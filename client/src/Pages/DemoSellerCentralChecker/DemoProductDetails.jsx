@@ -22,6 +22,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import axiosInstance from '../../config/axios.config.js';
 import { formatCurrencyWithLocale, formatYAxisCurrency } from '../../utils/currencyUtils.js';
 import ProductPPCIssuesTable from '../../Components/ProductDetails/ProductPPCIssuesTable.jsx';
+import FbaInventorySection from '../../Components/ProductDetails/FbaInventorySection.jsx';
 import DemoTryFreeTrialPopup from '../../Components/DemoTryFreeTrialPopup.jsx';
 
 // Helper function to format messages with important details highlighted on separate line
@@ -716,6 +717,20 @@ const Dashboard = () => {
         rankingErrors: rankingProduct || effectiveProduct?.rankingErrors || undefined
     } : null;
 
+    /** Same series as the conversion chart: mean of plotted points (server summary or client fallback). */
+    const conversionRateFromHistory = useMemo(() => {
+        const hist = historyData?.history;
+        if (!Array.isArray(hist) || hist.length === 0) return null;
+        const avg = historyData?.summary?.averages?.conversionRate;
+        if (historyData?.summary?.hasData && avg != null && !Number.isNaN(Number(avg))) {
+            return Number(avg);
+        }
+        const sum = hist.reduce((s, h) => s + (Number(h.conversionRate) || 0), 0);
+        return Math.round((sum / hist.length) * 100) / 100;
+    }, [historyData]);
+
+    const displayConversionRate = conversionRateFromHistory ?? updatedProduct?.performance?.conversionRate ?? 0;
+
     const rankingTableRows = useMemo(() => {
         if (!updatedProduct?.rankingErrors?.data) return [];
 
@@ -909,7 +924,10 @@ const Dashboard = () => {
     }, [updatedProduct]);
     
     // Build normalised metrics and evaluate 20 scenario-based recommendations
-    const scenarioMetrics = clientBuildMetrics(updatedProduct?.performance, profitabilityProduct);
+    const performanceForScenarios = updatedProduct?.performance && conversionRateFromHistory != null
+        ? { ...updatedProduct.performance, conversionRate: conversionRateFromHistory }
+        : updatedProduct?.performance;
+    const scenarioMetrics = clientBuildMetrics(performanceForScenarios, profitabilityProduct);
     const clientRecommendations = evaluateScenarios(scenarioMetrics, updatedProduct?.comparison);
     
     // Debug: Log performance data (can be removed once verified working)
@@ -1625,6 +1643,8 @@ const Dashboard = () => {
                     </div>
                 </motion.div>
 
+                <FbaInventorySection asin={updatedProduct.asin} />
+
                 {/* Section 2: Performance (metrics, recommendations, trends) with WoW/MoM */}
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
@@ -1692,10 +1712,10 @@ const Dashboard = () => {
                                     <div className="bg-[#21262d] rounded border border-[#30363d] p-2 text-center">
                                         <p className="text-xs text-gray-400 mb-1">Conversion Rate</p>
                                         <p className={`text-lg font-bold ${
-                                            (updatedProduct.performance?.conversionRate ?? 0) >= 10 ? 'text-green-400' : 
-                                            (updatedProduct.performance?.conversionRate ?? 0) >= 5 ? 'text-yellow-400' : 'text-red-400'
+                                            displayConversionRate >= 10 ? 'text-green-400' : 
+                                            displayConversionRate >= 5 ? 'text-yellow-400' : 'text-red-400'
                                         }`}>
-                                            {(updatedProduct.performance?.conversionRate ?? 0).toFixed(1)}%
+                                            {displayConversionRate.toFixed(1)}%
                                         </p>
                                         {updatedProduct.comparison?.hasComparison && updatedProduct.comparison?.changes?.conversionRate && (
                                             <ChangeIndicator 
@@ -1751,12 +1771,12 @@ const Dashboard = () => {
                                         )}
                                     </div>
 
-                                    {/* PPC Impressions / Clicks */}
+                                    {/* PPC Clicks / Impressions */}
                                     <div className="bg-[#21262d] rounded border border-[#30363d] p-2 text-center">
-                                        <p className="text-xs text-gray-400 mb-1">PPC Impressions / Clicks (30 days)</p>
+                                        <p className="text-xs text-gray-400 mb-1">PPC Clicks / Impressions (30 days)</p>
                                         <p className="text-lg font-bold text-gray-100">
                                             {perAsinCachedData?.ppcIssues?.ppcMetrics
-                                                ? `${(perAsinCachedData.ppcIssues.ppcMetrics.impressions ?? 0).toLocaleString()} / ${(perAsinCachedData.ppcIssues.ppcMetrics.clicks ?? 0).toLocaleString()}`
+                                                ? `${(perAsinCachedData.ppcIssues.ppcMetrics.clicks ?? 0).toLocaleString()} / ${(perAsinCachedData.ppcIssues.ppcMetrics.impressions ?? 0).toLocaleString()}`
                                                 : 'N/A'}
                                         </p>
                                     </div>

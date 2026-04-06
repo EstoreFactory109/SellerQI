@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
-import { Calendar, TrendingUp, AlertTriangle, DollarSign, Box, ShoppingBag, Activity, LineChart, PieChart, Users, Filter, Download, ChevronDown, FileText, FileSpreadsheet, Award, Target, RefreshCw, Receipt, TrendingDown, Gauge, FileWarning } from 'lucide-react'
+import { Calendar, TrendingUp, AlertTriangle, DollarSign, Box, ShoppingBag, Activity, LineChart, PieChart, Users, Filter, Award, Target, RefreshCw, Receipt, TrendingDown, Gauge, FileWarning } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import ProductChecker from '../../Components/Dashboard/SamePageComponents/ProductChecker.jsx'
 import TotalSales from '../../Components/Dashboard/SamePageComponents/TotalSales.jsx'
 import AccountHealth from '../../Components/Dashboard/SamePageComponents/AccountHealth.jsx'
-import Calender from '../../Components/Calender/Calender.jsx'
+import Calender, { isClickInsideGaCalDropdown } from '../../Components/Calender/Calender.jsx'
 import ErrorBoundary from '../../Components/ErrorBoundary/ErrorBoundary.jsx'
 import { SkeletonStatValue, SkeletonCardBody, SkeletonChart, SkeletonTableBody } from '../../Components/Skeleton/PageSkeletons.jsx'
 import { SkeletonBar } from '../../Components/Skeleton/Skeleton.jsx'
@@ -14,15 +14,15 @@ import { formatCurrency, formatCurrencyWithLocale } from '../../utils/currencyUt
 import { fetchReimbursementSummary } from '../../redux/slices/ReimbursementSlice.js'
 import { fetchLatestPPCMetrics, selectPPCSummary, selectLatestPPCMetricsLoading, selectPPCDateWiseMetrics } from '../../redux/slices/PPCMetricsSlice.js'
 import { parseLocalDate } from '../../utils/dateUtils.js'
+import { shouldUseCalendarDateRange } from '../../utils/totalSalesFilterUrl.js'
 import { useDashboardData } from '../../hooks/usePageData.js'
 import { devLog } from '../../utils/devLogger.js'
 
 const Dashboard = () => {
   const [openCalender, setOpenCalender] = useState(false)
-  const [openExportDropdown, setOpenExportDropdown] = useState(false)
   const [selectedPeriod, setSelectedPeriod] = useState('Last 30 Days')
   const CalenderRef = useRef(null)
-  const ExportRef = useRef(null)
+  const calendarAnchorRef = useRef(null)
   const contentRef = useRef(null)
   const navigate = useNavigate()
   const dispatch = useDispatch()
@@ -82,7 +82,7 @@ const Dashboard = () => {
     loadingPhase3,
     loadingTop4,
     error: dashboardError, 
-    refetch: refetchDashboard,
+    forceRefresh: refreshDashboard,
     isPhase1Complete,
     isPhase2Complete,
     isPhase3Complete,
@@ -162,12 +162,11 @@ const Dashboard = () => {
   const ppcMetricsLastFetched = useSelector(state => state.ppcMetrics?.latestMetrics?.lastFetched)
   
   // Calculate filtered PPC summary based on date range (same approach as PPCDashboard)
-  const calendarMode = dashboardInfo?.calendarMode || 'default';
-  const isDateRangeSelected = (calendarMode === 'custom' || calendarMode === 'last7') && dashboardInfo?.startDate && dashboardInfo?.endDate;
+  const isDateRangeSelected = shouldUseCalendarDateRange(dashboardInfo?.startDate, dashboardInfo?.endDate);
   
   // Filter dateWiseMetrics and calculate summary for selected date range
   const ppcSummary = useMemo(() => {
-    // If no custom date range, use latest summary
+    // If no resolved calendar range, use latest summary
     if (!isDateRangeSelected || !ppcDateWiseMetrics || ppcDateWiseMetrics.length === 0) {
       return ppcSummaryLatest;
     }
@@ -230,7 +229,6 @@ const Dashboard = () => {
   const adsKeywordsPerformanceData = useMemo(() => {
     if (!adsKeywordsPerformanceDataRaw.length) return adsKeywordsPerformanceDataRaw;
     
-    // Only filter if custom date range is selected
     if (!isDateRangeSelected) return adsKeywordsPerformanceDataRaw;
     
     const startDate = parseLocalDate(dashboardInfo?.startDate);
@@ -330,18 +328,9 @@ const Dashboard = () => {
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      // Don't close calendar if clicking inside the calendar portal
-      // The calendar uses createPortal to render to document.body
-      const calendarPortal = document.querySelector('.fixed.inset-0.z-\\[9999\\]');
-      if (calendarPortal && calendarPortal.contains(event.target)) {
-        return; // Click is inside the calendar portal, don't close
-      }
-      
+      if (isClickInsideGaCalDropdown(event.target)) return
       if (CalenderRef.current && !CalenderRef.current.contains(event.target)) {
         setOpenCalender(false)
-      }
-      if (ExportRef.current && !ExportRef.current.contains(event.target)) {
-        setOpenExportDropdown(false)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
@@ -380,59 +369,6 @@ const Dashboard = () => {
     const spend = adsPPCSpend > 0 ? adsPPCSpend : Number(dashboardInfo?.accountFinance?.ProductAdsPayment || 0);
     return spend;
   };
-
-  const handleDownloadCSV = () => {
-    // Use actual dashboard data for CSV export
-    const ppcSpend = calculatePPCSpend();
-    const csvData = [
-      ['Metric', 'Value', 'Change'],
-      ['Revenue', formatCurrency(totalSales), 'N/A'],
-      ['Amazon Owes You', formatCurrencyWithLocale(expectedReimbursement, currency), 'N/A'],
-      ['Money Wasted in Ads', formatCurrencyWithLocale(amazonOwesYou, currency), 'N/A'],
-      ['ACOS', `${acos}%`, 'N/A'],
-      ['Total Issues', totalIssues.toLocaleString(), 'N/A'],
-      ['Period', selectedPeriod, '']
-    ]
-    
-    const csvContent = csvData.map(row => row.join(',')).join('\n')
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a')
-    const url = URL.createObjectURL(blob)
-    link.setAttribute('href', url)
-    link.setAttribute('download', `dashboard-export-${new Date().toISOString().split('T')[0]}.csv`)
-    link.style.visibility = 'hidden'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    setOpenExportDropdown(false)
-  }
-
-  const handleDownloadExcel = () => {
-    // For Excel export, we'll create a simple tab-separated values file
-    // In a real implementation, you might want to use a library like xlsx
-    const ppcSpend = calculatePPCSpend();
-    const excelData = [
-      ['Metric', 'Value', 'Change'],
-      ['Revenue', formatCurrency(totalSales), 'N/A'],
-      ['Amazon Owes You', formatCurrencyWithLocale(expectedReimbursement, currency), 'N/A'],
-      ['Money Wasted in Ads', formatCurrencyWithLocale(amazonOwesYou, currency), 'N/A'],
-      ['ACOS', `${acos}%`, 'N/A'],
-      ['Total Issues', totalIssues.toLocaleString(), 'N/A'],
-      ['Period', selectedPeriod, '']
-    ]
-    
-    const excelContent = excelData.map(row => row.join('\t')).join('\n')
-    const blob = new Blob([excelContent], { type: 'application/vnd.ms-excel;charset=utf-8;' })
-    const link = document.createElement('a')
-    const url = URL.createObjectURL(blob)
-    link.setAttribute('href', url)
-    link.setAttribute('download', `dashboard-export-${new Date().toISOString().split('T')[0]}.xls`)
-    link.style.visibility = 'hidden'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    setOpenExportDropdown(false)
-  }
 
   // Calculate real data from backend
   const totalSales = Number(dashboardInfo?.TotalWeeklySale || 0);
@@ -523,6 +459,7 @@ const Dashboard = () => {
             <div className='flex items-center gap-1.5'>
               <div className='relative' ref={CalenderRef}>
                 <button 
+                  ref={calendarAnchorRef}
                   onClick={() => setOpenCalender(!openCalender)}
                   className='flex items-center gap-1 px-2 py-1 bg-[#21262d] border border-[#30363d] hover:border-blue-500/50 rounded transition-all duration-200'
                 >
@@ -530,67 +467,29 @@ const Dashboard = () => {
                   <span className='text-xs font-medium text-gray-200'>{selectedPeriod}</span>
                 </button>
                 
-                <AnimatePresence>
-                  {openCalender && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                      transition={{ duration: 0.2 }}
-                      className="absolute top-full right-0 mt-1 z-[9999] bg-[#21262d] rounded border border-[#30363d] overflow-hidden max-h-[80vh] overflow-y-auto"
-                      style={{ 
-                        maxHeight: 'calc(100vh - 150px)',
-                        transform: 'translateY(0)'
-                      }}
-                    >
-                      <Calender 
-                        setOpenCalender={setOpenCalender} 
-                        setSelectedPeriod={setSelectedPeriod}
-                      />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                {openCalender && (
+                  <Calender
+                    anchorRef={calendarAnchorRef}
+                    setOpenCalender={setOpenCalender}
+                    setSelectedPeriod={setSelectedPeriod}
+                  />
+                )}
               </div>
 
-              <div className='relative' ref={ExportRef}>
-                <button 
-                  onClick={() => setOpenExportDropdown(!openExportDropdown)}
-                  className='flex items-center gap-1 px-2.5 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors'
-                >
-                  <Download className='w-3 h-3' />
-                  <span className='hidden sm:inline'>Export</span>
-                  <ChevronDown className='w-3 h-3' />
-                </button>
-                
-                <AnimatePresence>
-                  {openExportDropdown && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                      transition={{ duration: 0.2 }}
-                      className="absolute top-full right-0 mt-1 z-50 bg-[#21262d] rounded border border-[#30363d] overflow-hidden min-w-[160px]"
-                    >
-                      <div className="py-1">
-                        <button
-                          onClick={handleDownloadCSV}
-                          className="w-full flex items-center gap-1.5 px-2 py-1.5 text-gray-200 hover:bg-[#161b22] transition-colors text-sm"
-                        >
-                          <FileText className="w-4 h-4 text-blue-400" />
-                          <span className="text-sm font-medium">Download as CSV</span>
-                        </button>
-                        <button
-                          onClick={handleDownloadExcel}
-                          className="w-full flex items-center gap-1.5 px-2 py-1.5 text-gray-200 hover:bg-[#161b22] transition-colors text-sm"
-                        >
-                          <FileSpreadsheet className="w-4 h-4 text-blue-400" />
-                          <span className="text-sm font-medium">Download as Excel</span>
-                        </button>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
+              <button
+                type="button"
+                onClick={() => refreshDashboard()}
+                disabled={
+                  loadingPhase1 || loadingPhase2 || loadingPhase3 || loadingTop4
+                }
+                title="Reload all dashboard data (sales, health, charts, top products)"
+                className="flex items-center gap-1 px-2.5 py-1 bg-[#21262d] border border-[#30363d] hover:border-blue-500/50 rounded text-xs font-medium text-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw
+                  className={`w-3 h-3 text-gray-300 ${loadingPhase1 || loadingPhase2 || loadingPhase3 || loadingTop4 ? 'animate-spin' : ''}`}
+                />
+                <span className="hidden sm:inline">Refresh</span>
+              </button>
             </div>
           </div>
         </div>

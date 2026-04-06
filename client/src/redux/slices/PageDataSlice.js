@@ -648,14 +648,16 @@ export const fetchProfitabilityMetrics = createAsyncThunk(
             const response = await axiosInstance.get('/api/pagewise/profitability/metrics');
             const data = response.data.data;
             
-            // Sync to DashboardSlice for backward compatibility
             if (data) {
                 const existingDashboard = state.Dashboard?.DashBoardInfo || {};
+                const dateRange = data.dateRange || {};
                 dispatch(setDashboardInfo({
                     ...existingDashboard,
                     accountFinance: data.accountFinance,
-                    TotalWeeklySale: data.totalSales,
-                    Country: data.Country
+                    Country: data.Country,
+                    startDate: dateRange.startDate || existingDashboard.startDate,
+                    endDate: dateRange.endDate || existingDashboard.endDate,
+                    calendarMode: existingDashboard.calendarMode || 'default',
                 }));
             }
             
@@ -684,18 +686,14 @@ export const fetchProfitabilityChart = createAsyncThunk(
             const response = await axiosInstance.get('/api/pagewise/profitability/chart');
             const data = response.data.data;
             
-            // Sync economicsMetrics to DashboardSlice for chart compatibility
+            // Keep dateRange only — do not overwrite datewiseSales with unscoped pagewise chart sales
+            // (Profitability uses /api/total-sales/filter datewiseChartData when calendar dates apply).
             if (data?.chartData) {
                 const existingDashboard = state.Dashboard?.DashBoardInfo || {};
                 dispatch(setDashboardInfo({
                     ...existingDashboard,
                     economicsMetrics: {
                         ...existingDashboard.economicsMetrics,
-                        datewiseSales: data.chartData.map(item => ({
-                            date: item.date,
-                            sales: { amount: item.totalSales },
-                            grossProfit: { amount: item.grossProfit }
-                        })),
                         dateRange: data.dateRange
                     }
                 }));

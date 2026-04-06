@@ -5,6 +5,11 @@
  * and storing calculated metrics in the database.
  * 
  * This replaces the separate sales/finance API calls with a unified MCP approach.
+ *
+ * DEPRECATED NOTE:
+ * This integration fetches and stores full economics metrics (gross profit, fees, refunds, ASIN-wise details).
+ * For sales-only use-cases (total date-wise + total sales + cached last 7/14 days), use
+ * `MCPSalesOnlyIntegration.js` / `SalesOnlyMetrics`.
  * 
  * IMPORTANT: Uses TWO separate queries for accurate data:
  * 1. RANGE + PARENT_ASIN query: Gets ASIN-level totals and overall summaries
@@ -82,12 +87,10 @@ async function fetchAndStoreEconomicsData(userId, refreshToken, region, country)
             };
         }
 
-        // Calculate date range (last 30 days ending yesterday)
-        // Amazon data has a 24-hour delay, so we fetch up to yesterday
-        const endDate = new Date();
-        endDate.setDate(endDate.getDate() - 1); // Yesterday
-        const startDate = new Date(endDate);
-        startDate.setDate(startDate.getDate() - 30); // 30 days before yesterday
+        // UTC-based date range matching Expences.js: yesterday − 30 days → yesterday
+        const now = new Date();
+        const endDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
+        const startDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1 - 30));
 
         const startDateStr = startDate.toISOString().split('T')[0];
         const endDateStr = endDate.toISOString().split('T')[0];

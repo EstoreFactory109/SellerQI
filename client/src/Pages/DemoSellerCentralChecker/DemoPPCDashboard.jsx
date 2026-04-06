@@ -3,7 +3,7 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, Ca
 import { useSelector, useDispatch } from 'react-redux';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronLeft, ChevronRight, TrendingUp, DollarSign, Gauge, Package, AlertTriangle, Calendar, Pause, CheckCircle, XCircle, X, Ban, MoreVertical, Loader2, Check, Square, Minus } from 'lucide-react';
-import Calender from '../../Components/Calender/Calender.jsx';
+import Calender, { isClickInsideGaCalDropdown } from '../../Components/Calender/Calender.jsx';
 import DownloadReport from '../../Components/DownloadReport/DownloadReport.jsx';
 import { formatCurrencyWithLocale, formatYAxisCurrency } from '../../utils/currencyUtils.js';
 import { 
@@ -58,6 +58,7 @@ import {
 } from '../../redux/slices/PPCCampaignAnalysisSlice.js';
 
 import { parseLocalDate } from '../../utils/dateUtils.js';
+import { shouldUseCalendarDateRange } from '../../utils/totalSalesFilterUrl.js';
 import { usePPCData } from '../../hooks/usePageData.js';
 import { PageSkeleton, CampaignAnalysisSkeleton } from '../../Components/Skeleton/PageSkeletons.jsx';
 import { SkeletonBar } from '../../Components/Skeleton/Skeleton.jsx';
@@ -177,6 +178,7 @@ const PPCDashboard = () => {
   const [hasInteracted, setHasInteracted] = useState(false);
   const [openCalender, setOpenCalender] = useState(false);
   const CalenderRef = useRef(null);
+  const calendarAnchorRef = useRef(null);
   const tabsContainerRef = useRef(null);
   const [showLeftArrow, setShowLeftArrow] = useState(false);
   const [showRightArrow, setShowRightArrow] = useState(false);
@@ -213,13 +215,7 @@ const PPCDashboard = () => {
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      // Don't close calendar if clicking inside the calendar portal
-      // The calendar uses createPortal to render to document.body
-      const calendarPortal = document.querySelector('.fixed.inset-0.z-\\[9999\\]');
-      if (calendarPortal && calendarPortal.contains(event.target)) {
-        return; // Click is inside the calendar portal, don't close
-      }
-      
+      if (isClickInsideGaCalDropdown(event.target)) return;
       if (CalenderRef.current && !CalenderRef.current.contains(event.target)) {
         setOpenCalender(false);
       }
@@ -841,7 +837,7 @@ const PPCDashboard = () => {
   }, [dateWiseTotalCosts, info?.startDate, info?.endDate]);
 
   // Check if date range is explicitly selected (custom or last7, not default last30)
-  const isTableDateRangeSelected = (info?.calendarMode === 'custom' || info?.calendarMode === 'last7') && info?.startDate && info?.endDate;
+  const isTableDateRangeSelected = shouldUseCalendarDateRange(info?.startDate, info?.endDate);
 
   // Filter adsKeywordsPerformanceData based on selected date range
   const filteredAdsKeywordsPerformanceData = useMemo(() => {
@@ -1120,7 +1116,7 @@ const PPCDashboard = () => {
   // Transform the data for the chart - prioritize PPCMetrics model data
   const chartData = useMemo(() => {
     // Check if date range is selected
-    const isDateRangeSelected = (info?.calendarMode === 'custom' || info?.calendarMode === 'last7') && info?.startDate && info?.endDate;
+    const isDateRangeSelected = shouldUseCalendarDateRange(info?.startDate, info?.endDate);
     
     // Filter PPCMetrics dateWiseMetrics based on selected date range
     let filteredPPCMetricsData = ppcDateWiseMetrics;
@@ -1592,8 +1588,7 @@ const PPCDashboard = () => {
     }
   }, [tabs, selectedTabIndex]);
   
-  // Check if date range is selected to determine which data to use
-  const isDateRangeSelected = (info?.calendarMode === 'custom' || info?.calendarMode === 'last7') && info?.startDate && info?.endDate;
+  const isDateRangeSelected = shouldUseCalendarDateRange(info?.startDate, info?.endDate);
   
   // Fetch filtered PPC Units Sold when date range is selected
   useEffect(() => {
@@ -2043,6 +2038,7 @@ const PPCDashboard = () => {
             <div className='flex items-center gap-2'>
               <div className='relative' ref={CalenderRef}>
                 <button 
+                  ref={calendarAnchorRef}
                   onClick={() => setOpenCalender(!openCalender)}
                   className='flex items-center gap-1 px-2 py-1 bg-[#21262d] border border-[#30363d] hover:border-[#30363d] rounded text-xs transition-all text-gray-300 hover:bg-[#161b22]'
                 >
@@ -2055,19 +2051,9 @@ const PPCDashboard = () => {
                   </span>
                 </button>
                 
-                <AnimatePresence>
-                  {openCalender && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                      transition={{ duration: 0.2 }}
-                      className="absolute top-full right-0 mt-1 z-[9999] bg-[#21262d] shadow-xl rounded border border-[#30363d] overflow-hidden max-h-[80vh] overflow-y-auto"
-                    >
-                      <Calender setOpenCalender={setOpenCalender} />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                {openCalender && (
+                  <Calender anchorRef={calendarAnchorRef} setOpenCalender={setOpenCalender} />
+                )}
               </div>
               
               <DownloadReport

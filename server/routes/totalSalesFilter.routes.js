@@ -1,7 +1,7 @@
 /**
  * Total Sales Filter Routes
  * 
- * Routes for filtering total sales component data from EconomicsMetrics model
+ * Routes for filtering total sales component data from SalesOnlyMetrics model
  */
 
 const express = require('express');

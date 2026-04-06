@@ -17,6 +17,7 @@
 
 const logger = require('../../utils/Logger.js');
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
+const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 const CogsModel = require('../../models/finance/CogsModel.js');
 const ProductWiseFinancial = require('../../models/finance/ProductWiseFinancialModel.js');
@@ -944,6 +945,109 @@ async function getQMateProfitabilityContext(userId, country, region, options = {
     const { asinLimit = 100 } = options;
     
     try {
+        // Sales-only mode: prioritize `SalesOnlyMetrics` so we don't depend on grossProfit/fees/refunds.
+        // If sales-only data exists, return a minimal profitability context with grossProfit forced to 0.
+        const salesOnlyMetrics = await SalesOnlyMetrics.findLatest(userId, region, country)
+            .select('totalSales datewiseSales dateRange')
+            .lean();
+
+        if (salesOnlyMetrics) {
+            const currencyCode = salesOnlyMetrics?.totalSales?.currencyCode || 'USD';
+            const totalSalesAmount = salesOnlyMetrics?.totalSales?.amount || 0;
+            const datewiseSales = Array.isArray(salesOnlyMetrics?.datewiseSales) ? salesOnlyMetrics.datewiseSales : [];
+
+            const datewiseData = datewiseSales
+                .filter(d => d?.date)
+                .map(d => ({
+                    date: d.date,
+                    totalSales: parseFloat((d.sales?.amount || 0).toFixed(2)),
+                    grossProfit: 0,
+                    // No fee/refund persistence in sales-only. Keep PPC fields as 0 for consistency.
+                    ppcSpend: 0,
+                    ppcSales: 0,
+                    amazonFees: 0,
+                    unitsSold: d.unitsSold || 0,
+                }));
+
+            const datewiseProfitability = {
+                datewiseData,
+                summary: {
+                    totalSales: parseFloat(totalSalesAmount.toFixed(2)),
+                    totalGrossProfit: 0,
+                    profitMargin: 0,
+                    profitLoss: 0,
+                    daysCount: datewiseData.length,
+                    currencyCode,
+                    dateRange: salesOnlyMetrics?.dateRange || null,
+                    totalPpcSpend: 0,
+                    totalPpcSales: 0,
+                    totalAmazonFees: 0,
+                }
+            };
+
+            const asinWiseProfitability = {
+                total: 0,
+                currentOffset: 0,
+                summary: {
+                    totalProducts: 0,
+                    totalSales: parseFloat(totalSalesAmount.toFixed(2)),
+                    totalGrossProfit: 0,
+                    lossMakingCount: 0,
+                    profitableCount: 0,
+                    lowMarginCount: 0,
+                },
+                asinProfitability: [],
+                lossMakingTotal: 0,
+                lossMakingProducts: [],
+                profitableTotal: 0,
+                profitableProducts: [],
+                lowMarginTotal: 0,
+                lowMarginProducts: [],
+            };
+
+            const context = {
+                cogsData: null,
+                marginCategories: {
+                    summary: {
+                        totalProducts: 0,
+                        overallProfitMargin: 0,
+                        healthyMargin: 0,
+                        lowMargin: 0,
+                        negativeMargin: 0,
+                    }
+                },
+                parentChildAnalysis: {
+                    summary: { totalParents: 0, totalChildren: 0 }
+                },
+                issues: null,
+                financialBreakdown: null,
+                datewiseProfitability,
+                asinWiseProfitability,
+                overallSummary: {
+                    totalProducts: 0,
+                    totalSales: parseFloat(totalSalesAmount.toFixed(2)),
+                    totalGrossProfit: 0,
+                    totalAdsSpend: 0,
+                    totalAmazonFees: 0,
+                    totalUnitsSold: 0,
+                    overallProfitMargin: 0,
+                    lossMakingCount: 0,
+                    lowMarginCount: 0,
+                    productsWithCOGS: 0,
+                    totalCogs: 0,
+                    currencyCode,
+                    dateRange: salesOnlyMetrics?.dateRange || null,
+                    topRecommendation: 'Review sales drivers; gross profit/fees are not available in sales-only mode',
+                }
+            };
+
+            return {
+                success: true,
+                source: 'sales_only_profitability',
+                data: context
+            };
+        }
+
         // Fetch all data in parallel - including new datewise and ASIN-wise data
         const [
             cogsResult,

@@ -115,11 +115,12 @@ const MON_WED_FRI_FUNCTIONS = {
         requiresAdsToken: true,
         apiDataKey: 'ppcUnitsSold'
     },
-    // MCP Economics
+    // MCP SalesOnly (key retained as mcpEconomicsData for backward compatibility)
     'mcpEconomicsData': {
-        service: require('../MCP/MCPEconomicsIntegration.js'),
-        functionName: 'fetchAndStoreEconomicsData',
-        description: 'MCP Economics Data',
+        // Sales-only replacement (kept under the same key for backward compatibility)
+        service: require('../MCP/MCPSalesOnlyIntegration.js'),
+        functionName: 'fetchAndStoreSalesOnlyData',
+        description: 'MCP SalesOnly Data',
         requiresRefreshToken: true,
         apiDataKey: 'mcpEconomicsData'
     },
@@ -131,6 +132,21 @@ const MON_WED_FRI_FUNCTIONS = {
         apiDataKey: 'reviewOrderIngestion',
         isCalculationService: true,
         runOrder: 97
+    },
+    // Expense Report - fetches Finance API events, persists raw rows, recalculates totals
+    'expenseReport': {
+        service: require('../Sp_API/ExpenseReportService.js'),
+        functionName: 'fetchPersistAndReturnExpenseReport',
+        description: 'Expense Report (Finance API)',
+        requiresAccessToken: true,
+        apiDataKey: 'expenseReport'
+    },
+    'asinWiseSales': {
+        service: require('../Sp_API/AsinWiseSalesStorageService.js'),
+        functionName: 'fetchPersistAndReturnAsinWiseSales',
+        description: 'ASIN-wise Sales (SP-API report)',
+        requiresAccessToken: true,
+        apiDataKey: 'asinWiseSales'
     }
 };
 

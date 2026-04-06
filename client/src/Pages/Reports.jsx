@@ -6,7 +6,7 @@ import Health from '../Components/Reports/Reports_Third_Row/Health.jsx'
 import AllIssues from '../Components/Reports/Reports_Third_Row/AllIssues.jsx'
 import RowFour from '../Components/Reports/Reports_Fourth_Row.jsx'
 import TopSalesChart from '../Components/Reports/Reports_Second_Row.jsx'
-import Calender from '../Components/Calender/Calender.jsx'
+import Calender, { isClickInsideGaCalDropdown } from '../Components/Calender/Calender.jsx'
 import { AnimatePresence, motion } from 'framer-motion';
 import DownloadReport from '../Components/DownloadReport/DownloadReport.jsx';
 import { useSelector } from 'react-redux';
@@ -18,6 +18,7 @@ import { formatCurrencyWithLocale } from '../utils/currencyUtils.js';
 const Reports = () => {
    const [openCalender, setOpenCalender] = useState(false)
     const CalenderRef = useRef(null);
+    const calendarAnchorRef = useRef(null);
     const info = useSelector(state => state.Dashboard.DashBoardInfo);
   
   // Get currency from Redux
@@ -189,7 +190,7 @@ const Reports = () => {
         <p className='text-sm'>REPORTS</p>
         <div className='flex gap-4 flex-wrap'>
         <div className='fit-content relative ' ref={CalenderRef}>
-          <div className='flex bg-white gap-3 justify-between items-center px-3 py-1 border-2 border-gray-200 cursor-pointer calendar-selector' onClick={() => setOpenCalender(!openCalender)}>
+          <div ref={calendarAnchorRef} className='flex bg-white gap-3 justify-between items-center px-3 py-1 border-2 border-gray-200 cursor-pointer calendar-selector' onClick={() => setOpenCalender(!openCalender)}>
             <p className='font-semi-bold text-xs'>
               {(info?.calendarMode === 'custom' && info?.startDate && info?.endDate)
                 ? `${new Date(info.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - ${new Date(info.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
@@ -200,20 +201,9 @@ const Reports = () => {
             </p>
             <Calendar className='w-4 h-4 text-gray-400' />
           </div>
-          <AnimatePresence>
-            {openCalender && (
-              <motion.div
-
-                initial={{ opacity: 0, scaleY: 0 }}
-                animate={{ opacity: 1, scaleY: 1 }}
-                exit={{ opacity: 0, scaleY: 0 }}
-                transition={{ duration: 0.3 }}
-                className="absolute top-full right-0 z-50 bg-white shadow-md rounded-md origin-top"
-              >
-                <Calender setOpenCalender={setOpenCalender}/>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {openCalender && (
+            <Calender anchorRef={calendarAnchorRef} setOpenCalender={setOpenCalender}/>
+          )}
 
         </div>
           <DownloadReport

@@ -7,6 +7,8 @@ const {testReport,getTotalSales,testAmazonAds,
     testKeywordRecommendationsFromDB,getStoredKeywordRecommendations,testPPCMetrics,testNumberOfProductReviews,getLastAdsKeywordsPerformanceDocument,testAllAdsServices,testStoreIssueSummary,testStoreIssuesSummaryAndChunks}=require('../controllers/test/TestController.js')
 const { testAlerts } = require('../controllers/alerts/AlertsController.js')
 const { testExpenseReport } = require('../controllers/test/ExpenseReportTestController.js')
+const { testAsinWiseSales } = require('../controllers/test/AsinWiseSalesTestController.js')
+const { testItemStock } = require('../controllers/test/ItemStockTestController.js')
 
 // PPC Units Sold Controller - Fetches units sold data date-wise
 const { testGetPPCUnitsSold, getUnitsMetricsInfo } = require('../controllers/test/PPCUnitsSoldTestController.js')
@@ -74,5 +76,11 @@ router.post('/testStoreIssuesSummaryAndChunks', testStoreIssuesSummaryAndChunks)
 
 // Expense report (Settlement reports -> expense analysis)
 router.post('/testExpenseReport', testExpenseReport)  // Body: { userId, country, region, daysBack? }
+
+// ASIN-wise Sales report
+router.post('/testAsinWiseSales', testAsinWiseSales)  // Body: { userId, country, region, days?, dataSource? }
+
+// FBA inventory summaries (Inventory API)
+router.post('/testItemStock', testItemStock)  // Body: { userId, country, region, sellerSkus? }
 
 module.exports=router

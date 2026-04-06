@@ -8,7 +8,7 @@ import AmazonReadyProducts from '../Components/Dashboard/SamePageComponents/Amaz
 import ProductChecker from '../Components/Dashboard/SamePageComponents/ProductChecker.jsx'
 import TotalSales from '../Components/Dashboard/SamePageComponents/TotalSales.jsx'
 import AccountHealth from '../Components/Dashboard/SamePageComponents/AccountHealth.jsx'
-import Calender from '../Components/Calender/Calender.jsx'
+import Calender, { isClickInsideGaCalDropdown } from '../Components/Calender/Calender.jsx'
 import ErrorBoundary from '../Components/ErrorBoundary/ErrorBoundary.jsx'
 import DataFallback, { PartialDataNotice, useDataAvailability } from '../Components/DataFallback/DataFallback.jsx'
 import { useSelector } from 'react-redux'
@@ -75,6 +75,7 @@ const Dashboard = () => {
 
   useEffect(() => {
     const handleClickOutside = (event) => {
+      if (isClickInsideGaCalDropdown(event.target)) return
       if (CalenderRef.current && !CalenderRef.current.contains(event.target)) {
         setOpenCalender(false)
       }
@@ -226,6 +227,7 @@ const Dashboard = () => {
             <div className='flex items-center gap-3'>
               <div className='relative' ref={CalenderRef}>
                 <button 
+                  ref={calendarAnchorRef}
                   onClick={() => setOpenCalender(!openCalender)}
                   className='flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 hover:border-gray-400 rounded-lg transition-all duration-200 shadow-sm hover:shadow'
                 >
@@ -233,26 +235,13 @@ const Dashboard = () => {
                   <span className='text-sm font-medium text-gray-700'>{selectedPeriod}</span>
                 </button>
                 
-                <AnimatePresence>
-                  {openCalender && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                      transition={{ duration: 0.2 }}
-                      className="absolute top-full right-0 mt-2 z-50 bg-white shadow-xl rounded-xl border border-gray-200 overflow-hidden max-h-[80vh] overflow-y-auto"
-                      style={{ 
-                        maxHeight: 'calc(100vh - 150px)',
-                        transform: 'translateY(0)'
-                      }}
-                    >
-                      <Calender 
-                        setOpenCalender={setOpenCalender} 
-                        setSelectedPeriod={setSelectedPeriod}
-                      />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                {openCalender && (
+                  <Calender
+                    anchorRef={calendarAnchorRef}
+                    setOpenCalender={setOpenCalender}
+                    setSelectedPeriod={setSelectedPeriod}
+                  />
+                )}
               </div>
 
               <div className='relative' ref={ExportRef}>

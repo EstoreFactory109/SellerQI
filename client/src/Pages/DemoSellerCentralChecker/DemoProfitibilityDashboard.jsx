@@ -6,10 +6,11 @@ import SuggestionList from '../../Components/ProfitibilityDashboard/SuggestionLi
 import { useSelector, useDispatch } from "react-redux";
 import { AnimatePresence, motion } from 'framer-motion';
 import { X, AlertCircle, TrendingUp, Download, Calendar, BarChart3, TrendingDown, DollarSign, Target, Zap, HelpCircle, Loader2 } from 'lucide-react';
-import Calender from '../../Components/Calender/Calender.jsx';
+import Calender, { isClickInsideGaCalDropdown } from '../../Components/Calender/Calender.jsx';
 import DownloadReport from '../../Components/DownloadReport/DownloadReport.jsx';
 import { formatCurrencyWithLocale } from '../../utils/currencyUtils.js';
 import { parseLocalDate } from '../../utils/dateUtils.js';
+import { buildTotalSalesFilterUrl, shouldUseCalendarDateRange } from '../../utils/totalSalesFilterUrl.js';
 import { devLog, devWarn } from '../../utils/devLogger.js';
 import axios from 'axios';
 import { fetchLatestPPCMetrics, selectPPCSummary, selectPPCDateWiseMetrics, selectLatestPPCMetricsLoading } from '../../redux/slices/PPCMetricsSlice.js';
@@ -53,6 +54,7 @@ const ProfitabilityDashboard = () => {
   const [filteredData, setFilteredData] = useState(null);
   const [loading, setLoading] = useState(false);
   const CalenderRef = useRef(null);
+  const calendarAnchorRef = useRef(null);
   
   // PPCMetrics model data (PRIMARY source for PPC spend)
   const ppcSummary = useSelector(selectPPCSummary);
@@ -73,13 +75,7 @@ const ProfitabilityDashboard = () => {
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      // Don't close calendar if clicking inside the calendar portal
-      // The calendar uses createPortal to render to document.body
-      const calendarPortal = document.querySelector('.fixed.inset-0.z-\\[9999\\]');
-      if (calendarPortal && calendarPortal.contains(event.target)) {
-        return; // Click is inside the calendar portal, don't close
-      }
-      
+      if (isClickInsideGaCalDropdown(event.target)) return;
       if (CalenderRef.current && !CalenderRef.current.contains(event.target)) {
         setOpenCalender(false);
       }
@@ -161,17 +157,20 @@ const ProfitabilityDashboard = () => {
   // IMPORTANT: Always get calendar/date properties from legacyInfo (DashboardSlice)
   // because the Calendar component updates these values in DashboardSlice via UpdateDashboardInfo
   const info = useMemo(() => {
+    const filterSales =
+      filteredData?.totalSales?.amount !== undefined && filteredData?.totalSales?.amount !== null
+        ? filteredData.totalSales.amount
+        : null;
     return {
       ...legacyInfo,
-      // Override with phased data when available
       profitibilityData: tableData,
       accountFinance: metricsData?.accountFinance || legacyInfo?.accountFinance,
-      TotalWeeklySale: metricsData?.totalSales || legacyInfo?.TotalWeeklySale,
+      TotalWeeklySale: filterSales ?? metricsData?.totalSales ?? legacyInfo?.TotalWeeklySale,
       calendarMode: legacyInfo?.calendarMode,
       startDate: legacyInfo?.startDate,
       endDate: legacyInfo?.endDate,
     };
-  }, [legacyInfo, metricsData, tableData]);
+  }, [legacyInfo, metricsData, tableData, filteredData]);
   
   // Get calendar mode and dates from info (now properly sourced from legacyInfo)
   const calendarMode = info?.calendarMode || 'default';
@@ -181,27 +180,16 @@ const ProfitabilityDashboard = () => {
   // Get currency from Redux
   const currency = useSelector(state => state.currency?.currency) || '$';
 
-  // Fetch filtered data when calendar mode or dates change
+  // Calendar-aligned total sales (same rule as main Dashboard Total Sales widget)
   useEffect(() => {
     const fetchFilteredData = async () => {
-      // Only fetch if not default mode (last 30 days uses default data)
-      if (calendarMode === 'default') {
-        setFilteredData(null);
-        return;
-      }
-
       setLoading(true);
       try {
-        let periodType = calendarMode;
-        let url = `${import.meta.env.VITE_BASE_URI}/api/total-sales/filter?periodType=${periodType}`;
-        
-        // Add dates for both custom and last7 ranges
-        if ((periodType === 'custom' || periodType === 'last7') && startDate && endDate) {
-          url += `&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
-        }
-
+        const url = buildTotalSalesFilterUrl(import.meta.env.VITE_BASE_URI, {
+          startDate,
+          endDate,
+        });
         const response = await axios.get(url, { withCredentials: true });
-        
         if (response.status === 200 && response.data?.data) {
           setFilteredData(response.data.data);
         }
@@ -274,34 +262,35 @@ const ProfitabilityDashboard = () => {
   
   // Transform the data for the chart using filtered data when available
   const chartData = useMemo(() => {
-    // PHASED LOADING: Use pre-fetched chart data from Phase 2 endpoint when available (default calendar mode)
-    // This provides instant rendering of the chart without waiting for all data
-    const usePhaseChartData = calendarMode === 'default' && phasedChartData && phasedChartData.length > 0 && !filteredData;
-    
+    if (
+      filteredData?.datewiseChartData &&
+      Array.isArray(filteredData.datewiseChartData) &&
+      filteredData.datewiseChartData.length > 0
+    ) {
+      return filteredData.datewiseChartData.map((item) => ({
+        date: item.date,
+        grossProfit: parseFloat((item.grossProfit || 0).toFixed(2)),
+        totalSales: parseFloat((item.totalSales || 0).toFixed(2)),
+      }));
+    }
+
+    const usePhaseChartData =
+      calendarMode === 'default' &&
+      phasedChartData &&
+      phasedChartData.length > 0;
+
     if (usePhaseChartData) {
-      return phasedChartData.map(item => {
+      return phasedChartData.map((item) => {
         const date = new Date(item.date);
         const dateKey = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         return {
           date: dateKey,
           grossProfit: parseFloat((item.grossProfit || 0).toFixed(2)),
-          totalSales: parseFloat((item.totalSales || 0).toFixed(2))
+          totalSales: parseFloat((item.totalSales || 0).toFixed(2)),
         };
       });
     }
-    
-    // LEGACY LOGIC: Used for filtered data scenarios (calendar date selection)
-    const useFilteredData = filteredData !== null && calendarMode !== 'default';
-    
-    // Use datewise chart data from filtered API response if available
-    if (useFilteredData && filteredData?.datewiseChartData && Array.isArray(filteredData.datewiseChartData) && filteredData.datewiseChartData.length > 0) {
-      return filteredData.datewiseChartData.map(item => ({
-        date: item.date,
-        grossProfit: parseFloat((item.grossProfit || 0).toFixed(2)),
-        totalSales: parseFloat((item.totalSales || 0).toFixed(2))
-      }));
-    }
-    
+
     // PRIMARY: Use EconomicsMetrics datewiseSales (includes grossProfit directly)
     // For legacy data, backend aggregates from asinWiseSales automatically
     if (economicsMetrics?.datewiseSales && Array.isArray(economicsMetrics.datewiseSales) && economicsMetrics.datewiseSales.length > 0) {
@@ -433,7 +422,8 @@ const ProfitabilityDashboard = () => {
   const metrics = useMemo(() => {
     // PHASED LOADING: Use pre-calculated metrics from backend when available (default calendar mode)
     // This provides instant rendering of KPI boxes without waiting for all data
-    const usePhaseMetrics = calendarMode === 'default' && metricsData && !filteredData;
+    const usePhaseMetrics =
+      calendarMode === 'default' && metricsData && filteredData === null;
     
     if (usePhaseMetrics) {
       return [
@@ -466,7 +456,7 @@ const ProfitabilityDashboard = () => {
     
     // Calculate ad spend - use filtered API data for consistency when available
     let adSpend = 0;
-    const isDateRangeSelected = (info?.calendarMode === 'custom' || info?.calendarMode === 'last7') && info?.startDate && info?.endDate;
+    const isDateRangeSelected = shouldUseCalendarDateRange(info?.startDate, info?.endDate);
     
     // Filter PPCMetrics dateWiseMetrics based on date range
     const getFilteredPPCSpend = () => {
@@ -555,10 +545,7 @@ const ProfitabilityDashboard = () => {
                         adSpend +
                         refunds);
     
-    // Use filtered total sales and gross profit when filters are applied
-    const totalSales = useFilteredData
-      ? Number(filteredData?.totalSales?.amount || 0)
-      : Number(info?.TotalWeeklySale || 0);
+    const totalSales = Number(info?.TotalWeeklySale || 0);
     
     // Get gross profit from backend (Sales - Amazon Fees - Refunds)
     const grossProfitFromBackend = useFilteredData
@@ -1437,19 +1424,15 @@ const ProfitabilityDashboard = () => {
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <div className='relative' ref={CalenderRef}>
-                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} className='flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all duration-200' onClick={() => setOpenCalender(!openCalender)} style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6', fontSize: '12px' }} onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'} onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}>
+                  <motion.button ref={calendarAnchorRef} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} className='flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all duration-200' onClick={() => setOpenCalender(!openCalender)} style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6', fontSize: '12px' }} onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'} onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}>
                     <Calendar className="w-3.5 h-3.5" />
                     <span className='font-medium'>
                       {info?.startDate && info?.endDate ? `${parseLocalDate(info.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${parseLocalDate(info.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : 'Select Date'}
                     </span>
                   </motion.button>
-                  <AnimatePresence>
-                    {openCalender && (
-                      <motion.div initial={{ opacity: 0, scaleY: 0 }} animate={{ opacity: 1, scaleY: 1 }} exit={{ opacity: 0, scaleY: 0 }} transition={{ duration: 0.3 }} className="absolute top-full right-0 z-[9999] mt-2 rounded-xl origin-top" style={{ background: '#161b22', border: '1px solid #30363d', boxShadow: '0 10px 25px rgba(0, 0, 0, 0.3)' }}>
-                        <Calender setOpenCalender={setOpenCalender} />
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                  {openCalender && (
+                    <Calender anchorRef={calendarAnchorRef} setOpenCalender={setOpenCalender} />
+                  )}
                 </div>
                 <DownloadReport prepareDataFunc={prepareProfitabilityData} filename="Profitability_Dashboard_Report" buttonText="Export" showIcon={true} />
               </div>

@@ -67,6 +67,19 @@ const ExpenseReportRunSchema = new mongoose.Schema(
       required: true,
       default: 0,
     },
+    totalAmazonFeeRows: {
+      type: Number,
+      required: true,
+      default: 0,
+    },
+    amazonFeeCategories: {
+      type: [String],
+      default: [],
+    },
+    nonAmazonFeeCategories: {
+      type: [String],
+      default: [],
+    },
 
     dateRangeEarliest: {
       type: Date,
@@ -85,6 +98,18 @@ const ExpenseReportRunSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Date range covered by NEW reports processed in this run (from report metadata)
+    reportDateRangeFrom: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    reportDateRangeTo: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+
     // Totals for each "section" (small numeric fields only)
     totals: {
       allTime: {
@@ -98,6 +123,21 @@ const ExpenseReportRunSchema = new mongoose.Schema(
         default: 0,
       },
       last14Days: {
+        type: Number,
+        required: true,
+        default: 0,
+      },
+      amazonAllTime: {
+        type: Number,
+        required: true,
+        default: 0,
+      },
+      amazonLast7Days: {
+        type: Number,
+        required: true,
+        default: 0,
+      },
+      amazonLast14Days: {
         type: Number,
         required: true,
         default: 0,

@@ -16,7 +16,14 @@ const ORDER_CONFIG = {
 
   // Delay between each solicitation request (ms) to respect rate limits
   delayBetweenRequests: 1000,
+
+  // Brief pause between Orders API pagination calls to reduce 429s
+  delayBetweenOrderPagesMs: 750,
 };
+
+const ORDERS_FETCH_MAX_ATTEMPTS = 6;
+const ORDERS_FETCH_BASE_BACKOFF_MS = 2000;
+const ORDERS_FETCH_MAX_BACKOFF_MS = 60000;
 
 // ─── HELPERS ───────────────────────────────────────────────────────────────────
 function sleep(ms) {
@@ -118,6 +125,49 @@ function signRequest({ method, url, accessToken, body = "", awsConfig }) {
   };
 }
 
+/**
+ * Single GET with retries on SP-API throttle (429) and transient unavailability (503).
+ * `buildHeaders` is invoked on every attempt so SigV4 x-amz-date stays fresh after backoff waits.
+ */
+async function fetchOrdersPageWithRetry(url, buildHeaders) {
+  for (let attempt = 0; attempt < ORDERS_FETCH_MAX_ATTEMPTS; attempt++) {
+    const headers = buildHeaders();
+    const response = await fetch(url, { method: "GET", headers });
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
+
+    const isRetryableThrottle = response.status === 429 || response.status === 503;
+    if (isRetryableThrottle && attempt < ORDERS_FETCH_MAX_ATTEMPTS - 1) {
+      const retryAfterRaw = response.headers.get("retry-after");
+      let waitMs = retryAfterRaw ? parseInt(retryAfterRaw, 10) * 1000 : NaN;
+      if (!Number.isFinite(waitMs) || waitMs < 0) {
+        waitMs = Math.min(
+          ORDERS_FETCH_MAX_BACKOFF_MS,
+          ORDERS_FETCH_BASE_BACKOFF_MS * Math.pow(2, attempt) + Math.random() * 500
+        );
+      }
+      console.warn(
+        `Orders API ${response.status} (rate limit / transient); retry ${attempt + 1}/${ORDERS_FETCH_MAX_ATTEMPTS} in ${Math.round(waitMs / 1000)}s`
+      );
+      await sleep(waitMs);
+      continue;
+    }
+
+    if (!response.ok) {
+      console.error("Orders API Error:", JSON.stringify(data, null, 2));
+      throw new Error(`Orders API failed: ${response.status}`);
+    }
+
+    return data;
+  }
+
+  throw new Error("Orders API failed: 429 — exhausted retries");
+}
+
 // ─── FETCH ALL ORDERS ──────────────────────────────────────────────────────────
 async function fetchOrders(
   accessToken,
@@ -147,21 +197,15 @@ async function fetchOrders(
     if (nextToken) params.set("NextToken", nextToken);
 
     const url     = `${normalizedEndpoint}/orders/v0/orders?${params.toString()}`;
-    const headers = signRequest({
-      method: "GET",
-      url,
-      accessToken,
-      awsConfig: { awsAccessKeyId, awsSecretAccessKey, awsRegion, awsSessionToken },
-      body: "",
-    });
-
-    const response = await fetch(url, { method: "GET", headers });
-    const data     = await response.json();
-
-    if (!response.ok) {
-      console.error("Orders API Error:", JSON.stringify(data, null, 2));
-      throw new Error(`Orders API failed: ${response.status}`);
-    }
+    const data = await fetchOrdersPageWithRetry(url, () =>
+      signRequest({
+        method: "GET",
+        url,
+        accessToken,
+        awsConfig: { awsAccessKeyId, awsSecretAccessKey, awsRegion, awsSessionToken },
+        body: "",
+      })
+    );
 
     const orders = data?.payload?.Orders || [];
     allOrders    = allOrders.concat(orders);
@@ -169,6 +213,10 @@ async function fetchOrders(
 
     console.log(`  Page ${page}: ${orders.length} orders (total: ${allOrders.length})`);
     page++;
+
+    if (nextToken && ORDER_CONFIG.delayBetweenOrderPagesMs > 0) {
+      await sleep(ORDER_CONFIG.delayBetweenOrderPagesMs);
+    }
 
   } while (nextToken);
 

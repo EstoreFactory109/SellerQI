@@ -13,7 +13,7 @@
  */
 
 const logger = require('../../utils/Logger.js');
-const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
+const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
 const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
 const V2_Model = require('../../models/seller-performance/V2_Seller_Performance_ReportModel.js');
 const V1_Model = require('../../models/seller-performance/V1_Seller_Performance_Report_Model.js');
@@ -40,7 +40,7 @@ async function getDashboardSummary(userId, country, region) {
     try {
         // Run all queries in parallel with projections and .lean()
         const [
-            economicsMetrics,
+            salesOnlyMetrics,
             buyBoxData,
             v2Data,
             v1Data,
@@ -51,10 +51,10 @@ async function getDashboardSummary(userId, country, region) {
             dataFetchTracking,
             issueSummary
         ] = await Promise.all([
-            // EconomicsMetrics: Only select fields needed for dashboard totals
-            EconomicsMetrics.findOne({ User: userId, country, region })
+            // SalesOnlyMetrics: only select fields needed for dashboard totals
+            SalesOnlyMetrics.findOne({ User: userId, country, region })
                 .sort({ createdAt: -1 })
-                .select('totalSales grossProfit datewiseSales dateRange ppcSpent fbaFees storageFees amazonFees totalFees refunds isBig')
+                .select('totalSales datewiseSales dateRange last7Days last14Days')
                 .lean(),
             
             // BuyBoxData: Only select summary fields, not full asinBuyBoxData array
@@ -124,13 +124,13 @@ async function getDashboardSummary(userId, country, region) {
 
         // Calculate total sales from datewiseSales for consistency
         let totalWeeklySale = 0;
-        if (economicsMetrics?.datewiseSales && Array.isArray(economicsMetrics.datewiseSales)) {
-            totalWeeklySale = economicsMetrics.datewiseSales.reduce(
+        if (salesOnlyMetrics?.datewiseSales && Array.isArray(salesOnlyMetrics.datewiseSales)) {
+            totalWeeklySale = salesOnlyMetrics.datewiseSales.reduce(
                 (sum, item) => sum + (item.sales?.amount || 0), 0
             );
             totalWeeklySale = parseFloat(totalWeeklySale.toFixed(2));
-        } else if (economicsMetrics?.totalSales?.amount) {
-            totalWeeklySale = economicsMetrics.totalSales.amount;
+        } else if (salesOnlyMetrics?.totalSales?.amount) {
+            totalWeeklySale = salesOnlyMetrics.totalSales.amount;
         }
 
         // Calculate order count (Shipped, Unshipped, PartiallyShipped)
@@ -186,9 +186,9 @@ async function getDashboardSummary(userId, country, region) {
         if (dataFetchTracking?.dataRange) {
             startDate = dataFetchTracking.dataRange.startDate;
             endDate = dataFetchTracking.dataRange.endDate;
-        } else if (economicsMetrics?.dateRange) {
-            startDate = economicsMetrics.dateRange.startDate;
-            endDate = economicsMetrics.dateRange.endDate;
+        } else if (salesOnlyMetrics?.dateRange) {
+            startDate = salesOnlyMetrics.dateRange.startDate;
+            endDate = salesOnlyMetrics.dateRange.endDate;
         }
 
         // Build minimal error counts (for quick stats)
@@ -216,37 +216,20 @@ async function getDashboardSummary(userId, country, region) {
             // Sales and Finance
             TotalWeeklySale: totalWeeklySale,
             accountFinance: (() => {
-                const fbaFees = economicsMetrics?.fbaFees?.amount || 0;
-                const storageFees = economicsMetrics?.storageFees?.amount || 0;
-                let amazonFees = economicsMetrics?.amazonFees?.amount || 0;
-                const refunds = economicsMetrics?.refunds?.amount || 0;
-                
-                // Fallback: use fbaFees + storageFees if amazonFees is 0
-                if (amazonFees === 0) {
-                    amazonFees = fbaFees + storageFees;
-                }
-                
-                // Calculate Gross Profit: Sales - Amazon Fees - Refunds
-                // This matches the calculation in Analyse.js convertEconomicsToFinanceFormat
-                // Note: PPC is subtracted in frontend for display, not in backend
-                const grossProfit = totalWeeklySale - amazonFees - refunds;
-                
-                // Other_Amazon_Fees = Total Amazon Fees - FBA Fees (for TotalSales component)
-                const otherAmazonFees = Math.max(0, amazonFees - fbaFees);
-                
                 return {
-                    Gross_Profit: parseFloat(grossProfit.toFixed(2)),
+                    // Sales-only mode: gross profit requires fees/refunds, which we no longer store.
+                    Gross_Profit: 0,
                     Total_Sales: totalWeeklySale,
                     ProductAdsPayment: ppcSummary.totalSpend || 0,
-                    FBA_Fees: fbaFees,
-                    Storage: storageFees,
-                    Amazon_Fees: amazonFees,
-                    Amazon_Charges: amazonFees, // Alias for Profitability page
-                    Other_Amazon_Fees: parseFloat(otherAmazonFees.toFixed(2)), // For TotalSales component
-                    Refunds: refunds
+                    FBA_Fees: 0,
+                    Storage: 0,
+                    Amazon_Fees: 0,
+                    Amazon_Charges: 0,
+                    Other_Amazon_Fees: 0,
+                    Refunds: 0
                 };
             })(),
-            TotalSales: economicsMetrics?.datewiseSales || [],
+            TotalSales: salesOnlyMetrics?.datewiseSales || [],
             
             // Orders
             GetOrderData: filteredOrders,
@@ -542,10 +525,10 @@ async function getDashboardPhase2(userId, country, region) {
     logger.info(`[PERF] Starting getDashboardPhase2 for user ${userId}, country ${country}, region ${region}`);
 
     try {
-        const [economicsMetrics, v2Data, v1Data, buyBoxData, ppcMetrics] = await Promise.all([
-            EconomicsMetrics.findOne({ User: userId, country, region })
+        const [salesOnlyMetrics, v2Data, v1Data, buyBoxData, ppcMetrics] = await Promise.all([
+            SalesOnlyMetrics.findOne({ User: userId, country, region })
                 .sort({ createdAt: -1 })
-                .select('totalSales grossProfit fbaFees storageFees amazonFees refunds dateRange')
+                .select('totalSales dateRange')
                 .lean(),
             V2_Model.findOne({ User: userId, country, region })
                 .sort({ createdAt: -1 })
@@ -566,14 +549,13 @@ async function getDashboardPhase2(userId, country, region) {
         const accountHealthPercentage = calculateAccountHealthPercentage(v2Data);
         const accountErrors = checkAccountHealth(v2Data, v1Data);
 
-        const totalWeeklySale = economicsMetrics?.totalSales?.amount || 0;
-        const fbaFees = economicsMetrics?.fbaFees?.amount || 0;
-        const storageFees = economicsMetrics?.storageFees?.amount || 0;
-        let amazonFees = economicsMetrics?.amazonFees?.amount || 0;
-        const refunds = economicsMetrics?.refunds?.amount || 0;
-        if (amazonFees === 0) amazonFees = fbaFees + storageFees;
-        const grossProfit = totalWeeklySale - amazonFees - refunds;
-        const otherAmazonFees = Math.max(0, amazonFees - fbaFees);
+        const totalWeeklySale = salesOnlyMetrics?.totalSales?.amount || 0;
+        const grossProfit = 0;
+        const fbaFees = 0;
+        const storageFees = 0;
+        const amazonFees = 0;
+        const refunds = 0;
+        const otherAmazonFees = 0;
 
         const ppcSummary = ppcMetrics?.summary || {
             totalSales: 0, totalSpend: 0, overallAcos: 0, overallRoas: 0,
@@ -640,8 +622,8 @@ async function getDashboardPhase3(userId, country, region) {
     logger.info(`[PERF] Starting getDashboardPhase3 for user ${userId}, country ${country}, region ${region}`);
 
     try {
-        const [economicsMetrics, ppcMetrics, adsKeywordsData, orderData, sellerData] = await Promise.all([
-            EconomicsMetrics.findOne({ User: userId, country, region })
+        const [salesOnlyMetrics, ppcMetrics, adsKeywordsData, orderData, sellerData] = await Promise.all([
+            SalesOnlyMetrics.findOne({ User: userId, country, region })
                 .sort({ createdAt: -1 })
                 .select('datewiseSales')
                 .lean(),
@@ -699,7 +681,7 @@ async function getDashboardPhase3(userId, country, region) {
         const dateWiseMetrics = ppcMetrics?.dateWiseMetrics || [];
 
         const phase3Data = {
-            TotalSales: economicsMetrics?.datewiseSales || [],
+            TotalSales: salesOnlyMetrics?.datewiseSales || [],
             TotalProduct: totalProducts,
             ActiveProducts: activeProducts,
             GetOrderData: filteredOrders,

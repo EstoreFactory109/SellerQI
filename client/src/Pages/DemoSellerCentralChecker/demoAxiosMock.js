@@ -1347,6 +1347,64 @@ export const initDemoAxiosMock = () => {
       });
     }
 
+    // FBA inventory (ProductDetails — FbaInventorySection)
+    if (method === 'get' && /^\/api\/fba-inventory\/asin\/([^/]+)$/.test(pathname)) {
+      const [, asinRaw] = pathname.match(/^\/api\/fba-inventory\/asin\/([^/]+)$/);
+      const asinU = String(asinRaw || '').toUpperCase();
+      const prod = DEMO_PRODUCTS.find((p) => p.asin === asinU) || DEMO_PRODUCTS[0];
+      const baseQty = Math.max(0, Math.round(Number(prod.quantity) || 24));
+      const fulfillable = Math.max(0, Math.round(baseQty * 0.55));
+      const nowIso = new Date().toISOString();
+      const item = {
+        asin: prod.asin,
+        fnSku: `X000${prod.asin.replace(/[^A-Z0-9]/gi, '').slice(0, 6)}`,
+        sellerSku: prod.sku,
+        productName: prod.name,
+        condition: 'NewItem',
+        lastUpdatedTime: nowIso,
+        totalQuantity: fulfillable + 18,
+        fulfillableQuantity: fulfillable,
+        inboundWorkingQuantity: 2,
+        inboundShippedQuantity: 10,
+        inboundReceivingQuantity: 6,
+        totalReservedQuantity: 5,
+        pendingCustomerOrderQuantity: 3,
+        pendingTransshipmentQuantity: 1,
+        fcProcessingQuantity: 1,
+        totalUnfulfillableQuantity: 2,
+        customerDamagedQuantity: 0,
+        warehouseDamagedQuantity: 1,
+        distributorDamagedQuantity: 0,
+        carrierDamagedQuantity: 0,
+        defectiveQuantity: 1,
+        expiredQuantity: 0,
+        totalResearchingQuantity: 0,
+        researchingQuantityInShortTerm: 0,
+        researchingQuantityInMidTerm: 0,
+        researchingQuantityInLongTerm: 0,
+        fetchedAt: nowIso,
+      };
+      const inboundSum =
+        item.inboundWorkingQuantity + item.inboundShippedQuantity + item.inboundReceivingQuantity;
+      const summary = {
+        skuCount: 1,
+        totalFulfillable: item.fulfillableQuantity,
+        totalQuantity: item.totalQuantity,
+        totalReserved: item.totalReservedQuantity,
+        totalInbound: inboundSum,
+        totalUnfulfillable: item.totalUnfulfillableQuantity,
+        latestFetchedAt: item.fetchedAt,
+      };
+      return makeNestedDataResponse(config, {
+        asin: asinU,
+        country: 'US',
+        region: 'NA',
+        marketplaceId: 'ATVPDKIKX0DER',
+        items: [item],
+        summary,
+      });
+    }
+
     if (method === 'get' && /^\/api\/pagewise\/product\/([^/]+)\/performance/.test(pathname)) {
       const [, asinRaw] = pathname.match(/^\/api\/pagewise\/product\/([^/]+)\/performance/);
       const asin = asinRaw.toUpperCase();

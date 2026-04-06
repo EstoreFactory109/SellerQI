@@ -4,7 +4,7 @@
  * Tracks when calendar-affecting services run for each user/country/region.
  * 
  * ONLY tracks on Mon/Wed/Fri (days 1, 3, 5) when calendar-affecting services run:
- * - mcpEconomicsData (Total Sales, Gross Profit, Fees, Refunds)
+ * - mcpEconomicsData (Sales only): Total Sales + date-wise daily Sales (plus cached last 7/14 day summaries)
  * - ppcMetricsAggregated (PPC Metrics - SP, SB, SD)
  * - ppcSpendsDateWise (Date-wise PPC Spend)
  * - adsKeywordsPerformanceData (Keywords Performance / Wasted Spend)

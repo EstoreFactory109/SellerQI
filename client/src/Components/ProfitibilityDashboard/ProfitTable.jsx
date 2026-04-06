@@ -5,6 +5,7 @@ import { setCogsValue, fetchCogs, saveCogsToDb, selectCogsSaving, selectSavedCog
 import { updateProfitabilityErrors } from '../../redux/slices/errorsSlice';
 import { formatCurrencyWithLocale } from '../../utils/currencyUtils';
 import { parseLocalDate } from '../../utils/dateUtils';
+import { shouldUseCalendarDateRange } from '../../utils/totalSalesFilterUrl.js';
 import axiosInstance from '../../config/axios.config';
 import { SkeletonBar } from '../Skeleton/Skeleton.jsx';
 
@@ -49,7 +50,11 @@ const ProfitTable = ({
     totalChildren: serverTotalChildren = 0,
     totalProducts: serverTotalProducts = 0,
     onLoadMore = null,
-    onPageChange = null
+    onPageChange = null,
+    // New profitability table props (ASIN-keyed joined data)
+    profitTableData = null,
+    profitTablePagination = null,
+    onProfitTablePageChange = null,
 }) => {
     // Use phased loading if pagination handler is provided (indicates phased loading mode)
     // This prevents falling back to legacy data while waiting for server response
@@ -83,13 +88,10 @@ const ProfitTable = ({
     // Note: Backend returns 'economicsMetrics' (lowercase 'e')
     const economicsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.economicsMetrics);
     
-    // Get date filter state from Redux
-    const calendarMode = useSelector(state => state.Dashboard.DashBoardInfo?.calendarMode);
     const startDate = useSelector(state => state.Dashboard.DashBoardInfo?.startDate);
     const endDate = useSelector(state => state.Dashboard.DashBoardInfo?.endDate);
     
-    // Check if date range is selected
-    const isDateRangeSelected = (calendarMode === 'custom' || calendarMode === 'last7') && startDate && endDate;
+    const isDateRangeSelected = shouldUseCalendarDateRange(startDate, endDate);
     
     // Fetch ASIN-wise sales data for big accounts
     // When economicsMetrics.isBig is true, the asinWiseSales array is empty to save memory
@@ -705,7 +707,211 @@ const ProfitTable = ({
         totalProducts: processedProducts.length
       };
     }, [processedProducts]);
-  
+
+    // ── NEW PROFITABILITY TABLE (ASIN-keyed with joined sales + expenses) ──
+    if (profitTableData && Array.isArray(profitTableData)) {
+      const pPag = profitTablePagination || {};
+      const filteredRows = profitTableData.filter(row => row.sku && row.sku.trim() !== '');
+
+      // Generate suggestions from new flow data
+      if (setSuggestionsData && filteredRows.length > 0) {
+        const newSuggestions = [];
+        filteredRows.forEach(row => {
+          const cogsPerUnit = cogsValues[row.asin] || 0;
+          const totalCogs = cogsPerUnit * (row.unitsSold || 0);
+          const gp = row.grossProfit || 0;
+          const netProfit = gp - totalCogs;
+          const margin = row.totalSales > 0 ? (netProfit / row.totalSales) * 100 : 0;
+          if (margin < 0) {
+            newSuggestions.push(`ASIN ${row.asin} (${row.sku}): Negative margin (${margin.toFixed(1)}%). Consider increasing selling price or reducing costs.`);
+          } else if (margin < 10) {
+            newSuggestions.push(`ASIN ${row.asin} (${row.sku}): Very low margin (${margin.toFixed(1)}%). Review expenses and COGS to improve profitability.`);
+          }
+          if (cogsPerUnit > 0 && row.totalSales > 0) {
+            const cogsPercentage = (totalCogs / row.totalSales) * 100;
+            if (cogsPercentage > 60) {
+              newSuggestions.push(`ASIN ${row.asin}: COGS consuming ${cogsPercentage.toFixed(1)}% of sales. Explore alternative suppliers.`);
+            }
+          }
+        });
+        if (newSuggestions.length > 0) {
+          setTimeout(() => setSuggestionsData(newSuggestions), 0);
+        }
+      }
+
+      return (
+        <div className="rounded-lg overflow-hidden" style={{ background: '#161b22', border: '1px solid #30363d' }}>
+          <div className="p-3 border-b" style={{ background: '#21262d', borderBottom: '1px solid #30363d' }}>
+            <div className="flex items-center gap-2">
+              <Table className="w-4 h-4" style={{ color: '#3b82f6' }} />
+              <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Product Profitability Analysis</h3>
+            </div>
+          </div>
+
+          <div className="w-full overflow-x-auto">
+            <table className="w-full table-fixed">
+              <thead>
+                <tr style={{ background: '#21262d', borderBottom: '1px solid #30363d' }}>
+                  <th className="w-8 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>#</th>
+                  <th className="w-1/5 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Product</th>
+                  <th className="w-24 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>ASIN</th>
+                  <th className="w-20 px-2 py-2 text-left text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>SKU</th>
+                  <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Sales</th>
+                  <th className="w-16 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Units</th>
+                  <th className="w-28 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Expenses</th>
+                  <th className="w-28 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>COGS</th>
+                  <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Gross</th>
+                  <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Net</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRows.length === 0 ? (
+                  <tr><td colSpan={10} className="text-center py-8 text-sm" style={{ color: '#9ca3af' }}>No profitability data available</td></tr>
+                ) : filteredRows.map((row, idx) => {
+                  const cogsPerUnit = cogsValues[row.asin] || 0;
+                  const totalCogs = cogsPerUnit * (row.unitsSold || 0);
+                  const grossProfit = row.grossProfit || 0;
+                  const netProfit = grossProfit - totalCogs;
+                  const rowNum = ((pPag.page || 1) - 1) * (pPag.limit || 10) + idx + 1;
+                  const isExpBreakdownOpen = expandedRows.has(`exp_${row.asin}`);
+
+                  return (
+                    <React.Fragment key={row.asin || idx}>
+                      <tr style={{ borderBottom: '1px solid #30363d' }} className="hover:bg-[#21262d]/60 transition-colors">
+                        <td className="px-2 py-2 text-center text-xs" style={{ color: '#9ca3af' }}>{rowNum}</td>
+                        <td className="px-3 py-2 text-left">
+                          <span className="text-xs font-medium truncate block" style={{ color: '#f3f4f6' }} title={row.productName || ''}>
+                            {row.productName || 'N/A'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-left">
+                          <span className="text-xs font-mono" style={{ color: '#60a5fa' }}>{row.asin || 'N/A'}</span>
+                        </td>
+                        <td className="px-2 py-2 text-left">
+                          <span className="text-[10px] font-mono truncate block" style={{ color: '#9ca3af' }} title={row.sku || ''}>{row.sku}</span>
+                        </td>
+                        <td className="px-2 py-2 text-center text-xs font-medium" style={{ color: '#f3f4f6' }}>
+                          {formatCurrencyWithLocale(row.totalSales || 0, currency)}
+                        </td>
+                        <td className="px-2 py-2 text-center text-xs" style={{ color: '#9ca3af' }}>
+                          {row.unitsSold || 0}
+                        </td>
+                        <td className="px-2 py-2 text-center text-xs" style={{ color: '#f87171' }}>
+                          <div className="flex items-center justify-center gap-1">
+                            <span>{formatCurrencyWithLocale(row.totalExpenses || 0, currency)}</span>
+                            <button
+                              onClick={() => {
+                                const key = `exp_${row.asin}`;
+                                setExpandedRows(prev => {
+                                  const next = new Set(prev);
+                                  next.has(key) ? next.delete(key) : next.add(key);
+                                  return next;
+                                });
+                              }}
+                              className="p-0.5 rounded hover:bg-[#30363d] transition-colors"
+                              title="View expense breakdown"
+                              style={{ color: '#60a5fa' }}
+                            >
+                              {isExpBreakdownOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                            </button>
+                          </div>
+                        </td>
+                        <td className="px-2 py-2 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <span className="text-[10px]" style={{ color: '#9ca3af' }}>{cogsCurrencySymbol}</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={cogsValues[row.asin] ?? ''}
+                              onChange={(e) => handleCogsChange(row.asin, e.target.value)}
+                              placeholder="0.00"
+                              className="w-14 text-center text-xs rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-blue-500"
+                              style={{ background: '#1a1a1a', color: '#f3f4f6', border: '1px solid #30363d' }}
+                            />
+                            <button
+                              onClick={() => handleSaveCogs(row.asin, row.sku)}
+                              disabled={cogsSaving[row.asin] || !needsSave(row.asin)}
+                              className="p-0.5 rounded transition-colors"
+                              style={needsSave(row.asin) ? { background: 'rgba(34,197,94,0.2)', color: '#22c55e' } : { color: '#30363d' }}
+                              title={cogsSaving[row.asin] ? 'Saving...' : needsSave(row.asin) ? 'Click to save COGS' : 'Enter COGS value to save'}
+                            >
+                              {cogsSaving[row.asin] ? <Loader2 className="w-3 h-3 animate-spin" /> : isSaved(row.asin) ? <CheckCircle2 className="w-3 h-3" /> : <Check className="w-3 h-3" />}
+                            </button>
+                          </div>
+                        </td>
+                        <td className="px-2 py-2 text-center text-xs font-medium" style={{ color: grossProfit >= 0 ? '#22c55e' : '#f87171' }}>
+                          {formatCurrencyWithLocale(grossProfit, currency)}
+                        </td>
+                        <td className="px-2 py-2 text-center text-xs font-medium">
+                          {cogsPerUnit > 0 ? (
+                            <span style={{ color: netProfit >= 0 ? '#22c55e' : '#f87171' }}>
+                              {formatCurrencyWithLocale(netProfit, currency)}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded border" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa', borderColor: 'rgba(59, 130, 246, 0.3)' }}>
+                              +COGS
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                      {isExpBreakdownOpen && (
+                        <tr style={{ background: '#1a1f26' }}>
+                          <td colSpan={10} className="px-6 py-3">
+                            <div className="text-[10px] font-semibold uppercase mb-2" style={{ color: '#9ca3af' }}>Expense Breakdown</div>
+                            {row.breakdown && row.breakdown.length > 0 ? (
+                              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-x-4 gap-y-1.5">
+                                {row.breakdown.map((b, bIdx) => (
+                                  <div key={bIdx} className="flex items-center justify-between gap-2 px-2 py-1 rounded" style={{ background: '#21262d' }}>
+                                    <span className="text-[10px] truncate" style={{ color: '#d1d5db' }} title={b.category}>{b.category}</span>
+                                    <span className="text-[10px] font-medium whitespace-nowrap" style={{ color: '#f87171' }}>{formatCurrencyWithLocale(b.amount, currency)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-[10px]" style={{ color: '#6b7280' }}>No expense data for this SKU</span>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          {pPag.totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-2 border-t" style={{ borderTop: '1px solid #30363d', background: '#21262d' }}>
+              <span className="text-[10px]" style={{ color: '#9ca3af' }}>
+                Page {pPag.page} of {pPag.totalPages} ({pPag.totalItems} items)
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => onProfitTablePageChange && onProfitTablePageChange(pPag.page - 1)}
+                  disabled={pPag.page <= 1}
+                  className="p-1 rounded transition-colors disabled:opacity-30"
+                  style={{ color: '#9ca3af' }}
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => onProfitTablePageChange && onProfitTablePageChange(pPag.page + 1)}
+                  disabled={!pPag.hasMore}
+                  className="p-1 rounded transition-colors disabled:opacity-30"
+                  style={{ color: '#9ca3af' }}
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── LEGACY TABLE (fallback when profitTableData is not available) ──
     return (
       <div className="rounded-lg overflow-hidden" style={{ background: '#161b22', border: '1px solid #30363d' }}>
         {/* Enhanced Header */}

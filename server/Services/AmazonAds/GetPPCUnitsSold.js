@@ -477,10 +477,10 @@ async function getPPCUnitsSold(accessToken, profileId, userId, country, region, 
             }
         } : null;
 
-        // Calculate dates if not provided
+        // Calculate dates if not provided (UTC-based, matching Expences.js: yesterday − 30 days → yesterday)
         const now = new Date();
-        const calculatedEndDate = endDate || new Date(now.getTime() - (24 * 60 * 60 * 1000)).toISOString().split('T')[0];
-        const calculatedStartDate = startDate || new Date(now.getTime() - (31 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
+        const calculatedEndDate = endDate || new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1)).toISOString().split('T')[0];
+        const calculatedStartDate = startDate || new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1 - 30)).toISOString().split('T')[0];
 
         console.log(`📅 [GetPPCUnitsSold] Date range: ${calculatedStartDate} to ${calculatedEndDate}`);
 

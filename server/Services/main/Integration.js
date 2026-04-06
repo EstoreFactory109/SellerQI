@@ -29,6 +29,10 @@ const withTimeout = (promise, timeoutMs, operationName) => {
     ]);
 };
 
+// GET_MERCHANT_LISTINGS_ALL_DATA is an async SP-API report (queue + poll + download + parse).
+// Large catalogs and busy marketplaces often exceed 5 minutes; align with typical report wait times.
+const MERCHANT_LISTINGS_FETCH_TIMEOUT_MS = 15 * 60 * 1000;
+
 // Models - use service layers for models that can hit 16MB limit
 // ListingItems service handles 16MB limit with separate collection
 const { saveListingItemsData } = require('../products/ListingItemsService.js');
@@ -37,6 +41,7 @@ const { getProductWiseSponsoredAdsData } = require('../amazon-ads/ProductWiseSpo
 
 // SP-API Services
 const GET_MERCHANT_LISTINGS_ALL_DATA = require('../Sp_API/GET_MERCHANT_LISTINGS_ALL_DATA.js');
+const { runFbaInventorySyncForMarketplace } = require('../Sp_API/FbaInventoryStorageService.js');
 const GET_V2_SELLER_PERFORMANCE_REPORT = require('../Sp_API/V2_Seller_Performance_Report.js');
 const GET_V1_SELLER_PERFORMANCE_REPORT = require('../Sp_API/GET_V1_SELLER_PERFORMANCE_REPORT.js');
 const GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT = require('../Sp_API/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT.js');
@@ -70,11 +75,16 @@ const GET_LEDGER_SUMMARY_VIEW_DATA = require('../Sp_API/GET_LEDGER_SUMMARY_VIEW_
 const GET_LEDGER_DETAIL_VIEW_DATA = require('../Sp_API/GET_LEDGER_DETAIL_VIEW_DATA.js');
 const GET_FBA_REIMBURSEMENTS_DATA = require('../Sp_API/GET_FBA_REIMBURSEMENTS_DATA.js');
 
-// MCP Services for Economics data
-const { fetchAndStoreEconomicsData } = require('../MCP/MCPEconomicsIntegration.js');
+// MCP Services for Sales-only data
+const { fetchAndStoreSalesOnlyData } = require('../MCP/MCPSalesOnlyIntegration.js');
 
 // MCP Services for BuyBox data
 const { fetchAndStoreBuyBoxData } = require('../MCP/MCPBuyBoxIntegration.js');
+
+// Expense Report Service (Finance API → raw rows → aggregated analysis)
+const { fetchPersistAndReturnExpenseReport } = require('../Sp_API/ExpenseReportService.js');
+// ASIN-wise sales (SP-API report → Mongo runs/items)
+const { fetchPersistAndReturnAsinWiseSales } = require('../Sp_API/AsinWiseSalesStorageService.js');
 
 // Data Fetch Tracking for calendar-affecting services
 const DataFetchTrackingService = require('../system/DataFetchTrackingService.js');
@@ -232,6 +242,14 @@ class Integration {
                 AccessToken, marketplaceIds, userId, Country, Region, Base_URI,
                 RefreshToken, AdsRefreshToken, loggingHelper
             );
+
+            await runFbaInventorySyncForMarketplace({
+                userId,
+                country: Country,
+                region: Region,
+                accessToken: AccessToken,
+                loggingHelper,
+            });
 
             // Yield to event loop to allow lock renewal
             await new Promise(resolve => setImmediate(resolve));
@@ -760,7 +778,7 @@ class Integration {
                 tokenManager.wrapSpApiFunction(
                     GET_MERCHANT_LISTINGS_ALL_DATA, userId, RefreshToken, AdsRefreshToken
                 )(AccessToken, marketplaceIds, userId, Country, Region, Base_URI),
-                300000, // 5 minutes
+                MERCHANT_LISTINGS_FETCH_TIMEOUT_MS,
                 'GET_MERCHANT_LISTINGS_ALL_DATA'
             );
 
@@ -1227,12 +1245,12 @@ class Integration {
             thirdBatchServiceNames.push("Ad Groups Data");
         }
 
-        // Add MCP Economics fetch to third batch (runs in parallel)
+        // Add MCP SalesOnly fetch to third batch (runs in parallel)
         if (RefreshToken) {
             thirdBatchPromises.push(
-                fetchAndStoreEconomicsData(userId, RefreshToken, Region, Country)
+                fetchAndStoreSalesOnlyData(userId, RefreshToken, Region, Country)
             );
-            thirdBatchServiceNames.push("MCP Economics Data");
+            thirdBatchServiceNames.push("MCP SalesOnly Data");
         }
 
         const thirdBatchResults = await Promise.allSettled(thirdBatchPromises);
@@ -1252,41 +1270,41 @@ class Integration {
             apiData.adGroupsData = { success: false, data: null, error: "Ads token not available" };
         }
 
-        // Process MCP Economics and BuyBox results
+        // Process MCP SalesOnly and BuyBox results
         if (RefreshToken) {
             try {
-                const mcpEconomicsResult = thirdBatchResults[thirdResultIndex++];
-                if (mcpEconomicsResult.status === 'fulfilled' && mcpEconomicsResult.value?.success) {
+                const mcpSalesOnlyResult = thirdBatchResults[thirdResultIndex++];
+                if (mcpSalesOnlyResult.status === 'fulfilled' && mcpSalesOnlyResult.value?.success) {
                     apiData.mcpEconomicsData = { 
                         success: true, 
-                        data: mcpEconomicsResult.value.data, 
+                        data: mcpSalesOnlyResult.value.data, 
                         error: null 
                     };
-                    logger.info("MCP Economics data fetched successfully", {
+                    logger.info("MCP SalesOnly data fetched successfully", {
                         userId,
                         region: Region,
                         country: Country
                     });
                 } else {
-                    const errorMsg = mcpEconomicsResult.status === 'rejected' 
-                        ? (mcpEconomicsResult.reason?.message || mcpEconomicsResult.reason?.toString() || 'Promise rejected')
-                        : (mcpEconomicsResult.value?.error || 'Unknown error');
+                    const errorMsg = mcpSalesOnlyResult.status === 'rejected' 
+                        ? (mcpSalesOnlyResult.reason?.message || mcpSalesOnlyResult.reason?.toString() || 'Promise rejected')
+                        : (mcpSalesOnlyResult.value?.error || 'Unknown error');
                     apiData.mcpEconomicsData = { 
                         success: false, 
                         data: null, 
                         error: errorMsg 
                     };
-                    logger.warn("MCP Economics data fetch failed", { 
+                    logger.warn("MCP SalesOnly data fetch failed", { 
                         error: errorMsg,
                         userId,
                         region: Region,
                         country: Country,
-                        resultStatus: mcpEconomicsResult.status,
-                        hasValue: !!mcpEconomicsResult.value
+                        resultStatus: mcpSalesOnlyResult.status,
+                        hasValue: !!mcpSalesOnlyResult.value
                     });
                 }
             } catch (mcpError) {
-                logger.error("Error processing MCP Economics result", {
+                logger.error("Error processing MCP SalesOnly result", {
                     error: mcpError.message,
                     stack: mcpError.stack,
                     userId,
@@ -1296,12 +1314,12 @@ class Integration {
                 apiData.mcpEconomicsData = { 
                     success: false, 
                     data: null, 
-                    error: `Error processing MCP Economics: ${mcpError.message}` 
+                    error: `Error processing MCP SalesOnly: ${mcpError.message}` 
                 };
             }
         } else {
             apiData.mcpEconomicsData = { success: false, data: null, error: "Refresh token not available" };
-            logger.info("MCP Economics skipped - no refresh token", { userId, region: Region, country: Country });
+            logger.info("MCP SalesOnly skipped - no refresh token", { userId, region: Region, country: Country });
         }
 
         // Fetch BuyBox data (runs after Economics)
@@ -1353,11 +1371,97 @@ class Integration {
             logger.info("MCP BuyBox skipped - no refresh token", { userId, region: Region, country: Country });
         }
         
+        // Fetch Expense Report (Finance API) after BuyBox
+        if (AccessToken && RefreshToken) {
+            try {
+                logger.info("Fetching Expense Report data", { userId, region: Region, country: Country });
+                const expenseResult = await fetchPersistAndReturnExpenseReport({
+                    userId,
+                    country: Country,
+                    regionModel: Region,
+                    refreshToken: RefreshToken,
+                    accessToken: AccessToken,
+                    clientId: process.env.SPAPI_CLIENT_ID,
+                    clientSecret: process.env.SPAPI_CLIENT_SECRET,
+                });
+                apiData.expenseReport = {
+                    success: true,
+                    data: expenseResult,
+                    error: null
+                };
+                logger.info("Expense Report data fetched successfully", {
+                    userId,
+                    region: Region,
+                    country: Country,
+                    hasNewData: expenseResult?.hasNewData
+                });
+            } catch (expenseError) {
+                logger.error("Error fetching Expense Report data", {
+                    error: expenseError.message,
+                    stack: expenseError.stack,
+                    userId,
+                    region: Region,
+                    country: Country
+                });
+                apiData.expenseReport = {
+                    success: false,
+                    data: null,
+                    error: `Error fetching Expense Report: ${expenseError.message}`
+                };
+            }
+        } else {
+            apiData.expenseReport = { success: false, data: null, error: "SP-API tokens not available" };
+            logger.info("Expense Report skipped - no tokens", { userId, region: Region, country: Country });
+        }
+
+        // ASIN-wise sales (persisted to Mongo for profitability / ASIN APIs)
+        if (AccessToken && RefreshToken) {
+            try {
+                logger.info('Fetching ASIN-wise sales data', { userId, region: Region, country: Country });
+                const asinWiseResult = await fetchPersistAndReturnAsinWiseSales({
+                    userId,
+                    country: Country,
+                    regionModel: Region,
+                    refreshToken: RefreshToken,
+                    accessToken: AccessToken,
+                    clientId: process.env.SPAPI_CLIENT_ID,
+                    clientSecret: process.env.SPAPI_CLIENT_SECRET,
+                });
+                apiData.asinWiseSales = {
+                    success: true,
+                    data: asinWiseResult,
+                    error: null,
+                };
+                logger.info('ASIN-wise sales fetched successfully', {
+                    userId,
+                    region: Region,
+                    country: Country,
+                    totalAsins: asinWiseResult?.data?.totalAsins,
+                });
+            } catch (asinWiseError) {
+                logger.error('Error fetching ASIN-wise sales data', {
+                    error: asinWiseError.message,
+                    stack: asinWiseError.stack,
+                    userId,
+                    region: Region,
+                    country: Country,
+                });
+                apiData.asinWiseSales = {
+                    success: false,
+                    data: null,
+                    error: `Error fetching ASIN-wise sales: ${asinWiseError.message}`,
+                };
+            }
+        } else {
+            apiData.asinWiseSales = { success: false, data: null, error: 'SP-API tokens not available' };
+            logger.info('ASIN-wise sales skipped - no tokens', { userId, region: Region, country: Country });
+        }
+
         // Set legacy fields to indicate they're no longer used (for backward compatibility)
-        apiData.WeeklySales = { success: false, data: null, error: "Deprecated - Use MCP Economics data" };
-        apiData.feesResult = { success: false, data: null, error: "Deprecated - Use MCP Economics data" };
-        apiData.financeDataFromAPI = { success: false, data: null, error: "Deprecated - Use MCP Economics data" };
-        apiData.feeProtectorData = { success: false, data: null, error: "Deprecated - Use MCP Economics data" };
+        apiData.WeeklySales = { success: false, data: null, error: "Deprecated - Use MCP SalesOnly data" };
+        apiData.feesResult = { success: false, data: null, error: "Deprecated - Use MCP SalesOnly data" };
+        apiData.financeDataFromAPI = { success: false, data: null, error: "Deprecated - Use MCP SalesOnly data" };
+        apiData.feeProtectorData = { success: false, data: null, error: "Deprecated - Use MCP SalesOnly data" };
         // Note: ledgerSummaryData is now fetched in Second Batch for reimbursement calculations
         
         logger.info("Third Batch Ends");
@@ -1923,7 +2027,7 @@ class Integration {
             fbaInventoryPlanningData: apiData.fbaInventoryPlanningData.success ? apiData.fbaInventoryPlanningData.data : null,
             strandedInventoryData: apiData.strandedInventoryData.success ? apiData.strandedInventoryData.data : null,
             inboundNonComplianceData: apiData.inboundNonComplianceData.success ? apiData.inboundNonComplianceData.data : null,
-            // MCP Economics and BuyBox data
+            // MCP SalesOnly and BuyBox data
             mcpEconomicsData: apiData.mcpEconomicsData.success ? apiData.mcpEconomicsData.data : null,
             mcpBuyBoxData: apiData.mcpBuyBoxData.success ? apiData.mcpBuyBoxData.data : null
         };
@@ -1948,7 +2052,7 @@ class Integration {
             { name: "FBA Inventory Planning", result: apiData.fbaInventoryPlanningData },
             { name: "Stranded Inventory", result: apiData.strandedInventoryData },
             { name: "Inbound Non-Compliance", result: apiData.inboundNonComplianceData },
-            { name: "MCP Economics Data", result: apiData.mcpEconomicsData }, // New: Track MCP Economics service
+            { name: "MCP SalesOnly Data", result: apiData.mcpEconomicsData },
             { name: "MCP BuyBox Data", result: apiData.mcpBuyBoxData }, // New: Track MCP BuyBox service
             { name: "Shipment Data", result: apiData.shipment },
             { name: "Brand Data", result: apiData.brandData },
@@ -2362,6 +2466,14 @@ class Integration {
                 AccessToken, marketplaceIds, userId, Country, Region, Base_URI,
                 RefreshToken, AdsRefreshToken, null
             );
+
+            await runFbaInventorySyncForMarketplace({
+                userId,
+                country: Country,
+                region: Region,
+                accessToken: AccessToken,
+                loggingHelper,
+            });
 
             // Extract product data (active products)
             const productData = await this.extractProductData(merchantListingsData, Country, Region);
@@ -2838,12 +2950,12 @@ class Integration {
                 thirdBatchServiceNames.push("Ad Groups");
             }
 
-            // MCP Economics
+            // MCP SalesOnly
             if (RefreshToken) {
                 thirdBatchPromises.push(
-                    fetchAndStoreEconomicsData(userId, RefreshToken, Region, Country)
+                    fetchAndStoreSalesOnlyData(userId, RefreshToken, Region, Country)
                 );
-                thirdBatchServiceNames.push("MCP Economics Data");
+                thirdBatchServiceNames.push("MCP SalesOnly Data");
             }
 
             const thirdBatchResults = await Promise.allSettled(thirdBatchPromises);
@@ -2859,7 +2971,7 @@ class Integration {
                 'Integration:Batch3And4Phase:Batch3'
             );
 
-            // MCP BuyBox (after Economics) - handled separately as it depends on Economics
+            // MCP BuyBox (after SalesOnly) - handled separately
             if (RefreshToken) {
                 try {
                     await fetchAndStoreBuyBoxData(userId, RefreshToken, Region, Country);
@@ -2899,6 +3011,137 @@ class Integration {
                         }
                     }
                 }
+            }
+
+            // Expense Report (Finance API) after BuyBox — mirrors Integration.getSpApiData third batch
+            if (AccessToken && RefreshToken) {
+                try {
+                    logger.info('[Integration:Batch3And4Phase] Fetching Expense Report data', { userId, region: Region, country: Country });
+                    const expenseResult = await fetchPersistAndReturnExpenseReport({
+                        userId,
+                        country: Country,
+                        regionModel: Region,
+                        refreshToken: RefreshToken,
+                        accessToken: AccessToken,
+                        clientId: process.env.SPAPI_CLIENT_ID,
+                        clientSecret: process.env.SPAPI_CLIENT_SECRET,
+                    });
+                    logger.info('[Integration:Batch3And4Phase] Expense Report fetched successfully', {
+                        userId,
+                        region: Region,
+                        country: Country,
+                        hasNewData: expenseResult?.hasNewData,
+                    });
+                    if (sessionId) {
+                        try {
+                            await LoggingHelper.addLogToSession(sessionId, {
+                                functionName: 'Expense Report',
+                                logType: 'success',
+                                status: 'completed',
+                                message: 'Expense Report completed successfully',
+                                contextData: { userId, region: Region, country: Country, hasNewData: expenseResult?.hasNewData },
+                            });
+                        } catch (logError) {
+                            logger.warn(`[Integration:Batch3And4Phase] Failed to log Expense Report success: ${logError.message}`);
+                        }
+                    }
+                } catch (expenseError) {
+                    logger.error('[Integration:Batch3And4Phase] Error fetching Expense Report data', {
+                        error: expenseError.message,
+                        stack: expenseError.stack,
+                        userId,
+                        region: Region,
+                        country: Country,
+                    });
+                    if (sessionId) {
+                        try {
+                            await LoggingHelper.addLogToSession(sessionId, {
+                                functionName: 'Expense Report',
+                                logType: 'error',
+                                status: 'failed',
+                                message: `Expense Report failed: ${expenseError.message}`,
+                                errorDetails: {
+                                    errorMessage: expenseError.message,
+                                    stackTrace: expenseError.stack,
+                                    phase: 'Integration:Batch3And4Phase:Batch3',
+                                },
+                                contextData: { userId, region: Region, country: Country },
+                            });
+                        } catch (logError) {
+                            logger.warn(`[Integration:Batch3And4Phase] Failed to log Expense Report error: ${logError.message}`);
+                        }
+                    }
+                }
+            } else {
+                logger.info('[Integration:Batch3And4Phase] Expense Report skipped - no SP-API tokens', { userId, region: Region, country: Country });
+            }
+
+            // ASIN-wise sales — mirrors Integration.getSpApiData (after expense)
+            if (AccessToken && RefreshToken) {
+                try {
+                    logger.info('[Integration:Batch3And4Phase] Fetching ASIN-wise sales data', { userId, region: Region, country: Country });
+                    const asinWiseResult = await fetchPersistAndReturnAsinWiseSales({
+                        userId,
+                        country: Country,
+                        regionModel: Region,
+                        refreshToken: RefreshToken,
+                        accessToken: AccessToken,
+                        clientId: process.env.SPAPI_CLIENT_ID,
+                        clientSecret: process.env.SPAPI_CLIENT_SECRET,
+                    });
+                    logger.info('[Integration:Batch3And4Phase] ASIN-wise sales fetched successfully', {
+                        userId,
+                        region: Region,
+                        country: Country,
+                        totalAsins: asinWiseResult?.data?.totalAsins,
+                    });
+                    if (sessionId) {
+                        try {
+                            await LoggingHelper.addLogToSession(sessionId, {
+                                functionName: 'ASIN-wise sales',
+                                logType: 'success',
+                                status: 'completed',
+                                message: 'ASIN-wise sales completed successfully',
+                                contextData: {
+                                    userId,
+                                    region: Region,
+                                    country: Country,
+                                    totalAsins: asinWiseResult?.data?.totalAsins,
+                                },
+                            });
+                        } catch (logError) {
+                            logger.warn(`[Integration:Batch3And4Phase] Failed to log ASIN-wise sales success: ${logError.message}`);
+                        }
+                    }
+                } catch (asinWiseError) {
+                    logger.error('[Integration:Batch3And4Phase] Error fetching ASIN-wise sales data', {
+                        error: asinWiseError.message,
+                        stack: asinWiseError.stack,
+                        userId,
+                        region: Region,
+                        country: Country,
+                    });
+                    if (sessionId) {
+                        try {
+                            await LoggingHelper.addLogToSession(sessionId, {
+                                functionName: 'ASIN-wise sales',
+                                logType: 'error',
+                                status: 'failed',
+                                message: `ASIN-wise sales failed: ${asinWiseError.message}`,
+                                errorDetails: {
+                                    errorMessage: asinWiseError.message,
+                                    stackTrace: asinWiseError.stack,
+                                    phase: 'Integration:Batch3And4Phase:Batch3',
+                                },
+                                contextData: { userId, region: Region, country: Country },
+                            });
+                        } catch (logError) {
+                            logger.warn(`[Integration:Batch3And4Phase] Failed to log ASIN-wise sales error: ${logError.message}`);
+                        }
+                    }
+                }
+            } else {
+                logger.info('[Integration:Batch3And4Phase] ASIN-wise sales skipped - no SP-API tokens', { userId, region: Region, country: Country });
             }
 
             logger.info("[Integration:Batch3And4Phase] Third Batch Ends", {

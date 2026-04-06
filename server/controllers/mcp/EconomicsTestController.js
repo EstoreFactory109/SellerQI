@@ -12,11 +12,11 @@ const logger = require('../../utils/Logger.js');
 const LoggingHelper = require('../../utils/LoggingHelper.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const {
-    fetchAndStoreEconomicsData
-} = require('../../Services/MCP/MCPEconomicsIntegration.js');
+    fetchAndStoreSalesOnlyData
+} = require('../../Services/MCP/MCPSalesOnlyIntegration.js');
 const {
-    getLatestEconomicsMetrics
-} = require('../../Services/MCP/EconomicsMetricsService.js');
+    getLatestSalesOnlyMetrics
+} = require('../../Services/MCP/SalesOnlyMetricsService.js');
 
 /**
  * POST /api/test/mcp-economics/fetch
@@ -135,9 +135,9 @@ const testFetchEconomicsData = asyncHandler(async (req, res) => {
         const effectiveRegion = req.body.region || region;
         const effectiveCountry = req.body.country || country;
 
-        logger.info('Testing MCP economics fetch', { userId, region: effectiveRegion, country: effectiveCountry });
+        logger.info('Testing MCP sales-only fetch', { userId, region: effectiveRegion, country: effectiveCountry });
 
-        const result = await fetchAndStoreEconomicsData(
+        const result = await fetchAndStoreSalesOnlyData(
             userId,
             finalRefreshToken,
             effectiveRegion,
@@ -157,7 +157,7 @@ const testFetchEconomicsData = asyncHandler(async (req, res) => {
                 userId,
                 region: effectiveRegion,
                 country: effectiveCountry,
-                functionName: 'fetchAndStoreEconomicsData',
+                functionName: 'fetchAndStoreSalesOnlyData',
                 error: result.error || 'Economics fetch failed',
                 source: 'MCP_ECONOMICS',
                 additionalData: {
@@ -175,7 +175,7 @@ const testFetchEconomicsData = asyncHandler(async (req, res) => {
         }
 
         // Verify data persisted
-        const stored = await getLatestEconomicsMetrics(userId, effectiveRegion, effectiveCountry);
+        const stored = await getLatestSalesOnlyMetrics(userId, effectiveRegion, effectiveCountry);
 
         return res.status(200).json(
             new ApiResponse(
@@ -185,7 +185,7 @@ const testFetchEconomicsData = asyncHandler(async (req, res) => {
                     storedInDatabase: !!stored,
                     databaseId: stored?._id || null
                 },
-                result.message || 'Economics data fetched and stored successfully',
+                result.message || 'Sales-only data fetched and stored successfully',
                 {
                     timestamp: new Date().toISOString(),
                     effectiveRegion,

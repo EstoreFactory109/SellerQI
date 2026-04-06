@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { DateRange } from 'react-date-range';
 import 'react-date-range/dist/styles.css';
@@ -13,15 +13,54 @@ import { addBrand } from '../../redux/slices/authSlice.js'
 import PulseLoader from "react-spinners/PulseLoader";
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Calendar, Clock, Sparkles } from 'lucide-react';
+import { ChevronRight, Check } from 'lucide-react';
 
 import {
   subDays,
   subMonths,
+  addMonths,
+  addYears,
+  setMonth,
+  setYear,
+  startOfMonth,
+  format,
 } from 'date-fns';
 import { parseLocalDate } from '../../utils/dateUtils.js';
 
-export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
+/** Use in mousedown handlers so portaled dropdown clicks don’t close the picker */
+export function isClickInsideGaCalDropdown(target) {
+  return Boolean(target?.closest?.('[data-ga-cal-dropdown="true"]'));
+}
+
+const gaCalLayoutSpring = {
+  type: 'spring',
+  stiffness: 320,
+  damping: 30,
+  mass: 0.92,
+};
+
+/** Match react-date-range Calendar visible months (forwards / backwards). */
+function visibleMonthAtIndex(focus, index, monthsShown, calendarFocus) {
+  if (calendarFocus === 'backwards') {
+    return subMonths(focus, monthsShown - 1 - index);
+  }
+  return addMonths(focus, index);
+}
+
+function readPortalStyle(anchorRef) {
+  if (!anchorRef?.current || typeof window === 'undefined') return null;
+  const r = anchorRef.current.getBoundingClientRect();
+  const gap = 8;
+  return {
+    position: 'fixed',
+    top: r.bottom + gap,
+    right: document.documentElement.clientWidth - r.right,
+    left: 'auto',
+    zIndex: 10050,
+  };
+}
+
+export default function DateFilter({ setOpenCalender, setSelectedPeriod, anchorRef }) {
   const navigate=useNavigate();
   const dispatch=useDispatch()
   const [Loader,setLoader]=useState(false);
@@ -56,6 +95,7 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         },
         thirtyDaysActive: false,
         sevenDaysActive: false,
+        fourteenDaysActive: false,
         customActive: true
       };
     } else if (calendarMode === 'last7') {
@@ -71,6 +111,21 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         },
         thirtyDaysActive: false,
         sevenDaysActive: true,
+        fourteenDaysActive: false,
+        customActive: false
+      };
+    } else if (calendarMode === 'last14') {
+      const hasBackendDates = dashboardInfo?.startDate && dashboardInfo?.endDate;
+      const backendEndDate = hasBackendDates ? parseLocalDate(dashboardInfo.endDate) : subDays(new Date(), 1);
+      return {
+        selectedRange: {
+          startDate: subDays(backendEndDate, 13),
+          endDate: backendEndDate,
+          key: 'selection',
+        },
+        thirtyDaysActive: false,
+        sevenDaysActive: false,
+        fourteenDaysActive: true,
         customActive: false
       };
     } else {
@@ -86,6 +141,7 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         },
         thirtyDaysActive: true,
         sevenDaysActive: false,
+        fourteenDaysActive: false,
         customActive: false
       };
     }
@@ -97,44 +153,74 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
   const [thirtyDaysActive,setThirtyDaysActive]=useState(initialState.thirtyDaysActive);
   const [sevenDaysActive,setSevenDaysActive]=useState(initialState.sevenDaysActive);
   const [customActive,setCustomActive]=useState(initialState.customActive);
+  const [fourteenDaysActive, setFourteenDaysActive] = useState(initialState.fourteenDaysActive || false);
+  /** True only after user picks Custom — calendar + apply show on the right */
+  const [customPanelOpen, setCustomPanelOpen] = useState(Boolean(initialState.customActive));
+  /** Keeps split popover layout until custom panel exit animation finishes (avoids layout jump) */
+  const [splitLayout, setSplitLayout] = useState(Boolean(initialState.customActive));
 
-  // Debug: Log initial calendar state
-  console.log('=== Calendar Component Initialization ===');
-  console.log('Dashboard startDate:', dashboardInfo?.startDate);
-  console.log('Dashboard endDate:', dashboardInfo?.endDate);
-  console.log('Calendar mode from Redux:', dashboardInfo?.calendarMode);
-  console.log('Is custom range:', dashboardInfo?.calendarMode === 'custom');
-  console.log('Is last 7 days:', dashboardInfo?.calendarMode === 'last7');
-  console.log('Initial thirtyDaysActive:', initialState.thirtyDaysActive);
-  console.log('Initial sevenDaysActive:', initialState.sevenDaysActive);
-  console.log('Initial customActive:', initialState.customActive);
-  console.log('Initial selectedRange:', initialState.selectedRange);
+  const [portalPosition, setPortalPosition] = useState(() => readPortalStyle(anchorRef));
+
+  useEffect(() => {
+    if (customPanelOpen) setSplitLayout(true);
+  }, [customPanelOpen]);
+
+  const updatePortalPosition = useCallback(() => {
+    setPortalPosition(readPortalStyle(anchorRef));
+  }, [anchorRef]);
+
+  useLayoutEffect(() => {
+    if (!anchorRef) {
+      setPortalPosition(null);
+      return undefined;
+    }
+    updatePortalPosition();
+    window.addEventListener('resize', updatePortalPosition);
+    document.addEventListener('scroll', updatePortalPosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePortalPosition);
+      document.removeEventListener('scroll', updatePortalPosition, true);
+    };
+  }, [anchorRef, updatePortalPosition, customPanelOpen, splitLayout]);
 
   // NOTE: We no longer sync with Redux state changes while the calendar is open.
   // The calendar initializes from Redux state when it mounts (via initializeCalendarState),
   // and user interactions control the state from that point forward.
   // This prevents the calendar from resetting or closing when the user is switching between filters.
 
+  const formatPillDate = (date) =>
+    date?.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) || '';
+
   const handleActive=(btnValue)=>{
     switch(btnValue){
       case 'last30':
         setThirtyDaysActive(true);
         setSevenDaysActive(false);
+        setFourteenDaysActive(false);
         setCustomActive(false);
         break;
       case 'last7':
         setThirtyDaysActive(false);
         setSevenDaysActive(true);
+        setFourteenDaysActive(false);
         setCustomActive(false);
         break;
       case 'custom':
         setThirtyDaysActive(false);
         setSevenDaysActive(false);
+        setFourteenDaysActive(false);
         setCustomActive(true);
+        break;
+      case 'last14':
+        setThirtyDaysActive(false);
+        setSevenDaysActive(false);
+        setFourteenDaysActive(true);
+        setCustomActive(false);
         break;
       default:
         setThirtyDaysActive(false);
         setSevenDaysActive(false);
+        setFourteenDaysActive(false);
         setCustomActive(false);
         break;
     }
@@ -162,6 +248,7 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
 
     switch (type) {
       case 'last30':
+        setCustomPanelOpen(false);
         handleActive('last30');
         // Use existing backend dates if available, otherwise fallback to calculated dates
         // This prevents showing incorrect dates before the API call returns
@@ -182,6 +269,7 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         await applyDefaultDateRange();
         break;
       case 'last7':
+        setCustomPanelOpen(false);
         handleActive('last7');
         // Last 7 days: Use backend's endDate as reference (no calculation from current date)
         // endDate = from backend, startDate = endDate - 6 days (gives 7 days total)
@@ -201,9 +289,25 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
         // Make API call with last 7 days range (relative to backend endDate)
         await applyDateRange(last7Range, 'last7');
         break;
+      case 'last14':
+        setCustomPanelOpen(false);
+        handleActive('last14');
+        const hasBackendDatesFor14 = dashboardInfo?.startDate && dashboardInfo?.endDate;
+        const backendEndDateFor14 = hasBackendDatesFor14 ? parseLocalDate(dashboardInfo.endDate) : subDays(today, 1);
+        const last14Range = {
+          startDate: subDays(backendEndDateFor14, 13),
+          endDate: backendEndDateFor14,
+          key: 'selection',
+        };
+        setSelectedRange(last14Range);
+        if (setSelectedPeriod) setSelectedPeriod('Last 14 Days');
+        dispatch(setCalendarMode('last14'));
+        await applyDateRange(last14Range, 'last14');
+        break;
       case 'custom':
         handleActive('custom');
-        // Keep current range for custom selection - user will select dates and click Apply
+        setSplitLayout(true);
+        setCustomPanelOpen(true);
         break;
       default:
         break;
@@ -276,9 +380,6 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
 
     const formattedStartDate = formatDateForURL(startDate);
     const formattedEndDate = formatDateForURL(endDate);
-
-    console.log('startDate', formattedStartDate);
-    console.log('endDate', formattedEndDate);
     
     try {
       // Add periodType as query parameter - properly encode dates
@@ -293,14 +394,12 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
       let calendarMode = 'custom'; // default
       if (periodType === 'last7') {
         calendarMode = 'last7';
+      } else if (periodType === 'last14') {
+        calendarMode = 'last14';
       } else if (periodType === 'custom') {
         calendarMode = 'custom';
       }
       
-      console.log('=== applyDateRange: Setting calendar mode ===');
-      console.log('periodType:', periodType);
-      console.log('calendarMode:', calendarMode);
-
       dispatch(UpdateDashboardInfo({
         startDate: formattedStartDate,
         endDate: formattedEndDate,
@@ -315,9 +414,6 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
       
       // PPC metrics are now filtered locally in Dashboard based on ppcDateWiseMetrics
       // No need for separate API call - Dashboard will recalculate when dates change
-      console.log('=== Calendar: Date range updated, Dashboard will filter PPC metrics locally ===');
-      console.log('startDate:', formattedStartDate);
-      console.log('endDate:', formattedEndDate);
 
     } catch (error) {
       console.error('Calendar API Error:', error);
@@ -335,265 +431,306 @@ export default function DateFilter({setOpenCalender, setSelectedPeriod}) {
     }
   };
 
-  const closeCalendar = () => {
-    setOpenCalender(false);
-  };
+  const presets = [
+    { id: 'last30', label: 'Last 30 days', active: thirtyDaysActive },
+    { id: 'last7', label: 'Last 7 days', active: sevenDaysActive },
+    { id: 'last14', label: 'Last 14 days', active: fourteenDaysActive },
+    { id: 'custom', label: 'Custom', active: customActive },
+  ];
 
-  return createPortal(
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.3 }}
-        className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-        style={{ backdropFilter: 'blur(8px)', backgroundColor: 'rgba(0, 0, 0, 0.4)' }}
-        onClick={closeCalendar}
-      >
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9, y: 20 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.9, y: 20 }}
-          transition={{ duration: 0.4, type: "spring", stiffness: 300, damping: 30 }}
-          className="bg-[#161b22] rounded-2xl shadow-2xl border border-[#30363d] max-w-5xl w-full max-h-[90vh] overflow-hidden"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Header */}
-          <div className="bg-blue-600 p-6 text-white relative overflow-hidden">
-            <div className="relative z-10 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Calendar className="w-5 h-5 text-white" />
-                <div>
-                  <h2 className="text-2xl font-bold text-white">Select Date Range</h2>
-                  <p className="text-blue-200 text-sm">Choose your preferred time period for data analysis</p>
-                </div>
-              </div>
-              <button
-                onClick={closeCalendar}
-                className="w-10 h-10 bg-white/20 hover:bg-white/30 rounded-xl flex items-center justify-center transition-all duration-200 backdrop-blur-sm"
+  /** Apply in the same row as month/year dropdowns + arrows (navigatorRenderer API) */
+  const customNavigatorRenderer = useCallback(
+    (focusedDate, changeShownDate, calProps) => {
+      const {
+        showMonthArrow,
+        minDate: navMinDate,
+        maxDate: navMaxDate,
+        showMonthAndYearPickers,
+        ariaLabels = {},
+        months: monthsProp = 1,
+        calendarFocus = 'forwards',
+        direction = 'vertical',
+        monthDisplayFormat = 'MMM yyyy',
+        locale: navLocale,
+      } = calProps;
+      const monthsShown = Math.max(1, monthsProp);
+      const isDualHeader =
+        monthsShown >= 2 && direction === 'horizontal';
+      const dateFmtOpts = { locale: navLocale };
+
+      const upperYearLimit = (navMaxDate || addYears(new Date(), 20)).getFullYear();
+      const lowerYearLimit = (navMinDate || addYears(new Date(), -100)).getFullYear();
+      const monthNames = [...Array(12).keys()].map((i) => calProps.locale.localize.month(i));
+
+      const applyPickerChange = (columnIndex, monthDate, mode, value) => {
+        const v = Number(value);
+        const updated =
+          mode === 'month'
+            ? startOfMonth(setMonth(monthDate, v))
+            : startOfMonth(setYear(monthDate, v));
+        if (isDualHeader && columnIndex === 1) {
+          changeShownDate(subMonths(updated, 1), 'set');
+        } else {
+          changeShownDate(updated, 'set');
+        }
+      };
+
+      const renderMonthYearSelects = (columnIndex) => {
+        const monthDate = isDualHeader
+          ? visibleMonthAtIndex(focusedDate, columnIndex, monthsShown, calendarFocus)
+          : focusedDate;
+        const monthAria =
+          columnIndex === 0
+            ? ariaLabels.monthPicker
+            : ariaLabels.monthPickerSecond || 'Second visible month';
+        const yearAria =
+          columnIndex === 0
+            ? ariaLabels.yearPicker
+            : ariaLabels.yearPickerSecond || 'Second visible month year';
+
+        return (
+          <span
+            key={columnIndex}
+            className="rdrMonthAndYearPickers ga-cal__monthNavPickers"
+          >
+            <span className="rdrMonthPicker">
+              <select
+                value={monthDate.getMonth()}
+                onChange={(e) => applyPickerChange(columnIndex, monthDate, 'month', e.target.value)}
+                aria-label={monthAria}
               >
-                <X className="w-5 h-5 text-white" />
-              </button>
+                {monthNames.map((monthName, i) => (
+                  <option key={i} value={i}>
+                    {monthName}
+                  </option>
+                ))}
+              </select>
+            </span>
+            <span className="rdrMonthAndYearDivider ga-cal__monthNavDivider" aria-hidden />
+            <span className="rdrYearPicker">
+              <select
+                value={monthDate.getFullYear()}
+                onChange={(e) => applyPickerChange(columnIndex, monthDate, 'year', e.target.value)}
+                aria-label={yearAria}
+              >
+                {new Array(upperYearLimit - lowerYearLimit + 1)
+                  .fill(upperYearLimit)
+                  .map((val, i) => {
+                    const year = val - i;
+                    return (
+                      <option key={year} value={year}>
+                        {year}
+                      </option>
+                    );
+                  })}
+              </select>
+            </span>
+          </span>
+        );
+      };
+
+      const renderTextMonthLabels = () => {
+        if (isDualHeader) {
+          const m0 = visibleMonthAtIndex(focusedDate, 0, monthsShown, calendarFocus);
+          const m1 = visibleMonthAtIndex(focusedDate, 1, monthsShown, calendarFocus);
+          return (
+            <span className="rdrMonthAndYearPickers ga-cal__monthNavPickers ga-cal__monthNavPickers--labels">
+              <span className="ga-cal__monthNavLabel">{format(m0, monthDisplayFormat, dateFmtOpts)}</span>
+              <span className="ga-cal__monthNavBetweenPickers" aria-hidden />
+              <span className="ga-cal__monthNavLabel">{format(m1, monthDisplayFormat, dateFmtOpts)}</span>
+            </span>
+          );
+        }
+        return (
+          <span className="rdrMonthAndYearPickers ga-cal__monthNavPickers ga-cal__monthNavPickers--labels">
+            <span className="ga-cal__monthNavLabel">
+              {monthNames[focusedDate.getMonth()]} {focusedDate.getFullYear()}
+            </span>
+          </span>
+        );
+      };
+
+      return (
+        <div
+          onMouseUp={(e) => e.stopPropagation()}
+          className="rdrMonthAndYearWrapper ga-cal__monthNavRow"
+        >
+          <div className="ga-cal__monthNavLeft">
+            <div
+              className={`ga-cal__monthNavCluster${isDualHeader ? ' ga-cal__monthNavCluster--dual' : ''}`}
+              role="group"
+              aria-label={isDualHeader ? 'Visible calendar months' : 'Calendar month and year'}
+            >
+              {showMonthArrow ? (
+                <button
+                  type="button"
+                  className="rdrNextPrevButton rdrPprevButton ga-cal__monthNavArrow"
+                  onClick={() => changeShownDate(-1, 'monthOffset')}
+                  aria-label={ariaLabels.prevButton}
+                >
+                  <i />
+                </button>
+              ) : null}
+              {showMonthAndYearPickers ? (
+                isDualHeader ? (
+                  <>
+                    {renderMonthYearSelects(0)}
+                    <span className="ga-cal__monthNavBetweenPickers" aria-hidden />
+                    {renderMonthYearSelects(1)}
+                  </>
+                ) : (
+                  renderMonthYearSelects(0)
+                )
+              ) : (
+                renderTextMonthLabels()
+              )}
+              {showMonthArrow ? (
+                <button
+                  type="button"
+                  className="rdrNextPrevButton rdrNextButton ga-cal__monthNavArrow"
+                  onClick={() => changeShownDate(+1, 'monthOffset')}
+                  aria-label={ariaLabels.nextButton}
+                >
+                  <i />
+                </button>
+              ) : null}
             </div>
           </div>
-
-          {/* Main Content */}
-          <div className="flex h-[600px]">
-            {/* Left Panel - Options */}
-            <div className="w-80 bg-[#1a1a1a] p-6 border-r border-[#30363d]">
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 mb-6">
-                  <Clock className="w-5 h-5 text-gray-400" />
-                  <h3 className="text-lg font-semibold text-gray-100">Time Periods</h3>
-                </div>
-
-                {/* Last 30 Days Option */}
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => handlePreset('last30')}
-                  disabled={Loader}
-                  className={`w-full p-4 rounded-xl transition-all duration-300 text-left relative overflow-hidden ${
-                    thirtyDaysActive
-                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
-                      : 'bg-[#21262d] hover:bg-[#1c2128] text-gray-300 border border-[#30363d] hover:border-blue-500/40 hover:shadow-md'
-                  } ${Loader ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  <div className="relative z-10">
-                    {Loader && thirtyDaysActive ? (
-                      <div className="flex items-center justify-center">
-                        <PulseLoader color="#ffffff" size={6} />
-                      </div>
-                    ) : (
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <div className={`w-2 h-2 rounded-full ${thirtyDaysActive ? 'bg-white' : 'bg-blue-400'}`}></div>
-                          <div className="font-semibold">Last 30 Days</div>
-                        </div>
-                        <div className={`text-sm ${thirtyDaysActive ? 'text-blue-200' : 'text-gray-400'}`}>
-                          {thirtyDaysActive ? 'Currently active period' : 'Most recent 30 days of data'}
-                        </div>
-                        {thirtyDaysActive && (
-                          <div className="flex items-center gap-1 mt-2">
-                            <Sparkles className="w-3 h-3 text-yellow-400" />
-                            <span className="text-xs text-yellow-300">Recommended</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </motion.button>
-
-                {/* Last 7 Days Option */}
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => handlePreset('last7')}
-                  disabled={Loader}
-                  className={`w-full p-4 rounded-xl transition-all duration-300 text-left relative overflow-hidden ${
-                    sevenDaysActive
-                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
-                      : 'bg-[#21262d] hover:bg-[#1c2128] text-gray-300 border border-[#30363d] hover:border-blue-500/40 hover:shadow-md'
-                  } ${Loader ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  <div className="relative z-10">
-                    {Loader && sevenDaysActive ? (
-                      <div className="flex items-center justify-center">
-                        <PulseLoader color="#ffffff" size={6} />
-                      </div>
-                    ) : (
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <div className={`w-2 h-2 rounded-full ${sevenDaysActive ? 'bg-white' : 'bg-blue-400'}`}></div>
-                          <div className="font-semibold">Last 7 Days</div>
-                        </div>
-                        <div className={`text-sm ${sevenDaysActive ? 'text-blue-200' : 'text-gray-400'}`}>
-                          {sevenDaysActive ? 'Currently active period' : 'Most recent 7 days of data'}
-                        </div>
-                        {sevenDaysActive && (
-                          <div className="flex items-center gap-1 mt-2">
-                            <Sparkles className="w-3 h-3 text-yellow-400" />
-                            <span className="text-xs text-yellow-300">Quick view</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </motion.button>
-
-                {/* Custom Range Option */}
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => handlePreset('custom')}
-                  disabled={Loader}
-                  className={`w-full p-4 rounded-xl transition-all duration-300 text-left relative overflow-hidden ${
-                    customActive
-                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
-                      : 'bg-[#21262d] hover:bg-[#1c2128] text-gray-300 border border-[#30363d] hover:border-blue-500/40 hover:shadow-md'
-                  } ${Loader ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  <div className="relative z-10">
-                    <div className="flex items-center gap-2 mb-1">
-                      <div className={`w-2 h-2 rounded-full ${customActive ? 'bg-white' : 'bg-blue-400'}`}></div>
-                      <div className="font-semibold">Custom Range</div>
-                    </div>
-                    <div className={`text-sm ${customActive ? 'text-blue-200' : 'text-gray-400'}`}>
-                      {customActive ? 'Select your specific date range' : 'Choose any date range you need'}
-                    </div>
-                    {customActive && (
-                      <div className="flex items-center gap-1 mt-2">
-                        <Calendar className="w-3 h-3 text-blue-300" />
-                        <span className="text-xs text-blue-200">Active selection</span>
-                      </div>
-                    )}
-                  </div>
-                </motion.button>
-
-                {/* Account Info */}
-                {createdAccountDate && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.2 }}
-                    className="mt-8 p-4 bg-[#21262d] rounded-xl border border-[#30363d] shadow-sm"
-                  >
-                    <h4 className="font-medium text-gray-100 mb-2 text-sm">Account Information</h4>
-                    <div className="space-y-1 text-xs text-gray-400">
-                      <div>Created: {new Date(createdAccountDate.createdAt).toLocaleDateString('en-US', { 
-                        month: 'long', 
-                        day: 'numeric', 
-                        year: 'numeric' 
-                      })}</div>
-                      <div>Data from: {minimumDate.toLocaleDateString('en-US', { 
-                        month: 'long', 
-                        day: 'numeric', 
-                        year: 'numeric' 
-                      })}</div>
-                    </div>
-                  </motion.div>
-                )}
-              </div>
-            </div>
-
-            {/* Right Panel - Calendar */}
-            <div className="flex-1 p-6 flex flex-col bg-[#161b22]">
-              <div className="text-center mb-4">
-                <h3 className="text-lg font-semibold text-gray-100 mb-1">
-                  {customActive ? 'Select Your Date Range' : 'Current Date Range'}
-                </h3>
-                <p className="text-sm text-gray-400">
-                  {customActive 
-                    ? 'Click and drag to select your preferred date range' 
-                    : 'Showing the last 30 days of data'
-                  }
-                </p>
-              </div>
-
-              {/* Calendar Container */}
-              <div className="flex-1 flex items-center justify-center">
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 0.1, duration: 0.3 }}
-                  className={`calendar-container ${!customActive ? 'opacity-60 pointer-events-none' : ''}`}
-                  style={{
-                    transform: 'scale(1.1)',
-                    filter: customActive ? 'none' : 'grayscale(50%)'
-                  }}
-                >
-                  <DateRange
-                    ranges={[selectedRange]}
-                    onChange={handleRangeChange}
-                    moveRangeOnFirstSelection={false}
-                    editableDateInputs={customActive}
-                    rangeColors={customActive ? ['#2563eb'] : ['#6B7280']}
-                    color={customActive ? '#2563eb' : '#6B7280'}
-                    months={2}
-                    direction="horizontal"
-                    minDate={minimumDate}
-                    maxDate={new Date()}
-                    showDateDisplay={false}
-                    className="modern-calendar"
-                  />
-                </motion.div>
-              </div>
-
-              {/* Apply Button - Only show when custom is active */}
-              <AnimatePresence>
-                {customActive && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 20 }}
-                    transition={{ duration: 0.3 }}
-                    className="flex justify-center mt-6"
-                  >
-                    <button
-                      onClick={submitdateRange}
-                      disabled={Loader}
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-xl font-semibold shadow-lg shadow-blue-500/25 hover:shadow-xl hover:shadow-blue-500/30 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105"
-                    >
-                      {Loader ? (
-                        <div className="flex items-center gap-2">
-                          <PulseLoader color="#ffffff" size={4} />
-                          <span>Applying Range...</span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <Calendar className="w-4 h-4" />
-                          <span>Apply Custom Range</span>
-                        </div>
-                      )}
-                    </button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+          <div className="ga-cal__monthNavRight">
+            <button
+              type="button"
+              onClick={submitdateRange}
+              className="ga-cal__btn ga-cal__btn--primary ga-cal__btn--navApply"
+              disabled={Loader}
+            >
+              {Loader ? (
+                <span className="ga-cal__btnLoading">
+                  <PulseLoader color="#ffffff" size={4} />
+                  <span>Applying…</span>
+                </span>
+              ) : (
+                'Apply'
+              )}
+            </button>
           </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>,
-    document.body
+        </div>
+      );
+    },
+    [Loader, submitdateRange]
   );
+
+  const fixedPortalStyle = anchorRef
+    ? (portalPosition ?? readPortalStyle(anchorRef))
+    : undefined;
+
+  const dropdown = (
+    <motion.div
+      data-ga-cal-dropdown="true"
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.15, ease: 'easeOut' }}
+      className={`ga-cal-dropdown${anchorRef ? ' ga-cal-dropdown--portal' : ''}`}
+      style={fixedPortalStyle}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <motion.div
+        layout
+        layoutDependency={customPanelOpen}
+        role="listbox"
+        aria-label="Date range"
+        className={`ga-cal-popover ${splitLayout ? 'ga-cal-popover--split' : ''}`}
+        transition={{ layout: gaCalLayoutSpring }}
+        style={{ borderRadius: 8 }}
+      >
+        <div className="ga-cal-menu">
+          {presets.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              role="option"
+              aria-selected={p.active}
+              onClick={() => handlePreset(p.id)}
+              disabled={Loader}
+              className={`ga-cal-menuItem ${p.active ? 'is-active' : ''}`}
+            >
+              <span className="ga-cal-menuItemLabel">{p.label}</span>
+              <span className="ga-cal-menuItemAffix">
+                {p.active ? (
+                  <Check className="w-4 h-4" aria-hidden />
+                ) : p.id === 'custom' && !customPanelOpen && !splitLayout ? (
+                  <ChevronRight className="w-4 h-4 opacity-50" aria-hidden />
+                ) : null}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        <AnimatePresence
+          onExitComplete={() => {
+            if (!customPanelOpen) setSplitLayout(false);
+          }}
+        >
+          {customPanelOpen && (
+            <motion.div
+              key="ga-cal-custom-pane"
+              className="ga-cal-customPane"
+              initial={{ opacity: 0, x: 16 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 12 }}
+              transition={{
+                opacity: { duration: 0.2, ease: [0.22, 1, 0.36, 1] },
+                x: { ...gaCalLayoutSpring },
+              }}
+              style={{ transformOrigin: 'left center' }}
+            >
+              <div className="ga-cal__rangePills ga-cal__rangePills--compact">
+                <div className="ga-cal__pill is-active">
+                  <div className="ga-cal__pillLabel">From</div>
+                  <div className="ga-cal__pillValue">{formatPillDate(selectedRange?.startDate)}</div>
+                </div>
+                <div className="ga-cal__pill is-active">
+                  <div className="ga-cal__pillLabel">To</div>
+                  <div className="ga-cal__pillValue">{formatPillDate(selectedRange?.endDate)}</div>
+                </div>
+              </div>
+
+              <div className="calendar-container ga-cal__calendar ga-cal__calendar--embedded">
+                <DateRange
+                  ranges={[selectedRange]}
+                  onChange={handleRangeChange}
+                  moveRangeOnFirstSelection={false}
+                  editableDateInputs
+                  rangeColors={['#3b82f6']}
+                  color="#3b82f6"
+                  months={2}
+                  direction="horizontal"
+                  minDate={minimumDate}
+                  maxDate={new Date()}
+                  showDateDisplay={false}
+                  className="modern-calendar"
+                  navigatorRenderer={customNavigatorRenderer}
+                />
+              </div>
+
+              <div className="ga-cal__footer ga-cal__footer--custom ga-cal__footer--backOnly">
+                <button
+                  type="button"
+                  onClick={() => setCustomPanelOpen(false)}
+                  className="ga-cal__btn ga-cal__btn--ghost"
+                  disabled={Loader}
+                >
+                  Back
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
+    </motion.div>
+  );
+
+  if (anchorRef) {
+    return createPortal(dropdown, document.body);
+  }
+  return dropdown;
 }

@@ -22,6 +22,7 @@ const { getProductWiseSponsoredAdsData } = require('../amazon-ads/ProductWiseSpo
 const { GetListingItemIssuesForInactive } = require('../Sp_API/GetListingItemsIssues.js');
 const limit = require('promise-limit')(3); // Limit to 3 concurrent promises
 const DataFetchTrackingService = require('../system/DataFetchTrackingService.js');
+const { runFbaInventorySyncForMarketplace } = require('../Sp_API/FbaInventoryStorageService.js');
 
 class ScheduledIntegration {
     /**
@@ -187,6 +188,14 @@ class ScheduledIntegration {
                 AccessToken, marketplaceIds, userId, Country, Region, Base_URI,
                 RefreshToken, AdsRefreshToken, loggingHelper
             );
+
+            await runFbaInventorySyncForMarketplace({
+                userId,
+                country: Country,
+                region: Region,
+                accessToken: AccessToken,
+                loggingHelper,
+            });
 
             // Extract product data (active products)
             const productData = this.extractProductData(merchantListingsData, Country, Region);
@@ -921,7 +930,7 @@ class ScheduledIntegration {
         const secondBatchPromises = [];
         const secondBatchServiceNames = [];
 
-        // Third batch: Shipment Data, Brand Data, Ad Groups Data, MCP Economics, MCP BuyBox
+        // Third batch: Shipment, Brand, Ad Groups, MCP SalesOnly, BuyBox, Expense Report, ASIN-wise sales
         logger.info("Third Batch Starts");
         const thirdBatchPromises = [];
         const thirdBatchServiceNames = [];
@@ -956,8 +965,8 @@ class ScheduledIntegration {
                  'calculateDisposedInventoryReimbursement'].includes(functionKey)) {
                 return 2;
             }
-            // Batch 3: Shipment Data, Brand Data, Ad Groups Data, MCP Economics, MCP BuyBox
-            if (['shipment', 'brandData', 'adGroupsData', 'mcpEconomicsData', 'mcpBuyBoxData'].includes(functionKey)) {
+            // Batch 3: Shipment Data, Brand Data, Ad Groups Data, MCP SalesOnly, MCP BuyBox, Expense Report
+            if (['shipment', 'brandData', 'adGroupsData', 'mcpEconomicsData', 'mcpBuyBoxData', 'expenseReport', 'asinWiseSales'].includes(functionKey)) {
                 return 3;
             }
             // Batch 4: Negative Keywords, Search Keywords, Keyword Recommendations
@@ -1128,11 +1137,11 @@ class ScheduledIntegration {
                         return { success: false, error: error.message || 'Negative Keywords fetch failed', data: null };
                     });
                 } else if (functionKey === 'mcpEconomicsData') {
-                    // MCP Economics returns { success, data, error } structure
-                    logger.info('Starting MCP Economics fetch', { userId, region: Region, country: Country, hasRefreshToken: !!RefreshToken });
+                    // Sales-only MCP returns { success, data, error } structure
+                    logger.info('Starting MCP SalesOnly fetch', { userId, region: Region, country: Country, hasRefreshToken: !!RefreshToken });
                     promise = serviceFunction(userId, RefreshToken, Region, Country)
                         .then(result => {
-                            logger.info('MCP Economics raw result', { 
+                            logger.info('MCP SalesOnly raw result', { 
                                 userId, 
                                 region: Region, 
                                 country: Country,
@@ -1143,25 +1152,25 @@ class ScheduledIntegration {
                             });
                             // Convert to standard format - KEEP the success wrapper for batch handler
                             if (result && result.success) {
-                                logger.info('MCP Economics succeeded', { userId, region: Region, country: Country });
+                                logger.info('MCP SalesOnly succeeded', { userId, region: Region, country: Country });
                                 // Return the full success wrapper, not just the data
                                 return { success: true, data: result.data, error: null };
                             } else {
                                 // Don't throw - return error object instead to be handled by Promise.allSettled
-                                const errorMsg = result?.error || 'MCP Economics fetch failed';
-                                logger.warn('MCP Economics returned failure', { error: errorMsg, userId, region: Region, country: Country });
+                                const errorMsg = result?.error || 'MCP SalesOnly fetch failed';
+                                logger.warn('MCP SalesOnly returned failure', { error: errorMsg, userId, region: Region, country: Country });
                                 return { success: false, error: errorMsg, data: null };
                             }
                         })
                         .catch(error => {
-                            logger.error('Error in MCP Economics promise chain', { 
+                            logger.error('Error in MCP SalesOnly promise chain', { 
                                 error: error.message, 
                                 stack: error.stack,
                                 userId, 
                                 region: Region, 
                                 country: Country 
                             });
-                            return { success: false, error: error.message || 'MCP Economics fetch failed', data: null };
+                            return { success: false, error: error.message || 'MCP SalesOnly fetch failed', data: null };
                         });
                 } else if (functionKey === 'ppcMetricsAggregated') {
                     // PPC Metrics Aggregated - special handling with different parameters
@@ -1212,6 +1221,60 @@ class ScheduledIntegration {
                                 country: Country 
                             });
                             return { success: false, error: error.message || 'MCP BuyBox fetch failed', data: null };
+                        });
+                } else if (functionKey === 'expenseReport') {
+                    // Expense Report: fetch Finance API data, persist raw rows, recalculate totals
+                    promise = serviceFunction({
+                        userId,
+                        country: Country,
+                        regionModel: Region,
+                        refreshToken: RefreshToken,
+                        accessToken: AccessToken,
+                        clientId: process.env.SPAPI_CLIENT_ID,
+                        clientSecret: process.env.SPAPI_CLIENT_SECRET,
+                    })
+                        .then(result => {
+                            logger.info('Expense Report succeeded', { userId, region: Region, country: Country, hasNewData: result?.hasNewData });
+                            return { success: true, data: result, error: null };
+                        })
+                        .catch(error => {
+                            logger.error('Error in Expense Report promise chain', {
+                                error: error.message,
+                                stack: error.stack,
+                                userId,
+                                region: Region,
+                                country: Country
+                            });
+                            return { success: false, error: error.message || 'Expense Report fetch failed', data: null };
+                        });
+                } else if (functionKey === 'asinWiseSales') {
+                    promise = serviceFunction({
+                        userId,
+                        country: Country,
+                        regionModel: Region,
+                        refreshToken: RefreshToken,
+                        accessToken: AccessToken,
+                        clientId: process.env.SPAPI_CLIENT_ID,
+                        clientSecret: process.env.SPAPI_CLIENT_SECRET,
+                    })
+                        .then(result => {
+                            logger.info('ASIN-wise sales succeeded', {
+                                userId,
+                                region: Region,
+                                country: Country,
+                                totalAsins: result?.data?.totalAsins,
+                            });
+                            return { success: true, data: result, error: null };
+                        })
+                        .catch(error => {
+                            logger.error('Error in ASIN-wise sales promise chain', {
+                                error: error.message,
+                                stack: error.stack,
+                                userId,
+                                region: Region,
+                                country: Country,
+                            });
+                            return { success: false, error: error.message || 'ASIN-wise sales fetch failed', data: null };
                         });
                 } else if (requiresAdsToken) {
                     // Standard Ads function
@@ -2101,6 +2164,15 @@ class ScheduledIntegration {
             }
 
             const merchantListingsData = await this.fetchMerchantListings(AccessToken, marketplaceIds, userId, Country, Region, Base_URI, RefreshToken, AdsRefreshToken, loggingHelper);
+
+            await runFbaInventorySyncForMarketplace({
+                userId,
+                country: Country,
+                region: Region,
+                accessToken: AccessToken,
+                loggingHelper,
+            });
+
             const productData = this.extractProductData(merchantListingsData, Country, Region);
             const inactiveProductData = this.extractInactiveProductData(merchantListingsData, Country, Region);
 

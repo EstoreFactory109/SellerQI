@@ -16,6 +16,7 @@
 
 const logger = require('../../utils/Logger.js');
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
+const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const GetDateWisePPCspendModel = require('../../models/amazon-ads/GetDateWisePPCspendModel.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
@@ -669,8 +670,8 @@ const getProfitabilityMetrics = async (userId, country, region) => {
     // Fetch only what we need for metrics (EconomicsMetrics + PPCMetrics summary)
     // OPTIMIZED: Only select fields needed for metrics calculation
     const [economicsMetricsData, ppcMetricsData] = await Promise.all([
-        EconomicsMetrics.findLatest(userId, region, country)
-            .select('datewiseSales datewiseFeesAndRefunds datewiseAmazonFees totalSales grossProfit fbaFees storageFees refunds dateRange')
+        SalesOnlyMetrics.findLatest(userId, region, country)
+            .select('datewiseSales totalSales dateRange')
             .lean(),
         require('../../models/amazon-ads/PPCMetricsModel.js').findLatestForUser(userId, country, region)
     ]);
@@ -760,11 +761,6 @@ const getProfitabilityMetrics = async (userId, country, region) => {
         logger.info(`[ProfitabilityMetrics] No PPCMetrics data found for user ${userId}, country ${country}, region ${region}`);
     }
 
-    // DISPLAYED Gross Profit = Backend Gross Profit - PPC Spend
-    // This is what the dashboard displays to users as "Gross Profit"
-    // (matches TotalSales.jsx line 198: grossProfitRaw = grossProfitFromBackend - ppcSpent)
-    const grossProfit = backendGrossProfit - totalAdSpend;
-
     const fetchTime = Date.now() - startTime;
     logger.info(`[PERF] ProfitabilityService.getProfitabilityMetrics completed in ${fetchTime}ms`);
 
@@ -773,22 +769,19 @@ const getProfitabilityMetrics = async (userId, country, region) => {
         totalPpcSales,
         totalAdSpend,
         acos: parseFloat(acos.toFixed(2)),
-        amazonFees,
-        grossProfit: parseFloat(grossProfit.toFixed(2)),
-        fbaFees,
-        storageFees,
-        refunds,
-        // Additional data for backward compatibility
-        // NOTE: Gross_Profit here is the BACKEND gross profit (before PPC subtraction)
-        // This matches what Analyse.js returns in accountFinance.Gross_Profit
+        amazonFees: parseFloat(amazonFees.toFixed(2)),
+        grossProfit: parseFloat(backendGrossProfit.toFixed(2)),
+        fbaFees: parseFloat(fbaFees.toFixed(2)),
+        storageFees: parseFloat(storageFees.toFixed(2)),
+        refunds: parseFloat(refunds.toFixed(2)),
         accountFinance: {
             Total_Sales: totalSales,
             Gross_Profit: parseFloat(backendGrossProfit.toFixed(2)),
             ProductAdsPayment: totalAdSpend,
-            FBA_Fees: fbaFees,
-            Storage: storageFees,
-            Amazon_Fees: amazonFees,
-            Refunds: refunds
+            FBA_Fees: parseFloat(fbaFees.toFixed(2)),
+            Storage: parseFloat(storageFees.toFixed(2)),
+            Amazon_Fees: parseFloat(amazonFees.toFixed(2)),
+            Refunds: parseFloat(refunds.toFixed(2))
         },
         dateRange: processedEconomicsMetrics?.dateRange || null,
         Country: country
@@ -808,9 +801,9 @@ const getProfitabilityChart = async (userId, country, region) => {
     const startTime = Date.now();
     logger.info(`[PERF] ProfitabilityService.getProfitabilityChart starting for user ${userId}`);
 
-    // Fetch only EconomicsMetrics for datewise data
+    // Fetch only sales-only metrics for datewise data
     // OPTIMIZED: Only select fields needed for chart
-    const economicsMetricsData = await EconomicsMetrics.findLatest(userId, region, country)
+    const economicsMetricsData = await SalesOnlyMetrics.findLatest(userId, region, country)
         .select('datewiseSales dateRange')
         .lean();
 
@@ -828,7 +821,7 @@ const getProfitabilityChart = async (userId, country, region) => {
                 return {
                     date: item.date,
                     totalSales: parseFloat((item.sales?.amount || 0).toFixed(2)),
-                    grossProfit: parseFloat((item.grossProfit?.amount || 0).toFixed(2))
+                    grossProfit: 0
                 };
             })
             .filter(item => item !== null)
@@ -1078,187 +1071,36 @@ const computeFullProfitabilityTableData = async (userId, country, region) => {
  */
 const getProfitabilityTable = async (userId, country, region, page = 1, limit = 10) => {
     const startTime = Date.now();
-    logger.info(`[PERF] ProfitabilityService.getProfitabilityTable (V2 - True Pagination) starting for user ${userId}, page ${page}, limit ${limit}`);
+    logger.info(`[PERF] ProfitabilityService.getProfitabilityTable (sales-only) starting for user ${userId}, page ${page}, limit ${limit}`);
 
-    // Step 1: Get EconomicsMetrics to check if big account and get metricsId
-    const economicsMetricsData = await EconomicsMetrics.findLatest(userId, region, country)
-        .select('_id isBig totalSales')
+    // Sales-only mode: we do not persist ASIN-wise fee/gross-profit data required for the original table.
+    // Return an empty but well-shaped response so the UI can render a sales-only view without crashing.
+    const salesOnlyMetricsData = await SalesOnlyMetrics.findLatest(userId, region, country)
+        .select('dateRange totalSales')
         .lean();
-    
-    if (!economicsMetricsData) {
-        logger.info(`[PERF] No EconomicsMetrics found for user ${userId}`);
-        return {
-            profitibilityData: [],
-            pagination: { page, limit, totalItems: 0, totalPages: 0, hasMore: false },
-            totalParents: 0,
-            totalChildren: 0,
-            totalProducts: 0,
-            totalProfitabilityErrors: 0,
-            profitabilityErrorDetails: [],
-            Country: country
-        };
-    }
 
-    const metricsId = economicsMetricsData._id;
-    const isBigAccount = economicsMetricsData.isBig === true || 
-        (economicsMetricsData.totalSales?.amount > 5000);
-
-    // Step 2: Get product info (only asin, itemName, sku, status for the lookup)
-    // Note: Can't combine $elemMatch with field projection on nested arrays
-    // So we use $elemMatch to filter by region/country, then get full products array
-    const sellerData = await Seller.findOne(
-        { User: userId },
-        { 
-            'sellerAccount': {
-                $elemMatch: { region, country }
-            }
-        }
-    ).lean();
-
-    const products = sellerData?.sellerAccount?.[0]?.products || [];
-    
-    // Create lightweight product name map
-    const productNameMap = new Map();
-    products.forEach(p => {
-        if (p.asin) {
-            productNameMap.set(p.asin, {
-                itemName: p.itemName,
-                sku: p.sku,
-                status: p.status
-            });
-        }
-    });
-
-    // Step 3: Get aggregated ads spend by ASIN (optimized - uses MongoDB aggregation + Redis cache)
-    // This is much faster than loading all sponsored ads items and aggregating in Node
-    const adsSpendByAsin = await getAdsSpendByAsin(userId, country, region);
-
-    let paginatedData = [];
-    let totalParents = 0;
-    let totalChildren = 0;
-    let totalProfitabilityErrors = 0;
-    let profitabilityErrorDetails = [];
-
-    if (isBigAccount) {
-        // BIG ACCOUNT: Use optimized MongoDB aggregation with true pagination
-        logger.info(`[PERF] Big account detected, using aggregation-based pagination`);
-        
-        // Get paginated parent data + counts in parallel
-        const [paginatedResult, errorsResult] = await Promise.all([
-            AsinWiseSalesForBigAccounts.getPaginatedParentProfitability(metricsId, page, limit),
-            AsinWiseSalesForBigAccounts.getProfitabilityErrors(metricsId, 10)
-        ]);
-
-        totalParents = paginatedResult.totalParents;
-        totalChildren = paginatedResult.totalChildren;
-        totalProfitabilityErrors = errorsResult.totalErrors;
-        profitabilityErrorDetails = errorsResult.errorDetails;
-
-        // Transform aggregation result to match expected format
-        paginatedData = paginatedResult.parents.map(parent => {
-            const productInfo = productNameMap.get(parent.parentAsin) || {};
-            const adsSpend = adsSpendByAsin.get(parent.parentAsin) || 0;
-            
-            // Recalculate gross profit with ads spend from Amazon Ads API
-            const salesMinusFees = parent.totalSales - parent.totalFees;
-            const grossProfit = salesMinusFees - adsSpend;
-            const profitMargin = parent.totalSales > 0 ? (grossProfit / parent.totalSales) * 100 : 0;
-            
-            // Transform children
-            const childrenForDisplay = parent.children.map(child => {
-                const childProductInfo = productNameMap.get(child.asin) || {};
-                const childAdsSpend = adsSpendByAsin.get(child.asin) || 0;
-                const childGrossProfit = child.sales - child.totalFees - childAdsSpend;
-                const childProfitMargin = child.sales > 0 ? (childGrossProfit / child.sales) * 100 : 0;
-                
-                return {
-                    asin: child.asin,
-                    itemName: childProductInfo.itemName || null,
-                    sku: childProductInfo.sku || null,
-                    quantity: child.quantity,
-                    sales: parseFloat(child.sales.toFixed(2)),
-                    ads: parseFloat(childAdsSpend.toFixed(2)),
-                    amzFee: parseFloat(child.totalFees.toFixed(2)),
-                    totalFees: parseFloat(child.totalFees.toFixed(2)),
-                    amazonFees: parseFloat(child.amazonFees.toFixed(2)),
-                    fbaFees: parseFloat(child.fbaFees.toFixed(2)),
-                    storageFees: parseFloat(child.storageFees.toFixed(2)),
-                    grossProfit: parseFloat(childGrossProfit.toFixed(2)),
-                    profitMargin: parseFloat(childProfitMargin.toFixed(2)),
-                    source: 'economicsMetrics',
-                    adsSource: 'amazonAdsAPI'
-                };
-            });
-
-            return {
-                asin: parent.parentAsin,
-                parentAsin: null,
-                itemName: productInfo.itemName || null,
-                sku: productInfo.sku || null,
-                quantity: parent.totalQuantity,
-                sales: parseFloat(parent.totalSales.toFixed(2)),
-                ads: parseFloat(adsSpend.toFixed(2)),
-                amzFee: parseFloat(parent.totalFees.toFixed(2)),
-                totalFees: parseFloat(parent.totalFees.toFixed(2)),
-                amazonFees: parseFloat(parent.totalAmazonFees.toFixed(2)),
-                fbaFees: parseFloat(parent.totalFbaFees.toFixed(2)),
-                storageFees: parseFloat(parent.totalStorageFees.toFixed(2)),
-                grossProfit: parseFloat(grossProfit.toFixed(2)),
-                profitMargin: parseFloat(profitMargin.toFixed(2)),
-                source: 'economicsMetrics',
-                adsSource: 'amazonAdsAPI',
-                isParent: true,
-                isExpandable: childrenForDisplay.length > 0,
-                children: childrenForDisplay,
-                childrenCount: childrenForDisplay.length
-            };
-        });
-
-        // Add product names to error details
-        profitabilityErrorDetails = profitabilityErrorDetails.map(err => ({
-            ...err,
-            productName: productNameMap.get(err.asin)?.itemName || null
-        }));
-
-    } else {
-        // SMALL ACCOUNT: Use in-memory processing (data fits in memory)
-        // Fall back to original logic for small accounts
-        logger.info(`[PERF] Small account, using in-memory pagination`);
-        
-        const fullData = await computeFullProfitabilityTableData(userId, country, region);
-        
-        totalParents = fullData.totalParents;
-        totalChildren = fullData.totalChildCount;
-        totalProfitabilityErrors = fullData.totalProfitabilityErrors;
-        profitabilityErrorDetails = fullData.profitabilityErrorDetails;
-        
-        // Apply pagination
-        const startIndex = (page - 1) * limit;
-        const endIndex = startIndex + limit;
-        paginatedData = fullData.allProfitabilityData.slice(startIndex, endIndex);
-    }
-
-    const totalProducts = totalParents + totalChildren;
-    const totalPages = Math.ceil(totalParents / limit);
+    const hasData = !!salesOnlyMetricsData;
+    const totalItems = hasData ? 0 : 0;
+    const totalPages = 0;
 
     const fetchTime = Date.now() - startTime;
-    logger.info(`[PERF] ProfitabilityService.getProfitabilityTable completed in ${fetchTime}ms, page ${page}/${totalPages}, ${paginatedData.length} items`);
+    logger.info(`[PERF] ProfitabilityService.getProfitabilityTable (sales-only) completed in ${fetchTime}ms`);
 
     return {
-        profitibilityData: paginatedData,
+        profitibilityData: [],
         pagination: {
             page,
             limit,
-            totalItems: totalParents,
+            totalItems,
             totalPages,
-            hasMore: page < totalPages
+            hasMore: false,
         },
-        totalParents,
-        totalChildren,
-        totalProducts,
-        totalProfitabilityErrors,
-        profitabilityErrorDetails,
-        Country: country
+        totalParents: 0,
+        totalChildren: 0,
+        totalProducts: 0,
+        totalProfitabilityErrors: 0,
+        profitabilityErrorDetails: [],
+        Country: country,
     };
 };
 

@@ -8,20 +8,18 @@ import TooltipBox from "../../ToolTipBox/ToolTipBoxBottom";
 import ToolTipBoxLeft from '../../ToolTipBox/ToolTipBoxBottomLeft';
 import { formatCurrencyWithLocale } from '../../../utils/currencyUtils.js';
 import { parseLocalDate } from '../../../utils/dateUtils.js';
+import { buildTotalSalesFilterUrl, shouldUseCalendarDateRange } from '../../../utils/totalSalesFilterUrl.js';
+import { pickSnapshotFeeTotalsForCalendar } from '../../../utils/expenseSnapshotCalendar.js';
 import { fetchLatestPPCMetrics, selectPPCSummary, selectPPCDateWiseMetrics, selectLatestPPCMetricsLoading } from '../../../redux/slices/PPCMetricsSlice.js';
 import { SkeletonChart } from '../../../Components/Skeleton/PageSkeletons.jsx';
 import { SkeletonContent } from '../../../Components/Skeleton/Skeleton.jsx';
 
 const formatDateWithOrdinal = (dateString) => {
   if (!dateString) return 'N/A';
-  
-  // Parse as local date to avoid timezone issues
   const [year, month, day] = dateString.split('-').map(Number);
   const date = new Date(year, month - 1, day);
-  
   const dayNum = date.getDate();
   const monthName = date.toLocaleDateString('en-US', { month: 'long' });
-  
   const getOrdinalSuffix = (d) => {
     if (d > 3 && d < 21) return 'th';
     switch (d % 10) {
@@ -31,8 +29,16 @@ const formatDateWithOrdinal = (dateString) => {
       default: return 'th';
     }
   };
-  
   return `${dayNum}${getOrdinalSuffix(dayNum)} ${monthName}`;
+};
+
+/** Match ProfitibilityDashboard: default → last30 window; period query is 7 | 14 | 30. */
+const getProfitabilityPeriodDays = (calendarMode) => {
+  const periodTypeRaw = calendarMode || 'default';
+  const periodType = periodTypeRaw === 'default' ? 'last30' : periodTypeRaw;
+  if (periodType === 'last7') return 7;
+  if (periodType === 'last14') return 14;
+  return 30;
 };
 
 const TotalSales = () => {
@@ -41,208 +47,249 @@ const TotalSales = () => {
   const calendarMode = useSelector(state => state.Dashboard.DashBoardInfo?.calendarMode);
   const startDate = useSelector(state => state.Dashboard.DashBoardInfo?.startDate);
   const endDate = useSelector(state => state.Dashboard.DashBoardInfo?.endDate);
-  const sponsoredAdsMetrics = useSelector(state => state.Dashboard.DashBoardInfo?.sponsoredAdsMetrics);
-  const dateWiseTotalCosts = useSelector((state) => state.Dashboard.DashBoardInfo?.dateWiseTotalCosts) || [];
   const currency = useSelector(state => state.currency?.currency) || '$';
   const navigate = useNavigate();
-  
-  // PPCMetrics model data (PRIMARY source for PPC spend)
+
   const ppcSummary = useSelector(selectPPCSummary);
   const ppcDateWiseMetrics = useSelector(selectPPCDateWiseMetrics);
   const ppcMetricsLoading = useSelector(selectLatestPPCMetricsLoading);
   const ppcMetricsLastFetched = useSelector(state => state.ppcMetrics?.latestMetrics?.lastFetched);
-  
-  // Fetch PPC metrics on mount (cached for 5 minutes)
+
   useEffect(() => {
     const CACHE_DURATION = 5 * 60 * 1000;
     const now = Date.now();
     const shouldFetch = !ppcMetricsLastFetched || (now - ppcMetricsLastFetched) > CACHE_DURATION;
-    
     if (shouldFetch && !ppcMetricsLoading) {
       dispatch(fetchLatestPPCMetrics());
     }
   }, [dispatch, ppcMetricsLastFetched, ppcMetricsLoading]);
-  
-  const [filteredData, setFilteredData] = useState(null);
+
+  const [salesData, setSalesData] = useState(null);
+  const [profitSummary, setProfitSummary] = useState(null);
+  const [expenseReportSnapshot, setExpenseReportSnapshot] = useState(null);
+  /** Fallback when summary/snapshot unavailable — same /api/expenses/* totals as before */
+  const [expenseFallback, setExpenseFallback] = useState({
+    amazonFees: 0,
+    totalExpenses: 0,
+    refunds: 0,
+  });
   const [loading, setLoading] = useState(false);
   const [openToolTipGrossProfit, setOpenToolTipGrossProfit] = useState(false);
   const [openToolTipTopSales, setOpenToolTipTopSales] = useState(false);
 
   useEffect(() => {
-    const fetchFilteredData = async () => {
-      if (calendarMode === 'default') {
-        setFilteredData(null);
-        return;
-      }
-
+    const fetchData = async () => {
       setLoading(true);
       try {
-        let periodType = calendarMode; // last30, last7, custom
-        let url = `${import.meta.env.VITE_BASE_URI}/api/total-sales/filter?periodType=${periodType}`;
-        
-        // Include startDate and endDate for both 'custom' and 'last7' modes
-        if ((periodType === 'custom' || periodType === 'last7') && startDate && endDate) {
-          url += `&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
+        const periodDays = getProfitabilityPeriodDays(calendarMode);
+        const useRange = shouldUseCalendarDateRange(startDate, endDate);
+        const base = import.meta.env.VITE_BASE_URI;
+        const root = String(base).replace(/\/$/, '');
+
+        // SalesOnlyMetrics: custom + dates when Redux has range; else last30 (same as ProfitibilityDashboard)
+        const salesUrl = buildTotalSalesFilterUrl(base, { startDate, endDate });
+
+        const summaryUrl = useRange
+          ? `${root}/api/profitability/summary/date-range?from=${encodeURIComponent(startDate)}&to=${encodeURIComponent(endDate)}`
+          : `${root}/api/profitability/summary?period=${periodDays}`;
+
+        const snapshotUrl = `${root}/api/expenses/snapshot`;
+
+        const totalExpUrl = useRange
+          ? `${root}/api/expenses/total/date-range?from=${encodeURIComponent(startDate)}&to=${encodeURIComponent(endDate)}`
+          : `${root}/api/expenses/total?period=${periodDays}`;
+
+        const amazonFeesUrl = useRange
+          ? `${root}/api/expenses/amazon-fees/date-range?from=${encodeURIComponent(startDate)}&to=${encodeURIComponent(endDate)}`
+          : `${root}/api/expenses/amazon-fees?period=${periodDays}`;
+
+        const refundsUrl = useRange
+          ? `${root}/api/expenses/refunds/date-range?from=${encodeURIComponent(startDate)}&to=${encodeURIComponent(endDate)}`
+          : `${root}/api/expenses/refunds?period=${periodDays}`;
+
+        const [
+          salesResp,
+          summaryResp,
+          snapshotResp,
+          totalExpResp,
+          amazonFeesResp,
+          refundsResp,
+        ] = await Promise.all([
+          axios.get(salesUrl, { withCredentials: true }).catch(() => null),
+          axios.get(summaryUrl, { withCredentials: true }).catch(() => null),
+          axios.get(snapshotUrl, { withCredentials: true }).catch(() => null),
+          axios.get(totalExpUrl, { withCredentials: true }).catch(() => null),
+          axios.get(amazonFeesUrl, { withCredentials: true }).catch(() => null),
+          axios.get(refundsUrl, { withCredentials: true }).catch(() => null),
+        ]);
+
+        if (salesResp?.status === 200 && salesResp?.data?.data) {
+          setSalesData(salesResp.data.data);
+        } else {
+          setSalesData(null);
         }
 
-        const response = await axios.get(url, { withCredentials: true });
-        
-        if (response.status === 200 && response.data?.data) {
-          setFilteredData(response.data.data);
+        if (summaryResp?.data?.data) {
+          setProfitSummary(summaryResp.data.data);
+        } else {
+          setProfitSummary(null);
         }
+
+        if (snapshotResp?.data?.data) {
+          setExpenseReportSnapshot(snapshotResp.data.data);
+        } else {
+          setExpenseReportSnapshot(null);
+        }
+
+        const totalExp = Math.abs(Number(totalExpResp?.data?.data?.total || 0));
+        const amazonFees = Math.abs(Number(amazonFeesResp?.data?.data?.total || 0));
+        const refunds = Math.abs(Number(refundsResp?.data?.data?.total || 0));
+
+        setExpenseFallback({ totalExpenses: totalExp, amazonFees, refunds });
       } catch (error) {
-        console.error('Error fetching filtered total sales data:', error);
-        setFilteredData(null);
+        console.error('Error fetching chart data:', error);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchFilteredData();
+    fetchData();
   }, [calendarMode, startDate, endDate]);
 
-  // Filter PPCMetrics dateWiseMetrics based on selected date range
   const filteredPPCMetrics = useMemo(() => {
-    const isDateRangeSelected = (calendarMode === 'custom' || calendarMode === 'last7') && startDate && endDate;
-    
-    if (!isDateRangeSelected || !ppcDateWiseMetrics.length) return ppcDateWiseMetrics;
-    
+    if (!shouldUseCalendarDateRange(startDate, endDate) || !ppcDateWiseMetrics.length) return ppcDateWiseMetrics;
     const start = parseLocalDate(startDate);
     const end = parseLocalDate(endDate);
-    
     return ppcDateWiseMetrics.filter(item => {
       const itemDate = new Date(item.date);
       return itemDate >= start && itemDate <= end;
     });
-  }, [ppcDateWiseMetrics, startDate, endDate, calendarMode]);
-
-  const filteredDateWiseTotalCosts = useMemo(() => {
-    if (!dateWiseTotalCosts.length) return [];
-    
-    if (!startDate || !endDate || calendarMode === 'default') {
-      return dateWiseTotalCosts;
-    }
-    
-    const filtered = dateWiseTotalCosts.filter(item => {
-      if (!item.date) return false;
-      
-      const itemDate = new Date(item.date);
-      const start = parseLocalDate(startDate);
-      const end = parseLocalDate(endDate);
-      
-      return itemDate >= start && itemDate <= end;
-    });
-    
-    return filtered;
-  }, [dateWiseTotalCosts, startDate, endDate, calendarMode]);
+  }, [ppcDateWiseMetrics, startDate, endDate]);
 
   const labelData = [
     "Gross Profit",
     "PPC Spent",
-    "FBA Fees",
-    "Other Amazon Fees",
+    "Amazon Fees",
+    "Other Expenses",
     "Refunds",
   ];
 
-  const useFilteredData = filteredData !== null && calendarMode !== 'default';
-  const isDateRangeSelected = (calendarMode === 'custom' || calendarMode === 'last7') && startDate && endDate;
-  
-  // Get gross profit from backend (Sales - Amazon Fees - Refunds)
-  const grossProfitFromBackend = useFilteredData 
-    ? Number(filteredData?.grossProfit?.amount || 0)
-    : Number(info?.accountFinance?.Gross_Profit) || 0;
-  const totalSales = useFilteredData
-    ? Number(filteredData?.totalSales?.amount || 0)
-    : Number(info?.TotalWeeklySale || 0);
+  const hasSalesData = salesData !== null;
 
-  // Calculate PPC Spent - use filtered data from API when available for consistency
-  let ppcSpent = 0;
-  if (useFilteredData && filteredData?.ppcSpent?.amount !== undefined) {
-    // PRIMARY: Use PPC spent from the filtered API response for consistency
-    // This ensures the same value is shown regardless of how the date range was selected
-    ppcSpent = Number(filteredData.ppcSpent.amount || 0);
-  } else if (isDateRangeSelected) {
-    // FALLBACK: Calculate from filtered PPCMetrics data when API data not available
-    if (filteredPPCMetrics.length > 0) {
-      ppcSpent = filteredPPCMetrics.reduce((sum, item) => sum + (item.spend || 0), 0);
-    } else if (filteredDateWiseTotalCosts.length > 0) {
-      // Fallback to legacy filtered data
-      ppcSpent = filteredDateWiseTotalCosts.reduce((sum, item) => sum + (item.totalCost || 0), 0);
+  /** Expense math aligned with ProfitibilityDashboard (snapshot → profit summary → /api/expenses/* fallback). */
+  const pieMetrics = useMemo(() => {
+    const useRange = shouldUseCalendarDateRange(startDate, endDate);
+
+    const snapshotFeeTotals = pickSnapshotFeeTotalsForCalendar(
+      expenseReportSnapshot,
+      calendarMode,
+      startDate,
+      endDate
+    );
+
+    const fbTotal = Math.abs(expenseFallback.totalExpenses);
+    const fbAmazon = Math.abs(expenseFallback.amazonFees);
+    const fbRefunds = Math.abs(expenseFallback.refunds);
+
+    const displayAmazonFees = snapshotFeeTotals
+      ? Math.abs(snapshotFeeTotals.amazonFees)
+      : profitSummary
+        ? Math.abs(profitSummary.amazonFees || 0)
+        : fbAmazon;
+
+    const displayTotalExpenses = snapshotFeeTotals
+      ? Math.abs(snapshotFeeTotals.totalExpenses)
+      : profitSummary
+        ? Math.abs(profitSummary.totalExpenses || 0)
+        : fbTotal;
+
+    const displayRefunds = profitSummary
+      ? Math.abs(profitSummary.refunds || 0)
+      : fbRefunds;
+
+    // Prefer /api/total-sales/filter (sum of datewiseSales in SalesOnlyMetrics) for all calendar modes when loaded
+    const hasSalesOnlyTotal =
+      salesData?.totalSales?.amount !== undefined && salesData?.totalSales?.amount !== null;
+    const totalSalesVal = hasSalesOnlyTotal
+      ? Number(salesData.totalSales.amount)
+      : profitSummary?.totalSales != null
+        ? Number(profitSummary.totalSales)
+        : Number(info?.TotalWeeklySale || 0);
+
+    let ppcSpentVal = 0;
+    if (useRange && filteredPPCMetrics.length > 0) {
+      ppcSpentVal = filteredPPCMetrics.reduce((sum, item) => sum + (item.spend || 0), 0);
+    } else if (ppcSummary?.totalSpend > 0) {
+      ppcSpentVal = ppcSummary.totalSpend;
     }
-  } else {
-    // Use PPCMetrics summary as primary source (no date filtering)
-    if (ppcSummary?.totalSpend > 0) {
-      ppcSpent = ppcSummary.totalSpend;
-    } else {
-      // Fallback to legacy data
-      const adsPPCSpend = Number(sponsoredAdsMetrics?.totalCost || 0);
-      ppcSpent = adsPPCSpend > 0 ? adsPPCSpend : Number(info?.accountFinance?.ProductAdsPayment || 0);
-    }
-  }
 
-  // Calculate FBA Fees
-  const fbaFees = useFilteredData
-    ? Number(filteredData?.fbaFees?.amount || 0)
-    : Number(info?.accountFinance?.FBA_Fees || 0);
+    // Snapshot total expenses include PPC; raw-row summary excludes PPC — subtract ad spend only in that path
+    const grossProfitRawVal = snapshotFeeTotals
+      ? totalSalesVal - displayTotalExpenses
+      : totalSalesVal - displayTotalExpenses - ppcSpentVal;
 
-  // Calculate Other Amazon Fees (Total Amazon Fees - FBA Fees)
-  // For filters: Use otherAmazonFees directly from API (already calculated in backend)
-  // For first load: Use Other_Amazon_Fees from accountFinance (calculated in backend)
-  const otherAmazonFees = useFilteredData
-    ? Number(filteredData?.otherAmazonFees?.amount || 0)
-    : Number(info?.accountFinance?.Other_Amazon_Fees || 0);
+    const otherExpensesVal = Math.max(0, displayTotalExpenses - displayAmazonFees);
 
-  // Calculate displayed gross profit: Backend Gross Profit - PPC Spent
-  // Backend stores: Sales - Amazon Fees - Refunds
-  // Display shows: Sales - Amazon Fees - Refunds - PPC Spent
-  const grossProfitRaw = grossProfitFromBackend - ppcSpent;
-  const grossProfit = Math.abs(grossProfitRaw);
+    const grossProfitVal = Math.abs(grossProfitRawVal);
 
-  const saleValues = [
-    grossProfit,
-    ppcSpent,
-    fbaFees,
-    otherAmazonFees, // Other Amazon Fees (Total Amazon Fees - FBA Fees) - directly from backend
-    useFilteredData
-      ? Number(filteredData?.refunds?.amount || 0)
-      : Number(info?.accountFinance?.Refunds || 0),
-  ];
+    const saleValuesVal = [
+      grossProfitVal,
+      ppcSpentVal,
+      displayAmazonFees,
+      otherExpensesVal,
+      displayRefunds,
+    ];
 
-  const handleNavigateToProfitability = (itemName) => {
+    return {
+      totalSales: totalSalesVal,
+      ppcSpent: ppcSpentVal,
+      grossProfitRaw: grossProfitRawVal,
+      grossProfit: grossProfitVal,
+      saleValues: saleValuesVal,
+    };
+  }, [
+    salesData,
+    profitSummary,
+    expenseReportSnapshot,
+    expenseFallback,
+    calendarMode,
+    startDate,
+    endDate,
+    filteredPPCMetrics,
+    ppcSummary,
+    info?.TotalWeeklySale,
+  ]);
+
+  const { totalSales, grossProfitRaw, grossProfit, saleValues } = pieMetrics;
+
+  const handleNavigateToProfitability = () => {
     navigate('/seller-central-checker/profitibility-dashboard');
   };
 
   const chartData = {
     series: saleValues,
     options: {
-      chart: { 
+      chart: {
         type: "pie",
         fontFamily: "'Inter', sans-serif",
         events: {
-          dataPointSelection: function(event, chartContext, config) {
-            const selectedLabel = labelData[config.dataPointIndex];
-            handleNavigateToProfitability(selectedLabel);
+          dataPointSelection: function() {
+            handleNavigateToProfitability();
           }
         }
       },
       labels: labelData,
       colors: [
-        grossProfitRaw < 0 ? "#64748b" : "#059669", // Gross Profit: emerald-600 (deep vibrant green)
-        "#d97706", // PPC Spent: amber-600 (deep vibrant amber)
-        "#ea580c", // FBA Fees: orange-600 (deep vibrant orange)
-        "#dc2626", // Other Amazon Fees: red-600 (deep vibrant red)
-        "#9333ea", // Refunds: purple-600 (deep vibrant purple)
+        grossProfitRaw < 0 ? "#64748b" : "#059669",
+        "#d97706",
+        "#ea580c",
+        "#dc2626",
+        "#9333ea",
       ],
       legend: { show: false },
-      dataLabels: { 
-        enabled: false
-      },
+      dataLabels: { enabled: false },
       plotOptions: {
-        pie: {
-          donut: {
-            size: '0%'
-          }
-        }
+        pie: { donut: { size: '0%' } }
       },
       stroke: {
         width: 2,
@@ -251,54 +298,28 @@ const TotalSales = () => {
       responsive: [{
         breakpoint: 768,
         options: {
-          chart: {
-            height: 280,
-            width: 280
-          }
+          chart: { height: 280, width: 280 }
         }
       }]
     },
   };
 
-  // Helper function to get actual end date (yesterday due to 24-hour data delay)
-  const getActualEndDate = () => {
+  const getDisplayDates = () => {
+    if (startDate && endDate) return { startDate, endDate };
+    if (hasSalesData && salesData?.dateRange?.startDate && salesData?.dateRange?.endDate) {
+      return { startDate: salesData.dateRange.startDate, endDate: salesData.dateRange.endDate };
+    }
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
-    return yesterday;
-  };
-
-  // Get display dates directly from database/Redux state
-  const getDisplayDates = () => {
-    // Always use the dates from Redux state (database) if available
-    if (startDate && endDate) {
-      return {
-        startDate: startDate,
-        endDate: endDate
-      };
-    }
-    
-    // If using filtered data with explicit date range, use those dates
-    if (useFilteredData && filteredData?.dateRange?.startDate && filteredData?.dateRange?.endDate) {
-      return {
-        startDate: filteredData.dateRange.startDate,
-        endDate: filteredData.dateRange.endDate
-      };
-    }
-    
-    // Fallback: calculate dates (should rarely happen)
-    const actualEndDate = getActualEndDate();
-    const calcStartDate = new Date(actualEndDate);
-    calcStartDate.setDate(actualEndDate.getDate() - 30);
-    
+    const calcStart = new Date(yesterday);
+    calcStart.setDate(yesterday.getDate() - 30);
     return {
-      startDate: calcStartDate.toISOString().split('T')[0],
-      endDate: actualEndDate.toISOString().split('T')[0]
+      startDate: calcStart.toISOString().split('T')[0],
+      endDate: yesterday.toISOString().split('T')[0],
     };
   };
 
   const displayDates = getDisplayDates();
-  const displayStartDate = displayDates.startDate;
-  const displayEndDate = displayDates.endDate;
 
   return (
     <div className="p-1.5 h-full bg-transparent rounded relative flex flex-col">
@@ -307,10 +328,10 @@ const TotalSales = () => {
           <Currency className="w-3 h-3 text-blue-400" />
           <h2 className="text-xs font-semibold text-gray-100">Total Sales</h2>
           <div className="relative">
-            <Info 
-              className="w-3 h-3 text-gray-400 hover:text-gray-300 cursor-pointer transition-colors" 
-              onMouseEnter={() => setOpenToolTipTopSales(true)} 
-              onMouseLeave={() => setOpenToolTipTopSales(false)} 
+            <Info
+              className="w-3 h-3 text-gray-400 hover:text-gray-300 cursor-pointer transition-colors"
+              onMouseEnter={() => setOpenToolTipTopSales(true)}
+              onMouseLeave={() => setOpenToolTipTopSales(false)}
             />
             {openToolTipTopSales && <ToolTipBoxLeft Information="Total revenue generated during the selected date range."/>}
           </div>
@@ -319,10 +340,10 @@ const TotalSales = () => {
           <PieChart className="w-3 h-3 text-blue-400" />
           <h2 className="text-xs font-semibold text-gray-100">Gross Profit</h2>
           <div className="relative">
-            <Info 
-              className="w-3 h-3 text-gray-400 hover:text-gray-300 cursor-pointer transition-colors" 
-              onMouseEnter={() => setOpenToolTipGrossProfit(true)} 
-              onMouseLeave={() => setOpenToolTipGrossProfit(false)} 
+            <Info
+              className="w-3 h-3 text-gray-400 hover:text-gray-300 cursor-pointer transition-colors"
+              onMouseEnter={() => setOpenToolTipGrossProfit(true)}
+              onMouseLeave={() => setOpenToolTipGrossProfit(false)}
             />
             {openToolTipGrossProfit && <TooltipBox Information="Gross profit after deducting ad spend, storage fees, FBA fees, and product return refunds from sales revenue."/>}
           </div>
@@ -339,7 +360,7 @@ const TotalSales = () => {
             </h2>
           )}
           <p className="text-xs text-gray-400">
-            {displayStartDate ? formatDateWithOrdinal(displayStartDate) : 'N/A'} - {displayEndDate ? formatDateWithOrdinal(displayEndDate) : 'N/A'}
+            {displayDates.startDate ? formatDateWithOrdinal(displayDates.startDate) : 'N/A'} - {displayDates.endDate ? formatDateWithOrdinal(displayDates.endDate) : 'N/A'}
           </p>
         </div>
         <div className="flex flex-col items-end">
@@ -382,34 +403,34 @@ const TotalSales = () => {
 
             <div className="lg:col-span-3 flex flex-col justify-between h-full gap-2">
               {labelData.map((label, index) => {
-            const value = saleValues[index];
-            const percentage = totalSales > 0 ? Math.round((value / totalSales) * 100) : 0;
+                const value = saleValues[index];
+                const percentage = totalSales > 0 ? Math.round((value / totalSales) * 100) : 0;
 
-            return (
-              <div
-                key={index}
-                onClick={() => handleNavigateToProfitability(label)}
-                className="flex items-center justify-between p-2.5 bg-[#21262d] rounded hover:bg-blue-500/20 border border-transparent hover:border-blue-500/40 transition-all cursor-pointer group flex-1"
-                title={`Click to view ${label} details in Profitability Dashboard`}
-              >
-                <div className="flex items-center gap-2">
+                return (
                   <div
-                    className="w-3 h-3 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: chartData.options.colors[index] }}
-                  ></div>
-                  <p className="text-sm font-medium text-gray-200 group-hover:text-blue-400 transition-colors">{label}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-semibold text-gray-100">
-                    {formatCurrencyWithLocale((index === 0 ? grossProfitRaw : value), currency)}
-                  </p>
-                  <span className="bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded text-xs font-medium min-w-[2.5rem] text-center">
-                    {percentage}%
-                  </span>
-                </div>
-              </div>
-            );
-          })}
+                    key={index}
+                    onClick={() => handleNavigateToProfitability()}
+                    className="flex items-center justify-between p-2.5 bg-[#21262d] rounded hover:bg-blue-500/20 border border-transparent hover:border-blue-500/40 transition-all cursor-pointer group flex-1"
+                    title={`Click to view ${label} details in Profitability Dashboard`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-3 h-3 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: chartData.options.colors[index] }}
+                      ></div>
+                      <p className="text-sm font-medium text-gray-200 group-hover:text-blue-400 transition-colors">{label}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-gray-100">
+                        {formatCurrencyWithLocale((index === 0 ? grossProfitRaw : value), currency)}
+                      </p>
+                      <span className="bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded text-xs font-medium min-w-[2.5rem] text-center">
+                        {percentage}%
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </>
         )}

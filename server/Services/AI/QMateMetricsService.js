@@ -17,6 +17,7 @@
 
 const logger = require('../../utils/Logger.js');
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
+const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
 const IssueSummary = require('../../models/system/IssueSummaryModel.js');
@@ -1170,6 +1171,129 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
         
         // Determine if we need to apply date filtering
         const shouldFilterByDate = startDate && endDate && calendarMode !== 'default';
+
+        // Sales-only fast path: build a minimal metrics context without relying
+        // on grossProfit/fees/refunds. This keeps QMate functional even when
+        // `EconomicsMetrics` persistence is disabled.
+        const salesOnlyMetrics = await SalesOnlyMetrics.findLatest(userObjectId, region, country)
+            .select('totalSales datewiseSales dateRange')
+            .lean();
+
+        if (salesOnlyMetrics) {
+            const currencyCode = salesOnlyMetrics?.totalSales?.currencyCode || 'USD';
+            const datewiseSalesData = Array.isArray(salesOnlyMetrics?.datewiseSales)
+                ? salesOnlyMetrics.datewiseSales
+                : [];
+
+            const effectiveDateRange = shouldFilterByDate
+                ? { startDate, endDate }
+                : (salesOnlyMetrics?.dateRange || null);
+
+            let filteredSales = datewiseSalesData;
+            if (shouldFilterByDate) {
+                const filterStart = new Date(startDate);
+                filterStart.setHours(0, 0, 0, 0);
+                const filterEnd = new Date(endDate);
+                filterEnd.setHours(23, 59, 59, 999);
+                filteredSales = datewiseSalesData.filter(item => {
+                    const d = new Date(item.date);
+                    return d >= filterStart && d <= filterEnd;
+                });
+            }
+
+            let totalSales = filteredSales.reduce((sum, item) => sum + (item.sales?.amount || 0), 0);
+            totalSales = parseFloat(totalSales.toFixed(2));
+
+            // PPC spend for the same date window (KPI)
+            const ppcMetrics = await PPCMetrics.findLatestForUser(userIdStr, country, region);
+            let ppcSpend = ppcMetrics?.summary?.totalSpend || 0;
+            if (shouldFilterByDate && Array.isArray(ppcMetrics?.dateWiseMetrics)) {
+                const filterStart = new Date(startDate);
+                filterStart.setHours(0, 0, 0, 0);
+                const filterEnd = new Date(endDate);
+                filterEnd.setHours(23, 59, 59, 999);
+                ppcSpend = ppcMetrics.dateWiseMetrics
+                    .filter(item => {
+                        const d = new Date(item.date);
+                        return d >= filterStart && d <= filterEnd;
+                    })
+                    .reduce((sum, item) => sum + (item.spend || 0), 0);
+            }
+            ppcSpend = parseFloat(ppcSpend.toFixed(2));
+
+            // Build chart data with grossProfit forced to 0.
+            const datewiseSalesForCharts = filteredSales
+                .slice(-30)
+                .map(item => ({
+                    date: item.date,
+                    TotalAmount: parseFloat((item.sales?.amount || 0).toFixed(2)),
+                    Profit: 0,
+                }));
+
+            // PPC datewise used by `ppc_datewise` charts in QMateService.
+            const datewisePPCForCharts = Array.isArray(ppcMetrics?.dateWiseMetrics)
+                ? (shouldFilterByDate
+                    ? ppcMetrics.dateWiseMetrics.filter(item => {
+                        const d = new Date(item.date);
+                        const filterStart = new Date(startDate);
+                        filterStart.setHours(0, 0, 0, 0);
+                        const filterEnd = new Date(endDate);
+                        filterEnd.setHours(23, 59, 59, 999);
+                        return d >= filterStart && d <= filterEnd;
+                    })
+                    : ppcMetrics.dateWiseMetrics
+                )
+                    .slice(-30)
+                    .map(item => ({
+                        date: item.date,
+                        totalCost: item.spend || 0,
+                        sales: item.sales || 0,
+                    }))
+                : [];
+
+            const context = {
+                summary: {
+                    brand: null,
+                    country,
+                    dateRange: effectiveDateRange,
+                    totalSales,
+                    grossProfit: 0,
+                    netProfit: 0,
+                    profitMargin: 0,
+                    ppcSpend,
+                    fbaFees: 0,
+                    storageFees: 0,
+                    amazonFees: 0,
+                    totalFees: 0,
+                    refunds: 0,
+                    currency: currencyCode,
+                },
+                ppc: null,
+                profitability: null,
+                buyBox: null,
+                accountHealth: null,
+                orders: null,
+                wastedAds: null,
+                topErrorProducts: null,
+                productCounts: null,
+                datewiseSales: datewiseSalesForCharts,
+                datewisePPC: datewisePPCForCharts,
+            };
+
+            logger.info('[QMateMetricsService] Built sales-only metrics context', {
+                userId: userIdStr,
+                country,
+                region,
+                totalSales,
+                ppcSpend,
+            });
+
+            return {
+                success: true,
+                source: 'sales_only_metrics',
+                data: context,
+            };
+        }
         
         // Fetch all data in parallel for performance
         const [

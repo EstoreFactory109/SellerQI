@@ -38,12 +38,11 @@ async function getReportId(accessToken, profileId, region, tokenRefreshCallback 
                 'Content-Type': 'application/vnd.createasyncreportrequest.v3+json'
             };
 
-            // Calculate dynamic dates
+            // Calculate dynamic dates (UTC-based, matching Expences.js: yesterday − 30 days → yesterday)
             const now = new Date();
-            const endDate = new Date(now.getTime() - (24 * 60 * 60 * 1000)); // 24 hours before now (1 day delay for data accuracy)
-            const startDate = new Date(now.getTime() - (31 * 24 * 60 * 60 * 1000)); // 31 days before now
+            const endDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
+            const startDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1 - 30));
             
-            // Format dates as YYYY-MM-DD strings
             const formatDate = (date) => {
                 return date.toISOString().split('T')[0];
             };

@@ -1,143 +1,654 @@
-/* Custom Calendar Styles - dark theme */
-.calendar-container .rdrCalendarWrapper {
-  border-radius: 16px;
-  border: 1px solid #30363d;
+/* GA-style Calendar Modal (dark, professional, subtle) */
+:root {
+  --ga-cal-bg: #0f141b;
+  --ga-cal-panel: #111827;
+  --ga-cal-surface: #0b1220;
+  --ga-cal-border: rgba(148, 163, 184, 0.18);
+  --ga-cal-border-strong: rgba(148, 163, 184, 0.28);
+  --ga-cal-text: #e5e7eb;
+  --ga-cal-muted: rgba(229, 231, 235, 0.72);
+  --ga-cal-subtle: rgba(229, 231, 235, 0.12);
+  --ga-cal-accent: #3b82f6;
+  --ga-cal-accent-2: rgba(59, 130, 246, 0.18);
+  --ga-cal-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+  --ga-cal-cell: 3rem;
+  --ga-cal-month-pad-x: 1.25rem;
+  --ga-cal-month-pad-y: 0.875rem;
+}
+
+.ga-cal-dropdown {
+  position: relative;
+  z-index: 80;
+  width: max-content;
+}
+
+/* Compact menu-only dropdown; expands horizontally when Custom is chosen */
+.ga-cal-popover {
   background: #161b22;
+  border: 1px solid var(--ga-cal-border);
+  border-radius: 8px;
+  box-shadow: var(--ga-cal-shadow);
+  overflow: visible;
+  /* Always row flex so Framer layout can animate width when the second column mounts */
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+}
+
+/* Hug preset list only — no empty strip on the right when calendar is closed */
+.ga-cal-popover:not(.ga-cal-popover--split) {
+  width: fit-content;
+  max-width: min(100vw - 24px, 360px);
+}
+
+.ga-cal-dropdown--portal {
+  pointer-events: auto;
+}
+
+.ga-cal-popover--split {
+  width: auto;
+  max-width: min(1220px, calc(100vw - 32px));
+  overflow: visible;
+}
+
+.ga-cal-menu {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  flex-shrink: 0;
+}
+
+.ga-cal-popover:not(.ga-cal-popover--split) .ga-cal-menu {
+  min-width: max-content;
+  width: 100%;
+}
+
+.ga-cal-popover--split .ga-cal-menu {
+  border-right: 1px solid var(--ga-cal-border);
+  min-width: 220px;
+}
+
+.ga-cal-menuItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 14px;
+  border: none;
+  background: transparent;
+  color: var(--ga-cal-text);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.ga-cal-menuItem:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.ga-cal-menuItem:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ga-cal-menuItem.is-active {
+  background: var(--ga-cal-accent-2);
+  color: #fff;
+}
+
+.ga-cal-menuItemLabel {
+  flex: 1;
+}
+
+.ga-cal-menuItemAffix {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.ga-cal-customPane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 0 0 auto;
+  max-width: min(1000px, calc(100vw - 252px));
+  /* No max-height / inner scroll — full calendar + Apply stay in one view */
+  overflow: visible;
+  padding: 16px 20px 18px;
+  background: rgba(11, 18, 32, 0.55);
+}
+
+.ga-cal__rangePills {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.ga-cal__pill {
+  flex: 0 0 auto;
+  border-radius: 10px;
+  border: 1px solid var(--ga-cal-border);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 10px 14px;
+  min-width: 0;
+}
+
+.ga-cal__pill.is-active {
+  border-color: rgba(59, 130, 246, 0.45);
+}
+
+.ga-cal__pillLabel {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(229, 231, 235, 0.5);
+  font-weight: 600;
+}
+
+.ga-cal__pillValue {
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ga-cal-text);
+  letter-spacing: 0.01em;
+}
+
+.ga-cal__rangePills--compact {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: stretch;
+  margin-bottom: 14px;
+  gap: 12px;
+  width: 100%;
+}
+
+.ga-cal__rangePills--compact .ga-cal__pill {
+  min-width: 0;
+}
+
+.ga-cal__rangePills--compact .ga-cal__pillValue {
+  white-space: nowrap;
   overflow: hidden;
-  color: #e6edf3;
+  text-overflow: ellipsis;
+}
+
+.ga-cal__calendar--embedded {
+  flex: 0 0 auto;
+  flex-shrink: 0;
+  min-height: min-content;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: visible;
+  width: 100%;
+}
+
+.ga-cal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.ga-cal__footer--custom {
+  flex-shrink: 0;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--ga-cal-border);
+}
+
+.ga-cal__footer--backOnly {
+  justify-content: flex-start;
+}
+
+/* Month/year row: left cluster (arrows + pickers) | right Apply */
+.ga-cal__monthNavRow {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: nowrap;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.ga-cal__monthNavLeft {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.ga-cal__monthNavCluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  padding: 3px 4px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--ga-cal-border);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.ga-cal__monthNavCluster--dual {
+  gap: 6px;
+  padding: 3px 6px;
+}
+
+/* Separator between left month block and right month block (inside arrows) */
+.ga-cal__monthNavBetweenPickers {
+  width: 1px;
+  align-self: stretch;
+  min-height: 26px;
+  margin: 0 2px;
+  background: var(--ga-cal-border-strong);
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+.ga-cal__monthNavPickers--labels {
+  gap: 10px !important;
+  padding: 0 4px;
+}
+
+.ga-cal__monthNavLabel {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ga-cal-text);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.ga-cal__monthNavPickers {
+  flex: 0 1 auto !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  justify-content: center !important;
+  margin: 0 1px;
+  min-width: 0;
+}
+
+.ga-cal__monthNavDivider {
+  width: 1px;
+  height: 18px;
+  margin: 0 1px;
+  background: var(--ga-cal-border-strong);
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+.ga-cal__monthNavArrow {
+  margin: 0 !important;
+  flex-shrink: 0;
+}
+
+.ga-cal__monthNavRight {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.ga-cal__btn--navApply {
+  height: 34px !important;
+  padding: 0 18px !important;
+  border-radius: 9px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.ga-cal__footer--custom .ga-cal__btn {
+  height: 36px;
+  padding: 0 18px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ga-cal__btn {
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 650;
+  border: 1px solid var(--ga-cal-border);
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.ga-cal__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ga-cal__btn--ghost {
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--ga-cal-text);
+}
+
+.ga-cal__btn--ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--ga-cal-border-strong);
+  transform: translateY(-1px);
+}
+
+.ga-cal__btn--primary {
+  background: var(--ga-cal-accent);
+  border-color: rgba(59, 130, 246, 0.8);
+  color: white;
+}
+
+.ga-cal__btn--primary:hover:not(:disabled) {
+  filter: brightness(1.03);
+  transform: translateY(-1px);
+}
+
+.ga-cal__btnLoading {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* react-date-range: cleaner GA-like dark treatment */
+.calendar-container .rdrCalendarWrapper {
+  border-radius: 14px;
+  border: 1px solid var(--ga-cal-border);
+  background: rgba(17, 24, 39, 0.55);
+  overflow: visible;
+  color: var(--ga-cal-text);
 }
 
 .calendar-container .rdrMonth {
-  padding: 1rem;
-  background: #161b22;
+  padding: 0.75rem 0.9rem;
+  background: transparent;
 }
 
 .calendar-container .rdrWeekDays {
-  padding: 0 1rem;
-  color: #8b949e;
+  padding: 0 0.9rem;
+  color: rgba(229, 231, 235, 0.55);
 }
 
 .calendar-container .rdrWeekDay {
-  color: #8b949e !important;
+  color: rgba(229, 231, 235, 0.55) !important;
+  font-weight: 600;
+  font-size: 11px;
 }
 
 .calendar-container .rdrMonthAndYearWrapper {
-  padding: 1rem;
-  background: #21262d;
-  color: #e6edf3;
-  border-bottom: 1px solid #30363d;
+  padding: 0.75rem 0.9rem;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ga-cal-text);
+  border-bottom: 1px solid var(--ga-cal-border);
 }
 
 .calendar-container .rdrMonthAndYearPickers select {
-  background: #161b22;
-  color: #e6edf3;
-  border-radius: 8px;
-  border: 1px solid #30363d;
-  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ga-cal-text);
+  border-radius: 10px;
+  border: 1px solid var(--ga-cal-border);
+  padding: 6px 10px;
+  font-weight: 650;
 }
 
-/* All date numbers - dark mode */
-.calendar-container .rdrDay .rdrDayNumber {
-  color: #e6edf3 !important;
+.calendar-container .rdrNextPrevButton {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  transition: all 0.18s ease;
+  color: var(--ga-cal-text);
 }
 
-.calendar-container .rdrDay .rdrDayNumber span {
-  color: #e6edf3 !important;
+.calendar-container .rdrNextPrevButton:hover {
+  background: rgba(255, 255, 255, 0.08);
+  transform: translateY(-1px);
 }
 
-.calendar-container .rdrDay:not(.rdrDayPassive) .rdrDayNumber span {
-  color: #e6edf3 !important;
+/* Day numbers — selectable days in current month */
+.calendar-container .rdrDay:not(.rdrDayPassive):not(.rdrDayDisabled) .rdrDayNumber span {
+  color: var(--ga-cal-text) !important;
+  font-weight: 600;
 }
 
+/* Other-month days: still show the number, not clickable */
 .calendar-container .rdrDayPassive .rdrDayNumber span {
-  color: #6e7681 !important;
+  color: #94a3b8 !important;
+  opacity: 1 !important;
+  font-weight: 500 !important;
 }
 
-.calendar-container .rdrDay:hover .rdrDayNumber span {
-  color: #ffffff !important;
+/* Out-of-range (before min / after max): visible, not selectable */
+.calendar-container .rdrDayDisabled {
+  background-color: rgba(30, 41, 59, 0.35) !important;
+  cursor: not-allowed !important;
 }
 
-.calendar-container .rdrDay.rdrDayHovered .rdrDayNumber span {
-  color: #ffffff !important;
+.calendar-container .rdrDayDisabled .rdrDayNumber span {
+  color: #64748b !important;
+  opacity: 1 !important;
+  font-weight: 500 !important;
 }
 
-.calendar-container .rdrDayToday .rdrDayNumber span {
-  color: #e6edf3 !important;
+.calendar-container .rdrDayPassive.rdrDayDisabled .rdrDayNumber span {
+  color: #64748b !important;
+}
+
+/* Keep date text above range highlight layers */
+.calendar-container .rdrDay .rdrDayNumber {
+  z-index: 2;
 }
 
 .calendar-container .rdrDayToday .rdrDayNumber span:after {
-  background: #2563eb;
+  background: var(--ga-cal-accent);
 }
 
-/* Selected dates */
-.calendar-container .rdrStartEdge .rdrDayNumber span,
-.calendar-container .rdrEndEdge .rdrDayNumber span {
-  color: #ffffff !important;
+/* Range styling */
+.calendar-container .rdrStartEdge,
+.calendar-container .rdrEndEdge {
+  background: var(--ga-cal-accent) !important;
+  border-radius: 10px;
+  z-index: 0;
 }
 
-.calendar-container .rdrInRange .rdrDayNumber span {
-  color: #e6edf3 !important;
+.calendar-container .rdrInRange {
+  background: rgba(59, 130, 246, 0.26) !important;
+  border-radius: 10px;
+  z-index: 0;
 }
 
-/* Additional modern styling */
-.calendar-container .rdrDateRangeWrapper {
-  border-radius: 16px;
-  background: #161b22;
+.calendar-container .rdrDay:not(.rdrDayPassive):not(.rdrDayDisabled) .rdrInRange ~ .rdrDayNumber span,
+.calendar-container .rdrDay:not(.rdrDayPassive):not(.rdrDayDisabled) .rdrStartEdge ~ .rdrDayNumber span,
+.calendar-container .rdrDay:not(.rdrDayPassive):not(.rdrDayDisabled) .rdrEndEdge ~ .rdrDayNumber span {
+  color: rgba(255, 255, 255, 0.95) !important;
 }
 
-.calendar-container .rdrDefinedRangesWrapper {
-  display: none;
-}
-
+.calendar-container .rdrDefinedRangesWrapper,
 .calendar-container .rdrDateDisplayWrapper {
   display: none;
 }
 
-.calendar-container .rdrMonthPicker select,
-.calendar-container .rdrYearPicker select {
-  font-weight: 600;
-  background: #161b22;
-  color: #e6edf3;
+.calendar-container .rdrInfiniteMonths {
+  overflow: visible !important;
 }
 
-.calendar-container .rdrNextPrevButton {
-  background: #30363d;
+/* Two-month horizontal picker — roomy, readable grid */
+.ga-cal__calendar--embedded .rdrDateRangeWrapper,
+.ga-cal__calendar--embedded .rdrCalendarWrapper {
+  width: 100% !important;
+  min-width: min(900px, 100%);
+  max-width: none;
+  border-radius: 12px;
+  font-size: 14px;
+  margin: 0;
+  overflow: visible;
+  border: 1px solid var(--ga-cal-border-strong);
+  background: rgba(17, 24, 39, 0.65);
+}
+
+.ga-cal__calendar--embedded .rdrMonthsHorizontal {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: flex-start;
+  width: 100%;
+  gap: 28px;
+  padding: 6px 4px 10px;
+  box-sizing: border-box;
+}
+
+.ga-cal__calendar--embedded .rdrMonthsHorizontal > .rdrMonth {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto !important;
+  max-width: none;
+  padding: var(--ga-cal-month-pad-y) var(--ga-cal-month-pad-x);
+  box-sizing: border-box;
+}
+
+.ga-cal__calendar--embedded .rdrMonthsHorizontal > .rdrMonth + .rdrMonth {
+  border-left: 1px solid var(--ga-cal-border);
+  padding-left: calc(var(--ga-cal-month-pad-x) + 14px);
+  margin-left: 0;
+}
+
+.ga-cal__calendar--embedded .rdrMonthName {
+  font-size: 0.8125rem;
+  font-weight: 650;
+  color: rgba(229, 231, 235, 0.65);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0 0 10px 2px;
+  margin: 0;
+}
+
+.ga-cal__calendar--embedded .rdrWeekDays {
+  display: flex;
+  padding: 0 2px 10px;
+  margin: 0;
+}
+
+.ga-cal__calendar--embedded .rdrWeekDay {
+  flex: 1 1 calc(100% / 7);
+  font-size: 11px !important;
+  font-weight: 650 !important;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(148, 163, 184, 0.95) !important;
+  line-height: 1.2;
+  padding: 0 2px 2px;
+  text-align: center;
+}
+
+.ga-cal__calendar--embedded .rdrMonthAndYearWrapper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 10px 14px;
+  margin: 0 0 4px;
+  border-bottom: 1px solid var(--ga-cal-border);
+  background: transparent;
+}
+
+.ga-cal__calendar--embedded .ga-cal__monthNavCluster .rdrMonthAndYearPickers select {
+  padding: 6px 8px;
+  font-size: 13px;
+  font-weight: 650;
+  border-radius: 7px;
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.ga-cal__calendar--embedded .ga-cal__monthNavCluster .rdrMonthPicker select {
+  min-width: 5.5rem;
+}
+
+.ga-cal__calendar--embedded .ga-cal__monthNavCluster .rdrYearPicker select {
+  min-width: 4.25rem;
+}
+
+.ga-cal__calendar--embedded .ga-cal__monthNavCluster--dual .rdrMonthPicker select {
+  min-width: 5rem;
+}
+
+.ga-cal__calendar--embedded .ga-cal__monthNavCluster--dual .rdrYearPicker select {
+  min-width: 4rem;
+}
+
+.ga-cal__calendar--embedded .ga-cal__monthNavCluster .rdrNextPrevButton {
+  width: 30px !important;
+  height: 30px !important;
+  margin: 0 !important;
+  border-radius: 7px !important;
+}
+
+.ga-cal__calendar--embedded .rdrMonthAndYearPickers {
+  gap: 8px;
+}
+
+.ga-cal__calendar--embedded .rdrMonthAndYearPickers select {
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 650;
   border-radius: 8px;
-  transition: all 0.2s ease;
-  color: #e6edf3;
 }
 
-.calendar-container .rdrNextPrevButton:hover {
-  background: #21262d;
-  transform: scale(1.05);
+.ga-cal__calendar--embedded .rdrDays {
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 2px;
 }
 
-/* Selected date range colors - consistent blue theme */
-.calendar-container .rdrStartEdge {
-  background: #2563eb !important;
-  border-radius: 8px;
+.ga-cal__calendar--embedded .rdrDay {
+  min-height: var(--ga-cal-cell);
+  height: var(--ga-cal-cell) !important;
+  line-height: 1 !important;
+  box-sizing: border-box;
 }
 
-.calendar-container .rdrEndEdge {
-  background: #2563eb !important;
-  border-radius: 8px;
+.ga-cal__calendar--embedded .rdrDay .rdrDayNumber {
+  top: 4px;
+  bottom: 4px;
+  left: 2px;
+  right: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.calendar-container .rdrInRange {
-  background: #1e40af !important;
-  border-radius: 8px;
+.ga-cal__calendar--embedded .rdrDay:not(.rdrDayPassive):not(.rdrDayDisabled) .rdrDayNumber span {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
 }
 
-.calendar-container .rdrDayStartOfMonth .rdrDayNumber span,
-.calendar-container .rdrDayEndOfMonth .rdrDayNumber span {
-  border-radius: 8px;
+.ga-cal__calendar--embedded .rdrDayPassive .rdrDayNumber span,
+.ga-cal__calendar--embedded .rdrDayDisabled .rdrDayNumber span {
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  font-variant-numeric: tabular-nums;
 }
 
-/* Ensure all day cells have dark background */
-.calendar-container .rdrDay {
-  background: #161b22;
+.ga-cal__calendar--embedded .rdrStartEdge,
+.ga-cal__calendar--embedded .rdrEndEdge {
+  border-radius: 9px !important;
+  top: 4px !important;
+  bottom: 4px !important;
 }
 
-.calendar-container .rdrDay:hover {
-  background: #21262d;
-} 
+.ga-cal__calendar--embedded .rdrInRange {
+  border-radius: 6px !important;
+  top: 4px !important;
+  bottom: 4px !important;
+}
+
+.ga-cal__calendar--embedded .rdrNextPrevButton {
+  width: 34px !important;
+  height: 34px !important;
+  margin: 0 4px;
+  border-radius: 8px !important;
+}

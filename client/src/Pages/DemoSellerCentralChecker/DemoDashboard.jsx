@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import ProductChecker from '../../Components/Dashboard/SamePageComponents/ProductChecker.jsx'
 import TotalSales from '../../Components/Dashboard/SamePageComponents/TotalSales.jsx'
 import AccountHealth from '../../Components/Dashboard/SamePageComponents/AccountHealth.jsx'
-import Calender from '../../Components/Calender/Calender.jsx'
+import Calender, { isClickInsideGaCalDropdown } from '../../Components/Calender/Calender.jsx'
 import ErrorBoundary from '../../Components/ErrorBoundary/ErrorBoundary.jsx'
 import { SkeletonStatValue, SkeletonCardBody, SkeletonChart, SkeletonTableBody } from '../../Components/Skeleton/PageSkeletons.jsx'
 import { SkeletonBar } from '../../Components/Skeleton/Skeleton.jsx'
@@ -14,6 +14,7 @@ import { formatCurrency, formatCurrencyWithLocale } from '../../utils/currencyUt
 import { fetchReimbursementSummary } from '../../redux/slices/ReimbursementSlice.js'
 import { fetchLatestPPCMetrics, selectPPCSummary, selectLatestPPCMetricsLoading, selectPPCDateWiseMetrics } from '../../redux/slices/PPCMetricsSlice.js'
 import { parseLocalDate } from '../../utils/dateUtils.js'
+import { shouldUseCalendarDateRange } from '../../utils/totalSalesFilterUrl.js'
 import { useDashboardData } from '../../hooks/usePageData.js'
 import { devLog } from '../../utils/devLogger.js'
 
@@ -22,6 +23,7 @@ const Dashboard = () => {
   const [openExportDropdown, setOpenExportDropdown] = useState(false)
   const [selectedPeriod, setSelectedPeriod] = useState('Last 30 Days')
   const CalenderRef = useRef(null)
+  const calendarAnchorRef = useRef(null)
   const ExportRef = useRef(null)
   const contentRef = useRef(null)
   const navigate = useNavigate()
@@ -162,8 +164,7 @@ const Dashboard = () => {
   const ppcMetricsLastFetched = useSelector(state => state.ppcMetrics?.latestMetrics?.lastFetched)
   
   // Calculate filtered PPC summary based on date range (same approach as PPCDashboard)
-  const calendarMode = dashboardInfo?.calendarMode || 'default';
-  const isDateRangeSelected = (calendarMode === 'custom' || calendarMode === 'last7') && dashboardInfo?.startDate && dashboardInfo?.endDate;
+  const isDateRangeSelected = shouldUseCalendarDateRange(dashboardInfo?.startDate, dashboardInfo?.endDate);
   
   // Filter dateWiseMetrics and calculate summary for selected date range
   const ppcSummary = useMemo(() => {
@@ -330,13 +331,7 @@ const Dashboard = () => {
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      // Don't close calendar if clicking inside the calendar portal
-      // The calendar uses createPortal to render to document.body
-      const calendarPortal = document.querySelector('.fixed.inset-0.z-\\[9999\\]');
-      if (calendarPortal && calendarPortal.contains(event.target)) {
-        return; // Click is inside the calendar portal, don't close
-      }
-      
+      if (isClickInsideGaCalDropdown(event.target)) return
       if (CalenderRef.current && !CalenderRef.current.contains(event.target)) {
         setOpenCalender(false)
       }
@@ -523,6 +518,7 @@ const Dashboard = () => {
             <div className='flex items-center gap-1.5'>
               <div className='relative' ref={CalenderRef}>
                 <button 
+                  ref={calendarAnchorRef}
                   onClick={() => setOpenCalender(!openCalender)}
                   className='flex items-center gap-1 px-2 py-1 bg-[#21262d] border border-[#30363d] hover:border-blue-500/50 rounded transition-all duration-200'
                 >
@@ -530,26 +526,13 @@ const Dashboard = () => {
                   <span className='text-xs font-medium text-gray-200'>{selectedPeriod}</span>
                 </button>
                 
-                <AnimatePresence>
-                  {openCalender && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                      transition={{ duration: 0.2 }}
-                      className="absolute top-full right-0 mt-1 z-[9999] bg-[#21262d] rounded border border-[#30363d] overflow-hidden max-h-[80vh] overflow-y-auto"
-                      style={{ 
-                        maxHeight: 'calc(100vh - 150px)',
-                        transform: 'translateY(0)'
-                      }}
-                    >
-                      <Calender 
-                        setOpenCalender={setOpenCalender} 
-                        setSelectedPeriod={setSelectedPeriod}
-                      />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                {openCalender && (
+                  <Calender
+                    anchorRef={calendarAnchorRef}
+                    setOpenCalender={setOpenCalender}
+                    setSelectedPeriod={setSelectedPeriod}
+                  />
+                )}
               </div>
 
               <div className='relative' ref={ExportRef}>

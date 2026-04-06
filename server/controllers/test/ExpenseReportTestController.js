@@ -1,11 +1,12 @@
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const { generateAccessToken } = require('../../Services/Sp_API/GenerateTokens.js');
 const logger = require('../../utils/Logger.js');
+const { getDefaultExpenseFinanceDaysBack } = require('../../config/expenseFinanceDaysBack.js');
 const { fetchPersistAndReturnExpenseReport } = require('../../Services/Sp_API/ExpenseReportService.js');
 
 async function testExpenseReport(req, res) {
   try {
-    const { userId, country, region, daysBack = 30 } = req.body || {};
+    const { userId, country, region, daysBack = getDefaultExpenseFinanceDaysBack() } = req.body || {};
 
     if (!userId || !country || !region) {
       return res.status(400).json({
@@ -74,7 +75,7 @@ async function testExpenseReport(req, res) {
       regionModel: regionUpper, // NA | EU | FE
       refreshToken,
       accessToken,
-      daysBack: Number(daysBack) || 30,
+      daysBack: Number(daysBack) || getDefaultExpenseFinanceDaysBack(),
       clientId: process.env.SPAPI_CLIENT_ID,
       clientSecret: process.env.SPAPI_CLIENT_SECRET,
     });

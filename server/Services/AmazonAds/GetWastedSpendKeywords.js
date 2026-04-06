@@ -278,17 +278,11 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
 
 // Orchestrator function
 async function getKeywordPerformanceReport(accessToken, profileId,userId,country, region, refreshToken = null) {
+    // UTC-based dates matching Expences.js: yesterday − 30 days → yesterday
     const now = new Date();
+    const endDateObj = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
+    const startDateObj = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1 - 30));
     
-    // End date: 24 hours before now (yesterday)
-    const endDateObj = new Date(now);
-    endDateObj.setDate(now.getDate() - 1);
-    
-    // Start date: 31 days before now
-    const startDateObj = new Date(now);
-    startDateObj.setDate(now.getDate() - 31);
-    
-    // Format as YYYY-MM-DD
     const formatDate = (date) => {
         return date.toISOString().split('T')[0];
     };
