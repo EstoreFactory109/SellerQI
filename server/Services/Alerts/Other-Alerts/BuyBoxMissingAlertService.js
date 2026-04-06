@@ -80,7 +80,7 @@ async function detectAndStoreBuyBoxMissingAlerts(userId, region, country, option
       return { created: false, productsWithChanges: 0 };
     }
 
-    const products = [];
+    let products = [];
 
     for (const item of buyBoxDoc.asinBuyBoxData) {
       const pct = item.buyBoxPercentage != null ? Number(item.buyBoxPercentage) : 0;
@@ -105,6 +105,30 @@ async function detectAndStoreBuyBoxMissingAlerts(userId, region, country, option
 
     if (products.length === 0) {
       return { created: false, productsWithChanges: 0 };
+    }
+
+    // Deduplication: only include products NOT already in the most recent previous alert
+    const prevAlert = await BuyBoxMissingAlert.findOne({
+      User: userId,
+      region: regionNorm,
+      country: countryNorm,
+    })
+      .sort({ createdAt: -1 })
+      .select('products')
+      .lean();
+
+    if (prevAlert?.products?.length > 0) {
+      const previousAsins = new Set(
+        prevAlert.products.map((p) => (p.asin && String(p.asin).trim()) || '').filter(Boolean)
+      );
+      const newProducts = products.filter((p) => !previousAsins.has(p.asin));
+      if (newProducts.length === 0) {
+        logger.info('[BuyBoxMissingAlert] No new buybox missing products since last alert (dedup)', {
+          userId, region, country, totalDetected: products.length, previousAlertCount: previousAsins.size,
+        });
+        return { created: false, productsWithChanges: 0 };
+      }
+      products = newProducts;
     }
 
     const alertPayload = {

@@ -15,6 +15,35 @@ const logger = require('../../../utils/Logger.js');
 
 const NEGATIVE_REVIEW_RATING_THRESHOLD = 4;
 
+/**
+ * Get set of ASINs from the most recent alert of a given type for user/region/country.
+ * Used for deduplication: only alert on products not already in the previous alert.
+ * @param {mongoose.Model} AlertModel - The discriminator model (e.g. NegetiveReviewsAlert)
+ * @param {*} userId
+ * @param {string} region
+ * @param {string} country
+ * @returns {Promise<Set<string>>} Set of normalized ASINs from the last alert
+ */
+async function getPreviousAlertAsins(AlertModel, userId, region, country) {
+  const prevAlert = await AlertModel.findOne({
+    User: userId,
+    region,
+    country,
+  })
+    .sort({ createdAt: -1 })
+    .select('products')
+    .lean();
+
+  const asinSet = new Set();
+  if (prevAlert?.products) {
+    for (const p of prevAlert.products) {
+      const asin = (p.asin && String(p.asin).trim()) || '';
+      if (asin) asinSet.add(asin);
+    }
+  }
+  return asinSet;
+}
+
 /** Escape special regex characters in a string used for RegExp */
 function escapeRegex(str) {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -108,7 +137,7 @@ async function runProductContentChangeCheck(newerDoc, olderDoc, userId, region, 
     (newerDoc.Products || []).map((p) => [normAsin(p.asin), { ...p, asin: p.asin?.trim() || p.asin }])
   );
 
-  const products = [];
+  let products = [];
 
   for (const [normalizedAsin, newerProduct] of newerByAsin) {
     const olderProduct = olderByAsin.get(normalizedAsin);
@@ -146,6 +175,19 @@ async function runProductContentChangeCheck(newerDoc, olderDoc, userId, region, 
 
   if (products.length === 0) {
     return { created: false, productsWithChanges: 0 };
+  }
+
+  // Deduplication: only include products NOT already in the most recent previous alert
+  const previousAsins = await getPreviousAlertAsins(ProductContentChangeAlert, userId, region, country);
+  if (previousAsins.size > 0) {
+    const newProducts = products.filter((p) => !previousAsins.has(p.asin));
+    if (newProducts.length === 0) {
+      logger.info('[ProductContentChangeAlert] No new content change products since last alert (dedup)', {
+        userId, region, country, totalDetected: products.length, previousAlertCount: previousAsins.size,
+      });
+      return { created: false, productsWithChanges: 0 };
+    }
+    products = newProducts;
   }
 
   const alertPayload = {
@@ -190,14 +232,14 @@ async function runNegativeReviewsCheck(lastDoc, userId, region, country) {
     return { created: false, productsWithChanges: 0 };
   }
 
-  const products = [];
+  const allProducts = [];
 
   for (const p of lastDoc.Products) {
     const rating = parseFloat(p.product_star_ratings);
     if (Number.isNaN(rating) || rating >= NEGATIVE_REVIEW_RATING_THRESHOLD) continue;
 
     const reviewCount = parseInt(p.product_num_ratings, 10) || 0;
-    products.push({
+    allProducts.push({
       asin: p.asin?.trim() || p.asin,
       sku: p.sku ?? undefined,
       title: p.product_title ?? undefined,
@@ -207,7 +249,20 @@ async function runNegativeReviewsCheck(lastDoc, userId, region, country) {
     });
   }
 
+  if (allProducts.length === 0) {
+    return { created: false, productsWithChanges: 0 };
+  }
+
+  // Deduplication: only include products NOT already in the most recent previous alert
+  const previousAsins = await getPreviousAlertAsins(NegetiveReviewsAlert, userId, region, country);
+  const products = previousAsins.size === 0
+    ? allProducts // First time — include all
+    : allProducts.filter((p) => !previousAsins.has(p.asin));
+
   if (products.length === 0) {
+    logger.info('[NegetiveReviewsAlert] No new negative review products since last alert (dedup)', {
+      userId, region, country, totalDetected: allProducts.length, previousAlertCount: previousAsins.size,
+    });
     return { created: false, productsWithChanges: 0 };
   }
 
@@ -263,7 +318,7 @@ async function runAPlusMissingCheck(userId, region, country) {
     return { created: false, productsWithChanges: 0 };
   }
 
-  const products = [];
+  const allProducts = [];
   for (const item of aplusDoc.ApiContentDetails) {
     const asin = item.Asins || item.asin;
     if (!asin || typeof asin !== 'string') continue;
@@ -274,14 +329,27 @@ async function runAPlusMissingCheck(userId, region, country) {
       status === 'true' ||
       status === true;
     if (hasAPlus) continue;
-    products.push({
+    allProducts.push({
       asin: String(asin).trim(),
       sku: undefined,
       message: `A+ content not present (status: ${status || 'Not Available'})`,
     });
   }
 
+  if (allProducts.length === 0) {
+    return { created: false, productsWithChanges: 0 };
+  }
+
+  // Deduplication: only include products NOT already in the most recent previous alert
+  const previousAsins = await getPreviousAlertAsins(APlusMissingAlert, userId, region, country);
+  const products = previousAsins.size === 0
+    ? allProducts // First time — include all
+    : allProducts.filter((p) => !previousAsins.has(p.asin));
+
   if (products.length === 0) {
+    logger.info('[APlusMissingAlert] No new A+ missing products since last alert (dedup)', {
+      userId, region, country, totalDetected: allProducts.length, previousAlertCount: previousAsins.size,
+    });
     return { created: false, productsWithChanges: 0 };
   }
 
