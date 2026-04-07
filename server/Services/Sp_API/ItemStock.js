@@ -61,12 +61,33 @@ async function fetchInventorySummaries(accessToken, baseUrl, marketplaceId, sell
       path = `/fba/inventory/v1/summaries?${params.toString()}`;
     }
 
-    const res = await httpsRequest({
-      hostname: baseUrl,
-      path,
-      method: "GET",
-      headers: { "x-amz-access-token": accessToken },
-    });
+    const MAX_RETRIES = 5;
+    let res;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      res = await httpsRequest({
+        hostname: baseUrl,
+        path,
+        method: "GET",
+        headers: { "x-amz-access-token": accessToken },
+      });
+
+      const isThrottled =
+        res.statusCode === 429 ||
+        (Array.isArray(res.body.errors) &&
+          res.body.errors.some((e) => e.code === "QuotaExceeded"));
+
+      if (isThrottled && attempt < MAX_RETRIES) {
+        const delayMs = Math.min(10000 * Math.pow(2, attempt), 60000);
+        logger.warn(
+          `[Inventory API] Throttled on page ${pageCount + 1}, attempt ${attempt + 1}/${MAX_RETRIES}. ` +
+          `Retrying in ${delayMs / 1000}s...`
+        );
+        await new Promise((r) => setTimeout(r, delayMs));
+        continue;
+      }
+
+      break;
+    }
 
     if (res.statusCode !== 200 || res.body.errors) {
       throw new Error(
