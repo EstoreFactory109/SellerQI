@@ -49,6 +49,7 @@ const exportAllAccountsCsv = asyncHandler(async (req, res) => {
                     phone: 1,
                     accessType: 1,
                     packageType: 1,
+                    isAgencyClient: 1,
                     subscriptionStatus: 1,
                     createdAt: 1
                 }
@@ -87,13 +88,16 @@ const exportAllAccountsCsv = asyncHandler(async (req, res) => {
             return `${day}/${month}/${year}`;
         };
 
+        const displayPackageType = (acc) =>
+            acc.isAgencyClient ? 'Agency Client' : acc.packageType;
+
         const rows = accounts.map(acc => [
             escapeCsv(acc.firstName),
             escapeCsv(acc.lastName),
             escapeCsv(acc.email),
             escapeCsv(acc.phone),
             escapeCsv(acc.accessType),
-            escapeCsv(acc.packageType),
+            escapeCsv(displayPackageType(acc)),
             escapeCsv(acc.subscriptionStatus),
             escapeCsv(formatDateDDMMYYYY(acc.createdAt))
         ].join(','));
@@ -245,6 +249,7 @@ const getAllAccounts = asyncHandler(async (req, res) => {
                     whatsapp: 1,
                     accessType: 1,
                     packageType: 1,
+                    isAgencyClient: 1,
                     subscriptionStatus: 1,
                     isInTrialPeriod: 1,
                     trialEndsDate: 1,

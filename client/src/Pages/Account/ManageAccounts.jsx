@@ -357,6 +357,9 @@ const ManageAccounts = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  /** Strip trailing "(Inactive)"-style suffix for compact type column (keeps "Agency Client" whole). */
+  const typeColumnLabel = (label) => label.replace(/\s*\([^)]*\)\s*$/, '').trim();
+
   // Helper functions - muted colors to match existing app
   const getPackageTypeInfo = (user) => {
     const isExpiredOrInactive =
@@ -364,6 +367,14 @@ const ManageAccounts = () => {
       (user.isInTrialPeriod && user.trialEndsDate && new Date() > new Date(user.trialEndsDate)) ||
       user.subscriptionStatus === 'inactive' ||
       user.subscriptionStatus === 'cancelled';
+
+    if (user.isAgencyClient === true) {
+      return {
+        icon: Users,
+        color: isExpiredOrInactive ? 'text-gray-500' : 'text-yellow-500',
+        label: isExpiredOrInactive ? 'Agency Client (Inactive)' : 'Agency Client'
+      };
+    }
 
     let packageType = user.packageType;
 
@@ -813,7 +824,7 @@ const ManageAccounts = () => {
                     <p className="text-xs text-gray-500">{cancelConfirmUser.email}</p>
                     <div className="flex items-center gap-2 mt-2">
                       <span className="text-xs px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-400">
-                        {cancelConfirmUser.packageType}
+                        {cancelConfirmUser.isAgencyClient ? 'Agency Client' : cancelConfirmUser.packageType}
                       </span>
                       {cancelConfirmUser.isInTrialPeriod && (
                         <span className="text-xs px-2 py-0.5 rounded bg-blue-500/20 text-blue-400">
@@ -1118,8 +1129,8 @@ const ManageAccounts = () => {
                             </td>
                             <td className="px-2 py-2.5 text-center text-xs text-gray-400">{user.phone || '—'}</td>
                             <td className="px-2 py-2.5 text-center">
-                              <span className={`inline-flex items-center gap-1 text-xs font-medium ${packageInfo.color}`}>
-                                <PackageIcon className="w-3 h-3" />{packageInfo.label.split(' ')[0]}
+                              <span className={`inline-flex items-center justify-center gap-1 text-xs font-medium ${packageInfo.color} max-w-[9rem] mx-auto text-center`}>
+                                <PackageIcon className="w-3 h-3 shrink-0" />{typeColumnLabel(packageInfo.label)}
                               </span>
                             </td>
                             <td className="px-2 py-2.5 text-xs text-gray-400">{user.brand || '—'}</td>
