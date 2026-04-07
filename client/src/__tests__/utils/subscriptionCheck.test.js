@@ -220,7 +220,7 @@ describe('subscriptionCheck', () => {
       const user = {
         packageType: 'PRO',
         isInTrialPeriod: true,
-        trialEndsDate: new Date().toISOString(),
+        trialEndsDate: new Date(Date.now() + 1000).toISOString(),
       };
       // Should be true because now <= trialEnd
       expect(isInActiveTrial(user)).toBe(true);
