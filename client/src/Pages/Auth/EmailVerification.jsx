@@ -8,8 +8,6 @@ import { clearAuthCache } from '../../utils/authCoordinator.js';
 import stripeService from '../../services/stripeService.js';
 import { detectCountry } from '../../utils/countryDetection.js';
 import axiosInstance from '../../config/axios.config.js';
-import { useDispatch } from 'react-redux';
-import { updateTrialStatus } from '../../redux/slices/authSlice.js';
 
 
 const PENDING_VERIFICATION_EMAIL = 'pendingVerificationEmail';
@@ -38,7 +36,6 @@ const OtpVerification = () => {
   const five = useRef(null);
   
   const navigate = useNavigate();
-  const dispatch = useDispatch();
   
   // Get intended package from state or localStorage
   // If null/undefined, user will choose plan on pricing page
@@ -202,53 +199,14 @@ const OtpVerification = () => {
         } else if (intendedPackage === 'PRO-Trial') {
           localStorage.removeItem('intendedPackage');
           
-          if (isIndianUser) {
-            // Indian users: Use Razorpay with 7-day trial (payment method collected, charged after trial)
-            try {
-              const razorpayService = (await import('../../services/razorpayService.js')).default;
-              razorpayService.initiatePayment(
-                'PRO',
-                // Success callback
-                (result) => {
-                  console.log('Razorpay trial started:', result);
-                  if (result?.isTrialing) {
-                    dispatch(updateTrialStatus({
-                      packageType: result.planType || 'PRO',
-                      subscriptionStatus: 'trialing',
-                      isInTrialPeriod: true,
-                      trialEndsDate: result.trialEndsDate
-                    }));
-                  }
-                  navigate(`/subscription-success?gateway=razorpay&isTrialing=true&isNewSignup=true`);
-                },
-                // Error callback
-                (error) => {
-                  console.error('Razorpay trial failed:', error);
-                  if (error.message !== 'Payment cancelled by user') {
-                    setErrorMessage(error.message || 'Failed to start free trial. Please try again.');
-                  }
-                  setLoading(false);
-                },
-                7 // 7-day trial period
-              );
-            } catch (razorpayError) {
-              console.error('Razorpay error:', razorpayError);
-              setErrorMessage('Failed to initiate free trial. Please try again.');
-              setLoading(false);
-              return;
-            }
-          } else {
-            // Non-Indian users: Go to Stripe checkout with 7-day trial
-            // Payment method collected, charged after trial ends
-            try {
-              await stripeService.createCheckoutSession('PRO', null, 7);
-              // stripeService will handle the redirect to Stripe
-            } catch (stripeError) {
-              console.error('Stripe checkout error:', stripeError);
-              setErrorMessage('Failed to initiate free trial. Please try again.');
-              setLoading(false);
-              return;
-            }
+          // Stripe checkout with 7-day trial (INR pricing for India)
+          try {
+            await stripeService.createCheckoutSession('PRO', null, 7, isIndianUser ? 'inr' : null);
+          } catch (stripeError) {
+            console.error('Stripe checkout error:', stripeError);
+            setErrorMessage('Failed to initiate free trial. Please try again.');
+            setLoading(false);
+            return;
           }
         } else if (intendedPackage === 'AGENCY') {
           // Separate agency flow: no Stripe; activate account and redirect to manage-agency-users
@@ -272,40 +230,15 @@ const OtpVerification = () => {
             setLoading(false);
           }
         } else if (intendedPackage === 'PRO') {
-          // PRO flow unchanged: Indian users Razorpay, others Stripe
+          // PRO direct payment via Stripe (INR pricing for India)
           localStorage.removeItem('intendedPackage');
-          if (isIndianUser) {
-            try {
-              const razorpayService = (await import('../../services/razorpayService.js')).default;
-              razorpayService.initiatePayment(
-                'PRO',
-                (result) => {
-                  console.log('Razorpay payment successful:', result);
-                  navigate(`/subscription-success?gateway=razorpay&isNewSignup=true`);
-                },
-                (error) => {
-                  console.error('Razorpay payment failed:', error);
-                  if (error.message !== 'Payment cancelled by user') {
-                    setErrorMessage(error.message || 'Failed to process payment. Please try again.');
-                  }
-                  setLoading(false);
-                }
-              );
-            } catch (razorpayError) {
-              console.error('Razorpay error:', razorpayError);
-              setErrorMessage('Failed to initiate payment. Please try again.');
-              setLoading(false);
-              return;
-            }
-          } else {
-            try {
-              await stripeService.createCheckoutSession('PRO');
-            } catch (stripeError) {
-              console.error('Stripe checkout error:', stripeError);
-              setErrorMessage('Failed to initiate payment. Please try again.');
-              setLoading(false);
-              return;
-            }
+          try {
+            await stripeService.createCheckoutSession('PRO', null, null, isIndianUser ? 'inr' : null);
+          } catch (stripeError) {
+            console.error('Stripe checkout error:', stripeError);
+            setErrorMessage('Failed to initiate payment. Please try again.');
+            setLoading(false);
+            return;
           }
         } else {
           // Unknown package - redirect to connect-to-amazon page (skip pricing)

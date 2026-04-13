@@ -12,7 +12,7 @@ let supportMessageEmailTemplate= fs.readFileSync(path.join(__dirname, '..', '..'
 
 
 
-const sendRegisteredEmail = async (databaseId, firstName, lastName, userPhone, RegisteredEmail, sellerId, userId = null) => {
+const sendRegisteredEmail = async (databaseId, firstName, lastName, userPhone, RegisteredEmail, userId = null) => {
     // Get first email from ADMIN_EMAIL_ID (handle comma-separated values)
     const adminEmail = process.env.ADMIN_EMAIL_ID 
         ? process.env.ADMIN_EMAIL_ID.split(',')[0].trim()
@@ -32,14 +32,13 @@ const sendRegisteredEmail = async (databaseId, firstName, lastName, userPhone, R
         emailProvider: 'AWS_SES'
     });
 
-    console.log(databaseId,firstName,lastName,userPhone,RegisteredEmail,sellerId);
+    console.log(databaseId,firstName,lastName,userPhone,RegisteredEmail);
 
     let template = supportMessageEmailTemplate
     .replace('{{userId}}',databaseId)
     .replace('{{userName}}',firstName + " " + lastName)
     .replace('{{userPhone}}',userPhone)
     .replace('{{userEmail}}',RegisteredEmail)
-    .replace('{{sellerId}}',sellerId)
     .replace('{{registrationDate}}', new Date().toLocaleString());
     try {
         // Save initial log

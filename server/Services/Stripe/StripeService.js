@@ -73,7 +73,7 @@ class StripeService {
      * @param {string} [couponCode] - Optional coupon/promo code to apply
      * @param {number} [trialPeriodDays] - Optional trial period in days (only for PRO plan)
      */
-    async createCheckoutSession(userId, planType, successUrl, cancelUrl, couponCode = null, trialPeriodDays = null) {
+    async createCheckoutSession(userId, planType, successUrl, cancelUrl, couponCode = null, trialPeriodDays = null, currency = null) {
         try {
             // Check if Stripe is configured
             if (!process.env.STRIPE_SECRET_KEY) {
@@ -110,11 +110,13 @@ class StripeService {
                 }
             }
 
-            // Get price ID based on plan type
+            // Get price ID based on plan type and currency
             let priceId;
             switch (planType) {
                 case 'PRO':
-                    priceId = process.env.STRIPE_PRO_PRICE_ID;
+                    priceId = currency === 'inr'
+                        ? process.env.INDIAN_PRO_STRIPE_PRICE_ID
+                        : process.env.STRIPE_PRO_PRICE_ID;
                     break;
                 case 'AGENCY':
                     priceId = process.env.STRIPE_AGENCY_PRICE_ID;
@@ -124,7 +126,8 @@ class StripeService {
             }
 
             if (!priceId) {
-                throw new Error(`STRIPE_${planType}_PRICE_ID is not configured. Please set it in environment variables.`);
+                const envKey = currency === 'inr' ? 'INDIAN_PRO_STRIPE_PRICE_ID' : `STRIPE_${planType}_PRICE_ID`;
+                throw new Error(`${envKey} is not configured. Please set it in environment variables.`);
             }
 
             // Create or get customer
@@ -337,7 +340,11 @@ class StripeService {
             const isUpgrade = previousPackageType === 'LITE' || previousPackageType === 'PRO' || wasInTrial;
             const isNewSignup = !previousPackageType || previousPackageType === null || (!isUpgrade && planType === 'PRO');
 
-            logger.info(`User payment context: wasInTrial=${wasInTrial}, previousPackageType=${previousPackageType}, isTrialUpgrade=${isTrialUpgrade}, isUpgrade=${isUpgrade}, isNewSignup=${isNewSignup}`);
+            // If user has never completed their first analysis, they should be
+            // sent to /analyse-account regardless of isUpgrade/isNewSignup flags.
+            const shouldGoToAnalyseAccount = !user.FirstAnalysisDone;
+
+            logger.info(`User payment context: wasInTrial=${wasInTrial}, previousPackageType=${previousPackageType}, isTrialUpgrade=${isTrialUpgrade}, isUpgrade=${isUpgrade}, isNewSignup=${isNewSignup}, shouldGoToAnalyseAccount=${shouldGoToAnalyseAccount}`);
 
             // Get subscription details from Stripe
             const stripeSubscription = session.subscription;
@@ -504,7 +511,8 @@ class StripeService {
                 isUpgrade: isUpgrade, // Flag to indicate if this is an upgrade (existing user)
                 isNewSignup: isNewSignup, // Flag to indicate if this is a new signup
                 isTrialing: isTrialing, // Flag to indicate if subscription is in trial
-                trialEndsDate: isTrialing && stripeSubscription.trial_end ? this.safeDate(stripeSubscription.trial_end) : null
+                trialEndsDate: isTrialing && stripeSubscription.trial_end ? this.safeDate(stripeSubscription.trial_end) : null,
+                shouldGoToAnalyseAccount: shouldGoToAnalyseAccount, // True if user hasn't completed first analysis
             };
 
         } catch (error) {
@@ -535,14 +543,15 @@ class StripeService {
             const subscription = await Subscription.findOne({ userId });
             
             if (subscription && subscription.paymentHistory) {
-                // Check for duplicate by sessionId or stripePaymentIntentId
+                // Check for duplicate by sessionId, stripePaymentIntentId, or stripeInvoiceId
                 const existingPayment = subscription.paymentHistory.find(payment => 
                     (paymentData.sessionId && payment.sessionId === paymentData.sessionId) ||
-                    (paymentData.stripePaymentIntentId && payment.stripePaymentIntentId === paymentData.stripePaymentIntentId)
+                    (paymentData.stripePaymentIntentId && payment.stripePaymentIntentId === paymentData.stripePaymentIntentId) ||
+                    (paymentData.stripeInvoiceId && payment.stripeInvoiceId === paymentData.stripeInvoiceId)
                 );
                 
                 if (existingPayment) {
-                    logger.info(`Payment already exists in history for user ${userId}, sessionId: ${paymentData.sessionId || 'N/A'}, paymentIntentId: ${paymentData.stripePaymentIntentId || 'N/A'}, skipping duplicate`);
+                    logger.info(`Payment already exists in history for user ${userId}, sessionId: ${paymentData.sessionId || 'N/A'}, paymentIntentId: ${paymentData.stripePaymentIntentId || 'N/A'}, invoiceId: ${paymentData.stripeInvoiceId || 'N/A'}, skipping duplicate`);
                     return;
                 }
             }
@@ -840,6 +849,118 @@ class StripeService {
 
         } catch (error) {
             logger.error('Error reactivating subscription:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Refund the last payment for a user's subscription
+     * @param {string} userId - User ID
+     * @returns {Promise<{refundId, amount, currency}>}
+     */
+    async refundLastPayment(userId) {
+        try {
+            const subscription = await Subscription.findOne({ userId, paymentGateway: 'stripe' });
+            if (!subscription || !subscription.stripeSubscriptionId) {
+                throw new Error('No Stripe subscription found for this user');
+            }
+
+            const invoices = await this.stripe.invoices.list({
+                subscription: subscription.stripeSubscriptionId,
+                status: 'paid',
+                limit: 1,
+            });
+
+            if (!invoices.data.length) {
+                throw new Error('No paid invoices found for this subscription');
+            }
+
+            const invoice = invoices.data[0];
+            if (!invoice.payment_intent) {
+                throw new Error('Invoice has no payment intent to refund');
+            }
+
+            const refund = await this.stripe.refunds.create({
+                payment_intent: invoice.payment_intent,
+            });
+
+            logger.info(`Refund created for user ${userId}: refundId=${refund.id}, amount=${refund.amount}, currency=${refund.currency}`);
+
+            if (subscription.paymentHistory) {
+                const historyEntry = subscription.paymentHistory.find(
+                    p => p.stripeInvoiceId === invoice.id || p.stripePaymentIntentId === invoice.payment_intent
+                );
+                if (historyEntry) {
+                    await Subscription.findOneAndUpdate(
+                        { userId, 'paymentHistory.stripeInvoiceId': invoice.id },
+                        { $set: { 'paymentHistory.$.status': 'refunded' } }
+                    );
+                }
+            }
+
+            return {
+                refundId: refund.id,
+                amount: refund.amount,
+                currency: refund.currency,
+                invoiceId: invoice.id,
+                invoiceNumber: invoice.number,
+            };
+        } catch (error) {
+            logger.error(`Error refunding payment for user ${userId}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Update/extend the trial period for a user's subscription
+     * @param {string} userId - User ID
+     * @param {number} trialDays - Number of days for the new trial period (from now)
+     * @returns {Promise<{trialEnd, subscriptionId}>}
+     */
+    async updateTrialPeriod(userId, trialDays) {
+        try {
+            const subscription = await Subscription.findOne({ userId, paymentGateway: 'stripe' });
+            if (!subscription || !subscription.stripeSubscriptionId) {
+                throw new Error('No Stripe subscription found for this user');
+            }
+
+            const trialEnd = Math.floor(Date.now() / 1000) + (trialDays * 24 * 60 * 60);
+
+            const updatedSub = await this.stripe.subscriptions.update(
+                subscription.stripeSubscriptionId,
+                { trial_end: trialEnd }
+            );
+
+            logger.info(`Trial period updated for user ${userId}: subscriptionId=${subscription.stripeSubscriptionId}, trialEnd=${new Date(trialEnd * 1000).toISOString()}`);
+
+            const trialEndDate = new Date(trialEnd * 1000);
+
+            await Subscription.findOneAndUpdate(
+                { userId },
+                {
+                    $set: {
+                        status: 'trialing',
+                        hasTrial: true,
+                        trialEndsAt: trialEndDate,
+                        nextBillingDate: trialEndDate,
+                        paymentStatus: 'no_payment_required',
+                    }
+                }
+            );
+
+            await User.findByIdAndUpdate(userId, {
+                isInTrialPeriod: true,
+                trialEndsDate: trialEndDate,
+                subscriptionStatus: 'trialing',
+            });
+
+            return {
+                trialEnd: trialEndDate,
+                subscriptionId: subscription.stripeSubscriptionId,
+                stripeStatus: updatedSub.status,
+            };
+        } catch (error) {
+            logger.error(`Error updating trial period for user ${userId}:`, error);
             throw error;
         }
     }

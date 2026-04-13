@@ -4,6 +4,7 @@ const Subscription = require('../../models/user-auth/SubscriptionModel');
 const User = require('../../models/user-auth/userModel');
 const PaymentLogs = require('../../models/system/PaymentLogsModel');
 const logger = require('../../utils/Logger');
+const { sendTrialToProSupportEmail } = require('../Email/SendTrialToProSupportEmail');
 
 class StripeWebhookService {
     constructor() {
@@ -154,6 +155,53 @@ class StripeWebhookService {
                         await this.updateUserSubscription(userId, planType, stripeSubscription.status, stripeSubscription);
                         
                         logger.info(`User ${userId} subscription activated via checkout.session.completed: plan=${planType}, status=${stripeSubscription.status}, isTrialing=${isTrialing}`);
+
+                        // Record payment history for paid (non-trial) checkouts
+                        // Trial subscriptions have no charge yet, so skip them
+                        if (!isTrialing && session.payment_status === 'paid') {
+                            try {
+                                let invoiceUrl = null;
+                                let invoicePdf = null;
+                                let invoiceId = null;
+                                let invoiceNumber = null;
+                                let amount = 0;
+                                let currency = 'usd';
+
+                                const invoices = await this.stripe.invoices.list({
+                                    subscription: stripeSubscription.id,
+                                    limit: 1
+                                });
+                                if (invoices.data.length > 0) {
+                                    const invoice = invoices.data[0];
+                                    invoiceUrl = invoice.hosted_invoice_url || null;
+                                    invoicePdf = invoice.invoice_pdf || null;
+                                    invoiceId = invoice.id;
+                                    invoiceNumber = invoice.number || null;
+                                    amount = invoice.amount_paid || 0;
+                                    currency = invoice.currency || 'usd';
+                                } else if (stripeSubscription.items?.data?.[0]?.price) {
+                                    amount = stripeSubscription.items.data[0].price.unit_amount || 0;
+                                    currency = stripeSubscription.items.data[0].price.currency || 'usd';
+                                }
+
+                                await this.addPaymentToHistory(userId, {
+                                    sessionId: session.id,
+                                    amount: amount,
+                                    currency: currency,
+                                    status: 'paid',
+                                    paymentDate: new Date(),
+                                    stripePaymentIntentId: session.payment_intent || null,
+                                    stripeInvoiceId: invoiceId,
+                                    invoiceUrl: invoiceUrl,
+                                    invoicePdf: invoicePdf,
+                                    invoiceNumber: invoiceNumber,
+                                    paymentGateway: 'stripe'
+                                });
+                                logger.info(`Payment history recorded via checkout.session.completed for user ${userId}`);
+                            } catch (historyError) {
+                                logger.error(`Error recording payment history in checkout.session.completed for user ${userId}:`, historyError);
+                            }
+                        }
                         
                         // Log checkout completed event with webhookEventId for idempotency
                         await PaymentLogs.logWebhookEvent({
@@ -432,13 +480,22 @@ class StripeWebhookService {
 
             // Get subscription from Stripe to get metadata
             const subscription = await this.stripe.subscriptions.retrieve(subscriptionId);
-            const userId = subscription.metadata?.userId;
-            const planType = subscription.metadata?.planType;
+            let userId = subscription.metadata?.userId;
+            let planType = subscription.metadata?.planType;
 
-            // Validate required metadata
+            // Fallback: if metadata is missing, resolve user from local DB
             if (!userId) {
-                logger.warn(`Invoice ${invoice.id} has subscription ${subscriptionId} without userId in metadata`);
-                return;
+                logger.warn(`Invoice ${invoice.id} has subscription ${subscriptionId} without userId in metadata, attempting DB fallback`);
+                const dbSub = await Subscription.findOne({ stripeSubscriptionId: subscriptionId })
+                    || await Subscription.findOne({ stripeCustomerId: subscription.customer });
+                if (dbSub) {
+                    userId = dbSub.userId?.toString();
+                    planType = planType || dbSub.planType;
+                    logger.info(`Resolved userId ${userId} via DB fallback for subscription ${subscriptionId}`);
+                } else {
+                    logger.warn(`Invoice ${invoice.id}: could not resolve user for subscription ${subscriptionId} even with DB fallback`);
+                    return;
+                }
             }
             
             // Check if this is a trial ending payment (billing_reason will be 'subscription_cycle' after trial)
@@ -476,6 +533,29 @@ class StripeWebhookService {
                     subscriptionStatus: 'active'
                 });
                 logger.info(`Trial ended for user: ${userId}. Payment successfully charged. User now on paid ${planType} plan.`);
+            }
+
+            // Send support notification only for trial -> paid conversion.
+            // Keep it non-blocking for webhook stability.
+            if (wasInTrial && user) {
+                try {
+                    const formattedAmount = `${(invoice.currency || 'usd').toUpperCase()} ${(invoice.amount_paid || 0) / 100}`;
+                    const conversionDate = this.safeDate(invoice.status_transitions?.paid_at)?.toLocaleString() || new Date().toLocaleString();
+                    await sendTrialToProSupportEmail({
+                        userId: user._id,
+                        firstName: user.firstName,
+                        lastName: user.lastName,
+                        userEmail: user.email,
+                        userPhone: user.phone,
+                        planType: planType || user.packageType || 'PRO',
+                        amountPaid: formattedAmount,
+                        invoiceNumber: invoice.number || null,
+                        invoiceId: invoice.id || null,
+                        conversionDate
+                    });
+                } catch (supportEmailError) {
+                    logger.error(`Non-critical: failed to send trial-to-pro support email for user ${userId}: ${supportEmailError.message}`);
+                }
             }
 
             logger.info(`Successfully recorded payment for user: ${userId}`);
@@ -525,13 +605,22 @@ class StripeWebhookService {
 
             // Get subscription from Stripe to get metadata and status
             const subscription = await this.stripe.subscriptions.retrieve(subscriptionId);
-            const userId = subscription.metadata?.userId;
-            const planType = subscription.metadata?.planType;
+            let userId = subscription.metadata?.userId;
+            let planType = subscription.metadata?.planType;
 
-            // Validate required metadata
+            // Fallback: if metadata is missing, resolve user from local DB
             if (!userId) {
-                logger.warn(`Invoice ${invoice.id} has subscription ${subscriptionId} without userId in metadata`);
-                return;
+                logger.warn(`Invoice ${invoice.id} has subscription ${subscriptionId} without userId in metadata, attempting DB fallback`);
+                const dbSub = await Subscription.findOne({ stripeSubscriptionId: subscriptionId })
+                    || await Subscription.findOne({ stripeCustomerId: subscription.customer });
+                if (dbSub) {
+                    userId = dbSub.userId?.toString();
+                    planType = planType || dbSub.planType;
+                    logger.info(`Resolved userId ${userId} via DB fallback for subscription ${subscriptionId}`);
+                } else {
+                    logger.warn(`Invoice ${invoice.id}: could not resolve user for subscription ${subscriptionId} even with DB fallback`);
+                    return;
+                }
             }
 
             logger.warn(`Invoice payment failed for user: ${userId}, amount: ${invoice.amount_due}, attempt: ${invoice.attempt_count}, next attempt: ${invoice.next_payment_attempt ? 'scheduled' : 'none'}`);

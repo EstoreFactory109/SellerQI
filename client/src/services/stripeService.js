@@ -24,8 +24,9 @@ class StripeService {
      * @param {string} planType - Plan type (PRO or AGENCY)
      * @param {string} [couponCode] - Optional coupon/promo code to apply automatically
      * @param {number} [trialPeriodDays] - Optional trial period in days (only for PRO plan)
+     * @param {string} [currency] - Optional currency hint ('inr' for Indian pricing)
      */
-    async createCheckoutSession(planType, couponCode = null, trialPeriodDays = null) {
+    async createCheckoutSession(planType, couponCode = null, trialPeriodDays = null, currency = null) {
         try {
             const requestBody = { planType };
             if (couponCode) {
@@ -34,6 +35,9 @@ class StripeService {
             // Add trial period for PRO plan only
             if (trialPeriodDays && trialPeriodDays > 0 && planType === 'PRO') {
                 requestBody.trialPeriodDays = trialPeriodDays;
+            }
+            if (currency) {
+                requestBody.currency = currency;
             }
             
             const response = await axiosInstance.post('/app/stripe/create-checkout-session', requestBody);

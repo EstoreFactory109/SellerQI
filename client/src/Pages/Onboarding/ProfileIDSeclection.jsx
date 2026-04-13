@@ -8,7 +8,6 @@ import axiosInstance from '../../config/axios.config.js';
 import { detectCountry } from '../../utils/countryDetection.js';
 import { hasPremiumAccess } from '../../utils/subscriptionCheck.js';
 import stripeService from '../../services/stripeService.js';
-import razorpayService from '../../services/razorpayService.js';
 
 
 const ProfileIDSelection = () => {
@@ -310,32 +309,9 @@ const ProfileIDSelection = () => {
       
       console.log(`[ProfileIDSelection] Detected country: ${country}, navigating to payment...`);
       
-      if (isIndianUser) {
-        // India: Use Razorpay with 7-day trial
-        setWaitingForAnalysis(false);
-        await razorpayService.initiatePayment(
-          'PRO',
-          // Success callback
-          (result) => {
-            console.log('Razorpay trial started:', result);
-            navigate(`/subscription-success?gateway=razorpay&isTrialing=true&isNewSignup=true`);
-          },
-          // Error callback
-          (error) => {
-            console.error('Razorpay trial failed:', error);
-            if (error.message !== 'Payment cancelled by user') {
-              alert(error.message || 'Failed to start free trial. Please try again.');
-            }
-            setWaitingForAnalysis(false);
-          },
-          7 // 7-day trial period
-        );
-      } else {
-        // US/Other: Use Stripe checkout with 7-day trial
-        setWaitingForAnalysis(false);
-        await stripeService.createCheckoutSession('PRO', null, 7);
-        // stripeService will handle the redirect to Stripe
-      }
+      // Stripe checkout with 7-day trial (INR pricing for India)
+      setWaitingForAnalysis(false);
+      await stripeService.createCheckoutSession('PRO', null, 7, isIndianUser ? 'inr' : null);
     } catch (error) {
       console.error('[ProfileIDSelection] Error navigating to payment:', error);
       setWaitingForAnalysis(false);

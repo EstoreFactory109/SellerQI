@@ -42,7 +42,7 @@ const sanitizeErrorMessage = (error) => {
 const createCheckoutSession = asyncHandler(async (req, res) => {
     try {
         const userId = req.userId;
-        const { planType, couponCode, trialPeriodDays } = req.body;
+        const { planType, couponCode, trialPeriodDays, currency } = req.body;
 
         // Validate plan type
         if (!planType || !['PRO', 'AGENCY'].includes(planType)) {
@@ -105,7 +105,8 @@ const createCheckoutSession = asyncHandler(async (req, res) => {
             successUrl,
             cancelUrl,
             couponCode || null,
-            trialPeriodDays ? parseInt(trialPeriodDays) : null
+            trialPeriodDays ? parseInt(trialPeriodDays) : null,
+            currency || null
         );
 
         const trialInfo = checkoutSession.hasTrial ? `, trial: ${checkoutSession.trialDays} days` : '';
@@ -272,7 +273,9 @@ const getPaymentHistory = asyncHandler(async (req, res) => {
 
         const subscription = await Subscription.findOne({ userId }).select('paymentHistory');
         
-        const paymentHistory = subscription ? subscription.paymentHistory : [];
+        const paymentHistory = subscription && subscription.paymentHistory
+            ? subscription.paymentHistory.filter(payment => payment.paymentGateway === 'stripe')
+            : [];
 
         return res.status(200).json(
             new ApiResponse(200, { paymentHistory }, 'Payment history retrieved successfully')
@@ -324,6 +327,11 @@ const getSubscriptionConfig = asyncHandler(async (req, res) => {
             plans: {
                 PRO: {
                     priceId: process.env.STRIPE_PRO_PRICE_ID,
+                    name: 'PRO',
+                    features: ['Advanced Analytics', 'Priority Support', 'API Access']
+                },
+                PRO_INR: {
+                    priceId: process.env.INDIAN_PRO_STRIPE_PRICE_ID,
                     name: 'PRO',
                     features: ['Advanced Analytics', 'Priority Support', 'API Access']
                 },

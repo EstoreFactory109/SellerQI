@@ -20,6 +20,7 @@ const {getBrand} = require('../../Services/Sp_API/GetBrand.js');
 const {getAdGroups} = require('../../Services/AmazonAds/AdGroups.js');
 const {getKeywordRecommendations} = require('../../Services/AmazonAds/KeyWordsRecommendations.js');
 const { sendRegisteredEmail } = require('../../Services/Email/SendEmailOnRegistered.js');
+const { sendTrialToProSupportEmail } = require('../../Services/Email/SendTrialToProSupportEmail.js');
 const getLedgerSummaryReport = require('../../Services/Sp_API/GET_LEDGER_SUMMARY_VIEW_DATA.js');
 const getProductWiseFBAData = require('../../Services/Sp_API/GetProductWiseFBAData.js');
 const adsKeywordsPerformanceModel = require('../../models/amazon-ads/adsKeywordsPerformanceModel.js');
@@ -601,13 +602,47 @@ const testAmazonAds = async (req, res) => {
 
 
   const testSendEmailOnRegistered = async (req, res) => {
-    const { userId, firstName, lastName, userPhone, userEmail,sellerId } = req.body;
+    const { userId, firstName, lastName, userPhone, userEmail } = req.body;
 
-    console.log(userId, firstName, lastName, userPhone, userEmail,sellerId);
-    const result = await sendRegisteredEmail(userId, firstName, lastName, userPhone, userEmail,sellerId);
+    console.log(userId, firstName, lastName, userPhone, userEmail);
+    const result = await sendRegisteredEmail(userId, firstName, lastName, userPhone, userEmail, userId);
     return res.status(200).json({
         data: result
     })
+  }
+
+  const testSendTrialToProSupportEmail = async (req, res) => {
+    const targetEmail = 'ankanmandal2001@gmail.com';
+    const {
+      userId = 'test-user-id',
+      firstName = 'Test',
+      lastName = 'User',
+      userPhone = '9999999999',
+      planType = 'PRO',
+      amountPaid = 'USD 21',
+      invoiceNumber = 'INV-TEST-001',
+      invoiceId = 'in_test_001'
+    } = req.body || {};
+
+    const result = await sendTrialToProSupportEmail({
+      userId,
+      firstName,
+      lastName,
+      userEmail: targetEmail,
+      userPhone,
+      planType,
+      amountPaid,
+      invoiceNumber,
+      invoiceId,
+      conversionDate: new Date().toLocaleString(),
+      recipientEmail: targetEmail
+    });
+
+    return res.status(200).json({
+      success: !!result,
+      targetEmail,
+      messageId: result || null
+    });
   }
 
   /**
@@ -2597,4 +2632,5 @@ module.exports = { testReport, getTotalSales,
    testAllAdsServices,
    testStoreIssueSummary,
    testStoreIssuesSummaryAndChunks,
+   testSendTrialToProSupportEmail,
    }

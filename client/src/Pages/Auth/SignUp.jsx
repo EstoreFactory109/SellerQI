@@ -16,7 +16,7 @@ import {
 import axios from 'axios';
 import { useNavigate, Link } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
-import { loginSuccess, updateTrialStatus } from '../../redux/slices/authSlice';
+import { loginSuccess } from '../../redux/slices/authSlice';
 import { clearAuthCache } from '../../utils/authCoordinator.js';
 import googleAuthService from '../../services/googleAuthService.js';
 import { countryCodesData } from '../../utils/countryCodesData.js';
@@ -300,68 +300,14 @@ const SignUp = () => {
           if (noPlanSelected) {
             navigate('/connect-to-amazon');
           } else if (isPROTrial) {
-            // PRO-Trial: Different flow for India vs non-India
-            if (isIndianUser) {
-              // Indian users: Use Razorpay with 7-day trial (payment method collected, charged after trial)
-              const razorpayService = (await import('../../services/razorpayService.js')).default;
-              razorpayService.initiatePayment(
-                'PRO',
-                // Success callback
-                (result) => {
-                  devLog('Razorpay trial started:', result);
-                  if (result?.isTrialing) {
-                    dispatch(updateTrialStatus({
-                      packageType: result.planType || 'PRO',
-                      subscriptionStatus: 'trialing',
-                      isInTrialPeriod: true,
-                      trialEndsDate: result.trialEndsDate
-                    }));
-                  }
-                  navigate(`/subscription-success?gateway=razorpay&isTrialing=true&isNewSignup=true`);
-                },
-                // Error callback
-                (error) => {
-                  console.error('Razorpay trial failed:', error);
-                  if (error.message !== 'Payment cancelled by user') {
-                    setErrorMessage(error.message || 'Failed to start free trial. Please try again.');
-                  }
-                  // Note: setGoogleLoading(false) is handled in the finally block
-                },
-                7 // 7-day trial period
-              );
-            } else {
-              // Non-Indian users: Go to Stripe checkout with 7-day trial
-              // Payment method collected, charged after trial ends
-              const stripeService = (await import('../../services/stripeService.js')).default;
-              await stripeService.createCheckoutSession('PRO', null, 7);
-            }
+            // PRO-Trial: Stripe checkout with 7-day trial (INR pricing for India)
+            const stripeService = (await import('../../services/stripeService.js')).default;
+            await stripeService.createCheckoutSession('PRO', null, 7, isIndianUser ? 'inr' : null);
           } else {
-            // PRO/AGENCY (paid): Go to Stripe payment (for non-India) or Razorpay (for India)
-            if (isIndianUser && packageType === 'PRO') {
-              // Indian users with PRO: Use Razorpay (direct payment, no trial)
-              const razorpayService = (await import('../../services/razorpayService.js')).default;
-              razorpayService.initiatePayment(
-                'PRO',
-                // Success callback
-                (result) => {
-                  devLog('Razorpay payment successful:', result);
-                  navigate(`/subscription-success?gateway=razorpay&isNewSignup=true`);
-                },
-                // Error callback
-                (error) => {
-                  console.error('Razorpay payment failed:', error);
-                  if (error.message !== 'Payment cancelled by user') {
-                    setErrorMessage(error.message || 'Failed to process payment. Please try again.');
-                  }
-                  // Note: setGoogleLoading(false) is handled in the finally block
-                }
-              );
-            } else {
-              // Non-Indian users or AGENCY: Go to Stripe payment
-              localStorage.setItem('intendedPackage', plans);
-              const stripeService = (await import('../../services/stripeService.js')).default;
-              await stripeService.createCheckoutSession(packageType);
-            }
+            // PRO/AGENCY (paid): Go to Stripe payment (INR pricing for Indian PRO users)
+            localStorage.setItem('intendedPackage', plans);
+            const stripeService = (await import('../../services/stripeService.js')).default;
+            await stripeService.createCheckoutSession(packageType, null, null, isIndianUser && packageType === 'PRO' ? 'inr' : null);
           }
           
         } else {

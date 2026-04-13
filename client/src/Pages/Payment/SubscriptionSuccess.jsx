@@ -63,16 +63,15 @@ export default function SubscriptionSuccess() {
                         // Redirect based on plan type and payment context
                         setTimeout(() => {
                             if (result.data.planType === 'AGENCY') {
-                                // User purchased AGENCY plan, redirect to manage agency users
                                 navigate('/manage-agency-users');
+                            } else if (result.data.shouldGoToAnalyseAccount) {
+                                // User hasn't completed first analysis yet → must set up account first
+                                navigate('/analyse-account');
                             } else if (result.data.isTrialUpgrade || result.data.isUpgrade) {
-                                // User upgraded (from trial or LITE) → redirect to dashboard
                                 navigate('/seller-central-checker/dashboard');
                             } else if (result.data.isNewSignup) {
-                                // New signup payment → redirect to analyse-account page
                                 navigate('/analyse-account');
                             } else {
-                                // Default: if unsure, redirect to dashboard (safer for existing users)
                                 navigate('/seller-central-checker/dashboard');
                             }
                         }, 3000);

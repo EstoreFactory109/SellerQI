@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Trial Converted To Pro</title>
+  <style>
+    body, html { margin: 0; padding: 0; }
+    body {
+      background-color: #f7fafc;
+      font-family: Arial, sans-serif;
+      padding: 24px 0;
+    }
+    .container {
+      background-color: #ffffff;
+      max-width: 600px;
+      margin: 0 auto;
+      border-radius: 8px;
+      padding: 28px;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+    }
+    .title {
+      font-size: 24px;
+      font-weight: 700;
+      color: #1f2937;
+      text-align: center;
+      margin: 0 0 16px 0;
+    }
+    .success-box {
+      background-color: #ecfdf5;
+      border: 1px solid #a7f3d0;
+      border-radius: 8px;
+      padding: 12px 16px;
+      color: #065f46;
+      margin-bottom: 20px;
+      text-align: center;
+      font-weight: 600;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+    }
+    td {
+      border-bottom: 1px solid #e5e7eb;
+      padding: 10px 8px;
+      vertical-align: top;
+      font-size: 14px;
+    }
+    .label {
+      width: 36%;
+      font-weight: 600;
+      color: #4b5563;
+      background-color: #f9fafb;
+    }
+    .value {
+      color: #111827;
+    }
+    .footer {
+      margin-top: 20px;
+      font-size: 12px;
+      color: #6b7280;
+      text-align: center;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="title">Trial Converted to Pro</h1>
+
+    <div class="success-box">
+      Trial completed successfully and first Pro payment was captured.
+    </div>
+
+    <table>
+      <tr>
+        <td class="label">User ID</td>
+        <td class="value">{{userId}}</td>
+      </tr>
+      <tr>
+        <td class="label">Name</td>
+        <td class="value">{{userName}}</td>
+      </tr>
+      <tr>
+        <td class="label">Email</td>
+        <td class="value">{{userEmail}}</td>
+      </tr>
+      <tr>
+        <td class="label">Phone</td>
+        <td class="value">{{userPhone}}</td>
+      </tr>
+      <tr>
+        <td class="label">Plan</td>
+        <td class="value">{{planType}}</td>
+      </tr>
+      <tr>
+        <td class="label">Amount Paid</td>
+        <td class="value">{{amountPaid}}</td>
+      </tr>
+      <tr>
+        <td class="label">Invoice Number</td>
+        <td class="value">{{invoiceNumber}}</td>
+      </tr>
+      <tr>
+        <td class="label">Invoice ID</td>
+        <td class="value">{{invoiceId}}</td>
+      </tr>
+      <tr>
+        <td class="label">Conversion Date</td>
+        <td class="value">{{conversionDate}}</td>
+      </tr>
+    </table>
+
+    <div class="footer">
+      SellerQI automated notification.<br />
+      This alert is sent when a trial user becomes a paid Pro user.
+    </div>
+  </div>
+</body>
+</html>

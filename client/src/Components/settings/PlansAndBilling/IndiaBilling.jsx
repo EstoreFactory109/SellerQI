@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { updatePackageType, loginSuccess } from '../../../redux/slices/authSlice';
-import axiosInstance from '../../../config/axios.config';
+import { updatePackageType } from '../../../redux/slices/authSlice';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Check, 
@@ -27,7 +26,7 @@ import {
   Mail,
   AlertTriangle
 } from 'lucide-react';
-import razorpayService from '../../../services/razorpayService';
+import stripeService from '../../../services/stripeService';
 
 export default function IndiaBilling() {
   const [currentPlan, setCurrentPlan] = useState('LITE');
@@ -60,8 +59,8 @@ export default function IndiaBilling() {
       name: 'LITE',
       displayName: 'Free Plan',
       price: 0,
-      displayPrice: '₹0',
-      currency: 'INR',
+      displayPrice: '$0',
+      currency: 'USD',
       icon: Star,
       color: 'emerald',
       gradient: 'from-emerald-400 via-emerald-500 to-emerald-600',
@@ -81,9 +80,9 @@ export default function IndiaBilling() {
     PRO: {
       name: 'PRO',
       displayName: 'Pro',
-      price: 1999,
-      displayPrice: '₹1,999',
-      currency: 'INR',
+      price: 21,
+      displayPrice: '$21',
+      currency: 'USD',
       icon: Crown,
       color: 'indigo',
       gradient: 'from-indigo-500 via-purple-500 to-purple-600',
@@ -106,7 +105,7 @@ export default function IndiaBilling() {
       displayName: 'Agency',
       price: null,
       displayPrice: 'Custom',
-      currency: 'INR',
+      currency: 'USD',
       icon: Users,
       color: 'purple',
       gradient: 'from-purple-500 via-violet-500 to-indigo-600',
@@ -166,9 +165,9 @@ export default function IndiaBilling() {
         setSubscriptionStatus(user.subscriptionStatus || 'active');
       }
 
-      // Try to get detailed subscription info from Razorpay
+      // Try to get detailed subscription info from Stripe
       try {
-        const subscription = await razorpayService.getSubscription();
+        const subscription = await stripeService.getSubscription();
         setUserSubscription(subscription);
       } catch (error) {
       }
@@ -186,67 +185,8 @@ export default function IndiaBilling() {
       if (planType === 'LITE') {
         alert('To downgrade to LITE, please cancel your subscription.');
       } else if (planType === 'PRO') {
-        // Use Razorpay for India
-        await razorpayService.initiatePayment(
-          planType,
-          async (result) => {
-            // Success callback - fetch fresh user data from server
-            try {
-              // Fetch fresh user data from server to ensure we have latest state
-              const response = await axiosInstance.get('/app/profile');
-              if (response.status === 200 && response.data?.data) {
-                const freshUserData = response.data.data;
-                // Update Redux with complete fresh user data
-                dispatch(loginSuccess(freshUserData));
-                
-                // Update local state based on fresh data
-                const userIsInTrial = freshUserData.isInTrialPeriod || false;
-                setIsTrialPeriod(userIsInTrial);
-                
-                if (freshUserData.packageType === 'PRO' && !userIsInTrial) {
-                  setCurrentPlan('PRO');
-                } else if (freshUserData.packageType === 'AGENCY') {
-                  setCurrentPlan('AGENCY');
-                } else {
-                  setCurrentPlan('LITE');
-                }
-                setSubscriptionStatus(freshUserData.subscriptionStatus || 'active');
-              } else {
-                // Fallback: update Redux manually if API call fails
-                dispatch(updatePackageType({
-                  packageType: 'PRO',
-                  subscriptionStatus: 'active'
-                }));
-                setCurrentPlan('PRO');
-                setSubscriptionStatus('active');
-                setIsTrialPeriod(false);
-              }
-            } catch (error) {
-              console.error('Error fetching fresh user data after payment:', error);
-              // Fallback: update Redux manually if API call fails
-              dispatch(updatePackageType({
-                packageType: 'PRO',
-                subscriptionStatus: 'active'
-              }));
-              setCurrentPlan('PRO');
-              setSubscriptionStatus('active');
-              setIsTrialPeriod(false);
-            }
-            
-            fetchUserSubscription();
-            fetchPaymentHistory();
-            setLoading(prev => ({ ...prev, [planType]: false }));
-          },
-          (error) => {
-            // Error callback
-            if (error.message !== 'Payment cancelled by user') {
-              // Show more detailed error message
-              const errorMsg = error.message || 'Payment failed. Please try again or use a different payment method.';
-              alert(errorMsg);
-            }
-            setLoading(prev => ({ ...prev, [planType]: false }));
-          }
-        );
+        // Use Stripe with INR pricing for India
+        await stripeService.createCheckoutSession('PRO', null, null, 'inr');
       } else if (planType === 'AGENCY') {
         // Navigate to support page
         navigate('/seller-central-checker/settings?tab=support');
@@ -259,58 +199,16 @@ export default function IndiaBilling() {
     }
   };
 
-  const handleStartFreeTrial = () => {
+  const handleStartFreeTrial = async () => {
     setFreeTrialLoading(true);
-    razorpayService.initiatePayment(
-      'PRO',
-      async (result) => {
-        try {
-          const response = await axiosInstance.get('/app/profile');
-          if (response.status === 200 && response.data?.data) {
-            const freshUserData = response.data.data;
-            dispatch(loginSuccess(freshUserData));
-            const userIsInTrial = freshUserData.isInTrialPeriod || false;
-            setIsTrialPeriod(userIsInTrial);
-            if (freshUserData.packageType === 'PRO' && !userIsInTrial) {
-              setCurrentPlan('PRO');
-            } else if (freshUserData.packageType === 'AGENCY') {
-              setCurrentPlan('AGENCY');
-            } else {
-              setCurrentPlan('LITE');
-            }
-            setSubscriptionStatus(freshUserData.subscriptionStatus || 'active');
-          } else {
-            dispatch(updatePackageType({
-              packageType: 'PRO',
-              subscriptionStatus: 'active'
-            }));
-            setCurrentPlan('PRO');
-            setSubscriptionStatus('active');
-            setIsTrialPeriod(false);
-          }
-        } catch (error) {
-          console.error('Error fetching fresh user data after payment:', error);
-          dispatch(updatePackageType({
-            packageType: 'PRO',
-            subscriptionStatus: 'active'
-          }));
-          setCurrentPlan('PRO');
-          setSubscriptionStatus('active');
-          setIsTrialPeriod(false);
-        }
-        fetchUserSubscription();
-        fetchPaymentHistory();
-        setFreeTrialLoading(false);
-      },
-      (error) => {
-        if (error.message !== 'Payment cancelled by user') {
-          const errorMsg = error.message || 'Payment failed. Please try again or use a different payment method.';
-          alert(errorMsg);
-        }
-        setFreeTrialLoading(false);
-      },
-      7 // 7-day trial
-    );
+    try {
+      await stripeService.createCheckoutSession('PRO', null, 7, 'inr');
+    } catch (error) {
+      console.error('Error starting free trial:', error);
+      const errorMsg = error.response?.data?.message || error.message || 'Failed to start free trial. Please try again.';
+      alert(errorMsg);
+      setFreeTrialLoading(false);
+    }
   };
 
   const handleCancelSubscription = async () => {
@@ -318,7 +216,7 @@ export default function IndiaBilling() {
     setCancelMessage('');
 
     try {
-      const result = await razorpayService.cancelSubscription();
+      const result = await stripeService.cancelSubscription();
       
       if (result.statusCode === 200 || result.data?.success) {
         // Update Redux state immediately
@@ -353,14 +251,14 @@ export default function IndiaBilling() {
   const fetchPaymentHistory = async () => {
     setLoadingHistory(true);
     try {
-      const history = await razorpayService.getPaymentHistory();
+      const history = await stripeService.getPaymentHistory();
       
-      // Deduplicate by paymentId or razorpayPaymentId (safety measure)
+      // Deduplicate by stripePaymentIntentId, stripeInvoiceId, or sessionId
       const uniqueHistory = history.filter((payment, index, self) => 
         index === self.findIndex(p => 
-          (payment.paymentId && p.paymentId === payment.paymentId) ||
-          (payment.razorpayPaymentId && p.razorpayPaymentId === payment.razorpayPaymentId) ||
-          (payment.orderId && p.orderId === payment.orderId)
+          (payment.stripePaymentIntentId && p.stripePaymentIntentId === payment.stripePaymentIntentId) ||
+          (payment.stripeInvoiceId && p.stripeInvoiceId === payment.stripeInvoiceId) ||
+          (payment.sessionId && p.sessionId === payment.sessionId)
         )
       );
       
@@ -684,9 +582,9 @@ export default function IndiaBilling() {
                     <p className="text-gray-400 mb-3 text-sm">{plans.PRO.description}</p>
                     
                     <div className="mb-3">
-                      <div className="text-lg line-through text-gray-500 mb-2">₹8,999/month</div>
+                      <div className="text-lg line-through text-gray-500 mb-2">$99/month</div>
                       <div className="text-4xl md:text-5xl font-bold text-blue-400 mb-1">
-                        ₹1,999<span className="text-xl font-normal">/month</span>
+                        $21<span className="text-xl font-normal">/month</span>
                       </div>
                       <div className="text-sm text-gray-400 mb-2">For Indian registered sellers</div>
                       <div className="flex items-center justify-center gap-2 mb-2">
@@ -912,7 +810,7 @@ export default function IndiaBilling() {
                         {plans[currentPlan]?.displayName}
                       </p>
                       <p className="text-xs text-gray-400">
-                        ₹{plans[currentPlan]?.price?.toLocaleString('en-IN')}/month
+                        {plans[currentPlan]?.displayPrice}/month
                       </p>
                     </div>
                   </div>
@@ -963,7 +861,7 @@ export default function IndiaBilling() {
               <div className="space-y-4">
                 {paymentHistory.slice(0, visiblePayments).map((payment, index) => (
                   <motion.div
-                    key={payment.razorpayPaymentId || payment.paymentId || payment.orderId || `payment-${index}`}
+                    key={payment.stripePaymentIntentId || payment.stripeInvoiceId || payment.sessionId || `payment-${index}`}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.4, delay: index * 0.1 }}
@@ -996,42 +894,34 @@ export default function IndiaBilling() {
                         {/* Download Invoice Button - Always show for all payments */}
                         <button
                           onClick={async () => {
-                            const paymentId = payment.razorpayPaymentId || payment.paymentId || payment.id;
-                            setLoadingInvoice(prev => ({ ...prev, [paymentId]: true }));
+                            const invoiceKey = payment.stripePaymentIntentId || payment.stripeInvoiceId || payment.sessionId;
+                            setLoadingInvoice(prev => ({ ...prev, [invoiceKey]: true }));
                             
                             try {
                               if (payment.invoicePdf || payment.invoiceUrl) {
-                                // Direct download if URL is already available
                                 const invoiceUrl = payment.invoicePdf || payment.invoiceUrl;
-                                const newWindow = window.open(invoiceUrl, '_blank');
-                                
-                                // Wait a moment for the window to open, then stop loading
+                                window.open(invoiceUrl, '_blank');
                                 setTimeout(() => {
-                                  setLoadingInvoice(prev => ({ ...prev, [paymentId]: false }));
+                                  setLoadingInvoice(prev => ({ ...prev, [invoiceKey]: false }));
                                 }, 500);
-                              } else if (payment.razorpayPaymentId) {
-                                // Fetch invoice URL from Razorpay
-                                await razorpayService.downloadInvoice(payment.razorpayPaymentId);
-                                setLoadingInvoice(prev => ({ ...prev, [paymentId]: false }));
-                              } else if (payment.paymentId) {
-                                // Try using paymentId for Razorpay
-                                await razorpayService.downloadInvoice(payment.paymentId);
-                                setLoadingInvoice(prev => ({ ...prev, [paymentId]: false }));
+                              } else if (payment.stripePaymentIntentId || payment.stripeInvoiceId) {
+                                await stripeService.downloadInvoice(payment.stripePaymentIntentId || payment.stripeInvoiceId);
+                                setLoadingInvoice(prev => ({ ...prev, [invoiceKey]: false }));
                               } else {
                                 alert('Invoice information not available for this payment. Please contact support.');
-                                setLoadingInvoice(prev => ({ ...prev, [paymentId]: false }));
+                                setLoadingInvoice(prev => ({ ...prev, [invoiceKey]: false }));
                               }
                             } catch (error) {
                               console.error('Error downloading invoice:', error);
                               alert('Failed to download invoice. Please try again or contact support.');
-                              setLoadingInvoice(prev => ({ ...prev, [paymentId]: false }));
+                              setLoadingInvoice(prev => ({ ...prev, [invoiceKey]: false }));
                             }
                           }}
-                          disabled={loadingInvoice[payment.razorpayPaymentId || payment.paymentId || payment.id]}
+                          disabled={loadingInvoice[payment.stripePaymentIntentId || payment.stripeInvoiceId || payment.sessionId]}
                           className="flex items-center space-x-2 px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded-xl font-medium transition-all duration-300 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed border border-blue-500/40"
                           title="Download Invoice"
                         >
-                          {loadingInvoice[payment.razorpayPaymentId || payment.paymentId || payment.id] ? (
+                          {loadingInvoice[payment.stripePaymentIntentId || payment.stripeInvoiceId || payment.sessionId] ? (
                             <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           ) : (
                             <span className="text-xs">Invoice</span>

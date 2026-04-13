@@ -930,6 +930,153 @@ const cancelUserSubscription = asyncHandler(async (req, res) => {
     }
 });
 
+/**
+ * Refund the last payment for a user's Stripe subscription
+ */
+const refundUserPayment = asyncHandler(async (req, res) => {
+    const adminId = req.SuperAdminId;
+    const { userId } = req.params;
+
+    if (!adminId) {
+        return res.status(401).json(new ApiResponse(401, "", "Admin token required"));
+    }
+    if (!userId) {
+        return res.status(400).json(new ApiResponse(400, "", "User ID is required"));
+    }
+
+    const admin = await UserModel.findById(adminId);
+    if (!admin || admin.accessType !== 'superAdmin') {
+        return res.status(403).json(new ApiResponse(403, "", "SuperAdmin access required"));
+    }
+
+    try {
+        const user = await UserModel.findById(userId).select('firstName lastName email');
+        if (!user) {
+            return res.status(404).json(new ApiResponse(404, "", "User not found"));
+        }
+
+        const result = await StripeService.refundLastPayment(userId);
+
+        await PaymentLogs.logEvent({
+            userId,
+            eventType: 'ADMIN_REFUND_ISSUED',
+            paymentGateway: 'STRIPE',
+            status: 'SUCCESS',
+            paymentId: result.refundId,
+            amount: result.amount / 100,
+            currency: result.currency?.toUpperCase() || 'USD',
+            message: `SuperAdmin refunded payment: ${result.currency?.toUpperCase()} ${result.amount / 100}`,
+            source: 'ADMIN',
+            metadata: {
+                adminId: adminId.toString(),
+                adminEmail: admin.email,
+                invoiceId: result.invoiceId,
+                invoiceNumber: result.invoiceNumber,
+            }
+        });
+
+        logger.info(`SuperAdmin ${adminId} refunded payment for user ${userId}: refundId=${result.refundId}`);
+
+        return res.status(200).json(new ApiResponse(200, {
+            userId,
+            userEmail: user.email,
+            userName: `${user.firstName} ${user.lastName}`,
+            ...result,
+        }, "Payment refunded successfully"));
+
+    } catch (error) {
+        await PaymentLogs.logEvent({
+            userId,
+            eventType: 'ADMIN_REFUND_ISSUED',
+            paymentGateway: 'STRIPE',
+            status: 'FAILED',
+            errorMessage: error.message,
+            message: 'SuperAdmin failed to refund payment',
+            source: 'ADMIN',
+            metadata: { adminId: adminId.toString() }
+        });
+
+        logger.error(`Error refunding payment for user ${userId}:`, error);
+        return res.status(500).json(new ApiResponse(500, "", error.message || "Failed to refund payment"));
+    }
+});
+
+/**
+ * Update/extend the trial period for a user's Stripe subscription
+ */
+const updateUserTrialPeriod = asyncHandler(async (req, res) => {
+    const adminId = req.SuperAdminId;
+    const { userId } = req.params;
+    const { trialDays } = req.body;
+
+    if (!adminId) {
+        return res.status(401).json(new ApiResponse(401, "", "Admin token required"));
+    }
+    if (!userId) {
+        return res.status(400).json(new ApiResponse(400, "", "User ID is required"));
+    }
+
+    const days = parseInt(trialDays);
+    if (!days || isNaN(days) || days < 1 || days > 365) {
+        return res.status(400).json(new ApiResponse(400, "", "Trial period must be between 1 and 365 days"));
+    }
+
+    const admin = await UserModel.findById(adminId);
+    if (!admin || admin.accessType !== 'superAdmin') {
+        return res.status(403).json(new ApiResponse(403, "", "SuperAdmin access required"));
+    }
+
+    try {
+        const user = await UserModel.findById(userId).select('firstName lastName email packageType subscriptionStatus');
+        if (!user) {
+            return res.status(404).json(new ApiResponse(404, "", "User not found"));
+        }
+
+        const result = await StripeService.updateTrialPeriod(userId, days);
+
+        await PaymentLogs.logEvent({
+            userId,
+            eventType: 'ADMIN_TRIAL_UPDATED',
+            paymentGateway: 'STRIPE',
+            status: 'SUCCESS',
+            subscriptionId: result.subscriptionId,
+            message: `SuperAdmin set trial to ${days} days (ends ${result.trialEnd.toISOString()})`,
+            source: 'ADMIN',
+            metadata: {
+                adminId: adminId.toString(),
+                adminEmail: admin.email,
+                trialDays: days,
+                trialEnd: result.trialEnd,
+            }
+        });
+
+        logger.info(`SuperAdmin ${adminId} updated trial for user ${userId}: ${days} days, ends ${result.trialEnd.toISOString()}`);
+
+        return res.status(200).json(new ApiResponse(200, {
+            userId,
+            userEmail: user.email,
+            userName: `${user.firstName} ${user.lastName}`,
+            trialDays: days,
+            ...result,
+        }, `Trial period set to ${days} days successfully`));
+
+    } catch (error) {
+        await PaymentLogs.logEvent({
+            userId,
+            eventType: 'ADMIN_TRIAL_UPDATED',
+            paymentGateway: 'STRIPE',
+            status: 'FAILED',
+            errorMessage: error.message,
+            message: 'SuperAdmin failed to update trial period',
+            source: 'ADMIN',
+            metadata: { adminId: adminId.toString() }
+        });
+
+        logger.error(`Error updating trial for user ${userId}:`, error);
+        return res.status(500).json(new ApiResponse(500, "", error.message || "Failed to update trial period"));
+    }
+});
+
 module.exports = {
     adminLogin,
     adminLogout,
@@ -939,5 +1086,7 @@ module.exports = {
     getPaymentLogs,
     getAllPaymentLogs,
     cancelUserSubscription,
-    exportAllAccountsCsv
+    exportAllAccountsCsv,
+    refundUserPayment,
+    updateUserTrialPeriod
 };

@@ -4,7 +4,7 @@ const {testReport,getTotalSales,testAmazonAds,
     testGetCampaigns,
     testGetAdGroups,testGetKeywords,testGetPPCSpendsBySKU,
     testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations,
-    testKeywordRecommendationsFromDB,getStoredKeywordRecommendations,testPPCMetrics,testNumberOfProductReviews,getLastAdsKeywordsPerformanceDocument,testAllAdsServices,testStoreIssueSummary,testStoreIssuesSummaryAndChunks}=require('../controllers/test/TestController.js')
+    testKeywordRecommendationsFromDB,getStoredKeywordRecommendations,testPPCMetrics,testNumberOfProductReviews,getLastAdsKeywordsPerformanceDocument,testAllAdsServices,testStoreIssueSummary,testStoreIssuesSummaryAndChunks,testSendTrialToProSupportEmail}=require('../controllers/test/TestController.js')
 const { testAlerts } = require('../controllers/alerts/AlertsController.js')
 const { testExpenseReport } = require('../controllers/test/ExpenseReportTestController.js')
 const { testAsinWiseSales } = require('../controllers/test/AsinWiseSalesTestController.js')
@@ -29,6 +29,7 @@ router.post('/testGetKeywords',testGetKeywords)
 router.post('/testGetPPCSpendsBySKU',testGetPPCSpendsBySKU)
 router.post('/testGetBrand',testGetBrand)
 router.post('/testSendEmailOnRegistered',testSendEmailOnRegistered)
+router.post('/testSendTrialToProSupportEmail', testSendTrialToProSupportEmail)
 router.post('/testLedgerSummaryReport',testLedgerSummaryReport)
 router.post('/testGetProductWiseFBAData',testGetProductWiseFBAData)
 router.post('/testGetWastedSpendKeywords',testGetWastedSpendKeywords)

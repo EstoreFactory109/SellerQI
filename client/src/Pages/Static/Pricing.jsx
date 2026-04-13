@@ -2,18 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Check, X, Loader2, Zap, Users, Crown, Sparkles } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useSelector, useDispatch } from 'react-redux';
-import axiosInstance from '../../config/axios.config.js';
+import { useSelector } from 'react-redux';
 import stripeService from '../../services/stripeService.js';
-import razorpayService from '../../services/razorpayService.js';
 import { detectCountry } from '../../utils/countryDetection.js';
 import IndiaPricing from '../../Components/Pricing/IndiaPricing.jsx';
-import { updateTrialStatus } from '../../redux/slices/authSlice.js';
 import sellerQILogo from '../../assets/Logo/sellerQILogo.png';
 
 export default function PricingPage() {
   const navigate = useNavigate();
-  const dispatch = useDispatch();
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState({});
   const [showCancelledMessage, setShowCancelledMessage] = useState(false);
@@ -106,7 +102,7 @@ export default function PricingPage() {
     }
   };
 
-  // Handle subscription for India (Razorpay)
+  // Handle subscription for India (Stripe with INR pricing)
   const handleIndiaSubscribe = async (planType) => {
     if (!isAuthenticated) {
       localStorage.setItem('intendedPlan', planType);
@@ -115,7 +111,6 @@ export default function PricingPage() {
       return;
     }
 
-    // Only PRO plan is available for India via Razorpay
     if (planType !== 'PRO') {
       alert('Please contact us for Agency plan in India.');
       return;
@@ -124,33 +119,17 @@ export default function PricingPage() {
     setLoading(prev => ({ ...prev, [planType]: true }));
 
     try {
-      await razorpayService.initiatePayment(
-        planType,
-        // Success callback
-        (result) => {
-          console.log('Payment successful:', result);
-          setLoading(prev => ({ ...prev, [planType]: false }));
-          // Navigate to success page with payment context
-          const isTrialUpgrade = result?.isTrialUpgrade ? 'true' : 'false';
-          const isUpgrade = result?.isUpgrade ? 'true' : 'false';
-          const isNewSignup = result?.isNewSignup ? 'true' : 'false';
-          navigate(`/subscription-success?gateway=razorpay&isTrialUpgrade=${isTrialUpgrade}&isUpgrade=${isUpgrade}&isNewSignup=${isNewSignup}`);
-        },
-        // Error callback
-        (error) => {
-          console.error('Payment failed:', error);
-          setLoading(prev => ({ ...prev, [planType]: false }));
-          if (error.message !== 'Payment cancelled by user') {
-            // Show more detailed error message
-            const errorMsg = error.message || 'Payment failed. Please try again or use a different payment method.';
-            alert(errorMsg);
-          }
-        }
-      );
+      if (isAuthenticated && currentPlan) {
+        localStorage.setItem('previousPlan', currentPlan);
+      }
+      await stripeService.createCheckoutSession(planType, null, null, 'inr');
     } catch (error) {
-      console.error('Error initiating Razorpay payment:', error);
+      console.error('Error initiating Stripe payment:', error);
       alert(error.response?.data?.message || 'Failed to process payment. Please try again.');
-      setLoading(prev => ({ ...prev, [planType]: false }));
+    } finally {
+      setTimeout(() => {
+        setLoading(prev => ({ ...prev, [planType]: false }));
+      }, 500);
     }
   };
 
@@ -166,45 +145,8 @@ export default function PricingPage() {
     try {
       localStorage.removeItem('intendedAction');
       
-      if (country === 'IN') {
-        // For Indian users, use Razorpay with 7-day trial
-        // Payment method is collected upfront but not charged until trial ends
-        await razorpayService.initiatePayment(
-          'PRO',
-          // Success callback
-          (result) => {
-            console.log('Razorpay trial started:', result);
-            setLoading(prev => ({ ...prev, freeTrial: false }));
-            
-            // Update Redux state if trial info is returned
-            if (result?.isTrialing) {
-              dispatch(updateTrialStatus({
-                packageType: result.planType || 'PRO',
-                subscriptionStatus: 'trialing',
-                isInTrialPeriod: true,
-                trialEndsDate: result.trialEndsDate
-              }));
-            }
-            
-            // Navigate to success page or connect page
-            const isTrialing = result?.isTrialing ? 'true' : 'false';
-            navigate(`/subscription-success?gateway=razorpay&isTrialing=${isTrialing}&isNewSignup=true`);
-          },
-          // Error callback
-          (error) => {
-            console.error('Razorpay trial failed:', error);
-            setLoading(prev => ({ ...prev, freeTrial: false }));
-            if (error.message !== 'Payment cancelled by user') {
-              alert(error.message || 'Failed to start free trial. Please try again.');
-            }
-          },
-          7 // 7-day trial period
-        );
-      } else {
-        // For non-Indian users (US, etc.), use Stripe checkout with 7-day trial
-        // Payment method is collected upfront but not charged until trial ends
-        await stripeService.createCheckoutSession('PRO', null, 7);
-      }
+      // Stripe checkout with 7-day trial (INR pricing for India)
+      await stripeService.createCheckoutSession('PRO', null, 7, country === 'IN' ? 'inr' : null);
     } catch (error) {
       console.error('Error starting free trial:', error);
       alert(error.response?.data?.message || 'Failed to start free trial. Please try again.');

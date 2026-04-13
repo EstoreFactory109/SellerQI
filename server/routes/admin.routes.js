@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { adminLogin, adminLogout, getAllAccounts, loginSelectedUser, deleteUser, getPaymentLogs, getAllPaymentLogs, cancelUserSubscription, exportAllAccountsCsv } = require('../controllers/admin/admin.js');
+const { adminLogin, adminLogout, getAllAccounts, loginSelectedUser, deleteUser, getPaymentLogs, getAllPaymentLogs, cancelUserSubscription, exportAllAccountsCsv, refundUserPayment, updateUserTrialPeriod } = require('../controllers/admin/admin.js');
 const { getSubscriptionData } = require('../controllers/admin/AdminSubscriptionController.js');
 const { getAdminEmailLogs } = require('../controllers/admin/AdminEmailLogsController.js');
 const { getAdminTicketMessages } = require('../controllers/admin/AdminTicketMessagesController.js');
@@ -19,6 +19,8 @@ router.get('/admin/accounts/export', superAdminAuth, exportAllAccountsCsv);
 router.post('/admin/login-as-user', superAdminAuth, loginSelectedUser);
 router.delete('/admin/users/:userId', superAdminAuth, deleteUser);
 router.post('/admin/users/:userId/cancel-subscription', superAdminAuth, cancelUserSubscription);
+router.post('/admin/users/:userId/refund', superAdminAuth, refundUserPayment);
+router.post('/admin/users/:userId/update-trial', superAdminAuth, updateUserTrialPeriod);
 
 // Payment logs routes for superAdmin (existing - used by manage-accounts and user logging)
 router.get('/admin/payment-logs', superAdminAuth, getAllPaymentLogs);

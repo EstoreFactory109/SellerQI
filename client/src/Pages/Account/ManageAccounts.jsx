@@ -20,6 +20,8 @@ import {
   X as XIcon,
   Ban,
   Download,
+  RefreshCw,
+  Clock,
 } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 
@@ -131,6 +133,16 @@ const ManageAccounts = () => {
   const [cancelError, setCancelError] = useState('');
   const [cancelConfirmUser, setCancelConfirmUser] = useState(null);
   const [cancelSuccess, setCancelSuccess] = useState('');
+  const [refundingUsers, setRefundingUsers] = useState(new Set());
+  const [refundError, setRefundError] = useState('');
+  const [refundConfirmUser, setRefundConfirmUser] = useState(null);
+  const [refundSuccess, setRefundSuccess] = useState('');
+  const [trialUser, setTrialUser] = useState(null);
+  const [trialDays, setTrialDays] = useState(7);
+  const [trialUnit, setTrialUnit] = useState('days');
+  const [trialLoading, setTrialLoading] = useState(false);
+  const [trialError, setTrialError] = useState('');
+  const [trialSuccess, setTrialSuccess] = useState('');
   const [openDropdownId, setOpenDropdownId] = useState(null);
   const [dropdownPosition, setDropdownPosition] = useState(null);
   const dropdownRef = useRef(null);
@@ -605,6 +617,88 @@ const ManageAccounts = () => {
     setCancelError('');
   };
 
+  const handleRefund = async (user) => {
+    try {
+      setRefundingUsers(prev => new Set([...prev, user._id]));
+      setRefundError('');
+
+      const response = await axiosInstance.post(`/app/auth/admin/users/${user._id}/refund`);
+
+      if (response.data.statusCode === 200) {
+        setRefundConfirmUser(null);
+        const data = response.data.data;
+        setRefundSuccess(`Refund of ${data.currency?.toUpperCase()} ${(data.amount / 100).toFixed(2)} issued for ${user.firstName} ${user.lastName} (${user.email}).`);
+        setTimeout(() => setRefundSuccess(''), 5000);
+      } else {
+        setRefundError(response.data.message || 'Failed to refund payment');
+      }
+    } catch (error) {
+      console.error('Error refunding payment:', error);
+      setRefundError(error.response?.data?.message || 'Failed to refund payment');
+    } finally {
+      setRefundingUsers(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(user._id);
+        return newSet;
+      });
+    }
+  };
+
+  const openRefundConfirm = (user) => {
+    setRefundConfirmUser(user);
+    setRefundError('');
+  };
+
+  const closeRefundConfirm = () => {
+    setRefundConfirmUser(null);
+    setRefundError('');
+  };
+
+  const handleUpdateTrial = async (user) => {
+    try {
+      setTrialLoading(true);
+      setTrialError('');
+
+      const days = trialUnit === 'months' ? trialDays * 30 : trialDays;
+
+      const response = await axiosInstance.post(`/app/auth/admin/users/${user._id}/update-trial`, { trialDays: days });
+
+      if (response.data.statusCode === 200) {
+        const data = response.data.data;
+        setUsers(prevUsers => prevUsers.map(u => {
+          if (u._id === user._id) {
+            return { ...u, subscriptionStatus: 'trialing', isInTrialPeriod: true };
+          }
+          return u;
+        }));
+        setTrialUser(null);
+        setTrialDays(7);
+        setTrialUnit('days');
+        setTrialSuccess(`Trial for ${user.firstName} ${user.lastName} set to ${days} days (ends ${new Date(data.trialEnd).toLocaleDateString()}).`);
+        setTimeout(() => setTrialSuccess(''), 5000);
+      } else {
+        setTrialError(response.data.message || 'Failed to update trial period');
+      }
+    } catch (error) {
+      console.error('Error updating trial:', error);
+      setTrialError(error.response?.data?.message || 'Failed to update trial period');
+    } finally {
+      setTrialLoading(false);
+    }
+  };
+
+  const openTrialModal = (user) => {
+    setTrialUser(user);
+    setTrialDays(7);
+    setTrialUnit('days');
+    setTrialError('');
+  };
+
+  const closeTrialModal = () => {
+    setTrialUser(null);
+    setTrialError('');
+  };
+
   // Check if user has an active subscription that can be cancelled
   const canCancelSubscription = (user) => {
     // User must have a PRO or AGENCY package, and be in active/trialing status
@@ -726,6 +820,184 @@ const ManageAccounts = () => {
           {cancelSuccess && (
             <div className="rounded-lg border border-[#252525] bg-[#161b22] p-4 mb-6">
               <p className="text-sm font-medium text-gray-300">✓ {cancelSuccess}</p>
+            </div>
+          )}
+
+          {/* Refund Error State */}
+          {refundError && (
+            <div className="rounded-lg border border-red-500/40 bg-red-500/5 p-4 mb-6">
+              <p className="text-sm font-medium text-red-300">Refund Error: {refundError}</p>
+              <button
+                onClick={() => setRefundError('')}
+                className="mt-2 px-3 py-2 text-sm rounded-lg bg-[#252525] text-gray-300 hover:bg-[#333] transition-colors"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {/* Refund Success State */}
+          {refundSuccess && (
+            <div className="rounded-lg border border-[#252525] bg-[#161b22] p-4 mb-6">
+              <p className="text-sm font-medium text-gray-300">✓ {refundSuccess}</p>
+            </div>
+          )}
+
+          {/* Trial Error State */}
+          {trialError && !trialUser && (
+            <div className="rounded-lg border border-red-500/40 bg-red-500/5 p-4 mb-6">
+              <p className="text-sm font-medium text-red-300">Trial Error: {trialError}</p>
+              <button
+                onClick={() => setTrialError('')}
+                className="mt-2 px-3 py-2 text-sm rounded-lg bg-[#252525] text-gray-300 hover:bg-[#333] transition-colors"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {/* Trial Success State */}
+          {trialSuccess && (
+            <div className="rounded-lg border border-[#252525] bg-[#161b22] p-4 mb-6">
+              <p className="text-sm font-medium text-gray-300">✓ {trialSuccess}</p>
+            </div>
+          )}
+
+          {/* Refund Confirmation Dialog */}
+          {refundConfirmUser && (
+            <div
+              className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+              onClick={closeRefundConfirm}
+            >
+              <div
+                className="bg-[#161b22] rounded-lg max-w-md w-full p-6 border border-[#30363d]"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-9 h-9 rounded-full bg-yellow-500/10 flex items-center justify-center">
+                    <RefreshCw className="w-4 h-4 text-yellow-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-semibold text-gray-100">Refund Payment</h3>
+                    <p className="text-xs text-gray-500">This will refund the last payment via Stripe</p>
+                  </div>
+                </div>
+                <div className="mb-5">
+                  <p className="text-sm text-gray-400 mb-2">Are you sure you want to refund the last payment for this user?</p>
+                  <div className="bg-[#0d1117] rounded-lg p-3 border border-[#30363d]">
+                    <p className="text-sm font-medium text-gray-200">{refundConfirmUser.firstName} {refundConfirmUser.lastName}</p>
+                    <p className="text-xs text-gray-500">{refundConfirmUser.email}</p>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={closeRefundConfirm}
+                    disabled={refundingUsers.has(refundConfirmUser._id)}
+                    className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-[#30363d] text-gray-300 hover:bg-[#21262d] transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleRefund(refundConfirmUser)}
+                    disabled={refundingUsers.has(refundConfirmUser._id)}
+                    className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      refundingUsers.has(refundConfirmUser._id)
+                        ? 'bg-[#333] text-gray-500 cursor-not-allowed'
+                        : 'bg-yellow-600 text-white hover:bg-yellow-500'
+                    }`}
+                  >
+                    {refundingUsers.has(refundConfirmUser._id) ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        Refunding...
+                      </span>
+                    ) : (
+                      'Refund Payment'
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Change Trial Period Modal */}
+          {trialUser && (
+            <div
+              className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+              onClick={closeTrialModal}
+            >
+              <div
+                className="bg-[#161b22] rounded-lg max-w-md w-full p-6 border border-[#30363d]"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-9 h-9 rounded-full bg-blue-500/10 flex items-center justify-center">
+                    <Clock className="w-4 h-4 text-blue-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-semibold text-gray-100">Change Trial Period</h3>
+                    <p className="text-xs text-gray-500">Set new trial duration from today</p>
+                  </div>
+                </div>
+                <div className="mb-4">
+                  <div className="bg-[#0d1117] rounded-lg p-3 border border-[#30363d] mb-4">
+                    <p className="text-sm font-medium text-gray-200">{trialUser.firstName} {trialUser.lastName}</p>
+                    <p className="text-xs text-gray-500">{trialUser.email}</p>
+                  </div>
+                  <label className="block text-sm text-gray-400 mb-2">Trial Period</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      min="1"
+                      max={trialUnit === 'months' ? 12 : 365}
+                      value={trialDays}
+                      onChange={(e) => setTrialDays(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="flex-1 px-3 py-2 rounded-lg bg-[#0d1117] border border-[#30363d] text-gray-200 text-sm focus:outline-none focus:border-blue-500"
+                    />
+                    <select
+                      value={trialUnit}
+                      onChange={(e) => setTrialUnit(e.target.value)}
+                      className="px-3 py-2 rounded-lg bg-[#0d1117] border border-[#30363d] text-gray-200 text-sm focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="days">Days</option>
+                      <option value="months">Months</option>
+                    </select>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">
+                    Trial will end on: {new Date(Date.now() + (trialUnit === 'months' ? trialDays * 30 : trialDays) * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+                  </p>
+                  {trialError && (
+                    <p className="text-xs text-red-400 mt-2">{trialError}</p>
+                  )}
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={closeTrialModal}
+                    disabled={trialLoading}
+                    className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-[#30363d] text-gray-300 hover:bg-[#21262d] transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleUpdateTrial(trialUser)}
+                    disabled={trialLoading}
+                    className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      trialLoading
+                        ? 'bg-[#333] text-gray-500 cursor-not-allowed'
+                        : 'bg-blue-600 text-white hover:bg-blue-500'
+                    }`}
+                  >
+                    {trialLoading ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        Updating...
+                      </span>
+                    ) : (
+                      'Update Trial'
+                    )}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -921,6 +1193,39 @@ const ManageAccounts = () => {
                       <Ban className="w-3.5 h-3.5" />
                     )}
                     Cancel Sub
+                  </button>
+                )}
+                {canCancel && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenDropdownId(null);
+                      setDropdownPosition(null);
+                      openRefundConfirm(user);
+                    }}
+                    disabled={refundingUsers.has(user._id)}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-yellow-500 hover:bg-[#252525] hover:text-yellow-400 disabled:opacity-50"
+                  >
+                    {refundingUsers.has(user._id) ? (
+                      <div className="w-3 h-3 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-3.5 h-3.5" />
+                    )}
+                    Refund
+                  </button>
+                )}
+                {canCancel && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenDropdownId(null);
+                      setDropdownPosition(null);
+                      openTrialModal(user);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-blue-500 hover:bg-[#252525] hover:text-blue-400"
+                  >
+                    <Clock className="w-3.5 h-3.5" />
+                    Change Trial
                   </button>
                 )}
                 <button

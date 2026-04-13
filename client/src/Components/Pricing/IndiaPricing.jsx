@@ -68,9 +68,9 @@ export default function IndiaPricing({ loading, handleFreeTrial, handleSubscribe
                   </span>
                 </div>
                 <div className="mb-6 pt-2">
-                  <div className="text-2xl line-through text-gray-500 mb-2">₹8,999/month</div>
+                  <div className="text-2xl line-through text-gray-500 mb-2">$99/month</div>
                   <div className="flex items-baseline justify-center gap-1 flex-wrap">
-                    <span className="text-5xl md:text-6xl font-extrabold bg-gradient-to-r from-blue-400 to-blue-300 bg-clip-text text-transparent">₹1,999</span>
+                    <span className="text-5xl md:text-6xl font-extrabold bg-gradient-to-r from-blue-400 to-blue-300 bg-clip-text text-transparent">$21</span>
                     <span className="text-xl text-gray-400">/month</span>
                   </div>
                   <div className="text-sm text-gray-400 mt-2">For Indian registered sellers</div>
@@ -332,7 +332,7 @@ export default function IndiaPricing({ loading, handleFreeTrial, handleSubscribe
             ) : (
               <>
                 <Sparkles className="w-5 h-5" />
-                Start 7-Day Free Trial — ₹1,999/month after
+                Start 7-Day Free Trial — $21/month after
               </>
             )}
           </motion.button>

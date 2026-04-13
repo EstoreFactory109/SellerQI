@@ -22,6 +22,7 @@ const { OAuth2Client } = require('google-auth-library');
 const { getHttpsCookieOptions } = require('../../utils/cookieConfig.js');
 const sendVerificationCode = require('../../Services/SMS/sendSMS.js');
 const subscriptionVerificationService = require('../../Services/User/SubscriptionVerificationService.js');
+const { sendRegisteredEmail } = require('../../Services/Email/SendEmailOnRegistered.js');
 
 const registerUser = asyncHandler(async (req, res) => {
     const { firstname, lastname, phone, email, password, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate, intendedPackage, agencyName } = req.body;
@@ -271,6 +272,28 @@ const verifyUser = asyncHandler(async (req, res) => {
     } catch (error) {
         logger.error(`Failed to initialize scheduling for user ${verifyUser.id}:`, error);
         // Don't fail the verification process if scheduling fails
+    }
+
+    // Send admin registration email right after OTP verification
+    // Seller ID may not exist yet at this stage (before SP-API connect), so mark as pending.
+    try {
+        const verifiedUser = await UserModel.findById(verifyUser.id).select('firstName lastName phone email');
+        if (verifiedUser) {
+            const sendEmailResult = await sendRegisteredEmail(
+                verifyUser.id,
+                verifiedUser.firstName,
+                verifiedUser.lastName,
+                verifiedUser.phone,
+                verifiedUser.email,
+                verifyUser.id
+            );
+            if (!sendEmailResult) {
+                logger.warn(`Failed to send post-verification registration email for user ${verifyUser.id}`);
+            }
+        }
+    } catch (emailError) {
+        // Non-blocking; verification already succeeded
+        logger.error(`Error sending post-verification registration email (non-critical): ${emailError.message}`);
     }
 
     const options = getHttpsCookieOptions();

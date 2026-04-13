@@ -9,7 +9,6 @@ const logger = require('../../utils/Logger.js');
 const { UserSchedulingService } = require('../../Services/BackgroundJobs/UserSchedulingService.js');
 const { v4: uuidv4 } = require('uuid');
 const { getHttpCookieOptions } = require('../../utils/cookieConfig.js');
-const { sendRegisteredEmail } = require('../../Services/Email/SendEmailOnRegistered.js');
 const {
     clearAdsRefreshTokenForAccount,
     clearAllRefreshTokensForAccount
@@ -287,23 +286,6 @@ const generateSPAPITokens = asyncHandler(async (req, res) => {
         sellerAccount.selling_partner_id = sellingPartnerId;
 
         await sellerCentral.save();
-
-        // Send registration email in background - don't block the main flow
-        try {
-            const getUser = await User.findById(userId).select("firstName lastName phone email");
-
-            if(getUser){
-                const sendEmail = await sendRegisteredEmail(userId, getUser.firstName, getUser.lastName, getUser.phone, getUser.email, sellingPartnerId);
-                if(!sendEmail){
-                    logger.warn("Failed to send registration email, but token was saved successfully");
-                }
-            } else {
-                logger.warn("User not found for sending registration email, but token was saved successfully");
-            }
-        } catch (emailError) {
-            // Log email error but don't fail the main flow - token is already saved
-            logger.error(`Error sending registration email (non-critical): ${emailError.message}`);
-        }
 
         return res.status(200).json(new ApiResponse(200, sellerCentral, "Tokens generated successfully"));
 
