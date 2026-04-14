@@ -423,14 +423,19 @@ async function getCustomRangeData(userId, country, region, startDateStr, endDate
     const asinDateMap = new Map();
 
     for (const metrics of allMetrics) {
-        // Check if document's date range overlaps with requested range
-        const docStartDate = new Date(metrics.dateRange?.startDate);
-        const docEndDate = new Date(metrics.dateRange?.endDate);
-        docStartDate.setHours(0, 0, 0, 0);
-        docEndDate.setHours(23, 59, 59, 999);
+        // Check if document's date range overlaps with requested range.
+        // If dateRange is missing/incomplete, assume the document may contain
+        // relevant data — the per-item date filter below will still guard correctness.
+        let docOverlaps = true;
+        if (metrics.dateRange?.startDate && metrics.dateRange?.endDate) {
+            const docStartDate = new Date(metrics.dateRange.startDate);
+            const docEndDate = new Date(metrics.dateRange.endDate);
+            docStartDate.setHours(0, 0, 0, 0);
+            docEndDate.setHours(23, 59, 59, 999);
+            docOverlaps = startDate <= docEndDate && endDate >= docStartDate;
+        }
 
-        // Check for overlap
-        if (startDate <= docEndDate && endDate >= docStartDate) {
+        if (docOverlaps) {
             // Get currency code from first document
             if (!currencyCode && metrics.totalSales?.currencyCode) {
                 currencyCode = metrics.totalSales.currencyCode;
@@ -565,17 +570,19 @@ async function getCustomRangeData(userId, country, region, startDateStr, endDate
     if (totalPpcSpent === 0) {
         // Calculate proportional PPC from economics metrics as fallback
         for (const metrics of allMetrics) {
-            const docStartDate = new Date(metrics.dateRange?.startDate);
-            const docEndDate = new Date(metrics.dateRange?.endDate);
-            docStartDate.setHours(0, 0, 0, 0);
-            docEndDate.setHours(23, 59, 59, 999);
+            if (metrics.dateRange?.startDate && metrics.dateRange?.endDate) {
+                const docStartDate = new Date(metrics.dateRange.startDate);
+                const docEndDate = new Date(metrics.dateRange.endDate);
+                docStartDate.setHours(0, 0, 0, 0);
+                docEndDate.setHours(23, 59, 59, 999);
 
-            if (startDate <= docEndDate && endDate >= docStartDate) {
-                const overlapDays = calculateOverlapDays(startDate, endDate, docStartDate, docEndDate);
-                const docTotalDays = Math.ceil((docEndDate - docStartDate + 1) / (1000 * 60 * 60 * 24));
-                if (docTotalDays > 0) {
-                    const proportion = overlapDays / docTotalDays;
-                    totalPpcSpent += (metrics.ppcSpent?.amount || 0) * proportion;
+                if (startDate <= docEndDate && endDate >= docStartDate) {
+                    const overlapDays = calculateOverlapDays(startDate, endDate, docStartDate, docEndDate);
+                    const docTotalDays = Math.ceil((docEndDate - docStartDate + 1) / (1000 * 60 * 60 * 24));
+                    if (docTotalDays > 0) {
+                        const proportion = overlapDays / docTotalDays;
+                        totalPpcSpent += (metrics.ppcSpent?.amount || 0) * proportion;
+                    }
                 }
             }
         }
@@ -586,15 +593,19 @@ async function getCustomRangeData(userId, country, region, startDateStr, endDate
     const processedChartDates = new Set();
     
     for (const metrics of allMetrics) {
-        const docStartDate = new Date(metrics.dateRange?.startDate);
-        const docEndDate = new Date(metrics.dateRange?.endDate);
-        docStartDate.setHours(0, 0, 0, 0);
-        docEndDate.setHours(23, 59, 59, 999);
+        // Same overlap guard as above — missing dateRange means "assume overlap"
+        let chartDocOverlaps = true;
+        if (metrics.dateRange?.startDate && metrics.dateRange?.endDate) {
+            const docStartDate = new Date(metrics.dateRange.startDate);
+            const docEndDate = new Date(metrics.dateRange.endDate);
+            docStartDate.setHours(0, 0, 0, 0);
+            docEndDate.setHours(23, 59, 59, 999);
+            chartDocOverlaps = startDate <= docEndDate && endDate >= docStartDate;
+        }
 
-        // Check for overlap
-        if (startDate <= docEndDate && endDate >= docStartDate) {
+        if (chartDocOverlaps) {
             const datewiseSales = metrics.datewiseSales || [];
-            
+
             // Process sales - use existing grossProfit from datewiseSales
             // The grossProfit in datewiseSales is already calculated correctly (netSales - cogs)
             datewiseSales.forEach(item => {

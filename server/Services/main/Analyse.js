@@ -755,7 +755,7 @@ class AnalyseService {
                         // Use actual data from that day
                         asinDataMap[asin].data.push({
                             date: dateForData.toISOString(),
-                            formattedDate: this.formatDate(dateForData),
+                            formattedDate: this.formatDateDisplay(dateForData),
                             salesIn7Days: parseFloat(productData['7daySales'] || productData.salesIn7Days || 0),
                             salesIn14Days: parseFloat(productData['14daySales'] || productData.salesIn14Days || 0),
                             salesIn30Days: parseFloat(productData['30daySales'] || productData.salesIn30Days || 0),
@@ -773,7 +773,7 @@ class AnalyseService {
                         // No data for this day, add zeros
                         asinDataMap[asin].data.push({
                             date: dateForData.toISOString(),
-                            formattedDate: this.formatDate(dateForData),
+                            formattedDate: this.formatDateDisplay(dateForData),
                             salesIn7Days: 0,
                             salesIn14Days: 0,
                             salesIn30Days: 0,
@@ -809,11 +809,24 @@ class AnalyseService {
     /**
      * Format date helper
      */
+    /**
+     * YYYY-MM-DD format — used for startDate/endDate in API responses.
+     * Must stay machine-readable so the frontend can pass it back as query params.
+     */
     static formatDate(date) {
         const dte = new Date(date);
-        const Day = String(dte.getDate()).padStart(2, '0');
-        const Month = dte.toLocaleString('default', { month: 'short' });
-        return `${Day} ${Month}`;
+        const year = dte.getFullYear();
+        const month = String(dte.getMonth() + 1).padStart(2, '0');
+        const day = String(dte.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
+    /** Human-readable label for chart axes / tooltips (e.g. "06 Apr"). */
+    static formatDateDisplay(date) {
+        const dte = new Date(date);
+        const day = String(dte.getDate()).padStart(2, '0');
+        const month = dte.toLocaleString('default', { month: 'short' });
+        return `${day} ${month}`;
     }
 
     /**
@@ -1334,8 +1347,8 @@ class AnalyseService {
             }
         }
 
-        // For custom date ranges, use OrderAndRevenue model to calculate gross sales
-        if (periodType === 'custom' || periodType === 'last7' || periodType === 'thisMonth' || periodType === 'lastMonth') {
+        // For any explicit date range, use EconomicsMetrics datewise data to calculate totals
+        if (periodType === 'custom' || periodType === 'last7' || periodType === 'last14' || periodType === 'last30' || periodType === 'thisMonth' || periodType === 'lastMonth') {
             return this.processCustomDateRange(userId, country, region, start, end, daysDifference);
         }
 
