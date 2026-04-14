@@ -62,6 +62,71 @@ const mkPagination = (page, limit, totalItems) => {
   };
 };
 
+const DEMO_PROFITABILITY_SERIES = [
+  { date: '2026-02-17', totalSales: 3510, totalExpenses: 1520, ppcSpend: 590 },
+  { date: '2026-02-18', totalSales: 4680, totalExpenses: 1980, ppcSpend: 840 },
+  { date: '2026-02-19', totalSales: 4020, totalExpenses: 1725, ppcSpend: 690 },
+  { date: '2026-02-20', totalSales: 3895, totalExpenses: 1680, ppcSpend: 660 },
+  { date: '2026-02-21', totalSales: 2780, totalExpenses: 1325, ppcSpend: 420 },
+  { date: '2026-02-22', totalSales: 0, totalExpenses: 0, ppcSpend: 0 },
+  { date: '2026-02-23', totalSales: 4910, totalExpenses: 2090, ppcSpend: 905 },
+  { date: '2026-02-24', totalSales: 4345, totalExpenses: 1840, ppcSpend: 735 },
+  { date: '2026-02-25', totalSales: 5230, totalExpenses: 2240, ppcSpend: 980 },
+  { date: '2026-02-26', totalSales: 4090, totalExpenses: 1755, ppcSpend: 700 },
+  { date: '2026-02-27', totalSales: 4625, totalExpenses: 1970, ppcSpend: 810 },
+  { date: '2026-02-28', totalSales: 3055, totalExpenses: 1430, ppcSpend: 470 },
+  { date: '2026-03-01', totalSales: 0, totalExpenses: 0, ppcSpend: 0 },
+  { date: '2026-03-02', totalSales: 5385, totalExpenses: 2310, ppcSpend: 1025 },
+  { date: '2026-03-03', totalSales: 4410, totalExpenses: 1865, ppcSpend: 750 },
+  { date: '2026-03-04', totalSales: 4760, totalExpenses: 2030, ppcSpend: 845 },
+  { date: '2026-03-05', totalSales: 3720, totalExpenses: 1605, ppcSpend: 620 },
+  { date: '2026-03-06', totalSales: 4580, totalExpenses: 1960, ppcSpend: 805 },
+  { date: '2026-03-07', totalSales: 3110, totalExpenses: 1420, ppcSpend: 495 },
+  { date: '2026-03-08', totalSales: 0, totalExpenses: 0, ppcSpend: 0 },
+  { date: '2026-03-09', totalSales: 4890, totalExpenses: 2095, ppcSpend: 890 },
+  { date: '2026-03-10', totalSales: 4270, totalExpenses: 1805, ppcSpend: 710 },
+  { date: '2026-03-11', totalSales: 5340, totalExpenses: 2280, ppcSpend: 980 },
+  { date: '2026-03-12', totalSales: 3985, totalExpenses: 1710, ppcSpend: 655 },
+  { date: '2026-03-13', totalSales: 4715, totalExpenses: 2010, ppcSpend: 820 },
+  { date: '2026-03-14', totalSales: 2860, totalExpenses: 1365, ppcSpend: 430 },
+  { date: '2026-03-15', totalSales: 5160, totalExpenses: 2215, ppcSpend: 935 },
+  { date: '2026-03-16', totalSales: 0, totalExpenses: 0, ppcSpend: 0 },
+  { date: '2026-03-17', totalSales: 5470, totalExpenses: 2360, ppcSpend: 1015 },
+  { date: '2026-03-18', totalSales: 4395, totalExpenses: 1840, ppcSpend: 730 }
+];
+
+const parseDateKey = (v) => {
+  if (!v) return null;
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+const getSeriesForCalendar = ({ startDate, endDate, periodType } = {}) => {
+  const all = DEMO_PROFITABILITY_SERIES.slice();
+  if (!all.length) return [];
+
+  const mode = String(periodType || 'last30').toLowerCase();
+  // Preset modes should be deterministic and distinct regardless of passed range.
+  if (mode === 'last7') return all.slice(-7);
+  if (mode === 'last14') return all.slice(-14);
+
+  const useRange = Boolean(startDate && endDate);
+  if (useRange) {
+    const s = parseDateKey(startDate);
+    const e = parseDateKey(endDate);
+    const ranged = all.filter((row) => row.date >= s && row.date <= e);
+    if (ranged.length) return ranged;
+  }
+
+  return all.slice(-30);
+};
+
+const toSalesOnlyRows = (rows) => rows.map((row) => ({
+  interval: `${row.date}T00:00:00.000Z--${row.date}T23:59:59.999Z`,
+  TotalAmount: Number(row.totalSales) || 0
+}));
+
 const PPC_DATE_WISE_METRICS = [
   // Curvy day-to-day fluctuations so line/area charts look less linear.
   { date: '2026-03-10', spend: 78, sales: 155, impressions: 9100, clicks: 430 },
@@ -276,6 +341,34 @@ const getDemoErrorCountsByCategory = () => {
   return { rankingTotal, conversionTotal, inventoryTotal };
 };
 
+const getDemoProductLifecycleStatus = (product, idx) => {
+  if ((Number(product?.quantity) || 0) <= 0) return 'Zero Availability';
+  if (idx % 9 === 0 && idx > 0) return 'Inactive';
+  if (idx % 7 === 0 && idx > 0) return 'Incomplete';
+  return 'Active';
+};
+
+const mkYourProductsBaseRecord = (product, idx) => {
+  const status = getDemoProductLifecycleStatus(product, idx);
+  const starRatings = Math.max(3.1, Math.min(4.8, 4.6 - (idx % 8) * 0.18));
+  return {
+    asin: product.asin,
+    sku: product.sku,
+    title: product.name,
+    name: product.name,
+    status,
+    price: Number(product.price) || 0,
+    quantity: Number(product.quantity) || 0,
+    issueCount: getDemoTotalErrorsForAsin(product?.asin),
+    hasVideo: idx % 3 !== 1,
+    has_b2b_pricing: idx % 4 !== 0,
+    numRatings: 180 + idx * 73,
+    starRatings,
+    hasAPlus: idx % 5 !== 0,
+    isTargetedInAds: idx % 4 !== 1
+  };
+};
+
 const mkBuyBoxDetails = (asin, sku, title) => ({
   asin,
   sku,
@@ -286,21 +379,49 @@ const mkBuyBoxDetails = (asin, sku, title) => ({
 });
 
 const mkPPCMetricKeywords = () => {
-  const wastedRows = (DEMO_PPC?.tabs?.wastedSpend?.rows || []).map((r) => ({
+  const baseWasted = (DEMO_PPC?.tabs?.wastedSpend?.rows || []).map((r) => ({
     ...r,
     matchType: r.matchType || 'EXACT',
     keywordId: r.keywordId || `kw-w-${r.keyword}-${Math.random().toString(16).slice(2, 6)}`
   }));
-  const topRows = (DEMO_PPC?.tabs?.topPerforming?.rows || []).map((r) => ({
+  const extraWasted = [
+    { keywordId: 'kw-w-3', keyword: 'standing desk mat', campaignName: 'SP - Office', campaignId: 'c4', adGroupName: 'AG - Broad', adGroupId: 'ag4', sales: 0, spend: 47.2, matchType: 'BROAD' },
+    { keywordId: 'kw-w-4', keyword: 'laptop riser', campaignName: 'SP - Office', campaignId: 'c4', adGroupName: 'AG - Phrase', adGroupId: 'ag5', sales: 0, spend: 32.9, matchType: 'PHRASE' },
+    { keywordId: 'kw-w-5', keyword: 'back posture support', campaignName: 'SD - Posture', campaignId: 'c5', adGroupName: 'AG - SD', adGroupId: 'ag6', sales: 0, spend: 28.5, matchType: 'EXACT' },
+    { keywordId: 'kw-w-6', keyword: 'drawer organizer tray', campaignName: 'SP - Home', campaignId: 'c6', adGroupName: 'AG - Broad', adGroupId: 'ag7', sales: 0, spend: 26.7, matchType: 'BROAD' },
+    { keywordId: 'kw-w-7', keyword: 'meal prep container', campaignName: 'SP - Kitchen', campaignId: 'c7', adGroupName: 'AG - Exact', adGroupId: 'ag8', sales: 0, spend: 35.4, matchType: 'EXACT' },
+    { keywordId: 'kw-w-8', keyword: 'travel neck support', campaignName: 'SP - Travel', campaignId: 'c8', adGroupName: 'AG - Phrase', adGroupId: 'ag9', sales: 0, spend: 30.3, matchType: 'PHRASE' }
+  ];
+  const wastedRows = [...baseWasted, ...extraWasted];
+
+  const baseTop = (DEMO_PPC?.tabs?.topPerforming?.rows || []).map((r) => ({
     ...r,
     keywordId: r.keywordId || `kw-t-${r.keyword}-${Math.random().toString(16).slice(2, 6)}`,
     impressions: r.impressions || 5600
   }));
-  const zeroSalesRows = (DEMO_PPC?.tabs?.searchTermsZeroSales?.rows || []).map((r) => ({
+  const extraTop = [
+    { keywordId: 'kw-t-2', keyword: 'ergonomic mouse wireless', campaignName: 'SP - Top', campaignId: 'c1', adGroupName: 'AG - Exact', adGroupId: 'ag1', sales: 312.4, spend: 52.1, acos: 16.7, impressions: 7400 },
+    { keywordId: 'kw-t-3', keyword: 'desk lamp dimmable', campaignName: 'SD - Lux', campaignId: 'c2', adGroupName: 'AG - SD', adGroupId: 'ag3', sales: 286.7, spend: 49.3, acos: 17.2, impressions: 6800 },
+    { keywordId: 'kw-t-4', keyword: 'insulated bottle 1l', campaignName: 'SP - Fitness', campaignId: 'c9', adGroupName: 'AG - Exact', adGroupId: 'ag10', sales: 358.9, spend: 63.5, acos: 17.7, impressions: 9200 },
+    { keywordId: 'kw-t-5', keyword: 'vacuum storage bags', campaignName: 'SP - Home', campaignId: 'c6', adGroupName: 'AG - Phrase', adGroupId: 'ag11', sales: 271.3, spend: 46.9, acos: 17.3, impressions: 6100 },
+    { keywordId: 'kw-t-6', keyword: 'wrist rest keyboard', campaignName: 'SP - Office', campaignId: 'c4', adGroupName: 'AG - Exact', adGroupId: 'ag12', sales: 224.6, spend: 39.8, acos: 17.7, impressions: 5700 },
+    { keywordId: 'kw-t-7', keyword: 'lunch tote insulated', campaignName: 'SP - Kitchen', campaignId: 'c7', adGroupName: 'AG - Broad', adGroupId: 'ag13', sales: 248.2, spend: 43.2, acos: 17.4, impressions: 5900 }
+  ];
+  const topRows = [...baseTop, ...extraTop];
+
+  const baseZeroSales = (DEMO_PPC?.tabs?.searchTermsZeroSales?.rows || []).map((r) => ({
     ...r,
     keywordId: r.keywordId || `kw-z-${r.searchTerm}-${Math.random().toString(16).slice(2, 6)}`,
     adGroupName: r.adGroupName || 'AG - Demo'
   }));
+  const extraZeroSales = [
+    { searchTerm: 'cheap desk organizer', campaignId: 'c6', campaignName: 'SP - Home', keyword: 'desk organizer', keywordId: 'kw-z-2', adGroupName: 'AG - Broad', clicks: 24, spend: 26.4 },
+    { searchTerm: 'pillow for flights', campaignId: 'c8', campaignName: 'SP - Travel', keyword: 'travel pillow', keywordId: 'kw-z-3', adGroupName: 'AG - Phrase', clicks: 21, spend: 24.8 },
+    { searchTerm: 'book light kids', campaignId: 'c10', campaignName: 'SP - Reading', keyword: 'book lamp', keywordId: 'kw-z-4', adGroupName: 'AG - Broad', clicks: 16, spend: 17.9 },
+    { searchTerm: 'water bottle with straw lid', campaignId: 'c9', campaignName: 'SP - Fitness', keyword: 'water bottle', keywordId: 'kw-z-5', adGroupName: 'AG - Broad', clicks: 19, spend: 23.6 },
+    { searchTerm: 'food clip bag sealer', campaignId: 'c7', campaignName: 'SP - Kitchen', keyword: 'food clips', keywordId: 'kw-z-6', adGroupName: 'AG - Exact', clicks: 17, spend: 20.1 }
+  ];
+  const zeroSalesRows = [...baseZeroSales, ...extraZeroSales];
   return { wastedRows, topRows, zeroSalesRows };
 };
 
@@ -309,20 +430,57 @@ const { wastedRows: DEMO_WASTED_SPEND_ROWS, topRows: DEMO_TOP_KEYWORDS_ROWS, zer
 const mkHighAcosRows = () => ([
   { campaignName: 'SP - Top', spend: 420.5, sales: 820.0, acos: 51.2 },
   { campaignName: 'SD - Lux', spend: 360.2, sales: 695.0, acos: 51.8 },
-  { campaignName: 'SP - Others', spend: 285.1, sales: 510.0, acos: 55.9 }
+  { campaignName: 'SP - Others', spend: 285.1, sales: 510.0, acos: 55.9 },
+  { campaignName: 'SP - Office', spend: 310.8, sales: 548.0, acos: 56.7 },
+  { campaignName: 'SP - Kitchen', spend: 276.4, sales: 487.0, acos: 56.8 },
+  { campaignName: 'SD - Retarget', spend: 240.6, sales: 422.0, acos: 57.0 },
+  { campaignName: 'SP - Travel', spend: 198.9, sales: 345.0, acos: 57.7 },
+  { campaignName: 'SP - Reading', spend: 172.3, sales: 296.0, acos: 58.2 },
+  { campaignName: 'SP - Fitness', spend: 334.5, sales: 573.0, acos: 58.4 },
+  { campaignName: 'SD - Competitor', spend: 211.0, sales: 358.0, acos: 58.9 }
 ]);
 
 const mkNoNegativesRows = () => ([
   { campaignName: 'SP - Top', adGroupName: 'AG - Exact', negatives: 0 },
   { campaignName: 'SP - Others', adGroupName: 'AG - Broad', negatives: 0 },
-  { campaignName: 'SD - Lux', adGroupName: 'AG - SD', negatives: 0 }
+  { campaignName: 'SD - Lux', adGroupName: 'AG - SD', negatives: 0 },
+  { campaignName: 'SP - Office', adGroupName: 'AG - Phrase', negatives: 0 },
+  { campaignName: 'SP - Home', adGroupName: 'AG - Broad', negatives: 0 },
+  { campaignName: 'SP - Kitchen', adGroupName: 'AG - Exact', negatives: 0 },
+  { campaignName: 'SP - Travel', adGroupName: 'AG - Phrase', negatives: 0 },
+  { campaignName: 'SP - Fitness', adGroupName: 'AG - Broad', negatives: 0 },
+  { campaignName: 'SD - Competitor', adGroupName: 'AG - SD', negatives: 0 },
+  { campaignName: 'SP - Reading', adGroupName: 'AG - Exact', negatives: 0 }
 ]);
 
 const mkAutoInsightsRows = () => ([
   { searchTerm: 'wireless mouse', campaignName: 'SP - Top', adGroupName: 'AG - Exact', sales: 180.0, acos: 24.1 },
   { searchTerm: 'desk lamp', campaignName: 'SD - Lux', adGroupName: 'AG - SD', sales: 250.0, acos: 18.4 },
-  { searchTerm: 'stainless mug 500ml', campaignName: 'SP - Others', adGroupName: 'AG - Demo', sales: 0.01, acos: 300.0 }
+  { searchTerm: 'stainless mug 500ml', campaignName: 'SP - Others', adGroupName: 'AG - Demo', sales: 0.01, acos: 300.0 },
+  { searchTerm: 'ergonomic office mouse', campaignName: 'SP - Office', adGroupName: 'AG - Exact', sales: 212.4, acos: 20.5 },
+  { searchTerm: 'under cabinet lamp', campaignName: 'SP - Home', adGroupName: 'AG - Phrase', sales: 194.8, acos: 21.7 },
+  { searchTerm: 'vacuum bag set', campaignName: 'SP - Home', adGroupName: 'AG - Broad', sales: 229.3, acos: 19.6 },
+  { searchTerm: 'travel neck pillow', campaignName: 'SP - Travel', adGroupName: 'AG - Phrase', sales: 161.7, acos: 23.9 },
+  { searchTerm: 'book clip light', campaignName: 'SP - Reading', adGroupName: 'AG - Exact', sales: 139.2, acos: 22.8 },
+  { searchTerm: 'running belt hydration', campaignName: 'SP - Fitness', adGroupName: 'AG - Broad', sales: 176.5, acos: 24.4 },
+  { searchTerm: 'food bag clips', campaignName: 'SP - Kitchen', adGroupName: 'AG - Exact', sales: 208.1, acos: 20.2 }
 ]);
+
+const getDemoProfitabilityErrorTotal = () => {
+  const rows = DEMO_PROFITABILITY?.tableRows || [];
+  return rows.filter((r) => String(r?.status || '').toLowerCase() !== 'good').length;
+};
+
+const getDemoSponsoredAdsErrorTotal = () => {
+  return (
+    (mkHighAcosRows().length || 0) +
+    (DEMO_WASTED_SPEND_ROWS.length || 0) +
+    (mkNoNegativesRows().length || 0) +
+    (DEMO_ZERO_SALES_ROWS.length || 0)
+  );
+};
+
+const getDemoAccountErrorTotal = () => 10;
 
 const isDemoPath = () => {
   if (typeof window === 'undefined') return false;
@@ -413,6 +571,67 @@ export const initDemoAxiosMock = () => {
     const method = (config.method || 'get').toLowerCase();
     const pathname = extractPathname(config.url);
     const query = extractQuery(config.url);
+    const params = new URLSearchParams(query);
+    // Calendar default fetch (used by Calendar "Last 30 days" apply)
+    if (method === 'get' && pathname === '/api/pagewise/dashboard') {
+      const periodRows = getSeriesForCalendar({ periodType: 'last30' });
+      const startDate = periodRows[0]?.date || DEMO_PROFITABILITY?.dateRange?.startDate || '2026-02-17';
+      const endDate = periodRows[periodRows.length - 1]?.date || DEMO_PROFITABILITY?.dateRange?.endDate || '2026-03-18';
+      const totalSales = periodRows.reduce((s, r) => s + (Number(r.totalSales) || 0), 0);
+      return makeNestedDataResponse(config, {
+        dashboardData: {
+          ...DEMO_DASHBOARD_SUMMARY,
+          startDate,
+          endDate,
+          calendarMode: 'default',
+          TotalWeeklySale: totalSales,
+          TotalSales: toSalesOnlyRows(periodRows),
+          GetOrderData: []
+        }
+      });
+    }
+
+    // Calendar custom/last7/last14 fetch
+    if (method === 'get' && pathname === '/app/analyse/getDataFromDate') {
+      const periodType = params.get('periodType') || 'custom';
+      const startDate = params.get('startDate');
+      const endDate = params.get('endDate');
+      const rows = getSeriesForCalendar({ startDate, endDate, periodType });
+      const salesRows = toSalesOnlyRows(rows);
+      const totalSales = rows.reduce((s, r) => s + (Number(r.totalSales) || 0), 0);
+      const resolvedStartDate = rows[0]?.date || startDate || DEMO_PROFITABILITY?.dateRange?.startDate || '2026-02-17';
+      const resolvedEndDate =
+        rows[rows.length - 1]?.date || endDate || DEMO_PROFITABILITY?.dateRange?.endDate || '2026-03-18';
+
+      // Keep non-sales dashboard cards static in demo mode.
+      const tableRows = DEMO_PROFITABILITY?.tableRows || [];
+      const totalFees = tableRows.reduce((sum, r) => sum + (Number(r.fees) || 0), 0);
+      const fbaFees = totalFees * 0.45;
+      const otherAmazonFees = totalFees - fbaFees;
+      const staticTotalSales = Number(DEMO_PROFITABILITY?.summary?.totalSales) || 0;
+      const staticTotalPpc = Number(DEMO_PPC?.kpiSummary?.totalSpend) || 0;
+      const staticGrossProfit = Number(DEMO_PROFITABILITY?.summary?.totalGrossProfit) || 0;
+      return makeRawResponse(config, {
+        data: {
+          startDate: resolvedStartDate,
+          endDate: resolvedEndDate,
+          FinanceData: {
+            Gross_Profit: staticGrossProfit,
+            ProductAdsPayment: staticTotalPpc,
+            FBA_Fees: fbaFees,
+            Other_Amazon_Fees: otherAmazonFees,
+            Refunds: staticTotalSales * 0.03
+          },
+          reimburstmentData: DEMO_REIMBURSEMENT?.summary || {},
+          TotalSales: {
+            totalSales,
+            dateWiseSales: salesRows
+          },
+          GetOrderData: []
+        }
+      });
+    }
+
 
     // Navbar
     if (method === 'get' && pathname === '/api/pagewise/navbar') {
@@ -427,6 +646,53 @@ export const initDemoAxiosMock = () => {
     // Alerts (TopNav dropdown)
     if (method === 'get' && pathname === '/api/alerts/latest') {
       return makeNestedDataResponse(config, { alerts: notificationState });
+    }
+
+    // Notifications listing page
+    if (method === 'get' && pathname === '/api/alerts') {
+      const limit = Math.max(1, Number(params.get('limit') || 20));
+      const skip = Math.max(0, Number(params.get('skip') || 0));
+      const sourceNotifications = Array.isArray(notificationState) && notificationState.length
+        ? notificationState
+        : (Array.isArray(DEMO_NOTIFICATIONS) ? DEMO_NOTIFICATIONS : []);
+      const sorted = [...sourceNotifications].sort((a, b) => {
+        const aTime = new Date(a?.timestamp || a?.createdAt || 0).getTime();
+        const bTime = new Date(b?.timestamp || b?.createdAt || 0).getTime();
+        return bTime - aTime;
+      });
+      const page = sorted.slice(skip, skip + limit);
+      const alerts = page.map((n) => ({
+        _id: n.alertId || n.id,
+        alertType: n.alertType || (n.type === 'analysis_complete' ? 'Analysis' : 'Alert'),
+        message: n.message || n.title || '',
+        createdAt: n.timestamp || n.createdAt || new Date().toISOString(),
+        viewed: Boolean(n.viewed || n.isRead),
+        products: Array.isArray(n.products) ? n.products : [],
+        metadata: n.metadata || {}
+      }));
+      return makeNestedDataResponse(config, {
+        alerts,
+        total: sorted.length
+      });
+    }
+
+    // Notification details page
+    if (method === 'get' && /^\/api\/alerts\/([^/]+)$/.test(pathname)) {
+      const [, alertId] = pathname.match(/^\/api\/alerts\/([^/]+)$/);
+      const hit = notificationState.find((n) => String(n.alertId || n.id) === String(alertId));
+      if (!hit) {
+        return makeErrorResponse(config, 404, 'Notification not found');
+      }
+      return makeNestedDataResponse(config, {
+        _id: hit.alertId || hit.id,
+        alertType: hit.alertType || 'Alert',
+        message: hit.message || hit.title || '',
+        createdAt: hit.timestamp || hit.createdAt || new Date().toISOString(),
+        viewed: Boolean(hit.viewed || hit.isRead),
+        products: Array.isArray(hit.products) ? hit.products : [],
+        conversionRates: Array.isArray(hit.conversionRates) ? hit.conversionRates : [],
+        metadata: hit.metadata || {}
+      });
     }
 
     if (method === 'patch' && /^\/api\/alerts\/([^/]+)\/viewed$/.test(pathname)) {
@@ -457,14 +723,12 @@ export const initDemoAxiosMock = () => {
 
     // Dashboard phases (multi-phase parallel fetch)
     if (method === 'get' && pathname === '/api/pagewise/dashboard-phase1') {
-      const top = DEMO_DASHBOARD_SUMMARY?.topIssues || [];
-
       const { rankingTotal, conversionTotal, inventoryTotal } = getDemoErrorCountsByCategory();
 
       const totalIssuesCore = rankingTotal + conversionTotal + inventoryTotal;
-      const totalProfitabilityErrors = top[0]?.count || 0;
-      const totalSponsoredAdsErrors = top[1]?.count || 0;
-      const totalErrorInAccount = 6;
+      const totalProfitabilityErrors = getDemoProfitabilityErrorTotal();
+      const totalSponsoredAdsErrors = getDemoSponsoredAdsErrorTotal();
+      const totalErrorInAccount = getDemoAccountErrorTotal();
       const totalIssues = totalIssuesCore + totalProfitabilityErrors + totalSponsoredAdsErrors + totalErrorInAccount;
       return makeNestedDataResponse(config, {
         dashboardData: {
@@ -546,52 +810,22 @@ export const initDemoAxiosMock = () => {
       // Used by DemoDashboard's quick stat "Money Wasted in Ads"
       // (filters: cost > 0 && attributedSales30d < 0.01)
       const adsKeywordsPerformanceData = [
-        {
-          date: '2026-03-18',
-          keyword: 'wireless mouse',
-          keywordId: 'kw-101',
-          campaignName: 'SP - Top',
-          campaignId: 'c-101',
-          adGroupName: 'AG - Exact',
-          adGroupId: 'ag-101',
-          matchType: 'EXACT',
-          cost: 42.50,
+        ...DEMO_WASTED_SPEND_ROWS.map((row, idx) => ({
+          date: `2026-03-${String(18 - (idx % 7)).padStart(2, '0')}`,
+          keyword: row.keyword,
+          keywordId: row.keywordId || `kw-waste-${idx + 1}`,
+          campaignName: row.campaignName,
+          campaignId: row.campaignId || `c-waste-${idx + 1}`,
+          adGroupName: row.adGroupName || 'AG - Demo',
+          adGroupId: row.adGroupId || `ag-waste-${idx + 1}`,
+          matchType: row.matchType || 'EXACT',
+          cost: Number(row.spend) || 0,
           attributedSales30d: 0.0,
-          impressions: 5200,
-          clicks: 22,
+          impressions: 1800 + idx * 750,
+          clicks: 10 + idx * 3,
           adKeywordStatus: 'enabled'
-        },
-        {
-          date: '2026-03-17',
-          keyword: 'desk lamp',
-          keywordId: 'kw-102',
-          campaignName: 'SD - Lux',
-          campaignId: 'c-102',
-          adGroupName: 'AG - SD',
-          adGroupId: 'ag-102',
-          matchType: 'PHRASE',
-          cost: 18.15,
-          attributedSales30d: 0.005,
-          impressions: 2600,
-          clicks: 14,
-          adKeywordStatus: 'enabled'
-        },
-        {
-          date: '2026-03-16',
-          keyword: 'stainless mug 500ml',
-          keywordId: 'kw-103',
-          campaignName: 'SP - Others',
-          campaignId: 'c-103',
-          adGroupName: 'AG - Demo',
-          adGroupId: 'ag-103',
-          matchType: 'BROAD',
-          cost: 15.34,
-          attributedSales30d: 0.009,
-          impressions: 1500,
-          clicks: 11,
-          adKeywordStatus: 'enabled'
-        },
-        // A few extra non-wasted keywords so other PPC sections don't look empty
+        })),
+        // Keep a few converting keywords so PPC sections stay realistic
         {
           date: '2026-03-15',
           keyword: 'usb c cable 2m',
@@ -616,7 +850,7 @@ export const initDemoAxiosMock = () => {
           adGroupName: 'AG - Exact',
           adGroupId: 'ag-101',
           matchType: 'PHRASE',
-          cost: 61.00,
+          cost: 61.0,
           attributedSales30d: 95.3,
           impressions: 12000,
           clicks: 210,
@@ -631,7 +865,7 @@ export const initDemoAxiosMock = () => {
           adGroupName: 'AG - SD',
           adGroupId: 'ag-102',
           matchType: 'EXACT',
-          cost: 22.40,
+          cost: 22.4,
           attributedSales30d: 35.7,
           impressions: 6400,
           clicks: 98,
@@ -639,7 +873,9 @@ export const initDemoAxiosMock = () => {
         }
       ];
 
-      const moneyWastedInAds = 42.50 + 18.15 + 15.34; // = 75.99
+      const moneyWastedInAds = DEMO_WASTED_SPEND_ROWS.reduce((sum, row) => {
+        return sum + (Number(row?.spend) || 0);
+      }, 0);
       return makeNestedDataResponse(config, {
         dashboardData: {
           TotalSales: [{ date: 'Mar 18', sales: 0 }],
@@ -691,10 +927,9 @@ export const initDemoAxiosMock = () => {
 
       const { rankingTotal, conversionTotal, inventoryTotal } = getDemoErrorCountsByCategory();
 
-      const top = DEMO_DASHBOARD_SUMMARY?.topIssues || [];
-      const totalProfitabilityErrors = top[0]?.count || 0;
-      const totalSponsoredAdsErrors = top[1]?.count || 0;
-      const totalErrorInAccount = 6;
+      const totalProfitabilityErrors = getDemoProfitabilityErrorTotal();
+      const totalSponsoredAdsErrors = getDemoSponsoredAdsErrorTotal();
+      const totalErrorInAccount = getDemoAccountErrorTotal();
       const totalIssuesCore = rankingTotal + conversionTotal + inventoryTotal;
       const totalIssues = totalIssuesCore + totalProfitabilityErrors + totalSponsoredAdsErrors + totalErrorInAccount;
 
@@ -799,21 +1034,26 @@ export const initDemoAxiosMock = () => {
 
     // Filtered total-sales (used when calendar mode != 'default')
     if (method === 'get' && pathname === '/api/total-sales/filter') {
-      const params = new URLSearchParams(query);
       const periodType = params.get('periodType') || 'custom';
-
       const startDate = params.get('startDate') || DEMO_PROFITABILITY?.dateRange?.startDate || '';
       const endDate = params.get('endDate') || DEMO_PROFITABILITY?.dateRange?.endDate || '';
+      const rows = getSeriesForCalendar({ startDate, endDate, periodType });
+      const totalSales = rows.reduce((sum, r) => sum + (Number(r.totalSales) || 0), 0);
+      const ppcSpent = rows.reduce((sum, r) => sum + (Number(r.ppcSpend) || 0), 0);
+      const totalExpenses = rows.reduce((sum, r) => sum + (Number(r.totalExpenses) || 0), 0);
+      const grossProfit = totalSales - totalExpenses - ppcSpent;
+      const datewiseChartData = rows.map((r) => ({
+        date: new Date(`${r.date}T00:00:00.000Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        originalDate: r.date,
+        totalSales: Number(r.totalSales) || 0,
+        grossProfit: (Number(r.totalSales) || 0) - (Number(r.totalExpenses) || 0) - (Number(r.ppcSpend) || 0),
+      }));
 
       const tableRows = DEMO_PROFITABILITY?.tableRows || [];
       const totalFees = tableRows.reduce((sum, r) => sum + (Number(r.fees) || 0), 0);
       const fbaFees = totalFees * 0.45;
       const otherAmazonFees = totalFees - fbaFees;
       const refunds = (Number(DEMO_PROFITABILITY?.summary?.totalSales) || 0) * 0.03;
-
-      const totalSales = Number(DEMO_PROFITABILITY?.summary?.totalSales) || 0;
-      const ppcSpent = Number(DEMO_PPC?.kpiSummary?.totalSpend) || 0;
-      const grossProfit = Number(DEMO_PROFITABILITY?.summary?.totalGrossProfit) || 0;
 
       return makeNestedDataResponse(config, {
         dateRange: { mode: periodType, startDate, endDate },
@@ -822,7 +1062,140 @@ export const initDemoAxiosMock = () => {
         ppcSpent: { amount: ppcSpent },
         fbaFees: { amount: fbaFees },
         otherAmazonFees: { amount: otherAmazonFees },
-        refunds: { amount: refunds }
+        refunds: { amount: refunds },
+        datewiseChartData
+      });
+    }
+
+    // New profitability + expenses endpoints (used by updated profitability UI)
+    if (method === 'get' && (pathname === '/api/profitability/summary' || pathname === '/api/profitability/summary/date-range')) {
+      const totals = DEMO_PROFITABILITY_SERIES.reduce((acc, row) => {
+        acc.totalSales += Number(row.totalSales) || 0;
+        acc.totalExpenses += Number(row.totalExpenses) || 0;
+        acc.ppcSpend += Number(row.ppcSpend) || 0;
+        return acc;
+      }, { totalSales: 0, totalExpenses: 0, ppcSpend: 0 });
+      const amazonFees = totals.totalExpenses * 0.68;
+      const fbaFees = totals.totalExpenses * 0.41;
+      const refunds = totals.totalSales * 0.028;
+      return makeNestedDataResponse(config, {
+        totalSales: totals.totalSales,
+        totalExpenses: totals.totalExpenses,
+        amazonFees,
+        fbaFees,
+        refunds,
+      });
+    }
+
+    if (method === 'get' && (pathname === '/api/profitability/chart' || pathname === '/api/profitability/chart/date-range')) {
+      return makeNestedDataResponse(config, DEMO_PROFITABILITY_SERIES.map((row) => ({
+        date: row.date,
+        totalSales: row.totalSales,
+      })));
+    }
+
+    if (method === 'get' && (pathname === '/api/expenses/total' || pathname === '/api/expenses/total/date-range')) {
+      return makeNestedDataResponse(config, {
+        datewise: DEMO_PROFITABILITY_SERIES.map((row) => ({
+          date: row.date,
+          totalAmount: row.totalExpenses,
+        })),
+      });
+    }
+
+    if (method === 'get' && pathname === '/api/expenses/snapshot') {
+      const totalExpenses = DEMO_PROFITABILITY_SERIES.reduce((sum, row) => sum + (Number(row.totalExpenses) || 0), 0);
+      const totalAmazonFees = totalExpenses * 0.68;
+      const last7Expenses = DEMO_PROFITABILITY_SERIES.slice(-7).reduce((sum, row) => sum + (Number(row.totalExpenses) || 0), 0);
+      const last7AmazonFees = last7Expenses * 0.68;
+      const last14Expenses = last7Expenses;
+      const last14AmazonFees = last7AmazonFees;
+      return makeNestedDataResponse(config, {
+        totalAmazonFees: { total: totalAmazonFees },
+        totalExpenses: { total: totalExpenses },
+        totalAmazonFeesLast7Days: { total: last7AmazonFees },
+        totalExpensesLast7Days: { total: last7Expenses },
+        totalAmazonFeesLast14Days: { total: last14AmazonFees },
+        totalExpensesLast14Days: { total: last14Expenses },
+        dateWiseAmazonFees: DEMO_PROFITABILITY_SERIES.map((row) => ({ date: row.date, totalAmount: row.totalExpenses * 0.68 })),
+        dateWiseExpenses: DEMO_PROFITABILITY_SERIES.map((row) => ({ date: row.date, totalAmount: row.totalExpenses })),
+      });
+    }
+
+    if (method === 'get' && (pathname === '/api/profitability/table' || pathname === '/api/profitability/table/date-range')) {
+      const params = new URLSearchParams(query);
+      const page = Number(params.get('page') || 1);
+      const limit = Number(params.get('limit') || 10);
+      const rows = (DEMO_PROFITABILITY?.tableRows || []).map((r, idx) => {
+        const adSpend = Number(r.adSpend) || 0;
+        const amazonFees = Number(r.fees) || 0;
+        const totalExpenses = adSpend + amazonFees;
+        const type = idx % 5;
+        let breakdown = [];
+        if (type === 0) {
+          breakdown = [
+            { category: 'Amazon Referral Fees', amount: amazonFees * 0.52 },
+            { category: 'FBA Fulfillment', amount: amazonFees * 0.33 },
+            { category: 'PPC Spend', amount: adSpend * 0.85 },
+            { category: 'Promo Discounts', amount: adSpend * 0.15 }
+          ];
+        } else if (type === 1) {
+          breakdown = [
+            { category: 'FBA Storage', amount: amazonFees * 0.24 },
+            { category: 'Amazon Closing Fees', amount: amazonFees * 0.41 },
+            { category: 'Sponsored Products', amount: adSpend * 0.58 },
+            { category: 'Sponsored Brands', amount: adSpend * 0.42 }
+          ];
+        } else if (type === 2) {
+          breakdown = [
+            { category: 'Returns & Refund Handling', amount: amazonFees * 0.19 },
+            { category: 'Amazon Variable Fees', amount: amazonFees * 0.81 },
+            { category: 'Auto Campaign Spend', amount: adSpend * 0.36 },
+            { category: 'Manual Campaign Spend', amount: adSpend * 0.64 }
+          ];
+        } else if (type === 3) {
+          breakdown = [
+            { category: 'FBA Pick & Pack', amount: amazonFees * 0.47 },
+            { category: 'Inventory Placement Fees', amount: amazonFees * 0.18 },
+            { category: 'Long-Term Storage Reserve', amount: amazonFees * 0.35 },
+            { category: 'Top-of-Search Bids', amount: adSpend * 0.49 },
+            { category: 'Product Targeting Ads', amount: adSpend * 0.51 }
+          ];
+        } else {
+          breakdown = [
+            { category: 'Referral + FBA Core Fees', amount: amazonFees * 0.74 },
+            { category: 'Policy/Adjustment Fees', amount: amazonFees * 0.26 },
+            { category: 'Keyword Bids', amount: adSpend * 0.67 },
+            { category: 'Placement Multipliers', amount: adSpend * 0.21 },
+            { category: 'Budget Overrun Buffer', amount: adSpend * 0.12 }
+          ];
+        }
+        return {
+          asin: r.asin,
+          sku: r.sku,
+          productName: r.name,
+          unitsSold: Number(r.units) || 0,
+          totalSales: Number(r.sales) || 0,
+          adSpend,
+          amazonFees,
+          totalExpenses,
+          grossProfit: Number(r.grossProfit) || 0,
+          netProfit: Number(r.netProfit) || 0,
+          breakdown: breakdown.map((b) => ({ category: b.category, amount: Number(b.amount.toFixed(2)) })),
+          status: r.status || 'good',
+        };
+      });
+      const start = (page - 1) * limit;
+      const pageRows = rows.slice(start, start + limit);
+      return makeNestedDataResponse(config, {
+        rows: pageRows,
+        pagination: {
+          page,
+          limit,
+          totalItems: rows.length,
+          totalPages: Math.max(1, Math.ceil(rows.length / limit)),
+          hasMore: page < Math.ceil(rows.length / limit),
+        },
       });
     }
 
@@ -948,7 +1321,7 @@ export const initDemoAxiosMock = () => {
           totalPages: Math.max(1, Math.ceil(rows.length / limit)),
           hasMore: page < Math.ceil(rows.length / limit)
         },
-        totalProfitabilityErrors: 0,
+        totalProfitabilityErrors: getDemoProfitabilityErrorTotal(),
         profitabilityErrorDetails: [],
         totalParents: rows.length,
         totalChildren: 0,
@@ -990,11 +1363,14 @@ export const initDemoAxiosMock = () => {
       };
 
       const allSeedRows = (DEMO_PROFITABILITY?.tableRows || []).slice();
-      const allIssues = [];
-      for (let i = 0; i < 18; i++) {
-        const row = allSeedRows[i % allSeedRows.length];
-        allIssues.push(buildIssue(row, i));
-      }
+      const flaggedRows = allSeedRows.filter((row) => {
+        const sales = Number(row?.sales) || 0;
+        const netProfit = Number(row?.netProfit) || 0;
+        const margin = sales > 0 ? (netProfit / sales) * 100 : 0;
+        return netProfit < 0 || margin < 12;
+      });
+      const sourceRows = flaggedRows.length > 0 ? flaggedRows : allSeedRows;
+      const allIssues = sourceRows.map((row, i) => buildIssue(row, i));
 
       const total = allIssues.length;
       const start = (page - 1) * limit;
@@ -1072,13 +1448,16 @@ export const initDemoAxiosMock = () => {
     }
 
     if (method === 'get' && pathname === '/api/pagewise/ppc/tab-counts') {
+      const highAcosRows = mkHighAcosRows();
+      const noNegativeRows = mkNoNegativesRows();
+      const autoInsightRows = mkAutoInsightsRows();
       return makeNestedDataResponse(config, {
-        highAcos: 3,
+        highAcos: highAcosRows.length,
         wastedSpend: DEMO_WASTED_SPEND_ROWS.length || 2,
-        noNegatives: 3,
+        noNegatives: noNegativeRows.length,
         topKeywords: DEMO_TOP_KEYWORDS_ROWS.length || 2,
         zeroSales: DEMO_ZERO_SALES_ROWS.length || 2,
-        autoInsights: 3
+        autoInsights: autoInsightRows.length
       });
     }
 
@@ -1611,6 +1990,82 @@ export const initDemoAxiosMock = () => {
     // - /app/analyse/keywordOpportunities/keywords?asin=...&page=...&limit=10&filter=...
     // - /app/analyse/keywordOpportunities/search?query=...
     // =====================================================================
+    const getKeywordPoolForAsin = (asin) => {
+      const product = DEMO_PRODUCTS.find((p) => String(p.asin).toUpperCase() === String(asin || '').toUpperCase());
+      const name = String(product?.name || '').toLowerCase();
+
+      if (name.includes('mouse') || name.includes('wrist') || name.includes('hub')) {
+        return [
+          'wireless mouse',
+          'ergonomic mouse',
+          'usb c hub',
+          'desk wrist rest',
+          'office desk accessory',
+          'computer mouse silent'
+        ];
+      }
+      if (name.includes('lamp') || name.includes('light') || name.includes('book')) {
+        return [
+          'desk lamp',
+          'reading light',
+          'clip lamp',
+          'dimmable lamp',
+          'night reading lamp',
+          'study desk light'
+        ];
+      }
+      if (name.includes('bottle') || name.includes('belt') || name.includes('bands')) {
+        return [
+          'stainless water bottle',
+          'insulated bottle',
+          'running belt',
+          'fitness resistance bands',
+          'gym workout accessory',
+          'sport hydration gear'
+        ];
+      }
+      if (name.includes('kitchen') || name.includes('food') || name.includes('coffee') || name.includes('oil') || name.includes('brush')) {
+        return [
+          'kitchen organizer',
+          'food storage clips',
+          'coffee canister',
+          'oil dispenser',
+          'bottle cleaning brush',
+          'kitchen storage set'
+        ];
+      }
+      if (name.includes('vacuum') || name.includes('fridge') || name.includes('bins') || name.includes('mat')) {
+        return [
+          'vacuum storage bags',
+          'fridge organizer bins',
+          'non slip mat',
+          'home storage organizer',
+          'space saver bags',
+          'pantry storage bins'
+        ];
+      }
+      if (name.includes('pillow') || name.includes('mask') || name.includes('blanket') || name.includes('tote')) {
+        return [
+          'travel neck pillow',
+          'sleep eye mask',
+          'pet blanket soft',
+          'insulated lunch tote',
+          'comfort travel accessory',
+          'sleep comfort product'
+        ];
+      }
+
+      // Fallback pool
+      return [
+        'amazon product listing',
+        'top selling product',
+        'premium quality item',
+        'best value product',
+        'daily use essential',
+        'customer favorite product'
+      ];
+    };
+
     const mkKeywordOppRow = (asin, idx, filter) => {
       const seed = Math.abs(
         String(asin || '')
@@ -1618,18 +2073,7 @@ export const initDemoAxiosMock = () => {
           .reduce((acc, ch) => acc + ch.charCodeAt(0), 0)
       );
 
-      const keywordBases = [
-        'wireless mouse',
-        'ergonomic chair',
-        'desk lamp',
-        'stainless mug 500ml',
-        'kitchen storage organizer',
-        'cord organizer cable',
-        'multi usb charger',
-        'insulated water bottle',
-        'eco friendly cleaning brush',
-        'fitness resistance band'
-      ];
+      const keywordBases = getKeywordPoolForAsin(asin);
 
       const base = keywordBases[(idx + seed) % keywordBases.length];
       const adjective = ['best', 'cheap', 'premium', 'lightweight', 'durable', 'compact'][((idx + seed) * 3) % 6];
@@ -1778,14 +2222,21 @@ export const initDemoAxiosMock = () => {
     // Your Products V3 endpoints (frontend-only, no backend)
     // =====================================================================
     if (method === 'get' && pathname === '/api/pagewise/your-products-v3/summary') {
+      const baseRows = DEMO_PRODUCTS.map((p, idx) => mkYourProductsBaseRecord(p, idx));
+      const totalProducts = baseRows.length;
+      const activeProducts = baseRows.filter((p) => p.status === 'Active').length;
+      const inactiveProducts = baseRows.filter((p) => p.status === 'Inactive').length;
+      const incompleteProducts = baseRows.filter((p) => p.status === 'Incomplete').length;
+      const zeroAvailabilityProducts = baseRows.filter((p) => p.status === 'Zero Availability').length;
+
       return makeNestedDataResponse(config, {
-        totalProducts: DEMO_PRODUCTS.length,
-        activeProducts: 2,
-        inactiveProducts: 1,
-        incompleteProducts: 1,
-        zeroAvailabilityProducts: 1,
-        productsWithoutAPlus: 3,
-        productsNotTargetedInAds: 3,
+        totalProducts,
+        activeProducts,
+        inactiveProducts,
+        incompleteProducts,
+        zeroAvailabilityProducts,
+        productsWithoutAPlus: baseRows.filter((p) => !p.hasAPlus).length,
+        productsNotTargetedInAds: baseRows.filter((p) => !p.isTargetedInAds).length,
         hasBrandStory: true
       });
     }
@@ -1795,22 +2246,9 @@ export const initDemoAxiosMock = () => {
       const page = Number(params.get('page') || 1);
       const limit = Number(params.get('limit') || 20);
 
-      const all = DEMO_PRODUCTS.slice(0, 2).map((p, idx) => ({
-        asin: p.asin,
-        sku: p.sku,
-        title: p.name,
-        name: p.name,
-        status: 'Active',
-        price: Number(p.price) || 0,
-        quantity: Number(p.quantity) || 0,
-        issueCount: getDemoTotalErrorsForAsin(p?.asin),
-        hasVideo: idx % 2 === 0,
-        has_b2b_pricing: idx % 2 !== 0,
-        numRatings: idx === 0 ? 1280 : 420,
-        starRatings: idx === 0 ? 4.4 : 3.9,
-        hasAPlus: idx % 2 === 0,
-        isTargetedInAds: idx % 2 === 0
-      }));
+      const all = DEMO_PRODUCTS
+        .map((p, idx) => mkYourProductsBaseRecord(p, idx))
+        .filter((p) => p.status === 'Active');
 
       const start = (page - 1) * limit;
       const rows = all.slice(start, start + limit);
@@ -1822,22 +2260,9 @@ export const initDemoAxiosMock = () => {
     }
 
     if (method === 'get' && pathname === '/api/pagewise/your-products-v3/inactive') {
-      const all = DEMO_PRODUCTS.slice(2, 3).map((p, idx) => ({
-        asin: p.asin,
-        sku: p.sku,
-        title: p.name,
-        name: p.name,
-        status: 'Inactive',
-        price: Number(p.price) || 0,
-        quantity: Number(p.quantity) || 0,
-        issueCount: getDemoTotalErrorsForAsin(p?.asin),
-        hasVideo: true,
-        has_b2b_pricing: false,
-        numRatings: 210,
-        starRatings: 3.6,
-        hasAPlus: false,
-        isTargetedInAds: false
-      }));
+      const all = DEMO_PRODUCTS
+        .map((p, idx) => mkYourProductsBaseRecord(p, idx))
+        .filter((p) => p.status === 'Inactive');
       return makeNestedDataResponse(config, {
         products: all,
         pagination: { ...mkPagination(1, 20, all.length), totalItems: all.length },
@@ -1846,23 +2271,9 @@ export const initDemoAxiosMock = () => {
     }
 
     if (method === 'get' && pathname === '/api/pagewise/your-products-v3/incomplete') {
-      // Keep non-empty to avoid empty-state variants in other UI paths
-      const all = DEMO_PRODUCTS.slice(3, 4).map((p, idx) => ({
-        asin: p.asin,
-        sku: p.sku,
-        title: p.name,
-        name: p.name,
-        status: 'Incomplete',
-        price: Number(p.price) || 0,
-        quantity: Number(p.quantity) || 0,
-        issueCount: getDemoTotalErrorsForAsin(p?.asin),
-        hasVideo: false,
-        has_b2b_pricing: false,
-        numRatings: 80,
-        starRatings: 3.2,
-        hasAPlus: false,
-        isTargetedInAds: true
-      }));
+      const all = DEMO_PRODUCTS
+        .map((p, idx) => mkYourProductsBaseRecord(p, idx))
+        .filter((p) => p.status === 'Incomplete');
       return makeNestedDataResponse(config, {
         products: all,
         pagination: { ...mkPagination(1, 20, all.length), totalItems: all.length },
@@ -1875,60 +2286,36 @@ export const initDemoAxiosMock = () => {
       const page = Number(params.get('page') || 1);
       const limit = Number(params.get('limit') || 20);
 
-      const indices = [2, 3, 4];
-      const all = indices
-        .map((i) => {
-          const p = DEMO_PRODUCTS[i];
-          if (!p) return null;
-
-          if (i === 3) {
-            return {
-              asin: p.asin,
-              sku: p.sku,
-              title: p.name,
-              name: p.name,
-              status: 'Incomplete',
-              issues: ['Listing data incomplete', 'A+ compliance not ready'],
-              issueCount: getDemoTotalErrorsForAsin(p?.asin),
-              price: Number(p.price) || 0,
-              quantity: Number(p.quantity) || 0
-            };
-          }
-
-          if (i === 4) {
-            return {
-              asin: p.asin,
-              sku: p.sku,
-              title: p.name,
-              name: p.name,
-              status: 'Zero Availability',
-              issues: ['Zero availability / out of stock', 'Replenishment delay'],
-              issueCount: getDemoTotalErrorsForAsin(p?.asin),
-              price: Number(p.price) || 0,
-              quantity: Number(p.quantity) || 0
-            };
-          }
-
-          return {
-            asin: p.asin,
-            sku: p.sku,
-            title: p.name,
-            name: p.name,
-            status: 'Inactive',
-            issues: ['Inactive listing detected', 'Stranded inventory risk'],
-            issueCount: getDemoTotalErrorsForAsin(p?.asin),
-            price: Number(p.price) || 0,
-            quantity: Number(p.quantity) || 0
-          };
-        })
-        .filter(Boolean);
+      const all = DEMO_PRODUCTS
+        .map((p, idx) => mkYourProductsBaseRecord(p, idx))
+        .filter((p) => p.status !== 'Active')
+        .map((p) => ({
+          asin: p.asin,
+          sku: p.sku,
+          title: p.name,
+          name: p.name,
+          status: p.status,
+          issues:
+            p.status === 'Incomplete'
+              ? ['Listing data incomplete', 'A+ compliance not ready']
+              : p.status === 'Zero Availability'
+                ? ['Zero availability / out of stock', 'Replenishment delay']
+                : ['Inactive listing detected', 'Stranded inventory risk'],
+          issueCount: p.issueCount,
+          price: p.price,
+          quantity: p.quantity
+        }));
 
       const start = (page - 1) * limit;
       const rows = all.slice(start, start + limit);
       return makeNestedDataResponse(config, {
         products: rows,
         pagination: { ...mkPagination(page, limit, all.length), totalItems: all.length },
-        counts: { inactive: 1, incomplete: 1, zeroAvailability: 1 },
+        counts: {
+          inactive: all.filter((p) => p.status === 'Inactive').length,
+          incomplete: all.filter((p) => p.status === 'Incomplete').length,
+          zeroAvailability: all.filter((p) => p.status === 'Zero Availability').length
+        },
         fromCache: false
       });
     }
@@ -1938,22 +2325,9 @@ export const initDemoAxiosMock = () => {
       const page = Number(params.get('page') || 1);
       const limit = Number(params.get('limit') || 20);
 
-      const indices = [1, 2, 4];
-      const all = indices
-        .map((i) => DEMO_PRODUCTS[i])
-        .filter(Boolean)
-        .map((p, idx) => ({
-        asin: p.asin,
-        sku: p.sku,
-        title: p.name,
-        name: p.name,
-        status: 'Active',
-        price: Number(p.price) || 0,
-        quantity: Number(p.quantity) || 0,
-        issueCount: getDemoTotalErrorsForAsin(p?.asin),
-        hasAPlus: false,
-        isTargetedInAds: idx % 2 === 0
-      }));
+      const all = DEMO_PRODUCTS
+        .map((p, idx) => mkYourProductsBaseRecord(p, idx))
+        .filter((p) => !p.hasAPlus);
 
       const start = (page - 1) * limit;
       const rows = all.slice(start, start + limit);
@@ -1969,22 +2343,9 @@ export const initDemoAxiosMock = () => {
       const page = Number(params.get('page') || 1);
       const limit = Number(params.get('limit') || 20);
 
-      const indices = [0, 3, 4];
-      const all = indices
-        .map((i) => DEMO_PRODUCTS[i])
-        .filter(Boolean)
-        .map((p, idx2) => ({
-        asin: p.asin,
-        sku: p.sku,
-        title: p.name,
-        name: p.name,
-        status: 'Active',
-        price: Number(p.price) || 0,
-        quantity: Number(p.quantity) || 0,
-        issueCount: getDemoTotalErrorsForAsin(p?.asin),
-        hasAPlus: idx2 % 2 === 0,
-        isTargetedInAds: false
-      }));
+      const all = DEMO_PRODUCTS
+        .map((p, idx) => mkYourProductsBaseRecord(p, idx))
+        .filter((p) => !p.isTargetedInAds);
 
       const start = (page - 1) * limit;
       const rows = all.slice(start, start + limit);

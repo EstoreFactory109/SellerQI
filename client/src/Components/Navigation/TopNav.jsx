@@ -13,6 +13,10 @@ import { amazonMarketplaceCurrencies } from '../../utils/amazonAllowedCountries.
 const TopNav = () => {
     const navigate = useNavigate()
     const location = useLocation()
+    const isDemoNotificationsContext = location.pathname.startsWith('/seller-central-checker-demo');
+    const notificationsListPath = isDemoNotificationsContext
+        ? '/seller-central-checker-demo/notifications'
+        : '/seller-central-checker/notifications';
     const marketplaces = {
         US: "United States",
         CA: "Canada",
@@ -169,7 +173,7 @@ const TopNav = () => {
             }
             dispatch(markAsRead(notification.id)); // dropdown shows viewed colour immediately
             setOpenNotifications(false);
-            navigate('/seller-central-checker/notifications', { state: { markedViewedId: notification.id } }); // page shows it as viewed on load
+            navigate(notificationsListPath, { state: { markedViewedId: notification.id } }); // page shows it as viewed on load
             return;
         }
         dispatch(markAsRead(notification.id));
@@ -606,7 +610,7 @@ const TopNav = () => {
                                         type="button"
                                         onClick={() => {
                                             setOpenNotifications(false);
-                                            navigate('/seller-central-checker/notifications');
+                                            navigate(notificationsListPath);
                                         }}
                                         className="text-sm font-medium text-blue-400 hover:text-blue-300 hover:underline"
                                     >

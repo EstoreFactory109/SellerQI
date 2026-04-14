@@ -1,9 +1,7 @@
 const nodemailer = require('nodemailer');
-const dns = require('dns');
-const { promisify } = require('util');
+const mongoose = require('mongoose');
 const logger = require('../../utils/Logger.js');
 const EmailLogs = require('../../models/system/EmailLogsModel.js');
-const resolveMx = promisify(dns.resolveMx);
 const fs = require('fs');
 const path = require('path');
 
@@ -21,11 +19,13 @@ const sendRegisteredEmail = async (databaseId, firstName, lastName, userPhone, R
     // Use SELF_MAIL_ID or first admin email as sender
     const senderEmail = process.env.SELF_MAIL_ID || adminEmail;
 
+    const safeUserId = userId && mongoose.Types.ObjectId.isValid(userId) ? userId : null;
+
     // Create email log entry
     const emailLog = new EmailLogs({
         emailType: 'USER_REGISTERED',
         receiverEmail: adminEmail, // First admin email only
-        receiverId: userId,
+        receiverId: safeUserId,
         status: 'PENDING',
         subject: "New User Registered",
         emailContent: `New user registered: ${firstName} ${lastName} (${RegisteredEmail})`,
@@ -43,47 +43,50 @@ const sendRegisteredEmail = async (databaseId, firstName, lastName, userPhone, R
     try {
         // Save initial log
         await emailLog.save();
+        logger.info(`EmailLog saved for USER_REGISTERED (id: ${emailLog._id})`);
 
         const transporter = nodemailer.createTransport({
             host: "email-smtp.us-west-2.amazonaws.com",
-            port: 587, // Use 587 for STARTTLS
-            secure: false, // Set to false for STARTTLS
+            port: 587,
+            secure: false,
             auth: {
-                user: process.env.ADMIN_USERNAME, // Your Gmail address
-                pass: process.env.APP_PASSWORD, // Your Gmail password or App Password
+                user: process.env.ADMIN_USERNAME,
+                pass: process.env.APP_PASSWORD,
             },
         });
 
-        
         const text = `
             Dear Admin,
 
             A new user has been registered in the system.
 
-            Best regards,  
+            Best regards,
             SellerQi Team
-            
+
             `;
         const body = template;
 
         // Send mail with defined transport object
         const info = await transporter.sendMail({
-            from: senderEmail, // Sender address (first email only)
-            to: adminEmail, // First admin email only
-            subject: "New User Registered", // Subject line
-            text: text, // Plain text body
-            html: body, // HTML body
+            from: senderEmail,
+            to: adminEmail,
+            subject: "New User Registered",
+            text: text,
+            html: body,
         });
 
         // Mark email as sent
         await emailLog.markAsSent();
         logger.info(`User registered email sent successfully. Message ID: ${info.messageId}`);
-        return info.messageId; // Return the message ID on success
+        return info.messageId;
     } catch (error) {
-        logger.error(`Failed to send email to ${adminEmail}:`, error);
-        await emailLog.markAsFailed(error.message);
+        logger.error(`Failed to send USER_REGISTERED email to ${adminEmail}: ${error.message}`, error);
+        try {
+            await emailLog.markAsFailed(error.message);
+        } catch (logError) {
+            logger.error(`Could not mark USER_REGISTERED email as FAILED: ${logError.message}`);
+        }
         return false;
-
     }
 };
 

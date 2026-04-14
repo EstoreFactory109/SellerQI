@@ -337,21 +337,25 @@ async function getTable({ userId, country, region, fromDate, toDate, page = 1, l
   ]);
 
   const skuExpMap = new Map(
-    expBySku.map((r) => [
-      r._id || 'N/A',
-      {
-        totalExpenses: Math.abs(round2(r.totalExpenses)),
-        amazonFees: Math.abs(round2(r.amazonFees)),
-        refunds: Math.abs(round2(r.refunds)),
-        breakdown: (r.breakdown || [])
-          .map((b) => ({
-            category: b.category,
-            amount: Math.abs(round2(b.amount)),
-            count: Number(b.count) || 0,
-          }))
-          .sort((a, b) => b.amount - a.amount),
-      },
-    ])
+    expBySku.map((r) => {
+      const breakdown = (r.breakdown || [])
+        .map((b) => ({
+          category: b.category,
+          amount: Math.abs(round2(b.amount)),
+          count: Number(b.count) || 0,
+        }))
+        .sort((a, b) => b.amount - a.amount);
+      const totalExpenses = round2(breakdown.reduce((s, b) => s + b.amount, 0));
+      return [
+        r._id || 'N/A',
+        {
+          totalExpenses,
+          amazonFees: Math.abs(round2(r.amazonFees)),
+          refunds: Math.abs(round2(r.refunds)),
+          breakdown,
+        },
+      ];
+    })
   );
 
   let salesByAsin = [];

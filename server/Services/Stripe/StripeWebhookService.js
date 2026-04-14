@@ -524,20 +524,29 @@ class StripeWebhookService {
                 status: subscription.status
             });
 
-            // Update user - if this was a trial that just ended, update trial status
+            // Detect trial-to-paid conversion.
+            // Skip $0 trial-start invoices (subscription still trialing).
+            // Use PaymentLogs as race-safe check: subscription.updated may flip
+            // isInTrialPeriod before this handler runs, so the DB flag alone is unreliable.
             const user = await User.findById(userId);
-            const wasInTrial = user?.isInTrialPeriod === true;
-            if (user && user.isInTrialPeriod) {
-                await User.findByIdAndUpdate(userId, {
-                    isInTrialPeriod: false,
-                    subscriptionStatus: 'active'
-                });
-                logger.info(`Trial ended for user: ${userId}. Payment successfully charged. User now on paid ${planType} plan.`);
+            let wasInTrial = false;
+
+            if (subscription.status !== 'trialing' && invoice.amount_paid > 0 && subscription.trial_end != null) {
+                const alreadyConverted = await PaymentLogs.findOne({ userId, eventType: 'TRIAL_ENDED' });
+                wasInTrial = !alreadyConverted;
             }
 
-            // Send support notification only for trial -> paid conversion.
-            // Keep it non-blocking for webhook stability.
             if (wasInTrial && user) {
+                if (user.isInTrialPeriod) {
+                    await User.findByIdAndUpdate(userId, {
+                        isInTrialPeriod: false,
+                        subscriptionStatus: 'active'
+                    });
+                }
+                logger.info(`Trial ended for user: ${userId}. Payment successfully charged. User now on paid ${planType} plan.`);
+
+                // Send support notification for trial -> paid conversion.
+                // Non-blocking for webhook stability.
                 try {
                     const formattedAmount = `${(invoice.currency || 'usd').toUpperCase()} ${(invoice.amount_paid || 0) / 100}`;
                     const conversionDate = this.safeDate(invoice.status_transitions?.paid_at)?.toLocaleString() || new Date().toLocaleString();

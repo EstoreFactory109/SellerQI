@@ -274,26 +274,46 @@ const verifyUser = asyncHandler(async (req, res) => {
         // Don't fail the verification process if scheduling fails
     }
 
-    // Send admin registration email right after OTP verification
-    // Seller ID may not exist yet at this stage (before SP-API connect), so mark as pending.
+    // Send admin registration email right after OTP verification.
+    // Non-blocking: auth flow must succeed even if email fails.
     try {
-        const verifiedUser = await UserModel.findById(verifyUser.id).select('firstName lastName phone email');
-        if (verifiedUser) {
-            const sendEmailResult = await sendRegisteredEmail(
+        const fallbackUser = {
+            firstName: verifyUser.firstName,
+            lastName: verifyUser.lastName,
+            phone: verifyUser.phone,
+            email: verifyUser.email
+        };
+        const dbUser = await UserModel.findById(verifyUser.id).select('firstName lastName phone email');
+        const emailUser = dbUser || fallbackUser;
+
+        logger.info(`Attempting post-verification registration email for user ${verifyUser.id}`);
+        let sendEmailResult = await sendRegisteredEmail(
+            verifyUser.id,
+            emailUser.firstName,
+            emailUser.lastName,
+            emailUser.phone,
+            emailUser.email,
+            verifyUser.id
+        );
+
+        // One retry for transient SMTP/network hiccups
+        if (!sendEmailResult) {
+            logger.warn(`Post-verification registration email first attempt failed for user ${verifyUser.id}, retrying once`);
+            sendEmailResult = await sendRegisteredEmail(
                 verifyUser.id,
-                verifiedUser.firstName,
-                verifiedUser.lastName,
-                verifiedUser.phone,
-                verifiedUser.email,
+                emailUser.firstName,
+                emailUser.lastName,
+                emailUser.phone,
+                emailUser.email,
                 verifyUser.id
             );
-            if (!sendEmailResult) {
-                logger.warn(`Failed to send post-verification registration email for user ${verifyUser.id}`);
-            }
+        }
+
+        if (!sendEmailResult) {
+            logger.warn(`Failed to send post-verification registration email for user ${verifyUser.id} after retry`);
         }
     } catch (emailError) {
-        // Non-blocking; verification already succeeded
-        logger.error(`Error sending post-verification registration email (non-critical): ${emailError.message}`);
+        logger.error(`Error sending post-verification registration email (non-critical) for user ${verifyUser.id}: ${emailError.message}`);
     }
 
     const options = getHttpsCookieOptions();
@@ -1285,6 +1305,39 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
         } catch (error) {
             logger.error(`Failed to initialize scheduling for user ${savedUser._id}:`, error);
             // Don't fail the registration process if scheduling fails
+        }
+
+        // Send admin registration email for Google signup as well.
+        // Non-blocking: registration should succeed even if email fails.
+        try {
+            logger.info(`Attempting post-google-registration email for user ${savedUser._id}`);
+            let sendEmailResult = await sendRegisteredEmail(
+                savedUser._id,
+                savedUser.firstName,
+                savedUser.lastName,
+                savedUser.phone,
+                savedUser.email,
+                savedUser._id
+            );
+
+            // One retry for transient SMTP/network issues
+            if (!sendEmailResult) {
+                logger.warn(`Post-google-registration email first attempt failed for user ${savedUser._id}, retrying once`);
+                sendEmailResult = await sendRegisteredEmail(
+                    savedUser._id,
+                    savedUser.firstName,
+                    savedUser.lastName,
+                    savedUser.phone,
+                    savedUser.email,
+                    savedUser._id
+                );
+            }
+
+            if (!sendEmailResult) {
+                logger.warn(`Failed to send post-google-registration email for user ${savedUser._id} after retry`);
+            }
+        } catch (emailError) {
+            logger.error(`Error sending post-google-registration email (non-critical) for user ${savedUser._id}: ${emailError.message}`);
         }
 
         const options = getHttpsCookieOptions();

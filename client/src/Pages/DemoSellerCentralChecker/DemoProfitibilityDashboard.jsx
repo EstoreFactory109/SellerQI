@@ -11,10 +11,13 @@ import DownloadReport from '../../Components/DownloadReport/DownloadReport.jsx';
 import { formatCurrencyWithLocale } from '../../utils/currencyUtils.js';
 import { parseLocalDate } from '../../utils/dateUtils.js';
 import { buildTotalSalesFilterUrl, shouldUseCalendarDateRange } from '../../utils/totalSalesFilterUrl.js';
+import { pickSnapshotFeeTotalsForCalendar } from '../../utils/expenseSnapshotCalendar.js';
 import { devLog, devWarn } from '../../utils/devLogger.js';
 import axios from 'axios';
 import { fetchLatestPPCMetrics, selectPPCSummary, selectPPCDateWiseMetrics, selectLatestPPCMetricsLoading } from '../../redux/slices/PPCMetricsSlice.js';
+import { fetchPPCKPISummary, selectPPCKPISummary } from '../../redux/slices/PPCCampaignAnalysisSlice.js';
 import { usePhasedProfitabilityData } from '../../hooks/usePageData.js';
+import { fetchDashboardPhase1 } from '../../redux/slices/PageDataSlice.js';
 import { PageSkeleton } from '../../Components/Skeleton/PageSkeletons.jsx';
 
 // Helper function to get actual end date (yesterday due to 24-hour data delay)
@@ -23,6 +26,13 @@ const getActualEndDate = () => {
   yesterday.setDate(yesterday.getDate() - 1);
   return yesterday;
 };
+
+function normalizeProfitabilityChartPayload(payload) {
+  if (payload == null) return [];
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload.chartData)) return payload.chartData;
+  return [];
+}
 
 // Create empty chart data with zero values when no data is available
 const createEmptyProfitabilityData = () => {
@@ -53,11 +63,20 @@ const ProfitabilityDashboard = () => {
   const [profitabilityTab, setProfitabilityTab] = useState('table'); // 'table' | 'issues'
   const [filteredData, setFilteredData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [profitSummary, setProfitSummary] = useState(null);
+  const [profitChartData, setProfitChartData] = useState(null);
+  const [expenseDatewise, setExpenseDatewise] = useState([]);
+  const [expenseReportSnapshot, setExpenseReportSnapshot] = useState(null);
+  const [ppcGraphData, setPpcGraphData] = useState([]);
+  const [profitTableData, setProfitTableData] = useState(null);
+  const [profitTablePagination, setProfitTablePagination] = useState(null);
+  const [profitTablePage, setProfitTablePage] = useState(1);
   const CalenderRef = useRef(null);
   const calendarAnchorRef = useRef(null);
   
   // PPCMetrics model data (PRIMARY source for PPC spend)
   const ppcSummary = useSelector(selectPPCSummary);
+  const ppcKPISummary = useSelector(selectPPCKPISummary);
   const ppcDateWiseMetrics = useSelector(selectPPCDateWiseMetrics);
   const ppcMetricsLoading = useSelector(selectLatestPPCMetricsLoading);
   const ppcMetricsLastFetched = useSelector(state => state.ppcMetrics?.latestMetrics?.lastFetched);
@@ -70,6 +89,7 @@ const ProfitabilityDashboard = () => {
     
     if (shouldFetch && !ppcMetricsLoading) {
       dispatch(fetchLatestPPCMetrics());
+      dispatch(fetchPPCKPISummary());
     }
   }, [dispatch, ppcMetricsLastFetched, ppcMetricsLoading]);
 
@@ -153,6 +173,12 @@ const ProfitabilityDashboard = () => {
   
   // Legacy DashboardSlice for calendar and backward compatibility
   const legacyInfo = useSelector((state) => state.Dashboard.DashBoardInfo);
+
+  useEffect(() => {
+    if (!legacyInfo?.startDate || !legacyInfo?.endDate) {
+      dispatch(fetchDashboardPhase1());
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   
   // IMPORTANT: Always get calendar/date properties from legacyInfo (DashboardSlice)
   // because the Calendar component updates these values in DashboardSlice via UpdateDashboardInfo
@@ -180,15 +206,14 @@ const ProfitabilityDashboard = () => {
   // Get currency from Redux
   const currency = useSelector(state => state.currency?.currency) || '$';
 
-  // Calendar-aligned total sales (same rule as main Dashboard Total Sales widget)
   useEffect(() => {
     const fetchFilteredData = async () => {
       setLoading(true);
       try {
-        const url = buildTotalSalesFilterUrl(import.meta.env.VITE_BASE_URI, {
-          startDate,
-          endDate,
-        });
+        const base = import.meta.env.VITE_BASE_URI;
+        const url = shouldUseCalendarDateRange(startDate, endDate)
+          ? buildTotalSalesFilterUrl(base, { startDate, endDate })
+          : `${String(base).replace(/\/$/, '')}/api/total-sales/filter?periodType=last30`;
         const response = await axios.get(url, { withCredentials: true });
         if (response.status === 200 && response.data?.data) {
           setFilteredData(response.data.data);
@@ -203,6 +228,63 @@ const ProfitabilityDashboard = () => {
 
     fetchFilteredData();
   }, [calendarMode, startDate, endDate]);
+
+  useEffect(() => {
+    const fetchProfitabilityData = async () => {
+      try {
+        const periodTypeRaw = calendarMode || 'default';
+        const periodType = periodTypeRaw === 'default' ? 'last30' : periodTypeRaw;
+        const periodDays = periodType === 'last7' ? 7 : periodType === 'last14' ? 14 : 30;
+        const useRange = shouldUseCalendarDateRange(startDate, endDate);
+        const root = import.meta.env.VITE_BASE_URI;
+
+        const summaryUrl = useRange
+          ? `${root}/api/profitability/summary/date-range?from=${encodeURIComponent(startDate)}&to=${encodeURIComponent(endDate)}`
+          : `${root}/api/profitability/summary?period=${periodDays}`;
+        const chartUrl = useRange
+          ? `${root}/api/profitability/chart/date-range?from=${encodeURIComponent(startDate)}&to=${encodeURIComponent(endDate)}`
+          : `${root}/api/profitability/chart?period=${periodDays}`;
+        const tableUrl = useRange
+          ? `${root}/api/profitability/table/date-range?from=${encodeURIComponent(startDate)}&to=${encodeURIComponent(endDate)}&page=${profitTablePage}&limit=10`
+          : `${root}/api/profitability/table?period=${periodDays}&page=${profitTablePage}&limit=10`;
+        const expensesUrl = useRange
+          ? `${root}/api/expenses/total/date-range?from=${encodeURIComponent(startDate)}&to=${encodeURIComponent(endDate)}`
+          : `${root}/api/expenses/total?period=${periodDays}`;
+        const ppcGraphUrl = useRange
+          ? `${root}/api/pagewise/ppc-metrics/graph?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`
+          : `${root}/api/pagewise/ppc-metrics/graph`;
+        const snapshotUrl = `${root}/api/expenses/snapshot`;
+
+        const [summaryResp, chartResp, tableResp, expensesResp, ppcGraphResp, snapshotResp] = await Promise.all([
+          axios.get(summaryUrl, { withCredentials: true }).catch(() => null),
+          axios.get(chartUrl, { withCredentials: true }).catch(() => null),
+          axios.get(tableUrl, { withCredentials: true }).catch(() => null),
+          axios.get(expensesUrl, { withCredentials: true }).catch(() => null),
+          axios.get(ppcGraphUrl, { withCredentials: true }).catch(() => null),
+          axios.get(snapshotUrl, { withCredentials: true }).catch(() => null),
+        ]);
+
+        setExpenseReportSnapshot(snapshotResp?.data?.data || null);
+        if (summaryResp?.data?.data) setProfitSummary(summaryResp.data.data);
+        if (chartResp?.data && chartResp.data.data !== undefined && chartResp.data.data !== null) {
+          setProfitChartData(normalizeProfitabilityChartPayload(chartResp.data.data));
+        }
+        if (tableResp?.data?.data) {
+          setProfitTableData(tableResp.data.data.rows || []);
+          setProfitTablePagination(tableResp.data.data.pagination || null);
+        }
+        setExpenseDatewise(expensesResp?.data?.data?.datewise || []);
+        setPpcGraphData(ppcGraphResp?.data?.data?.graphData || []);
+      } catch (err) {
+        console.error('Error fetching profitability data:', err);
+      }
+    };
+    fetchProfitabilityData();
+  }, [calendarMode, startDate, endDate, profitTablePage]);
+
+  const handleProfitTablePageChange = useCallback((newPage) => {
+    setProfitTablePage(newPage);
+  }, []);
   
   // Get ProductWiseSponsoredAdsGraphData from Redux store
   const productWiseSponsoredAdsGraphData = useSelector((state) => state.Dashboard.DashBoardInfo?.ProductWiseSponsoredAdsGraphData) || {};
@@ -262,6 +344,51 @@ const ProfitabilityDashboard = () => {
   
   // Transform the data for the chart using filtered data when available
   const chartData = useMemo(() => {
+    const normalizedProfitChartData = Array.isArray(profitChartData)
+      ? profitChartData
+      : (Array.isArray(profitChartData?.chartData) ? profitChartData.chartData : []);
+    const toDateKey = (value) => {
+      if (!value) return null;
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return null;
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+    const expensesByDate = new Map();
+    if (Array.isArray(expenseDatewise)) {
+      expenseDatewise.forEach((item) => {
+        const key = toDateKey(item?.date);
+        if (!key) return;
+        expensesByDate.set(key, Number(item?.totalAmount || 0));
+      });
+    }
+    const ppcByDate = new Map();
+    if (Array.isArray(ppcGraphData)) {
+      ppcGraphData.forEach((item) => {
+        const key = toDateKey(item?.rawDate || item?.date);
+        if (!key) return;
+        ppcByDate.set(key, Number(item?.spend || 0));
+      });
+    }
+
+    if (normalizedProfitChartData.length > 0) {
+      return normalizedProfitChartData.map((item) => {
+        const rawDateKey = toDateKey(item.date);
+        const displayDate = rawDateKey ? new Date(rawDateKey).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : item.date;
+        const totalSales = Number(item.totalSales || 0);
+        const totalExpenses = rawDateKey ? Number(expensesByDate.get(rawDateKey) || 0) : 0;
+        const totalPpcSpend = rawDateKey ? Number(ppcByDate.get(rawDateKey) || 0) : 0;
+        return {
+          date: displayDate,
+          grossProfit: parseFloat((totalSales - totalExpenses - totalPpcSpend).toFixed(2)),
+          totalSales: parseFloat(totalSales.toFixed(2)),
+          spend: parseFloat((totalExpenses + totalPpcSpend).toFixed(2)),
+        };
+      });
+    }
+
     if (
       filteredData?.datewiseChartData &&
       Array.isArray(filteredData.datewiseChartData) &&
@@ -414,222 +541,105 @@ const ProfitabilityDashboard = () => {
     
     // Final fallback: Return empty data with zero values
     return createEmptyProfitabilityData();
-  }, [totalSalesData, info?.accountFinance, productWiseSponsoredAdsGraphData, accountFinance, filteredData, calendarMode, economicsMetrics, phasedChartData]);
+  }, [totalSalesData, info?.accountFinance, productWiseSponsoredAdsGraphData, accountFinance, filteredData, calendarMode, economicsMetrics, phasedChartData, profitChartData, expenseDatewise, ppcGraphData]);
 
   // Get COGs values from Redux store
   const cogsValues = useSelector((state) => state.cogs.cogsValues);
   
   const metrics = useMemo(() => {
-    // PHASED LOADING: Use pre-calculated metrics from backend when available (default calendar mode)
-    // This provides instant rendering of KPI boxes without waiting for all data
-    const usePhaseMetrics =
-      calendarMode === 'default' && metricsData && filteredData === null;
-    
-    if (usePhaseMetrics) {
-      return [
-        { label: 'Total Sales', value: `${currency}${(metricsData.totalSales || 0).toFixed(2)}`, icon: 'dollar-sign' },
-        { label: 'Total PPC Sales', value: `${currency}${(metricsData.totalPpcSales || 0).toFixed(2)}`, icon: 'zap' },
-        { label: 'Total Ad Spend', value: `${currency}${(metricsData.totalAdSpend || 0).toFixed(2)}`, icon: 'dollar-sign' },
-        { label: 'ACOS%', value: `${(metricsData.acos || 0).toFixed(2)}%`, icon: 'target' },
-        { label: 'Amazon Fees', value: `${currency}${(metricsData.amazonFees || 0).toFixed(2)}`, icon: 'list' },
-        { label: 'Gross Profit', value: `${currency}${(metricsData.grossProfit || 0).toFixed(2)}`, icon: 'dollar-sign' },
-      ];
-    }
-    
-    // LEGACY LOGIC: Used for filtered data scenarios (calendar date selection)
-    // Use the same Total Sales value as the Dashboard Total Sales component
     const filteredAccountFinance = info?.accountFinance || accountFinance;
-    let totalOverallSpend = 0;
-    
-    // Use filtered data if available, otherwise use default data from Redux
-    const useFilteredData = filteredData !== null && calendarMode !== 'default';
-    
-    // Calculate total COGS from all products that have COGS entered
-    let totalCOGS = 0;
-    const profitibilityData = info?.profitibilityData || [];
-    
-    profitibilityData.forEach(product => {
-      const cogsPerUnit = cogsValues[product.asin] || 0;
-      const quantity = product.quantity || 0;
-      totalCOGS += cogsPerUnit * quantity;
-    });
-    
-    // Calculate ad spend - use filtered API data for consistency when available
-    let adSpend = 0;
     const isDateRangeSelected = shouldUseCalendarDateRange(info?.startDate, info?.endDate);
-    
-    // Filter PPCMetrics dateWiseMetrics based on date range
-    const getFilteredPPCSpend = () => {
-      if (!ppcDateWiseMetrics || ppcDateWiseMetrics.length === 0) return 0;
-      
-      if (!isDateRangeSelected) return 0;
-      
+
+    const getFilteredPPCDateBounds = () => {
       const start = parseLocalDate(info.startDate);
       const end = parseLocalDate(info.endDate);
-      
+      start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
+      return { start, end };
+    };
+    const getFilteredPPCSpend = () => {
+      if (!ppcDateWiseMetrics?.length || !isDateRangeSelected) return 0;
+      const { start, end } = getFilteredPPCDateBounds();
       return ppcDateWiseMetrics
-        .filter(item => {
+        .filter((item) => {
           const itemDate = new Date(item.date);
           return itemDate >= start && itemDate <= end;
         })
         .reduce((sum, item) => sum + (item.spend || 0), 0);
     };
-    
     const getFilteredPPCSales = () => {
-      if (!ppcDateWiseMetrics || ppcDateWiseMetrics.length === 0) return 0;
-      
-      if (!isDateRangeSelected) return 0;
-      
-      const start = parseLocalDate(info.startDate);
-      const end = parseLocalDate(info.endDate);
-      
+      if (!ppcDateWiseMetrics?.length || !isDateRangeSelected) return 0;
+      const { start, end } = getFilteredPPCDateBounds();
       return ppcDateWiseMetrics
-        .filter(item => {
+        .filter((item) => {
           const itemDate = new Date(item.date);
           return itemDate >= start && itemDate <= end;
         })
         .reduce((sum, item) => sum + (item.sales || 0), 0);
     };
-    
-    if (useFilteredData && filteredData?.ppcSpent?.amount !== undefined) {
-      // PRIMARY: Use PPC spent from the filtered API response for consistency
-      // This ensures the same value is shown regardless of how the date range was selected
-      adSpend = Number(filteredData.ppcSpent.amount || 0);
-      devLog('=== Profitability Dashboard: Using filtered API PPC spend for consistency ===');
-      devLog('Filtered API ad spend:', adSpend);
-    } else if (isDateRangeSelected) {
-      // FALLBACK: Use filtered PPCMetrics data when date range is selected
-      const filteredPPCSpend = getFilteredPPCSpend();
-      if (filteredPPCSpend > 0) {
-        adSpend = filteredPPCSpend;
-        devLog('=== Profitability Dashboard: Using filtered PPCMetrics spend ===');
-        devLog('Filtered PPCMetrics ad spend:', adSpend);
-      } else if (filteredDateWiseTotalCosts.length > 0) {
-        // FALLBACK: Use legacy filtered data
-        adSpend = filteredDateWiseTotalCosts.reduce((sum, item) => sum + (item.totalCost || 0), 0);
-        devLog('=== Profitability Dashboard: Using legacy filtered spend data ===');
-        devLog('Legacy filtered ad spend:', adSpend);
-      }
-    } else {
-      // PRIMARY: Use PPCMetrics model summary (no date filtering)
-      if (ppcSummary?.totalSpend > 0) {
-        adSpend = ppcSummary.totalSpend;
-        devLog('=== Profitability Dashboard: Using PPCMetrics model as PRIMARY ===');
-        devLog('PPCMetrics totalSpend:', adSpend);
-      } else {
-        // FALLBACK: Use legacy sponsoredAdsMetrics
-        const adsPPCSpend = Number(sponsoredAdsMetrics?.totalCost || 0);
-        adSpend = adsPPCSpend > 0 ? adsPPCSpend : Number(filteredAccountFinance?.ProductAdsPayment || 0);
-        devLog('=== Profitability Dashboard: Using legacy data as FALLBACK ===');
-        devLog('sponsoredAdsMetrics?.totalCost:', adsPPCSpend);
-        devLog('ProductAdsPayment:', filteredAccountFinance?.ProductAdsPayment || 0);
-        devLog('Final ad spend used:', adSpend);
-      }
-    }
-    
-    // Use filtered fees when available
-    const fbaFees = useFilteredData
-      ? Number(filteredData?.fbaFees?.amount || 0)
-      : Number(filteredAccountFinance?.FBA_Fees || 0);
-    const storageFees = useFilteredData
-      ? Number(filteredData?.storageFees?.amount || 0)
-      : Number(filteredAccountFinance?.Storage || 0);
-    const refunds = useFilteredData
-      ? Number(filteredData?.refunds?.amount || 0)
-      : Number(filteredAccountFinance?.Refunds || 0);
-    
-    // Calculate total overall spend including all Amazon fees (using calculated adSpend)
-    totalOverallSpend = (fbaFees + 
-                        storageFees + 
-                        Number(filteredAccountFinance?.Amazon_Charges || 0) +
-                        adSpend +
-                        refunds);
-    
-    const totalSales = Number(info?.TotalWeeklySale || 0);
-    
-    // Get gross profit from backend (Sales - Amazon Fees - Refunds)
-    const grossProfitFromBackend = useFilteredData
-      ? Number(filteredData?.grossProfit?.amount || 0)
-      : Number(filteredAccountFinance?.Gross_Profit) || 0;
-    
-    // Calculate displayed gross profit: Backend Gross Profit - Ad Spend
-    // This matches the Total Sales component display
-    const grossProfit = grossProfitFromBackend - adSpend;
-    
-    // Calculate COGS-adjusted profit for product-level analysis (separate from displayed gross profit)
-    const cogsAdjustedProfit = grossProfit - totalCOGS;
-    
-    // Use Amazon_Fees if available (from EconomicsMetrics), otherwise calculate from FBA + Storage
-    // Use filtered fees when available
-    let amazonFees = Number(filteredAccountFinance?.Amazon_Fees || 0) || 
-                     (fbaFees + storageFees);
-    
-    // If account-level fees is 0, calculate from product-wise data as fallback
-    if (amazonFees === 0 && profitibilityData.length > 0) {
-      let productAmazonFees = 0;
-      
-      profitibilityData.forEach(product => {
-        productAmazonFees += Number(product.amazonFees || product.totalFees || product.amzFee || 0);
-      });
-      
-      if (productAmazonFees > 0) {
-        amazonFees = productAmazonFees;
-        devLog('=== Profitability Dashboard: Using product-wise fees fallback ===');
-        devLog('Product Amazon Fees:', amazonFees);
-      }
-    }
-    
-    // Calculate profit margin using gross profit (matching Total Sales component)
-    const profitMargin = totalSales > 0 ? ((grossProfit / totalSales) * 100) : 0;
-    
-    // Calculate Total PPC Sales and ACOS% (same logic as PPC Dashboard/Campaign Analysis page)
+
+    let adSpend = 0;
+    if (isDateRangeSelected) adSpend = getFilteredPPCSpend();
+    else if ((ppcKPISummary?.spend ?? 0) > 0 || (ppcKPISummary?.sales ?? 0) > 0) adSpend = ppcKPISummary.spend || 0;
+    else if (ppcSummary?.totalSpend > 0) adSpend = ppcSummary.totalSpend;
+
+    const hasSalesOnlyTotal =
+      filteredData?.totalSales?.amount !== undefined && filteredData?.totalSales?.amount !== null;
+    const totalSales = hasSalesOnlyTotal
+      ? Number(filteredData.totalSales.amount)
+      : profitSummary?.totalSales != null
+        ? Number(profitSummary.totalSales)
+        : Number(info?.TotalWeeklySale || 0);
+
     let ppcSales = 0;
-    let acos = 0;
-    
-    // Use the same calculation logic as PPC Dashboard with date filtering support
-    if (isDateRangeSelected) {
-      // PRIMARY: Use filtered PPCMetrics data when date range is selected
-      const filteredPPCSales = getFilteredPPCSales();
-      if (filteredPPCSales > 0) {
-        ppcSales = filteredPPCSales;
-        devLog('=== Profitability Dashboard: Using filtered PPCMetrics sales ===');
-        devLog('Filtered PPCMetrics sales:', ppcSales);
-      } else if (filteredDateWiseTotalCosts.length > 0) {
-        // FALLBACK: Use legacy filtered data
-        ppcSales = filteredDateWiseTotalCosts.reduce((sum, item) => sum + (parseFloat(item.sales) || 0), 0);
-        devLog('=== Profitability Dashboard: Using legacy filtered sales data ===');
-        devLog('Legacy filtered sales:', ppcSales);
-      }
-    } else {
-      // PRIMARY: Use PPCMetrics model summary (no date filtering)
-      if (ppcSummary?.totalSales > 0 || ppcSummary?.totalSpend > 0) {
-        ppcSales = ppcSummary.totalSales || 0;
-        acos = ppcSummary.overallAcos || 0;
-        devLog('=== Profitability Dashboard: Using PPCMetrics model for PPC Sales ===');
-        devLog('PPCMetrics totalSales:', ppcSales);
-        devLog('PPCMetrics overallAcos:', acos);
-      } else {
-        // FALLBACK: Use legacy sponsoredAdsMetrics
-        ppcSales = sponsoredAdsMetrics?.totalSalesIn30Days || 0;
-        devLog('=== Profitability Dashboard: Using legacy data for PPC Sales ===');
-        devLog('sponsoredAdsMetrics?.totalSalesIn30Days:', ppcSales);
-      }
-    }
-    
-    // Calculate ACOS if not already set (same as PPC Dashboard)
-    if (!acos && ppcSales > 0 && adSpend > 0) {
-      acos = (adSpend / ppcSales) * 100;
-    }
-    
-    return [
-      { label: 'Total Sales', value: `${currency}${totalSales.toFixed(2)}`, icon: 'dollar-sign' },
-      { label: 'Total PPC Sales', value: `${currency}${ppcSales.toFixed(2)}`, icon: 'zap' },
-      { label: 'Total Ad Spend', value: `${currency}${adSpend.toFixed(2)}`, icon: 'dollar-sign' },
-      { label: 'ACOS%', value: `${acos.toFixed(2)}%`, icon: 'target' },
-      { label: 'Amazon Fees', value: `${currency}${amazonFees.toFixed(2)}`, icon: 'list' },
-      { label: 'Gross Profit', value: `${currency}${grossProfit.toFixed(2)}`, icon: 'dollar-sign' }, // Matches Total Sales component (Backend GP - PPC)
-    ];
-  }, [info?.accountFinance, info?.TotalWeeklySale, info?.sponsoredAdsMetrics, info?.profitibilityData, accountFinance, cogsValues, sponsoredAdsMetrics, filteredDateWiseTotalCosts, info?.calendarMode, info?.startDate, info?.endDate, filteredData, calendarMode, ppcSummary, ppcDateWiseMetrics, currency, metricsData]);
+    if (isDateRangeSelected) ppcSales = getFilteredPPCSales();
+    else if ((ppcKPISummary?.spend ?? 0) > 0 || (ppcKPISummary?.sales ?? 0) > 0) ppcSales = ppcKPISummary.sales || 0;
+    else if (ppcSummary?.totalSales > 0 || ppcSummary?.totalSpend > 0) ppcSales = ppcSummary.totalSales || 0;
+    const acos = ppcSales > 0 ? (adSpend / ppcSales) * 100 : 0;
+
+    const snapshotFeeTotals = pickSnapshotFeeTotalsForCalendar(
+      expenseReportSnapshot,
+      calendarMode,
+      info?.startDate,
+      info?.endDate
+    );
+
+    const displayAmazonFees = snapshotFeeTotals
+      ? Math.abs(snapshotFeeTotals.amazonFees)
+      : profitSummary
+        ? Math.abs(profitSummary.amazonFees || 0)
+        : Math.abs(Number(filteredAccountFinance?.Amazon_Fees || 0) || (Number(filteredAccountFinance?.FBA_Fees || 0) + Number(filteredAccountFinance?.Storage || 0)));
+    const displayTotalExpenses = snapshotFeeTotals
+      ? Math.abs(snapshotFeeTotals.totalExpenses)
+      : profitSummary
+        ? Math.abs(profitSummary.totalExpenses || 0)
+        : 0;
+    const displayRefunds = profitSummary ? Math.abs(profitSummary.refunds || 0) : Math.abs(Number(filteredAccountFinance?.Refunds || 0));
+    const displayFbaFees = profitSummary ? Math.abs(profitSummary.fbaFees || 0) : Math.abs(Number(filteredAccountFinance?.FBA_Fees || 0));
+    const displayGrossProfit = snapshotFeeTotals
+      ? totalSales - displayTotalExpenses
+      : profitSummary
+        ? (totalSales - displayTotalExpenses - adSpend)
+        : (totalSales - displayAmazonFees - displayRefunds - adSpend);
+
+    return {
+      row1: [
+        { label: 'Total Sales', value: `${currency}${totalSales.toFixed(2)}`, icon: 'dollar-sign' },
+        { label: 'Total PPC Sales', value: `${currency}${ppcSales.toFixed(2)}`, icon: 'zap' },
+        { label: 'Total Ad Spend', value: `${currency}${adSpend.toFixed(2)}`, icon: 'dollar-sign' },
+        { label: 'Amazon Fees', value: `${currency}${displayAmazonFees.toFixed(2)}`, icon: 'list' },
+        { label: 'Gross Profit', value: `${currency}${displayGrossProfit.toFixed(2)}`, icon: 'dollar-sign' },
+      ],
+      row2: (profitSummary || snapshotFeeTotals)
+        ? [
+            { label: 'Total Expenses', value: `${currency}${displayTotalExpenses.toFixed(2)}`, icon: 'trending-down' },
+            { label: 'FBA Fees', value: `${currency}${(profitSummary ? displayFbaFees : 0).toFixed(2)}`, icon: 'dollar-sign' },
+            { label: 'Refunds', value: `${currency}${(profitSummary ? displayRefunds : 0).toFixed(2)}`, icon: 'trending-down' },
+            { label: 'ACOS%', value: `${acos.toFixed(2)}%`, icon: 'target' },
+          ]
+        : [],
+    };
+  }, [info?.accountFinance, info?.TotalWeeklySale, info?.startDate, info?.endDate, accountFinance, filteredData, calendarMode, ppcSummary, ppcKPISummary, ppcDateWiseMetrics, currency, profitSummary, expenseReportSnapshot]);
 
   // Prepare data for CSV/Excel export
   const prepareProfitabilityData = () => {
@@ -640,7 +650,7 @@ const ProfitabilityDashboard = () => {
         metricsExists: !!metrics,
         chartDataExists: !!chartData,
         cogsValuesExists: !!cogsValues,
-        metricsLength: Array.isArray(metrics) ? metrics.length : 'not array',
+        metricsLength: metrics?.row1 ? metrics.row1.length + (metrics.row2?.length || 0) : 'not object',
         chartDataLength: Array.isArray(chartData) ? chartData.length : 'not array'
       });
       
@@ -768,8 +778,9 @@ const ProfitabilityDashboard = () => {
     // Add metrics summary (with COGS adjustments)
     devLog('Step 3: Processing metrics');
     csvData.push(['Key Metrics (COGS-Adjusted)']);
-    if (Array.isArray(metrics) && metrics.length > 0) {
-      metrics.forEach((metric, index) => {
+    const allMetrics = [...(metrics?.row1 || []), ...(metrics?.row2 || [])];
+    if (allMetrics.length > 0) {
+      allMetrics.forEach((metric, index) => {
         if (metric && typeof metric === 'object' && metric.label && metric.value) {
           csvData.push([metric.label, metric.value]);
         } else {
@@ -1235,9 +1246,10 @@ const ProfitabilityDashboard = () => {
         basicCsvData.push([]);
         
         // Basic metrics if available
-        if (Array.isArray(metrics) && metrics.length > 0) {
+        const basicAllMetrics = [...(metrics?.row1 || []), ...(metrics?.row2 || [])];
+        if (basicAllMetrics.length > 0) {
           basicCsvData.push(['Key Metrics']);
-          metrics.forEach(metric => {
+          basicAllMetrics.forEach(metric => {
             if (metric && metric.label && metric.value) {
               basicCsvData.push([metric.label, metric.value]);
             }
@@ -1449,20 +1461,39 @@ const ProfitabilityDashboard = () => {
               style={{ marginBottom: '10px' }}
             >
               {/* Show skeleton when loading OR when metricsData is not yet available (initial state) */}
-              {(metricsLoading || (calendarMode === 'default' && !metricsData && !filteredData)) ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6" style={{ gap: '8px' }}>
-                  {[...Array(6)].map((_, i) => (
-                    <div key={i} className="animate-pulse" style={{ background: '#161b22', borderRadius: '6px', border: '1px solid #30363d', padding: '16px' }}>
-                      <div style={{ background: '#30363d', height: '14px', width: '60%', borderRadius: '4px', marginBottom: '8px' }}></div>
-                      <div style={{ background: '#30363d', height: '24px', width: '80%', borderRadius: '4px' }}></div>
-                    </div>
-                  ))}
+              {(metricsLoading || !profitSummary) ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-5" style={{ gap: '8px' }}>
+                    {[...Array(5)].map((_, i) => (
+                      <div key={i} className="animate-pulse" style={{ background: '#161b22', borderRadius: '6px', border: '1px solid #30363d', padding: '16px' }}>
+                        <div style={{ background: '#30363d', height: '14px', width: '60%', borderRadius: '4px', marginBottom: '8px' }}></div>
+                        <div style={{ background: '#30363d', height: '24px', width: '80%', borderRadius: '4px' }}></div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4" style={{ gap: '8px' }}>
+                    {[...Array(4)].map((_, i) => (
+                      <div key={i} className="animate-pulse" style={{ background: '#161b22', borderRadius: '6px', border: '1px solid #30363d', padding: '16px' }}>
+                        <div style={{ background: '#30363d', height: '14px', width: '60%', borderRadius: '4px', marginBottom: '8px' }}></div>
+                        <div style={{ background: '#30363d', height: '24px', width: '80%', borderRadius: '4px' }}></div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6" style={{ gap: '8px' }}>
-                  {metrics.map((metric, index) => (
-                    <MetricCard key={metric.label} label={metric.label} value={metric.value} icon={metric.icon} />
-                  ))}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-5" style={{ gap: '8px' }}>
+                    {metrics.row1.map((metric) => (
+                      <MetricCard key={metric.label} label={metric.label} value={metric.value} icon={metric.icon} />
+                    ))}
+                  </div>
+                  {metrics.row2.length > 0 && (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4" style={{ gap: '8px' }}>
+                      {metrics.row2.map((metric) => (
+                        <MetricCard key={metric.label} label={metric.label} value={metric.value} icon={metric.icon} />
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </motion.div>
@@ -1639,6 +1670,9 @@ const ProfitabilityDashboard = () => {
                       totalProducts={totalProducts}
                       onLoadMore={fetchNextPage}
                       onPageChange={fetchPage}
+                      profitTableData={profitTableData}
+                      profitTablePagination={profitTablePagination}
+                      onProfitTablePageChange={handleProfitTablePageChange}
                     />
                   )}
                   {profitabilityTab === 'issues' && (

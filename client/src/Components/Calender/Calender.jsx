@@ -11,7 +11,7 @@ import { addBrand } from '../../redux/slices/authSlice.js'
 // PPC metrics are now filtered locally in Dashboard based on ppcDateWiseMetrics
 // No need to fetch filtered metrics from API
 import PulseLoader from "react-spinners/PulseLoader";
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronRight, Check } from 'lucide-react';
 
@@ -62,8 +62,10 @@ function readPortalStyle(anchorRef) {
 
 export default function DateFilter({ setOpenCalender, setSelectedPeriod, anchorRef }) {
   const navigate=useNavigate();
+  const location = useLocation();
   const dispatch=useDispatch()
   const [Loader,setLoader]=useState(false);
+  const isDemoRoute = location.pathname.includes('/seller-central-checker-demo');
   
   // Get createdAccountDate from Redux
   const dashboardInfo = useSelector(state => state.Dashboard?.DashBoardInfo);
@@ -263,10 +265,15 @@ export default function DateFilter({ setOpenCalender, setSelectedPeriod, anchorR
         
         // Set calendar mode to default
         dispatch(setCalendarMode('default'));
-        
-        // Make API call to get the default dashboard data
-        // The applyDefaultDateRange function will update selectedRange with actual backend dates
-        await applyDefaultDateRange();
+
+        // Demo dashboard should only update Total Sales on calendar changes.
+        if (isDemoRoute) {
+          await applyDateRange(defaultRange, 'last30');
+        } else {
+          // Main app keeps existing full dashboard refresh behavior.
+          // The applyDefaultDateRange function will update selectedRange with actual backend dates.
+          await applyDefaultDateRange();
+        }
         break;
       case 'last7':
         setCustomPanelOpen(false);
@@ -396,13 +403,20 @@ export default function DateFilter({ setOpenCalender, setSelectedPeriod, anchorR
         calendarMode = 'last7';
       } else if (periodType === 'last14') {
         calendarMode = 'last14';
+      } else if (periodType === 'last30') {
+        calendarMode = 'default';
       } else if (periodType === 'custom') {
         calendarMode = 'custom';
       }
+
+      const responseStartDate = dateResponse?.data?.data?.startDate;
+      const responseEndDate = dateResponse?.data?.data?.endDate;
+      const resolvedStartDate = responseStartDate || formattedStartDate;
+      const resolvedEndDate = responseEndDate || formattedEndDate;
       
       dispatch(UpdateDashboardInfo({
-        startDate: formattedStartDate,
-        endDate: formattedEndDate,
+        startDate: resolvedStartDate,
+        endDate: resolvedEndDate,
         financeData: dateResponse.data.data.FinanceData,
         reimburstmentData: dateResponse.data.data.reimburstmentData,
         WeeklySales: dateResponse.data.data.TotalSales.totalSales,
