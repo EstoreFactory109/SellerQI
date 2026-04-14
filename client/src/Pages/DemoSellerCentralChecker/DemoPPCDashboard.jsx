@@ -836,8 +836,11 @@ const PPCDashboard = () => {
     return filtered;
   }, [dateWiseTotalCosts, info?.startDate, info?.endDate]);
 
-  // Check if date range is explicitly selected (custom or last7, not default last30)
-  const isTableDateRangeSelected = shouldUseCalendarDateRange(info?.startDate, info?.endDate);
+  // In demo, default and explicit last30 should behave identically.
+  const isDefaultOrLast30Mode = (info?.calendarMode || 'default') === 'default' || (info?.calendarMode === 'last30');
+  const isCalendarFilteredRange = !isDefaultOrLast30Mode && shouldUseCalendarDateRange(info?.startDate, info?.endDate);
+  // Check if date range is explicitly selected (custom/last7/last14 only)
+  const isTableDateRangeSelected = isCalendarFilteredRange;
 
   // Filter adsKeywordsPerformanceData based on selected date range
   const filteredAdsKeywordsPerformanceData = useMemo(() => {
@@ -1115,8 +1118,8 @@ const PPCDashboard = () => {
   
   // Transform the data for the chart - prioritize PPCMetrics model data
   const chartData = useMemo(() => {
-    // Check if date range is selected
-    const isDateRangeSelected = shouldUseCalendarDateRange(info?.startDate, info?.endDate);
+    // Default and last30 are the same baseline in demo campaign audit.
+    const isDateRangeSelected = isCalendarFilteredRange;
     
     // Filter PPCMetrics dateWiseMetrics based on selected date range
     let filteredPPCMetricsData = ppcDateWiseMetrics;
@@ -1198,7 +1201,7 @@ const PPCDashboard = () => {
     // Last resort: Return empty data with zero values
     console.log("🔴 CHART DATA: Using empty data fallback");
     return createEmptyChartData();
-  }, [ppcDateWiseMetrics, filteredDateWiseTotalCosts, dateWiseTotalCosts, info?.startDate, info?.endDate, info?.calendarMode]);
+  }, [ppcDateWiseMetrics, filteredDateWiseTotalCosts, dateWiseTotalCosts, info?.startDate, info?.endDate, info?.calendarMode, isCalendarFilteredRange]);
   
   // Final debug: Log the actual chart data being used
   if (info?.startDate && info?.endDate) {
@@ -1588,7 +1591,7 @@ const PPCDashboard = () => {
     }
   }, [tabs, selectedTabIndex]);
   
-  const isDateRangeSelected = shouldUseCalendarDateRange(info?.startDate, info?.endDate);
+  const isDateRangeSelected = isCalendarFilteredRange;
   
   // Fetch filtered PPC Units Sold when date range is selected
   useEffect(() => {

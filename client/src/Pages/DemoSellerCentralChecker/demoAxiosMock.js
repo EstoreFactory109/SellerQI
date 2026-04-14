@@ -110,6 +110,7 @@ const getSeriesForCalendar = ({ startDate, endDate, periodType } = {}) => {
   // Preset modes should be deterministic and distinct regardless of passed range.
   if (mode === 'last7') return all.slice(-7);
   if (mode === 'last14') return all.slice(-14);
+  if (mode === 'last30' || mode === 'default') return all.slice(-30);
 
   const useRange = Boolean(startDate && endDate);
   if (useRange) {
@@ -127,66 +128,131 @@ const toSalesOnlyRows = (rows) => rows.map((row) => ({
   TotalAmount: Number(row.totalSales) || 0
 }));
 
-const PPC_DATE_WISE_METRICS = [
-  // Curvy day-to-day fluctuations so line/area charts look less linear.
-  { date: '2026-03-10', spend: 78, sales: 155, impressions: 9100, clicks: 430 },
-  { date: '2026-03-11', spend: 120, sales: 220, impressions: 12400, clicks: 610 },
-  { date: '2026-03-12', spend: 90, sales: 195, impressions: 10800, clicks: 520 },
-  { date: '2026-03-13', spend: 135, sales: 240, impressions: 13250, clicks: 640 },
-  { date: '2026-03-14', spend: 105, sales: 210, impressions: 11800, clicks: 570 },
-  { date: '2026-03-15', spend: 160, sales: 270, impressions: 14800, clicks: 720 },
-  { date: '2026-03-16', spend: 130, sales: 260, impressions: 13900, clicks: 690 },
-  { date: '2026-03-17', spend: 175, sales: 310, impressions: 16000, clicks: 780 },
-  { date: '2026-03-18', spend: 150, sales: 295, impressions: 15400, clicks: 755 }
-].map((d) => {
-  const acos = d.sales > 0 ? (d.spend / d.sales) * 100 : 0;
-  const tacos = d.sales > 0 ? (d.spend / d.sales) * 100 : 0;
-  return { ...d, acos, tacos };
-});
-
-const PPC_DATE_WISE_UNITS_SOLD = [
-  { date: '2026-03-10', unitsSold: 14 },
-  { date: '2026-03-11', unitsSold: 17 },
-  { date: '2026-03-12', unitsSold: 20 },
-  { date: '2026-03-13', unitsSold: 18 },
-  { date: '2026-03-14', unitsSold: 23 },
-  { date: '2026-03-15', unitsSold: 25 },
-  { date: '2026-03-16', unitsSold: 26 },
-  { date: '2026-03-17', unitsSold: 28 },
-  { date: '2026-03-18', unitsSold: 30 }
+const DEMO_PPC_CAMPAIGN_AUDIT_SERIES = [
+  { date: '2026-02-17', spend: 280, sales: 760, impressions: 7200, clicks: 205 },
+  { date: '2026-02-18', spend: 640, sales: 1910, impressions: 12400, clicks: 388 },
+  { date: '2026-02-19', spend: 330, sales: 860, impressions: 7600, clicks: 228 },
+  { date: '2026-02-20', spend: 720, sales: 2080, impressions: 13100, clicks: 412 },
+  { date: '2026-02-21', spend: 260, sales: 690, impressions: 6900, clicks: 196 },
+  { date: '2026-02-22', spend: 590, sales: 1750, impressions: 11750, clicks: 360 },
+  { date: '2026-02-23', spend: 0, sales: 0, impressions: 0, clicks: 0 },
+  { date: '2026-02-24', spend: 350, sales: 990, impressions: 8200, clicks: 246 },
+  { date: '2026-02-25', spend: 690, sales: 2010, impressions: 12800, clicks: 405 },
+  { date: '2026-02-26', spend: 300, sales: 810, impressions: 7400, clicks: 218 },
+  { date: '2026-02-27', spend: 610, sales: 1825, impressions: 12000, clicks: 374 },
+  { date: '2026-02-28', spend: 245, sales: 640, impressions: 6650, clicks: 188 },
+  { date: '2026-03-01', spend: 570, sales: 1680, impressions: 11300, clicks: 348 },
+  { date: '2026-03-02', spend: 780, sales: 2280, impressions: 13800, clicks: 430 },
+  { date: '2026-03-03', spend: 325, sales: 900, impressions: 7700, clicks: 230 },
+  { date: '2026-03-04', spend: 665, sales: 1960, impressions: 12500, clicks: 398 },
+  { date: '2026-03-05', spend: 0, sales: 0, impressions: 0, clicks: 0 },
+  { date: '2026-03-06', spend: 285, sales: 780, impressions: 7250, clicks: 210 },
+  { date: '2026-03-07', spend: 630, sales: 1880, impressions: 12100, clicks: 382 },
+  { date: '2026-03-08', spend: 310, sales: 840, impressions: 7500, clicks: 222 },
+  { date: '2026-03-09', spend: 740, sales: 2160, impressions: 13400, clicks: 418 },
+  { date: '2026-03-10', spend: 265, sales: 710, impressions: 7000, clicks: 198 },
+  { date: '2026-03-11', spend: 605, sales: 1800, impressions: 11900, clicks: 370 },
+  { date: '2026-03-12', spend: 355, sales: 980, impressions: 8150, clicks: 244 },
+  { date: '2026-03-13', spend: 700, sales: 2050, impressions: 12900, clicks: 408 },
+  { date: '2026-03-14', spend: 290, sales: 770, impressions: 7300, clicks: 214 },
+  { date: '2026-03-15', spend: 640, sales: 1920, impressions: 12300, clicks: 390 },
+  { date: '2026-03-16', spend: 0, sales: 0, impressions: 0, clicks: 0 },
+  { date: '2026-03-17', spend: 760, sales: 2230, impressions: 13600, clicks: 424 },
+  { date: '2026-03-18', spend: 340, sales: 920, impressions: 7900, clicks: 236 }
 ];
 
-const PPC_TOTAL_SPEND = PPC_DATE_WISE_METRICS.reduce((s, x) => s + (Number(x.spend) || 0), 0);
-const PPC_TOTAL_SALES = PPC_DATE_WISE_METRICS.reduce((s, x) => s + (Number(x.sales) || 0), 0);
-const PPC_OVERALL_ACOS = PPC_TOTAL_SALES > 0 ? (PPC_TOTAL_SPEND / PPC_TOTAL_SALES) * 100 : 0;
+const PPC_DATE_WISE_METRICS = DEMO_PPC_CAMPAIGN_AUDIT_SERIES.map((row) => {
+  const spend = Number(row.spend) || 0;
+  const sales = Number(row.sales) || 0;
+  const impressions = Number(row.impressions) || 0;
+  const clicks = Number(row.clicks) || 0;
+  const acos = sales > 0 ? (spend / sales) * 100 : 0;
+  const tacos = sales > 0 ? (spend / sales) * 100 : 0;
+  return {
+    date: String(row.date),
+    spend,
+    sales,
+    impressions,
+    clicks,
+    acos,
+    tacos
+  };
+});
+
+const PPC_DATE_WISE_UNITS_SOLD = DEMO_PPC_CAMPAIGN_AUDIT_SERIES.map((row, idx) => {
+  const unitsSold = row.sales > 0 ? Math.max(0, Math.round((Number(row.sales) || 0) / (44 + (idx % 5) * 3))) : 0;
+  return { date: row.date, unitsSold };
+});
+
+const computePpcSummary = (rows) => {
+  const totalSpend = rows.reduce((s, x) => s + (Number(x.spend) || 0), 0);
+  const totalSales = rows.reduce((s, x) => s + (Number(x.sales) || 0), 0);
+  const overallAcos = totalSales > 0 ? (totalSpend / totalSales) * 100 : 0;
+  return { totalSpend, totalSales, overallAcos };
+};
+
+const PPC_SUMMARY_ALL = computePpcSummary(PPC_DATE_WISE_METRICS);
+const PPC_TOTAL_SPEND = PPC_SUMMARY_ALL.totalSpend;
+const PPC_TOTAL_SALES = PPC_SUMMARY_ALL.totalSales;
+const PPC_OVERALL_ACOS = PPC_SUMMARY_ALL.overallAcos;
 const PPC_TOTAL_UNITS_SOLD = PPC_DATE_WISE_UNITS_SOLD.reduce((s, x) => s + (Number(x.unitsSold) || 0), 0);
 
-const mkPPCMetricsModelPayload = () => ({
+const getPpcMetricsForRange = ({ startDate, endDate } = {}) => {
+  const all = PPC_DATE_WISE_METRICS.slice();
+  if (!all.length) return [];
+  if (!startDate || !endDate) return all;
+  const s = parseDateKey(startDate);
+  const e = parseDateKey(endDate);
+  const ranged = all.filter((row) => row.date >= s && row.date <= e);
+  return ranged.length ? ranged : all;
+};
+
+const getPpcUnitsForRange = ({ startDate, endDate } = {}) => {
+  const all = PPC_DATE_WISE_UNITS_SOLD.slice();
+  if (!all.length) return [];
+  if (!startDate || !endDate) return all;
+  const s = parseDateKey(startDate);
+  const e = parseDateKey(endDate);
+  const ranged = all.filter((row) => row.date >= s && row.date <= e);
+  return ranged.length ? ranged : all;
+};
+
+const mkPPCMetricsModelPayload = (metricsRows = PPC_DATE_WISE_METRICS) => {
+  const rows = Array.isArray(metricsRows) && metricsRows.length ? metricsRows : PPC_DATE_WISE_METRICS;
+  const summary = computePpcSummary(rows);
+  const startDate = rows[0]?.date || PPC_DATE_WISE_METRICS[0]?.date || '2026-02-17';
+  const endDate = rows[rows.length - 1]?.date || PPC_DATE_WISE_METRICS[PPC_DATE_WISE_METRICS.length - 1]?.date || '2026-03-18';
+  return ({
   found: true,
   data: {
     summary: {
-      totalSpend: PPC_TOTAL_SPEND,
-      totalSales: PPC_TOTAL_SALES,
-      overallAcos: PPC_OVERALL_ACOS,
-      tacos: PPC_OVERALL_ACOS
+      totalSpend: summary.totalSpend,
+      totalSales: summary.totalSales,
+      overallAcos: summary.overallAcos,
+      tacos: summary.overallAcos
     },
-    dateRange: { mode: 'last30', startDate: '2026-03-10', endDate: '2026-03-18' },
-    dateWiseMetrics: PPC_DATE_WISE_METRICS,
+    dateRange: { mode: 'last30', startDate, endDate },
+    dateWiseMetrics: rows,
     campaignTypeBreakdown: {
-      sponsoredBrands: { spend: PPC_TOTAL_SPEND * 0.25, sales: PPC_TOTAL_SALES * 0.22 },
-      sponsoredProducts: { spend: PPC_TOTAL_SPEND * 0.65, sales: PPC_TOTAL_SALES * 0.68 },
-      sponsoredDisplay: { spend: PPC_TOTAL_SPEND * 0.1, sales: PPC_TOTAL_SALES * 0.1 }
+      sponsoredBrands: { spend: summary.totalSpend * 0.25, sales: summary.totalSales * 0.22 },
+      sponsoredProducts: { spend: summary.totalSpend * 0.65, sales: summary.totalSales * 0.68 },
+      sponsoredDisplay: { spend: summary.totalSpend * 0.1, sales: summary.totalSales * 0.1 }
     }
   }
 });
+};
 
-const mkPPCUnitsSoldModelPayload = () => ({
+const mkPPCUnitsSoldModelPayload = (unitsRows = PPC_DATE_WISE_UNITS_SOLD) => {
+  const rows = Array.isArray(unitsRows) && unitsRows.length ? unitsRows : PPC_DATE_WISE_UNITS_SOLD;
+  const totalUnits = rows.reduce((s, x) => s + (Number(x.unitsSold) || 0), 0);
+  return ({
   found: true,
   data: {
-    totalUnits: PPC_TOTAL_UNITS_SOLD,
-    dateWiseUnits: PPC_DATE_WISE_UNITS_SOLD
+    totalUnits,
+    dateWiseUnits: rows
   }
 });
+};
 
 const mkError = (message, howToSolve) => ({
   status: 'Error',
@@ -1069,7 +1135,15 @@ export const initDemoAxiosMock = () => {
 
     // New profitability + expenses endpoints (used by updated profitability UI)
     if (method === 'get' && (pathname === '/api/profitability/summary' || pathname === '/api/profitability/summary/date-range')) {
-      const totals = DEMO_PROFITABILITY_SERIES.reduce((acc, row) => {
+      const isDateRange = pathname.endsWith('/date-range');
+      const from = params.get('from');
+      const to = params.get('to');
+      const period = Number(params.get('period') || 30);
+      const periodType = period === 7 ? 'last7' : period === 14 ? 'last14' : 'last30';
+      const rows = isDateRange
+        ? getSeriesForCalendar({ startDate: from, endDate: to, periodType: 'custom' })
+        : getSeriesForCalendar({ periodType });
+      const totals = rows.reduce((acc, row) => {
         acc.totalSales += Number(row.totalSales) || 0;
         acc.totalExpenses += Number(row.totalExpenses) || 0;
         acc.ppcSpend += Number(row.ppcSpend) || 0;
@@ -1088,15 +1162,31 @@ export const initDemoAxiosMock = () => {
     }
 
     if (method === 'get' && (pathname === '/api/profitability/chart' || pathname === '/api/profitability/chart/date-range')) {
-      return makeNestedDataResponse(config, DEMO_PROFITABILITY_SERIES.map((row) => ({
+      const isDateRange = pathname.endsWith('/date-range');
+      const from = params.get('from');
+      const to = params.get('to');
+      const period = Number(params.get('period') || 30);
+      const periodType = period === 7 ? 'last7' : period === 14 ? 'last14' : 'last30';
+      const rows = isDateRange
+        ? getSeriesForCalendar({ startDate: from, endDate: to, periodType: 'custom' })
+        : getSeriesForCalendar({ periodType });
+      return makeNestedDataResponse(config, rows.map((row) => ({
         date: row.date,
         totalSales: row.totalSales,
       })));
     }
 
     if (method === 'get' && (pathname === '/api/expenses/total' || pathname === '/api/expenses/total/date-range')) {
+      const isDateRange = pathname.endsWith('/date-range');
+      const from = params.get('from');
+      const to = params.get('to');
+      const period = Number(params.get('period') || 30);
+      const periodType = period === 7 ? 'last7' : period === 14 ? 'last14' : 'last30';
+      const rows = isDateRange
+        ? getSeriesForCalendar({ startDate: from, endDate: to, periodType: 'custom' })
+        : getSeriesForCalendar({ periodType });
       return makeNestedDataResponse(config, {
-        datewise: DEMO_PROFITABILITY_SERIES.map((row) => ({
+        datewise: rows.map((row) => ({
           date: row.date,
           totalAmount: row.totalExpenses,
         })),
@@ -1108,8 +1198,8 @@ export const initDemoAxiosMock = () => {
       const totalAmazonFees = totalExpenses * 0.68;
       const last7Expenses = DEMO_PROFITABILITY_SERIES.slice(-7).reduce((sum, row) => sum + (Number(row.totalExpenses) || 0), 0);
       const last7AmazonFees = last7Expenses * 0.68;
-      const last14Expenses = last7Expenses;
-      const last14AmazonFees = last7AmazonFees;
+      const last14Expenses = DEMO_PROFITABILITY_SERIES.slice(-14).reduce((sum, row) => sum + (Number(row.totalExpenses) || 0), 0);
+      const last14AmazonFees = last14Expenses * 0.68;
       return makeNestedDataResponse(config, {
         totalAmazonFees: { total: totalAmazonFees },
         totalExpenses: { total: totalExpenses },
@@ -1397,12 +1487,18 @@ export const initDemoAxiosMock = () => {
     }
 
     if (method === 'get' && pathname === '/api/pagewise/ppc-metrics/filter') {
-      return makeNestedDataResponse(config, mkPPCMetricsModelPayload());
+      const startDate = params.get('startDate');
+      const endDate = params.get('endDate');
+      const rows = getPpcMetricsForRange({ startDate, endDate });
+      return makeNestedDataResponse(config, mkPPCMetricsModelPayload(rows));
     }
 
     if (method === 'get' && pathname === '/api/pagewise/ppc-metrics/graph') {
+      const startDate = params.get('startDate');
+      const endDate = params.get('endDate');
+      const rows = getPpcMetricsForRange({ startDate, endDate });
       return makeNestedDataResponse(config, {
-        graphData: PPC_DATE_WISE_METRICS.map((d) => ({
+        graphData: rows.map((d) => ({
           date: d.date,
           spend: d.spend,
           sales: d.sales,
@@ -1418,11 +1514,18 @@ export const initDemoAxiosMock = () => {
     }
 
     if (method === 'get' && pathname === '/api/pagewise/ppc-units-sold/filter') {
-      return makeNestedDataResponse(config, mkPPCUnitsSoldModelPayload());
+      const startDate = params.get('startDate');
+      const endDate = params.get('endDate');
+      const rows = getPpcUnitsForRange({ startDate, endDate });
+      return makeNestedDataResponse(config, mkPPCUnitsSoldModelPayload(rows));
     }
 
     if (method === 'get' && pathname === '/api/pagewise/ppc-units-sold/summary') {
-      return makeNestedDataResponse(config, { totalUnitsSold: PPC_TOTAL_UNITS_SOLD, totalUnits: PPC_TOTAL_UNITS_SOLD });
+      const startDate = params.get('startDate');
+      const endDate = params.get('endDate');
+      const rows = getPpcUnitsForRange({ startDate, endDate });
+      const totalUnits = rows.reduce((s, x) => s + (Number(x.unitsSold) || 0), 0);
+      return makeNestedDataResponse(config, { totalUnitsSold: totalUnits, totalUnits });
     }
 
     if (method === 'get' && pathname === '/api/pagewise/ppc/summary') {
