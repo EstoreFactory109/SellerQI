@@ -10,7 +10,7 @@ const validateTotalSalesFilterQuery = [
     query('periodType')
         .optional()
         .trim()
-        .isIn(['last30', 'last7', 'custom']).withMessage('periodType must be last30, last7, or custom'),
+        .isIn(['last30', 'last7', 'last14', 'custom']).withMessage('periodType must be last30, last7, last14, or custom'),
     query('startDate')
         .optional()
         .trim()

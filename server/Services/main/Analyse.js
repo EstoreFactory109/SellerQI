@@ -807,7 +807,8 @@ class AnalyseService {
     }
 
     /**
-     * Format date helper
+     * YYYY-MM-DD format — used for startDate/endDate in API responses.
+     * Must stay machine-readable so the frontend can pass it back as query params.
      */
     /**
      * YYYY-MM-DD format — used for startDate/endDate in API responses.
