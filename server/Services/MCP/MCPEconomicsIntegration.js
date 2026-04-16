@@ -87,13 +87,15 @@ async function fetchAndStoreEconomicsData(userId, refreshToken, region, country)
             };
         }
 
-        // UTC-based date range matching Expences.js: yesterday − 30 days → yesterday
+        // Local-timezone date range: yesterday − 30 days → yesterday
+        // Uses local time so "yesterday" is the correct calendar day regardless of job run time
         const now = new Date();
-        const endDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
-        const startDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1 - 30));
+        const endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+        const startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1 - 30);
 
-        const startDateStr = startDate.toISOString().split('T')[0];
-        const endDateStr = endDate.toISOString().split('T')[0];
+        const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        const startDateStr = fmt(startDate);
+        const endDateStr = fmt(endDate);
 
         logger.info('Building economics queries (RANGE for totals, DAY for datewise)', { 
             startDate: startDateStr, 

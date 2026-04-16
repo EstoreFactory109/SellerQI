@@ -534,10 +534,11 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
             }
         } : null;
 
-        // Calculate dates if not provided (UTC-based, matching Expences.js: yesterday − 30 days → yesterday)
+        // Calculate dates if not provided (local timezone: yesterday − 30 days → yesterday)
         const now = new Date();
-        const calculatedEndDate = endDate || new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1)).toISOString().split('T')[0];
-        const calculatedStartDate = startDate || new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1 - 30)).toISOString().split('T')[0];
+        const fmtLocal = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        const calculatedEndDate = endDate || fmtLocal(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+        const calculatedStartDate = startDate || fmtLocal(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1 - 30));
 
         console.log(`📅 [GetPPCMetrics] Date range: ${calculatedStartDate} to ${calculatedEndDate}`);
 

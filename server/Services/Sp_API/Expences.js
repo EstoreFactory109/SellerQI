@@ -65,9 +65,9 @@ function resolveMarketplaceAndRegion(countryUpper, regionOverride) {
 
 function formatDateDDMMYYYY(date) {
   if (!date || !(date instanceof Date) || isNaN(date.getTime())) return "N/A";
-  const dd = String(date.getUTCDate()).padStart(2, "0");
-  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const yyyy = date.getUTCFullYear();
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const yyyy = date.getFullYear();
   return `${dd}/${mm}/${yyyy}`;
 }
 
@@ -766,10 +766,11 @@ async function fetchNewFinanceData(config) {
     logger.info("[Finance Fetch] Access token obtained.");
   }
 
-  // Calculate date window: (yesterday - daysBack) to yesterday
+  // Calculate date window: (yesterday - daysBack) to yesterday (local timezone)
+  // Uses local time so "yesterday" is the correct calendar day regardless of job run time
   const now = new Date();
-  const yesterday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1, 23, 59, 59));
-  const startDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1 - daysBack, 0, 0, 0));
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59);
+  const startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1 - daysBack, 0, 0, 0);
 
   const postedAfter = startDate.toISOString();
   const postedBefore = yesterday.toISOString();
