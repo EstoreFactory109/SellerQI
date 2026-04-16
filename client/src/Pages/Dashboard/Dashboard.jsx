@@ -164,7 +164,11 @@ const Dashboard = () => {
   const ppcMetricsLastFetched = useSelector(state => state.ppcMetrics?.latestMetrics?.lastFetched)
   
   // Calculate filtered PPC summary based on date range (same approach as PPCDashboard)
-  const isDateRangeSelected = shouldUseCalendarDateRange(dashboardInfo?.startDate, dashboardInfo?.endDate);
+  const isDateRangeSelected = shouldUseCalendarDateRange(
+    dashboardInfo?.startDate,
+    dashboardInfo?.endDate,
+    dashboardInfo?.calendarMode
+  );
   
   // Filter dateWiseMetrics and calculate summary for selected date range
   const ppcSummary = useMemo(() => {

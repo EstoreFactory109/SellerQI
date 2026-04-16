@@ -216,8 +216,8 @@ const ProfitabilityDashboard = () => {
       setLoading(true);
       try {
         const base = import.meta.env.VITE_BASE_URI;
-        const url = shouldUseCalendarDateRange(startDate, endDate)
-          ? buildTotalSalesFilterUrl(base, { startDate, endDate })
+        const url = shouldUseCalendarDateRange(startDate, endDate, calendarMode)
+          ? buildTotalSalesFilterUrl(base, { startDate, endDate, calendarMode })
           : `${String(base).replace(/\/$/, '')}/api/total-sales/filter?periodType=last30`;
 
         const response = await axios.get(url, { withCredentials: true });
@@ -243,7 +243,7 @@ const ProfitabilityDashboard = () => {
         const periodTypeRaw = calendarMode || 'default';
         const periodType = periodTypeRaw === 'default' ? 'last30' : periodTypeRaw;
         const periodDays = periodType === 'last7' ? 7 : periodType === 'last14' ? 14 : 30;
-        const useRange = shouldUseCalendarDateRange(startDate, endDate);
+        const useRange = shouldUseCalendarDateRange(startDate, endDate, calendarMode);
         const root = import.meta.env.VITE_BASE_URI;
 
         const summaryUrl = useRange
@@ -604,7 +604,7 @@ const ProfitabilityDashboard = () => {
     
     // Calculate ad spend - use filtered API data for consistency when available
     let adSpend = 0;
-    const isDateRangeSelected = shouldUseCalendarDateRange(info?.startDate, info?.endDate);
+    const isDateRangeSelected = shouldUseCalendarDateRange(info?.startDate, info?.endDate, info?.calendarMode);
     
     const getFilteredPPCDateBounds = () => {
       const start = parseLocalDate(info.startDate);

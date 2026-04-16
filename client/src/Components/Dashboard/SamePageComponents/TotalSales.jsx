@@ -82,12 +82,12 @@ const TotalSales = () => {
       setLoading(true);
       try {
         const periodDays = getProfitabilityPeriodDays(calendarMode);
-        const useRange = shouldUseCalendarDateRange(startDate, endDate);
+        const useRange = shouldUseCalendarDateRange(startDate, endDate, calendarMode);
         const base = import.meta.env.VITE_BASE_URI;
         const root = String(base).replace(/\/$/, '');
 
         // SalesOnlyMetrics: custom + dates when Redux has range; else last30 (same as ProfitibilityDashboard)
-        const salesUrl = buildTotalSalesFilterUrl(base, { startDate, endDate });
+        const salesUrl = buildTotalSalesFilterUrl(base, { startDate, endDate, calendarMode });
 
         const summaryUrl = useRange
           ? `${root}/api/profitability/summary/date-range?from=${encodeURIComponent(startDate)}&to=${encodeURIComponent(endDate)}`
@@ -157,7 +157,7 @@ const TotalSales = () => {
   }, [calendarMode, startDate, endDate]);
 
   const filteredPPCMetrics = useMemo(() => {
-    if (!shouldUseCalendarDateRange(startDate, endDate) || !ppcDateWiseMetrics.length) return ppcDateWiseMetrics;
+    if (!shouldUseCalendarDateRange(startDate, endDate, calendarMode) || !ppcDateWiseMetrics.length) return ppcDateWiseMetrics;
     // Align with ProfitibilityDashboard / Campaign Audit: include full days in local time
     const start = parseLocalDate(startDate);
     const end = parseLocalDate(endDate);
@@ -167,7 +167,7 @@ const TotalSales = () => {
       const itemDate = new Date(item.date);
       return itemDate >= start && itemDate <= end;
     });
-  }, [ppcDateWiseMetrics, startDate, endDate]);
+  }, [ppcDateWiseMetrics, startDate, endDate, calendarMode]);
 
   const labelData = [
     "Gross Profit",
@@ -181,7 +181,7 @@ const TotalSales = () => {
 
   /** Expense math aligned with ProfitibilityDashboard (snapshot → profit summary → /api/expenses/* fallback). */
   const pieMetrics = useMemo(() => {
-    const useRange = shouldUseCalendarDateRange(startDate, endDate);
+    const useRange = shouldUseCalendarDateRange(startDate, endDate, calendarMode);
 
     const snapshotFeeTotals = pickSnapshotFeeTotalsForCalendar(
       expenseReportSnapshot,

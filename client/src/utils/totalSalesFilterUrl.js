@@ -1,9 +1,15 @@
 /**
- * True when Redux has both bounds — use /date-range and total-sales filter with periodType=custom
- * so expenses, profitability, and sales match the calendar (not rolling ?period= from server).
+ * True when Redux has both bounds AND the user selected a non-default calendar mode.
+ * "default" represents the first-load Last 30 Days dataset and should use default endpoints.
  */
-export function shouldUseCalendarDateRange(startDate, endDate) {
-  return Boolean(startDate && endDate);
+export function shouldUseCalendarDateRange(startDate, endDate, calendarMode) {
+  const hasBounds = Boolean(startDate && endDate);
+  // Backward compatibility: old callsites pass only start/end.
+  if (calendarMode === undefined || calendarMode === null) {
+    return hasBounds;
+  }
+  const isDefaultMode = calendarMode === 'default';
+  return hasBounds && !isDefaultMode;
 }
 
 /**
@@ -12,9 +18,9 @@ export function shouldUseCalendarDateRange(startDate, endDate) {
  * use periodType=custom so the backend sums SalesOnlyMetrics datewise rows for that exact range.
  * Otherwise fall back to last30 (first paint before dates exist).
  */
-export function buildTotalSalesFilterUrl(baseUri, { startDate, endDate }) {
+export function buildTotalSalesFilterUrl(baseUri, { startDate, endDate, calendarMode }) {
   const root = `${String(baseUri || '').replace(/\/$/, '')}/api/total-sales/filter`;
-  if (startDate && endDate) {
+  if (shouldUseCalendarDateRange(startDate, endDate, calendarMode)) {
     return `${root}?periodType=custom&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
   }
   return `${root}?periodType=last30`;

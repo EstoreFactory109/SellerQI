@@ -940,7 +940,7 @@ const PPCDashboard = () => {
   }, [dateWiseTotalCosts, info?.startDate, info?.endDate]);
 
   // Check if date range is explicitly selected (custom or last7, not default last30)
-  const isTableDateRangeSelected = shouldUseCalendarDateRange(info?.startDate, info?.endDate);
+  const isTableDateRangeSelected = shouldUseCalendarDateRange(info?.startDate, info?.endDate, info?.calendarMode);
 
   // Filter adsKeywordsPerformanceData based on selected date range
   const filteredAdsKeywordsPerformanceData = useMemo(() => {
@@ -1219,7 +1219,7 @@ const PPCDashboard = () => {
   // Transform the data for the chart - prioritize PPCMetrics model data
   const chartData = useMemo(() => {
     // Check if date range is selected
-    const isDateRangeSelected = shouldUseCalendarDateRange(info?.startDate, info?.endDate);
+    const isDateRangeSelected = shouldUseCalendarDateRange(info?.startDate, info?.endDate, info?.calendarMode);
     
     // Filter PPCMetrics dateWiseMetrics based on selected date range
     let filteredPPCMetricsData = ppcDateWiseMetrics;
@@ -1695,7 +1695,7 @@ const PPCDashboard = () => {
   }, [tabs, selectedTabIndex]);
   
   // Check if date range is selected to determine which data to use
-  const isDateRangeSelected = shouldUseCalendarDateRange(info?.startDate, info?.endDate);
+  const isDateRangeSelected = shouldUseCalendarDateRange(info?.startDate, info?.endDate, info?.calendarMode);
   
   // Fetch filtered PPC Units Sold when date range is selected
   useEffect(() => {
