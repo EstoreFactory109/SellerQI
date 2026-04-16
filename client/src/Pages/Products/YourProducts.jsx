@@ -179,6 +179,9 @@ const YourProducts = () => {
   const [selectedOptimizationColumns, setSelectedOptimizationColumns] = useState(loadSelectedOptimizationColumns);
   const [columnDropdownOpen, setColumnDropdownOpen] = useState(false);
   const columnDropdownRef = useRef(null);
+  const searchDebounceRef = useRef(null);
+  /** Last debounced search string per tab — used to detect “clear search” and bypass Redux client cache */
+  const lastDebouncedSearchByTabRef = useRef({});
 
   useEffect(() => {
     try {
@@ -256,6 +259,52 @@ const YourProducts = () => {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Server-side search (debounced): when searchQuery is present, fetch from backend
+  // This avoids client-only filtering on the currently loaded page.
+  useEffect(() => {
+    const normalizedSearch = (searchQuery || '').toString().trim();
+
+    // Only apply server search for tabs that are backed by V3 endpoints
+    const supportedTabs = new Set(['active', 'nonSellable', 'withoutAPlus', 'notTargetedInAds', 'optimization']);
+    if (!supportedTabs.has(activeTab)) return;
+
+    // Debounce to avoid firing on every keystroke
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      const prev = (lastDebouncedSearchByTabRef.current[activeTab] ?? '').toString().trim();
+      lastDebouncedSearchByTabRef.current[activeTab] = normalizedSearch;
+      const clearingSearch = prev.length > 0 && normalizedSearch.length === 0;
+      const opts = {
+        page: 1,
+        limit: itemsPerPage,
+        append: false,
+        search: normalizedSearch,
+        forceRefresh: clearingSearch
+      };
+      switch (activeTab) {
+        case 'active':
+          dispatch(fetchYourProductsActiveV3(opts));
+          break;
+        case 'nonSellable':
+          dispatch(fetchYourProductsNonSellableV3(opts));
+          break;
+        case 'withoutAPlus':
+          dispatch(fetchYourProductsWithoutAPlusV3(opts));
+          break;
+        case 'notTargetedInAds':
+          dispatch(fetchYourProductsNotTargetedInAdsV3(opts));
+          break;
+        case 'optimization':
+          dispatch(fetchOptimizationProductsV3(opts));
+          break;
+      }
+    }, 300);
+
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, [dispatch, activeTab, searchQuery]); // intentionally omit itemsPerPage (constant)
+
   // Tab switch: lazy load data for other tabs
   useEffect(() => {
     if (activeTab === 'active') return; // Already loaded initially
@@ -297,6 +346,7 @@ const YourProducts = () => {
   // Handle loading more products
   const handleLoadMoreFromBackend = async () => {
     if (loadingMore || loading) return;
+    const normalizedSearch = (searchQuery || '').toString().trim();
     
     // For optimization tab, use its own pagination
     if (activeTab === 'optimization') {
@@ -307,7 +357,7 @@ const YourProducts = () => {
       try {
         const currentPage = optimizationPagination.page || 1;
         const nextPage = currentPage + 1;
-        await dispatch(fetchOptimizationProductsV3({ page: nextPage, limit: itemsPerPage, append: true })).unwrap();
+        await dispatch(fetchOptimizationProductsV3({ page: nextPage, limit: itemsPerPage, append: true, search: normalizedSearch })).unwrap();
         // After successfully loading more products, increase display limit to show them
         setOptimizationDisplayLimit(prev => prev + itemsPerPage);
       } catch (err) {
@@ -327,16 +377,16 @@ const YourProducts = () => {
       
       switch (activeTab) {
         case 'active':
-          await dispatch(fetchYourProductsActiveV3({ page: nextPage, limit: itemsPerPage, append: true })).unwrap();
+          await dispatch(fetchYourProductsActiveV3({ page: nextPage, limit: itemsPerPage, append: true, search: normalizedSearch })).unwrap();
           break;
         case 'nonSellable':
-          await dispatch(fetchYourProductsNonSellableV3({ page: nextPage, limit: itemsPerPage, append: true })).unwrap();
+          await dispatch(fetchYourProductsNonSellableV3({ page: nextPage, limit: itemsPerPage, append: true, search: normalizedSearch })).unwrap();
           break;
         case 'withoutAPlus':
-          await dispatch(fetchYourProductsWithoutAPlusV3({ page: nextPage, limit: itemsPerPage, append: true })).unwrap();
+          await dispatch(fetchYourProductsWithoutAPlusV3({ page: nextPage, limit: itemsPerPage, append: true, search: normalizedSearch })).unwrap();
           break;
         case 'notTargetedInAds':
-          await dispatch(fetchYourProductsNotTargetedInAdsV3({ page: nextPage, limit: itemsPerPage, append: true })).unwrap();
+          await dispatch(fetchYourProductsNotTargetedInAdsV3({ page: nextPage, limit: itemsPerPage, append: true, search: normalizedSearch })).unwrap();
           break;
       }
     } catch (err) {
@@ -409,19 +459,11 @@ const YourProducts = () => {
     return { hasHTML: true, processedHTML };
   }, [currentRegion]);
 
-  // Filter products based on search and sort
-  const filteredProducts = useMemo(() => {
-    let filtered = [...products];
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim();
-      filtered = filtered.filter(product => 
-        product.asin?.toLowerCase().includes(query) ||
-        product.sku?.toLowerCase().includes(query) ||
-        product.title?.toLowerCase().includes(query)
-      );
-    }
+  // Sort products (search is handled server-side for large catalogs)
+  const sortedProducts = useMemo(() => {
+    const list = [...products];
     if (sortConfig.key) {
-      filtered.sort((a, b) => {
+      list.sort((a, b) => {
         let aValue = a[sortConfig.key];
         let bValue = b[sortConfig.key];
         if (sortConfig.key === 'price' || sortConfig.key === 'numRatings' || sortConfig.key === 'starRatings' || sortConfig.key === 'quantity') {
@@ -438,21 +480,13 @@ const YourProducts = () => {
         }
       });
     }
-    return filtered;
-  }, [products, searchQuery, sortConfig]);
+    return list;
+  }, [products, sortConfig]);
 
-  // Optimization tab filtering
-  const filteredOptimizationProducts = useMemo(() => {
+  // Optimization tab sorting (search handled server-side)
+  const sortedOptimizationProducts = useMemo(() => {
     if (activeTab !== 'optimization' || !optimizationProducts.length) return [];
-    let list = [...optimizationProducts];
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      list = list.filter(p =>
-        (p.asin || '').toLowerCase().includes(q) ||
-        (p.sku || '').toLowerCase().includes(q) ||
-        (p.name || p.title || '').toLowerCase().includes(q)
-      );
-    }
+    const list = [...optimizationProducts];
     if (sortConfig.key) {
       list.sort((a, b) => {
         const perfA = a.performance || {};
@@ -477,12 +511,12 @@ const YourProducts = () => {
       });
     }
     return list;
-  }, [activeTab, optimizationProducts, searchQuery, sortConfig]);
+  }, [activeTab, optimizationProducts, sortConfig]);
 
   const displayedOptimizationProducts = useMemo(() => {
     if (activeTab !== 'optimization') return [];
-    return filteredOptimizationProducts.slice(0, optimizationDisplayLimit);
-  }, [activeTab, filteredOptimizationProducts, optimizationDisplayLimit]);
+    return sortedOptimizationProducts.slice(0, optimizationDisplayLimit);
+  }, [activeTab, sortedOptimizationProducts, optimizationDisplayLimit]);
 
   const prevActiveTabRef = useRef(activeTab);
   const prevSearchQueryRef = useRef(searchQuery);
@@ -496,16 +530,16 @@ const YourProducts = () => {
     }
   }, [activeTab, searchQuery]);
 
-  const displayedProducts = activeTab === 'optimization' ? displayedOptimizationProducts : filteredProducts;
+  const displayedProducts = activeTab === 'optimization' ? displayedOptimizationProducts : sortedProducts;
   
   // Optimization: client-side display limit (for already loaded products)
-  const hasMoreOptimizationClientSide = activeTab === 'optimization' && optimizationDisplayLimit < filteredOptimizationProducts.length;
+  const hasMoreOptimizationClientSide = activeTab === 'optimization' && optimizationDisplayLimit < sortedOptimizationProducts.length;
   const loadMoreOptimization = () => setOptimizationDisplayLimit(prev => prev + itemsPerPage);
   
   // Optimization: backend pagination (when server has more products)
   // Show backend Load More when: we've displayed all loaded products AND there are more on server
   const optimizationTotalItems = optimizationPagination.totalItems || 0;
-  const allLoadedProductsDisplayed = optimizationDisplayLimit >= filteredOptimizationProducts.length;
+  const allLoadedProductsDisplayed = optimizationDisplayLimit >= sortedOptimizationProducts.length;
   const hasMoreOptimizationFromBackend = activeTab === 'optimization' && allLoadedProductsDisplayed && optimizationProductsRaw.length < optimizationTotalItems;
 
   const productTableColCount = 6;
@@ -559,7 +593,7 @@ const YourProducts = () => {
     ];
     const csvRows = [
       headers.join(','),
-      ...filteredProducts.map(product => {
+      ...sortedProducts.map(product => {
         return [
           product.asin,
           `"${(product.sku || '').replace(/"/g, '""')}"`,

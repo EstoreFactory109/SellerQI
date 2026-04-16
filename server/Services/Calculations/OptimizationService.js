@@ -17,6 +17,7 @@ const logger = require('../../utils/Logger.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const mongoose = require('mongoose');
 const { aggregateProductPerformance, enrichProductsWithPerformance } = require('./ProductPerformanceService.js');
+const ProfitabilityService = require('./ProfitabilityService.js');
 const { evaluateScenarios, buildMetrics } = require('./ScenarioRecommendationService.js');
 const { fetchAndEnrichWithComparison } = require('./ProductPerformanceComparisonService.js');
 
@@ -82,17 +83,20 @@ const buildProfitabilityMap = async (economicsData) => {
  * @param {string} userId - User ID
  * @param {string} region - Region code
  * @param {string} country - Country code
- * @param {Object} options - Options { page, limit }
+ * @param {Object} options - Options { page, limit, search }
  * @returns {Promise<Object>} { products, pagination, currency }
  */
 const getOptimizationProducts = async (userId, region, country, options = {}) => {
     const startTime = Date.now();
     const page = Math.max(1, parseInt(options.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(options.limit) || 20));
+    const rawSearch = (options.search || '').toString().trim();
     
     logger.info(`[OptimizationService] Starting for user ${userId}, page ${page}, limit ${limit}`);
     
     const userObjectId = mongoose.Types.ObjectId.createFromHexString(userId);
+    const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const searchRegex = rawSearch ? new RegExp(escapeRegex(rawSearch), 'i') : null;
     
     // Import required models and services
     const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
@@ -108,6 +112,15 @@ const getOptimizationProducts = async (userId, region, country, options = {}) =>
             { $match: { 'sellerAccount.region': region } },
             { $unwind: { path: '$sellerAccount.products', preserveNullAndEmptyArrays: false } },
             { $match: { 'sellerAccount.products.status': { $regex: /^active$/i } } },
+            ...(searchRegex ? [{
+                $match: {
+                    $or: [
+                        { 'sellerAccount.products.asin': { $regex: searchRegex } },
+                        { 'sellerAccount.products.sku': { $regex: searchRegex } },
+                        { 'sellerAccount.products.itemName': { $regex: searchRegex } }
+                    ]
+                }
+            }] : []),
             { $sort: { 'sellerAccount.products.asin': 1 } },
             {
                 $project: {
@@ -139,13 +152,17 @@ const getOptimizationProducts = async (userId, region, country, options = {}) =>
         sponsoredAdsArray = sponsoredAdsData;
     }
     
-    // Step 3: Use ProductPerformanceService for consistent performance data format
-    // This ensures same data structure as the rest of the app (sessions, pageViews, sales, acos, etc.)
+    // Step 3: ASIN-wise sales/units from the same source as the profitability table
+    const { asinPpcSales: economicsAsinSalesOverride } = await ProfitabilityService.getAsinPpcSalesFromEconomics(economicsData);
+
+    // Step 3b: Use ProductPerformanceService for consistent performance data format
+    // Pass economics override so sales/units match profitability (including big accounts).
     const performanceMap = aggregateProductPerformance({
         productList: allProducts,
         buyBoxData: buyBoxData,
         productWiseSponsoredAds: sponsoredAdsArray,
-        economicsMetrics: economicsData
+        economicsMetrics: economicsData,
+        economicsAsinSalesOverride
     });
     
     // Step 4: Build profitability map (for detailed profitability metrics beyond basic sales)

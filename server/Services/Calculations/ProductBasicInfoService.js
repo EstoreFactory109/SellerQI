@@ -9,8 +9,8 @@
 const mongoose = require('mongoose');
 const NumberOfProductReviews = require('../../models/seller-performance/NumberOfProductReviewsModel.js');
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
-const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 const ProductWiseSponsoredAdsItem = require('../../models/amazon-ads/ProductWiseSponsoredAdsItemModel.js');
+const ProfitabilityService = require('./ProfitabilityService.js');
 const logger = require('../../utils/Logger.js');
 
 /**
@@ -130,83 +130,50 @@ async function fetchCatalogData(userId, country, region, asin) {
 }
 
 /**
- * Fetch economics data (sales, profit, fees) from EconomicsMetrics
+ * Fetch economics data (sales, profit, fees) using the same ASIN aggregation as the profitability table
+ * (ProfitabilityService.getAsinPpcSalesFromEconomics — normal + big accounts + duplicate ASIN rows).
  */
 async function fetchEconomicsData(userId, country, region, asin) {
     try {
-        // Get the latest EconomicsMetrics document
         const doc = await EconomicsMetrics.findLatest(userId, region, country);
 
         if (!doc) {
             return {};
         }
 
-        let asinData = null;
-
-        // Check if big account (data in separate collection)
-        const isBigAccount = doc.isBig === true;
-        const hasEmptyAsinData = !doc.asinWiseSales || doc.asinWiseSales.length === 0;
-
-        if ((isBigAccount || hasEmptyAsinData) && doc._id) {
-            // Big account - fetch from separate collection using aggregation for single ASIN
-            const results = await AsinWiseSalesForBigAccounts.aggregate([
-                { $match: { metricsId: doc._id } },
-                { $unwind: '$asinSales' },
-                { $match: { 'asinSales.asin': asin } },
-                {
-                    $group: {
-                        _id: '$asinSales.asin',
-                        sales: { $sum: '$asinSales.sales.amount' },
-                        grossProfit: { $sum: '$asinSales.grossProfit.amount' },
-                        unitsSold: { $sum: '$asinSales.unitsSold' },
-                        amzFee: { $sum: '$asinSales.amazonFees.amount' },
-                        fbaFees: { $sum: '$asinSales.fbaFees.amount' },
-                        storageFees: { $sum: '$asinSales.storageFees.amount' },
-                        totalFees: { $sum: '$asinSales.totalFees.amount' },
-                        refunds: { $sum: '$asinSales.refunds.amount' },
-                        ppcSpent: { $sum: '$asinSales.ppcSpent.amount' }
-                    }
+        const { asinPpcSales } = await ProfitabilityService.getAsinPpcSalesFromEconomics(doc);
+        const normalized = (asin || '').trim().toUpperCase();
+        let row = null;
+        if (asinPpcSales && typeof asinPpcSales === 'object') {
+            for (const [k, v] of Object.entries(asinPpcSales)) {
+                if ((k || '').trim().toUpperCase() === normalized) {
+                    row = v;
+                    break;
                 }
-            ]);
-
-            if (results.length > 0) {
-                asinData = results[0];
-            }
-        } else {
-            // Regular account - find in asinWiseSales array
-            const found = doc.asinWiseSales?.find(item =>
-                (item.asin || '').trim().toUpperCase() === asin
-            );
-
-            if (found) {
-                asinData = {
-                    sales: found.sales?.amount || 0,
-                    grossProfit: found.grossProfit?.amount || 0,
-                    unitsSold: found.unitsSold || 0,
-                    amzFee: found.amazonFees?.amount || 0,
-                    fbaFees: found.fbaFees?.amount || 0,
-                    storageFees: found.storageFees?.amount || 0,
-                    totalFees: found.totalFees?.amount || 0,
-                    refunds: found.refunds?.amount || 0,
-                    ppcSpent: found.ppcSpent?.amount || 0
-                };
             }
         }
 
-        if (!asinData) {
+        if (!row) {
             return {};
         }
 
+        const sales = typeof row.sales === 'number' ? row.sales : (row.sales?.amount || 0);
+        const grossProfit = typeof row.grossProfit === 'number' ? row.grossProfit : (row.grossProfit?.amount || 0);
+        const unitsSold = row.unitsSold || 0;
+        const totalFees = row.totalFees !== undefined ? row.totalFees : ((row.fbaFees || 0) + (row.storageFees || 0));
+        const amazonFees = row.amazonFees != null ? row.amazonFees : totalFees;
+        const refundsVal = typeof row.refunds === 'number' ? row.refunds : (row.refunds?.amount || 0);
+
         return {
-            sales: asinData.sales || 0,
-            grossProfit: asinData.grossProfit || 0,
-            unitsSold: asinData.unitsSold || 0,
-            amzFee: asinData.amzFee || 0,
-            fbaFees: asinData.fbaFees || 0,
-            storageFees: asinData.storageFees || 0,
-            totalFees: asinData.totalFees || 0,
-            refunds: asinData.refunds || 0,
-            price: asinData.unitsSold > 0 ? (asinData.sales / asinData.unitsSold) : 0
+            sales,
+            grossProfit,
+            unitsSold,
+            amzFee: amazonFees,
+            fbaFees: row.fbaFees || 0,
+            storageFees: row.storageFees || 0,
+            totalFees,
+            refunds: refundsVal,
+            price: unitsSold > 0 ? (sales / unitsSold) : 0
         };
     } catch (error) {
         logger.error('[ProductBasicInfoService] Error fetching economics data', { error: error.message, asin });

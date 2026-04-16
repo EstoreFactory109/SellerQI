@@ -21,8 +21,28 @@ import { ProductDetailsPageSkeleton } from '../../Components/Skeleton/PageSkelet
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import axiosInstance from '../../config/axios.config.js';
 import { formatCurrencyWithLocale, formatYAxisCurrency } from '../../utils/currencyUtils.js';
+import { shouldUseCalendarDateRange } from '../../utils/totalSalesFilterUrl.js';
 import ProductPPCIssuesTable from '../../Components/ProductDetails/ProductPPCIssuesTable.jsx';
 import FbaInventorySection from '../../Components/ProductDetails/FbaInventorySection.jsx';
+
+/** Normalize API fields that may be a number or `{ amount }` (asin-wise-sales / economics). */
+function pickNumericAmount(v) {
+    if (v == null) return 0;
+    if (typeof v === 'number' && !Number.isNaN(v)) return v;
+    if (typeof v === 'object' && v.amount != null) return Number(v.amount) || 0;
+    const n = Number(v);
+    return Number.isNaN(n) ? 0 : n;
+}
+
+/** Make finance expense labels UI-friendly (no underscores / shouty uppercase). */
+function formatExpenseCategoryLabel(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return 'Other Fee';
+    const cleaned = raw.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+    return cleaned
+        .toLowerCase()
+        .replace(/\b\w/g, (m) => m.toUpperCase());
+}
 
 // Helper function to format messages with important details highlighted on separate line
 const formatMessageWithHighlight = (message) => {
@@ -332,6 +352,9 @@ const Dashboard = () => {
     const currency = useSelector((state) => state.currency?.currency) || '$';
     const country = useSelector((state) => state.Dashboard?.DashBoardInfo?.Country ?? state.currency?.country);
     const region = useSelector((state) => state.Dashboard?.DashBoardInfo?.Region);
+    const startDate = info?.startDate;
+    const endDate = info?.endDate;
+    const calendarMode = info?.calendarMode || 'default';
     
     // Per-ASIN product details state (fallback when ASIN not in issues-by-product)
     const productDetailsState = useSelector((state) => state.pageData?.productDetails);
@@ -373,6 +396,11 @@ const Dashboard = () => {
     
     // Track if we're using per-ASIN fallback
     const [usingPerAsinFallback, setUsingPerAsinFallback] = useState(false);
+
+    /** Economics/pagewise row (PPC etc.); sales/units/GP may disagree with finance table. */
+    const [asinEconomicsRow, setAsinEconomicsRow] = useState(null);
+    /** Same pipeline as profitability dashboard table (`AsinWiseSalesDateItem` + expenses). */
+    const [financeProfitSnapshot, setFinanceProfitSnapshot] = useState(null);
     
     // Comparison options
     const comparisonOptions = [
@@ -383,6 +411,54 @@ const Dashboard = () => {
 
     const { asin } = useParams();
     const normalizedAsin = asin?.trim().toUpperCase();
+
+    useEffect(() => {
+        if (!normalizedAsin) return undefined;
+        let cancelled = false;
+        setAsinEconomicsRow(null);
+        (async () => {
+            try {
+                const res = await axiosInstance.get('/api/pagewise/asin-wise-sales');
+                if (cancelled) return;
+                const ok = res.data?.statusCode === 200;
+                const rows = ok && Array.isArray(res.data?.data?.asinWiseSales)
+                    ? res.data.data.asinWiseSales
+                    : [];
+                const row = rows.find((r) => (r.asin || '').trim().toUpperCase() === normalizedAsin) || null;
+                setAsinEconomicsRow(row);
+            } catch {
+                if (!cancelled) setAsinEconomicsRow(null);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [normalizedAsin]);
+
+    useEffect(() => {
+        if (!normalizedAsin) return undefined;
+        let cancelled = false;
+        setFinanceProfitSnapshot(null);
+        (async () => {
+            try {
+                const useRange = shouldUseCalendarDateRange(startDate, endDate);
+                const periodTypeRaw = calendarMode || 'default';
+                const periodType = periodTypeRaw === 'default' ? 'last30' : periodTypeRaw;
+                const periodDays = periodType === 'last7' ? 7 : periodType === 'last14' ? 14 : 30;
+                const q = useRange
+                    ? `from=${encodeURIComponent(startDate)}&to=${encodeURIComponent(endDate)}`
+                    : `period=${periodDays}`;
+                const res = await axiosInstance.get(
+                    `/api/profitability/asin/${encodeURIComponent(normalizedAsin)}/snapshot?${q}`
+                );
+                if (cancelled) return;
+                const ok = res.data?.statusCode === 200;
+                const payload = ok ? res.data?.data : null;
+                setFinanceProfitSnapshot(payload ?? null);
+            } catch {
+                if (!cancelled) setFinanceProfitSnapshot(null);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [normalizedAsin, startDate, endDate, calendarMode]);
 
     // Load issues-by-product data so we have enriched productWiseError (performance + recommendations).
     // This syncs to DashBoardInfo and ensures this detail page shows the Performance section.
@@ -538,13 +614,11 @@ const Dashboard = () => {
             .finally(() => setGenerateTitleLoading(false));
     }, [fixContext.asin, fixContext.title, fixForm, normalizedAsin]);
     
-    // Fallback: If ASIN not in issues-by-product cache and not loading, fetch per-ASIN data
+    // Fallback: If ASIN not in issues-by-product cache, fetch per-ASIN data immediately.
+    // Do not wait for issues-by-product to finish; this enables first-come-first-load rendering.
     useEffect(() => {
         if (!normalizedAsin) return;
-        
-        // Wait for issues-by-product to finish loading
-        if (issuesByProductLoading) return;
-        
+
         // If product found in issues-by-product, use that (existing flow)
         if (productFromIssuesByProduct) {
             setUsingPerAsinFallback(false);
@@ -566,7 +640,7 @@ const Dashboard = () => {
         dispatch(fetchProductBasicInfo(normalizedAsin));
         dispatch(fetchProductPerformance({ asin: normalizedAsin, comparison: comparisonType }));
         dispatch(fetchProductIssues(normalizedAsin));
-    }, [normalizedAsin, issuesByProductLoading, productFromIssuesByProduct, dispatch, comparisonType, perAsinCachedData]);
+    }, [normalizedAsin, productFromIssuesByProduct, dispatch, comparisonType, perAsinCachedData]);
     
     // Re-fetch performance when comparison type changes (for per-ASIN fallback)
     useEffect(() => {
@@ -645,14 +719,65 @@ const Dashboard = () => {
     }, [dispatch, comparisonType]);
     
     // Find product from rankingProductWiseErrors array (same as Category.jsx)
-    const rankingProduct = info?.rankingProductWiseErrors?.find(item => item.asin === asin);
+    const rankingProduct = info?.rankingProductWiseErrors?.find(
+        (item) => (item.asin || '').trim().toUpperCase() === normalizedAsin
+    );
     
     // Get product from productWiseError for error data
-    const product = info?.productWiseError?.find(item => item.asin === asin);
+    const product = info?.productWiseError?.find(
+        (item) => (item.asin || '').trim().toUpperCase() === normalizedAsin
+    );
     
-    // Get profitability data (same source as profitability dashboard) for accurate sales/quantity
-    // This uses EconomicsMetrics as primary source, which is more accurate
-    const profitabilityProduct = info?.profitibilityData?.find(item => item.asin === asin);
+    // Prefer finance-table snapshot (matches Profitability dashboard); fall back to economics / Redux.
+    const profitabilityProduct = useMemo(() => {
+        const fromRedux = info?.profitibilityData?.find(
+            (item) => (item.asin || '').trim().toUpperCase() === normalizedAsin
+        );
+        if (financeProfitSnapshot && typeof financeProfitSnapshot === 'object') {
+            const adsFromEconomics = asinEconomicsRow != null
+                ? pickNumericAmount(asinEconomicsRow.ppcSpent)
+                : undefined;
+            return {
+                ...(fromRedux || {}),
+                asin: normalizedAsin,
+                sales: Number(financeProfitSnapshot.totalSales) || 0,
+                quantity: Number(financeProfitSnapshot.unitsSold) || 0,
+                unitsSold: Number(financeProfitSnapshot.unitsSold) || 0,
+                grossProfit: Number(financeProfitSnapshot.grossProfit) || 0,
+                ads: adsFromEconomics ?? fromRedux?.ads ?? 0,
+            };
+        }
+        if (!asinEconomicsRow) return fromRedux;
+        const salesN = pickNumericAmount(asinEconomicsRow.sales);
+        const unitsN = Number(asinEconomicsRow.unitsSold) || 0;
+        const gpN = pickNumericAmount(asinEconomicsRow.grossProfit);
+        const adsN = pickNumericAmount(asinEconomicsRow.ppcSpent);
+        return {
+            ...(fromRedux || {}),
+            asin: normalizedAsin,
+            sales: salesN,
+            quantity: unitsN,
+            unitsSold: unitsN,
+            grossProfit: gpN,
+            ads: adsN || fromRedux?.ads || 0,
+        };
+    }, [info?.profitibilityData, normalizedAsin, asinEconomicsRow, financeProfitSnapshot]);
+
+    const financeExpenseSummary = useMemo(() => {
+        if (!financeProfitSnapshot || typeof financeProfitSnapshot !== 'object') return null;
+        const totalExpenses = Number(financeProfitSnapshot.totalExpenses) || 0;
+        const amazonFees = Number(financeProfitSnapshot.amazonFees) || 0;
+        const refunds = Number(financeProfitSnapshot.refunds) || 0;
+        const breakdown = Array.isArray(financeProfitSnapshot.breakdown)
+            ? financeProfitSnapshot.breakdown
+                .map((b) => ({
+                    category: b?.category || 'Other',
+                    amount: Number(b?.amount) || 0,
+                }))
+                .sort((a, b) => b.amount - a.amount)
+            : [];
+        return { totalExpenses, amazonFees, refunds, breakdown };
+    }, [financeProfitSnapshot]);
     
             // Build product from per-ASIN fallback data if available
     const buildProductFromPerAsinData = useCallback(() => {
@@ -1020,15 +1145,21 @@ const Dashboard = () => {
 
     // Check if per-ASIN data is still loading
     const isPerAsinLoading = productDetailsLoading?.info || productDetailsLoading?.issues;
-    
-    // Show skeleton while loading issues-by-product data OR per-ASIN fallback data
-    // so we never flash "Product Not Found" before data arrives
-    if (issuesByProductLoading || !info) {
+
+    const hasIssuesByProductData = Boolean(info?.productWiseError?.length);
+    const hasPerAsinData = Boolean(
+        perAsinCachedData?.info ||
+        perAsinCachedData?.issues ||
+        perAsinCachedData?.performance
+    );
+
+    // Show full-page skeleton only for the true initial state when nothing is available yet.
+    if (!hasIssuesByProductData && !hasPerAsinData && (issuesByProductLoading || isPerAsinLoading || !info)) {
         return <ProductDetailsPageSkeleton />;
     }
-    
-    // If ASIN not found in issues-by-product, but we're fetching per-ASIN data, show skeleton
-    if (!product && isPerAsinLoading) {
+
+    // If target ASIN data isn't ready yet, keep skeleton until either source resolves.
+    if (!updatedProduct && (issuesByProductLoading || isPerAsinLoading)) {
         return <ProductDetailsPageSkeleton />;
     }
 
@@ -1969,32 +2100,50 @@ const Dashboard = () => {
                                         </div>
                                     </div>
                                     
-                                    {/* Summary Stats */}
+                                    {/* Expense breakdown (same finance source as Profitability table) */}
                                     {historyData?.summary?.hasData && (
                                         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
                                             <div className="bg-[#21262d] rounded border border-[#30363d] p-2 text-center">
-                                                <p className="text-xs text-gray-400">Avg. Sessions</p>
-                                                <p className="text-sm font-bold text-gray-100">{historyData.summary.averages.sessions?.toLocaleString() || 0}</p>
-                                            </div>
-                                            <div className="bg-[#21262d] rounded border border-[#30363d] p-2 text-center">
-                                                <p className="text-xs text-gray-400">Avg. Sales</p>
-                                                <p className="text-sm font-bold text-gray-100">{formatCurrencyWithLocale(historyData.summary.averages.sales ?? 0, currency)}</p>
-                                            </div>
-                                            <div className="bg-[#21262d] rounded border border-[#30363d] p-2 text-center">
-                                                <p className="text-xs text-gray-400">Avg. Conv %</p>
-                                                <p className="text-sm font-bold text-gray-100">{historyData.summary.averages.conversionRate?.toFixed(1) || 0}%</p>
-                                            </div>
-                                            <div className="bg-[#21262d] rounded border border-[#30363d] p-2 text-center">
-                                                <p className="text-xs text-gray-400">Sales Trend</p>
-                                                <p className={`text-sm font-bold flex items-center justify-center gap-1 ${
-                                                    historyData.summary.trends.sales > 0 ? 'text-green-400' : 
-                                                    historyData.summary.trends.sales < 0 ? 'text-red-400' : 'text-gray-400'
-                                                }`}>
-                                                    {historyData.summary.trends.sales > 0 ? <ArrowUpRight className="w-3 h-3" /> : 
-                                                     historyData.summary.trends.sales < 0 ? <ArrowDownRight className="w-3 h-3" /> : null}
-                                                    {historyData.summary.trends.sales > 0 ? '+' : ''}{historyData.summary.trends.sales || 0}%
+                                                <p className="text-xs text-gray-400">Total Expenses</p>
+                                                <p className="text-sm font-bold text-red-400">
+                                                    {formatCurrencyWithLocale(financeExpenseSummary?.totalExpenses ?? 0, currency)}
                                                 </p>
                                             </div>
+                                            <div className="bg-[#21262d] rounded border border-[#30363d] p-2 text-center">
+                                                <p className="text-xs text-gray-400">Amazon Fees</p>
+                                                <p className="text-sm font-bold text-gray-100">
+                                                    {formatCurrencyWithLocale(financeExpenseSummary?.amazonFees ?? 0, currency)}
+                                                </p>
+                                            </div>
+                                            <div className="bg-[#21262d] rounded border border-[#30363d] p-2 text-center">
+                                                <p className="text-xs text-gray-400">Refunds</p>
+                                                <p className="text-sm font-bold text-gray-100">
+                                                    {formatCurrencyWithLocale(financeExpenseSummary?.refunds ?? 0, currency)}
+                                                </p>
+                                            </div>
+                                            <div className="bg-[#21262d] rounded border border-[#30363d] p-2 text-center">
+                                                <p className="text-xs text-gray-400">Expense Categories</p>
+                                                <p className="text-sm font-bold text-gray-100">
+                                                    {(financeExpenseSummary?.breakdown?.length ?? 0).toLocaleString()}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {(financeExpenseSummary?.breakdown?.length ?? 0) > 0 && (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+                                            {financeExpenseSummary.breakdown.map((item, idx) => (
+                                                <div
+                                                    key={`${item.category}-${idx}`}
+                                                    className="bg-[#21262d] rounded border border-[#30363d] px-2 py-1.5 flex items-center justify-between"
+                                                >
+                                                    <span className="text-xs text-gray-300 truncate pr-2">
+                                                        {formatExpenseCategoryLabel(item.category)}
+                                                    </span>
+                                                    <span className="text-xs font-semibold text-gray-100">
+                                                        {formatCurrencyWithLocale(item.amount, currency)}
+                                                    </span>
+                                                </div>
+                                            ))}
                                         </div>
                                     )}
                                 </div>

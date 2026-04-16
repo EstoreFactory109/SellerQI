@@ -71,8 +71,15 @@ const analyseDataCache = (cacheDurationInSeconds = 3600, pageType = 'dashboard')
             if (v3PaginatedTypes.includes(pageType)) {
                 const page = parseInt(req.query.page) || 1;
                 const limit = parseInt(req.query.limit) || 20;
+                const search = (req.query.search || '').toString().trim();
                 
                 // Only cache page 1 - Load More (page > 1) bypasses cache
+                // IMPORTANT: when search is present, bypass cache to avoid mixing queries
+                if (search) {
+                    logger.info(`[v3] Skipping cache for ${pageType} (search query present)`);
+                    return next();
+                }
+                
                 if (page === 1) {
                     cacheKey = `analyse_data:${pageType}:${userId}:${country}:${region}:${adminId || 'null'}:page${page}:limit${limit}`;
                 } else {

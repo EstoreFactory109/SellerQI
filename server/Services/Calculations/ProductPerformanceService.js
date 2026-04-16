@@ -21,11 +21,18 @@ const logger = require('../../utils/Logger.js');
  * @param {Object} params - Input parameters
  * @param {Array} params.productList - Array of products (with asin property)
  * @param {Object} params.buyBoxData - BuyBox data with asinBuyBoxData array
- * @param {Array} params.productWiseSponsoredAds - Product-wise sponsored ads data
  * @param {Object} params.economicsMetrics - Economics metrics with asinWiseSales
+ * @param {Object|null} params.economicsAsinSalesOverride - Optional ASIN -> sales row object from
+ *   ProfitabilityService.getAsinPpcSalesFromEconomics (same source as profitability table; includes big accounts).
  * @returns {Map<string, Object>} Map of ASIN -> performance metrics
  */
-function aggregateProductPerformance({ productList, buyBoxData, productWiseSponsoredAds, economicsMetrics }) {
+function aggregateProductPerformance({
+    productList,
+    buyBoxData,
+    productWiseSponsoredAds,
+    economicsMetrics,
+    economicsAsinSalesOverride = null
+}) {
     const performanceMap = new Map();
     
     // Build lookup maps for efficient access
@@ -36,7 +43,8 @@ function aggregateProductPerformance({ productList, buyBoxData, productWiseSpons
         buyBoxData.asinBuyBoxData.forEach(item => {
             const asin = (item.childAsin || item.parentAsin || '').trim();
             if (asin) {
-                buyBoxMap.set(asin, {
+                const key = asin.toUpperCase();
+                buyBoxMap.set(key, {
                     sessions: item.sessions || 0,
                     pageViews: item.pageViews || 0,
                     unitSessionPercentage: item.unitSessionPercentage || 0,
@@ -54,8 +62,9 @@ function aggregateProductPerformance({ productList, buyBoxData, productWiseSpons
         productWiseSponsoredAds.forEach(item => {
             const asin = (item.asin || '').trim();
             if (asin) {
+                const key = asin.toUpperCase();
                 // Aggregate if multiple entries for same ASIN
-                const existing = ppcMap.get(asin) || {
+                const existing = ppcMap.get(key) || {
                     ppcSpend: 0,
                     ppcSales: 0,
                     impressions: 0,
@@ -65,22 +74,39 @@ function aggregateProductPerformance({ productList, buyBoxData, productWiseSpons
                 existing.ppcSales += item.salesIn7Days || item.salesIn14Days || item.salesIn30Days || 0;
                 existing.impressions += item.impressions || 0;
                 existing.clicks += item.clicks || 0;
-                ppcMap.set(asin, existing);
+                ppcMap.set(key, existing);
             }
         });
     }
     
-    // 3. Economics data (sales, units from EconomicsMetrics)
+    // 3. Economics ASIN-wise sales (same semantics as profitability table / getAsinPpcSalesFromEconomics)
     const economicsMap = new Map();
-    if (economicsMetrics?.asinWiseSales && Array.isArray(economicsMetrics.asinWiseSales)) {
+    if (economicsAsinSalesOverride && typeof economicsAsinSalesOverride === 'object') {
+        Object.entries(economicsAsinSalesOverride).forEach(([asin, data]) => {
+            const key = (asin || '').trim().toUpperCase();
+            if (!key) return;
+            economicsMap.set(key, {
+                totalSales: data.sales || 0,
+                unitsSold: data.unitsSold || 0,
+                grossProfit: data.grossProfit || 0
+            });
+        });
+    } else if (economicsMetrics?.asinWiseSales && Array.isArray(economicsMetrics.asinWiseSales)) {
         economicsMetrics.asinWiseSales.forEach(item => {
-            const asin = (item.asin || '').trim();
-            if (asin) {
-                economicsMap.set(asin, {
-                    totalSales: item.sales?.amount || 0,
-                    unitsSold: item.unitsSold || 0,
-                    grossProfit: item.grossProfit?.amount || 0
-                });
+            const key = (item.asin || '').trim().toUpperCase();
+            if (!key) return;
+            const row = {
+                totalSales: item.sales?.amount || 0,
+                unitsSold: item.unitsSold || 0,
+                grossProfit: item.grossProfit?.amount || 0
+            };
+            const existing = economicsMap.get(key);
+            if (existing) {
+                existing.totalSales += row.totalSales;
+                existing.unitsSold += row.unitsSold;
+                existing.grossProfit += row.grossProfit;
+            } else {
+                economicsMap.set(key, row);
             }
         });
     }
@@ -89,9 +115,11 @@ function aggregateProductPerformance({ productList, buyBoxData, productWiseSpons
     const productAsins = productList.map(p => (p.asin || '').trim()).filter(Boolean);
     
     productAsins.forEach(asin => {
-        const buyBox = buyBoxMap.get(asin) || {};
-        const ppc = ppcMap.get(asin) || {};
-        const economics = economicsMap.get(asin) || {};
+        const key = asin.toUpperCase();
+        const buyBox = buyBoxMap.get(key) || {};
+        const ppc = ppcMap.get(key) || {};
+        const economics = economicsMap.get(key) || {};
+        const hasEconomicsRow = economicsMap.has(key);
         
         // Calculate derived metrics
         const ppcSpend = ppc.ppcSpend || 0;
@@ -104,6 +132,17 @@ function aggregateProductPerformance({ productList, buyBoxData, productWiseSpons
         // CTR = (clicks / impressions) * 100
         const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
         
+        // Sales / units: align with profitability table — Economics (getAsinPpcSalesFromEconomics) wins when present
+        const sales = hasEconomicsRow
+            ? (Number(economics.totalSales) || 0)
+            : (buyBox.sales || economics.totalSales || 0);
+        const unitsSold = hasEconomicsRow
+            ? (Number(economics.unitsSold) || 0)
+            : (buyBox.unitsOrdered || economics.unitsSold || 0);
+        const grossProfit = hasEconomicsRow
+            ? (Number(economics.grossProfit) || 0)
+            : (economics.grossProfit || 0);
+
         performanceMap.set(asin, {
             // Traffic metrics (from BuyBox/Sales and Traffic by ASIN)
             sessions: buyBox.sessions || 0,
@@ -111,10 +150,9 @@ function aggregateProductPerformance({ productList, buyBoxData, productWiseSpons
             conversionRate: buyBox.unitSessionPercentage || 0,
             buyBoxPercentage: buyBox.buyBoxPercentage || 0,
             
-            // Sales metrics (prefer BuyBox data if available, fall back to economics)
-            sales: buyBox.sales || economics.totalSales || 0,
-            unitsSold: buyBox.unitsOrdered || economics.unitsSold || 0,
-            grossProfit: economics.grossProfit || 0,
+            sales,
+            unitsSold,
+            grossProfit,
             
             // PPC metrics
             ppcSpend: ppcSpend,

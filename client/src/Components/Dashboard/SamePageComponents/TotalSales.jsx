@@ -158,8 +158,11 @@ const TotalSales = () => {
 
   const filteredPPCMetrics = useMemo(() => {
     if (!shouldUseCalendarDateRange(startDate, endDate) || !ppcDateWiseMetrics.length) return ppcDateWiseMetrics;
+    // Align with ProfitibilityDashboard / Campaign Audit: include full days in local time
     const start = parseLocalDate(startDate);
     const end = parseLocalDate(endDate);
+    start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
     return ppcDateWiseMetrics.filter(item => {
       const itemDate = new Date(item.date);
       return itemDate >= start && itemDate <= end;
@@ -223,12 +226,12 @@ const TotalSales = () => {
       ppcSpentVal = ppcSummary.totalSpend;
     }
 
-    // Snapshot total expenses include PPC; raw-row summary excludes PPC — subtract ad spend only in that path
-    const grossProfitRawVal = snapshotFeeTotals
-      ? totalSalesVal - displayTotalExpenses
-      : totalSalesVal - displayTotalExpenses - ppcSpentVal;
+    // Gross profit: always subtract PPC spend as well (keeps PPC as an explicit cost bucket)
+    const grossProfitRawVal = totalSalesVal - displayTotalExpenses - ppcSpentVal;
 
-    const otherExpensesVal = Math.max(0, displayTotalExpenses - displayAmazonFees);
+    // Ensure refunds are not double-counted: TotalExpenses includes refunds (because refunds are part of ExpenseRawRow aggregation),
+    // but refunds are also shown as a separate pie slice.
+    const otherExpensesVal = Math.max(0, displayTotalExpenses - displayAmazonFees - displayRefunds);
 
     const grossProfitVal = Math.abs(grossProfitRawVal);
 

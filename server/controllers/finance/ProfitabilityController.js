@@ -79,6 +79,44 @@ const getTableByDateRange = asyncHandler(async (req, res) => {
   return res.status(200).json(new ApiResponse(200, data, 'Profitability table for date range'));
 });
 
+function validateAsinParam(asin) {
+  const a = String(asin || '').trim().toUpperCase();
+  if (!/^[A-Z0-9]{10}$/.test(a)) return null;
+  return a;
+}
+
+/** Same row shape as profitability table — for product details header vs economics/pagewise drift. */
+const getAsinTableSnapshot = asyncHandler(async (req, res) => {
+  const asin = validateAsinParam(req.params.asin);
+  if (!asin) return res.status(400).json(new ApiError(400, 'Invalid ASIN.'));
+
+  const { from, to } = req.query;
+  if (from && to) {
+    const err = validateDates(from, to);
+    if (err) return res.status(400).json(new ApiError(400, err));
+    const data = await ProfitabilityReadService.getTableRowByAsinByDateRange({
+      ...getUserContext(req),
+      from,
+      to,
+      asin,
+    });
+    return res.status(200).json(new ApiResponse(200, data, 'Profitability table row for ASIN (date range)'));
+  }
+
+  const periodDays = parsePeriod(req.query.period);
+  if (!periodDays) {
+    return res.status(400).json(
+      new ApiError(400, 'Provide period=7|14|30 or both from and to (YYYY-MM-DD).')
+    );
+  }
+  const data = await ProfitabilityReadService.getTableRowByAsinByPeriod({
+    ...getUserContext(req),
+    periodDays,
+    asin,
+  });
+  return res.status(200).json(new ApiResponse(200, data, 'Profitability table row for ASIN'));
+});
+
 module.exports = {
   getSummaryByPeriod,
   getSummaryByDateRange,
@@ -86,4 +124,5 @@ module.exports = {
   getChartByDateRange,
   getTableByPeriod,
   getTableByDateRange,
+  getAsinTableSnapshot,
 };

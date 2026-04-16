@@ -586,16 +586,19 @@ const getIssuesByProductData = asyncHandler(async (req, res) => {
 
         // Import performance and recommendation services
         const { aggregateProductPerformance, enrichProductsWithPerformance } = require('../../Services/Calculations/ProductPerformanceService.js');
+        const ProfitabilityService = require('../../Services/Calculations/ProfitabilityService.js');
         const { buildErrorMaps, generateAllRecommendations, enrichProductsWithRecommendations } = require('../../Services/Calculations/RecommendationService.js');
         const { fetchAndEnrichWithComparison, COMPARISON_TYPES } = require('../../Services/Calculations/ProductPerformanceComparisonService.js');
         
-        // Aggregate performance metrics per ASIN
+        // Aggregate performance metrics per ASIN (sales/units same source as profitability table)
         const productList = dashboardData.productWiseError || [];
+        const { asinPpcSales: economicsAsinSalesOverride } = await ProfitabilityService.getAsinPpcSalesFromEconomics(rawData.EconomicsMetrics);
         const performanceMap = aggregateProductPerformance({
             productList,
             buyBoxData: rawData.BuyBoxData,
             productWiseSponsoredAds: rawData.ProductWiseSponsoredAds,
-            economicsMetrics: rawData.EconomicsMetrics
+            economicsMetrics: rawData.EconomicsMetrics,
+            economicsAsinSalesOverride
         });
         
         // Enrich products with performance
@@ -2860,11 +2863,14 @@ const getYourProductsActiveV3 = asyncHandler(async (req, res) => {
     const Country = req.country;
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const rawSearch = (req.query.search || '').toString().trim();
 
     try {
         logger.info(`[v3-active] Getting Active products for user ${userId}, page ${page}`);
 
         const userObjectId = require('mongoose').Types.ObjectId.createFromHexString(userId);
+        const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const searchRegex = rawSearch ? new RegExp(escapeRegex(rawSearch), 'i') : null;
 
         // Sellable only: Active with quantity > 0
         const pipeline = [
@@ -2873,6 +2879,15 @@ const getYourProductsActiveV3 = asyncHandler(async (req, res) => {
             { $match: { 'sellerAccount.region': Region } },
             { $unwind: { path: '$sellerAccount.products', preserveNullAndEmptyArrays: false } },
             { $match: { 'sellerAccount.products.status': 'Active', $expr: { $gt: [{ $ifNull: ['$sellerAccount.products.quantity', 0] }, 0] } } },
+            ...(searchRegex ? [{
+                $match: {
+                    $or: [
+                        { 'sellerAccount.products.asin': { $regex: searchRegex } },
+                        { 'sellerAccount.products.sku': { $regex: searchRegex } },
+                        { 'sellerAccount.products.itemName': { $regex: searchRegex } }
+                    ]
+                }
+            }] : []),
             {
                 $facet: {
                     count: [{ $count: 'total' }],
@@ -3166,11 +3181,14 @@ const getYourProductsNonSellableV3 = asyncHandler(async (req, res) => {
     const Country = req.country;
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const rawSearch = (req.query.search || '').toString().trim();
 
     try {
         logger.info(`[v3-non-sellable] Getting Non-Sellable (Inactive+Incomplete) products for user ${userId}, page ${page}`);
 
         const userObjectId = require('mongoose').Types.ObjectId.createFromHexString(userId);
+        const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const searchRegex = rawSearch ? new RegExp(escapeRegex(rawSearch), 'i') : null;
 
         // Non-sellable: Inactive, Incomplete, or Active with quantity 0 (0 availability)
         const pipeline = [
@@ -3186,6 +3204,15 @@ const getYourProductsNonSellableV3 = asyncHandler(async (req, res) => {
                     ]
                 }
             },
+            ...(searchRegex ? [{
+                $match: {
+                    $or: [
+                        { 'sellerAccount.products.asin': { $regex: searchRegex } },
+                        { 'sellerAccount.products.sku': { $regex: searchRegex } },
+                        { 'sellerAccount.products.itemName': { $regex: searchRegex } }
+                    ]
+                }
+            }] : []),
             {
                 $facet: {
                     count: [{ $count: 'total' }],
@@ -3281,11 +3308,14 @@ const getYourProductsWithoutAPlusV3 = asyncHandler(async (req, res) => {
     const Country = req.country;
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const rawSearch = (req.query.search || '').toString().trim();
 
     try {
         logger.info(`[v3-without-aplus] Getting products without A+ for user ${userId}, page ${page}`);
 
         const userObjectId = require('mongoose').Types.ObjectId.createFromHexString(userId);
+        const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const searchRegex = rawSearch ? new RegExp(escapeRegex(rawSearch), 'i') : null;
 
         // Get all ASINs with A+ (APPROVED or PUBLISHED)
         const aPlusDoc = await APlusContent.findOne({
@@ -3324,6 +3354,15 @@ const getYourProductsWithoutAPlusV3 = asyncHandler(async (req, res) => {
                     }
                 }
             },
+            ...(searchRegex ? [{
+                $match: {
+                    $or: [
+                        { 'sellerAccount.products.asin': { $regex: searchRegex } },
+                        { 'sellerAccount.products.sku': { $regex: searchRegex } },
+                        { 'sellerAccount.products.itemName': { $regex: searchRegex } }
+                    ]
+                }
+            }] : []),
             {
                 $facet: {
                     count: [{ $count: 'total' }],
@@ -3396,11 +3435,14 @@ const getYourProductsNotTargetedInAdsV3 = asyncHandler(async (req, res) => {
     const Country = req.country;
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const rawSearch = (req.query.search || '').toString().trim();
 
     try {
         logger.info(`[v3-not-targeted] Getting products not targeted in ads for user ${userId}, page ${page}`);
 
         const userObjectId = require('mongoose').Types.ObjectId.createFromHexString(userId);
+        const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const searchRegex = rawSearch ? new RegExp(escapeRegex(rawSearch), 'i') : null;
 
         // Get distinct ASINs targeted in ads (latest batch only)
         // First find latest batchId
@@ -3443,6 +3485,15 @@ const getYourProductsNotTargetedInAdsV3 = asyncHandler(async (req, res) => {
                     }
                 }
             },
+            ...(searchRegex ? [{
+                $match: {
+                    $or: [
+                        { 'sellerAccount.products.asin': { $regex: searchRegex } },
+                        { 'sellerAccount.products.sku': { $regex: searchRegex } },
+                        { 'sellerAccount.products.itemName': { $regex: searchRegex } }
+                    ]
+                }
+            }] : []),
             {
                 $facet: {
                     count: [{ $count: 'total' }],
@@ -3518,11 +3569,12 @@ const getOptimizationProductsV3 = asyncHandler(async (req, res) => {
     const Country = req.country;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
+    const search = (req.query.search || '').toString().trim();
 
     try {
         const { getOptimizationProducts } = require('../../Services/Calculations/OptimizationService.js');
         
-        const result = await getOptimizationProducts(userId, Region, Country, { page, limit });
+        const result = await getOptimizationProducts(userId, Region, Country, { page, limit, search });
 
         return res.status(200).json(
             new ApiResponse(200, result, "Optimization products retrieved")

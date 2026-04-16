@@ -6,12 +6,19 @@ const { fetchPersistAndReturnExpenseReport } = require('../../Services/Sp_API/Ex
 
 async function testExpenseReport(req, res) {
   try {
-    const { userId, country, region, daysBack = getDefaultExpenseFinanceDaysBack() } = req.body || {};
+    const { userId, country, region, daysBack = getDefaultExpenseFinanceDaysBack(), from, to } = req.body || {};
 
     if (!userId || !country || !region) {
       return res.status(400).json({
         success: false,
         message: 'userId, country, and region are required',
+      });
+    }
+
+    if ((from && !to) || (!from && to)) {
+      return res.status(400).json({
+        success: false,
+        message: 'If you pass from/to, you must pass BOTH. Format: YYYY-MM-DD',
       });
     }
 
@@ -76,6 +83,8 @@ async function testExpenseReport(req, res) {
       refreshToken,
       accessToken,
       daysBack: Number(daysBack) || getDefaultExpenseFinanceDaysBack(),
+      from: from || undefined,
+      to: to || undefined,
       clientId: process.env.SPAPI_CLIENT_ID,
       clientSecret: process.env.SPAPI_CLIENT_SECRET,
     });

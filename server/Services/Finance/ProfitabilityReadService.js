@@ -4,6 +4,7 @@ const AsinWiseSalesRun = require('../../models/finance/AsinWiseSalesRunModel.js'
 const AsinWiseSalesItem = require('../../models/finance/AsinWiseSalesItemModel.js');
 const AsinWiseSalesDateItem = require('../../models/finance/AsinWiseSalesDateItemModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
+const { isAmazonFee } = require('../Sp_API/Expences.js');
 
 const FBA_FEE_CATEGORIES = new Set([
   'FBA Fulfillment Fee',
@@ -144,13 +145,13 @@ async function getSummary({ userId, country, region, fromDate, toDate }) {
   const uid = toObjectId(userId);
   const expMatch = { User: uid, country, region, postedDate: { $gte: fromDate, $lte: toDate }, category: { $ne: 'Advertising / PPC' } };
 
-  const [totalExpAgg, amazonFeesAgg, refundsAgg] = await Promise.all([
+  const [totalExpAgg, categoryAgg, refundsAgg] = await Promise.all([
     ExpenseRawRow.aggregate([
       { $match: expMatch },
       { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } },
     ]),
     ExpenseRawRow.aggregate([
-      { $match: { ...expMatch, isAmazonFee: true } },
+      { $match: expMatch },
       {
         $group: {
           _id: '$category',
@@ -168,7 +169,8 @@ async function getSummary({ userId, country, region, fromDate, toDate }) {
 
   let amazonFeesTotal = 0;
   let fbaFeesTotal = 0;
-  for (const row of amazonFeesAgg) {
+  for (const row of categoryAgg) {
+    if (!isAmazonFee(row._id)) continue;
     const amt = Number(row.totalAmount) || 0;
     amazonFeesTotal += amt;
     if (FBA_FEE_CATEGORIES.has(row._id)) fbaFeesTotal += amt;
@@ -284,7 +286,8 @@ async function getChartByDateRange({ userId, country, region, from, to }) {
 // 3) TABLE (ASIN-keyed, joined sales + expenses)
 // ──────────────────────────────────────────────────────────────
 
-async function getTable({ userId, country, region, fromDate, toDate, page = 1, limit = 10 }) {
+/** Full profitability table rows (same logic as paginated `getTable`). */
+async function buildAllProfitabilityTableRows(userId, country, region, fromDate, toDate) {
   const uid = toObjectId(userId);
   const fromStr = formatDateKey(fromDate);
   const toStr = formatDateKey(toDate);
@@ -307,7 +310,6 @@ async function getTable({ userId, country, region, fromDate, toDate, page = 1, l
           _id: { sku: '$sku', category: '$category' },
           amount: { $sum: '$amount' },
           count: { $sum: 1 },
-          isAmazonFee: { $first: '$isAmazonFee' },
           hasRefund: {
             $sum: { $cond: [{ $eq: ['$transactionType', 'Refund'] }, 1, 0] },
           },
@@ -320,9 +322,6 @@ async function getTable({ userId, country, region, fromDate, toDate, page = 1, l
         $group: {
           _id: '$_id.sku',
           totalExpenses: { $sum: '$amount' },
-          amazonFees: {
-            $sum: { $cond: [{ $eq: ['$isAmazonFee', true] }, '$amount', 0] },
-          },
           refunds: { $sum: '$refundAmount' },
           breakdown: {
             $push: {
@@ -346,11 +345,17 @@ async function getTable({ userId, country, region, fromDate, toDate, page = 1, l
         }))
         .sort((a, b) => b.amount - a.amount);
       const totalExpenses = round2(breakdown.reduce((s, b) => s + b.amount, 0));
+      const amazonFees = round2(
+        breakdown.reduce((sum, b) => {
+          if (!isAmazonFee(b.category)) return sum;
+          return sum + (Number(b.amount) || 0);
+        }, 0)
+      );
       return [
         r._id || 'N/A',
         {
           totalExpenses,
-          amazonFees: Math.abs(round2(r.amazonFees)),
+          amazonFees: Math.abs(amazonFees),
           refunds: Math.abs(round2(r.refunds)),
           breakdown,
         },
@@ -414,11 +419,16 @@ async function getTable({ userId, country, region, fromDate, toDate, page = 1, l
   }
 
   rows.sort((a, b) => b.totalSales - a.totalSales);
+  return { rows };
+}
 
-  const totalItems = rows.length;
+async function getTable({ userId, country, region, fromDate, toDate, page = 1, limit = 10 }) {
+  const { rows: allRows } = await buildAllProfitabilityTableRows(userId, country, region, fromDate, toDate);
+
+  const totalItems = allRows.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / limit));
   const startIdx = (page - 1) * limit;
-  const paginated = rows.slice(startIdx, startIdx + limit);
+  const paginated = allRows.slice(startIdx, startIdx + limit);
 
   return {
     rows: paginated,
@@ -430,6 +440,25 @@ async function getTable({ userId, country, region, fromDate, toDate, page = 1, l
       hasMore: page < totalPages,
     },
   };
+}
+
+/** One table row for an ASIN (same pipeline as `/api/profitability/table`). */
+async function getTableRowByAsin({ userId, country, region, fromDate, toDate, asin }) {
+  const normalized = String(asin || '').trim().toUpperCase();
+  if (!/^[A-Z0-9]{10}$/.test(normalized)) return null;
+  const { rows } = await buildAllProfitabilityTableRows(userId, country, region, fromDate, toDate);
+  return rows.find((r) => (r.asin || '').trim().toUpperCase() === normalized) || null;
+}
+
+async function getTableRowByAsinByPeriod({ userId, country, region, periodDays, asin }) {
+  const fromDate = getPeriodStartDate(periodDays);
+  const toDate = new Date();
+  return getTableRowByAsin({ userId, country, region, fromDate, toDate, asin });
+}
+
+async function getTableRowByAsinByDateRange({ userId, country, region, from, to, asin }) {
+  const { fromDate, toDate } = buildDateRange(from, to);
+  return getTableRowByAsin({ userId, country, region, fromDate, toDate, asin });
 }
 
 async function getTableByPeriod({ userId, country, region, periodDays, page, limit }) {
@@ -450,4 +479,6 @@ module.exports = {
   getChartByDateRange,
   getTableByPeriod,
   getTableByDateRange,
+  getTableRowByAsinByPeriod,
+  getTableRowByAsinByDateRange,
 };

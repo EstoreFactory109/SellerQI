@@ -1917,20 +1917,21 @@ export const fetchYourProductsSummaryV3 = createAsyncThunk(
  */
 export const fetchYourProductsActiveV3 = createAsyncThunk(
     'pageData/fetchYourProductsActiveV3',
-    async ({ page = 1, limit = 20, append = false } = {}, { getState, rejectWithValue }) => {
+    async ({ page = 1, limit = 20, append = false, search = '', forceRefresh = false } = {}, { getState, rejectWithValue }) => {
         try {
             const state = getState();
             const existing = state.pageData?.yourProductsV3?.active;
+            const normalizedSearch = (search || '').toString().trim();
             
-            // For page 1, check cache
-            if (page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
+            // For page 1, check cache (skip when clearing search — state may still hold search subset)
+            if (!forceRefresh && !normalizedSearch && page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
                 devLog('[v3 Redux] Using cached Active products');
                 return { fromCache: true };
             }
             
-            devLog(`[v3 Redux] Fetching Active products page ${page}`);
+            devLog(`[v3 Redux] Fetching Active products page ${page}${normalizedSearch ? ' (search)' : ''}`);
             const response = await axiosInstance.get('/api/pagewise/your-products-v3/active', {
-                params: { page, limit }
+                params: { page, limit, ...(normalizedSearch ? { search: normalizedSearch } : {}) }
             });
             
             const newData = response.data.data;
@@ -2060,19 +2061,20 @@ export const fetchYourProductsIncompleteV3 = createAsyncThunk(
  */
 export const fetchYourProductsNonSellableV3 = createAsyncThunk(
     'pageData/fetchYourProductsNonSellableV3',
-    async ({ page = 1, limit = 20, append = false } = {}, { getState, rejectWithValue }) => {
+    async ({ page = 1, limit = 20, append = false, search = '', forceRefresh = false } = {}, { getState, rejectWithValue }) => {
         try {
             const state = getState();
             const existing = state.pageData?.yourProductsV3?.nonSellable;
+            const normalizedSearch = (search || '').toString().trim();
             
-            if (page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
+            if (!forceRefresh && !normalizedSearch && page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
                 devLog('[v3 Redux] Using cached Non-Sellable products');
                 return { fromCache: true };
             }
             
-            devLog(`[v3 Redux] Fetching Non-Sellable products page ${page}`);
+            devLog(`[v3 Redux] Fetching Non-Sellable products page ${page}${normalizedSearch ? ' (search)' : ''}`);
             const response = await axiosInstance.get('/api/pagewise/your-products-v3/non-sellable', {
-                params: { page, limit }
+                params: { page, limit, ...(normalizedSearch ? { search: normalizedSearch } : {}) }
             });
             
             const newData = response.data.data;
@@ -2108,19 +2110,20 @@ export const fetchYourProductsNonSellableV3 = createAsyncThunk(
  */
 export const fetchYourProductsWithoutAPlusV3 = createAsyncThunk(
     'pageData/fetchYourProductsWithoutAPlusV3',
-    async ({ page = 1, limit = 20, append = false } = {}, { getState, rejectWithValue }) => {
+    async ({ page = 1, limit = 20, append = false, search = '', forceRefresh = false } = {}, { getState, rejectWithValue }) => {
         try {
             const state = getState();
             const existing = state.pageData?.yourProductsV3?.withoutAPlus;
+            const normalizedSearch = (search || '').toString().trim();
             
-            if (page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
+            if (!forceRefresh && !normalizedSearch && page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
                 devLog('[v3 Redux] Using cached Without A+ products');
                 return { fromCache: true };
             }
             
-            devLog(`[v3 Redux] Fetching Without A+ products page ${page}`);
+            devLog(`[v3 Redux] Fetching Without A+ products page ${page}${normalizedSearch ? ' (search)' : ''}`);
             const response = await axiosInstance.get('/api/pagewise/your-products-v3/without-aplus', {
-                params: { page, limit }
+                params: { page, limit, ...(normalizedSearch ? { search: normalizedSearch } : {}) }
             });
             
             const newData = response.data.data;
@@ -2155,19 +2158,20 @@ export const fetchYourProductsWithoutAPlusV3 = createAsyncThunk(
  */
 export const fetchYourProductsNotTargetedInAdsV3 = createAsyncThunk(
     'pageData/fetchYourProductsNotTargetedInAdsV3',
-    async ({ page = 1, limit = 20, append = false } = {}, { getState, rejectWithValue }) => {
+    async ({ page = 1, limit = 20, append = false, search = '', forceRefresh = false } = {}, { getState, rejectWithValue }) => {
         try {
             const state = getState();
             const existing = state.pageData?.yourProductsV3?.notTargetedInAds;
+            const normalizedSearch = (search || '').toString().trim();
             
-            if (page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
+            if (!forceRefresh && !normalizedSearch && page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
                 devLog('[v3 Redux] Using cached Not Targeted in Ads products');
                 return { fromCache: true };
             }
             
-            devLog(`[v3 Redux] Fetching Not Targeted in Ads products page ${page}`);
+            devLog(`[v3 Redux] Fetching Not Targeted in Ads products page ${page}${normalizedSearch ? ' (search)' : ''}`);
             const response = await axiosInstance.get('/api/pagewise/your-products-v3/not-targeted-in-ads', {
-                params: { page, limit }
+                params: { page, limit, ...(normalizedSearch ? { search: normalizedSearch } : {}) }
             });
             
             const newData = response.data.data;
@@ -2205,19 +2209,20 @@ export const fetchYourProductsNotTargetedInAdsV3 = createAsyncThunk(
  */
 export const fetchOptimizationProductsV3 = createAsyncThunk(
     'pageData/fetchOptimizationProductsV3',
-    async ({ page = 1, limit = 20, append = false } = {}, { getState, rejectWithValue }) => {
+    async ({ page = 1, limit = 20, append = false, search = '', forceRefresh = false } = {}, { getState, rejectWithValue }) => {
         try {
             const state = getState();
             const existing = state.pageData?.yourProductsV3?.optimization;
+            const normalizedSearch = (search || '').toString().trim();
             
-            if (page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
+            if (!forceRefresh && !normalizedSearch && page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
                 devLog('[v3 Redux] Using cached Optimization products');
                 return { fromCache: true };
             }
             
-            devLog(`[v3 Redux] Fetching Optimization products page ${page}`);
+            devLog(`[v3 Redux] Fetching Optimization products page ${page}${normalizedSearch ? ' (search)' : ''}`);
             const response = await axiosInstance.get('/api/pagewise/your-products-v3/optimization', {
-                params: { page, limit }
+                params: { page, limit, ...(normalizedSearch ? { search: normalizedSearch } : {}) }
             });
             
             const newData = response.data.data;

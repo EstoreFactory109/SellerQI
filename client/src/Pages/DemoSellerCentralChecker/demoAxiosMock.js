@@ -2348,10 +2348,19 @@ export const initDemoAxiosMock = () => {
       const params = new URLSearchParams(query);
       const page = Number(params.get('page') || 1);
       const limit = Number(params.get('limit') || 20);
+      const search = (params.get('search') || '').toString().trim().toLowerCase();
 
       const all = DEMO_PRODUCTS
         .map((p, idx) => mkYourProductsBaseRecord(p, idx))
-        .filter((p) => p.status === 'Active');
+        .filter((p) => p.status === 'Active')
+        .filter((p) => {
+          if (!search) return true;
+          return (
+            (p.asin || '').toLowerCase().includes(search) ||
+            (p.sku || '').toLowerCase().includes(search) ||
+            (p.title || p.name || '').toLowerCase().includes(search)
+          );
+        });
 
       const start = (page - 1) * limit;
       const rows = all.slice(start, start + limit);
@@ -2388,6 +2397,7 @@ export const initDemoAxiosMock = () => {
       const params = new URLSearchParams(query);
       const page = Number(params.get('page') || 1);
       const limit = Number(params.get('limit') || 20);
+      const search = (params.get('search') || '').toString().trim().toLowerCase();
 
       const all = DEMO_PRODUCTS
         .map((p, idx) => mkYourProductsBaseRecord(p, idx))
@@ -2407,7 +2417,15 @@ export const initDemoAxiosMock = () => {
           issueCount: p.issueCount,
           price: p.price,
           quantity: p.quantity
-        }));
+        }))
+        .filter((p) => {
+          if (!search) return true;
+          return (
+            (p.asin || '').toLowerCase().includes(search) ||
+            (p.sku || '').toLowerCase().includes(search) ||
+            (p.title || p.name || '').toLowerCase().includes(search)
+          );
+        });
 
       const start = (page - 1) * limit;
       const rows = all.slice(start, start + limit);
@@ -2427,10 +2445,19 @@ export const initDemoAxiosMock = () => {
       const params = new URLSearchParams(query);
       const page = Number(params.get('page') || 1);
       const limit = Number(params.get('limit') || 20);
+      const search = (params.get('search') || '').toString().trim().toLowerCase();
 
       const all = DEMO_PRODUCTS
         .map((p, idx) => mkYourProductsBaseRecord(p, idx))
-        .filter((p) => !p.hasAPlus);
+        .filter((p) => !p.hasAPlus)
+        .filter((p) => {
+          if (!search) return true;
+          return (
+            (p.asin || '').toLowerCase().includes(search) ||
+            (p.sku || '').toLowerCase().includes(search) ||
+            (p.title || p.name || '').toLowerCase().includes(search)
+          );
+        });
 
       const start = (page - 1) * limit;
       const rows = all.slice(start, start + limit);
@@ -2445,10 +2472,19 @@ export const initDemoAxiosMock = () => {
       const params = new URLSearchParams(query);
       const page = Number(params.get('page') || 1);
       const limit = Number(params.get('limit') || 20);
+      const search = (params.get('search') || '').toString().trim().toLowerCase();
 
       const all = DEMO_PRODUCTS
         .map((p, idx) => mkYourProductsBaseRecord(p, idx))
-        .filter((p) => !p.isTargetedInAds);
+        .filter((p) => !p.isTargetedInAds)
+        .filter((p) => {
+          if (!search) return true;
+          return (
+            (p.asin || '').toLowerCase().includes(search) ||
+            (p.sku || '').toLowerCase().includes(search) ||
+            (p.title || p.name || '').toLowerCase().includes(search)
+          );
+        });
 
       const start = (page - 1) * limit;
       const rows = all.slice(start, start + limit);
@@ -2463,6 +2499,7 @@ export const initDemoAxiosMock = () => {
       const params = new URLSearchParams(query);
       const page = Number(params.get('page') || 1);
       const limit = Number(params.get('limit') || 20);
+      const search = (params.get('search') || '').toString().trim().toLowerCase();
 
       const all = DEMO_PRODUCTS.map((p, idx) => {
         const last = PPC_DATE_WISE_METRICS[PPC_DATE_WISE_METRICS.length - 1] || {};
@@ -2510,6 +2547,13 @@ export const initDemoAxiosMock = () => {
           hasAPlus: idx % 2 === 0,
           isTargetedInAds: idx % 2 === 0
         };
+      }).filter((p) => {
+        if (!search) return true;
+        return (
+          (p.asin || '').toLowerCase().includes(search) ||
+          (p.sku || '').toLowerCase().includes(search) ||
+          (p.name || p.title || '').toLowerCase().includes(search)
+        );
       });
 
       const start = (page - 1) * limit;

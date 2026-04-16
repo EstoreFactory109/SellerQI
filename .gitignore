@@ -15,6 +15,7 @@ server/logs.txt
 # Markdown files
 *.md
 *.csv
+*.json
 
 # Dependency directories
 /npm-debug.log

@@ -14,6 +14,8 @@
 const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
+const AsinWiseSalesRun = require('../../models/finance/AsinWiseSalesRunModel.js');
+const AsinWiseSalesDateItem = require('../../models/finance/AsinWiseSalesDateItemModel.js');
 const logger = require('../../utils/Logger.js');
 
 /**
@@ -88,7 +90,7 @@ async function getProductHistory({ userId, region, country, asin, limit = 30, gr
             }
         });
 
-        // Process EconomicsMetrics - add/update sales data
+        // Process EconomicsMetrics - add/update sales data (fallback path)
         // Handle both regular accounts (asinWiseSales in main doc) and big accounts (separate collection)
         for (const doc of economicsDocs) {
             const dateKey = doc.dateRange?.endDate || doc.createdAt?.toISOString()?.split('T')[0] || 'unknown';
@@ -174,6 +176,61 @@ async function getProductHistory({ userId, region, country, asin, limit = 30, gr
                     historyMap.set(dateKey, existing);
                 }
             }
+        }
+
+        // Prefer the same date-wise ASIN sales source used by profitability endpoints.
+        // This avoids stale/zero sales in ProductDetails history graphs.
+        try {
+            const runIds = await AsinWiseSalesRun.find({
+                User: userId,
+                country,
+                region,
+            })
+                .sort({ generatedAt: -1 })
+                .limit(10)
+                .select({ _id: 1 })
+                .lean()
+                .then((rows) => rows.map((r) => r._id));
+
+            if (runIds.length) {
+                const asinDateRows = await AsinWiseSalesDateItem.aggregate([
+                    { $match: { runId: { $in: runIds }, asin: normalizedAsin } },
+                    // newest run wins for same (asin, date)
+                    { $addFields: { _runIdx: { $indexOfArray: [runIds, '$runId'] } } },
+                    { $sort: { _runIdx: 1 } },
+                    {
+                        $group: {
+                            _id: '$date',
+                            unitsSold: { $first: '$units' },
+                            sales: { $first: '$revenue' },
+                        },
+                    },
+                    { $sort: { _id: 1 } },
+                ]);
+
+                for (const row of asinDateRows) {
+                    const dateKey = row._id;
+                    const existing = historyMap.get(dateKey) || {
+                        date: dateKey,
+                        sessions: 0,
+                        pageViews: 0,
+                        conversionRate: 0,
+                        buyBoxPercentage: 0,
+                        sales: 0,
+                        unitsSold: 0
+                    };
+
+                    existing.sales = Number(row.sales) || 0;
+                    existing.unitsSold = Number(row.unitsSold) || 0;
+                    historyMap.set(dateKey, existing);
+                }
+            }
+        } catch (salesSourceError) {
+            logger.error('Error fetching AsinWiseSalesDateItem history in ProductHistoryService', {
+                userId,
+                asin: normalizedAsin,
+                error: salesSourceError.message
+            });
         }
 
         // Convert map to sorted array

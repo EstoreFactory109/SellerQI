@@ -881,26 +881,41 @@ const ProfitTable = ({
             </table>
           </div>
 
-          {/* Pagination */}
+          {/* Pagination — centered under the table */}
           {pPag.totalPages > 1 && (
-            <div className="flex items-center justify-between px-4 py-2 border-t" style={{ borderTop: '1px solid #30363d', background: '#21262d' }}>
+            <div
+              className="flex flex-col items-center justify-center gap-2 px-4 py-3 border-t"
+              style={{ borderTop: '1px solid #30363d', background: '#21262d' }}
+            >
               <span className="text-[10px]" style={{ color: '#9ca3af' }}>
                 Page {pPag.page} of {pPag.totalPages} ({pPag.totalItems} items)
               </span>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center justify-center gap-2">
                 <button
+                  type="button"
                   onClick={() => onProfitTablePageChange && onProfitTablePageChange(pPag.page - 1)}
                   disabled={pPag.page <= 1}
-                  className="p-1 rounded transition-colors disabled:opacity-30"
-                  style={{ color: '#9ca3af' }}
+                  className="p-2 rounded-lg transition-colors disabled:opacity-30"
+                  style={
+                    pPag.page <= 1
+                      ? { background: '#21262d', color: '#6b7280' }
+                      : { background: '#1a1a1a', color: '#f3f4f6', border: '1px solid #30363d' }
+                  }
+                  aria-label="Previous page"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
                 <button
+                  type="button"
                   onClick={() => onProfitTablePageChange && onProfitTablePageChange(pPag.page + 1)}
                   disabled={!pPag.hasMore}
-                  className="p-1 rounded transition-colors disabled:opacity-30"
-                  style={{ color: '#9ca3af' }}
+                  className="p-2 rounded-lg transition-colors disabled:opacity-30"
+                  style={
+                    !pPag.hasMore
+                      ? { background: '#21262d', color: '#6b7280' }
+                      : { background: '#1a1a1a', color: '#f3f4f6', border: '1px solid #30363d' }
+                  }
+                  aria-label="Next page"
                 >
                   <ChevronRight className="w-4 h-4" />
                 </button>

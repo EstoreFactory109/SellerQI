@@ -94,7 +94,6 @@ const filterTotalSales = asyncHandler(async (req, res) => {
  * This guarantees: same dates → same result, regardless of filter type.
  */
 async function getLast30DaysData(userId, country, region) {
-    // Get the latest sales-only metrics document
     const latestMetrics = await SalesOnlyMetrics.findOne({
         User: userId,
         country: country,
@@ -106,68 +105,18 @@ async function getLast30DaysData(userId, country, region) {
         return createEmptyResult();
     }
 
-    const currencyCode = latestMetrics.totalSales?.currencyCode || 'USD';
-    
-    // Get datewise data from the document
-    const datewiseSales = latestMetrics.datewiseSales || [];
-    // Sales-only mode intentionally does NOT persist fee/refund breakdown arrays.
-    // Keep fee-related totals as 0 for this endpoint.
-    
-    // Calculate totals by summing datewise values (same method as custom range)
-    let totalSales = 0;
-    let totalFbaFees = 0;
-    let totalAmazonFees = 0; // Changed from totalStorageFees to totalAmazonFees
-    let totalRefunds = 0;
-    let otherAmazonFees = 0;
-    
-    datewiseSales.forEach(item => {
-        totalSales += item.sales?.amount || 0;
-    });
-    
-    // Prepare datewise chart data
-    const datewiseChartData = datewiseSales.map(item => {
-        const itemDate = new Date(item.date);
-        const dateKey = itemDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        
-        return {
-            date: dateKey,
-            totalSales: item.sales?.amount || 0,
-            grossProfit: item.grossProfit?.amount || 0,
-            originalDate: item.date
-        };
-    }).sort((a, b) => new Date(a.originalDate) - new Date(b.originalDate));
-
-    // Get PPC spent from actual datewise PPC data (not estimated)
-    // Use the same date range as the economics metrics
+    // Use the exact same dynamic aggregation path as custom range.
     const dateRange = latestMetrics.dateRange || {};
-    let ppcSpent = 0;
-    
-    if (dateRange.startDate && dateRange.endDate) {
-        ppcSpent = await getDatewisePPCSpend(userId, country, region, dateRange.startDate, dateRange.endDate);
+    if (!dateRange.startDate || !dateRange.endDate) {
+        logger.warn('Latest sales-only metrics has missing dateRange; falling back to empty result', {
+            userId,
+            country,
+            region
+        });
+        return createEmptyResult();
     }
-    
-    // Fallback to stored value if no datewise PPC data found
-    if (ppcSpent === 0) {
-        ppcSpent = latestMetrics.ppcSpent?.amount || 0;
-    }
-    
-    // In sales-only mode, grossProfit is not persisted; force it to 0.
-    // PPC is subtracted in frontend for display, not in backend calculation
 
-    // Return calculated totals (sum of datewise values)
-    return {
-        totalSales: { amount: parseFloat(totalSales.toFixed(2)), currencyCode },
-        // Sales-only mode: gross profit is not persisted; force to 0.
-        grossProfit: { amount: 0, currencyCode },
-        ppcSpent: { amount: parseFloat(ppcSpent.toFixed(2)), currencyCode },
-        fbaFees: { amount: parseFloat(totalFbaFees.toFixed(2)), currencyCode },
-        amazonFees: { amount: parseFloat(totalAmazonFees.toFixed(2)), currencyCode }, // Total Amazon fees (for Profitability page)
-        otherAmazonFees: { amount: parseFloat(otherAmazonFees.toFixed(2)), currencyCode }, // Amazon fees excluding FBA (for Total Sales component)
-        refunds: { amount: parseFloat(totalRefunds.toFixed(2)), currencyCode },
-        dateRange: latestMetrics.dateRange || { startDate: null, endDate: null },
-        datewiseChartData: datewiseChartData,
-        currencyCode: currencyCode
-    };
+    return await getCustomRangeData(userId, country, region, dateRange.startDate, dateRange.endDate);
 }
 
 /**
@@ -195,7 +144,7 @@ async function getLast7DaysData(userId, country, region, startDateParam = null, 
         return await getCustomRangeData(userId, country, region, startDateParam, endDateParam);
     }
     
-    // Default behavior: Calculate last 7 days from yesterday and use latest document
+    // Default behavior: Calculate last 7 days from yesterday.
     let startDate, endDate;
     
     // Default: Calculate last 7 days date range (6 days before yesterday to yesterday)
@@ -208,81 +157,7 @@ async function getLast7DaysData(userId, country, region, startDateParam = null, 
 
     const startDateStr = formatDate(startDate);
     const endDateStr = formatDate(endDate);
-
-    // Get the latest sales-only metrics document
-    const latestMetrics = await SalesOnlyMetrics.findOne({
-        User: userId,
-        country: country,
-        region: region
-    }).sort({ createdAt: -1 });
-
-    if (!latestMetrics) {
-        logger.warn('No economics metrics found for last 7 days', { userId, country, region });
-        return createEmptyResult();
-    }
-
-    // Get datewise data from the document
-    const datewiseSales = latestMetrics.datewiseSales || [];
-
-    // Filter and sum sales data for last 7 days
-    const filteredSales = datewiseSales.filter(item => {
-        const itemDate = new Date(item.date);
-        return itemDate >= startDate && itemDate <= endDate;
-    });
-
-    // Sum up the values
-    let totalSales = 0;
-    let totalFbaFees = 0;
-    let totalAmazonFees = 0; // Changed from totalStorageFees to totalAmazonFees
-    let totalRefunds = 0;
-    let otherAmazonFees = 0;
-    let currencyCode = latestMetrics.totalSales?.currencyCode || 'USD';
-
-    filteredSales.forEach(item => {
-        totalSales += item.sales?.amount || 0;
-    });
-
-    // Get PPC spent from actual datewise PPC data (not estimated)
-    let totalPpcSpent = await getDatewisePPCSpend(userId, country, region, startDateStr, endDateStr);
-    
-    // Fallback to proportional calculation if no datewise PPC data found
-    if (totalPpcSpent === 0 && latestMetrics.ppcSpent?.amount > 0) {
-        totalPpcSpent = calculateProportionalPPC(
-            latestMetrics.ppcSpent?.amount || 0,
-            filteredSales.length,
-            datewiseSales.length
-        );
-    }
-
-    // Prepare datewise data for chart
-    const datewiseChartData = filteredSales.map(item => {
-        const itemDate = new Date(item.date);
-        const dateKey = itemDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        
-        return {
-            date: dateKey,
-            totalSales: item.sales?.amount || 0,
-            grossProfit: item.grossProfit?.amount || 0, // Chart uses Amazon's gross profit for daily breakdown
-            originalDate: item.date
-        };
-    });
-
-    return {
-        totalSales: { amount: parseFloat(totalSales.toFixed(2)), currencyCode },
-        // Sales-only mode: gross profit is not persisted; force to 0.
-        grossProfit: { amount: 0, currencyCode },
-        ppcSpent: { amount: parseFloat(totalPpcSpent.toFixed(2)), currencyCode },
-        fbaFees: { amount: parseFloat(totalFbaFees.toFixed(2)), currencyCode },
-        amazonFees: { amount: parseFloat(totalAmazonFees.toFixed(2)), currencyCode }, // Total Amazon fees (for Profitability page)
-        otherAmazonFees: { amount: parseFloat(otherAmazonFees.toFixed(2)), currencyCode }, // Amazon fees excluding FBA (for Total Sales component)
-        refunds: { amount: parseFloat(totalRefunds.toFixed(2)), currencyCode },
-        dateRange: {
-            startDate: startDateStr,
-            endDate: endDateStr
-        },
-        datewiseChartData: datewiseChartData,
-        currencyCode
-    };
+    return await getCustomRangeData(userId, country, region, startDateStr, endDateStr);
 }
 
 /**
@@ -304,71 +179,7 @@ async function getLast14DaysData(userId, country, region, startDateParam = null,
 
     const startDateStr = formatDate(startDate);
     const endDateStr = formatDate(endDate);
-
-    const latestMetrics = await SalesOnlyMetrics.findOne({
-        User: userId,
-        country: country,
-        region: region
-    }).sort({ createdAt: -1 });
-
-    if (!latestMetrics) {
-        return createEmptyResult();
-    }
-
-    const datewiseSales = latestMetrics.datewiseSales || [];
-
-    const filteredSales = datewiseSales.filter(item => {
-        const itemDate = new Date(item.date);
-        return itemDate >= startDate && itemDate <= endDate;
-    });
-
-    let totalSales = 0;
-    let totalFbaFees = 0;
-    let totalAmazonFees = 0;
-    let totalRefunds = 0;
-    let otherAmazonFees = 0;
-    let currencyCode = latestMetrics.totalSales?.currencyCode || 'USD';
-
-    filteredSales.forEach(item => {
-        totalSales += item.sales?.amount || 0;
-    });
-
-    let totalPpcSpent = await getDatewisePPCSpend(userId, country, region, startDateStr, endDateStr);
-
-    if (totalPpcSpent === 0 && latestMetrics.ppcSpent?.amount > 0) {
-        totalPpcSpent = calculateProportionalPPC(
-            latestMetrics.ppcSpent?.amount || 0,
-            filteredSales.length,
-            datewiseSales.length
-        );
-    }
-
-    const datewiseChartData = filteredSales.map(item => {
-        const itemDate = new Date(item.date);
-        const dateKey = itemDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        return {
-            date: dateKey,
-            totalSales: item.sales?.amount || 0,
-            grossProfit: item.grossProfit?.amount || 0,
-            originalDate: item.date
-        };
-    });
-
-    return {
-        totalSales: { amount: parseFloat(totalSales.toFixed(2)), currencyCode },
-        grossProfit: { amount: 0, currencyCode },
-        ppcSpent: { amount: parseFloat(totalPpcSpent.toFixed(2)), currencyCode },
-        fbaFees: { amount: parseFloat(totalFbaFees.toFixed(2)), currencyCode },
-        amazonFees: { amount: parseFloat(totalAmazonFees.toFixed(2)), currencyCode },
-        otherAmazonFees: { amount: parseFloat(otherAmazonFees.toFixed(2)), currencyCode },
-        refunds: { amount: parseFloat(totalRefunds.toFixed(2)), currencyCode },
-        dateRange: {
-            startDate: startDateStr,
-            endDate: endDateStr
-        },
-        datewiseChartData: datewiseChartData,
-        currencyCode
-    };
+    return await getCustomRangeData(userId, country, region, startDateStr, endDateStr);
 }
 
 /**

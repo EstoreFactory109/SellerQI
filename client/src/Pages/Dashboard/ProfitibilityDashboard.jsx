@@ -695,12 +695,9 @@ const ProfitabilityDashboard = () => {
       ? Math.abs(profitSummary.fbaFees || 0)
       : Math.abs(Number(filteredAccountFinance?.FBA_Fees || 0));
 
-    // Snapshot total expenses include PPC; raw-row summary excludes PPC and subtracts adSpend separately
-    const displayGrossProfit = snapshotFeeTotals
-      ? totalSales - displayTotalExpenses
-      : profitSummary
-        ? (totalSales - displayTotalExpenses - adSpend)
-        : (totalSales - displayAmazonFees - displayRefunds - adSpend);
+    // Align with main dashboard Total Sales component:
+    // Gross profit = Total Sales - Total Expenses - PPC Spend
+    const displayGrossProfit = totalSales - displayTotalExpenses - adSpend;
 
     const row1 = [
       { label: 'Total Sales', value: `${currency}${totalSales.toFixed(2)}`, icon: 'dollar-sign' },

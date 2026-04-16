@@ -9,7 +9,10 @@ const {
   getChartByDateRange,
   getTableByPeriod,
   getTableByDateRange,
+  getAsinTableSnapshot,
 } = require('../controllers/finance/ProfitabilityController.js');
+
+router.get('/asin/:asin/snapshot', auth, getLocation, getAsinTableSnapshot);
 
 router.get('/summary', auth, getLocation, getSummaryByPeriod);
 router.get('/summary/date-range', auth, getLocation, getSummaryByDateRange);
