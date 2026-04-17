@@ -2216,6 +2216,49 @@ const getTop4ProductsOptimized = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Get top-priority products to fix:
+ * - must have issues
+ * - sorted by highest sales desc (tie-breaker handled in service)
+ * - limited to top 4
+ */
+const getTopPriorityProductsToFix = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const region = req.region;
+    const country = req.country;
+
+    if (!userId || !country || !region) {
+        return res.status(400).json(
+            new ApiError(400, 'User ID, Country, and Region are required')
+        );
+    }
+
+    try {
+        const { getTop4ProductsBySalesWithIssuesOptimized } = require('../../Services/Calculations/DashboardCalculation.js');
+        const products = await getTop4ProductsBySalesWithIssuesOptimized(userId, region, country);
+
+        return res.status(200).json(
+            new ApiResponse(
+                200,
+                {
+                    total: products.length,
+                    products
+                },
+                'Top priority products fetched successfully'
+            )
+        );
+    } catch (error) {
+        logger.error('Error in getTopPriorityProductsToFix:', {
+            message: error.message,
+            stack: error.stack
+        });
+
+        return res.status(500).json(
+            new ApiError(500, `Error getting top priority products: ${error.message}`)
+        );
+    }
+});
+
+/**
  * =====================================================================
  * OPTIMIZED YOUR PRODUCTS ENDPOINTS (v2)
  * =====================================================================
@@ -3713,6 +3756,7 @@ module.exports = {
     getDashboardSummary,
     getProductCheckerData,
     getTop4ProductsOptimized,
+    getTopPriorityProductsToFix,
     getProfitabilityData,
     getProfitabilitySummary,
     getPPCData,

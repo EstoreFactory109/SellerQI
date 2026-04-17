@@ -8,6 +8,7 @@ import TooltipBox from '../../ToolTipBox/ToolTipBoxBottom.jsx'
 const ProductChecker = ({ loading = false }) => {
    const info = useSelector(state => state.Dashboard.DashBoardInfo)
    const navigate = useNavigate()
+   const [topProductsTab, setTopProductsTab] = useState('sales');
    
    // Get error counts from Redux with better fallbacks - these are now pre-calculated during analysis
    const profitabilityErrors = info?.totalProfitabilityErrors || 0;
@@ -20,7 +21,8 @@ const ProductChecker = ({ loading = false }) => {
    const [seriesData,setSeriesData]=useState([rankingErrors, conversionErrors, inventoryErrors, accountErrors, profitabilityErrors, sponsoredAdsErrors]);
  
    const [LableData, setDableData] = useState(["Rankings", "Conversion", "Inventory", "Account Health", "Profitability", "Sponsored Ads"])
-   const [productErrors, setProductErrors] = useState([]);
+  const [productsByIssues, setProductsByIssues] = useState([]);
+  const [productsBySales, setProductsBySales] = useState([]);
    
    useEffect(() => {
      let tempArr = [];
@@ -29,8 +31,15 @@ const ProductChecker = ({ loading = false }) => {
      if (info?.second) tempArr.push(info.second);
      if (info?.third) tempArr.push(info.third);
      if (info?.fourth) tempArr.push(info.fourth);
-     setProductErrors(tempArr)
+    setProductsByIssues(tempArr)
    }, [info])
+
+  useEffect(() => {
+    const salesPriorityProducts = Array.isArray(info?.topPriorityProductsSales)
+      ? info.topPriorityProductsSales
+      : [];
+    setProductsBySales(salesPriorityProducts.slice(0, 4));
+  }, [info?.topPriorityProductsSales]);
  
   useEffect(() => {
     // Update series data when info changes with safe fallbacks
@@ -99,16 +108,29 @@ const ProductChecker = ({ loading = false }) => {
     }));
   }, [seriesData, totalErrors]);
 
-  const navigateToIssue=(e)=>{
-    e.preventDefault();
-    navigate('/seller-central-checker/issues')
-  }
-
   const navigateToProductWithIssuesPage=(asin)=>{
     if(asin){
       navigate(`/seller-central-checker/${asin}`)
     }
   }
+
+  const getProductAsin = (product) => {
+    const candidates = [
+      product?.asin,
+      product?.ASIN,
+      product?.childAsin,
+      product?.parentAsin
+    ];
+    for (const value of candidates) {
+      const raw = String(value || '').trim().toUpperCase();
+      if (!raw) continue;
+      const compact = raw.replace(/[^A-Z0-9]/g, '');
+      const match = compact.match(/[A-Z0-9]{10}/);
+      if (match?.[0]) return match[0];
+      if (compact) return compact;
+    }
+    return '';
+  };
 
   const navigateToCategoryPage=(category)=>{
     // Handle direct navigation to dashboard pages for Profitability and Sponsored Ads
@@ -166,15 +188,9 @@ const ProductChecker = ({ loading = false }) => {
             {tooltipForProductChecker && <TooltipBox Information='Quick overview of product issues categorized by ranking, conversion, and account impact to assist you in prioritizing fixes efficiently.' />}
           </div>
         </div>
-        <button 
-          onClick={navigateToIssue} 
-          className='px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white text-xs font-medium rounded transition-colors'
-        >
-          View All
-        </button>
       </div>
 
-      <div className='grid grid-cols-1 lg:grid-cols-3 gap-1 mb-1'>
+      <div className='grid grid-cols-1 lg:grid-cols-[0.9fr_0.85fr_1.25fr] gap-1 mb-1'>
         <div className='flex justify-center items-center w-full'>
           <div className='relative w-full'>
             <Chart options={chartData.options} series={chartData.series} type="donut" width="100%" height={220} />
@@ -214,52 +230,91 @@ const ProductChecker = ({ loading = false }) => {
         </div>
 
         <div className='ml-2'>
-          <div className='flex items-center gap-1 mb-1'>
-            <Box className='w-3 h-3 text-blue-400' />
-            <h3 className='text-xs font-semibold text-gray-100'>Top Products</h3>
-            <div className='relative'>
-              <Info 
-                className='w-3.5 h-3.5 text-gray-400 hover:text-gray-300 cursor-pointer transition-colors'
-                onMouseEnter={() => setToolTipForProductWithIssues(true)}
-                onMouseLeave={() => setToolTipForProductWithIssues(false)}
-              />
-              {tooltipForProductWithIssues && <TooltipBox Information='Products with the highest number of issues that require immediate attention for optimal performance.' />}
+          <div className='flex items-center justify-between gap-2 mb-1'>
+            <div className='flex items-center gap-1'>
+              <Box className='w-3 h-3 text-blue-400' />
+              <h3 className='text-xs font-semibold text-gray-100'>Top Products to Fix</h3>
+              <div className='relative'>
+                <Info 
+                  className='w-3.5 h-3.5 text-gray-400 hover:text-gray-300 cursor-pointer transition-colors'
+                  onMouseEnter={() => setToolTipForProductWithIssues(true)}
+                  onMouseLeave={() => setToolTipForProductWithIssues(false)}
+                />
+                {tooltipForProductWithIssues && <TooltipBox Information='Prioritize fixes either by highest sales impact or by highest issue count.' />}
+              </div>
+            </div>
+
+            <div className='flex items-center gap-1'>
+              <button
+                type='button'
+                onClick={() => setTopProductsTab('sales')}
+                className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                  topProductsTab === 'sales'
+                    ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                    : 'bg-[#21262d] text-gray-300 border border-[#30363d] hover:border-blue-500/30'
+                }`}
+              >
+                Based on Sales
+              </button>
+              <button
+                type='button'
+                onClick={() => setTopProductsTab('issues')}
+                className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                  topProductsTab === 'issues'
+                    ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                    : 'bg-[#21262d] text-gray-300 border border-[#30363d] hover:border-blue-500/30'
+                }`}
+              >
+                Based on Issues
+              </button>
             </div>
           </div>
 
           <div className='space-y-1'>
-            {productErrors.slice(0, 4).map((product, index) => {
+            {(topProductsTab === 'sales' ? productsBySales : productsByIssues).slice(0, 4).map((product, index) => {
               if (!product) return null;
+              const productAsin = getProductAsin(product);
+              const errorCount = product.errors || product.totalErrors || 0;
+              const salesValue = Number(product.sales || 0);
               return (
                 <div 
                   key={index} 
-                  onClick={() => navigateToProductWithIssuesPage(product.asin)}
-                  className='flex items-center justify-between p-1.5 border border-[#30363d] rounded hover:border-blue-500/40 hover:bg-[#21262d] cursor-pointer transition-all duration-200'
+                  role='button'
+                  tabIndex={productAsin ? 0 : -1}
+                  onClick={() => productAsin && navigateToProductWithIssuesPage(productAsin)}
+                  onKeyDown={(e) => {
+                    if (!productAsin) return;
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      navigateToProductWithIssuesPage(productAsin);
+                    }
+                  }}
+                  className={`flex items-center justify-between p-1.5 border border-[#30363d] rounded transition-all duration-200 ${
+                    productAsin ? 'hover:border-blue-500/40 hover:bg-[#21262d] cursor-pointer' : 'opacity-70 cursor-not-allowed'
+                  }`}
                 >
                   <div className='flex items-center gap-1'>
                     <div className='w-6 h-6 bg-[#21262d] rounded flex items-center justify-center'>
                       <Box className='w-3 h-3 text-gray-400' />
                     </div>
                     <div>
-                      <p className='font-medium text-gray-100 text-sm'>{product.asin}</p>
-                      <p className='text-xs text-gray-400'>{product.errors || product.totalErrors || 0} issues</p>
+                      <p className='font-medium text-gray-100 text-sm'>{productAsin || 'N/A'}</p>
+                      <p className='text-xs text-gray-400'>
+                        {errorCount} issues
+                        {topProductsTab === 'sales' ? ` • $${salesValue.toLocaleString(undefined, { maximumFractionDigits: 2 })} sales` : ''}
+                      </p>
                     </div>
                   </div>
                   <div className='flex items-center gap-2'>
-                    {(() => {
-                      const errorCount = product.errors || product.totalErrors || 0;
-                      return (
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                          errorCount > 5 
-                            ? 'bg-blue-500/20 text-blue-400' 
-                            : errorCount > 2 
-                            ? 'bg-blue-500/10 text-blue-400' 
-                            : 'bg-blue-500/20 text-blue-400'
-                        }`}>
-                          {errorCount > 5 ? 'High' : errorCount > 2 ? 'Medium' : 'High'}
-                        </span>
-                      );
-                    })()}
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                      errorCount > 5
+                        ? 'bg-blue-500/20 text-blue-400'
+                        : errorCount > 2
+                        ? 'bg-blue-500/10 text-blue-400'
+                        : 'bg-blue-500/20 text-blue-400'
+                    }`}>
+                      {errorCount > 5 ? 'High' : errorCount > 2 ? 'Medium' : 'High'}
+                    </span>
                     <div className='relative'>
                       <Search 
                         className='w-3.5 h-3.5 text-gray-400 hover:text-gray-300 cursor-pointer transition-colors'
@@ -279,10 +334,10 @@ const ProductChecker = ({ loading = false }) => {
             })}
           </div>
 
-          {productErrors.filter(p => p).length === 0 && (
+          {(topProductsTab === 'sales' ? productsBySales : productsByIssues).filter(p => p).length === 0 && (
             <div className='text-center py-2'>
               <Box className='w-8 h-8 text-gray-400 mx-auto mb-1' />
-              <p className='text-xs text-gray-400'>No issues found</p>
+              <p className='text-xs text-gray-400'>No products found</p>
             </div>
           )}
         </div>

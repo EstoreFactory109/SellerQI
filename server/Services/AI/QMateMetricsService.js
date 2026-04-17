@@ -30,7 +30,173 @@ const { calculateAccountHealthPercentage, checkAccountHealth } = require('../Cal
 const OrderAndRevenue = require('../../models/products/OrderAndRevenueModel.js');
 const adsKeywordsPerformance = require('../../models/amazon-ads/adsKeywordsPerformanceModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
+const ExpenseReadService = require('../Finance/ExpenseReadService.js');
+const { buildExpenseReportResponseFromDB } = require('../Sp_API/ExpenseReportService.js');
+const { pickSnapshotFeeTotalsForCalendar } = require('../../utils/expenseSnapshotCalendar.js');
 const mongoose = require('mongoose');
+
+function pickDateRangeStrings(dateRange) {
+    const from = dateRange?.startDate || dateRange?.from || dateRange?.start || null;
+    const to = dateRange?.endDate || dateRange?.to || dateRange?.end || null;
+    if (typeof from === 'string' && typeof to === 'string') return { from, to };
+    return null;
+}
+
+function periodDaysForExpenseFallback(calendarMode, fallbackPeriodDays = 30) {
+    if (calendarMode === 'last7') return 7;
+    if (calendarMode === 'last14') return 14;
+    return Number(fallbackPeriodDays) || 30;
+}
+
+/**
+ * Align with dashboard / GET /api/expenses/snapshot + ExpenseController fallbacks:
+ * - Prefer ExpenseReportRun aggregates via buildExpenseReportResponseFromDB (same as /api/expenses/snapshot).
+ * - Pick totals with the same calendar rules as client expenseSnapshotCalendar.js.
+ * - Refunds always from ExpenseReadService (same as /api/expenses/refunds* — not on snapshot).
+ * - If no report snapshot, fall back to ExpenseReadService aggregates (same as /api/expenses/total*).
+ */
+async function getExpensesSnapshot({
+    userId,
+    country,
+    region,
+    startDate,
+    endDate,
+    calendarMode = 'default',
+    fallbackPeriodDays = 30,
+}) {
+    const mode = calendarMode || 'default';
+    const periodDays = periodDaysForExpenseFallback(mode, fallbackPeriodDays);
+    const useDateRangeForRaw = Boolean(startDate && endDate && mode !== 'default');
+
+    try {
+        if (useDateRangeForRaw) {
+            const err = ExpenseReadService.validateDateRange(startDate, endDate);
+            if (err) return { success: false, error: err, data: null };
+        }
+
+        const refundsPromise = useDateRangeForRaw
+            ? ExpenseReadService.getRefundsByDateRange({
+                  userId,
+                  country,
+                  region,
+                  from: startDate,
+                  to: endDate,
+              })
+            : ExpenseReadService.getRefundsByPeriod({
+                  userId,
+                  country,
+                  region,
+                  periodDays,
+              });
+
+        const [reportSnapshot, refunds] = await Promise.all([
+            buildExpenseReportResponseFromDB({ userId, country, regionModel: region }).catch(() => null),
+            refundsPromise,
+        ]);
+
+        if (reportSnapshot) {
+            const picked = pickSnapshotFeeTotalsForCalendar(reportSnapshot, mode, startDate || null, endDate || null);
+            if (picked) {
+                const totalExp = Math.abs(Number(picked.totalExpenses) || 0);
+                const amz = Math.abs(Number(picked.amazonFees) || 0);
+                const catTotals =
+                    mode === 'last7'
+                        ? reportSnapshot.totalExpensesLast7Days?.categories || []
+                        : mode === 'last14'
+                          ? reportSnapshot.totalExpensesLast14Days?.categories || []
+                          : mode === 'custom' && startDate && endDate
+                            ? reportSnapshot.totalExpenses?.categories || []
+                            : reportSnapshot.totalExpenses?.categories || [];
+                const catAmz =
+                    mode === 'last7'
+                        ? reportSnapshot.totalAmazonFeesLast7Days?.categories || []
+                        : mode === 'last14'
+                          ? reportSnapshot.totalAmazonFeesLast14Days?.categories || []
+                          : reportSnapshot.totalAmazonFees?.categories || [];
+
+                return {
+                    success: true,
+                    source: 'expense_report_snapshot',
+                    data: {
+                        dateRange: useDateRangeForRaw
+                            ? { startDate, endDate }
+                            : { periodDays },
+                        totalExpenses: { total: totalExp, categories: catTotals },
+                        amazonFees: { total: amz, categories: catAmz },
+                        refunds,
+                        dateWiseExpenses: reportSnapshot.dateWiseExpenses || [],
+                        dateWiseAmazonFees: reportSnapshot.dateWiseAmazonFees || [],
+                        metadata: reportSnapshot.metadata || null,
+                    },
+                };
+            }
+        }
+
+        if (useDateRangeForRaw) {
+            const [totalExpenses, amazonFees] = await Promise.all([
+                ExpenseReadService.getTotalExpensesByDateRange({
+                    userId,
+                    country,
+                    region,
+                    from: startDate,
+                    to: endDate,
+                }),
+                ExpenseReadService.getTotalAmazonFeesByDateRange({
+                    userId,
+                    country,
+                    region,
+                    from: startDate,
+                    to: endDate,
+                }),
+            ]);
+
+            return {
+                success: true,
+                source: 'expense_raw_rows',
+                data: {
+                    dateRange: { startDate, endDate },
+                    totalExpenses,
+                    amazonFees,
+                    refunds,
+                    dateWiseExpenses: [],
+                    dateWiseAmazonFees: [],
+                    metadata: null,
+                },
+            };
+        }
+
+        const [totalExpenses, amazonFees] = await Promise.all([
+            ExpenseReadService.getTotalExpensesByPeriod({
+                userId,
+                country,
+                region,
+                periodDays,
+            }),
+            ExpenseReadService.getTotalAmazonFeesByPeriod({
+                userId,
+                country,
+                region,
+                periodDays,
+            }),
+        ]);
+
+        return {
+            success: true,
+            source: 'expense_raw_rows',
+            data: {
+                dateRange: { periodDays },
+                totalExpenses,
+                amazonFees,
+                refunds,
+                dateWiseExpenses: [],
+                dateWiseAmazonFees: [],
+                metadata: null,
+            },
+        };
+    } catch (error) {
+        return { success: false, error: error.message, data: null };
+    }
+}
 
 /**
  * Get summary financial metrics for QMate context
@@ -1189,6 +1355,19 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
                 ? { startDate, endDate }
                 : (salesOnlyMetrics?.dateRange || null);
 
+            // Expenses snapshot (new expenses flow) - keep QMate aligned with finance pages.
+            // Use the same effective date range if we can, else fall back to last 30 days.
+            const effectiveRangeStrings = pickDateRangeStrings(effectiveDateRange);
+            const expenseSnapshot = await getExpensesSnapshot({
+                userId: userIdStr,
+                country,
+                region,
+                startDate: shouldFilterByDate ? startDate : (effectiveRangeStrings?.from || null),
+                endDate: shouldFilterByDate ? endDate : (effectiveRangeStrings?.to || null),
+                calendarMode: calendarMode || 'default',
+                fallbackPeriodDays: 30,
+            });
+
             let filteredSales = datewiseSalesData;
             if (shouldFilterByDate) {
                 const filterStart = new Date(startDate);
@@ -1263,11 +1442,12 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
                     ppcSpend,
                     fbaFees: 0,
                     storageFees: 0,
-                    amazonFees: 0,
+                    amazonFees: expenseSnapshot?.success ? (expenseSnapshot.data?.amazonFees?.total || 0) : 0,
                     totalFees: 0,
-                    refunds: 0,
+                    refunds: expenseSnapshot?.success ? (expenseSnapshot.data?.refunds?.total || 0) : 0,
                     currency: currencyCode,
                 },
+                expenses: expenseSnapshot?.success ? expenseSnapshot.data : null,
                 ppc: null,
                 profitability: null,
                 buyBox: null,
@@ -1610,6 +1790,19 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
                     };
                 });
             }
+
+            // Expenses: same sources as dashboard — GET /api/expenses/snapshot (ExpenseReportRun) when
+            // available, else ExpenseReadService (ExpenseRawRow) like /api/expenses/total*.
+            const effectiveRangeStrings = pickDateRangeStrings(effectiveDateRange);
+            const expenseSnapshot = await getExpensesSnapshot({
+                userId: userIdStr,
+                country,
+                region,
+                startDate: shouldFilterByDate ? startDate : (effectiveRangeStrings?.from || null),
+                endDate: shouldFilterByDate ? endDate : (effectiveRangeStrings?.to || null),
+                calendarMode: calendarMode || 'default',
+                fallbackPeriodDays: 30,
+            });
             
             context.summary = {
                 brand: null, // Will be set from user data if needed
@@ -1624,11 +1817,17 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
                 ppcSpend: parseFloat(ppcSpend.toFixed(2)),
                 fbaFees: parseFloat(totalFbaFees.toFixed(2)),
                 storageFees: parseFloat(totalStorageFees.toFixed(2)),
-                amazonFees: parseFloat(totalAmazonFees.toFixed(2)),
+                amazonFees: expenseSnapshot?.success
+                    ? (expenseSnapshot.data?.amazonFees?.total || 0)
+                    : parseFloat(totalAmazonFees.toFixed(2)),
                 totalFees: parseFloat((economicsMetrics.totalFees?.amount || 0).toFixed(2)),
-                refunds: parseFloat(totalRefunds.toFixed(2)),
+                refunds: expenseSnapshot?.success
+                    ? (expenseSnapshot.data?.refunds?.total || 0)
+                    : parseFloat(totalRefunds.toFixed(2)),
                 currency: economicsMetrics.totalSales?.currencyCode || 'USD'
             };
+
+            context.expenses = expenseSnapshot?.success ? expenseSnapshot.data : null;
         }
         
         // Process PPC Metrics

@@ -461,23 +461,54 @@ export const fetchTop4Products = createAsyncThunk(
             const state = getState();
             const lastFetched = state.pageData?.top4Products?.lastFetched;
             if (lastFetched && (Date.now() - lastFetched) < CACHE_TTL_MS) {
-                return state.pageData.top4Products.data;
+                const cachedData = state.pageData.top4Products.data;
+                const hasSalesShape = Array.isArray(cachedData?.sales?.products);
+
+                // Backward compatibility: if cache has new shape, sync DashboardSlice and reuse.
+                // If cache is old shape (no sales tab data), bypass cache and refetch.
+                if (hasSalesShape) {
+                    const currentState = getState();
+                    const existingDashboard = currentState.Dashboard?.DashBoardInfo || {};
+                    const cachedIssues = cachedData?.issues || {};
+                    const cachedSales = cachedData?.sales || {};
+
+                    dispatch(setDashboardInfo({
+                        ...existingDashboard,
+                        first: cachedIssues.first || null,
+                        second: cachedIssues.second || null,
+                        third: cachedIssues.third || null,
+                        fourth: cachedIssues.fourth || null,
+                        topPriorityProductsSales: cachedSales.products || []
+                    }));
+
+                    return cachedData;
+                }
             }
             
-            const response = await axiosInstance.get('/api/pagewise/top4-products');
-            const data = response.data.data;
+            const [issuesResponse, salesPriorityResponse] = await Promise.all([
+                axiosInstance.get('/api/pagewise/top4-products'),
+                axiosInstance.get('/api/pagewise/top-priority-products')
+            ]);
+
+            const issuesData = issuesResponse.data.data;
+            const salesPriorityData = salesPriorityResponse.data.data;
+            const data = {
+                issues: issuesData,
+                sales: salesPriorityData
+            };
             
             // Merge top 4 products into DashboardSlice
             // IMPORTANT: Get latest state AFTER the API call to ensure Phase 1 data is included
-            if (data) {
+            if (issuesData || salesPriorityData) {
                 const currentState = getState();
                 const existingDashboard = currentState.Dashboard?.DashBoardInfo || {};
                 dispatch(setDashboardInfo({
                     ...existingDashboard,
-                    first: data.first,
-                    second: data.second,
-                    third: data.third,
-                    fourth: data.fourth
+                    first: issuesData?.first || null,
+                    second: issuesData?.second || null,
+                    third: issuesData?.third || null,
+                    fourth: issuesData?.fourth || null,
+                    topPriorityProductsSales: salesPriorityData?.products || []
                 }));
             }
             

@@ -253,6 +253,8 @@ export const useDashboardData = (autoFetch = true) => {
     const p2 = phase2State.data || {};
     const p3 = phase3State.data || {};
     const p4 = phase4State.data || {};
+    const p4Issues = p4.issues || p4;
+    const p4Sales = p4.sales || {};
     
     const effectiveData = {
         // Phase 1: Instant (error counts, product counts, date range)
@@ -293,10 +295,11 @@ export const useDashboardData = (autoFetch = true) => {
         moneyWastedInAds: p3.moneyWastedInAds ?? 0,
         
         // Phase 4: Top 4 products
-        first: p4.first || null,
-        second: p4.second || null,
-        third: p4.third || null,
-        fourth: p4.fourth || null
+        first: p4Issues.first || null,
+        second: p4Issues.second || null,
+        third: p4Issues.third || null,
+        fourth: p4Issues.fourth || null,
+        topPriorityProductsSales: p4Sales.products || p4.topPriorityProductsSales || []
     };
     
     // Fall back to legacy if no phase data

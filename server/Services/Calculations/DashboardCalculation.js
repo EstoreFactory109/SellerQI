@@ -17,6 +17,8 @@ const logger = require('../../utils/Logger.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
+const AsinWiseSalesRun = require('../../models/finance/AsinWiseSalesRunModel.js');
+const AsinWiseSalesItem = require('../../models/finance/AsinWiseSalesItemModel.js');
 
 // Chunk size for yielding to event loop during large data processing
 const YIELD_CHUNK_SIZE = 500;
@@ -179,14 +181,11 @@ const getPpcSalesFromEconomics = async (economicsMetrics) => {
 };
 
 /**
- * OPTIMIZED: Get top 4 products sorted by highest issues
- * 
- * Simple and fast - single query to Seller model:
- * 1. Get products from Seller.sellerAccount[].products for (region, country)
- * 2. Filter to Active products with issueCount > 0
- * 3. Sort by issueCount descending (highest issues first)
- * 4. Return top 4
- * 
+ * OPTIMIZED: Get top 4 products sorted by highest issues (legacy behavior).
+ *
+ * Data source:
+ * - Seller.sellerAccount[].products
+ *
  * @param {string} userId - User ID
  * @param {string} region - Region (NA, EU, FE)
  * @param {string} country - Country code
@@ -198,36 +197,39 @@ const getTop4ProductsByIssuesOptimized = async (userId, region, country) => {
     try {
         const sellerData = await Seller.findOne(
             { User: userId },
-            { 
-                'sellerAccount': {
+            {
+                sellerAccount: {
                     $elemMatch: { region, country }
                 }
             }
         ).lean();
 
-        if (!sellerData?.sellerAccount?.[0]?.products) {
+        const sellerProducts = sellerData?.sellerAccount?.[0]?.products || [];
+        if (!sellerProducts.length) {
             logger.debug('No seller products found for top 4 calculation', { userId, region, country });
             return { first: null, second: null, third: null, fourth: null };
         }
 
-        const products = sellerData.sellerAccount[0].products;
-
-        const productsWithIssues = products
-            .filter(p => p.status === 'Active' && (p.issueCount || 0) > 0)
-            .sort((a, b) => (b.issueCount || 0) - (a.issueCount || 0))
+        const productsWithIssues = sellerProducts
+            .filter((p) => p?.status === 'Active' && Number(p?.issueCount || 0) > 0)
+            .sort((a, b) => Number(b?.issueCount || 0) - Number(a?.issueCount || 0))
             .slice(0, 4)
-            .map(p => ({
-                asin: p.asin,
-                name: p.itemName || 'N/A',
-                errors: p.issueCount || 0
-            }));
+            .map((p) => {
+                const normalizedAsin = (p?.asin || '').trim().toUpperCase();
+                return {
+                    asin: normalizedAsin,
+                    name: p?.itemName || 'N/A',
+                    errors: Number(p?.issueCount || 0),
+                    issues: Array.isArray(p?.issues) ? p.issues : []
+                };
+            });
 
         const elapsed = Date.now() - startTime;
         logger.info('getTop4ProductsByIssuesOptimized completed', {
             userId,
             region,
             country,
-            totalProducts: products.length,
+            totalSellerProducts: sellerProducts.length,
             productsWithIssues: productsWithIssues.length,
             elapsedMs: elapsed
         });
@@ -248,6 +250,136 @@ const getTop4ProductsByIssuesOptimized = async (userId, region, country) => {
             stack: error.stack
         });
         return { first: null, second: null, third: null, fourth: null };
+    }
+};
+
+/**
+ * OPTIMIZED: Get top 4 products to fix by highest sales with issues.
+ *
+ * Data sources:
+ * - Sales: AsinWiseSalesRun + AsinWiseSalesItem (same finance source as profitability page)
+ * - Issues: Seller.sellerAccount[].products
+ */
+const getTop4ProductsBySalesWithIssuesOptimized = async (userId, region, country) => {
+    const startTime = Date.now();
+
+    try {
+        const normalizeAsin = (value) => {
+            const raw = String(value || '').trim().toUpperCase();
+            if (!raw) return '';
+            const compact = raw.replace(/[^A-Z0-9]/g, '');
+            const asinMatch = compact.match(/[A-Z0-9]{10}/);
+            return asinMatch ? asinMatch[0] : compact;
+        };
+
+        let [latestSalesRun, sellerData] = await Promise.all([
+            AsinWiseSalesRun.findOne(
+                { User: userId, country, region },
+                { _id: 1, generatedAt: 1, country: 1, region: 1 }
+            ).sort({ generatedAt: -1 }).lean(),
+            Seller.findOne(
+                { User: userId },
+                { sellerAccount: 1 }
+            ).lean()
+        ]);
+
+        // Fallback: if strict country/region run is unavailable, use latest run for the user.
+        if (!latestSalesRun?._id) {
+            latestSalesRun = await AsinWiseSalesRun.findOne(
+                { User: userId },
+                { _id: 1, generatedAt: 1, country: 1, region: 1 }
+            ).sort({ generatedAt: -1 }).lean();
+        }
+
+        if (!latestSalesRun?._id) {
+            return [];
+        }
+
+        const salesRows = await AsinWiseSalesItem.find(
+            { runId: latestSalesRun._id },
+            { asin: 1, last30Days: 1, _id: 0 }
+        ).lean();
+
+        const sellerAccounts = Array.isArray(sellerData?.sellerAccount) ? sellerData.sellerAccount : [];
+        const matchedAccount =
+            sellerAccounts.find((acc) => acc?.country === country && acc?.region === region) ||
+            sellerAccounts.find((acc) => acc?.country === country) ||
+            sellerAccounts.find((acc) => acc?.region === region) ||
+            sellerAccounts[0];
+        const sellerProducts = Array.isArray(matchedAccount?.products) ? matchedAccount.products : [];
+        if (!sellerProducts.length) {
+            return [];
+        }
+
+        const issueByAsin = new Map();
+        for (const product of sellerProducts) {
+            const asin = normalizeAsin(product?.asin);
+            if (!asin) continue;
+            const issueCount = Number(product?.issueCount || 0);
+            const issuesArr = Array.isArray(product?.issues) ? product.issues : [];
+            const effectiveIssueCount = issueCount > 0 ? issueCount : issuesArr.length;
+            if (effectiveIssueCount <= 0) continue;
+
+            issueByAsin.set(asin, {
+                errors: effectiveIssueCount,
+                issues: issuesArr,
+                name: product?.itemName || 'N/A'
+            });
+        }
+
+        const salesByAsin = new Map();
+        for (const saleRow of (salesRows || [])) {
+            const asin = normalizeAsin(saleRow?.asin);
+            if (!asin) continue;
+            const prev = salesByAsin.get(asin) || { sales: 0, quantity: 0 };
+            prev.sales += Number(saleRow?.last30Days?.totalRevenue || 0);
+            prev.quantity += Number(saleRow?.last30Days?.totalUnits || 0);
+            salesByAsin.set(asin, prev);
+        }
+
+        // Build from issue products first (never empty when issue products exist),
+        // then enrich with sales if available.
+        const products = Array.from(issueByAsin.entries())
+            .map(([asin, issueMeta]) => {
+                const salesMeta = salesByAsin.get(asin) || { sales: 0, quantity: 0 };
+                return {
+                    asin,
+                    name: issueMeta.name,
+                    errors: issueMeta.errors,
+                    issues: issueMeta.issues,
+                    sales: Number(salesMeta.sales || 0),
+                    quantity: Number(salesMeta.quantity || 0)
+                };
+            })
+            .sort((a, b) => {
+                const salesDiff = Number(b?.sales || 0) - Number(a?.sales || 0);
+                if (salesDiff !== 0) return salesDiff;
+                return Number(b?.errors || 0) - Number(a?.errors || 0);
+            })
+            .slice(0, 4);
+
+        logger.info('getTop4ProductsBySalesWithIssuesOptimized completed', {
+            userId,
+            region,
+            country,
+            salesRows: salesRows.length,
+            issueCandidates: issueByAsin.size,
+            salesMatchedCandidates: Array.from(issueByAsin.keys()).filter((asin) => salesByAsin.has(asin)).length,
+            productsWithIssues: products.length,
+            salesSnapshotAt: latestSalesRun.generatedAt,
+            elapsedMs: Date.now() - startTime
+        });
+
+        return products;
+    } catch (error) {
+        logger.error('Error in getTop4ProductsBySalesWithIssuesOptimized', {
+            userId,
+            region,
+            country,
+            error: error.message,
+            stack: error.stack
+        });
+        return [];
     }
 };
 
@@ -1547,6 +1679,7 @@ module.exports = {
     getPpcSalesFromEconomics,
     calculateAcos,
     calculateTacos,
-    getTop4ProductsByIssuesOptimized
+    getTop4ProductsByIssuesOptimized,
+    getTop4ProductsBySalesWithIssuesOptimized
 };
 

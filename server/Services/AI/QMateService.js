@@ -16,8 +16,13 @@ const QMateReimbursementService = require('./QMateReimbursementService.js');
 const QMateProductsService = require('./QMateProductsService.js');
 const QMateAccountService = require('./QMateAccountService.js');
 const QMateKeywordService = require('./QMateKeywordService.js');
+const { interpretPrompt } = require('../../QMate/interpreter/PromptInterpreter.js');
+const { getDashboardPhase3 } = require('../Calculations/DashboardSummaryService.js');
 
 let openaiClient = null;
+const INTERPRETER_CONFIDENCE_THRESHOLD = 0.35;
+const QMATE_PRIMARY_MODEL = process.env.QMATE_PRIMARY_MODEL || 'gpt-5';
+const QMATE_FALLBACK_MODEL = process.env.QMATE_FALLBACK_MODEL || 'gpt-4.1-mini';
 
 const getOpenAIClient = () => {
     if (openaiClient) return openaiClient;
@@ -61,6 +66,197 @@ function clearPrompt(rawMessage, maxLength = 2000) {
     const wasTruncated = cleaned.length > maxLength;
     if (wasTruncated) cleaned = cleaned.slice(0, maxLength).trim();
     return { cleaned, wasTruncated };
+}
+
+function isPostActionMissingRequiredFields(interpreted) {
+    if (!interpreted || interpreted.intent !== 'post_action') return false;
+    const action = interpreted.postAction;
+    if (!action || !action.type) return true;
+    if (action.type === 'block_keywords' && (!Array.isArray(action.targets) || action.targets.length === 0)) {
+        return true;
+    }
+    return false;
+}
+
+function resolveClarificationChoice(question, chatHistory = []) {
+    const raw = String(question || '').trim();
+    const q = raw.toLowerCase();
+    if (!q) return null;
+
+    // If user pasted full clarification text and then selected an option,
+    // use the last non-empty line as the candidate choice.
+    const lines = raw
+        .split(/\n+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+    const candidateChoice = (lines[lines.length - 1] || q).toLowerCase();
+
+    let style = null;
+    if (/\b(single number|just number|value only|just value|number only|1)\b/i.test(candidateChoice)) {
+        style = 'value_lookup';
+    } else if (/\b(full analysis|detailed analysis|full detail|detailed|2)\b/i.test(candidateChoice)) {
+        style = 'detailed_explanation';
+    } else if (/\b(chart|graph|plot|trend|3)\b/i.test(candidateChoice)) {
+        style = 'graph';
+    } else if (/\b(action|do action|4)\b/i.test(candidateChoice)) {
+        style = 'post_action';
+    }
+
+    if (!style) return null;
+
+    // Filter to user-like messages and skip clarification-template text to avoid loops.
+    const previousUserMessages = Array.isArray(chatHistory)
+        ? chatHistory.filter((m) => {
+            if (!m || typeof m.content !== 'string') return false;
+            const role = String(m.role || '').toLowerCase();
+            return role !== 'assistant' && role !== 'system';
+        })
+        : [];
+
+    const isClarificationTemplate = (text) => {
+        const t = String(text || '').toLowerCase();
+        return t.includes('i could not confidently infer') ||
+            t.includes('do you want a single number, full analysis, or a chart');
+    };
+
+    let baseQuestion = null;
+    for (let i = previousUserMessages.length - 1; i >= 0; i--) {
+        const content = previousUserMessages[i].content.trim();
+        if (!content) continue;
+        if (content.toLowerCase() === q) continue;
+        if (isClarificationTemplate(content)) continue;
+        if (content.length < 8) continue;
+        baseQuestion = content;
+        break;
+    }
+
+    if (!baseQuestion) {
+        return { style, baseQuestion: null, resolvedPrompt: null };
+    }
+
+    let formatHint = 'Return a single number only.';
+    if (style === 'detailed_explanation') {
+        formatHint = 'Return a full analysis with reasoning.';
+    } else if (style === 'graph') {
+        formatHint = 'Return chart/trend-oriented output.';
+    } else if (style === 'post_action') {
+        formatHint = 'Treat this as an explicit action request and confirm required targets.';
+    }
+
+    return {
+        style,
+        baseQuestion,
+        resolvedPrompt: `${baseQuestion} ${formatHint}`
+    };
+}
+
+async function createCompletionWithFallback(client, messages) {
+    const modelsToTry = [QMATE_PRIMARY_MODEL, QMATE_FALLBACK_MODEL]
+        .filter(Boolean)
+        .filter((value, idx, arr) => arr.indexOf(value) === idx);
+
+    let lastError = null;
+    for (const model of modelsToTry) {
+        try {
+            const completion = await client.chat.completions.create({
+                model,
+                response_format: { type: 'json_object' },
+                messages,
+            });
+            if (model !== QMATE_PRIMARY_MODEL) {
+                logger.warn('[QMate] Primary model unavailable, used fallback model', {
+                    primaryModel: QMATE_PRIMARY_MODEL,
+                    fallbackModel: model,
+                });
+            }
+            return completion;
+        } catch (error) {
+            lastError = error;
+            logger.warn('[QMate] Model call failed, trying next model if available', {
+                model,
+                message: error.message,
+            });
+        }
+    }
+
+    throw lastError || new Error('No model available for completion');
+}
+
+async function generateClarificationFromModel(client, { question, reason, interpretation, chatHistory = [] }) {
+    const trimmedHistory = Array.isArray(chatHistory)
+        ? chatHistory.slice(-6).map((m) => ({
+            role: m.role === 'assistant' ? 'assistant' : 'user',
+            content: String(m.content || '').slice(0, 1000),
+        }))
+        : [];
+
+    const messages = [
+        {
+            role: 'system',
+            content: 'You are a clarification assistant. Ask all essential clarifications in one response. For each clarification, return exactly one question with exactly 4 options. Avoid unnecessary/silly clarifications for simple prompts. Return strict JSON with keys: answer_markdown (string), needs_clarification (boolean), clarifying_questions (string[]). No extra keys.'
+        },
+        ...trimmedHistory,
+        {
+            role: 'user',
+            content: JSON.stringify({
+                question,
+                reason,
+                interpretation
+            })
+        }
+    ];
+
+    try {
+        const completion = await createCompletionWithFallback(client, messages);
+        const content = completion?.choices?.[0]?.message?.content || '{}';
+        const parsed = JSON.parse(content);
+        const clarifyingQuestions = Array.isArray(parsed.clarifying_questions)
+            ? parsed.clarifying_questions
+                .filter((q) => typeof q === 'string' && q.trim())
+                .map((q) => q.trim())
+                .slice(0, 3)
+            : [];
+        return {
+            status: 200,
+            answer_markdown: typeof parsed.answer_markdown === 'string' && parsed.answer_markdown.trim()
+                ? parsed.answer_markdown.trim()
+                : `I need one clarification before answering. ${reason || ''}`.trim(),
+            chart_suggestions: [],
+            follow_up_questions: [],
+            needs_clarification: true,
+            clarifying_questions: clarifyingQuestions.length > 0
+                ? clarifyingQuestions
+                : [
+                    'Question 1: What output format do you want? | Option A: Single number | Option B: Full analysis | Option C: Chart | Option D: Action request',
+                ],
+            intent_interpretation: interpretation || undefined,
+            interpretation_reason: reason || undefined,
+            original_question: question || undefined,
+        };
+    } catch (error) {
+        logger.warn('[QMate] Clarification model generation failed; returning minimal clarification response', {
+            message: error.message
+        });
+        return {
+            status: 200,
+            answer_markdown: `I need one clarification before answering. ${reason || ''}`.trim(),
+            chart_suggestions: [],
+            follow_up_questions: [],
+            needs_clarification: true,
+            intent_interpretation: interpretation || undefined,
+            interpretation_reason: reason || undefined,
+            original_question: question || undefined,
+        };
+    }
+}
+
+function isSimpleEnoughToSkipClarification(question, interpreted) {
+    const q = String(question || '').toLowerCase();
+    // Common direct asks that should not be blocked by clarification loops.
+    if (isSimpleLast30DaySalesRequest(question)) return true;
+    if (/\b(how much|total|value|number)\b/.test(q) && interpreted?.intent === 'value_lookup') return true;
+    if (interpreted?.intent === 'graph' && /\b(last|past)\s*\d+\s*days?\b/.test(q)) return true;
+    return false;
 }
 
 /**
@@ -207,6 +403,14 @@ function extractEntitiesFromHistory(chatHistory) {
                        result.recentTopics.length > 0;
     
     return hasContent ? result : null;
+}
+
+function isSimpleLast30DaySalesRequest(question) {
+    const q = String(question || '').toLowerCase();
+    const hasSales = /\bsales\b/.test(q);
+    const hasThirtyDays = /\b(last|past)\s*30\s*days\b/.test(q) || /\b30\s*days\b/.test(q);
+    const hasDailyBreakdownWords = /\b(daily|day[-\s]?wise|breakdown|trend|chart|graph)\b/.test(q);
+    return hasSales && hasThirtyDays && !hasDailyBreakdownWords;
 }
 
 const isAccountHealthOnlyQuestion = (question = '') => {
@@ -2968,11 +3172,7 @@ class QMateService {
         // Step 5: Call OpenAI
         let aiRaw;
         try {
-            const completion = await client.chat.completions.create({
-                model: 'gpt-4.1-mini',
-                response_format: { type: 'json_object' },
-                messages,
-            });
+            const completion = await createCompletionWithFallback(client, messages);
 
             const content = completion.choices?.[0]?.message?.content || '{}';
             aiRaw = content;
@@ -3235,6 +3435,44 @@ class QMateService {
         const startTime = Date.now();
         const { cleaned: questionCleaned, wasTruncated: promptTruncated } = clearPrompt(question);
         const effectiveQuestion = questionCleaned || question?.trim() || '';
+        const allowDefaultSalesAnswer = isSimpleLast30DaySalesRequest(effectiveQuestion);
+        const clarificationChoice = resolveClarificationChoice(effectiveQuestion, chatHistory);
+        const effectiveQuestionForInterpretation = clarificationChoice?.resolvedPrompt || effectiveQuestion;
+        const interpreted = interpretPrompt({
+            prompt: effectiveQuestionForInterpretation,
+            context: { country, region, startDate, endDate, calendarMode },
+        });
+
+        // If user selected a clarification option but we couldn't resolve prior question context,
+        // provide a direct recovery message (avoid repeating the same clarification loop).
+        if (clarificationChoice && !clarificationChoice.baseQuestion) {
+            return await generateClarificationFromModel(client, {
+                question: effectiveQuestion,
+                reason: 'Could not map this selection to the original question from conversation history.',
+                interpretation: interpreted,
+                chatHistory
+            });
+        }
+
+        // Confidence guardrail: ask a focused clarification instead of returning noisy results.
+        if (!allowDefaultSalesAnswer && !isSimpleEnoughToSkipClarification(effectiveQuestion, interpreted) && (interpreted?.confidence || 0) < INTERPRETER_CONFIDENCE_THRESHOLD) {
+            return await generateClarificationFromModel(client, {
+                question: effectiveQuestion,
+                reason: 'I could not confidently infer what you need from this prompt.',
+                interpretation: interpreted,
+                chatHistory
+            });
+        }
+
+        // POST action guardrail: never proceed with ambiguous or under-specified action intents.
+        if (isPostActionMissingRequiredFields(interpreted)) {
+            return await generateClarificationFromModel(client, {
+                question: effectiveQuestion,
+                reason: 'I detected an action request, but action type or targets are missing.',
+                interpretation: interpreted,
+                chatHistory
+            });
+        }
 
         // Extract ASIN from question if user is asking about a specific ASIN
         // Matches patterns like "ASIN B07H9VLSZW", "asin: B07H9VLSZW", "B07H9VLSZW"
@@ -3309,6 +3547,107 @@ class QMateService {
                 return this.generateResponse({ userId, country, region, question, chatHistory });
             }
 
+            // Sensible default for common sales query to avoid unnecessary clarification loops.
+            if (allowDefaultSalesAnswer) {
+                const totalSales = metricsResult?.data?.summary?.totalSales;
+                const currency = metricsResult?.data?.summary?.currency || 'USD';
+                if (typeof totalSales === 'number' && !Number.isNaN(totalSales)) {
+                    return {
+                        status: 200,
+                        answer_markdown: `Total sales for the last 30 days: ${currency} ${Number(totalSales).toFixed(2)}.`,
+                        chart_suggestions: [],
+                        follow_up_questions: [
+                            'Do you want a daily sales breakdown for these 30 days?',
+                            'Do you want sales filtered by ASIN or product?',
+                        ],
+                        needs_clarification: false,
+                        intent_interpretation: interpreted,
+                    };
+                }
+            }
+
+            // Deterministic gross profit — must match dashboard / QMateMetricsService, NOT a naive
+            // sales - ExpenseRawRow.totalExpenses - PPC mix (those ledgers differ from economics fees).
+            // pre_computed: summary.grossProfit = totalSales - Amazon fees - refunds - PPC (economics path).
+            // sales_only_metrics: TotalSales.jsx style = totalSales - |totalExpenses| - PPC (expense rows).
+            const asksGrossProfitLast30Days =
+                /\b(gross\s*profit)\b/i.test(effectiveQuestionForInterpretation) &&
+                /\b(last|past)\s*30\s*days\b/i.test(effectiveQuestionForInterpretation);
+            const explicitlyAskedGrossProfitValue =
+                asksGrossProfitLast30Days &&
+                !/\b(chart|graph|trend|breakdown|daily|day[-\s]?wise|details?)\b/i.test(effectiveQuestionForInterpretation);
+
+            if (explicitlyAskedGrossProfitValue && metricsResult?.success && metricsResult?.data?.summary) {
+                const src = metricsResult.source;
+                const summary = metricsResult.data.summary;
+                const currency = summary.currency || 'USD';
+                let grossProfit = null;
+
+                if (src === 'pre_computed' && typeof summary.grossProfit === 'number' && !Number.isNaN(summary.grossProfit)) {
+                    grossProfit = summary.grossProfit;
+                } else if (src === 'sales_only_metrics') {
+                    const totalSales = Number(summary.totalSales || 0);
+                    const rawExp = metricsResult.data.expenses?.totalExpenses?.total;
+                    const totalExpenses = Math.abs(Number(rawExp ?? 0));
+                    const ppcSpend = Number(summary.ppcSpend || 0);
+                    grossProfit = totalSales - totalExpenses - ppcSpend;
+                }
+
+                if (grossProfit !== null && !Number.isNaN(grossProfit)) {
+                    return {
+                        status: 200,
+                        answer_markdown: `Gross profit for the last 30 days: ${currency} ${Number(grossProfit).toFixed(2)}.`,
+                        chart_suggestions: [],
+                        follow_up_questions: [
+                            'Do you want the formula breakdown (sales, fees, refunds, ad spend)?',
+                            'Do you want daily gross profit trend for the same period?',
+                        ],
+                        needs_clarification: false,
+                        intent_interpretation: interpreted,
+                    };
+                }
+            }
+
+            // Deterministic metric answer for "money wasted in ads" value-lookups.
+            // Keep this aligned with dashboard metric instead of broader PPC inefficiency narratives.
+            const asksMoneyWastedInAds =
+                /\b(money\s+wasted\s+in\s+ads|wasted\s+(money|spend)\s+in\s+ads|wasted\s+ads\s+spend|ads\s+wasted\s+spend|how\s+much.*wasted.*ads|total\s+wasted.*ads)\b/i.test(effectiveQuestionForInterpretation);
+            const explicitlyAskedForBreakdown =
+                /\b(list|show|breakdown|details?|which|keywords?|campaigns?)\b/i.test(effectiveQuestionForInterpretation);
+            if (asksMoneyWastedInAds && !explicitlyAskedForBreakdown) {
+                // Source-of-truth alignment with dashboard card:
+                // Prefer DashboardSummaryService phase-3 computed moneyWastedInAds,
+                // then fall back to QMate metrics context.
+                let wastedSpend = null;
+                try {
+                    const dashboardPhase3 = await getDashboardPhase3(userId, country, region);
+                    if (dashboardPhase3?.success) {
+                        wastedSpend = dashboardPhase3?.data?.moneyWastedInAds;
+                    }
+                } catch (e) {
+                    // Non-fatal: fallback handled below.
+                }
+                if (typeof wastedSpend !== 'number' || Number.isNaN(wastedSpend)) {
+                    wastedSpend = metricsResult?.data?.wastedAds?.totalWastedSpend;
+                }
+                if (typeof wastedSpend === 'number' && !Number.isNaN(wastedSpend)) {
+                    const currency = metricsResult?.data?.summary?.currency || 'USD';
+                    const amount = Number(wastedSpend).toFixed(2);
+                    return {
+                        status: 200,
+                        answer_markdown: `Money Wasted in Ads is ${currency} ${amount} for the selected period.`,
+                        chart_suggestions: [],
+                        follow_up_questions: [
+                            'Show me the top wasted spend keywords',
+                            'Which campaigns are causing most of this wasted spend?',
+                            'Suggest quick actions to reduce this wasted spend',
+                        ],
+                        needs_clarification: false,
+                        intent_interpretation: interpreted,
+                    };
+                }
+            }
+
             // Step 2: Build optimized model context from ALL pre-computed data
             const modelContext = buildOptimizedModelContext(
                 metricsResult.data,
@@ -3374,6 +3713,15 @@ class QMateService {
             // Add conversation context to the model context
             const contextWithHistory = {
                 ...effectiveModelContext,
+                promptInterpretation: interpreted,
+                responseIntentHints: {
+                    intent: interpreted.intent,
+                    detailLevel: interpreted.detailLevel,
+                    responseStyle: interpreted.presentation?.responseStyle || 'text',
+                    chartType: interpreted.presentation?.chartType || 'auto',
+                    // Keep action requests in preview mode only; execution must be explicit downstream.
+                    actionMode: interpreted.postAction?.mode || null,
+                },
                 conversationContext: conversationEntities ? {
                     note: "These entities were mentioned in previous messages. When user uses pronouns like 'them', 'these', 'those', 'it', refer to these entities.",
                     mentionedAsins: conversationEntities.lastMentionedAsins,
@@ -3396,11 +3744,7 @@ class QMateService {
             // Step 4: Call OpenAI
             let aiRaw;
             try {
-                const completion = await client.chat.completions.create({
-                    model: 'gpt-4.1-mini',
-                    response_format: { type: 'json_object' },
-                    messages,
-                });
+                const completion = await createCompletionWithFallback(client, messages);
 
                 const content = completion.choices?.[0]?.message?.content || '{}';
                 aiRaw = content;
@@ -3454,6 +3798,15 @@ class QMateService {
             const chart_suggestions = Array.isArray(parsed.chart_suggestions)
                 ? parsed.chart_suggestions
                 : [];
+            const chartSuggestionsWithIntentFallback =
+                interpreted.intent === 'graph' && chart_suggestions.length === 0
+                    ? [{
+                        type: interpreted.presentation?.chartType || 'line',
+                        title: 'Trend view',
+                        dataSource: interpreted.entities?.metrics?.includes('acos') ? 'ppc_datewise' : 'sales_datewise',
+                        xField: 'date',
+                    }]
+                    : chart_suggestions;
             const follow_up_questions = Array.isArray(parsed.follow_up_questions)
                 ? parsed.follow_up_questions
                 : [];
@@ -3733,6 +4086,16 @@ class QMateService {
 
                 return chart;
             });
+            const resolvedChartsWithData = chartSuggestionsWithIntentFallback === chart_suggestions
+                ? chartsWithData
+                : chartSuggestionsWithIntentFallback;
+
+            // For pure value lookups, avoid noisy chart payloads unless user explicitly asks for trends/charts.
+            const explicitChartRequest = /\b(chart|graph|plot|trend|visualize|time series)\b/i.test(question || '');
+            const finalChartSuggestions =
+                interpreted?.intent === 'value_lookup' && !explicitChartRequest
+                    ? []
+                    : resolvedChartsWithData;
 
             logger.info('[QMate] Optimized response generated', {
                 userId,
@@ -3747,9 +4110,13 @@ class QMateService {
             const questionLowerWasted = (question || '').toLowerCase();
             const wastedKwPatterns = ['wasted', 'waste', 'zero sales keyword', 'keywords with no sales', 'wasted spend'];
             const asksAboutWasted = wastedKwPatterns.some(p => questionLowerWasted.includes(p));
+            const explicitListRequest = /\b(show|list|which|what are|details?|breakdown|keywords?)\b/i.test(question || '');
+            const shouldAttachWastedKeywordTable = asksAboutWasted && (
+                interpreted?.intent !== 'value_lookup' || explicitListRequest
+            );
             let wasted_keywords_total = 0;
             let wasted_keywords_offset = 0;
-            if (asksAboutWasted && ppcData?.wastedSpendKeywords?.data && ppcData.wastedSpendKeywords.data.length > 0) {
+            if (shouldAttachWastedKeywordTable && ppcData?.wastedSpendKeywords?.data && ppcData.wastedSpendKeywords.data.length > 0) {
                 // Handle pagination offset for "load more" requests
                 const wastedOffsetMatch = questionLowerWasted.match(/\(offset:\s*(\d+)\)/i);
                 wasted_keywords_offset = wastedOffsetMatch ? parseInt(wastedOffsetMatch[1]) : 0;
@@ -3776,7 +4143,7 @@ class QMateService {
             return {
                 status: 200,
                 answer_markdown,
-                chart_suggestions: chartsWithData,
+                chart_suggestions: finalChartSuggestions,
                 follow_up_questions,
                 needs_clarification: needs_clarification,
                 clarifying_questions: clarifying_questions.length > 0 ? clarifying_questions : undefined,
@@ -3792,6 +4159,8 @@ class QMateService {
                 wasted_keywords: wasted_keywords,
                 wasted_keywords_total: wasted_keywords_total > 0 ? wasted_keywords_total : undefined,
                 wasted_keywords_offset: wasted_keywords_offset > 0 ? wasted_keywords_offset : undefined,
+                intent_interpretation: interpreted,
+                post_action_preview: interpreted.intent === 'post_action' ? interpreted.postAction : undefined,
             };
 
         } catch (error) {

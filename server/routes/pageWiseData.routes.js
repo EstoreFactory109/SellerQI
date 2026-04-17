@@ -19,6 +19,7 @@ const {
     getDashboardSummary,
     getProductCheckerData,
     getTop4ProductsOptimized,
+    getTopPriorityProductsToFix,
     getProfitabilityData,
     getProfitabilitySummary,
     getPPCData,
@@ -135,6 +136,11 @@ router.get('/product-checker', auth, getLocation, analyseDataCache(3600, 'produc
 // Expected response time: 50-200ms (vs 2-5s for /product-checker)
 // Cache TTL: 1 hour
 router.get('/top4-products', auth, getLocation, analyseDataCache(3600, 'top4-products'), getTop4ProductsOptimized);
+
+// ===== TOP PRIORITY PRODUCTS TO FIX =====
+// Returns top 4 products with issues, sorted by highest sales (desc)
+// Cache TTL: 1 hour
+router.get('/top-priority-products', auth, getLocation, analyseDataCache(3600, 'top-priority-products'), getTopPriorityProductsToFix);
 
 // ===== MULTI-PHASE DASHBOARD (Progressive Loading) =====
 // Phase 1: Instant (~50ms) - precomputed error counts, product counts, date range

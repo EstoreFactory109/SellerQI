@@ -984,6 +984,27 @@ export const initDemoAxiosMock = () => {
       });
     }
 
+    if (method === 'get' && pathname === '/api/pagewise/top-priority-products') {
+      const products = DEMO_PRODUCTS.slice(0, 4).map((p, idx) => {
+        const issues = DEMO_ISSUES_BY_ASIN?.[p?.asin];
+        const totalErrors = issues?.totalErrors ?? 0;
+        const pseudoSales = Math.max(0, (Number(p?.sales) || 0) + (4 - idx) * 1000);
+        return {
+          asin: p.asin,
+          name: p.name || p.itemName || p.asin,
+          errors: totalErrors,
+          issues: issues?.issues || [],
+          sales: pseudoSales,
+          quantity: Number(p?.unitsSold || 0)
+        };
+      });
+
+      return makeNestedDataResponse(config, {
+        total: products.length,
+        products
+      });
+    }
+
     // =====================================================================
     // Issues By Product (used by ProductDetails to populate totals + tables)
     // =====================================================================
