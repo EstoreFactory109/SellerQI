@@ -7,6 +7,7 @@ import './Calendar.css';
 import axios from 'axios'
 import {useDispatch, useSelector} from 'react-redux'
 import {UpdateDashboardInfo, setDashboardInfo, setCalendarMode} from '../../redux/slices/DashboardSlice.js'
+import { fetchTop4Products } from '../../redux/slices/PageDataSlice.js'
 import { addBrand } from '../../redux/slices/authSlice.js'
 // PPC metrics are now filtered locally in Dashboard based on ppcDateWiseMetrics
 // No need to fetch filtered metrics from API
@@ -339,8 +340,21 @@ export default function DateFilter({ setOpenCalender, setSelectedPeriod, anchorR
       // Dashboard data is now pre-calculated by the backend
       const dashboardData = response.data?.data?.dashboardData;
 
-      // Update Redux store with the complete dashboard data
-      dispatch(setDashboardInfo(dashboardData));
+      // Update Redux store with complete dashboard data while preserving
+      // phase-4 top-products fields that are loaded separately.
+      const existingDashboard = dashboardInfo || {};
+      dispatch(setDashboardInfo({
+        ...dashboardData,
+        first: existingDashboard.first ?? dashboardData?.first ?? null,
+        second: existingDashboard.second ?? dashboardData?.second ?? null,
+        third: existingDashboard.third ?? dashboardData?.third ?? null,
+        fourth: existingDashboard.fourth ?? dashboardData?.fourth ?? null,
+        topPriorityProductsSales: existingDashboard.topPriorityProductsSales ?? []
+      }));
+
+      // Ensure Top Products to Fix (sales/issues tabs) is refreshed after switching back
+      // to default 30-day mode.
+      dispatch(fetchTop4Products());
       
       // PPC metrics are now filtered locally in Dashboard
       // When calendarMode is 'default', Dashboard will use ppcSummaryLatest
