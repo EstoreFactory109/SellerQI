@@ -175,6 +175,15 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
   const [checkingSpApi, setCheckingSpApi] = useState(true);
   const [checkingSubscription, setCheckingSubscription] = useState(true);
   const [waitingForAnalysis, setWaitingForAnalysis] = useState(false);
+  // Location of the logged-in user as resolved from the backend
+  // (/app/user-location). This is preferred over URL query params so the
+  // OAuth redirect uses the marketplace tied to the user's own seller
+  // account instead of whatever happens to be in the URL.
+  const [apiLocation, setApiLocation] = useState({
+    country: null,
+    region: null,
+    fetched: false,
+  });
   const pollingRef = useRef(null);
   const timeoutRef = useRef(null);
   
@@ -186,10 +195,23 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
 
   const agencyBasePath = (isAgencyContext && clientId && agencyName) ? `/agency/${encodeURIComponent(agencyName)}/client/${clientId}` : '';
   
-  // Get country code and region from URL parameters
-  const countryCode = searchParams.get('country') || searchParams.get('countryCode');
-  const region = searchParams.get('region');
+  // Raw values from URL parameters — kept as a fallback so the agency flow
+  // (where URL explicitly encodes the target client's marketplace) and any
+  // legacy links continue to work unchanged.
+  const urlCountryCode = searchParams.get('country') || searchParams.get('countryCode');
+  const urlRegion = searchParams.get('region');
   const spApiConnectedFromUrl = searchParams.get('spApiConnected') === 'true';
+
+  // Effective values used throughout the component.
+  //   - Agency context: keep URL params as the source of truth (the agency
+  //     owner is picking WHICH client's marketplace to connect).
+  //   - Otherwise: prefer the API-resolved location and fall back to URL.
+  const countryCode = isAgencyContext
+    ? urlCountryCode
+    : (apiLocation.country || urlCountryCode);
+  const region = isAgencyContext
+    ? urlRegion
+    : (apiLocation.region || urlRegion);
 
   // Check authentication on mount - allow all authenticated users to proceed
   useEffect(() => {
@@ -209,6 +231,55 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
 
     checkAuth();
   }, [isAuthenticated, navigate]);
+
+  // Resolve the logged-in user's marketplace (country + region) from the
+  // standalone /app/user-location endpoint. This runs once on mount and
+  // replaces the old "read from URL" behavior for non-agency users.
+  //
+  // The agency flow is intentionally skipped because the agency owner is
+  // not connecting their own marketplace — the target client's marketplace
+  // is encoded in the URL by the agency onboarding flow.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    if (isAgencyContext) {
+      setApiLocation({ country: null, region: null, fetched: true });
+      return;
+    }
+
+    let cancelled = false;
+
+    const fetchUserLocation = async () => {
+      try {
+        const response = await axiosInstance.get('/app/user-location');
+        if (cancelled) return;
+        const data = response?.data?.data;
+        if (response?.status === 200 && data && data.country && data.region) {
+          setApiLocation({
+            country: data.country,
+            region: data.region,
+            fetched: true,
+          });
+          devLog('[ConnectAccounts] Resolved user location from API:', data);
+        } else {
+          setApiLocation({ country: null, region: null, fetched: true });
+        }
+      } catch (error) {
+        if (cancelled) return;
+        devWarn(
+          '[ConnectAccounts] Could not resolve user location from API, falling back to URL params:',
+          error?.response?.status || error?.message
+        );
+        setApiLocation({ country: null, region: null, fetched: true });
+      }
+    };
+
+    fetchUserLocation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, isAgencyContext]);
 
   // Check SP-API connection status - ONLY run once on mount
   useEffect(() => {
@@ -362,7 +433,21 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
     
     // Add event listener to prevent back navigation
     window.addEventListener('popstate', handlePopState);
-    
+
+    // Clear the sellerCentralLoading flag if it exists (cleanup from redirect)
+    if (localStorage.getItem('sellerCentralLoading') === 'true') {
+      localStorage.removeItem('sellerCentralLoading');
+    }
+
+    // Only finalize the marketplace config once the user-location API has
+    // resolved (or we're in agency context, where it resolves immediately).
+    // This avoids briefly defaulting to US while the API is still in-flight.
+    if (!apiLocation.fetched) {
+      return () => {
+        window.removeEventListener('popstate', handlePopState);
+      };
+    }
+
     // Set marketplace configuration based on country code or region
     if (countryCode && MARKETPLACE_CONFIG[countryCode.toUpperCase()]) {
       setMarketplaceConfig(MARKETPLACE_CONFIG[countryCode.toUpperCase()]);
@@ -377,16 +462,11 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
       setMarketplaceConfig(MARKETPLACE_CONFIG['US']);
     }
 
-    // Clear the sellerCentralLoading flag if it exists (cleanup from redirect)
-    if (localStorage.getItem('sellerCentralLoading') === 'true') {
-      localStorage.removeItem('sellerCentralLoading');
-    }
-    
     // Cleanup: remove event listener when component unmounts
     return () => {
       window.removeEventListener('popstate', handlePopState);
     };
-  }, [countryCode, region, allAccounts, userData, navigate]);
+  }, [countryCode, region, allAccounts, userData, navigate, apiLocation.fetched]);
 
   const getDefaultMarketplaceForRegion = (region) => {
     switch (region) {
