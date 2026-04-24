@@ -147,6 +147,23 @@ const MARKETPLACE_CONFIG = {
   }
 };
 
+// Amazon Ads LWA authorization base URL by region.
+// Amazon exposes different OAuth hosts per region for the Ads API:
+//   NA  -> https://www.amazon.com
+//   EU  -> https://eu.account.amazon.com
+//   FE  -> https://apac.account.amazon.com
+// The /ap/oa path is the same on all of them.
+const ADS_OAUTH_BASE_BY_REGION = {
+  NA: 'https://www.amazon.com',
+  EU: 'https://eu.account.amazon.com',
+  FE: 'https://apac.account.amazon.com',
+};
+
+const getAdsOAuthBaseUrl = (region) => {
+  const key = (region || 'NA').toUpperCase();
+  return ADS_OAUTH_BASE_BY_REGION[key] || ADS_OAUTH_BASE_BY_REGION.NA;
+};
+
 const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName = '' }) => {
   const [sellerCentralLoading, setSellerCentralLoading] = useState(false);
   const [amazonAdsLoading, setAmazonAdsLoading] = useState(false);
@@ -499,8 +516,12 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
       // Store state in sessionStorage for validation on callback
       sessionStorage.setItem('oauth_state_ads', state);
   
-      // Amazon Ads uses a different OAuth flow
-      const amazonAdsAuthUrl = new URL('https://www.amazon.com/ap/oa');
+      // Amazon Ads uses a different OAuth flow.
+      // Pick the LWA authorization host by region (NA/EU/FE), mirroring SP-API's
+      // region-based base URL selection so EU and FE sellers are not forced to
+      // authenticate against the NA host.
+      const adsOAuthBase = getAdsOAuthBaseUrl(marketplaceConfig.region);
+      const amazonAdsAuthUrl = new URL(`${adsOAuthBase}/ap/oa`);
       amazonAdsAuthUrl.searchParams.append('client_id', adsClientId);
       amazonAdsAuthUrl.searchParams.append('redirect_uri', redirectUri);
       amazonAdsAuthUrl.searchParams.append('response_type', 'code');
