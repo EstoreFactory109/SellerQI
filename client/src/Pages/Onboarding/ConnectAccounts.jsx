@@ -175,15 +175,6 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
   const [checkingSpApi, setCheckingSpApi] = useState(true);
   const [checkingSubscription, setCheckingSubscription] = useState(true);
   const [waitingForAnalysis, setWaitingForAnalysis] = useState(false);
-  // Location of the logged-in user as resolved from the backend
-  // (/app/user-location). This is preferred over URL query params so the
-  // OAuth redirect uses the marketplace tied to the user's own seller
-  // account instead of whatever happens to be in the URL.
-  const [apiLocation, setApiLocation] = useState({
-    country: null,
-    region: null,
-    fetched: false,
-  });
   const pollingRef = useRef(null);
   const timeoutRef = useRef(null);
   
@@ -194,24 +185,14 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
   const isAuthenticated = useSelector(state => state.Auth?.isAuthenticated) || localStorage.getItem('isAuth') === 'true';
 
   const agencyBasePath = (isAgencyContext && clientId && agencyName) ? `/agency/${encodeURIComponent(agencyName)}/client/${clientId}` : '';
-  
-  // Raw values from URL parameters — kept as a fallback so the agency flow
-  // (where URL explicitly encodes the target client's marketplace) and any
-  // legacy links continue to work unchanged.
-  const urlCountryCode = searchParams.get('country') || searchParams.get('countryCode');
-  const urlRegion = searchParams.get('region');
-  const spApiConnectedFromUrl = searchParams.get('spApiConnected') === 'true';
 
-  // Effective values used throughout the component.
-  //   - Agency context: keep URL params as the source of truth (the agency
-  //     owner is picking WHICH client's marketplace to connect).
-  //   - Otherwise: prefer the API-resolved location and fall back to URL.
-  const countryCode = isAgencyContext
-    ? urlCountryCode
-    : (apiLocation.country || urlCountryCode);
-  const region = isAgencyContext
-    ? urlRegion
-    : (apiLocation.region || urlRegion);
+  // Get country code and region from URL parameters. These drive the initial
+  // UI display only — the actual redirect URL for Connect Seller Central /
+  // Connect Amazon Ads is resolved on click via the /app/user-location
+  // endpoint (see resolveUserMarketplace below).
+  const countryCode = searchParams.get('country') || searchParams.get('countryCode');
+  const region = searchParams.get('region');
+  const spApiConnectedFromUrl = searchParams.get('spApiConnected') === 'true';
 
   // Check authentication on mount - allow all authenticated users to proceed
   useEffect(() => {
@@ -231,55 +212,6 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
 
     checkAuth();
   }, [isAuthenticated, navigate]);
-
-  // Resolve the logged-in user's marketplace (country + region) from the
-  // standalone /app/user-location endpoint. This runs once on mount and
-  // replaces the old "read from URL" behavior for non-agency users.
-  //
-  // The agency flow is intentionally skipped because the agency owner is
-  // not connecting their own marketplace — the target client's marketplace
-  // is encoded in the URL by the agency onboarding flow.
-  useEffect(() => {
-    if (!isAuthenticated) return;
-
-    if (isAgencyContext) {
-      setApiLocation({ country: null, region: null, fetched: true });
-      return;
-    }
-
-    let cancelled = false;
-
-    const fetchUserLocation = async () => {
-      try {
-        const response = await axiosInstance.get('/app/user-location');
-        if (cancelled) return;
-        const data = response?.data?.data;
-        if (response?.status === 200 && data && data.country && data.region) {
-          setApiLocation({
-            country: data.country,
-            region: data.region,
-            fetched: true,
-          });
-          devLog('[ConnectAccounts] Resolved user location from API:', data);
-        } else {
-          setApiLocation({ country: null, region: null, fetched: true });
-        }
-      } catch (error) {
-        if (cancelled) return;
-        devWarn(
-          '[ConnectAccounts] Could not resolve user location from API, falling back to URL params:',
-          error?.response?.status || error?.message
-        );
-        setApiLocation({ country: null, region: null, fetched: true });
-      }
-    };
-
-    fetchUserLocation();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isAuthenticated, isAgencyContext]);
 
   // Check SP-API connection status - ONLY run once on mount
   useEffect(() => {
@@ -433,21 +365,7 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
     
     // Add event listener to prevent back navigation
     window.addEventListener('popstate', handlePopState);
-
-    // Clear the sellerCentralLoading flag if it exists (cleanup from redirect)
-    if (localStorage.getItem('sellerCentralLoading') === 'true') {
-      localStorage.removeItem('sellerCentralLoading');
-    }
-
-    // Only finalize the marketplace config once the user-location API has
-    // resolved (or we're in agency context, where it resolves immediately).
-    // This avoids briefly defaulting to US while the API is still in-flight.
-    if (!apiLocation.fetched) {
-      return () => {
-        window.removeEventListener('popstate', handlePopState);
-      };
-    }
-
+    
     // Set marketplace configuration based on country code or region
     if (countryCode && MARKETPLACE_CONFIG[countryCode.toUpperCase()]) {
       setMarketplaceConfig(MARKETPLACE_CONFIG[countryCode.toUpperCase()]);
@@ -462,11 +380,16 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
       setMarketplaceConfig(MARKETPLACE_CONFIG['US']);
     }
 
+    // Clear the sellerCentralLoading flag if it exists (cleanup from redirect)
+    if (localStorage.getItem('sellerCentralLoading') === 'true') {
+      localStorage.removeItem('sellerCentralLoading');
+    }
+    
     // Cleanup: remove event listener when component unmounts
     return () => {
       window.removeEventListener('popstate', handlePopState);
     };
-  }, [countryCode, region, allAccounts, userData, navigate, apiLocation.fetched]);
+  }, [countryCode, region, allAccounts, userData, navigate]);
 
   const getDefaultMarketplaceForRegion = (region) => {
     switch (region) {
@@ -481,68 +404,139 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
     }
   };
 
-  const handleConnectSellerCentral = async () => {
-    if (!marketplaceConfig) {
-      setErrorMessage('Marketplace configuration not found. Please check your region settings.');
-      return;
+  // Resolve the user's marketplace (country + region + matching config entry)
+  // right before redirecting to Amazon. The source of truth is the
+  // standalone /app/user-location endpoint, which returns the country/region
+  // stored on the logged-in user's seller account.
+  //
+  //   - Agency context is intentionally skipped — the agency owner is not
+  //     connecting their own marketplace; the target client's marketplace
+  //     is encoded in the URL by the agency flow, so we keep URL params
+  //     as the source of truth there.
+  //   - On any failure (endpoint unavailable, network error, unknown
+  //     country) we fall back to the URL-derived marketplaceConfig so the
+  //     existing flow never breaks.
+  const resolveUserMarketplace = async () => {
+    if (isAgencyContext) {
+      if (marketplaceConfig && countryCode) {
+        return {
+          countryCode: countryCode.toUpperCase(),
+          region: marketplaceConfig.region,
+          config: marketplaceConfig,
+        };
+      }
+      return null;
     }
 
+    try {
+      const response = await axiosInstance.get('/app/user-location');
+      const data = response?.data?.data;
+      if (response?.status === 200 && data && data.country && data.region) {
+        const key = String(data.country).toUpperCase();
+        const config = MARKETPLACE_CONFIG[key];
+        if (config) {
+          devLog('[ConnectAccounts] Resolved user location from API:', data);
+          return {
+            countryCode: key,
+            region: data.region,
+            config,
+          };
+        }
+        devWarn(
+          '[ConnectAccounts] API returned country not present in MARKETPLACE_CONFIG, falling back:',
+          data
+        );
+      }
+    } catch (error) {
+      devWarn(
+        '[ConnectAccounts] /app/user-location lookup failed, falling back to URL-derived marketplaceConfig:',
+        error?.response?.status || error?.message
+      );
+    }
+
+    if (marketplaceConfig) {
+      return {
+        countryCode: (countryCode || 'US').toUpperCase(),
+        region: marketplaceConfig.region,
+        config: marketplaceConfig,
+      };
+    }
+
+    return null;
+  };
+
+  const handleConnectSellerCentral = async () => {
     setSellerCentralLoading(true);
     setErrorMessage('');
     setSuccessMessage('');
+
+    // Fetch the user's current country/region before redirecting so the
+    // Seller Central host is always correct for their marketplace.
+    const resolved = await resolveUserMarketplace();
+    if (!resolved) {
+      setSellerCentralLoading(false);
+      setErrorMessage('Could not determine your marketplace. Please refresh the page and try again.');
+      return;
+    }
+
+    const {
+      countryCode: resolvedCountry,
+      region: resolvedRegion,
+      config: resolvedConfig,
+    } = resolved;
 
     localStorage.setItem('sellerCentralLoading', 'true');
     localStorage.setItem('amazonAdsLoading', 'false');
     // Store the marketplace info for later use
     localStorage.setItem('selectedMarketplace', JSON.stringify({
-      countryCode: countryCode || 'US',
-      region: marketplaceConfig.region,
-      sellerCentralUrl: marketplaceConfig.sellerCentralUrl
+      countryCode: resolvedCountry,
+      region: resolvedRegion,
+      sellerCentralUrl: resolvedConfig.sellerCentralUrl
     }));
 
     if (isAgencyContext && clientId && agencyName) {
       localStorage.setItem('agencySpApiConnect', JSON.stringify({
         clientId,
-        country: countryCode || 'US',
-        region: marketplaceConfig.region,
+        country: resolvedCountry,
+        region: resolvedRegion,
         agencyName,
       }));
     } else {
       localStorage.removeItem('agencySpApiConnect');
     }
-  
+
     try {
       // Get the application ID from environment variable
       const applicationId = import.meta.env.VITE_APP_ID;
-  
+
       if (!applicationId) {
         throw new Error('Application ID not configured. Please check environment variables.');
       }
-  
+
       // Construct the Amazon authorization URL with dynamic marketplace
       const redirectUri = `${window.location.origin}/auth/callback`;
       const state = crypto.randomUUID();
-      
+
       // Store state in sessionStorage for validation on callback
       sessionStorage.setItem('oauth_state', state);
-  
-      const amazonAuthUrl = new URL(`${marketplaceConfig.sellerCentralUrl}/apps/authorize/consent`);
+
+      const amazonAuthUrl = new URL(`${resolvedConfig.sellerCentralUrl}/apps/authorize/consent`);
       amazonAuthUrl.searchParams.append('application_id', applicationId);
       amazonAuthUrl.searchParams.append('redirect_uri', redirectUri);
       amazonAuthUrl.searchParams.append('state', state);
-      
+
       // Add version=beta only if specified in environment or for testing
       if (import.meta.env.VITE_APP_BETA === 'true') {
         amazonAuthUrl.searchParams.append('version', 'beta');
       }
-  
-      setSuccessMessage(`Redirecting to Amazon Seller Central for ${countryCode || 'your region'}...`);
-  
+
+      setSuccessMessage(`Redirecting to Amazon Seller Central for ${resolvedCountry}...`);
+
       // Redirect to Amazon authorization page
       setTimeout(() => {
         window.location.href = amazonAuthUrl.toString();
       }, 1000);
-      
+
     } catch (error) {
       setSellerCentralLoading(false);
       setErrorMessage(error.message || 'Failed to connect to Seller Central. Please try again.');
@@ -551,75 +545,85 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
   };
 
   const handleConnectAmazonAds = async () => {
-    if (!marketplaceConfig) {
-      setErrorMessage('Marketplace configuration not found. Please check your region settings.');
-      return;
-    }
-
     setAmazonAdsLoading(true);
     setErrorMessage('');
     setSuccessMessage('');
+
+    // Fetch the user's current country/region before redirecting so the
+    // Amazon Ads LWA host matches their region (NA / EU / FE).
+    const resolved = await resolveUserMarketplace();
+    if (!resolved) {
+      setAmazonAdsLoading(false);
+      setErrorMessage('Could not determine your marketplace. Please refresh the page and try again.');
+      return;
+    }
+
+    const {
+      countryCode: resolvedCountry,
+      region: resolvedRegion,
+      config: resolvedConfig,
+    } = resolved;
 
     localStorage.setItem('sellerCentralLoading', 'false');
     localStorage.setItem('amazonAdsLoading', 'true');
     // Store the marketplace info for later use
     localStorage.setItem('selectedMarketplace', JSON.stringify({
-      countryCode: countryCode || 'US',
-      region: marketplaceConfig.region,
-      adsUrl: marketplaceConfig.adsUrl
+      countryCode: resolvedCountry,
+      region: resolvedRegion,
+      adsUrl: resolvedConfig.adsUrl
     }));
 
     // Store agency context so the OAuth callback can use the agency-safe endpoint
     if (isAgencyContext && clientId) {
       localStorage.setItem('agencyAdsConnect', JSON.stringify({
         clientId,
-        country: countryCode || 'US',
-        region: marketplaceConfig.region,
+        country: resolvedCountry,
+        region: resolvedRegion,
         agencyName,
       }));
     } else {
       localStorage.removeItem('agencyAdsConnect');
     }
-    
+
     try {
       // Get the ads client ID from environment variable
       const adsClientId = import.meta.env.VITE_ADS_CLIENT_ID || 'amzn1.application-oa2-client.cd1d81266e80444e97c6ae8795345d93';
-  
+
       if (!adsClientId) {
         throw new Error('Ads Client ID not configured. Please check environment variables.');
       }
-  
+
       // Construct the Amazon Ads authorization URL
       const redirectUri = `${window.location.origin}/auth/callback`;
       const state = crypto.randomUUID();
-      
+
       // Store state in sessionStorage for validation on callback
       sessionStorage.setItem('oauth_state_ads', state);
-  
+
       // Amazon Ads uses a different OAuth flow.
       // Pick the LWA authorization host by region (NA/EU/FE), mirroring SP-API's
       // region-based base URL selection so EU and FE sellers are not forced to
       // authenticate against the NA host.
-      const adsOAuthBase = getAdsOAuthBaseUrl(marketplaceConfig.region);
+      const adsOAuthBase = getAdsOAuthBaseUrl(resolvedRegion);
       const amazonAdsAuthUrl = new URL(`${adsOAuthBase}/ap/oa`);
       amazonAdsAuthUrl.searchParams.append('client_id', adsClientId);
       amazonAdsAuthUrl.searchParams.append('redirect_uri', redirectUri);
       amazonAdsAuthUrl.searchParams.append('response_type', 'code');
       amazonAdsAuthUrl.searchParams.append('scope', 'advertising::campaign_management');
       amazonAdsAuthUrl.searchParams.append('state', state);
-      
+
       // Add marketplace-specific parameters if needed
-      if (countryCode && countryCode !== 'US') {
-        amazonAdsAuthUrl.searchParams.append('marketplace', countryCode);
+      if (resolvedCountry && resolvedCountry !== 'US') {
+        amazonAdsAuthUrl.searchParams.append('marketplace', resolvedCountry);
       }
-  
-      setSuccessMessage(`Redirecting to Amazon Ads authorization for ${countryCode || 'your region'}...`);
-  
+
+      setSuccessMessage(`Redirecting to Amazon Ads authorization for ${resolvedCountry}...`);
+
       // Redirect to Amazon authorization page
       setTimeout(() => {
         window.location.href = amazonAdsAuthUrl.toString();
       }, 1000);
-      
+
     } catch (error) {
       setAmazonAdsLoading(false);
       setErrorMessage(error.message || 'Failed to connect to Amazon Ads. Please try again.');

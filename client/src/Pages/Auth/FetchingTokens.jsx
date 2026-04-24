@@ -98,7 +98,27 @@ const FetchingTokens = () => {
             navigate(`${agencyBasePath}/connect-accounts?country=${country}&region=${agencyRegion}&spApiConnected=true`);
           } else {
             localStorage.removeItem('agencySpApiConnect');
-            navigate('/connect-accounts');
+
+            // Preserve the marketplace that was in effect when the user
+            // kicked off SP-API OAuth so the next step (Amazon Ads) picks the
+            // correct region-specific LWA authorization host (EU/FE) instead
+            // of silently falling back to the NA default.
+            // `selectedMarketplace` is written by ConnectAccounts before the
+            // redirect to Amazon, so it is guaranteed to be present here.
+            let spApiRedirect = '/connect-accounts?spApiConnected=true';
+            try {
+              const selectedMarketplace = JSON.parse(
+                localStorage.getItem('selectedMarketplace') || '{}'
+              );
+              const marketplaceCountry = selectedMarketplace.countryCode;
+              const marketplaceRegion = selectedMarketplace.region;
+              if (marketplaceCountry && marketplaceRegion) {
+                spApiRedirect = `/connect-accounts?country=${encodeURIComponent(marketplaceCountry)}&region=${encodeURIComponent(marketplaceRegion)}&spApiConnected=true`;
+              }
+            } catch (e) {
+              devWarn('FetchingTokens: could not parse selectedMarketplace from localStorage', e);
+            }
+            navigate(spApiRedirect);
           }
         }
       } catch (error) {
