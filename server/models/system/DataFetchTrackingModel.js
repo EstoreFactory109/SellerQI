@@ -3,8 +3,8 @@
  * 
  * Tracks when calendar-affecting services run for each user/country/region.
  * 
- * ONLY tracks on Mon/Wed/Fri (days 1, 3, 5) when calendar-affecting services run:
- * - mcpEconomicsData (Sales only): Total Sales + date-wise daily Sales (plus cached last 7/14 day summaries)
+ * Runs DAILY (every day) via the phased pipeline (sched_init → sched_finalize).
+ * Tracked services include all daily PPC reports and ads entity endpoints:
  * - ppcMetricsAggregated (PPC Metrics - SP, SB, SD)
  * - ppcSpendsDateWise (Date-wise PPC Spend)
  * - adsKeywordsPerformanceData (Keywords Performance / Wasted Spend)
@@ -12,13 +12,17 @@
  * - ppcSpendsBySKU (Product-wise Sponsored Ads)
  * - ppcUnitsSold (PPC Units Sold)
  * - campaignData (Campaign Data)
+ * - adGroupsData, adsKeywords, negativeKeywords
  * 
- * These are the only services whose data can be filtered by calendar date range
+ * Plus Mon/Wed/Fri-only services:
+ * - mcpEconomicsData (Sales only)
+ * 
+ * These are the services whose data can be filtered by calendar date range
  * in the frontend (Dashboard, Profitability, Sponsored Ads pages).
  * 
  * Status values:
- * - 'started': Tracking entry created when Mon/Wed/Fri batch begins
- * - 'completed': All calendar services ran successfully
+ * - 'started': Tracking entry created at sched_init
+ * - 'completed': All services ran successfully (set at sched_finalize)
  * - 'partial': Some services failed, some succeeded (calendar still has valid data)
  * - 'failed': All services failed (calendar should use previous successful run)
  */

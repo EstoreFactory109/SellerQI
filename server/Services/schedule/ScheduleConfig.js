@@ -40,84 +40,11 @@ const SUNDAY_FUNCTIONS = {
     }
 };
 
-// Monday, Wednesday, Friday (3x/week) - Amazon Ads functions and MCP Economics
+// Monday, Wednesday, Friday (3x/week) - Non-ads services that don't need daily freshness.
+// All Amazon Ads services (reports + entities) have been moved to DAILY_FUNCTIONS.
 const MON_WED_FRI_FUNCTIONS = {
-    // Amazon Ads functions
-    'ppcSpendsBySKU': {
-        service: require('../AmazonAds/GetPPCProductWise.js'),
-        functionName: 'getPPCSpendsBySKU',
-        description: 'PPC Spends by SKU',
-        requiresAdsToken: true,
-        apiDataKey: 'ppcSpendsBySKU'
-    },
-    'adsKeywordsPerformanceData': {
-        service: require('../AmazonAds/GetWastedSpendKeywords.js'),
-        functionName: 'getKeywordPerformanceReport',
-        description: 'Ads Keywords Performance',
-        requiresAdsToken: true,
-        apiDataKey: 'adsKeywordsPerformanceData'
-    },
-    'ppcSpendsDateWise': {
-        service: require('../AmazonAds/GetDateWiseSpendKeywords.js'),
-        functionName: 'getPPCSpendsDateWise',
-        description: 'PPC Spends Date Wise',
-        requiresAdsToken: true,
-        apiDataKey: 'ppcSpendsDateWise'
-    },
-    'adsKeywords': {
-        service: require('../AmazonAds/Keywords.js'),
-        functionName: 'getKeywords',
-        description: 'Ads Keywords',
-        requiresAdsToken: true,
-        apiDataKey: 'adsKeywords'
-    },
-    'campaignData': {
-        service: require('../AmazonAds/GetCampaigns.js'),
-        functionName: 'getCampaign',
-        description: 'Campaign Data',
-        requiresAdsToken: true,
-        apiDataKey: 'campaignData'
-    },
-    'adGroupsData': {
-        service: require('../AmazonAds/AdGroups.js'),
-        functionName: 'getAdGroups',
-        description: 'Ad Groups Data',
-        requiresAdsToken: true,
-        apiDataKey: 'adGroupsData'
-    },
-    'negativeKeywords': {
-        service: require('../AmazonAds/NegetiveKeywords.js'),
-        functionName: 'getNegativeKeywords',
-        description: 'Negative Keywords',
-        requiresAdsToken: true,
-        apiDataKey: 'negativeKeywords'
-    },
-    'searchKeywords': {
-        service: require('../AmazonAds/GetSearchKeywords.js'),
-        functionName: 'getSearchKeywords',
-        description: 'Search Keywords',
-        requiresAdsToken: true,
-        apiDataKey: 'searchKeywords'
-    },
-    // PPC Metrics (Aggregated) - SP, SB, SD campaign data
-    'ppcMetricsAggregated': {
-        service: require('../AmazonAds/GetPPCMetrics.js'),
-        functionName: 'getPPCMetrics',
-        description: 'PPC Metrics (Aggregated)',
-        requiresAdsToken: true,
-        apiDataKey: 'ppcMetricsAggregated'
-    },
-    // PPC Units Sold - Date-wise units sold data
-    'ppcUnitsSold': {
-        service: require('../AmazonAds/GetPPCUnitsSold.js'),
-        functionName: 'getPPCUnitsSold',
-        description: 'PPC Units Sold',
-        requiresAdsToken: true,
-        apiDataKey: 'ppcUnitsSold'
-    },
     // MCP SalesOnly (key retained as mcpEconomicsData for backward compatibility)
     'mcpEconomicsData': {
-        // Sales-only replacement (kept under the same key for backward compatibility)
         service: require('../MCP/MCPSalesOnlyIntegration.js'),
         functionName: 'fetchAndStoreSalesOnlyData',
         description: 'MCP SalesOnly Data',
@@ -133,21 +60,6 @@ const MON_WED_FRI_FUNCTIONS = {
         isCalculationService: true,
         runOrder: 97
     },
-    // Expense Report - fetches Finance API events, persists raw rows, recalculates totals
-    'expenseReport': {
-        service: require('../Sp_API/ExpenseReportService.js'),
-        functionName: 'fetchPersistAndReturnExpenseReport',
-        description: 'Expense Report (Finance API)',
-        requiresAccessToken: true,
-        apiDataKey: 'expenseReport'
-    },
-    'asinWiseSales': {
-        service: require('../Sp_API/AsinWiseSalesStorageService.js'),
-        functionName: 'fetchPersistAndReturnAsinWiseSales',
-        description: 'ASIN-wise Sales (SP-API report)',
-        requiresAccessToken: true,
-        apiDataKey: 'asinWiseSales'
-    }
 };
 
 // Previously Tue/Thu/Sat/Sun only — now empty since BuyBox moved to DAILY_FUNCTIONS
@@ -205,7 +117,76 @@ const SATURDAY_FUNCTIONS = {
 };
 
 // Daily - All other functions that run every day
+// NOTE: All Amazon Ads services (PPC reports + entity endpoints) run daily to ensure
+// no staleness gap between performance data and structural data (campaigns, keywords, etc.).
 const DAILY_FUNCTIONS = {
+    // --- Amazon Ads: PPC Async Report Services (isolated into sched_ads phase) ---
+    'ppcSpendsBySKU': {
+        service: require('../AmazonAds/GetPPCProductWise.js'),
+        functionName: 'getPPCSpendsBySKU',
+        description: 'PPC Spends by SKU',
+        requiresAdsToken: true,
+        apiDataKey: 'ppcSpendsBySKU'
+    },
+    'adsKeywordsPerformanceData': {
+        service: require('../AmazonAds/GetWastedSpendKeywords.js'),
+        functionName: 'getKeywordPerformanceReport',
+        description: 'Ads Keywords Performance',
+        requiresAdsToken: true,
+        apiDataKey: 'adsKeywordsPerformanceData'
+    },
+    'ppcSpendsDateWise': {
+        service: require('../AmazonAds/GetDateWiseSpendKeywords.js'),
+        functionName: 'getPPCSpendsDateWise',
+        description: 'PPC Spends Date Wise',
+        requiresAdsToken: true,
+        apiDataKey: 'ppcSpendsDateWise'
+    },
+    'ppcMetricsAggregated': {
+        service: require('../AmazonAds/GetPPCMetrics.js'),
+        functionName: 'getPPCMetrics',
+        description: 'PPC Metrics (Aggregated)',
+        requiresAdsToken: true,
+        apiDataKey: 'ppcMetricsAggregated'
+    },
+    // --- Amazon Ads: Entity endpoints (campaigns, ad groups, keywords) ---
+    // Moved from MON_WED_FRI_FUNCTIONS so structural data is never stale relative
+    // to the daily PPC report data above.
+    'campaignData': {
+        service: require('../AmazonAds/GetCampaigns.js'),
+        functionName: 'getCampaign',
+        description: 'Campaign Data',
+        requiresAdsToken: true,
+        apiDataKey: 'campaignData'
+    },
+    'adGroupsData': {
+        service: require('../AmazonAds/AdGroups.js'),
+        functionName: 'getAdGroups',
+        description: 'Ad Groups Data',
+        requiresAdsToken: true,
+        apiDataKey: 'adGroupsData'
+    },
+    'adsKeywords': {
+        service: require('../AmazonAds/Keywords.js'),
+        functionName: 'getKeywords',
+        description: 'Ads Keywords',
+        requiresAdsToken: true,
+        apiDataKey: 'adsKeywords'
+    },
+    'negativeKeywords': {
+        service: require('../AmazonAds/NegetiveKeywords.js'),
+        functionName: 'getNegativeKeywords',
+        description: 'Negative Keywords',
+        requiresAdsToken: true,
+        apiDataKey: 'negativeKeywords'
+    },
+    'searchKeywords': {
+        service: require('../AmazonAds/GetSearchKeywords.js'),
+        functionName: 'getSearchKeywords',
+        description: 'Search Keywords',
+        requiresAdsToken: true,
+        apiDataKey: 'searchKeywords'
+    },
     'v2data': {
         service: require('../Sp_API/V2_Seller_Performance_Report.js'),
         functionName: null, // Default export, use service directly
@@ -294,6 +275,18 @@ const DAILY_FUNCTIONS = {
         apiDataKey: 'reviewRequestSender',
         isCalculationService: true,
         runOrder: 98
+    },
+    // Unified Finance Sync - Sales Report + Finance API → DailySkuFinance,
+    // DailyOverheadFinance, AsinRelationship, FinanceSyncLog. Runs daily so
+    // the profitability dashboard always has fresh data. Replaces the legacy
+    // `expenseReport` (Finance API only) and `asinWiseSales` (Sales Report
+    // only) entries that previously lived in MON_WED_FRI_FUNCTIONS.
+    'financeSync': {
+        service: require('../Sp_API/FinanceService.js'),
+        functionName: 'syncFinanceData',
+        description: 'Finance Sync (Sales + Expenses)',
+        requiresAccessToken: true,
+        apiDataKey: 'financeSync'
     }
 };
 

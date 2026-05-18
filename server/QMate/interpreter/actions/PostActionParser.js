@@ -37,9 +37,15 @@ function detectActionType(prompt) {
 
   // Heuristic fallback for common phrasing not captured in config.
   if (!bestType) {
+    const hasPauseVerb = /\b(pause|stop|disable|turn off)\b/i.test(p);
+    const hasNegativeVerb = /\b(add as negative|add to negative|negative)\b/i.test(p);
     const hasKeywordNoun = /\b(keyword|keywords|search term|search terms|term|terms)\b/i.test(p);
     const hasBlockVerb = /\b(block|pause|stop|exclude|negative)\b/i.test(p);
-    if (hasKeywordNoun && hasBlockVerb) {
+    if (hasKeywordNoun && hasPauseVerb && hasNegativeVerb) {
+      bestType = "pause_and_add_to_negative";
+    } else if (hasKeywordNoun && hasNegativeVerb) {
+      bestType = "add_to_negative";
+    } else if (hasKeywordNoun && hasBlockVerb) {
       bestType = "block_keywords";
     } else if (/\b(pause|stop|disable|turn off)\b/i.test(p) && /\bcampaign|campaigns|ad group|adgroup\b/i.test(p)) {
       bestType = "pause_campaigns";
@@ -88,8 +94,33 @@ function inferScope(prompt) {
   return "account";
 }
 
+function parseMatchType(prompt) {
+  const p = normalize(prompt);
+  if (/\bnegative exact\b|\bexact\b/.test(p)) return "negativeExact";
+  if (/\bnegative phrase\b|\bphrase\b/.test(p)) return "negativePhrase";
+  return null;
+}
+
+function parseAdType(prompt) {
+  const p = normalize(prompt);
+  if (/\bsponsored brands?\b|\bsb\b/.test(p)) return "SB";
+  if (/\bsponsored display\b|\bsd\b/.test(p)) return "SD";
+  if (/\bsponsored products?\b|\bsp\b/.test(p)) return "SP";
+  return null;
+}
+
+function isBulk(prompt, targets) {
+  const p = normalize(prompt);
+  return /\bbulk\b|\ball\b|\bmultiple\b/.test(p) || (Array.isArray(targets) && targets.length > 1);
+}
+
 function parse(prompt) {
-  const actionType = detectActionType(prompt);
+  let actionType = detectActionType(prompt);
+  const p = normalize(prompt);
+  const hasPauseVerb = /\b(pause|stop|disable|turn off)\b/i.test(p);
+  const hasNegativeVerb = /\b(add as negative|add to negative|negative)\b/i.test(p);
+  if (hasPauseVerb && hasNegativeVerb) actionType = "pause_and_add_to_negative";
+  else if (hasNegativeVerb && actionType === "block_keywords") actionType = "add_to_negative";
   if (!actionType) {
     return {
       type: null,
@@ -99,17 +130,23 @@ function parse(prompt) {
   }
 
   let targets = [];
-  if (actionType === "block_keywords") {
+  if (actionType === "block_keywords" || actionType === "add_to_negative" || actionType === "pause_and_add_to_negative") {
     targets = extractKeywordTargets(prompt);
   }
 
   const scope = inferScope(prompt);
+  const matchType = parseMatchType(prompt);
+  const adType = parseAdType(prompt);
+  const bulk = isBulk(prompt, targets);
 
   return {
     type: actionType,
     targets,
     scope,
-    mode: "preview"
+    mode: "preview",
+    matchType: matchType || "negativePhrase",
+    adType: adType || "SP",
+    bulk
   };
 }
 

@@ -21,6 +21,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@aws-sdk/client-sns": "^3.1045.0",
+    "@aws-sdk/client-sqs": "^3.1045.0",
     "@aws-sdk/client-sts": "^3.758.0",
     "@react-email/components": "^0.0.41",
     "amazon-sp-api": "^1.1.5",
@@ -28,7 +30,7 @@
     "axios": "^1.8.3",
     "axios-retry": "^4.5.0",
     "bcryptjs": "^3.0.2",
-    "bullmq": "^5.34.8",
+    "bullmq": "^5.76.7",
     "chalk": "^4.1.2",
     "cloudinary": "^2.6.1",
     "cookie-parser": "^1.4.7",

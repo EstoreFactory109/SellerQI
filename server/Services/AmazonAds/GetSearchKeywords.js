@@ -4,6 +4,10 @@ const { promisify } = require('util');
 const gunzip = promisify(zlib.gunzip);
 const SearchTerms = require('../../models/amazon-ads/SearchTermsModel.js');
 const { generateAdsAccessToken } = require('./GenerateToken.js');
+const { toYyyyMmDd, getYesterdayMetricDateUtc } = require('../../utils/metricDateKey.js');
+const { resolveReportDateRange } = require('../../utils/reportDateRange.js');
+
+/** Search-term report → `SearchTerms` per-day upsert; merged reads power zero-sales + auto-campaign insights tabs. */
 
 // Base URIs for different regions
 const BASE_URIS = {
@@ -12,9 +16,13 @@ const BASE_URIS = {
     'FE': 'https://advertising-api-fe.amazon.com'
 };
 
-async function getReportId(accessToken, profileId, region, tokenRefreshCallback = null) {
+async function getReportId(accessToken, profileId, region, tokenRefreshCallback = null, startDate, endDate) {
     let currentAccessToken = accessToken;
     let hasRetried = false;
+
+    if (!startDate || !endDate) {
+        throw new Error('getReportId requires startDate and endDate (YYYY-MM-DD).');
+    }
 
     while (true) {
         try {
@@ -35,15 +43,6 @@ async function getReportId(accessToken, profileId, region, tokenRefreshCallback 
                 'Content-Type': 'application/vnd.createasyncreportrequest.v3+json'
             };
 
-            // Calculate dynamic dates (UTC-based, matching Expences.js: yesterday − 30 days → yesterday)
-            const now = new Date();
-            const endDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
-            const startDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1 - 30));
-
-            const formatDate = (date) => {
-                return date.toISOString().split('T')[0];
-            };
-
             // Generate unique report name to prevent duplicate requests
             const timestamp = Date.now();
             const uniqueReportName = `Search Terms With Zero Sales - ${timestamp}`;
@@ -51,8 +50,8 @@ async function getReportId(accessToken, profileId, region, tokenRefreshCallback 
             // Set up request body for ASIN/SKU level data
             const body = {
                 "name": uniqueReportName,
-                "startDate": formatDate(startDate),
-                "endDate": formatDate(endDate),
+                "startDate": startDate,
+                "endDate": endDate,
                 "configuration": {
                     "adProduct": "SPONSORED_PRODUCTS",
                     "reportTypeId": "spSearchTerm",
@@ -67,9 +66,12 @@ async function getReportId(accessToken, profileId, region, tokenRefreshCallback 
                         "adGroupName",
                         "searchTerm",
                         "keyword",
+                        "impressions",
                         "clicks",
-                        "sales30d",
-                        "cost"
+                        "cost",
+                        "sales7d",
+                        "purchases7d",
+                        "unitsSoldClicks7d"
                     ]
                 }
             }
@@ -297,7 +299,7 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
                         searchTerm: item.searchTerm || '',
                         keyword: item.keyword || '',
                         clicks: item.clicks || 0,
-                        sales: item.sales30d || 0,
+                        sales: item.sales7d || 0,
                         spend: item.cost || 0,
                         impressions: item.impressions || 0
                     });
@@ -344,8 +346,13 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
     }
 }
 
-async function getSearchKeywords(accessToken, profileId, userId, country, region, refreshToken = null) {
+// `options.startDate` / `options.endDate` (YYYY-MM-DD) override the default
+// "yesterday-30 … yesterday" Pacific window. Per-day storage still keys on each
+// `row.date` returned by Amazon, so requesting a narrower window only narrows
+// the rows we ingest.
+async function getSearchKeywords(accessToken, profileId, userId, country, region, refreshToken = null, options = {}) {
     try {
+        const { startDate, endDate, isCustom } = resolveReportDateRange(options);
         // ===== INPUT VALIDATION =====
         if (!accessToken) {
             throw new Error('Access token is required');
@@ -372,7 +379,7 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
             throw new Error(`Invalid region: ${region}. Valid regions are: ${Object.keys(BASE_URIS).join(', ')}`);
         }
 
-        console.log(`📡 Getting search keywords for region: ${region}, country: ${country}, userId: ${userId}`);
+        console.log(`📡 Getting search keywords for region: ${region}, country: ${country}, userId: ${userId}, startDate: ${startDate}, endDate: ${endDate}, customDateRange: ${isCustom}`);
 
         // Add a small delay to prevent rapid successive requests
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -395,7 +402,7 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
         } : null;
 
         // Get the report ID first (with token refresh support)
-        const reportData = await getReportId(accessToken, profileId, region, tokenRefreshCallback);
+        const reportData = await getReportId(accessToken, profileId, region, tokenRefreshCallback, startDate, endDate);
 
         if (!reportData || !reportData.reportId) {
             throw new Error('Failed to get report ID');
@@ -422,55 +429,46 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
             if (!reportContent || reportContent.length === 0) {
                 console.warn('No search terms data available for the specified period', { userId, region, country });
 
-                // Save empty result for consistency
-                const createSearchTermsData = await SearchTerms.create({
-                    userId: userId,
-                    country: country,
-                    region: region,
-                    searchTermsData: []
-                });
+                const snapshotDay = getYesterdayMetricDateUtc();
+                await SearchTerms.upsertSearchTermsForDate(userId, country, region, snapshotDay, []);
 
+                const merged = await SearchTerms.findMergedSearchTermData(userId, country, region, {});
                 return {
                     success: true,
                     message: "No search terms data available for the specified period",
-                    data: createSearchTermsData
+                    data: {
+                        userId,
+                        country,
+                        region,
+                        searchTermData: merged
+                    }
                 };
             }
 
             try {
-                const createSearchTermsData = await SearchTerms.create({
-                    userId: userId,
-                    country: country,
-                    region: region,
-                    searchTermData: reportContent
-                });
-
-                if (!createSearchTermsData) {
-                    console.warn('Failed to save search terms data to database, but continuing with API data', {
-                        userId,
-                        region,
-                        country,
-                        dataLength: reportContent.length
-                    });
-
-                    return {
-                        success: true,
-                        message: "Search terms data retrieved but not saved to database",
-                        data: {
-                            userId,
-                            country,
-                            region,
-                            searchTermsData: reportContent,
-                            _isTemporary: true
-                        }
-                    };
+                const byDay = new Map();
+                for (const row of reportContent) {
+                    const day = toYyyyMmDd(row.date) || (row.date ? String(row.date).substring(0, 10) : null);
+                    if (!day) continue;
+                    if (!byDay.has(day)) byDay.set(day, []);
+                    byDay.get(day).push(row);
                 }
 
-                console.log(`✅ Search terms data saved successfully: ${reportContent.length} search terms stored`);
+                for (const [metricDate, rows] of byDay) {
+                    await SearchTerms.upsertSearchTermsForDate(userId, country, region, metricDate, rows);
+                }
+
+                const merged = await SearchTerms.findMergedSearchTermData(userId, country, region, {});
+                console.log(`✅ Search terms saved per day (${byDay.size} day(s)); merged rows: ${merged.length}`);
                 return {
                     success: true,
                     message: "Search terms data fetched and saved successfully",
-                    data: createSearchTermsData
+                    data: {
+                        userId,
+                        country,
+                        region,
+                        searchTermData: merged
+                    }
                 };
 
             } catch (dbError) {
@@ -482,7 +480,6 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
                     dataLength: reportContent.length
                 });
 
-                // Return the data anyway, even if DB save failed
                 return {
                     success: true,
                     message: "Search terms data retrieved but database save failed",
@@ -490,7 +487,7 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
                         userId,
                         country,
                         region,
-                        searchTermsData: reportContent,
+                        searchTermData: reportContent,
                         _isTemporary: true,
                         _dbError: dbError.message
                     }

@@ -151,10 +151,8 @@ async function fetchSalesAndTrafficByDate(refreshToken, region, country, startDa
 /**
  * Calculate sales metrics from JSONL document
  * 
- * IMPORTANT: To ensure consistency between totalSales and datewiseSales,
- * we first build the datewiseSales array with rounded values, then calculate
- * totalSales by summing those rounded values. This guarantees that:
- * sum(datewiseSales) === totalSales (no rounding discrepancies)
+ * Stores raw sales amounts without rounding to preserve precision.
+ * Rounding is only applied at display time, not at storage time.
  * 
  * @param {string} documentContent - JSONL document content
  * @param {string} startDate - Start date
@@ -173,7 +171,7 @@ function calculateSalesMetrics(documentContent, startDate, endDate, marketplace)
     let currencyCode = 'USD';
     const datewiseSales = [];
 
-    // First pass: Build datewiseSales array with rounded values
+    // Build datewiseSales array with raw values (no rounding)
     data.forEach(item => {
         const orderedSales = parseFloat(item.sales?.orderedProductSales?.amount || 0);
         const unitsOrdered = parseFloat(item.sales?.unitsOrdered || 0);
@@ -185,12 +183,11 @@ function calculateSalesMetrics(documentContent, startDate, endDate, marketplace)
 
         totalUnitsOrdered += unitsOrdered;
 
-        // Add datewise entry with rounded sales amount
-        const roundedSalesAmount = parseFloat(orderedSales.toFixed(2));
+        // Add datewise entry with raw sales amount (no rounding)
         datewiseSales.push({
             date: item.startDate,
             sales: {
-                amount: roundedSalesAmount,
+                amount: orderedSales,
                 currencyCode: currencyCode
             },
             unitsOrdered: unitsOrdered,
@@ -204,8 +201,7 @@ function calculateSalesMetrics(documentContent, startDate, endDate, marketplace)
     // Sort by date
     datewiseSales.sort((a, b) => a.date.localeCompare(b.date));
 
-    // CRITICAL: Calculate totalSales by summing the rounded datewiseSales amounts
-    // This ensures totalSales === sum(datewiseSales) with no discrepancy
+    // Calculate totalSales by summing the raw datewiseSales amounts
     const totalSales = datewiseSales.reduce((sum, item) => sum + item.sales.amount, 0);
 
     return {
@@ -215,7 +211,7 @@ function calculateSalesMetrics(documentContent, startDate, endDate, marketplace)
         },
         marketplace,
         totalSales: {
-            amount: parseFloat(totalSales.toFixed(2)),
+            amount: totalSales,
             currencyCode
         },
         totalUnitsOrdered,

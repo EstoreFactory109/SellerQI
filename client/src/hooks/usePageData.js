@@ -396,7 +396,9 @@ export const useProfitabilitySummary = (autoFetch = true) => {
  * All phases are fetched simultaneously on mount. Each component renders
  * as soon as its data arrives - no waiting for other phases.
  */
-export const usePhasedProfitabilityData = (autoFetch = true) => {
+export const usePhasedProfitabilityData = (options = true) => {
+    const autoFetch = typeof options === 'boolean' ? options : options?.autoFetch !== false;
+    const skipIssuesAutoFetch = typeof options === 'object' && options.skipIssuesAutoFetch === true;
     const dispatch = useDispatch();
     
     // Get all 4 phase states
@@ -435,13 +437,13 @@ export const usePhasedProfitabilityData = (autoFetch = true) => {
         const needsMetrics = !isMetricsFresh && !metricsState.loading;
         const needsChart = !isChartFresh && !chartState.loading;
         const needsTable = !isTableFresh && !tableState.loading;
-        const needsIssues = !isIssuesFresh && !issuesState.loading;
+        const needsIssues = !skipIssuesAutoFetch && !isIssuesFresh && !issuesState.loading;
         
         // Prevent duplicate fetches within same render cycle
         if (!hasFetchedRef.current && (needsMetrics || needsChart || needsTable || needsIssues)) {
             hasFetchedRef.current = true;
             
-            // Fire all requests simultaneously - each renders when ready
+            // Metrics first — returns dateRange for finance-dashboard (no main dashboard needed)
             if (needsMetrics) dispatch(fetchProfitabilityMetrics());
             if (needsChart) dispatch(fetchProfitabilityChart());
             if (needsTable) dispatch(fetchProfitabilityTable({ page: 1, limit: 10 }));
@@ -492,22 +494,40 @@ export const usePhasedProfitabilityData = (autoFetch = true) => {
         }
     }, [dispatch, tableState.loading]);
     
+    // Track the last date range used for issues so pagination stays in the same window
+    const issuesDateRangeRef = useRef({ startDate: null, endDate: null });
+
     // Fetch next page of issues data
     const fetchNextIssuesPage = useCallback(() => {
         const currentPage = issuesState.pagination?.page || 1;
         const hasMore = issuesState.pagination?.hasMore ?? true;
         
         if (hasMore && !issuesState.loading) {
-            dispatch(fetchProfitabilityIssues({ page: currentPage + 1, limit: 10 }));
+            dispatch(fetchProfitabilityIssues({
+                page: currentPage + 1,
+                limit: 10,
+                startDate: issuesDateRangeRef.current.startDate,
+                endDate: issuesDateRangeRef.current.endDate,
+            }));
         }
     }, [dispatch, issuesState.pagination, issuesState.loading]);
     
     // Fetch specific issues page
     const fetchIssuesPage = useCallback((page, limit = 10) => {
         if (!issuesState.loading) {
-            dispatch(fetchProfitabilityIssues({ page, limit }));
+            dispatch(fetchProfitabilityIssues({
+                page,
+                limit,
+                startDate: issuesDateRangeRef.current.startDate,
+                endDate: issuesDateRangeRef.current.endDate,
+            }));
         }
     }, [dispatch, issuesState.loading]);
+
+    // Allow the parent component to set the date range for issues
+    const setIssuesDateRange = useCallback((startDate, endDate) => {
+        issuesDateRangeRef.current = { startDate, endDate };
+    }, []);
     
     return {
         // Metrics data (Phase 1 - KPI boxes)
@@ -550,6 +570,7 @@ export const usePhasedProfitabilityData = (autoFetch = true) => {
         fetchPage,
         fetchNextIssuesPage,
         fetchIssuesPage,
+        setIssuesDateRange,
         
         // Pagination helpers (table)
         hasMore: tableState.pagination?.hasMore ?? false,

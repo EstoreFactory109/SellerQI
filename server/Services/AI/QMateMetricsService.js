@@ -31,7 +31,7 @@ const OrderAndRevenue = require('../../models/products/OrderAndRevenueModel.js')
 const adsKeywordsPerformance = require('../../models/amazon-ads/adsKeywordsPerformanceModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const ExpenseReadService = require('../Finance/ExpenseReadService.js');
-const { buildExpenseReportResponseFromDB } = require('../Sp_API/ExpenseReportService.js');
+const { buildExpenseReportResponseFromDB } = require('../Sp_API/FinanceService.js');
 const { pickSnapshotFeeTotalsForCalendar } = require('../../utils/expenseSnapshotCalendar.js');
 const mongoose = require('mongoose');
 
@@ -218,10 +218,14 @@ async function getFinancialSummary(userId, country, region) {
         
         // Get latest EconomicsMetrics and PPCMetrics documents in parallel
         // Dashboard uses PPCMetrics as primary source for PPC spend
-        const [economicsMetrics, ppcMetrics] = await Promise.all([
+        const [economicsMetrics, ppcRollupFin] = await Promise.all([
             EconomicsMetrics.findLatest(userObjectId, region, country),
-            PPCMetrics.findLatestForUser(userIdStr, country, region)
+            PPCMetrics.rollupLastDays(userIdStr, country, region, 30)
         ]);
+        const ppcMetrics =
+            ppcRollupFin && ppcRollupFin.found && ppcRollupFin.summary
+                ? { summary: ppcRollupFin.summary }
+                : null;
         
         if (!economicsMetrics) {
             logger.warn('[QMateMetricsService] No economics metrics found', {
@@ -384,10 +388,9 @@ async function getPPCMetrics(userId, country, region) {
     try {
         const userIdStr = userId?.toString() || userId;
         
-        // Get latest PPCMetrics document
-        const ppcMetrics = await PPCMetrics.findLatestForUser(userIdStr, country, region);
-        
-        if (!ppcMetrics) {
+        const rollup = await PPCMetrics.rollupLastDays(userIdStr, country, region, 30);
+
+        if (!rollup || !rollup.found) {
             logger.warn('[QMateMetricsService] No PPC metrics found', {
                 userId,
                 country,
@@ -404,22 +407,22 @@ async function getPPCMetrics(userId, country, region) {
         }
         
         const summary = {
-            dateRange: ppcMetrics.dateRange,
-            totalSpend: ppcMetrics.summary?.totalSpend || 0,
-            totalSales: ppcMetrics.summary?.totalSales || 0,
-            totalImpressions: ppcMetrics.summary?.totalImpressions || 0,
-            totalClicks: ppcMetrics.summary?.totalClicks || 0,
-            overallAcos: ppcMetrics.summary?.overallAcos || 0,
-            overallRoas: ppcMetrics.summary?.overallRoas || 0,
-            ctr: ppcMetrics.summary?.ctr || 0,
-            cpc: ppcMetrics.summary?.cpc || 0,
+            dateRange: rollup.dateRange,
+            totalSpend: rollup.summary?.totalSpend || 0,
+            totalSales: rollup.summary?.totalSales || 0,
+            totalImpressions: rollup.summary?.totalImpressions || 0,
+            totalClicks: rollup.summary?.totalClicks || 0,
+            overallAcos: rollup.summary?.overallAcos || 0,
+            overallRoas: rollup.summary?.overallRoas || 0,
+            ctr: rollup.summary?.ctr || 0,
+            cpc: rollup.summary?.cpc || 0,
             campaignTypeBreakdown: {
-                sponsoredProducts: ppcMetrics.campaignTypeBreakdown?.sponsoredProducts || null,
-                sponsoredBrands: ppcMetrics.campaignTypeBreakdown?.sponsoredBrands || null,
-                sponsoredDisplay: ppcMetrics.campaignTypeBreakdown?.sponsoredDisplay || null
+                sponsoredProducts: null,
+                sponsoredBrands: null,
+                sponsoredDisplay: null
             },
-            dateWiseMetrics: (ppcMetrics.dateWiseMetrics || []).slice(-30), // Last 30 days
-            lastUpdated: ppcMetrics.updatedAt
+            dateWiseMetrics: rollup.dateWiseMetrics || [],
+            lastUpdated: new Date().toISOString()
         };
         
         // Calculate TACOS if we have total sales data
@@ -1062,10 +1065,13 @@ async function getMoneyWastedInAds(userId, country, region, options = {}) {
             ? new mongoose.Types.ObjectId(userId) 
             : userId;
         
-        const adsData = await adsKeywordsPerformance.findOne({ userId: userObjectId, country, region })
-            .sort({ createdAt: -1 }).lean();
-        
-        if (!adsData || !adsData.keywordsData) {
+        let keywordsData = await adsKeywordsPerformance.findMergedKeywordsData(userObjectId, country, region, {
+            startDate,
+            endDate
+        });
+        keywordsData = keywordsData || [];
+
+        if (keywordsData.length === 0) {
             return {
                 success: false,
                 source: 'none',
@@ -1073,11 +1079,10 @@ async function getMoneyWastedInAds(userId, country, region, options = {}) {
                 data: null
             };
         }
-        
-        let keywordsData = adsData.keywordsData;
-        
-        // Apply date filtering if date range is provided (matches Dashboard.jsx behavior)
+
+        // Apply date filtering if date range is provided (legacy rows may lack metricDate docs)
         const shouldFilterByDate = startDate && endDate;
+        const countBeforeRowFilter = keywordsData.length;
         if (shouldFilterByDate) {
             const parseLocalDate = (dateString) => {
                 const [year, month, day] = dateString.split('-').map(Number);
@@ -1097,7 +1102,7 @@ async function getMoneyWastedInAds(userId, country, region, options = {}) {
             
             logger.info('[QMateMetricsService] Filtered keywords by date range', {
                 startDate, endDate,
-                originalCount: adsData.keywordsData.length,
+                originalCount: countBeforeRowFilter,
                 filteredCount: keywordsData.length
             });
         }
@@ -1341,9 +1346,8 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
         // Sales-only fast path: build a minimal metrics context without relying
         // on grossProfit/fees/refunds. This keeps QMate functional even when
         // `EconomicsMetrics` persistence is disabled.
-        const salesOnlyMetrics = await SalesOnlyMetrics.findLatest(userObjectId, region, country)
-            .select('totalSales datewiseSales dateRange')
-            .lean();
+        // Per-day model: findLatest aggregates recent 31 days into { totalSales, datewiseSales, dateRange }
+        const salesOnlyMetrics = await SalesOnlyMetrics.findLatest(userObjectId, region, country);
 
         if (salesOnlyMetrics) {
             const currencyCode = salesOnlyMetrics?.totalSales?.currencyCode || 'USD';
@@ -1383,21 +1387,13 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
             let totalSales = filteredSales.reduce((sum, item) => sum + (item.sales?.amount || 0), 0);
             totalSales = parseFloat(totalSales.toFixed(2));
 
-            // PPC spend for the same date window (KPI)
-            const ppcMetrics = await PPCMetrics.findLatestForUser(userIdStr, country, region);
+            // PPC spend for the same date window (KPI) — per-day docs rolled up for range or last ~30d
+            const ppcRollupKpi =
+                shouldFilterByDate && startDate && endDate
+                    ? await PPCMetrics.calculateMetricsForDateRange(userIdStr, country, region, startDate, endDate)
+                    : await PPCMetrics.rollupLastDays(userIdStr, country, region, 30);
+            const ppcMetrics = ppcRollupKpi?.found ? ppcRollupKpi : null;
             let ppcSpend = ppcMetrics?.summary?.totalSpend || 0;
-            if (shouldFilterByDate && Array.isArray(ppcMetrics?.dateWiseMetrics)) {
-                const filterStart = new Date(startDate);
-                filterStart.setHours(0, 0, 0, 0);
-                const filterEnd = new Date(endDate);
-                filterEnd.setHours(23, 59, 59, 999);
-                ppcSpend = ppcMetrics.dateWiseMetrics
-                    .filter(item => {
-                        const d = new Date(item.date);
-                        return d >= filterStart && d <= filterEnd;
-                    })
-                    .reduce((sum, item) => sum + (item.spend || 0), 0);
-            }
             ppcSpend = parseFloat(ppcSpend.toFixed(2));
 
             // Build chart data with grossProfit forced to 0.
@@ -1411,23 +1407,11 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
 
             // PPC datewise used by `ppc_datewise` charts in QMateService.
             const datewisePPCForCharts = Array.isArray(ppcMetrics?.dateWiseMetrics)
-                ? (shouldFilterByDate
-                    ? ppcMetrics.dateWiseMetrics.filter(item => {
-                        const d = new Date(item.date);
-                        const filterStart = new Date(startDate);
-                        filterStart.setHours(0, 0, 0, 0);
-                        const filterEnd = new Date(endDate);
-                        filterEnd.setHours(23, 59, 59, 999);
-                        return d >= filterStart && d <= filterEnd;
-                    })
-                    : ppcMetrics.dateWiseMetrics
-                )
-                    .slice(-30)
-                    .map(item => ({
-                        date: item.date,
-                        totalCost: item.spend || 0,
-                        sales: item.sales || 0,
-                    }))
+                ? ppcMetrics.dateWiseMetrics.slice(-30).map(item => ({
+                      date: item.date,
+                      totalCost: item.spend || 0,
+                      sales: item.sales || 0
+                  }))
                 : [];
 
             const context = {
@@ -1478,7 +1462,7 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
         // Fetch all data in parallel for performance
         const [
             economicsMetrics, 
-            ppcMetrics, 
+            ppcRollupParallel, 
             issueSummary, 
             cogsDoc,
             buyBoxResult,
@@ -1489,7 +1473,7 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
             amazonReadyResult
         ] = await Promise.all([
             EconomicsMetrics.findLatest(userObjectId, region, country),
-            PPCMetrics.findLatestForUser(userIdStr, country, region),
+            PPCMetrics.rollupLastDays(userIdStr, country, region, 30),
             IssueSummary.getIssueSummary(userObjectId, country, region),
             CogsModel.findOne({ User: userObjectId, country }).lean().catch(() => null),
             getBuyBoxData(userId, country, region).catch(() => ({ success: false })),
@@ -1499,6 +1483,15 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
             getTopErrorProducts(userId, country, region, 10).catch(() => ({ success: false })),
             getAmazonReadyProducts(userId, country, region).catch(() => ({ success: false }))
         ]);
+
+        const ppcMetrics =
+            ppcRollupParallel && ppcRollupParallel.found
+                ? {
+                      summary: ppcRollupParallel.summary,
+                      dateWiseMetrics: ppcRollupParallel.dateWiseMetrics || [],
+                      dateRange: ppcRollupParallel.dateRange
+                  }
+                : null;
         
         // Build context object
         const context = {

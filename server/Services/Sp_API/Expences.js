@@ -5,6 +5,26 @@ const logger = require("../../utils/Logger.js");
 const { URIs, marketplaceConfig: sharedMarketplaceConfig } = require("../../controllers/config/config.js");
 const { getDefaultExpenseFinanceDaysBack } = require("../../config/expenseFinanceDaysBack.js");
 
+// ═════════════════════════════════════════════════════════════════════════════
+// MIGRATED TO FINANCES API v2024-06-19
+//
+// Endpoint:  GET /finances/2024-06-19/transactions
+// Reference: https://developer-docs.amazon.com/sp-api/docs/finances-api-v2024-06-19-reference
+// Model:     https://github.com/amzn/selling-partner-api-models/blob/main/models/finances-api-model/finances_2024-06-19.json
+//
+// Key changes from v0:
+//   1. Endpoint changed from /finances/v0/financialEvents
+//   2. Response is a flat transactions[] array (not 34 nested event lists)
+//   3. Pagination param: NextToken → nextToken
+//   4. Date params: PostedAfter/PostedBefore → postedAfter/postedBefore (camelCase)
+//   5. NEW: marketplaceId query param to filter by specific marketplace
+//      (solves the multi-marketplace mixing problem in v0)
+//   6. SKU/ASIN now in items[].contexts[].ProductContext (not item.SellerSKU)
+//   7. Fees categorized by breakdowns[].breakdownType strings
+//      (not the v0 FeeType enum)
+//   8. Rate limit: 0.5 req/sec, burst 10 (was 0.5/30 in v0)
+// ═════════════════════════════════════════════════════════════════════════════
+
 // ─────────────────────────────────────────────
 // 1. COUNTRY -> INTERNAL REGION CONFIG
 // ─────────────────────────────────────────────
@@ -114,50 +134,90 @@ async function getAccessToken(clientId, clientSecret, refreshToken) {
   return res.body.access_token;
 }
 
-// ─────────────────────────────────────────────
-// 5. FINANCE API — FETCH FINANCIAL EVENTS
-// ─────────────────────────────────────────────
-async function fetchFinancialEvents(accessToken, baseUrl, postedAfter, postedBefore) {
-  const allEvents = {};
+// ═════════════════════════════════════════════════════════════════════════════
+// 5. FINANCE API v2024-06-19 — FETCH TRANSACTIONS
+//
+// Endpoint: GET /finances/2024-06-19/transactions
+// Rate limit: 0.5 req/sec, burst 10
+//
+// Query params:
+//   postedAfter            — ISO 8601 date-time (required if no relatedIdentifier)
+//   postedBefore           — ISO 8601 date-time (default: 2 min before now)
+//   marketplaceId          — Filter by specific marketplace ★ NEW
+//   transactionStatus      — RELEASED | DEFERRED | DEFERRED_RELEASED
+//   relatedIdentifierName  — ORDER_ID | FINANCIAL_EVENT_GROUP_ID
+//   relatedIdentifierValue — Corresponding value
+//   nextToken              — For pagination
+//
+// NOTE: postedAfter and postedBefore must be > 2 minutes before request time.
+//       If they're more than 180 days apart, response is empty.
+// ═════════════════════════════════════════════════════════════════════════════
+async function fetchTransactions(accessToken, baseUrl, postedAfter, postedBefore, marketplaceId) {
+  const allTransactions = [];
   let nextToken = null;
   let pageCount = 0;
   const MAX_RETRIES = 5;
+
   do {
     let path;
     if (nextToken) {
-      path = `/finances/v0/financialEvents?NextToken=${encodeURIComponent(nextToken)}`;
+      // For pagination: include same arguments as the call that produced the token
+      const params = new URLSearchParams({ nextToken });
+      path = `/finances/2024-06-19/transactions?${params.toString()}`;
     } else {
-      const params = new URLSearchParams({ PostedAfter: postedAfter, MaxResultsPerPage: "100" });
-      if (postedBefore) params.set("PostedBefore", postedBefore);
-      path = `/finances/v0/financialEvents?${params.toString()}`;
+      const params = new URLSearchParams({ postedAfter });
+      if (postedBefore) params.set("postedBefore", postedBefore);
+      if (marketplaceId) params.set("marketplaceId", marketplaceId);
+      path = `/finances/2024-06-19/transactions?${params.toString()}`;
     }
+
     let res;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      res = await httpsRequest({ hostname: baseUrl, path, method: "GET", headers: { "x-amz-access-token": accessToken } });
-      const isThrottled = res.statusCode === 429 || (Array.isArray(res.body.errors) && res.body.errors.some((e) => e.code === "QuotaExceeded"));
+      res = await httpsRequest({
+        hostname: baseUrl,
+        path,
+        method: "GET",
+        headers: { "x-amz-access-token": accessToken },
+      });
+
+      const isThrottled =
+        res.statusCode === 429 ||
+        (Array.isArray(res.body.errors) && res.body.errors.some((e) => e.code === "QuotaExceeded"));
+
       if (isThrottled && attempt < MAX_RETRIES) {
         const delayMs = Math.min(10000 * Math.pow(2, attempt), 60000);
-        logger.warn(`[Finance API] Throttled on page ${pageCount + 1}, attempt ${attempt + 1}/${MAX_RETRIES}. Retrying in ${delayMs / 1000}s...`);
+        logger.warn(
+          `[Finance API v2024-06-19] Throttled on page ${pageCount + 1}, attempt ${attempt + 1}/${MAX_RETRIES}. Retrying in ${delayMs / 1000}s...`
+        );
         await new Promise((r) => setTimeout(r, delayMs));
         continue;
       }
       break;
     }
-    if (res.body.errors) throw new Error(`Finance API failed: ${JSON.stringify(res.body.errors)}`);
-    const payload = res.body.payload || {};
-    const events = payload.FinancialEvents || {};
-    for (const [key, val] of Object.entries(events)) {
-      if (Array.isArray(val)) { if (!allEvents[key]) allEvents[key] = []; allEvents[key].push(...val); }
+
+    if (res.body.errors) {
+      throw new Error(`Finance API v2024-06-19 failed: ${JSON.stringify(res.body.errors)}`);
     }
-    nextToken = payload.NextToken || null;
+
+    const payload = res.body.payload || {};
+    const transactions = payload.transactions || [];
+    allTransactions.push(...transactions);
+
+    nextToken = payload.nextToken || null;
     pageCount++;
-    logger.info(`[Finance API] Page ${pageCount}: fetched events. NextToken: ${nextToken ? "yes" : "no"}`);
+    logger.info(
+      `[Finance API v2024-06-19] Page ${pageCount}: fetched ${transactions.length} transactions. nextToken: ${nextToken ? "yes" : "no"}`
+    );
   } while (nextToken);
-  return allEvents;
+
+  logger.info(`[Finance API v2024-06-19] Total transactions: ${allTransactions.length}`);
+  return allTransactions;
 }
 
 // ─────────────────────────────────────────────
 // 6. AMAZON FEE CLASSIFICATION
+//    Maps v2024-06-19 breakdownType strings to our internal categories.
+//    The new API uses descriptive strings (not v0's FeeType enum).
 // ─────────────────────────────────────────────
 const AMAZON_FEE_CATEGORIES = new Set([
   "Referral Commission", "Closing Fee", "FBA Fulfillment Fee",
@@ -171,391 +231,594 @@ const AMAZON_FEE_CATEGORIES = new Set([
 
 function isAmazonFee(category) { return AMAZON_FEE_CATEGORIES.has(category); }
 
-function mapFeeTypeToCategory(feeType) {
-  switch (feeType) {
-    case "Commission": case "RefundCommission": return "Referral Commission";
-    case "FBAPerUnitFulfillmentFee": case "FBAWeightBasedFee": return "FBA Fulfillment Fee";
-    case "FixedClosingFee": case "VariableClosingFee": return "Closing Fee";
-    case "ShippingChargeback": case "ShippingHB": return "Shipping Chargeback";
-    case "EasyShipCharge": return "Shipping / Easy Ship Fee";
-    case "TechnologyFee": return "Technology Fee";
-    case "FBAStorageFee": return "FBA Storage Fee";
-    case "FBAInboundTransportationFee": return "FBA Inbound Transportation Fee";
-    case "FBARemovalFee": return "FBA Removal Fee";
-    case "Subscription": return "Subscription Fee";
-    case "GiftwrapChargeback": return "Other Fee";
-    default: return feeType || "Other Fee";
+/**
+ * Map a v2024-06-19 breakdown to our internal expense category, using the
+ * full path through the breakdown tree.
+ *
+ * The real v2024-06-19 structure (verified with live India seller data) is:
+ *
+ *   ProductCharges
+ *     OurPricePrincipal       ← REVENUE (product price)
+ *   Tax
+ *     OurPriceTax             ← Tax collected from buyer
+ *     OurPriceTaxDiscount     ← Tax discount
+ *     ShippingTax             ← Shipping tax collected
+ *     ShippingTaxDiscount     ← Shipping tax discount
+ *   Shipping
+ *     ShippingPrincipal       ← Shipping revenue
+ *   PromoRebates
+ *     OurPriceDiscount        ← Discount given to customer
+ *     ShippingDiscount        ← Shipping discount given
+ *   AmazonFees
+ *     Commission > Base       ← Referral commission base
+ *     Commission > Promo      ← Commission on promo amount
+ *     FBAPerUnitFulfillmentFee > Base / Tax
+ *     FBAWeightBasedFee       > Base / Tax
+ *     FixedClosingFee         > Base / Tax
+ *     VariableClosingFee      > Base / Tax
+ *     TechnologyFee           > Base / Tax
+ *     ShippingChargeback      > Base / Tax
+ *     FBARemovalFee           > Base / Tax
+ *     FBAInboundTransportationFee > Base / Tax
+ *     RefundCommission        > Base / Tax
+ *   TaxWithholding
+ *     ItemTDS                 ← TDS deducted (India)
+ *   TaxCollectedAtSource
+ *     TCS-IGST / TCS-CGST / TCS-SGST  ← TCS collected (India)
+ *
+ * Returns the category. The single breakdownType (leaf) is also accepted
+ * for backward compat, in which case we use heuristics on the leaf alone.
+ */
+function categorizeBreakdownByPath(path) {
+  if (!Array.isArray(path) || path.length === 0) return "Other Fee";
+  const fullPath = path.join(">");
+  const leaf = path[path.length - 1];
+  const parent = path.length >= 2 ? path[path.length - 2] : "";
+  const grandparent = path.length >= 3 ? path[path.length - 3] : "";
+
+  // ── REVENUE leaves (Principal-like) ──
+  if (leaf === "OurPricePrincipal" || leaf === "Principal" || leaf === "Principle") {
+    return "Product Sales";
   }
+  if (leaf === "ShippingPrincipal") return "Shipping Revenue";
+  if (leaf === "GiftwrapPrincipal" || leaf === "GiftWrapPrincipal") return "Gift Wrap Revenue";
+  // ★ FBA Inventory Reimbursement — Amazon paying you back for lost/damaged inventory
+  if (leaf === "FBAInventoryReimbursement") return "FBA Inventory Reimbursement";
+  // ★ Refund of an FBA fee (Amazon returning a fee they overcharged)
+  if (leaf === "FulfillmentFeeRefund") return "Fulfillment Fee Refund";
+  // ★ Generic reimbursement (catches Sales>Reimbursements rollup)
+  if (leaf === "Reimbursements") return "Reimbursement";
+  // ★ Seller reward (Amazon promotional credit / incentive)
+  if (leaf === "SellerReward") return "Seller Reward";
+  // ★ SERRAC reimbursement (Seller Reimbursement Access program — adjustments)
+  if (leaf === "SERRACReimbursement") return "SERRAC Reimbursement";
+  // ★ Disbursement / fund transfer (payout from Amazon to seller's bank)
+  if (leaf === "FundTransfer") return "Disbursement";
+
+  // ── TAX collected (passes through to gov't) ──
+  if (leaf === "OurPriceTax") return "Sales Tax Collected";
+  if (leaf === "ShippingTax") return "Shipping Tax Collected";
+  if (leaf === "GiftwrapTax" || leaf === "GiftWrapTax") return "Gift Wrap Tax Collected";
+
+  // ── MARKETPLACE FACILITATOR TAX (US — Amazon collects & remits to state) ──
+  // These appear as negative amounts that offset the positive Sales Tax Collected.
+  // Net effect is $0 on seller's P&L — it's a pass-through.
+  // MarketplaceFacilitatorTax-Principal offsets OurPriceTax (product tax)
+  // MarketplaceFacilitatorTax-Shipping offsets ShippingTax (shipping tax)
+  // MarketplaceFacilitatorTax-Other offsets other tax types
+  if (/^MarketplaceFacilitatorTax/i.test(leaf) || /marketplace.facilitator/i.test(leaf)) {
+    return "Marketplace Facilitator Tax";
+  }
+
+  // ── DISCOUNTS / PROMOS ──
+  if (leaf === "OurPriceDiscount") return "Promotions / Discounts";
+  if (leaf === "ShippingDiscount") return "Shipping Discount";
+  if (leaf === "OurPriceTaxDiscount") return "Tax Discount";
+  if (leaf === "ShippingTaxDiscount") return "Shipping Tax Discount";
+
+  // ── TAX WITHHELD (India: TDS / TCS) ──
+  if (leaf === "ItemTDS" || /tds/i.test(leaf) || /TaxWithholding/i.test(parent) ||
+      /tax.deducted.at.source/i.test(leaf) || leaf === "TaxDeductedAtSource") {
+    return "TDS (Tax Deducted at Source)";
+  }
+  if (/^TCS[-_]/i.test(leaf) || leaf === "TCS" || /TaxCollectedAtSource/i.test(parent) ||
+      /tax.collected.at.source/i.test(leaf) || leaf === "TaxCollectedAtSource") {
+    return "TCS (Tax Collected at Source)";
+  }
+
+  // ── AMAZON FEES (path = AmazonFees > <FeeType> > Base|Tax|Promo) ──
+  if (parent === "Commission" || grandparent === "Commission" || /^Commission$/i.test(leaf)) {
+    return "Referral Commission";
+  }
+  if (parent === "RefundCommission" || grandparent === "RefundCommission" || /refund.commission/i.test(leaf)) {
+    return "Refund Commission";
+  }
+  if (parent === "FBAPerUnitFulfillmentFee" || grandparent === "FBAPerUnitFulfillmentFee" ||
+      parent === "FBAWeightBasedFee" || grandparent === "FBAWeightBasedFee" ||
+      /fba.*fulfillment/i.test(leaf) || /fba.*weight/i.test(leaf) ||
+      leaf === "FBA Fees" || leaf === "FBAFees") {
+    return "FBA Fulfillment Fee";
+  }
+  if (parent === "FixedClosingFee" || grandparent === "FixedClosingFee" ||
+      parent === "VariableClosingFee" || grandparent === "VariableClosingFee" ||
+      /closing.fee/i.test(leaf)) {
+    return "Closing Fee";
+  }
+  if (parent === "TechnologyFee" || grandparent === "TechnologyFee" || /technology.fee/i.test(leaf)) {
+    return "Technology Fee";
+  }
+  if (parent === "ShippingChargeback" || grandparent === "ShippingChargeback" ||
+      /shipping.chargeback/i.test(leaf) || leaf === "ShippingHB") {
+    return "Shipping Chargeback";
+  }
+  // ★ Gift wrap chargeback (fee Amazon charges seller for gift wrap service)
+  if (parent === "GiftwrapChargeback" || grandparent === "GiftwrapChargeback" ||
+      parent === "GiftWrapChargeback" || grandparent === "GiftWrapChargeback" ||
+      /giftwrap.chargeback/i.test(leaf)) {
+    return "Gift Wrap Chargeback";
+  }
+  if (parent === "FBARemovalFee" || grandparent === "FBARemovalFee" || /removal.fee/i.test(leaf)) {
+    return "FBA Removal Fee";
+  }
+  if (parent === "FBAInboundTransportationFee" || grandparent === "FBAInboundTransportationFee" ||
+      /inbound.transportation/i.test(leaf) || leaf === "InboundTransportationFee") {
+    return "FBA Inbound Transportation Fee";
+  }
+  // ★ FBA Inbound Convenience Fee (additional inbound handling charge)
+  if (parent === "FBAInboundConvenienceFee" || grandparent === "FBAInboundConvenienceFee" ||
+      /inbound.convenience/i.test(leaf)) {
+    return "FBA Inbound Convenience Fee";
+  }
+  if (parent === "FBADisposalFee" || grandparent === "FBADisposalFee" || /disposal.fee/i.test(leaf)) {
+    return "FBA Disposal Fee";
+  }
+  if (parent === "FBAStorageFee" || grandparent === "FBAStorageFee" || /storage.fee/i.test(leaf) ||
+      leaf === "StorageBillingFee") {
+    return "FBA Storage Fee";
+  }
+  if (/easy.?ship/i.test(leaf) || leaf === "EasyShipCharge") {
+    return "Shipping / Easy Ship Fee";
+  }
+  if (/subscription/i.test(leaf)) return "Subscription Fee";
+  if (/capacity.reservation/i.test(leaf)) return "FBA Capacity Reservation Fee";
+  if (/liquidation.fee/i.test(leaf)) return "FBA Liquidation Fee";
+  if (/liquidation.proceed/i.test(leaf)) return "FBA Liquidation Proceeds";
+  if (/deal.fee/i.test(leaf)) return "Deal Fee";
+  if (/coupon/i.test(leaf)) return "Coupon Redemption Fee";
+  if (/imaging.service/i.test(leaf)) return "Imaging Services Fee";
+  if (/value.added.service/i.test(leaf)) return "Value Added Service Fee";
+  if (/early.reviewer/i.test(leaf)) return "Early Reviewer Program Fee";
+
+  // ── ADVERTISING ──
+  if (/advertising|product.ads|ppc/i.test(leaf) || /advertising/i.test(parent)) {
+    return "Advertising / PPC";
+  }
+
+  // ── REIMBURSEMENT / REFUND-RELATED ──
+  // ★ Restocking deduction (Amazon charges buyer a restocking fee on return,
+  //   reducing the refund amount — positive value = money retained by seller)
+  if (/restocking/i.test(leaf) || /restocking/i.test(parent) ||
+      parent === "RestockingDeductionPrincipal" || leaf === "RestockingDeductionPrincipal") {
+    return "Restocking Fee";
+  }
+  // ★ Compensated clawback (Amazon reverses a previous reimbursement — negative value)
+  if (/compensated.?clawback/i.test(leaf) || /compensated.?clawback/i.test(parent) ||
+      parent === "CompensatedClawback" || leaf === "CompensatedClawback") {
+    return "Compensated Clawback";
+  }
+  if (/safe.?t/i.test(leaf) || /safe.?t/i.test(parent) || leaf === "SAFETReimbursement") {
+    return "SAFE-T Reimbursement";
+  }
+  // ★ FBA Reversed Reimbursement (Amazon claws back a previous reimbursement)
+  if (parent === "FBAReversedReimbursement" || grandparent === "FBAReversedReimbursement" ||
+      /payment.retraction/i.test(leaf) || /reversed.reimbursement/i.test(leaf)) {
+    return "FBA Reversed Reimbursement";
+  }
+  if (/reimbursement/i.test(leaf)) return "Reimbursement";
+  if (/charge.refund/i.test(leaf)) return "Charge Refund";
+  if (/debt.recovery/i.test(leaf)) return "Debt Recovery";
+  if (/loan/i.test(leaf)) return "Loan Servicing";
+  if (/retrocharge/i.test(leaf)) return "Retrocharge";
+  if (/rental/i.test(leaf)) return "Rental Fee";
+  if (/network.commingling/i.test(leaf)) return "Network Commingling";
+  if (/service.provider.credit/i.test(leaf)) return "Service Provider Credit";
+  if (/affordability/i.test(leaf)) return "Affordability Promotion Expense";
+  if (/adhoc.disbursement/i.test(leaf)) return "Adhoc Disbursement";
+  if (/ebt/i.test(leaf)) return "EBT Refund Reimbursement";
+  if (/pay.with.amazon/i.test(leaf)) return "Pay With Amazon Fee";
+  // ★ Reserve hold/release (temporary fund holds, always net to $0 in pairs)
+  if (leaf === "ReserveDebit" || /reserve.?debit/i.test(leaf)) return "Reserve Hold";
+  if (leaf === "ReserveCredit" || /reserve.?credit/i.test(leaf)) return "Reserve Release";
+
+  // Pass-through aggregator names (rollup nodes — we shouldn't see them as leaves
+  // unless something unusual happened, but guard anyway)
+  if (leaf === "Sales" || leaf === "ProductCharges" || leaf === "Product Charges" ||
+      leaf === "AmazonFees" || leaf === "Tax" || leaf === "Shipping" || leaf === "PromoRebates" ||
+      leaf === "Other" || leaf === "Expenses") {
+    return leaf;
+  }
+
+  // Generic fallback
+  if (/fee/i.test(leaf)) return "Other Fee";
+
+  return leaf;
+}
+
+/**
+ * Backward-compat single-breakdown-type categorization.
+ * Wraps the path-aware version with a single-element path.
+ *
+ * Kept for any external callers (tests, debugging) that import this directly.
+ */
+function mapBreakdownTypeToCategory(breakdownType) {
+  return categorizeBreakdownByPath([breakdownType || "Other Fee"]);
+}
+
+/**
+ * Identify which categories represent revenue (positive money inflow that
+ * isn't a fee). Used when separating revenue rows from expense rows.
+ *
+ * Note: Disbursements are technically not revenue (they're transfers OUT
+ * of Amazon to your bank), but we include them here as "money inflow" so
+ * they get captured separately rather than dumped into the expense bucket.
+ * Treat them as a separate "Disbursement" category in your dashboard.
+ */
+const REVENUE_CATEGORIES = new Set([
+  // Core sales
+  "Product Sales",
+  "Shipping Revenue",
+  "Gift Wrap Revenue",
+  // Reimbursements / rewards (money Amazon pays you)
+  "FBA Inventory Reimbursement",
+  "Fulfillment Fee Refund",
+  "Reimbursement",
+  "SAFE-T Reimbursement",
+  "SERRAC Reimbursement",
+  "Seller Reward",
+  // Disbursement is a payout — list it here so it's not classified as expense
+  "Disbursement",
+  // Reserve release (temporary hold released back — pairs with Reserve Hold)
+  "Reserve Release",
+  // Legacy / aggregator names that might leak through
+  "Sales", "Product Charges", "ProductCharges", "Principal", "Principle",
+]);
+
+function isRevenueCategory(category) {
+  return REVENUE_CATEGORIES.has(category);
 }
 
 // ─────────────────────────────────────────────
 // 7. HELPER: Build expense row
+//    Output shape: same fields as before + new `asin` field.
+//    The asin is extracted from items[].contexts[].ProductContext in v2024-06-19.
 // ─────────────────────────────────────────────
-function makeExpenseRow({ amount, category, isAmazonFeeOverride, amountType = "", amountDescription = "", sku = "N/A", orderId = "", transactionType = "", postedDate = null }) {
+function makeExpenseRow({ amount, category, isAmazonFeeOverride, amountType = "", amountDescription = "", sku = "N/A", asin = "", orderId = "", transactionType = "", postedDate = null, transactionId = "" }) {
   return {
     amount, absoluteAmount: Math.abs(amount), category,
     isAmazonFee: typeof isAmazonFeeOverride === "boolean" ? isAmazonFeeOverride : isAmazonFee(category),
-    amountType, amountDescription, sku, orderId, transactionType,
+    amountType, amountDescription, sku, asin, orderId, transactionType,
     postedDate, postedDateStr: postedDate ? formatDateYYYYMMDD(postedDate) : "",
+    transactionId,
   };
 }
 
-// ─────────────────────────────────────────────
-// 8. HELPER: Parse ShipmentEvent-shaped items
-//    (Shipments, Refunds, GuaranteeClaims,
-//     Chargebacks, ShipmentSettle)
-// ─────────────────────────────────────────────
-function parseShipmentEventItems(event, transactionType) {
-  const expenses = [];
-  const orderId = event.AmazonOrderId || "";
-  const postedDate = event.PostedDate ? new Date(event.PostedDate) : null;
-  const itemList = event.ShipmentItemAdjustmentList || event.ShipmentItemList || [];
+// ═════════════════════════════════════════════════════════════════════════════
+// 8. v2024-06-19 RESPONSE PARSING HELPERS
+// ═════════════════════════════════════════════════════════════════════════════
 
-  for (const item of itemList) {
-    const sku = item.SellerSKU || "N/A";
-
-    // Item Fees / Fee Adjustments
-    const feeList = item.ItemFeeAdjustmentList || item.ItemFeeList || [];
-    for (const fee of feeList) {
-      const amount = parseFloat(fee.FeeAmount?.CurrencyAmount || 0);
-      if (amount === 0) continue;
-      const category = mapFeeTypeToCategory(fee.FeeType);
-      expenses.push(makeExpenseRow({ amount, category, amountType: "ItemFees", amountDescription: fee.FeeType || "", sku, orderId, transactionType, postedDate }));
-    }
-
-    // Promotions / Promotion Adjustments
-    const promoList = item.PromotionAdjustmentList || item.PromotionList || [];
-    for (const promo of promoList) {
-      const amount = parseFloat(promo.PromotionAmount?.CurrencyAmount || 0);
-      if (amount === 0) continue;
-      expenses.push(makeExpenseRow({ amount, category: "Promotions / Discounts", isAmazonFeeOverride: false, amountType: "Promotion", amountDescription: promo.PromotionType || "Promotion", sku, orderId, transactionType, postedDate }));
-    }
-
-    // Item-level Tax Withheld (TDS/TCS per order item — India)
-    for (const twh of item.ItemTaxWithheldList || []) {
-      for (const tax of twh.TaxesWithheld || []) {
-        const amount = parseFloat(tax.ChargeAmount?.CurrencyAmount || 0);
-        if (amount === 0) continue;
-        const chargeType = tax.ChargeType || "";
-        let category = "Tax Withheld";
-        if (chargeType.includes("TDS")) category = "TDS (Tax Deducted at Source)";
-        if (chargeType.includes("TCS")) category = "TCS (Tax Collected at Source)";
-        expenses.push(makeExpenseRow({ amount, category, isAmazonFeeOverride: false, amountType: twh.TaxCollectionModel || chargeType, amountDescription: chargeType, sku, orderId, transactionType, postedDate }));
-      }
-    }
+/**
+ * Extract the related identifiers from a transaction or item.
+ * Returns a map: { ORDER_ID, SHIPMENT_ID, FINANCIAL_EVENT_GROUP_ID, ... }
+ */
+function extractRelatedIdentifiers(relatedIdentifiers) {
+  const map = {};
+  if (!Array.isArray(relatedIdentifiers)) return map;
+  for (const id of relatedIdentifiers) {
+    const name = id.relatedIdentifierName || id.itemRelatedIdentifierName;
+    const value = id.relatedIdentifierValue || id.itemRelatedIdentifierValue;
+    if (name && value) map[name] = value;
   }
-  return expenses;
+  return map;
 }
 
-// ─────────────────────────────────────────────
-// 9. PARSE ALL SP-API FINANCIAL EVENTS
-//    Handles every event list from the Finance
-//    API across all marketplaces (NA/EU/FE).
-// ─────────────────────────────────────────────
-function parseFinancialEvents(financialEvents) {
+/**
+ * Extract ProductContext (sku, asin, quantityShipped, fulfillmentNetwork)
+ * from an item's contexts[] array.
+ *
+ * In v2024-06-19, SKU and ASIN live in items[].contexts[] where contextType="ProductContext".
+ * This is a major change from v0 where they lived directly on item.SellerSKU.
+ */
+function extractProductContext(contexts) {
+  if (!Array.isArray(contexts)) return {};
+  for (const ctx of contexts) {
+    if (ctx.contextType === "ProductContext") {
+      return {
+        sku: ctx.sku || "",
+        asin: ctx.asin || "",
+        quantityShipped: ctx.quantityShipped || 0,
+        fulfillmentNetwork: ctx.fulfillmentNetwork || "",
+      };
+    }
+  }
+  return {};
+}
+
+/**
+ * Recursively walk a breakdowns[] tree and yield every leaf breakdown
+ * (the deepest level — these are the actual fee/charge entries).
+ *
+ * v2024-06-19 nests breakdowns. Example:
+ *   { breakdownType: "Sales", breakdownAmount: ..., breakdowns: [
+ *     { breakdownType: "Product Charges", breakdownAmount: ..., breakdowns: [
+ *       { breakdownType: "Principal", breakdownAmount: ..., breakdowns: [] }
+ *     ]}
+ *   ]}
+ *
+ * We walk to the leaves so we get the most granular categorization.
+ */
+function* walkBreakdowns(breakdowns, parentPath = []) {
+  if (!Array.isArray(breakdowns)) return;
+  for (const b of breakdowns) {
+    const path = [...parentPath, b.breakdownType];
+    if (Array.isArray(b.breakdowns) && b.breakdowns.length > 0) {
+      yield* walkBreakdowns(b.breakdowns, path);
+    } else {
+      // Leaf node — this is an actual fee/charge entry
+      yield { breakdown: b, path };
+    }
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 9. PARSE v2024-06-19 TRANSACTIONS
+//
+// New flat structure: a single transactions[] array. Each Transaction has:
+//   - relatedIdentifiers[]  → ORDER_ID, SHIPMENT_ID, FINANCIAL_EVENT_GROUP_ID, etc.
+//   - transactionType       → "Shipment" (currently the only documented value)
+//   - postedDate            → ISO 8601 date-time
+//   - totalAmount           → { currencyAmount, currencyCode }
+//   - marketplaceDetails    → { marketplaceId, marketplaceName }
+//   - items[]               → per-SKU breakdowns
+//   - contexts[]            → AmazonPay / Deferred / Business contexts
+//   - breakdowns[]          → transaction-level fee/charge breakdowns
+//
+// Each Item has:
+//   - description           → item title
+//   - relatedIdentifiers[]  → ORDER_ADJUSTMENT_ITEM_ID, COUPON_ID, etc.
+//   - totalAmount           → item subtotal
+//   - breakdowns[]          → item-level fee/charge breakdowns (leaf = real entry)
+//   - contexts[]            → ProductContext (sku, asin), etc.
+// ═════════════════════════════════════════════════════════════════════════════
+function parseTransactionsV2024(transactions) {
   const expenses = [];
 
-  // 1. ShipmentEventList (order fees)
-  for (const e of financialEvents.ShipmentEventList || []) expenses.push(...parseShipmentEventItems(e, "Order"));
+  for (const txn of transactions) {
+    const txnIdentifiers = extractRelatedIdentifiers(txn.relatedIdentifiers);
+    const txnOrderId = txnIdentifiers.ORDER_ID || "";
+    const txnPostedDate = txn.postedDate ? new Date(txn.postedDate) : null;
+    const txnType = txn.transactionType || "Unknown";
+    const txnDescription = txn.description || "";
+    const txnId = txn.transactionId || "";
 
-  // 2. RefundEventList (refund fee adjustments)
-  for (const e of financialEvents.RefundEventList || []) expenses.push(...parseShipmentEventItems(e, "Refund"));
+    // ────────────────────────────────────────
+    // ITEM-LEVEL EXPENSES
+    //   Each item has its own breakdowns[] and contexts[] (ProductContext → SKU + ASIN)
+    //   This is where most fees live (FBA fees, referral, etc.)
+    // ────────────────────────────────────────
+    const items = Array.isArray(txn.items) ? txn.items : [];
 
-  // 3. GuaranteeClaimEventList — A-to-Z claims (same ShipmentEvent schema)
-  for (const e of financialEvents.GuaranteeClaimEventList || []) expenses.push(...parseShipmentEventItems(e, "GuaranteeClaim"));
+    // Track whether any item produced a leaf — used to detect cases where
+    // items[] is populated but their breakdowns[] is null/empty
+    // (e.g. FBAInventoryReimbursement). In those cases the real breakdowns
+    // live at the transaction level and need to be attributed to the items.
+    let totalItemLeaves = 0;
 
-  // 4. ChargebackEventList — payment chargebacks (same ShipmentEvent schema)
-  for (const e of financialEvents.ChargebackEventList || []) expenses.push(...parseShipmentEventItems(e, "Chargeback"));
+    for (const item of items) {
+      const product = extractProductContext(item.contexts);
+      const sku = product.sku || "N/A";
+      const asin = product.asin || "";
 
-  // 5. ShipmentSettleEventList — settlement-time adjustments (same ShipmentEvent schema)
-  for (const e of financialEvents.ShipmentSettleEventList || []) expenses.push(...parseShipmentEventItems(e, "ShipmentSettle"));
+      // Resolve order ID for this item — prefer item-level identifiers,
+      // fall back to transaction-level
+      const itemIdentifiers = extractRelatedIdentifiers(item.relatedIdentifiers);
+      const itemOrderId = itemIdentifiers.ORDER_ID || txnOrderId || "";
 
-  // 6. ServiceFeeEventList (Storage, Subscription, Inbound Transport, Removal, etc.)
-  for (const sfe of financialEvents.ServiceFeeEventList || []) {
-    for (const fee of sfe.FeeList || []) {
-      const amount = parseFloat(fee.FeeAmount?.CurrencyAmount || 0);
-      if (amount === 0) continue;
-      const category = mapFeeTypeToCategory(fee.FeeType);
-      expenses.push(makeExpenseRow({ amount, category, amountType: "ServiceFee", amountDescription: fee.FeeType || "", sku: sfe.SellerSKU || "N/A", orderId: sfe.AmazonOrderId || "", transactionType: "ServiceFee", postedDate: new Date() }));
-    }
-  }
-
-  // 7. ProductAdsPaymentEventList (Advertising / PPC)
-  for (const ad of financialEvents.ProductAdsPaymentEventList || []) {
-    const amount = parseFloat(ad.transactionValue?.CurrencyAmount || 0);
-    if (amount === 0) continue;
-    const postedDate = ad.postedDate ? new Date(ad.postedDate) : null;
-    expenses.push(makeExpenseRow({ amount, category: "Advertising / PPC", isAmazonFeeOverride: false, amountType: "Cost of Advertising", amountDescription: ad.transactionType || "Advertising", orderId: ad.invoiceId || "", transactionType: "Advertising", postedDate }));
-  }
-
-  // 8. RemovalShipmentEventList (FBA removal/disposal)
-  for (const removal of financialEvents.RemovalShipmentEventList || []) {
-    const postedDate = removal.PostedDate ? new Date(removal.PostedDate) : null;
-    for (const item of removal.RemovalShipmentItemList || []) {
-      const amount = parseFloat(item.FeeAmount?.CurrencyAmount || 0);
-      if (amount === 0) continue;
-      expenses.push(makeExpenseRow({ amount: -Math.abs(amount), category: "FBA Disposal Fee", isAmazonFeeOverride: true, amountType: "other-transaction", amountDescription: "DisposalComplete", sku: item.SellerSKU || "N/A", orderId: removal.OrderId || "", transactionType: "Removal", postedDate }));
-    }
-  }
-
-  // 9. RemovalShipmentAdjustmentEventList
-  for (const adj of financialEvents.RemovalShipmentAdjustmentEventList || []) {
-    const postedDate = adj.PostedDate ? new Date(adj.PostedDate) : null;
-    for (const item of adj.RemovalShipmentItemAdjustmentList || []) {
-      const amount = parseFloat(item.AdjustmentAmount?.CurrencyAmount || 0);
-      if (amount === 0) continue;
-      expenses.push(makeExpenseRow({ amount, category: "FBA Removal Fee", isAmazonFeeOverride: true, amountType: "RemovalAdjustment", amountDescription: "RemovalShipmentAdjustment", sku: item.SellerSKU || "N/A", orderId: adj.OrderId || "", transactionType: "RemovalAdjustment", postedDate }));
-    }
-  }
-
-  // 10. AdjustmentEventList (reimbursements, reserves, postage, etc.)
-  for (const adj of financialEvents.AdjustmentEventList || []) {
-    const postedDate = adj.PostedDate ? new Date(adj.PostedDate) : null;
-    const adjType = adj.AdjustmentType || "";
-    for (const item of adj.AdjustmentItemList || []) {
-      const amount = parseFloat(item.TotalAmount?.CurrencyAmount || item.PerUnitAmount?.CurrencyAmount || 0);
-      if (amount === 0) continue;
-      let category = adjType || "Other Fee";
-      if (adjType.includes("Storage")) category = "FBA Storage Fee";
-      expenses.push(makeExpenseRow({ amount, category, amountType: "Adjustment", amountDescription: adjType, sku: item.SellerSKU || "N/A", transactionType: "Adjustment", postedDate }));
-    }
-  }
-
-  // 11. SAFETReimbursementEventList (SAFE-T claims)
-  for (const safet of financialEvents.SAFETReimbursementEventList || []) {
-    const postedDate = safet.PostedDate ? new Date(safet.PostedDate) : null;
-    const topAmount = parseFloat(safet.ReimbursedAmount?.CurrencyAmount || 0);
-    if (topAmount !== 0) {
-      expenses.push(makeExpenseRow({ amount: topAmount, category: "SAFE-T Reimbursement", isAmazonFeeOverride: false, amountType: "SAFETReimbursement", amountDescription: safet.ReasonCode || "SAFE-T", orderId: safet.SAFETClaimId || "", transactionType: "SAFETReimbursement", postedDate }));
-    }
-  }
-
-  // 12. TDSReimbursementEventList (India TDS)
-  for (const tds of financialEvents.TDSReimbursementEventList || []) {
-    const amount = parseFloat(tds.ReimbursedAmount?.CurrencyAmount || 0);
-    if (amount === 0) continue;
-    const postedDate = tds.PostedDate ? new Date(tds.PostedDate) : null;
-    expenses.push(makeExpenseRow({ amount: -Math.abs(amount), category: "TDS (Tax Deducted at Source)", isAmazonFeeOverride: false, amountType: "ItemTDS", amountDescription: "TDS", transactionType: "TDS", postedDate }));
-  }
-
-  // 13. TaxWithholdingEventList (TCS — India)
-  //     FIX: Handles BOTH WithheldAmount (top-level) AND TaxWithholdingComponentList (legacy)
-  for (const tax of financialEvents.TaxWithholdingEventList || []) {
-    const postedDate = tax.PostedDate ? new Date(tax.PostedDate) : null;
-    // Structure (a): Top-level WithheldAmount
-    const withheldAmount = parseFloat(tax.WithheldAmount?.CurrencyAmount || 0);
-    if (withheldAmount !== 0) {
-      expenses.push(makeExpenseRow({ amount: withheldAmount, category: "TCS (Tax Collected at Source)", isAmazonFeeOverride: false, amountType: "TaxWithholding", amountDescription: "TCS", transactionType: "TaxWithholding", postedDate }));
-    }
-    // Structure (b): TaxWithholdingComponentList (fallback if WithheldAmount is absent)
-    if (withheldAmount === 0) {
-      for (const component of tax.TaxWithholdingComponentList || []) {
-        const amount = parseFloat(component.TaxAmount?.CurrencyAmount || 0);
+      // Walk every leaf breakdown for this item
+      let itemLeavesHere = 0;
+      for (const { breakdown, path } of walkBreakdowns(item.breakdowns)) {
+        itemLeavesHere++;
+        const amount = parseFloat(breakdown.breakdownAmount?.currencyAmount || 0);
         if (amount === 0) continue;
-        expenses.push(makeExpenseRow({ amount: -Math.abs(amount), category: "TCS (Tax Collected at Source)", isAmazonFeeOverride: false, amountType: "ItemTCS", amountDescription: component.TaxType || "TCS", transactionType: "TaxWithholding", postedDate }));
+
+        const category = categorizeBreakdownByPath(path);
+
+        // Skip revenue entries — those are extracted separately by extractRevenueFromTransactions()
+        if (isRevenueCategory(category)) continue;
+
+        expenses.push(makeExpenseRow({
+          amount,
+          category,
+          amountType: txnType,
+          amountDescription: path.join(" > "), // full breakdown path for traceability
+          sku,
+          asin,                                // ★ NEW: ASIN propagated to expense row
+          orderId: itemOrderId,
+          transactionType: txnType,
+          postedDate: txnPostedDate,
+          transactionId: txnId,
+        }));
+      }
+      totalItemLeaves += itemLeavesHere;
+    }
+
+    // ────────────────────────────────────────
+    // TRANSACTION-LEVEL EXPENSES
+    //
+    // The transaction-level breakdowns are usually a roll-up of the item-level
+    // ones (same totals). But two cases require us to use them directly:
+    //
+    //   (a) NO items at all (Transfer, some Adjustments, TaxWithholding)
+    //       → use txn-level breakdowns, no SKU/ASIN context
+    //
+    //   (b) items[] is populated but their breakdowns are empty/null
+    //       (FBAInventoryReimbursement, some ServiceFee variants)
+    //       → attribute txn-level breakdowns to the first item's SKU/ASIN
+    //         (these txns typically have exactly 1 item)
+    //
+    // In all other cases (Shipment, normal Refund), item-level produced
+    // leaves and txn-level is just a duplicate roll-up — skip it.
+    // ────────────────────────────────────────
+    const txnBreakdowns = Array.isArray(txn.breakdowns)
+      ? txn.breakdowns
+      : (txn.breakdowns?.breakdowns || []);
+
+    const useTxnLevel = items.length === 0 || totalItemLeaves === 0;
+
+    if (useTxnLevel) {
+      // If items exist but had no breakdowns, borrow SKU/ASIN from first item
+      let fallbackSku = "N/A";
+      let fallbackAsin = "";
+      if (items.length > 0) {
+        const product = extractProductContext(items[0].contexts);
+        fallbackSku = product.sku || "N/A";
+        fallbackAsin = product.asin || "";
+      }
+
+      for (const { breakdown, path } of walkBreakdowns(txnBreakdowns)) {
+        const amount = parseFloat(breakdown.breakdownAmount?.currencyAmount || 0);
+        if (amount === 0) continue;
+
+        const category = categorizeBreakdownByPath(path);
+
+        // Skip revenue and disbursement-class categories — handled by extractRevenueFromTransactions
+        if (isRevenueCategory(category)) continue;
+
+        expenses.push(makeExpenseRow({
+          amount,
+          category,
+          amountType: txnType,
+          amountDescription: path.join(" > "),
+          sku: fallbackSku,
+          asin: fallbackAsin,
+          orderId: txnOrderId,
+          transactionType: txnType,
+          postedDate: txnPostedDate,
+          transactionId: txnId,
+        }));
       }
     }
-  }
-
-  // 14. AffordabilityExpenseEventList (India EMI / No-Cost EMI)
-  for (const aff of financialEvents.AffordabilityExpenseEventList || []) {
-    const amount = parseFloat(aff.TotalExpense?.CurrencyAmount || 0);
-    if (amount === 0) continue;
-    const postedDate = aff.PostedDate ? new Date(aff.PostedDate) : null;
-    expenses.push(makeExpenseRow({ amount, category: "Affordability Promotion Expense", isAmazonFeeOverride: false, amountType: "AffordabilityExpense", amountDescription: aff.TransactionType || "AffordabilityExpense", orderId: aff.AmazonOrderId || "", transactionType: "AffordabilityExpense", postedDate }));
-  }
-
-  // 15. AffordabilityExpenseReversalEventList
-  for (const aff of financialEvents.AffordabilityExpenseReversalEventList || []) {
-    const amount = parseFloat(aff.TotalExpense?.CurrencyAmount || 0);
-    if (amount === 0) continue;
-    const postedDate = aff.PostedDate ? new Date(aff.PostedDate) : null;
-    expenses.push(makeExpenseRow({ amount, category: "Affordability Promotion Expense", isAmazonFeeOverride: false, amountType: "AffordabilityExpenseReversal", amountDescription: aff.TransactionType || "Reversal", orderId: aff.AmazonOrderId || "", transactionType: "AffordabilityExpenseReversal", postedDate }));
-  }
-
-  // 16. SellerDealPaymentEventList (Lightning Deals, etc.)
-  for (const deal of financialEvents.SellerDealPaymentEventList || []) {
-    const postedDate = deal.PostedDate ? new Date(deal.PostedDate) : null;
-    const feeAmt = parseFloat(deal.FeeComponent?.FeeAmount?.CurrencyAmount || 0);
-    if (feeAmt !== 0) expenses.push(makeExpenseRow({ amount: feeAmt, category: "Deal Fee", isAmazonFeeOverride: true, amountType: "DealFee", amountDescription: deal.FeeComponent?.FeeType || "DealFee", orderId: deal.DealId || "", transactionType: "DealPayment", postedDate }));
-    const chargeAmt = parseFloat(deal.ChargeComponent?.ChargeAmount?.CurrencyAmount || 0);
-    if (chargeAmt !== 0) expenses.push(makeExpenseRow({ amount: chargeAmt, category: "Deal Fee", isAmazonFeeOverride: true, amountType: "DealCharge", amountDescription: deal.ChargeComponent?.ChargeType || "DealCharge", orderId: deal.DealId || "", transactionType: "DealPayment", postedDate }));
-    const totalAmt = parseFloat(deal.TotalAmount?.CurrencyAmount || 0);
-    if (totalAmt !== 0 && feeAmt === 0 && chargeAmt === 0) expenses.push(makeExpenseRow({ amount: totalAmt, category: "Deal Fee", isAmazonFeeOverride: true, amountType: "DealTotal", amountDescription: deal.DealDescription || "DealPayment", orderId: deal.DealId || "", transactionType: "DealPayment", postedDate }));
-  }
-
-  // 17. CouponPaymentEventList
-  for (const coupon of financialEvents.CouponPaymentEventList || []) {
-    const postedDate = coupon.PostedDate ? new Date(coupon.PostedDate) : null;
-    const feeAmt = parseFloat(coupon.FeeComponent?.FeeAmount?.CurrencyAmount || 0);
-    if (feeAmt !== 0) expenses.push(makeExpenseRow({ amount: feeAmt, category: "Coupon Redemption Fee", isAmazonFeeOverride: true, amountType: "CouponFee", amountDescription: coupon.FeeComponent?.FeeType || "CouponFee", orderId: coupon.CouponId || "", transactionType: "Coupon", postedDate }));
-    const chargeAmt = parseFloat(coupon.ChargeComponent?.ChargeAmount?.CurrencyAmount || 0);
-    if (chargeAmt !== 0) expenses.push(makeExpenseRow({ amount: chargeAmt, category: "Promotions / Discounts", isAmazonFeeOverride: false, amountType: "CouponCharge", amountDescription: coupon.ChargeComponent?.ChargeType || "CouponDiscount", orderId: coupon.CouponId || "", transactionType: "Coupon", postedDate }));
-    const totalAmt = parseFloat(coupon.TotalAmount?.CurrencyAmount || 0);
-    if (totalAmt !== 0 && feeAmt === 0 && chargeAmt === 0) expenses.push(makeExpenseRow({ amount: totalAmt, category: "Coupon Redemption Fee", isAmazonFeeOverride: true, amountType: "CouponTotal", amountDescription: "CouponPayment", orderId: coupon.CouponId || "", transactionType: "Coupon", postedDate }));
-  }
-
-  // 18. DebtRecoveryEventList
-  for (const debt of financialEvents.DebtRecoveryEventList || []) {
-    const amount = parseFloat(debt.RecoveryAmount?.CurrencyAmount || 0);
-    if (amount === 0) continue;
-    expenses.push(makeExpenseRow({ amount, category: "Debt Recovery", isAmazonFeeOverride: false, amountType: "DebtRecovery", amountDescription: debt.DebtRecoveryType || "DebtRecovery", transactionType: "DebtRecovery", postedDate: null }));
-  }
-
-  // 19. LoanServicingEventList
-  for (const loan of financialEvents.LoanServicingEventList || []) {
-    const amount = parseFloat(loan.LoanAmount?.CurrencyAmount || 0);
-    if (amount === 0) continue;
-    expenses.push(makeExpenseRow({ amount, category: "Loan Servicing", isAmazonFeeOverride: false, amountType: "LoanServicing", amountDescription: loan.SourceBusinessEventType || "Loan", transactionType: "LoanServicing", postedDate: null }));
-  }
-
-  // 20. FBALiquidationEventList
-  for (const liq of financialEvents.FBALiquidationEventList || []) {
-    const postedDate = liq.PostedDate ? new Date(liq.PostedDate) : null;
-    const feeAmt = parseFloat(liq.LiquidationFeeAmount?.CurrencyAmount || 0);
-    if (feeAmt !== 0) expenses.push(makeExpenseRow({ amount: feeAmt, category: "FBA Liquidation Fee", isAmazonFeeOverride: true, amountType: "LiquidationFee", amountDescription: "FBALiquidationFee", orderId: liq.OriginalRemovalOrderId || "", transactionType: "FBALiquidation", postedDate }));
-    const proceedsAmt = parseFloat(liq.LiquidationProceedsAmount?.CurrencyAmount || 0);
-    if (proceedsAmt !== 0) expenses.push(makeExpenseRow({ amount: proceedsAmt, category: "FBA Liquidation Proceeds", isAmazonFeeOverride: false, amountType: "LiquidationProceeds", amountDescription: "FBALiquidationProceeds", orderId: liq.OriginalRemovalOrderId || "", transactionType: "FBALiquidation", postedDate }));
-  }
-
-  // 21. RetrochargeEventList
-  for (const retro of financialEvents.RetrochargeEventList || []) {
-    const postedDate = retro.PostedDate ? new Date(retro.PostedDate) : null;
-    const amount = parseFloat(retro.RetrochargeTaxWithheldAmount?.CurrencyAmount || retro.BaseTax?.CurrencyAmount || 0);
-    if (amount === 0) continue;
-    expenses.push(makeExpenseRow({ amount, category: "Retrocharge", isAmazonFeeOverride: false, amountType: "Retrocharge", amountDescription: retro.RetrochargeEventType || "Retrocharge", orderId: retro.AmazonOrderId || "", transactionType: "Retrocharge", postedDate }));
-  }
-
-  // 22. RentalTransactionEventList
-  for (const rental of financialEvents.RentalTransactionEventList || []) {
-    const postedDate = rental.PostedDate ? new Date(rental.PostedDate) : null;
-    for (const fee of rental.RentalFeeList || []) {
-      const amount = parseFloat(fee.FeeAmount?.CurrencyAmount || 0);
-      if (amount === 0) continue;
-      expenses.push(makeExpenseRow({ amount, category: "Rental Fee", isAmazonFeeOverride: false, amountType: "RentalFee", amountDescription: fee.FeeType || "RentalFee", orderId: rental.AmazonOrderId || "", transactionType: "Rental", postedDate }));
-    }
-    for (const charge of rental.RentalChargeList || []) {
-      const amount = parseFloat(charge.ChargeAmount?.CurrencyAmount || 0);
-      if (amount === 0) continue;
-      expenses.push(makeExpenseRow({ amount, category: "Rental Fee", isAmazonFeeOverride: false, amountType: "RentalCharge", amountDescription: charge.ChargeType || "RentalCharge", orderId: rental.AmazonOrderId || "", transactionType: "Rental", postedDate }));
-    }
-  }
-
-  // 23. NetworkComminglingTransactionEventList
-  for (const nc of financialEvents.NetworkComminglingTransactionEventList || []) {
-    const postedDate = nc.PostedDate ? new Date(nc.PostedDate) : null;
-    const amount = parseFloat(nc.NetCoTransactionCharge?.CurrencyAmount || 0);
-    if (amount === 0) continue;
-    expenses.push(makeExpenseRow({ amount, category: "Network Commingling", isAmazonFeeOverride: false, amountType: "NetworkCommingling", amountDescription: nc.TransactionType || "NetworkCommingling", sku: nc.ASIN || "N/A", transactionType: "NetworkCommingling", postedDate }));
-  }
-
-  // 24. SellerReviewEnrollmentPaymentEventList (Early Reviewer Program)
-  for (const srep of financialEvents.SellerReviewEnrollmentPaymentEventList || []) {
-    const postedDate = srep.PostedDate ? new Date(srep.PostedDate) : null;
-    const feeAmt = parseFloat(srep.FeeComponent?.FeeAmount?.CurrencyAmount || 0);
-    if (feeAmt !== 0) expenses.push(makeExpenseRow({ amount: feeAmt, category: "Early Reviewer Program Fee", isAmazonFeeOverride: true, amountType: "EarlyReviewerFee", amountDescription: srep.FeeComponent?.FeeType || "EarlyReviewerFee", transactionType: "EarlyReviewerProgram", postedDate }));
-    const chargeAmt = parseFloat(srep.ChargeComponent?.ChargeAmount?.CurrencyAmount || 0);
-    if (chargeAmt !== 0) expenses.push(makeExpenseRow({ amount: chargeAmt, category: "Early Reviewer Program Fee", isAmazonFeeOverride: true, amountType: "EarlyReviewerCharge", amountDescription: srep.ChargeComponent?.ChargeType || "EarlyReviewerCharge", transactionType: "EarlyReviewerProgram", postedDate }));
-    const totalAmt = parseFloat(srep.TotalAmount?.CurrencyAmount || 0);
-    if (totalAmt !== 0 && feeAmt === 0 && chargeAmt === 0) expenses.push(makeExpenseRow({ amount: totalAmt, category: "Early Reviewer Program Fee", isAmazonFeeOverride: true, amountType: "EarlyReviewerTotal", amountDescription: "EarlyReviewerPayment", transactionType: "EarlyReviewerProgram", postedDate }));
-  }
-
-  // 25. ImagingServicesFeeEventList
-  for (const img of financialEvents.ImagingServicesFeeEventList || []) {
-    const postedDate = img.PostedDate ? new Date(img.PostedDate) : null;
-    for (const fee of img.FeeList || []) {
-      const amount = parseFloat(fee.FeeAmount?.CurrencyAmount || 0);
-      if (amount === 0) continue;
-      expenses.push(makeExpenseRow({ amount, category: "Imaging Services Fee", isAmazonFeeOverride: true, amountType: "ImagingServicesFee", amountDescription: fee.FeeType || "ImagingServicesFee", sku: img.ASIN || "N/A", transactionType: "ImagingServices", postedDate }));
-    }
-  }
-
-  // 26. PayWithAmazonEventList
-  for (const pwa of financialEvents.PayWithAmazonEventList || []) {
-    const postedDate = pwa.PostedDate ? new Date(pwa.PostedDate) : null;
-    for (const fee of pwa.FeeList || []) {
-      const amount = parseFloat(fee.FeeAmount?.CurrencyAmount || 0);
-      if (amount === 0) continue;
-      expenses.push(makeExpenseRow({ amount, category: "Pay With Amazon Fee", isAmazonFeeOverride: false, amountType: "PayWithAmazonFee", amountDescription: fee.FeeType || "PayWithAmazonFee", orderId: pwa.SellerOrderId || "", transactionType: "PayWithAmazon", postedDate }));
-    }
-    for (const charge of pwa.ChargeList || []) {
-      const amount = parseFloat(charge.ChargeAmount?.CurrencyAmount || 0);
-      if (amount === 0) continue;
-      expenses.push(makeExpenseRow({ amount, category: "Pay With Amazon Fee", isAmazonFeeOverride: false, amountType: "PayWithAmazonCharge", amountDescription: charge.ChargeType || "PayWithAmazonCharge", orderId: pwa.SellerOrderId || "", transactionType: "PayWithAmazon", postedDate }));
-    }
-  }
-
-  // 27. ServiceProviderCreditEventList
-  for (const spc of financialEvents.ServiceProviderCreditEventList || []) {
-    const amount = parseFloat(spc.TransactionAmount?.CurrencyAmount || 0);
-    if (amount === 0) continue;
-    const postedDate = spc.PostedDate ? new Date(spc.PostedDate) : null;
-    expenses.push(makeExpenseRow({ amount, category: "Service Provider Credit", isAmazonFeeOverride: false, amountType: "ServiceProviderCredit", amountDescription: spc.TransactionType || "ServiceProviderCredit", orderId: spc.SellerOrderId || "", transactionType: "ServiceProviderCredit", postedDate }));
-  }
-
-  // 28. TrialShipmentEventList
-  for (const trial of financialEvents.TrialShipmentEventList || []) {
-    const postedDate = trial.PostedDate ? new Date(trial.PostedDate) : null;
-    for (const fee of trial.FeeList || []) {
-      const amount = parseFloat(fee.FeeAmount?.CurrencyAmount || 0);
-      if (amount === 0) continue;
-      expenses.push(makeExpenseRow({ amount, category: "Trial Shipment Fee", isAmazonFeeOverride: false, amountType: "TrialShipmentFee", amountDescription: fee.FeeType || "TrialShipmentFee", sku: trial.SKU || "N/A", transactionType: "TrialShipment", postedDate }));
-    }
-  }
-
-  // 29. ValueAddedServiceChargeEventList
-  for (const vas of financialEvents.ValueAddedServiceChargeEventList || []) {
-    const postedDate = vas.PostedDate ? new Date(vas.PostedDate) : null;
-    const amount = parseFloat(vas.TransactionAmount?.CurrencyAmount || 0);
-    if (amount === 0) continue;
-    expenses.push(makeExpenseRow({ amount, category: "Value Added Service Fee", isAmazonFeeOverride: true, amountType: "ValueAddedServiceCharge", amountDescription: vas.TransactionType || "ValueAddedService", orderId: vas.OrderId || "", transactionType: "ValueAddedService", postedDate }));
-  }
-
-  // 30. CapacityReservationBillingEventList
-  for (const cap of financialEvents.CapacityReservationBillingEventList || []) {
-    const postedDate = cap.PostedDate ? new Date(cap.PostedDate) : null;
-    const amount = parseFloat(cap.TransactionAmount?.CurrencyAmount || 0);
-    if (amount === 0) continue;
-    expenses.push(makeExpenseRow({ amount, category: "FBA Capacity Reservation Fee", isAmazonFeeOverride: true, amountType: "CapacityReservation", amountDescription: cap.TransactionType || "CapacityReservation", transactionType: "CapacityReservation", postedDate }));
-  }
-
-  // 31. ChargeRefundEventList
-  for (const cr of financialEvents.ChargeRefundEventList || []) {
-    const postedDate = cr.PostedDate ? new Date(cr.PostedDate) : null;
-    const amount = parseFloat(cr.ChargeRefundAmount?.CurrencyAmount || cr.TransactionAmount?.CurrencyAmount || 0);
-    if (amount === 0) continue;
-    expenses.push(makeExpenseRow({ amount, category: "Charge Refund", isAmazonFeeOverride: false, amountType: "ChargeRefund", amountDescription: cr.ChargeRefundType || cr.TransactionType || "ChargeRefund", transactionType: "ChargeRefund", postedDate }));
-  }
-
-  // 32. AdhocDisbursementEventList
-  for (const adhoc of financialEvents.AdhocDisbursementEventList || []) {
-    const postedDate = adhoc.PostedDate ? new Date(adhoc.PostedDate) : null;
-    const amount = parseFloat(adhoc.TransactionAmount?.CurrencyAmount || 0);
-    if (amount === 0) continue;
-    expenses.push(makeExpenseRow({ amount, category: "Adhoc Disbursement", isAmazonFeeOverride: false, amountType: "AdhocDisbursement", amountDescription: adhoc.TransactionType || "AdhocDisbursement", transactionType: "AdhocDisbursement", postedDate }));
-  }
-
-  // 33. FailedAdhocDisbursementEventList
-  for (const failed of financialEvents.FailedAdhocDisbursementEventList || []) {
-    const postedDate = failed.PostedDate ? new Date(failed.PostedDate) : null;
-    const amount = parseFloat(failed.TransactionAmount?.CurrencyAmount || 0);
-    if (amount === 0) continue;
-    expenses.push(makeExpenseRow({ amount, category: "Failed Adhoc Disbursement", isAmazonFeeOverride: false, amountType: "FailedAdhocDisbursement", amountDescription: failed.TransactionType || "FailedAdhocDisbursement", transactionType: "FailedAdhocDisbursement", postedDate }));
-  }
-
-  // 34. EBTRefundReimbursementOnlyEventList (US marketplace)
-  for (const ebt of financialEvents.EBTRefundReimbursementOnlyEventList || []) {
-    const postedDate = ebt.PostedDate ? new Date(ebt.PostedDate) : null;
-    const amount = parseFloat(ebt.TransactionAmount?.CurrencyAmount || 0);
-    if (amount === 0) continue;
-    expenses.push(makeExpenseRow({ amount, category: "EBT Refund Reimbursement", isAmazonFeeOverride: false, amountType: "EBTRefundReimbursement", amountDescription: ebt.TransactionType || "EBTRefundReimbursement", transactionType: "EBTRefundReimbursement", postedDate }));
   }
 
   return expenses;
 }
 
+/**
+ * NEW: Extract revenue (Principal / Sales) from v2024-06-19 transactions.
+ *
+ * This is what enables the Sellerboard-style approach — revenue and expenses
+ * arrive together in the same transaction, so we never get expenses
+ * without matching revenue.
+ *
+ * Returns rows with positive amounts representing revenue.
+ */
+function extractRevenueFromTransactions(transactions) {
+  const revenueRows = [];
+
+  for (const txn of transactions) {
+    const txnIdentifiers = extractRelatedIdentifiers(txn.relatedIdentifiers);
+    const txnOrderId = txnIdentifiers.ORDER_ID || "";
+    const txnPostedDate = txn.postedDate ? new Date(txn.postedDate) : null;
+    const txnType = txn.transactionType || "";
+    const txnId = txn.transactionId || "";
+
+    const items = Array.isArray(txn.items) ? txn.items : [];
+    let totalItemLeaves = 0;
+
+    // Try item-level breakdowns first
+    for (const item of items) {
+      const product = extractProductContext(item.contexts);
+      const sku = product.sku || "N/A";
+      const asin = product.asin || "";
+      const quantity = product.quantityShipped || 0;
+
+      const itemIdentifiers = extractRelatedIdentifiers(item.relatedIdentifiers);
+      const itemOrderId = itemIdentifiers.ORDER_ID || txnOrderId || "";
+
+      for (const { breakdown, path } of walkBreakdowns(item.breakdowns)) {
+        totalItemLeaves++;
+        const category = categorizeBreakdownByPath(path);
+
+        // Only revenue categories
+        if (!isRevenueCategory(category)) continue;
+
+        const amount = parseFloat(breakdown.breakdownAmount?.currencyAmount || 0);
+        if (amount === 0) continue;
+
+        revenueRows.push({
+          amount,
+          category,
+          sku,
+          asin,
+          quantity,
+          orderId: itemOrderId,
+          transactionType: txnType,
+          postedDate: txnPostedDate,
+          postedDateStr: txnPostedDate ? formatDateYYYYMMDD(txnPostedDate) : "",
+          breakdownPath: path.join(" > "),
+          transactionId: txnId,
+        });
+      }
+    }
+
+    // Fall back to transaction-level breakdowns when item-level is empty
+    // (FBAInventoryReimbursement, Transfer/Disbursement, Adjustment, TaxWithholding)
+    if (items.length === 0 || totalItemLeaves === 0) {
+      let fallbackSku = "N/A";
+      let fallbackAsin = "";
+      let fallbackQuantity = 0;
+      if (items.length > 0) {
+        const product = extractProductContext(items[0].contexts);
+        fallbackSku = product.sku || "N/A";
+        fallbackAsin = product.asin || "";
+        fallbackQuantity = product.quantityShipped || 0;
+      }
+
+      const txnBreakdowns = Array.isArray(txn.breakdowns)
+        ? txn.breakdowns
+        : (txn.breakdowns?.breakdowns || []);
+
+      for (const { breakdown, path } of walkBreakdowns(txnBreakdowns)) {
+        const category = categorizeBreakdownByPath(path);
+
+        if (!isRevenueCategory(category)) continue;
+
+        const amount = parseFloat(breakdown.breakdownAmount?.currencyAmount || 0);
+        if (amount === 0) continue;
+
+        revenueRows.push({
+          amount,
+          category,
+          sku: fallbackSku,
+          asin: fallbackAsin,
+          quantity: fallbackQuantity,
+          orderId: txnOrderId,
+          transactionType: txnType,
+          postedDate: txnPostedDate,
+          postedDateStr: txnPostedDate ? formatDateYYYYMMDD(txnPostedDate) : "",
+          breakdownPath: path.join(" > "),
+          transactionId: txnId,
+        });
+      }
+    }
+  }
+
+  return revenueRows;
+}
+
 // ─────────────────────────────────────────────
-// 10. EXPENSE ANALYSIS ENGINE
+// 10. EXPENSE ANALYSIS ENGINE (UNCHANGED)
+//     Same aggregation logic as before — works on the
+//     same expenseRows shape produced by parseTransactionsV2024().
 // ─────────────────────────────────────────────
 function analyzeExpenses(expenseRows) {
   const now = new Date();
@@ -563,21 +826,93 @@ function analyzeExpenses(expenseRows) {
   const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
   const expenses = expenseRows.map((e) => ({ ...e, postedDate: e.postedDate instanceof Date ? e.postedDate : parseDate(e.postedDate || e.postedDateStr) }));
 
+  // Build SKU↔ASIN map across all rows so a SKU's ASIN can be carried even if
+  // some individual rows lacked an ASIN (e.g. promo or storage rows).
+  const skuToAsin = new Map();
+  const asinToSku = new Map();
+  for (const e of expenses) {
+    if (e.sku && e.sku !== "N/A" && e.asin) {
+      skuToAsin.set(e.sku, e.asin);
+      asinToSku.set(e.asin, e.sku);
+    }
+  }
+  function lookupAsin(sku) { return skuToAsin.get(sku) || ""; }
+  function lookupSku(asin) { return asinToSku.get(asin) || "N/A"; }
+
   function aggregateByCategory(filtered) {
     const catMap = {}; let total = 0;
     for (const exp of filtered) { total += exp.amount; if (!catMap[exp.category]) catMap[exp.category] = { category: exp.category, totalAmount: 0, count: 0 }; catMap[exp.category].totalAmount += exp.amount; catMap[exp.category].count++; }
     return { total: Math.round(total * 100) / 100, categories: Object.values(catMap).map((c) => ({ ...c, totalAmount: Math.round(c.totalAmount * 100) / 100 })).sort((a, b) => a.totalAmount - b.totalAmount) };
   }
+
   function aggregateBySku(filtered) {
     const skuMap = {};
-    for (const exp of filtered) { const sku = exp.sku; if (!skuMap[sku]) skuMap[sku] = { sku, totalAmount: 0, count: 0, breakdown: {} }; skuMap[sku].totalAmount += exp.amount; skuMap[sku].count++; if (!skuMap[sku].breakdown[exp.category]) skuMap[sku].breakdown[exp.category] = 0; skuMap[sku].breakdown[exp.category] += exp.amount; }
-    return Object.values(skuMap).map((s) => ({ ...s, totalAmount: Math.round(s.totalAmount * 100) / 100, breakdown: Object.entries(s.breakdown).map(([cat, amt]) => ({ category: cat, amount: Math.round(amt * 100) / 100 })).sort((a, b) => a.amount - b.amount) })).sort((a, b) => a.totalAmount - b.totalAmount);
+    for (const exp of filtered) {
+      const sku = exp.sku;
+      if (!skuMap[sku]) skuMap[sku] = { sku, asin: lookupAsin(sku), totalAmount: 0, count: 0, breakdown: {} };
+      // Prefer a non-empty asin if we encounter one mid-stream
+      if (!skuMap[sku].asin && exp.asin) skuMap[sku].asin = exp.asin;
+      skuMap[sku].totalAmount += exp.amount;
+      skuMap[sku].count++;
+      if (!skuMap[sku].breakdown[exp.category]) skuMap[sku].breakdown[exp.category] = 0;
+      skuMap[sku].breakdown[exp.category] += exp.amount;
+    }
+    return Object.values(skuMap).map((s) => ({
+      sku: s.sku,
+      asin: s.asin,
+      totalAmount: Math.round(s.totalAmount * 100) / 100,
+      count: s.count,
+      breakdown: Object.entries(s.breakdown).map(([cat, amt]) => ({ category: cat, amount: Math.round(amt * 100) / 100 })).sort((a, b) => a.amount - b.amount),
+    })).sort((a, b) => a.totalAmount - b.totalAmount);
   }
+
+  // ★ NEW: aggregate by ASIN. One ASIN can have multiple SKUs across
+  //   marketplaces, so we track the canonical SKU but list all SKUs seen.
+  function aggregateByAsin(filtered) {
+    const asinMap = {};
+    for (const exp of filtered) {
+      const asin = exp.asin || lookupAsin(exp.sku) || "";
+      if (!asin) continue; // skip rows without any ASIN information
+      if (!asinMap[asin]) asinMap[asin] = { asin, sku: lookupSku(asin), skus: new Set(), totalAmount: 0, count: 0, breakdown: {} };
+      if (exp.sku && exp.sku !== "N/A") asinMap[asin].skus.add(exp.sku);
+      asinMap[asin].totalAmount += exp.amount;
+      asinMap[asin].count++;
+      if (!asinMap[asin].breakdown[exp.category]) asinMap[asin].breakdown[exp.category] = 0;
+      asinMap[asin].breakdown[exp.category] += exp.amount;
+    }
+    return Object.values(asinMap).map((a) => ({
+      asin: a.asin,
+      sku: a.sku,
+      skus: [...a.skus],
+      totalAmount: Math.round(a.totalAmount * 100) / 100,
+      count: a.count,
+      breakdown: Object.entries(a.breakdown).map(([cat, amt]) => ({ category: cat, amount: Math.round(amt * 100) / 100 })).sort((a, b) => a.amount - b.amount),
+    })).sort((a, b) => a.totalAmount - b.totalAmount);
+  }
+
   function aggregateBySkuAndDate(filtered) {
     const map = {};
-    for (const exp of filtered) { const dateKey = exp.postedDateStr || "Unknown"; const sku = exp.sku; const key = `${sku}||${dateKey}`; if (!map[key]) map[key] = { sku, date: dateKey, totalAmount: 0, count: 0, breakdown: {} }; map[key].totalAmount += exp.amount; map[key].count++; if (!map[key].breakdown[exp.category]) map[key].breakdown[exp.category] = 0; map[key].breakdown[exp.category] += exp.amount; }
-    return Object.values(map).map((entry) => ({ ...entry, totalAmount: Math.round(entry.totalAmount * 100) / 100, breakdown: Object.entries(entry.breakdown).map(([cat, amt]) => ({ category: cat, amount: Math.round(amt * 100) / 100 })).sort((a, b) => a.amount - b.amount) })).sort((a, b) => { if (a.date !== b.date) return a.date > b.date ? -1 : 1; return a.sku.localeCompare(b.sku); });
+    for (const exp of filtered) {
+      const dateKey = exp.postedDateStr || "Unknown";
+      const sku = exp.sku;
+      const key = `${sku}||${dateKey}`;
+      if (!map[key]) map[key] = { sku, asin: lookupAsin(sku), date: dateKey, totalAmount: 0, count: 0, breakdown: {} };
+      if (!map[key].asin && exp.asin) map[key].asin = exp.asin;
+      map[key].totalAmount += exp.amount;
+      map[key].count++;
+      if (!map[key].breakdown[exp.category]) map[key].breakdown[exp.category] = 0;
+      map[key].breakdown[exp.category] += exp.amount;
+    }
+    return Object.values(map).map((entry) => ({
+      sku: entry.sku,
+      asin: entry.asin,
+      date: entry.date,
+      totalAmount: Math.round(entry.totalAmount * 100) / 100,
+      count: entry.count,
+      breakdown: Object.entries(entry.breakdown).map(([cat, amt]) => ({ category: cat, amount: Math.round(amt * 100) / 100 })).sort((a, b) => a.amount - b.amount),
+    })).sort((a, b) => { if (a.date !== b.date) return a.date > b.date ? -1 : 1; return a.sku.localeCompare(b.sku); });
   }
+
   function aggregateByDate(filtered) {
     const dateMap = {};
     for (const exp of filtered) { const dateKey = exp.postedDateStr || "Unknown"; if (!dateMap[dateKey]) dateMap[dateKey] = { date: dateKey, totalAmount: 0, count: 0, breakdown: {} }; dateMap[dateKey].totalAmount += exp.amount; dateMap[dateKey].count++; if (!dateMap[dateKey].breakdown[exp.category]) dateMap[dateKey].breakdown[exp.category] = 0; dateMap[dateKey].breakdown[exp.category] += exp.amount; }
@@ -593,23 +928,44 @@ function analyzeExpenses(expenseRows) {
   const expenseLatest = expenses.reduce((max, e) => (e.postedDate && (!max || e.postedDate > max) ? e.postedDate : max), null);
 
   return {
-    totalExpenses: aggregateByCategory(expenses), totalExpensesLast7Days: aggregateByCategory(last7), totalExpensesLast14Days: aggregateByCategory(last14),
-    skuWiseExpenses: aggregateBySku(expenses), skuWiseExpensesLast7Days: aggregateBySku(last7), skuWiseExpensesLast14Days: aggregateBySku(last14),
-    skuDateWiseExpenses: aggregateBySkuAndDate(expenses), dateWiseExpenses: aggregateByDate(expenses),
-    totalAmazonFees: aggregateByCategory(amazonFeesAll), totalAmazonFeesLast7Days: aggregateByCategory(amazonFeesLast7), totalAmazonFeesLast14Days: aggregateByCategory(amazonFeesLast14),
+    totalExpenses: aggregateByCategory(expenses),
+    totalExpensesLast7Days: aggregateByCategory(last7),
+    totalExpensesLast14Days: aggregateByCategory(last14),
+
+    // SKU-level (now carries `asin` on each row)
+    skuWiseExpenses: aggregateBySku(expenses),
+    skuWiseExpensesLast7Days: aggregateBySku(last7),
+    skuWiseExpensesLast14Days: aggregateBySku(last14),
+
+    // ★ NEW: ASIN-level aggregation
+    asinWiseExpenses: aggregateByAsin(expenses),
+    asinWiseExpensesLast7Days: aggregateByAsin(last7),
+    asinWiseExpensesLast14Days: aggregateByAsin(last14),
+
+    skuDateWiseExpenses: aggregateBySkuAndDate(expenses),
+    dateWiseExpenses: aggregateByDate(expenses),
+
+    totalAmazonFees: aggregateByCategory(amazonFeesAll),
+    totalAmazonFeesLast7Days: aggregateByCategory(amazonFeesLast7),
+    totalAmazonFeesLast14Days: aggregateByCategory(amazonFeesLast14),
     dateWiseAmazonFees: aggregateByDate(amazonFeesAll),
+
     metadata: {
-      totalExpenseRows: expenses.length, totalAmazonFeeRows: amazonFeesAll.length,
+      totalExpenseRows: expenses.length,
+      totalAmazonFeeRows: amazonFeesAll.length,
+      uniqueAsins: skuToAsin.size,
+      uniqueSkus: new Set(expenses.map((e) => e.sku).filter((s) => s && s !== "N/A")).size,
       amazonFeeCategories: Array.from(AMAZON_FEE_CATEGORIES),
       nonAmazonFeeCategories: ["TCS (Tax Collected at Source)", "TDS (Tax Deducted at Source)", "Advertising / PPC", "Promotions / Discounts", "Affordability Promotion Expense", "SAFE-T Reimbursement", "Debt Recovery", "Loan Servicing", "Retrocharge", "Rental Fee", "Network Commingling", "Service Provider Credit", "Charge Refund", "FBA Liquidation Proceeds", "Adhoc Disbursement", "Failed Adhoc Disbursement", "EBT Refund Reimbursement", "Pay With Amazon Fee", "Tax Withheld", "Trial Shipment Fee"],
       dateRange: { from: expenseEarliest, to: expenseLatest, fromFormatted: formatDateDDMMYYYY(expenseEarliest), toFormatted: formatDateDDMMYYYY(expenseLatest) },
       generatedAt: now.toISOString(),
+      apiVersion: "2024-06-19",
     },
   };
 }
 
 // ─────────────────────────────────────────────
-// 11. FETCH FINANCE DATA
+// 11. FETCH FINANCE DATA — uses v2024-06-19
 // ─────────────────────────────────────────────
 async function fetchNewFinanceData(config) {
   const {
@@ -619,33 +975,39 @@ async function fetchNewFinanceData(config) {
     refreshToken,
     clientId,
     clientSecret,
-    // Optional explicit window overrides:
-    // - postedAfter / postedBefore: ISO strings
-    // - from / to: YYYY-MM-DD (UTC day boundaries)
+    // Optional explicit window overrides
     postedAfter: postedAfterOverride,
     postedBefore: postedBeforeOverride,
     from,
     to,
+    // ★ NEW: Override marketplaceId if you want a specific marketplace
+    //   (otherwise resolved from country)
+    marketplaceIdOverride,
   } = config;
+
   const countryUpper = country.toUpperCase();
-  const { baseUrl, region } = resolveMarketplaceAndRegion(countryUpper, config.region);
-  logger.info(`[Finance Fetch] Country: ${countryUpper} | Region: ${region}`);
-  logger.info(`[Finance Fetch] Base URL: ${baseUrl}`);
+  const { baseUrl, region, marketplaceId: resolvedMarketplaceId } = resolveMarketplaceAndRegion(countryUpper, config.region);
+
+  // Use override if provided, else use the resolved marketplaceId
+  const marketplaceId = marketplaceIdOverride || resolvedMarketplaceId;
+
+  logger.info(`[Finance Fetch v2024-06-19] Country: ${countryUpper} | Region: ${region}`);
+  logger.info(`[Finance Fetch v2024-06-19] Marketplace ID: ${marketplaceId}`);
+  logger.info(`[Finance Fetch v2024-06-19] Base URL: ${baseUrl}`);
+
   let accessToken = providedAccessToken;
-  if (!accessToken) { logger.info("[Finance Fetch] Getting access token..."); accessToken = await getAccessToken(clientId, clientSecret, refreshToken); logger.info("[Finance Fetch] Access token obtained."); }
+  if (!accessToken) {
+    logger.info("[Finance Fetch v2024-06-19] Getting access token...");
+    accessToken = await getAccessToken(clientId, clientSecret, refreshToken);
+    logger.info("[Finance Fetch v2024-06-19] Access token obtained.");
+  }
 
   let postedAfter;
   let postedBefore;
 
-  // 1) Explicit ISO overrides win
-  if (postedAfterOverride) {
-    postedAfter = new Date(postedAfterOverride).toISOString();
-  }
-  if (postedBeforeOverride) {
-    postedBefore = new Date(postedBeforeOverride).toISOString();
-  }
+  if (postedAfterOverride) postedAfter = new Date(postedAfterOverride).toISOString();
+  if (postedBeforeOverride) postedBefore = new Date(postedBeforeOverride).toISOString();
 
-  // 2) from/to (YYYY-MM-DD) override (UTC day boundaries)
   if (!postedAfter && from) {
     const d = new Date(`${from}T00:00:00.000Z`);
     if (Number.isNaN(d.getTime())) throw new Error(`Invalid from date (expected YYYY-MM-DD): ${from}`);
@@ -657,25 +1019,41 @@ async function fetchNewFinanceData(config) {
     postedBefore = d.toISOString();
   }
 
-  // 3) Fallback: rolling (yesterday - daysBack) → yesterday (local time)
   if (!postedAfter || !postedBefore) {
     const now = new Date();
     const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59);
     const startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1 - daysBack, 0, 0, 0);
     postedAfter = postedAfter || startDate.toISOString();
     postedBefore = postedBefore || yesterday.toISOString();
-    logger.info(`[Finance Fetch] Fetching window: ${formatDateDDMMYYYY(startDate)} → ${formatDateDDMMYYYY(yesterday)} (${daysBack} days)`);
+    logger.info(`[Finance Fetch v2024-06-19] Window: ${formatDateDDMMYYYY(startDate)} → ${formatDateDDMMYYYY(yesterday)} (${daysBack} days)`);
   } else {
     const startDate = new Date(postedAfter);
     const endDate = new Date(postedBefore);
-    logger.info(`[Finance Fetch] Fetching explicit window: ${formatDateDDMMYYYY(startDate)} → ${formatDateDDMMYYYY(endDate)}`);
+    logger.info(`[Finance Fetch v2024-06-19] Explicit window: ${formatDateDDMMYYYY(startDate)} → ${formatDateDDMMYYYY(endDate)}`);
   }
 
-  const financialEvents = await fetchFinancialEvents(accessToken, baseUrl, postedAfter, postedBefore);
-  const expenseRows = parseFinancialEvents(financialEvents);
-  logger.info(`[Finance Fetch] Parsed ${expenseRows.length} expense rows.`);
-  if (expenseRows.length > 0) { const dates = expenseRows.filter(e => e.postedDateStr).map(e => e.postedDateStr).sort(); logger.info(`[Finance Fetch] Data date range: ${dates[0]} → ${dates[dates.length - 1]}`); }
-  return { hasNewData: expenseRows.length > 0, expenseRows, postedAfter, postedBefore };
+  // ★ Pass marketplaceId to filter at the API level — solves multi-marketplace mixing
+  const transactions = await fetchTransactions(accessToken, baseUrl, postedAfter, postedBefore, marketplaceId);
+
+  const expenseRows = parseTransactionsV2024(transactions);
+  const revenueRows = extractRevenueFromTransactions(transactions);
+
+  logger.info(`[Finance Fetch v2024-06-19] Parsed ${expenseRows.length} expense rows, ${revenueRows.length} revenue rows.`);
+
+  if (expenseRows.length > 0) {
+    const dates = expenseRows.filter(e => e.postedDateStr).map(e => e.postedDateStr).sort();
+    logger.info(`[Finance Fetch v2024-06-19] Expense data range: ${dates[0]} → ${dates[dates.length - 1]}`);
+  }
+
+  return {
+    hasNewData: expenseRows.length > 0 || revenueRows.length > 0,
+    expenseRows,
+    revenueRows,        // ★ NEW: revenue alongside expenses
+    transactions,        // ★ NEW: raw transactions for debugging / future use
+    postedAfter,
+    postedBefore,
+    marketplaceId,
+  };
 }
 
 // ─────────────────────────────────────────────
@@ -683,28 +1061,43 @@ async function fetchNewFinanceData(config) {
 // ─────────────────────────────────────────────
 async function fetchAndAnalyze(config) {
   const result = await fetchNewFinanceData(config);
-  if (!result.hasNewData) return { data: null, postedAfter: result.postedAfter, postedBefore: result.postedBefore };
+  if (!result.hasNewData) {
+    return {
+      data: null,
+      postedAfter: result.postedAfter,
+      postedBefore: result.postedBefore,
+      marketplaceId: result.marketplaceId,
+    };
+  }
   const analysis = analyzeExpenses(result.expenseRows);
   logger.info(`[Analyze] Total expenses: ${analysis.totalExpenses.total} | Amazon fees: ${analysis.totalAmazonFees.total}`);
-  return { data: analysis, postedAfter: result.postedAfter, postedBefore: result.postedBefore };
+  return {
+    data: analysis,
+    revenueRows: result.revenueRows,
+    postedAfter: result.postedAfter,
+    postedBefore: result.postedBefore,
+    marketplaceId: result.marketplaceId,
+  };
 }
 
 // ─────────────────────────────────────────────
 // 13. OFFLINE MODE — Parse local JSON files
+//     Now expects v2024-06-19 transaction format.
 // ─────────────────────────────────────────────
 const fs = require("fs");
 const path = require("path");
 
 function analyzeLocalFinanceFiles(filePaths) {
-  const allEvents = {};
+  const allTransactions = [];
   for (const filePath of filePaths) {
     const rawContent = fs.readFileSync(filePath, "utf-8");
     const data = JSON.parse(rawContent);
-    const events = data.payload?.FinancialEvents || data.FinancialEvents || data;
-    for (const [key, val] of Object.entries(events)) { if (Array.isArray(val)) { if (!allEvents[key]) allEvents[key] = []; allEvents[key].push(...val); } }
-    logger.info(`Parsed ${path.basename(filePath)}`);
+    // Accept: { payload: { transactions: [] } } or { transactions: [] } or { financialEvents: [] } or [] directly
+    const transactions = data.payload?.transactions || data.transactions || data.financialEvents || (Array.isArray(data) ? data : []);
+    allTransactions.push(...transactions);
+    logger.info(`Parsed ${path.basename(filePath)}: ${transactions.length} transactions`);
   }
-  const expenseRows = parseFinancialEvents(allEvents);
+  const expenseRows = parseTransactionsV2024(allTransactions);
   logger.info(`Total expense rows: ${expenseRows.length}`);
   const result = analyzeExpenses(expenseRows);
   logger.info(`[Summary] Expense data range: ${result.metadata.dateRange.fromFormatted} → ${result.metadata.dateRange.toFormatted}`);
@@ -716,7 +1109,35 @@ function analyzeLocalFinanceFiles(filePaths) {
 // EXPORTS
 // ─────────────────────────────────────────────
 module.exports = {
-  fetchNewFinanceData, analyzeExpenses, fetchAndAnalyze,
-  parseFinancialEvents, analyzeLocalFinanceFiles, isAmazonFee, AMAZON_FEE_CATEGORIES, formatDateDDMMYYYY,
-  getAccessToken, fetchFinancialEvents, resolveMarketplaceAndRegion, COUNTRY_TO_INTERNAL_REGION, REGION_BASE_URLS,
+  // Main API (same names as before for backward compatibility)
+  fetchNewFinanceData,
+  analyzeExpenses,
+  fetchAndAnalyze,
+  analyzeLocalFinanceFiles,
+
+  // Parsing functions (renamed to reflect v2024-06-19, aliases preserved)
+  parseTransactionsV2024,
+  parseFinancialEvents: parseTransactionsV2024, // alias for backward compat
+  extractRevenueFromTransactions,                // ★ NEW: revenue extraction
+
+  // Fee classification helpers
+  isAmazonFee,
+  AMAZON_FEE_CATEGORIES,
+  mapBreakdownTypeToCategory,
+  categorizeBreakdownByPath,                     // ★ NEW: path-aware categorization
+  isRevenueCategory,                             // ★ NEW: revenue check
+  REVENUE_CATEGORIES,                            // ★ NEW: set of revenue category names
+
+  // Date helpers
+  formatDateDDMMYYYY,
+
+  // Auth & low-level fetching
+  getAccessToken,
+  fetchTransactions,
+  fetchFinancialEvents: fetchTransactions, // alias for backward compat
+
+  // Region/marketplace resolution
+  resolveMarketplaceAndRegion,
+  COUNTRY_TO_INTERNAL_REGION,
+  REGION_BASE_URLS,
 };

@@ -39,7 +39,12 @@ module.exports = {
             exec_mode: 'fork',
             env: {
                 NODE_ENV: 'production',
-                PORT: process.env.PORT || 3000
+                PORT: process.env.PORT || 3000,
+                // Flip to 'true' once the `cron-producer` PM2 app is running.
+                // When true, api-server skips registering any in-process cron
+                // jobs — those are owned by cron-producer. Default 'false' keeps
+                // backwards-compatible behaviour for single-process deploys.
+                CRON_PRODUCER_STANDALONE: process.env.CRON_PRODUCER_STANDALONE || 'false'
             },
             // Logging
             error_file: './logs/pm2-api-error.log',
@@ -64,16 +69,62 @@ module.exports = {
             }
         },
         {
+            // SellerQI v2 Phase 1: standalone cron producer.
+            //
+            // Owns all cron-based scheduling that used to live inside the API:
+            //   - Hourly daily-update enqueue (BullMQ producer)
+            //   - JobScheduler crons (cache cleanup, health check, weekly email,
+            //     trial reminders)
+            //   - Email reminder cron
+            //
+            // Distributed lock (OrchestrationCronLockModel) ensures only one
+            // tick fires per hour even if multiple instances accidentally run.
+            // Keep `instances: 1` to avoid lock contention in the steady state.
+            //
+            // Enable by also setting CRON_PRODUCER_STANDALONE=true on the
+            // api-server env above — that tells the API to skip in-process crons.
+            name: 'cron-producer',
+            script: './server/Services/BackgroundJobs/cronProducerStandalone.js',
+            instances: 1,
+            exec_mode: 'fork',
+            env: {
+                NODE_ENV: 'production',
+                TIMEZONE: process.env.TIMEZONE || 'UTC'
+            },
+            error_file: './logs/pm2-cron-producer-error.log',
+            out_file: './logs/pm2-cron-producer-out.log',
+            log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+            merge_logs: true,
+            autorestart: true,
+            max_restarts: 20,
+            min_uptime: '10s',
+            max_memory_restart: '512M',
+            kill_timeout: 30 * 1000,
+            watch: false,
+            env_production: { NODE_ENV: 'production' },
+            env_development: { NODE_ENV: 'development' }
+        },
+        {
+            // SellerQI v2 Phase 1 production target (~500 users / ~750 accounts):
+            //   5 worker instances × 15 concurrency = 75 phase-job slots
+            //   ≈ 7 phases × 750 accts / 24h ≈ ~220 phase-jobs/h demand vs
+            //   75 slots × (60min / 5min/phase) = 900 phase-jobs/h capacity
+            //   → ~25% utilisation, comfortable headroom for hot buckets.
+            // Override per environment via WORKER_INSTANCES / WORKER_CONCURRENCY.
             name: 'worker',
             script: './server/Services/BackgroundJobs/worker.js',
-            instances: parseInt(process.env.WORKER_INSTANCES || '2', 10), // Default: 2 workers
+            instances: parseInt(process.env.WORKER_INSTANCES || '5', 10), // Default: 5 workers (was 2)
             exec_mode: 'cluster', // Run multiple instances
             env: {
                 NODE_ENV: 'production',
-                WORKER_CONCURRENCY: process.env.WORKER_CONCURRENCY || '3', // Jobs per worker
+                WORKER_CONCURRENCY: process.env.WORKER_CONCURRENCY || '15', // Jobs per worker (was 3)
                 WORKER_SHUTDOWN_GRACE_MS: process.env.WORKER_SHUTDOWN_GRACE_MS || '120000',
                 // WORKER_NAME is not set here - worker.js will use `worker-${process.pid}` as fallback
                 // This ensures each worker instance has a unique identifier in merged logs
+                // Slice assembler flag (default off — finalize uses legacy Analyse path).
+                // Flip to 'true' once slice payloads have been verified to match
+                // the React dashboard's expected shape. See ScheduledIntegration.js.
+                USE_SLICE_ASSEMBLER: process.env.USE_SLICE_ASSEMBLER || 'false'
             },
             // Logging
             error_file: './logs/pm2-worker-error.log',
@@ -102,6 +153,12 @@ module.exports = {
             // Integration Worker - SEPARATE from scheduled workers
             // Handles first-time Integration.getSpApiData() jobs
             // Uses separate queue: 'user-integration'
+            //
+            // SellerQI v2 Phase 1 production target: 1 instance × 2 concurrency.
+            // First-time integrations are bursty (new signups) but rare relative
+            // to scheduled phases. 2 concurrent integrations is enough to clear
+            // a 500-user onboarding rate while keeping memory pressure low
+            // (integration jobs are 3GB-capped, see max_memory_restart).
             name: 'integration-worker',
             script: './server/Services/BackgroundJobs/integrationWorker.js',
             instances: parseInt(process.env.INTEGRATION_WORKER_INSTANCES || '1', 10), // Default: 1 worker

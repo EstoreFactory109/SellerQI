@@ -56,6 +56,11 @@ const ExpenseSkuAggSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    asin: {
+      type: String,
+      default: '',
+      index: true,
+    },
     totalAmount: {
       type: Number,
       required: true,
@@ -78,8 +83,9 @@ const ExpenseSkuAggSchema = new mongoose.Schema(
 
 ExpenseSkuAggSchema.index({ runId: 1, period: 1, sku: 1 }, { unique: true });
 ExpenseSkuAggSchema.index({ runId: 1, period: 1, totalAmount: 1 });
+ExpenseSkuAggSchema.index({ runId: 1, period: 1, asin: 1 });
 ExpenseSkuAggSchema.index({ User: 1, country: 1, region: 1, period: 1, totalAmount: 1 });
+ExpenseSkuAggSchema.index({ User: 1, country: 1, region: 1, period: 1, asin: 1 });
 ExpenseSkuAggSchema.index({ User: 1, country: 1, region: 1, period: 1, createdAt: -1 });
 
 module.exports = mongoose.model('ExpenseSkuAgg', ExpenseSkuAggSchema);
-

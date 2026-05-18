@@ -2,7 +2,7 @@ const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const { generateAccessToken } = require('../../Services/Sp_API/GenerateTokens.js');
 const logger = require('../../utils/Logger.js');
 const { getDefaultExpenseFinanceDaysBack } = require('../../config/expenseFinanceDaysBack.js');
-const { fetchPersistAndReturnExpenseReport } = require('../../Services/Sp_API/ExpenseReportService.js');
+const { fetchPersistAndReturnExpenseReport } = require('../../Services/Sp_API/FinanceService.js');
 
 async function testExpenseReport(req, res) {
   try {

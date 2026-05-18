@@ -6,8 +6,8 @@ import 'react-date-range/dist/theme/default.css';
 import './Calendar.css';
 import axios from 'axios'
 import {useDispatch, useSelector} from 'react-redux'
-import {UpdateDashboardInfo, setDashboardInfo, setCalendarMode} from '../../redux/slices/DashboardSlice.js'
-import { fetchTop4Products } from '../../redux/slices/PageDataSlice.js'
+import {UpdateDashboardInfo, setDashboardInfo, setCalendarMode, setDashboardDateRange} from '../../redux/slices/DashboardSlice.js'
+import { fetchTop4Products, fetchProfitabilityDateRange, setProfitabilityDateRange } from '../../redux/slices/PageDataSlice.js'
 import { addBrand } from '../../redux/slices/authSlice.js'
 // PPC metrics are now filtered locally in Dashboard based on ppcDateWiseMetrics
 // No need to fetch filtered metrics from API
@@ -67,6 +67,7 @@ export default function DateFilter({ setOpenCalender, setSelectedPeriod, anchorR
   const dispatch=useDispatch()
   const [Loader,setLoader]=useState(false);
   const isDemoRoute = location.pathname.includes('/seller-central-checker-demo');
+  const isProfitabilityRoute = location.pathname.includes('profitibility');
   
   // Get createdAccountDate from Redux
   const dashboardInfo = useSelector(state => state.Dashboard?.DashBoardInfo);
@@ -138,7 +139,7 @@ export default function DateFilter({ setOpenCalender, setSelectedPeriod, anchorR
       const hasBackendDates = dashboardInfo?.startDate && dashboardInfo?.endDate;
       return {
         selectedRange: {
-          startDate: hasBackendDates ? parseLocalDate(dashboardInfo.startDate) : subDays(new Date(), 31),
+          startDate: hasBackendDates ? parseLocalDate(dashboardInfo.startDate) : subDays(new Date(), 30),
           endDate: hasBackendDates ? parseLocalDate(dashboardInfo.endDate) : subDays(new Date(), 1),
           key: 'selection',
         },
@@ -257,7 +258,7 @@ export default function DateFilter({ setOpenCalender, setSelectedPeriod, anchorR
         // This prevents showing incorrect dates before the API call returns
         const hasExistingBackendDates = dashboardInfo?.startDate && dashboardInfo?.endDate;
         const defaultRange = {
-          startDate: hasExistingBackendDates ? parseLocalDate(dashboardInfo.startDate) : subDays(today, 31),
+          startDate: hasExistingBackendDates ? parseLocalDate(dashboardInfo.startDate) : subDays(today, 30),
           endDate: hasExistingBackendDates ? parseLocalDate(dashboardInfo.endDate) : subDays(today, 1),
           key: 'selection',
         };
@@ -267,12 +268,29 @@ export default function DateFilter({ setOpenCalender, setSelectedPeriod, anchorR
         // Set calendar mode to default
         dispatch(setCalendarMode('default'));
 
-        // Demo dashboard should only update Total Sales on calendar changes.
         if (isDemoRoute) {
           await applyDateRange(defaultRange, 'last30');
+        } else if (isProfitabilityRoute) {
+          dispatch(setCalendarMode('default'));
+          try {
+            const result = await dispatch(fetchProfitabilityDateRange()).unwrap();
+            if (result?.startDate && result?.endDate) {
+              setSelectedRange({
+                startDate: parseLocalDate(result.startDate),
+                endDate: parseLocalDate(result.endDate),
+                key: 'selection',
+              });
+              dispatch(setDashboardDateRange({
+                startDate: result.startDate,
+                endDate: result.endDate,
+                calendarMode: 'default',
+              }));
+            }
+          } catch (err) {
+            console.error('Profitability date range reset failed:', err);
+          }
+          setOpenCalender(false);
         } else {
-          // Main app keeps existing full dashboard refresh behavior.
-          // The applyDefaultDateRange function will update selectedRange with actual backend dates.
           await applyDefaultDateRange();
         }
         break;
@@ -401,6 +419,34 @@ export default function DateFilter({ setOpenCalender, setSelectedPeriod, anchorR
 
     const formattedStartDate = formatDateForURL(startDate);
     const formattedEndDate = formatDateForURL(endDate);
+
+    // Profitability page: update isolated date slice only (no legacy analyse / TotalSales refresh)
+    if (isProfitabilityRoute) {
+      try {
+        let calendarMode = 'custom';
+        if (periodType === 'last7') calendarMode = 'last7';
+        else if (periodType === 'last14') calendarMode = 'last14';
+        else if (periodType === 'last30' || periodType === 'last31') calendarMode = 'default';
+
+        dispatch(setProfitabilityDateRange({
+          startDate: formattedStartDate,
+          endDate: formattedEndDate,
+          calendarMode,
+        }));
+        dispatch(setDashboardDateRange({
+          startDate: formattedStartDate,
+          endDate: formattedEndDate,
+          calendarMode,
+        }));
+        dispatch(setCalendarMode(calendarMode));
+      } catch (error) {
+        console.error('Profitability calendar update failed:', error);
+      } finally {
+        setLoader(false);
+        setOpenCalender(false);
+      }
+      return;
+    }
     
     try {
       // Add periodType as query parameter - properly encode dates
@@ -417,7 +463,7 @@ export default function DateFilter({ setOpenCalender, setSelectedPeriod, anchorR
         calendarMode = 'last7';
       } else if (periodType === 'last14') {
         calendarMode = 'last14';
-      } else if (periodType === 'last30') {
+      } else if (periodType === 'last30' || periodType === 'last31') {
         calendarMode = 'default';
       } else if (periodType === 'custom') {
         calendarMode = 'custom';

@@ -667,14 +667,14 @@ const getProfitabilityMetrics = async (userId, country, region) => {
     const startTime = Date.now();
     logger.info(`[PERF] ProfitabilityService.getProfitabilityMetrics starting for user ${userId}`);
 
-    // Fetch only what we need for metrics (EconomicsMetrics + PPCMetrics summary)
-    // OPTIMIZED: Only select fields needed for metrics calculation
-    const [economicsMetricsData, ppcMetricsData] = await Promise.all([
-        SalesOnlyMetrics.findLatest(userId, region, country)
-            .select('datewiseSales totalSales dateRange')
-            .lean(),
-        require('../../models/amazon-ads/PPCMetricsModel.js').findLatestForUser(userId, country, region)
+    // Fetch only what we need for metrics (SalesOnlyMetrics + PPCMetrics rollup for ~last 30 days)
+    const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
+    const [economicsMetricsData, ppcRollup] = await Promise.all([
+        SalesOnlyMetrics.findLatest(userId, region, country),
+        PPCMetrics.rollupLastDays(userId, country, region, 30)
     ]);
+    const ppcMetricsData =
+        ppcRollup && ppcRollup.found && ppcRollup.summary ? { summary: ppcRollup.summary } : null;
 
     // With .lean(), economicsMetricsData is already a plain object
     const processedEconomicsMetrics = economicsMetricsData;
@@ -801,11 +801,9 @@ const getProfitabilityChart = async (userId, country, region) => {
     const startTime = Date.now();
     logger.info(`[PERF] ProfitabilityService.getProfitabilityChart starting for user ${userId}`);
 
-    // Fetch only sales-only metrics for datewise data
-    // OPTIMIZED: Only select fields needed for chart
-    const economicsMetricsData = await SalesOnlyMetrics.findLatest(userId, region, country)
-        .select('datewiseSales dateRange')
-        .lean();
+    // Fetch sales-only metrics for datewise data
+    // Per-day model: findLatest aggregates recent 31 days into { totalSales, datewiseSales, dateRange }
+    const economicsMetricsData = await SalesOnlyMetrics.findLatest(userId, region, country);
 
     // With .lean(), economicsMetricsData is already a plain object
     const processedEconomicsMetrics = economicsMetricsData;
@@ -1075,9 +1073,8 @@ const getProfitabilityTable = async (userId, country, region, page = 1, limit = 
 
     // Sales-only mode: we do not persist ASIN-wise fee/gross-profit data required for the original table.
     // Return an empty but well-shaped response so the UI can render a sales-only view without crashing.
-    const salesOnlyMetricsData = await SalesOnlyMetrics.findLatest(userId, region, country)
-        .select('dateRange totalSales')
-        .lean();
+    // Per-day model: findLatest aggregates recent 31 days into { totalSales, datewiseSales, dateRange }
+    const salesOnlyMetricsData = await SalesOnlyMetrics.findLatest(userId, region, country);
 
     const hasData = !!salesOnlyMetricsData;
     const totalItems = hasData ? 0 : 0;

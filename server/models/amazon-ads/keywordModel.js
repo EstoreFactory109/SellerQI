@@ -12,6 +12,12 @@ const keywordSchema = new mongoose.Schema({
     region:{
         type:String,
     },
+    /** YYYY-MM-DD snapshot day (UTC yesterday when synced). */
+    metricDate: {
+        type: String,
+        required: false,
+        index: true
+    },
     keywordData:[
         {
             keywordId:{
@@ -47,5 +53,12 @@ const keywordSchema = new mongoose.Schema({
 
 // Compound index for efficient queries
 keywordSchema.index({ userId: 1, country: 1, region: 1, createdAt: -1 });
+keywordSchema.index(
+    { userId: 1, country: 1, region: 1, metricDate: 1 },
+    {
+        unique: true,
+        partialFilterExpression: { metricDate: { $exists: true, $type: 'string' } }
+    }
+);
 
 module.exports = mongoose.model('Keyword', keywordSchema);

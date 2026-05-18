@@ -49,6 +49,7 @@ const GET_FBA_INVENTORY_PLANNING_DATA_Model = require('../../models/inventory/GE
 // Deprecated: FBAFeesModel - replaced by EconomicsMetrics (MCP)
 // const FBAFeesModel = require('../../models/finance/FBAFees.js');
 const adsKeywordsPerformanceModel = require('../../models/amazon-ads/adsKeywordsPerformanceModel.js');
+const { loadLatestSnapshotDoc } = require('../../utils/ppcSnapshotLoader.js');
 const GetOrderDataModel = require('../../models/products/OrderAndRevenueModel.js');
 const WeeklyFinanceModel = require('../../models/finance/WeekLyFinanceModel.js');
 const userModel = require('../../models/user-auth/userModel.js');
@@ -397,20 +398,28 @@ class AnalyseService {
             timedQuery('productWiseSales', () => ProductWiseSalesModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
             // Use service layer for ProductWiseSponsoredAds (handles both old and new formats)
             timedQuery('sponsoredAds', () => getProductWiseSponsoredAdsData(userId, country, region)),
-            timedQuery('negativeKeywords', () => NegetiveKeywords.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()),
-            timedQuery('keywords', () => KeywordModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()),
-            timedQuery('searchTerms', () => SearchTerms.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()),
-            timedQuery('campaignData', () => Campaign.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()),
+            timedQuery('negativeKeywords', () => loadLatestSnapshotDoc(NegetiveKeywords, userId, country, region)),
+            timedQuery('keywords', () => loadLatestSnapshotDoc(KeywordModel, userId, country, region)),
+            timedQuery('searchTerms', () =>
+                SearchTerms.findMergedSearchTermData(userId, country, region, {}).then((rows) =>
+                    rows?.length ? { userId, country, region, searchTermData: rows } : null
+                )
+            ),
+            timedQuery('campaignData', () => loadLatestSnapshotDoc(Campaign, userId, country, region)),
             timedQuery('inventoryPlanning', () => GET_FBA_INVENTORY_PLANNING_DATA_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
             // Use service layer for StrandedInventoryUIData (handles both old and new formats)
             timedQuery('strandedInventory', () => getStrandedInventoryUIData(userId, country, region)),
             timedQuery('nonCompliance', () => GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model.findOne({ userId: userId, country, region }).sort({ createdAt: -1 }).lean()),
             // Deprecated: FBAFeesModel - replaced by EconomicsMetrics (MCP provides ASIN-wise fees)
             Promise.resolve(null), // FBAFeesData - use EconomicsMetrics.asinWiseSales instead
-            timedQuery('adsKeywords', () => adsKeywordsPerformanceModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()),
+            timedQuery('adsKeywords', () =>
+                adsKeywordsPerformanceModel.findMergedKeywordsData(userId, country, region, {}).then((rows) =>
+                    rows?.length ? { userId, country, region, keywordsData: rows } : null
+                )
+            ),
             timedQuery('orderData', () => GetOrderDataModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
             timedQuery('ppcSpend', () => GetDateWisePPCspendModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()),
-            timedQuery('adsGroup', () => AdsGroup.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()),
+            timedQuery('adsGroup', () => loadLatestSnapshotDoc(AdsGroup, userId, country, region)),
             timedQuery('keywordTracking', () => KeywordTrackingModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()),
             timedQuery('ppcUnitsSold', () => PPCUnitsSold.findLatestForUser(userId, country, region))
         ]);

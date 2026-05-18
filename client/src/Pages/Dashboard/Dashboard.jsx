@@ -18,6 +18,7 @@ import { parseLocalDate } from '../../utils/dateUtils.js'
 import { shouldUseCalendarDateRange } from '../../utils/totalSalesFilterUrl.js'
 import { useDashboardData } from '../../hooks/usePageData.js'
 import { devLog } from '../../utils/devLogger.js'
+import axiosInstance from '../../config/axios.config.js'
 
 const Dashboard = () => {
   const [openCalender, setOpenCalender] = useState(false)
@@ -225,39 +226,45 @@ const Dashboard = () => {
   // Fallback to legacy sponsored ads metrics from Redux
   const sponsoredAdsMetrics = useSelector((state) => state.Dashboard.DashBoardInfo?.sponsoredAdsMetrics);
   
-  // Get search terms from Redux for "Amazon Owes You" calculation
-  const searchTerms = useSelector((state) => state.Dashboard.DashBoardInfo?.searchTerms) || [];
-  
-  // Get adsKeywordsPerformanceData from Redux for "Money Wasted in Ads" calculation
-  const adsKeywordsPerformanceDataRaw = useSelector((state) => state.Dashboard.DashBoardInfo?.adsKeywordsPerformanceData) || [];
-  
-  // Filter adsKeywordsPerformanceData based on selected date range (same as PPCDashboard)
-  const adsKeywordsPerformanceData = useMemo(() => {
-    if (!adsKeywordsPerformanceDataRaw.length) return adsKeywordsPerformanceDataRaw;
-    
-    if (!isDateRangeSelected) return adsKeywordsPerformanceDataRaw;
-    
-    const startDate = parseLocalDate(dashboardInfo?.startDate);
-    const endDate = parseLocalDate(dashboardInfo?.endDate);
-    startDate.setHours(0, 0, 0, 0);
-    endDate.setHours(23, 59, 59, 999);
-    
-    const filtered = adsKeywordsPerformanceDataRaw.filter(item => {
-      // If no date field, include the item (backward compatibility)
-      if (!item.date) return true;
-      
-      const itemDate = new Date(item.date);
-      return itemDate >= startDate && itemDate <= endDate;
-    });
-    
-    devLog('=== Dashboard: Filtered adsKeywordsPerformanceData ===');
-    devLog('Date range:', dashboardInfo?.startDate, 'to', dashboardInfo?.endDate);
-    devLog('Original length:', adsKeywordsPerformanceDataRaw.length);
-    devLog('Filtered length:', filtered.length);
-    
-    return filtered;
-  }, [adsKeywordsPerformanceDataRaw, isDateRangeSelected, dashboardInfo?.startDate, dashboardInfo?.endDate]);
-  
+  // Money wasted for custom calendar range (fetched from Campaign Audit aggregation API)
+  const [customRangeMoneyWasted, setCustomRangeMoneyWasted] = useState(null);
+  const [customRangeMoneyWastedLoading, setCustomRangeMoneyWastedLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isDateRangeSelected || !dashboardInfo?.startDate || !dashboardInfo?.endDate) {
+      setCustomRangeMoneyWasted(null);
+      return;
+    }
+
+    let cancelled = false;
+    setCustomRangeMoneyWastedLoading(true);
+
+    axiosInstance
+      .get('/api/pagewise/ppc/wasted-spend', {
+        params: {
+          page: 1,
+          limit: 1,
+          startDate: dashboardInfo.startDate,
+          endDate: dashboardInfo.endDate,
+        },
+      })
+      .then((res) => {
+        if (!cancelled) {
+          setCustomRangeMoneyWasted(res.data?.data?.totalWastedSpend ?? 0);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setCustomRangeMoneyWasted(0);
+      })
+      .finally(() => {
+        if (!cancelled) setCustomRangeMoneyWastedLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isDateRangeSelected, dashboardInfo?.startDate, dashboardInfo?.endDate]);
+
   // Get currency from Redux
   const currency = useSelector(state => state.currency?.currency) || '$';
   
@@ -429,36 +436,26 @@ const Dashboard = () => {
     return formatCurrency(value, currency);
   };
 
-  // Calculate "Money Wasted in Ads" - total spend of keywords with zero sales
-  // Uses adsKeywordsPerformanceData: cost > 0 && attributedSales30d < 0.01
-  const calculateAmazonOwesYou = () => {
-    if (!Array.isArray(adsKeywordsPerformanceData) || adsKeywordsPerformanceData.length === 0) {
-      return 0;
+  // Money Wasted in Ads — from phase 3 (DataFetchTracking window) or custom-range API (Campaign Audit logic)
+  const moneyWastedInAds = useMemo(() => {
+    if (isDateRangeSelected && customRangeMoneyWasted != null) {
+      return customRangeMoneyWasted;
     }
-    
-    // Filter keywords with zero sales (cost > 0 && attributedSales30d < 0.01)
-    const wastedKeywords = adsKeywordsPerformanceData.filter(keyword => {
-      if (!keyword) return false;
-      const cost = parseFloat(keyword.cost) || 0;
-      const attributedSales30d = parseFloat(keyword.attributedSales30d) || 0;
-      // Use < 0.01 instead of === 0 to handle floating point precision issues
-      return cost > 0 && attributedSales30d < 0.01;
-    });
-    
-    // Sum the spend for all wasted keywords
-    const totalWastedSpend = wastedKeywords.reduce((total, keyword) => {
-      const cost = parseFloat(keyword.cost) || 0;
-      return total + cost;
-    }, 0);
-    
-    return Math.round(totalWastedSpend * 100) / 100; // Round to 2 decimal places
-  };
+    return dashboardInfo?.moneyWastedInAds ?? dashboardInfo?.ppcSummary?.moneyWastedInAds ?? 0;
+  }, [
+    isDateRangeSelected,
+    customRangeMoneyWasted,
+    dashboardInfo?.moneyWastedInAds,
+    dashboardInfo?.ppcSummary?.moneyWastedInAds,
+  ]);
 
-  const amazonOwesYou = calculateAmazonOwesYou();
+  const moneyWastedDisplay = customRangeMoneyWastedLoading && isDateRangeSelected
+    ? 'Loading...'
+    : formatCurrencyWithLocale(moneyWastedInAds, currency);
 
   const quickStats = [
     { icon: Receipt, label: 'Amazon Owes You', value: reimbursementLoading ? 'Loading...' : formatCurrencyWithLocale(expectedReimbursement, currency), change: 'N/A', trend: 'neutral', color: 'emerald', link: '/seller-central-checker/reimbursement-dashboard' },
-    { icon: TrendingDown, label: 'Money Wasted in Ads', value: formatCurrencyWithLocale(amazonOwesYou, currency), change: 'N/A', trend: 'neutral', color: 'blue', link: '/seller-central-checker/ppc-dashboard' },
+    { icon: TrendingDown, label: 'Money Wasted in Ads', value: moneyWastedDisplay, change: 'N/A', trend: 'neutral', color: 'blue', link: '/seller-central-checker/ppc-dashboard' },
     { icon: Gauge, label: 'ACoS %', value: `${acos}%`, change: 'N/A', trend: 'neutral', color: 'purple', link: '/seller-central-checker/ppc-dashboard' },
     { icon: FileWarning, label: 'Total Issues', value: totalIssues.toLocaleString(), change: 'N/A', trend: 'neutral', color: 'orange', link: '/seller-central-checker/issues' }
   ]
@@ -566,7 +563,7 @@ const Dashboard = () => {
               )}
             </motion.div>
             {/* TotalSales - needs Phase 3 data (datewiseSales array for chart) */}
-            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, delay: 0.03 }} className='lg:col-span-2 bg-[#161b22] rounded border border-[#30363d] overflow-hidden'>
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, delay: 0.03 }} className='lg:col-span-2 bg-[#161b22] rounded border border-[#30363d] overflow-visible'>
               {!isPhase3Complete ? (
                 <div className="p-1"><SkeletonChart height={220} /></div>
               ) : (

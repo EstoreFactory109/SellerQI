@@ -21,7 +21,7 @@ import { ProductDetailsPageSkeleton } from '../../Components/Skeleton/PageSkelet
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import axiosInstance from '../../config/axios.config.js';
 import { formatCurrencyWithLocale, formatYAxisCurrency } from '../../utils/currencyUtils.js';
-import { shouldUseCalendarDateRange } from '../../utils/totalSalesFilterUrl.js';
+import { resolveProfitabilityQueryDates } from '../../utils/profitabilityDateRange.js';
 import ProductPPCIssuesTable from '../../Components/ProductDetails/ProductPPCIssuesTable.jsx';
 import FbaInventorySection from '../../Components/ProductDetails/FbaInventorySection.jsx';
 
@@ -399,8 +399,12 @@ const Dashboard = () => {
 
     /** Economics/pagewise row (PPC etc.); sales/units/GP may disagree with finance table. */
     const [asinEconomicsRow, setAsinEconomicsRow] = useState(null);
-    /** Same pipeline as profitability dashboard table (`AsinWiseSalesDateItem` + expenses). */
+    /** Finance date range fetched independently from /api/finance-dashboard/date-range */
+    const [financeDateRange, setFinanceDateRange] = useState({ startDate: null, endDate: null, ready: false });
+    /** Snapshot from DailySkuFinance for this ASIN */
     const [financeProfitSnapshot, setFinanceProfitSnapshot] = useState(null);
+    /** Day-by-day finance rows from DailySkuFinance for charts */
+    const [financeChartData, setFinanceChartData] = useState([]);
     
     // Comparison options
     const comparisonOptions = [
@@ -411,6 +415,39 @@ const Dashboard = () => {
 
     const { asin } = useParams();
     const normalizedAsin = asin?.trim().toUpperCase();
+
+    // Fetch finance date range independently (same source as profitability dashboard)
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await axiosInstance.get('/api/finance-dashboard/date-range');
+                if (cancelled) return;
+                const d = res.data?.data;
+                if (d?.startDate && d?.endDate) {
+                    setFinanceDateRange({ startDate: d.startDate, endDate: d.endDate, ready: true });
+                }
+            } catch {
+                if (!cancelled) setFinanceDateRange((prev) => ({ ...prev, ready: false }));
+            }
+        })();
+        return () => { cancelled = true; };
+    }, []);
+
+    // Resolve effective dates: prefer Redux calendar override, fall back to finance bootstrap
+    const effectiveFinanceDates = useMemo(() => {
+        if (calendarMode && calendarMode !== 'default' && startDate && endDate) {
+            return resolveProfitabilityQueryDates({ calendarMode, startDate, endDate });
+        }
+        if (financeDateRange.ready) {
+            return resolveProfitabilityQueryDates({
+                calendarMode: 'default',
+                startDate: financeDateRange.startDate,
+                endDate: financeDateRange.endDate,
+            });
+        }
+        return { startDate: null, endDate: null, ready: false };
+    }, [calendarMode, startDate, endDate, financeDateRange]);
 
     useEffect(() => {
         if (!normalizedAsin) return undefined;
@@ -434,20 +471,15 @@ const Dashboard = () => {
     }, [normalizedAsin]);
 
     useEffect(() => {
-        if (!normalizedAsin) return undefined;
+        if (!normalizedAsin || !effectiveFinanceDates.ready) return undefined;
+
         let cancelled = false;
         setFinanceProfitSnapshot(null);
         (async () => {
             try {
-                const useRange = shouldUseCalendarDateRange(startDate, endDate);
-                const periodTypeRaw = calendarMode || 'default';
-                const periodType = periodTypeRaw === 'default' ? 'last30' : periodTypeRaw;
-                const periodDays = periodType === 'last7' ? 7 : periodType === 'last14' ? 14 : 30;
-                const q = useRange
-                    ? `from=${encodeURIComponent(startDate)}&to=${encodeURIComponent(endDate)}`
-                    : `period=${periodDays}`;
+                const q = `startDate=${encodeURIComponent(effectiveFinanceDates.startDate)}&endDate=${encodeURIComponent(effectiveFinanceDates.endDate)}`;
                 const res = await axiosInstance.get(
-                    `/api/profitability/asin/${encodeURIComponent(normalizedAsin)}/snapshot?${q}`
+                    `/api/finance-dashboard/asin/${encodeURIComponent(normalizedAsin)}/snapshot?${q}`
                 );
                 if (cancelled) return;
                 const ok = res.data?.statusCode === 200;
@@ -458,7 +490,38 @@ const Dashboard = () => {
             }
         })();
         return () => { cancelled = true; };
-    }, [normalizedAsin, startDate, endDate, calendarMode]);
+    }, [normalizedAsin, effectiveFinanceDates.ready, effectiveFinanceDates.startDate, effectiveFinanceDates.endDate]);
+
+    // Fetch day-by-day finance rows for the Sales chart
+    useEffect(() => {
+        if (!normalizedAsin || !effectiveFinanceDates.ready) return undefined;
+
+        let cancelled = false;
+        setFinanceChartData([]);
+        (async () => {
+            try {
+                const q = `startDate=${encodeURIComponent(effectiveFinanceDates.startDate)}&endDate=${encodeURIComponent(effectiveFinanceDates.endDate)}`;
+                const res = await axiosInstance.get(
+                    `/api/finance-dashboard/asin/${encodeURIComponent(normalizedAsin)}?${q}`
+                );
+                if (cancelled) return;
+                const ok = res.data?.statusCode === 200;
+                const rows = ok && Array.isArray(res.data?.data) ? res.data.data : [];
+                const chartRows = rows.map((r) => ({
+                    date: r.date,
+                    displayDate: r.date ? r.date.slice(5) : '',
+                    sales: Math.round((r.productSales || 0) * 100) / 100,
+                    units: r.units || 0,
+                    expenses: Math.round(Math.abs(r.totalExpenses || 0) * 100) / 100,
+                    grossProfit: Math.round(((r.productSales || 0) - Math.abs(r.totalExpenses || 0)) * 100) / 100,
+                }));
+                setFinanceChartData(chartRows);
+            } catch {
+                if (!cancelled) setFinanceChartData([]);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [normalizedAsin, effectiveFinanceDates.ready, effectiveFinanceDates.startDate, effectiveFinanceDates.endDate]);
 
     // Load issues-by-product data so we have enriched productWiseError (performance + recommendations).
     // This syncs to DashBoardInfo and ensures this detail page shows the Performance section.
@@ -734,9 +797,6 @@ const Dashboard = () => {
             (item) => (item.asin || '').trim().toUpperCase() === normalizedAsin
         );
         if (financeProfitSnapshot && typeof financeProfitSnapshot === 'object') {
-            const adsFromEconomics = asinEconomicsRow != null
-                ? pickNumericAmount(asinEconomicsRow.ppcSpent)
-                : undefined;
             return {
                 ...(fromRedux || {}),
                 asin: normalizedAsin,
@@ -744,7 +804,8 @@ const Dashboard = () => {
                 quantity: Number(financeProfitSnapshot.unitsSold) || 0,
                 unitsSold: Number(financeProfitSnapshot.unitsSold) || 0,
                 grossProfit: Number(financeProfitSnapshot.grossProfit) || 0,
-                ads: adsFromEconomics ?? fromRedux?.ads ?? 0,
+                ads: Number(financeProfitSnapshot.adsSpend) || 0,
+                totalExpenses: Number(financeProfitSnapshot.totalExpenses) || 0,
             };
         }
         if (!asinEconomicsRow) return fromRedux;
@@ -768,15 +829,18 @@ const Dashboard = () => {
         const totalExpenses = Number(financeProfitSnapshot.totalExpenses) || 0;
         const amazonFees = Number(financeProfitSnapshot.amazonFees) || 0;
         const refunds = Number(financeProfitSnapshot.refunds) || 0;
+        const adsSpend = Number(financeProfitSnapshot.adsSpend) || 0;
+        const reimbursements = Number(financeProfitSnapshot.reimbursements) || 0;
+        const promotions = Number(financeProfitSnapshot.promotions) || 0;
         const breakdown = Array.isArray(financeProfitSnapshot.breakdown)
             ? financeProfitSnapshot.breakdown
                 .map((b) => ({
                     category: b?.category || 'Other',
                     amount: Number(b?.amount) || 0,
                 }))
-                .sort((a, b) => b.amount - a.amount)
+                .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
             : [];
-        return { totalExpenses, amazonFees, refunds, breakdown };
+        return { totalExpenses, amazonFees, refunds, adsSpend, reimbursements, promotions, breakdown };
     }, [financeProfitSnapshot]);
     
             // Build product from per-ASIN fallback data if available
@@ -2003,28 +2067,33 @@ const Dashboard = () => {
                                         </div>
                                     )}
                                     
-                                    {/* Sales & Conversion Chart - first */}
+                                    {/* Sales & Expenses Chart (from DailySkuFinance) */}
                                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                                         <div>
                                             <h4 className="text-xs font-semibold text-gray-300 mb-2 flex items-center gap-1">
                                                 <DollarSign className="w-3 h-3 text-green-400" />
-                                                Sales
-                                                {historyData?.granularity === 'weekly' && <span className="text-gray-500 ml-1">(by week)</span>}
-                                                {historyData?.granularity === 'monthly' && <span className="text-gray-500 ml-1">(by month)</span>}
+                                                Sales (Daily)
                                             </h4>
                                             <div className="h-36 bg-[#21262d] rounded border border-[#30363d] p-2">
+                                                {financeChartData.length > 0 ? (
                                                 <ResponsiveContainer width="100%" height="100%">
-                                                    <LineChart data={historyData?.history || []} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                                                    <LineChart data={financeChartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
                                                         <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
                                                         <XAxis dataKey="displayDate" tick={{ fill: '#9ca3af', fontSize: 9 }} axisLine={{ stroke: '#30363d' }} />
                                                         <YAxis tick={{ fill: '#9ca3af', fontSize: 9 }} axisLine={{ stroke: '#30363d' }} tickFormatter={(v) => formatYAxisCurrency(v, currency)} />
                                                         <Tooltip 
                                                             contentStyle={{ backgroundColor: '#21262d', border: '1px solid #30363d', borderRadius: '6px' }}
-                                                            formatter={(value) => [formatCurrencyWithLocale(value ?? 0, currency), 'Sales']}
+                                                            formatter={(value, name) => [formatCurrencyWithLocale(value ?? 0, currency), name === 'sales' ? 'Sales' : 'Expenses']}
                                                         />
                                                         <Line type="monotone" dataKey="sales" stroke="#22c55e" strokeWidth={2} dot={{ fill: '#22c55e', r: 3 }} />
+                                                        <Line type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={1.5} dot={{ fill: '#ef4444', r: 2 }} strokeDasharray="4 2" />
                                                     </LineChart>
                                                 </ResponsiveContainer>
+                                                ) : (
+                                                    <div className="flex items-center justify-center h-full text-gray-500 text-xs">
+                                                        No finance data available for this period
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                         
@@ -2100,31 +2169,37 @@ const Dashboard = () => {
                                         </div>
                                     </div>
                                     
-                                    {/* Expense breakdown (same finance source as Profitability table) */}
-                                    {historyData?.summary?.hasData && (
-                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
+                                    {/* Expense breakdown (DailySkuFinance snapshot) */}
+                                    {financeExpenseSummary && (
+                                        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-2">
                                             <div className="bg-[#21262d] rounded border border-[#30363d] p-2 text-center">
                                                 <p className="text-xs text-gray-400">Total Expenses</p>
                                                 <p className="text-sm font-bold text-red-400">
-                                                    {formatCurrencyWithLocale(financeExpenseSummary?.totalExpenses ?? 0, currency)}
+                                                    {formatCurrencyWithLocale(financeExpenseSummary.totalExpenses, currency)}
                                                 </p>
                                             </div>
                                             <div className="bg-[#21262d] rounded border border-[#30363d] p-2 text-center">
                                                 <p className="text-xs text-gray-400">Amazon Fees</p>
                                                 <p className="text-sm font-bold text-gray-100">
-                                                    {formatCurrencyWithLocale(financeExpenseSummary?.amazonFees ?? 0, currency)}
+                                                    {formatCurrencyWithLocale(financeExpenseSummary.amazonFees, currency)}
                                                 </p>
                                             </div>
                                             <div className="bg-[#21262d] rounded border border-[#30363d] p-2 text-center">
                                                 <p className="text-xs text-gray-400">Refunds</p>
                                                 <p className="text-sm font-bold text-gray-100">
-                                                    {formatCurrencyWithLocale(financeExpenseSummary?.refunds ?? 0, currency)}
+                                                    {formatCurrencyWithLocale(financeExpenseSummary.refunds, currency)}
                                                 </p>
                                             </div>
                                             <div className="bg-[#21262d] rounded border border-[#30363d] p-2 text-center">
-                                                <p className="text-xs text-gray-400">Expense Categories</p>
+                                                <p className="text-xs text-gray-400">PPC Spend</p>
+                                                <p className="text-sm font-bold text-yellow-400">
+                                                    {formatCurrencyWithLocale(financeExpenseSummary.adsSpend, currency)}
+                                                </p>
+                                            </div>
+                                            <div className="bg-[#21262d] rounded border border-[#30363d] p-2 text-center">
+                                                <p className="text-xs text-gray-400">Promotions</p>
                                                 <p className="text-sm font-bold text-gray-100">
-                                                    {(financeExpenseSummary?.breakdown?.length ?? 0).toLocaleString()}
+                                                    {formatCurrencyWithLocale(financeExpenseSummary.promotions, currency)}
                                                 </p>
                                             </div>
                                         </div>

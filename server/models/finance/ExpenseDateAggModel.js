@@ -72,4 +72,3 @@ ExpenseDateAggSchema.index({ runId: 1, dateKey: -1 });
 ExpenseDateAggSchema.index({ User: 1, country: 1, region: 1, dateKey: 1, createdAt: -1 });
 
 module.exports = mongoose.model('ExpenseDateAgg', ExpenseDateAggSchema);
-

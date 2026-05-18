@@ -2,13 +2,15 @@ const express=require('express');
 const router=express.Router();
 const {testReport,getTotalSales,testAmazonAds,
     testGetCampaigns,
-    testGetAdGroups,testGetKeywords,testGetPPCSpendsBySKU,
+    testGetAdGroups,testGetKeywords,testGetRegularKeywords,testGetPPCSpendsBySKU,
     testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations,
     testKeywordRecommendationsFromDB,getStoredKeywordRecommendations,testPPCMetrics,testNumberOfProductReviews,getLastAdsKeywordsPerformanceDocument,testAllAdsServices,testStoreIssueSummary,testStoreIssuesSummaryAndChunks,testSendTrialToProSupportEmail}=require('../controllers/test/TestController.js')
 const { testAlerts } = require('../controllers/alerts/AlertsController.js')
 const { testExpenseReport } = require('../controllers/test/ExpenseReportTestController.js')
 const { testAsinWiseSales } = require('../controllers/test/AsinWiseSalesTestController.js')
+const { testAsinWiseSalesFromDb } = require('../controllers/test/AsinWiseSalesDbTestController.js')
 const { testItemStock } = require('../controllers/test/ItemStockTestController.js')
+const { testFinanceDashboardSync, testFinanceDashboardRead } = require('../controllers/test/FinanceDashboardTestController.js')
 
 // PPC Units Sold Controller - Fetches units sold data date-wise
 const { testGetPPCUnitsSold, getUnitsMetricsInfo } = require('../controllers/test/PPCUnitsSoldTestController.js')
@@ -26,6 +28,8 @@ router.post('/testAmazonAds',testAmazonAds)
 router.post('/testGetCampaigns',testGetCampaigns)
 router.post('/testGetAdGroups',testGetAdGroups)
 router.post('/testGetKeywords',testGetKeywords)
+// Regular / manual keywords (SP) — populates the Keyword collection used by Auto Campaign Insights
+router.post('/testGetRegularKeywords',testGetRegularKeywords)
 router.post('/testGetPPCSpendsBySKU',testGetPPCSpendsBySKU)
 router.post('/testGetBrand',testGetBrand)
 router.post('/testSendEmailOnRegistered',testSendEmailOnRegistered)
@@ -81,7 +85,16 @@ router.post('/testExpenseReport', testExpenseReport)  // Body: { userId, country
 // ASIN-wise Sales report
 router.post('/testAsinWiseSales', testAsinWiseSales)  // Body: { userId, country, region, days?, dataSource? }
 
+// ASIN-wise Sales — read persisted data from MongoDB (no SP-API)
+router.post('/testAsinWiseSalesFromDb', testAsinWiseSalesFromDb)  // Body: { userId, country, region, period? } | { userId, country, region, from, to }
+
 // FBA inventory summaries (Inventory API)
 router.post('/testItemStock', testItemStock)  // Body: { userId, country, region, sellerSkus? }
+
+// Finance Dashboard — Fetch from SP-API Finance v2024 and store in DailySkuFinance + DailyOverheadFinance
+router.post('/testFinanceDashboardSync', testFinanceDashboardSync)  // Body: { userId, country, region, startDate, endDate }
+
+// Finance Dashboard — Read-only: total sales + ASIN-wise sales (same calc as frontend profitability page)
+router.post('/testFinanceDashboardRead', testFinanceDashboardRead)  // Body: { userId, country, region, startDate, endDate }
 
 module.exports=router

@@ -199,7 +199,7 @@ async function fetchPPCSpendData(userId, country, region, asin) {
                 $group: {
                     _id: '$items.asin',
                     totalSpend: { $sum: '$items.spend' },
-                    totalSales: { $sum: '$items.salesIn30Days' },
+                    totalSales: { $sum: { $ifNull: ['$items.sales', { $ifNull: ['$items.salesIn30Days', 0] }] } },
                     totalImpressions: { $sum: '$items.impressions' },
                     totalClicks: { $sum: '$items.clicks' }
                 }

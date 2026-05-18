@@ -61,7 +61,6 @@ const { getPPCSpendsDateWise } = require('../AmazonAds/GetDateWiseSpendKeywords.
 const { getAdGroups } = require('../AmazonAds/AdGroups.js');
 const { getKeywordRecommendations } = require('../AmazonAds/KeyWordsRecommendations.js');
 const { getPPCMetrics } = require('../AmazonAds/GetPPCMetrics.js');
-const { getPPCUnitsSold } = require('../AmazonAds/GetPPCUnitsSold.js');
 
 // Other Services
 const { getBrand } = require('../Sp_API/GetBrand.js');
@@ -81,10 +80,10 @@ const { fetchAndStoreSalesOnlyData } = require('../MCP/MCPSalesOnlyIntegration.j
 // MCP Services for BuyBox data
 const { fetchAndStoreBuyBoxData } = require('../MCP/MCPBuyBoxIntegration.js');
 
-// Expense Report Service (Finance API → raw rows → aggregated analysis)
-const { fetchPersistAndReturnExpenseReport } = require('../Sp_API/ExpenseReportService.js');
-// ASIN-wise sales (SP-API report → Mongo runs/items)
-const { fetchPersistAndReturnAsinWiseSales } = require('../Sp_API/AsinWiseSalesStorageService.js');
+// Unified Finance Sync (Sales Report + Finance API → DailySkuFinance + DailyOverheadFinance + AsinRelationship)
+// This single call replaces the legacy `fetchPersistAndReturnExpenseReport`
+// (Finance API only) and `fetchPersistAndReturnAsinWiseSales` (Sales Report only).
+const { syncFinanceData } = require('../Sp_API/FinanceService.js');
 
 // Data Fetch Tracking for calendar-affecting services
 const DataFetchTrackingService = require('../system/DataFetchTrackingService.js');
@@ -201,32 +200,23 @@ class Integration {
 
             // Start tracking for calendar-affecting services (first-time user fetch)
             // For new users, ALL calendar-affecting services run regardless of day
-            // Calculate the data date range (30 days ending yesterday)
-            const trackingEndDate = new Date();
-            trackingEndDate.setDate(trackingEndDate.getDate() - 1); // Yesterday
-            const trackingStartDate = new Date(trackingEndDate);
-            trackingStartDate.setDate(trackingStartDate.getDate() - 30); // 30 days before yesterday
-            
-            const formatTrackingDate = (date) => {
-                const year = date.getFullYear();
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                const day = String(date.getDate()).padStart(2, '0');
-                return `${year}-${month}-${day}`;
-            };
+            // Use Pacific-time "yesterday" to match FinanceService's date logic
+            const { getDefaultReportDateRange } = require('../../utils/reportDateRange.js');
+            const trackingRange = getDefaultReportDateRange(30);
             
             try {
                 trackingEntry = await DataFetchTrackingService.startTracking(
                     userId,
                     Country,
                     Region,
-                    { startDate: formatTrackingDate(trackingStartDate), endDate: formatTrackingDate(trackingEndDate) },
+                    { startDate: trackingRange.startDate, endDate: trackingRange.endDate },
                     loggingHelper?.sessionId || null
                 );
                 logger.info('[Integration] Data fetch tracking started (first-time user)', {
                     trackingId: trackingEntry._id,
                     dayName: trackingEntry.dayName,
                     dateString: trackingEntry.dateString,
-                    dataRange: { startDate: formatTrackingDate(trackingStartDate), endDate: formatTrackingDate(trackingEndDate) }
+                    dataRange: trackingRange
                 });
             } catch (trackingError) {
                 logger.warn('[Integration] Failed to start tracking (non-critical)', {
@@ -1092,11 +1082,9 @@ class Integration {
                 tokenManager.wrapAdsFunction(getPPCSpendsDateWise, userId, RefreshToken, AdsRefreshToken)
                     (AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken),
                 // PPC Metrics - aggregated campaign data from SP, SB, SD
-                getPPCMetrics(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, null, null, true),
-                // PPC Units Sold - date-wise units sold data
-                getPPCUnitsSold(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, null, null, true)
+                getPPCMetrics(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, null, null, true)
             );
-            firstBatchServiceNames.push("PPC Spends by SKU", "Ads Keywords Performance", "PPC Spends Date Wise", "PPC Metrics (Aggregated)", "PPC Units Sold");
+            firstBatchServiceNames.push("PPC Spends by SKU", "Ads Keywords Performance", "PPC Spends Date Wise", "PPC Metrics (Aggregated)");
         }
 
         const firstBatchResults = await Promise.allSettled(firstBatchPromises);
@@ -1115,13 +1103,11 @@ class Integration {
             apiData.adsKeywordsPerformanceData = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1]);
             apiData.ppcSpendsDateWise = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1]);
             apiData.ppcMetricsAggregated = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1]);
-            apiData.ppcUnitsSold = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1]);
         } else {
             apiData.ppcSpendsBySKU = { success: false, data: null, error: "Ads token not available" };
             apiData.adsKeywordsPerformanceData = { success: false, data: null, error: "Ads token not available" };
             apiData.ppcSpendsDateWise = { success: false, data: null, error: "Ads token not available" };
             apiData.ppcMetricsAggregated = { success: false, data: null, error: "Ads token not available" };
-            apiData.ppcUnitsSold = { success: false, data: null, error: "Ads token not available" };
         }
         logger.info("First Batch Ends");
 
@@ -1371,11 +1357,14 @@ class Integration {
             logger.info("MCP BuyBox skipped - no refresh token", { userId, region: Region, country: Country });
         }
         
-        // Fetch Expense Report (Finance API) after BuyBox
+        // Unified Finance Sync (Sales Report + Finance API) — replaces the
+        // legacy Expense Report and ASIN-wise Sales calls. One pass populates
+        // DailySkuFinance, DailyOverheadFinance, AsinRelationship and
+        // FinanceSyncLog used by the profitability dashboard.
         if (AccessToken && RefreshToken) {
             try {
-                logger.info("Fetching Expense Report data", { userId, region: Region, country: Country });
-                const expenseResult = await fetchPersistAndReturnExpenseReport({
+                logger.info('Fetching Finance Sync (Sales + Expenses)', { userId, region: Region, country: Country });
+                const financeSyncResult = await syncFinanceData({
                     userId,
                     country: Country,
                     regionModel: Region,
@@ -1384,77 +1373,42 @@ class Integration {
                     clientId: process.env.SPAPI_CLIENT_ID,
                     clientSecret: process.env.SPAPI_CLIENT_SECRET,
                 });
-                apiData.expenseReport = {
-                    success: true,
-                    data: expenseResult,
-                    error: null
-                };
-                logger.info("Expense Report data fetched successfully", {
+                apiData.financeSync = { success: true, data: financeSyncResult, error: null };
+                // Backward-compat keys: legacy consumers expecting `expenseReport`
+                // and `asinWiseSales` shapes still see a populated success entry.
+                apiData.expenseReport = { success: true, data: financeSyncResult, error: null };
+                apiData.asinWiseSales = { success: true, data: financeSyncResult, error: null };
+                logger.info('Finance Sync completed successfully', {
                     userId,
                     region: Region,
                     country: Country,
-                    hasNewData: expenseResult?.hasNewData
+                    status: financeSyncResult?.status,
+                    startDate: financeSyncResult?.startDate,
+                    endDate: financeSyncResult?.endDate,
                 });
-            } catch (expenseError) {
-                logger.error("Error fetching Expense Report data", {
-                    error: expenseError.message,
-                    stack: expenseError.stack,
+            } catch (financeSyncError) {
+                logger.error('Error in Finance Sync', {
+                    error: financeSyncError.message,
+                    stack: financeSyncError.stack,
                     userId,
                     region: Region,
-                    country: Country
+                    country: Country,
                 });
-                apiData.expenseReport = {
+                const failure = {
                     success: false,
                     data: null,
-                    error: `Error fetching Expense Report: ${expenseError.message}`
+                    error: `Error in Finance Sync: ${financeSyncError.message}`,
                 };
+                apiData.financeSync = failure;
+                apiData.expenseReport = failure;
+                apiData.asinWiseSales = failure;
             }
         } else {
-            apiData.expenseReport = { success: false, data: null, error: "SP-API tokens not available" };
-            logger.info("Expense Report skipped - no tokens", { userId, region: Region, country: Country });
-        }
-
-        // ASIN-wise sales (persisted to Mongo for profitability / ASIN APIs)
-        if (AccessToken && RefreshToken) {
-            try {
-                logger.info('Fetching ASIN-wise sales data', { userId, region: Region, country: Country });
-                const asinWiseResult = await fetchPersistAndReturnAsinWiseSales({
-                    userId,
-                    country: Country,
-                    regionModel: Region,
-                    refreshToken: RefreshToken,
-                    accessToken: AccessToken,
-                    clientId: process.env.SPAPI_CLIENT_ID,
-                    clientSecret: process.env.SPAPI_CLIENT_SECRET,
-                });
-                apiData.asinWiseSales = {
-                    success: true,
-                    data: asinWiseResult,
-                    error: null,
-                };
-                logger.info('ASIN-wise sales fetched successfully', {
-                    userId,
-                    region: Region,
-                    country: Country,
-                    totalAsins: asinWiseResult?.data?.totalAsins,
-                });
-            } catch (asinWiseError) {
-                logger.error('Error fetching ASIN-wise sales data', {
-                    error: asinWiseError.message,
-                    stack: asinWiseError.stack,
-                    userId,
-                    region: Region,
-                    country: Country,
-                });
-                apiData.asinWiseSales = {
-                    success: false,
-                    data: null,
-                    error: `Error fetching ASIN-wise sales: ${asinWiseError.message}`,
-                };
-            }
-        } else {
-            apiData.asinWiseSales = { success: false, data: null, error: 'SP-API tokens not available' };
-            logger.info('ASIN-wise sales skipped - no tokens', { userId, region: Region, country: Country });
+            const noTokens = { success: false, data: null, error: 'SP-API tokens not available' };
+            apiData.financeSync = noTokens;
+            apiData.expenseReport = noTokens;
+            apiData.asinWiseSales = noTokens;
+            logger.info('Finance Sync skipped - no tokens', { userId, region: Region, country: Country });
         }
 
         // Set legacy fields to indicate they're no longer used (for backward compatibility)
@@ -2021,7 +1975,6 @@ class Integration {
             ppcSpendsDateWise: apiData.ppcSpendsDateWise.success ? apiData.ppcSpendsDateWise.data : null,
             ppcSpendsBySKU: apiData.ppcSpendsBySKU.success ? apiData.ppcSpendsBySKU.data : null,
             ppcMetricsAggregated: apiData.ppcMetricsAggregated?.success ? apiData.ppcMetricsAggregated.data : null,
-            ppcUnitsSold: apiData.ppcUnitsSold?.success ? apiData.ppcUnitsSold.data : null,
             campaignData: apiData.campaignData.success ? apiData.campaignData.data : null,
             adGroupsData: apiData.adGroupsData.success ? apiData.adGroupsData.data : null,
             fbaInventoryPlanningData: apiData.fbaInventoryPlanningData.success ? apiData.fbaInventoryPlanningData.data : null,
@@ -2044,7 +1997,6 @@ class Integration {
             { name: "Ads Keywords Performance", result: apiData.adsKeywordsPerformanceData },
             { name: "PPC Spends Date Wise", result: apiData.ppcSpendsDateWise },
             { name: "PPC Metrics (Aggregated)", result: apiData.ppcMetricsAggregated || { success: false, data: null, error: "Not available" } },
-            { name: "PPC Units Sold", result: apiData.ppcUnitsSold || { success: false, data: null, error: "Not available" } },
             { name: "Restock Inventory Recommendations", result: apiData.RestockinventoryData },
             { name: "Product Reviews", result: apiData.productReview },
             { name: "Ads Keywords", result: apiData.adsKeywords },
@@ -2461,6 +2413,29 @@ class Integration {
             // Initialize TokenManager
             tokenManager.setTokens(userId, AccessToken, AdsAccessToken, RefreshToken, AdsRefreshToken);
 
+            // Calendar data range tracking (30 inclusive days ending Pacific-time yesterday)
+            let trackingEntryId = null;
+            {
+                const { getDefaultReportDateRange } = require('../../utils/reportDateRange.js');
+                const trackingRange = getDefaultReportDateRange(30);
+                try {
+                    const entry = await DataFetchTrackingService.startTracking(
+                        userId,
+                        Country,
+                        Region,
+                        { startDate: trackingRange.startDate, endDate: trackingRange.endDate },
+                        sessionId
+                    );
+                    trackingEntryId = entry._id.toString();
+                    logger.info('[Integration:InitPhase] Data fetch tracking started', {
+                        trackingId: trackingEntryId,
+                        dataRange: trackingRange
+                    });
+                } catch (te) {
+                    logger.warn('[Integration:InitPhase] Failed to start data fetch tracking', { error: te.message });
+                }
+            }
+
             // Fetch merchant listings data (this stores to DB)
             const merchantListingsData = await this.fetchMerchantListings(
                 AccessToken, marketplaceIds, userId, Country, Region, Base_URI,
@@ -2501,7 +2476,8 @@ class Integration {
                 dataForNextPhase: {
                     sellerId,
                     hasAdsAccount: !!AdsRefreshToken,
-                    sessionId // Pass sessionId to next phases
+                    sessionId, // Pass sessionId to next phases
+                    trackingEntryId
                 }
             };
 
@@ -2720,10 +2696,9 @@ class Integration {
                         (AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken),
                     tokenManager.wrapAdsFunction(getPPCSpendsDateWise, userId, RefreshToken, AdsRefreshToken)
                         (AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken),
-                    getPPCMetrics(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, null, null, true),
-                    getPPCUnitsSold(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, null, null, true)
+                    getPPCMetrics(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, null, null, true)
                 );
-                firstBatchServiceNames.push("PPC Spends by SKU", "Ads Keywords Performance", "PPC Spends Date Wise", "PPC Metrics", "PPC Units Sold");
+                firstBatchServiceNames.push("PPC Spends by SKU", "Ads Keywords Performance", "PPC Spends Date Wise", "PPC Metrics");
             }
 
             const firstBatchResults = await Promise.allSettled(firstBatchPromises);
@@ -3013,11 +2988,12 @@ class Integration {
                 }
             }
 
-            // Expense Report (Finance API) after BuyBox — mirrors Integration.getSpApiData third batch
+            // Unified Finance Sync (Sales Report + Finance API) — replaces
+            // legacy Expense Report and ASIN-wise Sales steps.
             if (AccessToken && RefreshToken) {
                 try {
-                    logger.info('[Integration:Batch3And4Phase] Fetching Expense Report data', { userId, region: Region, country: Country });
-                    const expenseResult = await fetchPersistAndReturnExpenseReport({
+                    logger.info('[Integration:Batch3And4Phase] Fetching Finance Sync (Sales + Expenses)', { userId, region: Region, country: Country });
+                    const financeSyncResult = await syncFinanceData({
                         userId,
                         country: Country,
                         regionModel: Region,
@@ -3026,97 +3002,38 @@ class Integration {
                         clientId: process.env.SPAPI_CLIENT_ID,
                         clientSecret: process.env.SPAPI_CLIENT_SECRET,
                     });
-                    logger.info('[Integration:Batch3And4Phase] Expense Report fetched successfully', {
+                    logger.info('[Integration:Batch3And4Phase] Finance Sync completed successfully', {
                         userId,
                         region: Region,
                         country: Country,
-                        hasNewData: expenseResult?.hasNewData,
+                        status: financeSyncResult?.status,
+                        startDate: financeSyncResult?.startDate,
+                        endDate: financeSyncResult?.endDate,
                     });
                     if (sessionId) {
                         try {
                             await LoggingHelper.addLogToSession(sessionId, {
-                                functionName: 'Expense Report',
+                                functionName: 'Finance Sync',
                                 logType: 'success',
                                 status: 'completed',
-                                message: 'Expense Report completed successfully',
-                                contextData: { userId, region: Region, country: Country, hasNewData: expenseResult?.hasNewData },
-                            });
-                        } catch (logError) {
-                            logger.warn(`[Integration:Batch3And4Phase] Failed to log Expense Report success: ${logError.message}`);
-                        }
-                    }
-                } catch (expenseError) {
-                    logger.error('[Integration:Batch3And4Phase] Error fetching Expense Report data', {
-                        error: expenseError.message,
-                        stack: expenseError.stack,
-                        userId,
-                        region: Region,
-                        country: Country,
-                    });
-                    if (sessionId) {
-                        try {
-                            await LoggingHelper.addLogToSession(sessionId, {
-                                functionName: 'Expense Report',
-                                logType: 'error',
-                                status: 'failed',
-                                message: `Expense Report failed: ${expenseError.message}`,
-                                errorDetails: {
-                                    errorMessage: expenseError.message,
-                                    stackTrace: expenseError.stack,
-                                    phase: 'Integration:Batch3And4Phase:Batch3',
-                                },
-                                contextData: { userId, region: Region, country: Country },
-                            });
-                        } catch (logError) {
-                            logger.warn(`[Integration:Batch3And4Phase] Failed to log Expense Report error: ${logError.message}`);
-                        }
-                    }
-                }
-            } else {
-                logger.info('[Integration:Batch3And4Phase] Expense Report skipped - no SP-API tokens', { userId, region: Region, country: Country });
-            }
-
-            // ASIN-wise sales — mirrors Integration.getSpApiData (after expense)
-            if (AccessToken && RefreshToken) {
-                try {
-                    logger.info('[Integration:Batch3And4Phase] Fetching ASIN-wise sales data', { userId, region: Region, country: Country });
-                    const asinWiseResult = await fetchPersistAndReturnAsinWiseSales({
-                        userId,
-                        country: Country,
-                        regionModel: Region,
-                        refreshToken: RefreshToken,
-                        accessToken: AccessToken,
-                        clientId: process.env.SPAPI_CLIENT_ID,
-                        clientSecret: process.env.SPAPI_CLIENT_SECRET,
-                    });
-                    logger.info('[Integration:Batch3And4Phase] ASIN-wise sales fetched successfully', {
-                        userId,
-                        region: Region,
-                        country: Country,
-                        totalAsins: asinWiseResult?.data?.totalAsins,
-                    });
-                    if (sessionId) {
-                        try {
-                            await LoggingHelper.addLogToSession(sessionId, {
-                                functionName: 'ASIN-wise sales',
-                                logType: 'success',
-                                status: 'completed',
-                                message: 'ASIN-wise sales completed successfully',
+                                message: 'Finance Sync (Sales + Expenses) completed successfully',
                                 contextData: {
                                     userId,
                                     region: Region,
                                     country: Country,
-                                    totalAsins: asinWiseResult?.data?.totalAsins,
+                                    status: financeSyncResult?.status,
+                                    startDate: financeSyncResult?.startDate,
+                                    endDate: financeSyncResult?.endDate,
                                 },
                             });
                         } catch (logError) {
-                            logger.warn(`[Integration:Batch3And4Phase] Failed to log ASIN-wise sales success: ${logError.message}`);
+                            logger.warn(`[Integration:Batch3And4Phase] Failed to log Finance Sync success: ${logError.message}`);
                         }
                     }
-                } catch (asinWiseError) {
-                    logger.error('[Integration:Batch3And4Phase] Error fetching ASIN-wise sales data', {
-                        error: asinWiseError.message,
-                        stack: asinWiseError.stack,
+                } catch (financeSyncError) {
+                    logger.error('[Integration:Batch3And4Phase] Error in Finance Sync', {
+                        error: financeSyncError.message,
+                        stack: financeSyncError.stack,
                         userId,
                         region: Region,
                         country: Country,
@@ -3124,24 +3041,24 @@ class Integration {
                     if (sessionId) {
                         try {
                             await LoggingHelper.addLogToSession(sessionId, {
-                                functionName: 'ASIN-wise sales',
+                                functionName: 'Finance Sync',
                                 logType: 'error',
                                 status: 'failed',
-                                message: `ASIN-wise sales failed: ${asinWiseError.message}`,
+                                message: `Finance Sync failed: ${financeSyncError.message}`,
                                 errorDetails: {
-                                    errorMessage: asinWiseError.message,
-                                    stackTrace: asinWiseError.stack,
+                                    errorMessage: financeSyncError.message,
+                                    stackTrace: financeSyncError.stack,
                                     phase: 'Integration:Batch3And4Phase:Batch3',
                                 },
                                 contextData: { userId, region: Region, country: Country },
                             });
                         } catch (logError) {
-                            logger.warn(`[Integration:Batch3And4Phase] Failed to log ASIN-wise sales error: ${logError.message}`);
+                            logger.warn(`[Integration:Batch3And4Phase] Failed to log Finance Sync error: ${logError.message}`);
                         }
                     }
                 }
             } else {
-                logger.info('[Integration:Batch3And4Phase] ASIN-wise sales skipped - no SP-API tokens', { userId, region: Region, country: Country });
+                logger.info('[Integration:Batch3And4Phase] Finance Sync skipped - no SP-API tokens', { userId, region: Region, country: Country });
             }
 
             logger.info("[Integration:Batch3And4Phase] Third Batch Ends", {
@@ -3598,7 +3515,9 @@ class Integration {
      */
     static async executeFinalizePhase(userId, Region, Country, phaseData = {}) {
         logger.info(`[Integration:FinalizePhase] Starting for user ${userId}, ${Country}-${Region}`);
-        
+
+        const trackingEntryId = phaseData.trackingEntryId;
+
         // Load existing session from previous phase (if available)
         const sessionId = phaseData.sessionId;
         if (sessionId) {
@@ -3739,6 +3658,15 @@ class Integration {
 
             logger.info(`[Integration:FinalizePhase] Completed for user ${userId}`);
 
+            if (trackingEntryId) {
+                try {
+                    await DataFetchTrackingService.completeTracking(trackingEntryId);
+                    logger.info('[Integration:FinalizePhase] Data fetch tracking completed', { trackingId: trackingEntryId });
+                } catch (te) {
+                    logger.warn('[Integration:FinalizePhase] Failed to complete data fetch tracking', { error: te.message });
+                }
+            }
+
             // Log phase success and END the session with 'completed' status
             if (sessionId) {
                 try {
@@ -3770,7 +3698,15 @@ class Integration {
 
         } catch (error) {
             logger.error(`[Integration:FinalizePhase] Failed for user ${userId}:`, error);
-            
+
+            if (trackingEntryId) {
+                try {
+                    await DataFetchTrackingService.failTracking(trackingEntryId, error.message);
+                } catch (te) {
+                    logger.warn('[Integration:FinalizePhase] Failed to mark data fetch tracking as failed', { error: te.message });
+                }
+            }
+
             // Log phase failure (don't end session here - worker will handle it)
             if (sessionId) {
                 try {

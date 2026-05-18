@@ -24,6 +24,26 @@ const adsKeywordsPerformanceModel = require('../../models/amazon-ads/adsKeywords
 const DataFetchTracking = require('../../models/system/DataFetchTrackingModel.js');
 const { calculateAccountHealthPercentage, checkAccountHealth } = require('./AccountHealth.js');
 const IssueSummary = require('../../models/system/IssueSummaryModel.js');
+const PPCCampaignAnalysisService = require('./PPCCampaignAnalysisService.js');
+
+/**
+ * Money wasted in ads — same aggregation as Campaign Audit wasted-spend tab.
+ */
+async function resolveMoneyWastedInAds(userId, country, region, startDate, endDate) {
+    try {
+        const result = await PPCCampaignAnalysisService.getTotalWastedSpend(
+            userId,
+            country,
+            region,
+            startDate,
+            endDate
+        );
+        return result.totalWastedSpend ?? 0;
+    } catch (err) {
+        logger.warn('[DashboardSummary] resolveMoneyWastedInAds failed', { error: err.message });
+        return 0;
+    }
+}
 
 /**
  * Get dashboard summary data with optimized queries
@@ -44,18 +64,13 @@ async function getDashboardSummary(userId, country, region) {
             buyBoxData,
             v2Data,
             v1Data,
-            ppcMetrics,
             orderData,
             sellerData,
             adsKeywordsData,
             dataFetchTracking,
             issueSummary
         ] = await Promise.all([
-            // SalesOnlyMetrics: only select fields needed for dashboard totals
-            SalesOnlyMetrics.findOne({ User: userId, country, region })
-                .sort({ createdAt: -1 })
-                .select('totalSales datewiseSales dateRange last7Days last14Days')
-                .lean(),
+            SalesOnlyMetrics.getRecentDays(userId, region, country, 31),
             
             // BuyBoxData: Only select summary fields, not full asinBuyBoxData array
             BuyBoxData.findOne({ User: userId, country, region })
@@ -73,12 +88,6 @@ async function getDashboardSummary(userId, country, region) {
                 .sort({ createdAt: -1 })
                 .lean(),
             
-            // PPCMetrics: Only select summary for ACOS/spend display
-            PPCMetrics.findOne({ userId: userId.toString(), country, region })
-                .sort({ createdAt: -1 })
-                .select('summary dateRange dateWiseMetrics')
-                .lean(),
-            
             // Orders: Only need RevenueData for order count (filter on client or use aggregation)
             GetOrderDataModel.findOne({ User: userId, country, region })
                 .sort({ createdAt: -1 })
@@ -90,11 +99,10 @@ async function getDashboardSummary(userId, country, region) {
                 .select('sellerAccount brand')
                 .lean(),
             
-            // Ads Keywords: Only select cost and attributedSales30d for "Money Wasted" calc
-            adsKeywordsPerformanceModel.findOne({ userId, country, region })
-                .sort({ createdAt: -1 })
-                .select('keywordsData')
-                .lean(),
+            // Ads keywords: merge per-day docs (or legacy single doc) for "Money Wasted" calc
+            adsKeywordsPerformanceModel
+                .findMergedKeywordsData(userId, country, region, {})
+                .then((rows) => (rows?.length ? { keywordsData: rows } : null)),
             
             // DataFetchTracking: Get actual date range from last usable fetch (completed or partial)
             // Both 'completed' and 'partial' runs have valid data that can be used
@@ -109,6 +117,15 @@ async function getDashboardSummary(userId, country, region) {
 
         const queryTime = Date.now() - startTime;
         logger.info(`[PERF] getDashboardSummary queries completed in ${queryTime}ms`);
+
+        const ppcRollup = await PPCMetrics.rollupLastDays(userId.toString(), country, region, 30);
+        const ppcMetrics = ppcRollup?.found
+            ? {
+                  summary: ppcRollup.summary,
+                  dateRange: ppcRollup.dateRange,
+                  dateWiseMetrics: ppcRollup.dateWiseMetrics || []
+              }
+            : null;
 
         // Find the seller account for current region
         let sellerAccount = null;
@@ -151,20 +168,9 @@ async function getDashboardSummary(userId, country, region) {
         const activeProducts = totalProducts.filter(p => p.status === 'Active');
         const activeProductCount = activeProducts.length;
 
-        // Calculate "Money Wasted in Ads" - keywords with cost > 0 but sales < 0.01
-        let moneyWastedInAds = 0;
-        if (adsKeywordsData?.keywordsData && Array.isArray(adsKeywordsData.keywordsData)) {
-            const wastedKeywords = adsKeywordsData.keywordsData.filter(keyword => {
-                if (!keyword) return false;
-                const cost = parseFloat(keyword.cost) || 0;
-                const sales = parseFloat(keyword.attributedSales30d) || 0;
-                return cost > 0 && sales < 0.01;
-            });
-            moneyWastedInAds = wastedKeywords.reduce((total, kw) => {
-                return total + (parseFloat(kw.cost) || 0);
-            }, 0);
-            moneyWastedInAds = Math.round(moneyWastedInAds * 100) / 100;
-        }
+        const wastedStart = dataFetchTracking?.dataRange?.startDate || null;
+        const wastedEnd = dataFetchTracking?.dataRange?.endDate || null;
+        const moneyWastedInAds = await resolveMoneyWastedInAds(userId, country, region, wastedStart, wastedEnd);
 
         // Get PPC summary from PPCMetrics
         const ppcSummary = ppcMetrics?.summary || {
@@ -525,11 +531,8 @@ async function getDashboardPhase2(userId, country, region) {
     logger.info(`[PERF] Starting getDashboardPhase2 for user ${userId}, country ${country}, region ${region}`);
 
     try {
-        const [salesOnlyMetrics, v2Data, v1Data, buyBoxData, ppcMetrics] = await Promise.all([
-            SalesOnlyMetrics.findOne({ User: userId, country, region })
-                .sort({ createdAt: -1 })
-                .select('totalSales dateRange')
-                .lean(),
+        const [salesOnlyMetrics, v2Data, v1Data, buyBoxData] = await Promise.all([
+            SalesOnlyMetrics.getRecentDays(userId, region, country, 31),
             V2_Model.findOne({ User: userId, country, region })
                 .sort({ createdAt: -1 })
                 .lean(),
@@ -539,12 +542,11 @@ async function getDashboardPhase2(userId, country, region) {
             BuyBoxData.findOne({ User: userId, country, region })
                 .sort({ createdAt: -1 })
                 .select('totalProducts productsWithBuyBox productsWithoutBuyBox')
-                .lean(),
-            PPCMetrics.findOne({ userId: userId.toString(), country, region })
-                .sort({ createdAt: -1 })
-                .select('summary')
                 .lean()
         ]);
+
+        const ppcRollupPhase2 = await PPCMetrics.rollupLastDays(userId.toString(), country, region, 30);
+        const ppcMetrics = ppcRollupPhase2?.found ? { summary: ppcRollupPhase2.summary } : null;
 
         const accountHealthPercentage = calculateAccountHealthPercentage(v2Data);
         const accountErrors = checkAccountHealth(v2Data, v1Data);
@@ -622,27 +624,28 @@ async function getDashboardPhase3(userId, country, region) {
     logger.info(`[PERF] Starting getDashboardPhase3 for user ${userId}, country ${country}, region ${region}`);
 
     try {
-        const [salesOnlyMetrics, ppcMetrics, adsKeywordsData, orderData, sellerData] = await Promise.all([
-            SalesOnlyMetrics.findOne({ User: userId, country, region })
-                .sort({ createdAt: -1 })
-                .select('datewiseSales')
-                .lean(),
-            PPCMetrics.findOne({ userId: userId.toString(), country, region })
-                .sort({ createdAt: -1 })
-                .select('dateWiseMetrics')
-                .lean(),
-            adsKeywordsPerformanceModel.findOne({ userId, country, region })
-                .sort({ createdAt: -1 })
-                .select('keywordsData')
-                .lean(),
+        const [salesOnlyMetrics, adsKeywordsData, orderData, sellerData, dataFetchTracking] = await Promise.all([
+            SalesOnlyMetrics.getRecentDays(userId, region, country, 31),
+            adsKeywordsPerformanceModel
+                .findMergedKeywordsData(userId, country, region, {})
+                .then((rows) => (rows?.length ? { keywordsData: rows } : null)),
             GetOrderDataModel.findOne({ User: userId, country, region })
                 .sort({ createdAt: -1 })
                 .select('RevenueData')
                 .lean(),
             Seller.findOne({ User: userId })
                 .select('sellerAccount.country sellerAccount.region sellerAccount.products')
+                .lean(),
+            DataFetchTracking.findOne({ User: userId, country, region, status: { $in: ['completed', 'partial'] } })
+                .sort({ fetchedAt: -1 })
+                .select('dataRange status')
                 .lean()
         ]);
+
+        const ppcRollupPhase3 = await PPCMetrics.rollupLastDays(userId.toString(), country, region, 30);
+        const ppcMetrics = ppcRollupPhase3?.found
+            ? { dateWiseMetrics: ppcRollupPhase3.dateWiseMetrics || [], summary: ppcRollupPhase3.summary }
+            : null;
 
         let sellerAccount = null;
         if (sellerData?.sellerAccount) {
@@ -665,18 +668,10 @@ async function getDashboardPhase3(userId, country, region) {
             totalOrdersCount = filteredOrders.length;
         }
 
-        let moneyWastedInAds = 0;
         const keywordsData = adsKeywordsData?.keywordsData || [];
-        if (keywordsData.length > 0) {
-            const wastedKeywords = keywordsData.filter(kw => {
-                if (!kw) return false;
-                const cost = parseFloat(kw.cost) || 0;
-                const sales = parseFloat(kw.attributedSales30d) || 0;
-                return cost > 0 && sales < 0.01;
-            });
-            moneyWastedInAds = wastedKeywords.reduce((total, kw) => total + (parseFloat(kw.cost) || 0), 0);
-            moneyWastedInAds = Math.round(moneyWastedInAds * 100) / 100;
-        }
+        const wastedStart = dataFetchTracking?.dataRange?.startDate || null;
+        const wastedEnd = dataFetchTracking?.dataRange?.endDate || null;
+        const moneyWastedInAds = await resolveMoneyWastedInAds(userId, country, region, wastedStart, wastedEnd);
 
         const dateWiseMetrics = ppcMetrics?.dateWiseMetrics || [];
 

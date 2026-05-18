@@ -29,9 +29,9 @@ const getLatestPPCMetrics = asyncHandler(async (req, res) => {
     try {
         logger.info(`Fetching latest PPC metrics for user: ${userId}, country: ${country}, region: ${region}`);
 
-        const metrics = await PPCMetrics.findLatestForUser(userId, country, region);
+        const rollup = await PPCMetrics.rollupLastDays(userId, country, region, 30);
 
-        if (!metrics) {
+        if (!rollup || !rollup.found) {
             logger.info(`No PPC metrics found for user: ${userId}`);
             return res.status(200).json(
                 new ApiResponse(200, {
@@ -42,18 +42,17 @@ const getLatestPPCMetrics = asyncHandler(async (req, res) => {
             );
         }
 
-        logger.info(`Found PPC metrics for user: ${userId}, date range: ${metrics.dateRange?.startDate} to ${metrics.dateRange?.endDate}`);
+        logger.info(`PPC rollup for user: ${userId}, range: ${rollup.dateRange?.startDate} to ${rollup.dateRange?.endDate}`);
 
         return res.status(200).json(
             new ApiResponse(200, {
                 found: true,
                 data: {
-                    dateRange: metrics.dateRange,
-                    summary: metrics.summary,
-                    campaignTypeBreakdown: metrics.campaignTypeBreakdown,
-                    dateWiseMetrics: metrics.dateWiseMetrics,
-                    processedCampaignTypes: metrics.processedCampaignTypes,
-                    lastUpdated: metrics.updatedAt
+                    dateRange: rollup.dateRange,
+                    summary: rollup.summary,
+                    dateWiseMetrics: rollup.dateWiseMetrics,
+                    lastUpdated: new Date().toISOString(),
+                    rollupSource: rollup.dataAvailability?.source || 'perDayDocuments'
                 }
             }, 'PPC metrics retrieved successfully')
         );
@@ -116,10 +115,9 @@ const getPPCMetricsByDateRange = asyncHandler(async (req, res) => {
             );
         }
         
-        // No date range specified, get latest
-        const metrics = await PPCMetrics.findLatestForUser(userId, country, region);
+        const rollup = await PPCMetrics.rollupLastDays(userId, country, region, 30);
 
-        if (!metrics) {
+        if (!rollup || !rollup.found) {
             return res.status(200).json(
                 new ApiResponse(200, {
                     found: false,
@@ -134,12 +132,11 @@ const getPPCMetricsByDateRange = asyncHandler(async (req, res) => {
                 found: true,
                 isFiltered: false,
                 data: {
-                    dateRange: metrics.dateRange,
-                    summary: metrics.summary,
-                    campaignTypeBreakdown: metrics.campaignTypeBreakdown,
-                    dateWiseMetrics: metrics.dateWiseMetrics,
-                    processedCampaignTypes: metrics.processedCampaignTypes,
-                    lastUpdated: metrics.updatedAt
+                    dateRange: rollup.dateRange,
+                    summary: rollup.summary,
+                    dateWiseMetrics: rollup.dateWiseMetrics,
+                    lastUpdated: new Date().toISOString(),
+                    rollupSource: rollup.dataAvailability?.source
                 }
             }, 'PPC metrics retrieved successfully')
         );
@@ -171,9 +168,24 @@ const getPPCMetricsForGraph = asyncHandler(async (req, res) => {
     try {
         logger.info(`Fetching PPC graph data for user: ${userId}`);
 
-        const ppcMetrics = await PPCMetrics.findLatestForUser(userId, country, region);
+        const fmtLocal = (d) =>
+            `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        const now = new Date();
+        const defaultEnd = fmtLocal(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+        const defaultStart = fmtLocal(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1 - 30));
 
-        if (!ppcMetrics || !ppcMetrics.dateWiseMetrics) {
+        const rangeStart = startDate || defaultStart;
+        const rangeEnd = endDate || defaultEnd;
+
+        const rollup = await PPCMetrics.calculateMetricsForDateRange(
+            userId,
+            country,
+            region,
+            rangeStart,
+            rangeEnd
+        );
+
+        if (!rollup || !rollup.found || !rollup.dateWiseMetrics?.length) {
             return res.status(200).json(
                 new ApiResponse(200, {
                     found: false,
@@ -183,17 +195,7 @@ const getPPCMetricsForGraph = asyncHandler(async (req, res) => {
             );
         }
 
-        let dateWiseData = ppcMetrics.dateWiseMetrics;
-
-        // Filter by date range if provided
-        if (startDate && endDate) {
-            dateWiseData = dateWiseData.filter(item => {
-                const itemDate = new Date(item.date);
-                const start = new Date(startDate);
-                const end = new Date(endDate);
-                return itemDate >= start && itemDate <= end;
-            });
-        }
+        let dateWiseData = rollup.dateWiseMetrics;
 
         // Format data for charts
         const graphData = dateWiseData.map(item => ({
@@ -202,7 +204,7 @@ const getPPCMetricsForGraph = asyncHandler(async (req, res) => {
             ppcSales: item.sales || 0,
             spend: item.spend || 0,
             acos: item.acos || 0,
-            tacos: calculateTacos(item.spend, item.sales, ppcMetrics.summary?.totalSales),
+            tacos: calculateTacos(item.spend, item.sales, rollup.summary?.totalSales),
             impressions: item.impressions || 0,
             clicks: item.clicks || 0,
             ctr: item.ctr || 0,
@@ -215,10 +217,10 @@ const getPPCMetricsForGraph = asyncHandler(async (req, res) => {
                 found: true,
                 graphData: graphData,
                 dateRange: {
-                    startDate: dateWiseData[0]?.date || startDate,
-                    endDate: dateWiseData[dateWiseData.length - 1]?.date || endDate
+                    startDate: dateWiseData[0]?.date || rangeStart,
+                    endDate: dateWiseData[dateWiseData.length - 1]?.date || rangeEnd
                 },
-                summary: ppcMetrics.summary
+                summary: rollup.summary
             }, 'PPC graph data retrieved successfully')
         );
 
@@ -247,9 +249,9 @@ const getPPCMetricsHistory = asyncHandler(async (req, res) => {
 
     try {
         const metricsHistory = await PPCMetrics.find({ userId, country, region })
-            .sort({ createdAt: -1 })
+            .sort({ metricDate: -1 })
             .limit(parseInt(limit))
-            .select('dateRange summary createdAt updatedAt')
+            .select('metricDate dateRange summary createdAt updatedAt')
             .lean();
 
         return res.status(200).json(

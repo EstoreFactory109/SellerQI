@@ -8,11 +8,19 @@ import TooltipBox from "../../ToolTipBox/ToolTipBoxBottom";
 import ToolTipBoxLeft from '../../ToolTipBox/ToolTipBoxBottomLeft';
 import { formatCurrencyWithLocale } from '../../../utils/currencyUtils.js';
 import { parseLocalDate } from '../../../utils/dateUtils.js';
-import { buildTotalSalesFilterUrl, shouldUseCalendarDateRange } from '../../../utils/totalSalesFilterUrl.js';
-import { pickSnapshotFeeTotalsForCalendar } from '../../../utils/expenseSnapshotCalendar.js';
+import { resolveProfitabilityQueryDates } from '../../../utils/profitabilityDateRange.js';
 import { fetchLatestPPCMetrics, selectPPCSummary, selectPPCDateWiseMetrics, selectLatestPPCMetricsLoading } from '../../../redux/slices/PPCMetricsSlice.js';
+import { fetchCogs } from '../../../redux/slices/cogsSlice.js';
+import { computeTotalCogs } from '../../../utils/cogsCalculations.js';
 import { SkeletonChart } from '../../../Components/Skeleton/PageSkeletons.jsx';
 import { SkeletonContent } from '../../../Components/Skeleton/Skeleton.jsx';
+
+const OVERHEAD_EXCLUDE = new Set([
+  'Disbursement', 'Reserve Hold', 'Reserve Release',
+  'Seller Reward', 'Reimbursement', 'SAFE-T Reimbursement',
+  'SERRAC Reimbursement', 'EBT Refund Reimbursement',
+  'Fulfillment Fee Refund',
+]);
 
 const formatDateWithOrdinal = (dateString) => {
   if (!dateString) return 'N/A';
@@ -32,22 +40,13 @@ const formatDateWithOrdinal = (dateString) => {
   return `${dayNum}${getOrdinalSuffix(dayNum)} ${monthName}`;
 };
 
-/** Match ProfitibilityDashboard: default → last30 window; period query is 7 | 14 | 30. */
-const getProfitabilityPeriodDays = (calendarMode) => {
-  const periodTypeRaw = calendarMode || 'default';
-  const periodType = periodTypeRaw === 'default' ? 'last30' : periodTypeRaw;
-  if (periodType === 'last7') return 7;
-  if (periodType === 'last14') return 14;
-  return 30;
-};
-
 const TotalSales = () => {
   const dispatch = useDispatch();
-  const info = useSelector((state) => state.Dashboard.DashBoardInfo);
   const calendarMode = useSelector(state => state.Dashboard.DashBoardInfo?.calendarMode);
   const startDate = useSelector(state => state.Dashboard.DashBoardInfo?.startDate);
   const endDate = useSelector(state => state.Dashboard.DashBoardInfo?.endDate);
   const currency = useSelector(state => state.currency?.currency) || '$';
+  const cogsValues = useSelector((state) => state.cogs.cogsValues);
   const navigate = useNavigate();
 
   const ppcSummary = useSelector(selectPPCSummary);
@@ -64,183 +63,296 @@ const TotalSales = () => {
     }
   }, [dispatch, ppcMetricsLastFetched, ppcMetricsLoading]);
 
-  const [salesData, setSalesData] = useState(null);
-  const [profitSummary, setProfitSummary] = useState(null);
-  const [expenseReportSnapshot, setExpenseReportSnapshot] = useState(null);
-  /** Fallback when summary/snapshot unavailable — same /api/expenses/* totals as before */
-  const [expenseFallback, setExpenseFallback] = useState({
-    amazonFees: 0,
-    totalExpenses: 0,
-    refunds: 0,
-  });
+  useEffect(() => {
+    dispatch(fetchCogs());
+  }, [dispatch]);
+
+  const [financeDateRange, setFinanceDateRange] = useState({ startDate: null, endDate: null, ready: false });
+  const [financeDashTotals, setFinanceDashTotals] = useState(null);
+  const [financeDashAsinWise, setFinanceDashAsinWise] = useState([]);
+  const [financeDashOverhead, setFinanceDashOverhead] = useState([]);
+  const [financeDashMeta, setFinanceDashMeta] = useState(null);
   const [loading, setLoading] = useState(false);
   const [openToolTipGrossProfit, setOpenToolTipGrossProfit] = useState(false);
   const [openToolTipTopSales, setOpenToolTipTopSales] = useState(false);
+  const [hoveredSlice, setHoveredSlice] = useState(null);
+
+  // Bootstrap date window from DataFetchTracking (same as profitability dashboard)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const root = String(import.meta.env.VITE_BASE_URI || '').replace(/\/$/, '');
+        const res = await axios.get(`${root}/api/finance-dashboard/date-range`, { withCredentials: true });
+        if (cancelled) return;
+        const d = res.data?.data;
+        if (d?.startDate && d?.endDate) {
+          setFinanceDateRange({ startDate: d.startDate, endDate: d.endDate, ready: true });
+        }
+      } catch {
+        if (!cancelled) setFinanceDateRange((prev) => ({ ...prev, ready: false }));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const effectiveFinanceDates = useMemo(() => {
+    const anchorStart = startDate || financeDateRange.startDate;
+    const anchorEnd = endDate || financeDateRange.endDate;
+    if (!anchorStart || !anchorEnd) {
+      return { startDate: null, endDate: null, ready: false };
+    }
+    return resolveProfitabilityQueryDates({
+      calendarMode: calendarMode || 'default',
+      startDate: anchorStart,
+      endDate: anchorEnd,
+    });
+  }, [calendarMode, startDate, endDate, financeDateRange]);
 
   useEffect(() => {
+    if (!effectiveFinanceDates.ready) return undefined;
+
+    let cancelled = false;
     const fetchData = async () => {
       setLoading(true);
       try {
-        const periodDays = getProfitabilityPeriodDays(calendarMode);
-        const useRange = shouldUseCalendarDateRange(startDate, endDate, calendarMode);
-        const base = import.meta.env.VITE_BASE_URI;
-        const root = String(base).replace(/\/$/, '');
+        const root = String(import.meta.env.VITE_BASE_URI || '').replace(/\/$/, '');
+        const { startDate: fdStart, endDate: fdEnd } = effectiveFinanceDates;
+        const financeDashUrl = `${root}/api/finance-dashboard?startDate=${encodeURIComponent(fdStart)}&endDate=${encodeURIComponent(fdEnd)}`;
 
-        // SalesOnlyMetrics: custom + dates when Redux has range; else last30 (same as ProfitibilityDashboard)
-        const salesUrl = buildTotalSalesFilterUrl(base, { startDate, endDate, calendarMode });
+        const fdResp = await axios.get(financeDashUrl, { withCredentials: true }).catch(() => null);
+        if (cancelled) return;
 
-        const summaryUrl = useRange
-          ? `${root}/api/profitability/summary/date-range?from=${encodeURIComponent(startDate)}&to=${encodeURIComponent(endDate)}`
-          : `${root}/api/profitability/summary?period=${periodDays}`;
-
-        const snapshotUrl = `${root}/api/expenses/snapshot`;
-
-        const totalExpUrl = useRange
-          ? `${root}/api/expenses/total/date-range?from=${encodeURIComponent(startDate)}&to=${encodeURIComponent(endDate)}`
-          : `${root}/api/expenses/total?period=${periodDays}`;
-
-        const amazonFeesUrl = useRange
-          ? `${root}/api/expenses/amazon-fees/date-range?from=${encodeURIComponent(startDate)}&to=${encodeURIComponent(endDate)}`
-          : `${root}/api/expenses/amazon-fees?period=${periodDays}`;
-
-        const refundsUrl = useRange
-          ? `${root}/api/expenses/refunds/date-range?from=${encodeURIComponent(startDate)}&to=${encodeURIComponent(endDate)}`
-          : `${root}/api/expenses/refunds?period=${periodDays}`;
-
-        const [
-          salesResp,
-          summaryResp,
-          snapshotResp,
-          totalExpResp,
-          amazonFeesResp,
-          refundsResp,
-        ] = await Promise.all([
-          axios.get(salesUrl, { withCredentials: true }).catch(() => null),
-          axios.get(summaryUrl, { withCredentials: true }).catch(() => null),
-          axios.get(snapshotUrl, { withCredentials: true }).catch(() => null),
-          axios.get(totalExpUrl, { withCredentials: true }).catch(() => null),
-          axios.get(amazonFeesUrl, { withCredentials: true }).catch(() => null),
-          axios.get(refundsUrl, { withCredentials: true }).catch(() => null),
-        ]);
-
-        if (salesResp?.status === 200 && salesResp?.data?.data) {
-          setSalesData(salesResp.data.data);
+        if (fdResp?.data?.data) {
+          const fd = fdResp.data.data;
+          setFinanceDashTotals(fd.totals || null);
+          setFinanceDashAsinWise(fd.asinWise || []);
+          setFinanceDashOverhead(fd.overhead || []);
+          setFinanceDashMeta(fd.metadata || null);
         } else {
-          setSalesData(null);
+          setFinanceDashTotals(null);
+          setFinanceDashAsinWise([]);
+          setFinanceDashOverhead([]);
+          setFinanceDashMeta(null);
         }
-
-        if (summaryResp?.data?.data) {
-          setProfitSummary(summaryResp.data.data);
-        } else {
-          setProfitSummary(null);
-        }
-
-        if (snapshotResp?.data?.data) {
-          setExpenseReportSnapshot(snapshotResp.data.data);
-        } else {
-          setExpenseReportSnapshot(null);
-        }
-
-        const totalExp = Math.abs(Number(totalExpResp?.data?.data?.total || 0));
-        const amazonFees = Math.abs(Number(amazonFeesResp?.data?.data?.total || 0));
-        const refunds = Math.abs(Number(refundsResp?.data?.data?.total || 0));
-
-        setExpenseFallback({ totalExpenses: totalExp, amazonFees, refunds });
       } catch (error) {
-        console.error('Error fetching chart data:', error);
+        console.error('Error fetching finance dashboard data:', error);
+        if (!cancelled) {
+          setFinanceDashTotals(null);
+          setFinanceDashAsinWise([]);
+          setFinanceDashOverhead([]);
+          setFinanceDashMeta(null);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     fetchData();
-  }, [calendarMode, startDate, endDate]);
+    return () => { cancelled = true; };
+  }, [effectiveFinanceDates.ready, effectiveFinanceDates.startDate, effectiveFinanceDates.endDate]);
 
   const filteredPPCMetrics = useMemo(() => {
-    if (!shouldUseCalendarDateRange(startDate, endDate, calendarMode) || !ppcDateWiseMetrics.length) return ppcDateWiseMetrics;
-    // Align with ProfitibilityDashboard / Campaign Audit: include full days in local time
-    const start = parseLocalDate(startDate);
-    const end = parseLocalDate(endDate);
+    if (!effectiveFinanceDates.ready || !ppcDateWiseMetrics.length) return [];
+    const start = parseLocalDate(effectiveFinanceDates.startDate);
+    const end = parseLocalDate(effectiveFinanceDates.endDate);
     start.setHours(0, 0, 0, 0);
     end.setHours(23, 59, 59, 999);
-    return ppcDateWiseMetrics.filter(item => {
+    return ppcDateWiseMetrics.filter((item) => {
       const itemDate = new Date(item.date);
       return itemDate >= start && itemDate <= end;
     });
-  }, [ppcDateWiseMetrics, startDate, endDate, calendarMode]);
+  }, [ppcDateWiseMetrics, effectiveFinanceDates]);
 
-  const labelData = [
-    "Gross Profit",
-    "PPC Spent",
-    "Amazon Fees",
-    "Other Expenses",
-    "Refunds",
-  ];
+  const PIE_COLORS = {
+    grossProfit: (grossProfitRaw) => (grossProfitRaw < 0 ? '#64748b' : '#059669'),
+    ppc: '#d97706',
+    amazonFees: '#ea580c',
+    refundsPromos: '#9333ea',
+    additionalAmazon: '#64748b',
+    overhead: '#dc2626',
+  };
 
-  const hasSalesData = salesData !== null;
-
-  /** Expense math aligned with ProfitibilityDashboard (snapshot → profit summary → /api/expenses/* fallback). */
   const pieMetrics = useMemo(() => {
-    const useRange = shouldUseCalendarDateRange(startDate, endDate, calendarMode);
+    const t = financeDashTotals;
 
-    const snapshotFeeTotals = pickSnapshotFeeTotalsForCalendar(
-      expenseReportSnapshot,
-      calendarMode,
-      startDate,
-      endDate
-    );
-
-    const fbTotal = Math.abs(expenseFallback.totalExpenses);
-    const fbAmazon = Math.abs(expenseFallback.amazonFees);
-    const fbRefunds = Math.abs(expenseFallback.refunds);
-
-    const displayAmazonFees = snapshotFeeTotals
-      ? Math.abs(snapshotFeeTotals.amazonFees)
-      : profitSummary
-        ? Math.abs(profitSummary.amazonFees || 0)
-        : fbAmazon;
-
-    const displayTotalExpenses = snapshotFeeTotals
-      ? Math.abs(snapshotFeeTotals.totalExpenses)
-      : profitSummary
-        ? Math.abs(profitSummary.totalExpenses || 0)
-        : fbTotal;
-
-    const displayRefunds = profitSummary
-      ? Math.abs(profitSummary.refunds || 0)
-      : fbRefunds;
-
-    // Prefer /api/total-sales/filter (sum of datewiseSales in SalesOnlyMetrics) for all calendar modes when loaded
-    const hasSalesOnlyTotal =
-      salesData?.totalSales?.amount !== undefined && salesData?.totalSales?.amount !== null;
-    const totalSalesVal = hasSalesOnlyTotal
-      ? Number(salesData.totalSales.amount)
-      : profitSummary?.totalSales != null
-        ? Number(profitSummary.totalSales)
-        : Number(info?.TotalWeeklySale || 0);
+    const totalSalesVal = t?.productSales != null
+      ? Number(t.productSales)
+      : 0;
 
     let ppcSpentVal = 0;
-    if (useRange && filteredPPCMetrics.length > 0) {
+    if (filteredPPCMetrics.length > 0) {
       ppcSpentVal = filteredPPCMetrics.reduce((sum, item) => sum + (item.spend || 0), 0);
+    } else if (Number(t?.adsSpend) > 0) {
+      ppcSpentVal = Number(t.adsSpend);
     } else if (ppcSummary?.totalSpend > 0) {
       ppcSpentVal = ppcSummary.totalSpend;
     }
 
-    // Gross profit: always subtract PPC spend as well (keeps PPC as an explicit cost bucket)
-    const grossProfitRawVal = totalSalesVal - displayTotalExpenses - ppcSpentVal;
+    const reimbursements = t ? Math.abs(t.fbaInventoryReimbursement || 0) : 0;
 
-    // Ensure refunds are not double-counted: TotalExpenses includes refunds (because refunds are part of ExpenseRawRow aggregation),
-    // but refunds are also shown as a separate pie slice.
-    const otherExpensesVal = Math.max(0, displayTotalExpenses - displayAmazonFees - displayRefunds);
+    const amazonFeesVal = t ? Math.abs(
+      (t.fbaFulfillmentFee || 0) +
+      (t.referralCommission || 0) +
+      (t.closingFee || 0) +
+      (t.technologyFee || 0) +
+      (t.shippingChargeback || 0) +
+      (t.giftWrapChargeback || 0) +
+      (t.fbaDisposalFee || 0) +
+      (t.fbaReversedReimbursement || 0)
+    ) : 0;
 
+    const refundsPromosVal = t ? Math.abs(
+      (t.refundedAmount || 0) +
+      (t.refundCommission || 0) -
+      Math.abs(t.refundedReferralFee || 0) -
+      Math.abs(t.refundedPromotion || 0) -
+      Math.abs(t.restockingFee || 0) +
+      (t.promotionsDiscount || 0) +
+      (t.shippingDiscount || 0)
+    ) : 0;
+
+    const totalCogsVal = computeTotalCogs(financeDashAsinWise, cogsValues);
+
+    // Uncategorized Amazon fees + COGS (not tax pass-through / TDS / TCS)
+    const additionalAmazonBreakdown = (t?.otherExpensesBreakdown || [])
+      .filter((item) => Math.abs(item.amount || 0) > 0.01)
+      .map((item) => ({ label: item.category, amount: Math.abs(item.amount) }));
+
+    const uncategorizedAmazonFeesVal = additionalAmazonBreakdown.length > 0
+      ? additionalAmazonBreakdown.reduce((sum, item) => sum + item.amount, 0)
+      : Math.abs(t?.otherExpenses || 0);
+
+    const additionalAmazonFeesBreakdownWithCogs = [
+      ...additionalAmazonBreakdown,
+      ...(totalCogsVal > 0.01 ? [{ label: 'COGS (Cost of Goods Sold)', amount: totalCogsVal }] : []),
+    ];
+
+    const additionalAmazonFeesVal = uncategorizedAmazonFeesVal + totalCogsVal;
+
+    const showAdditionalAmazonSlice = additionalAmazonFeesVal > 0.01;
+
+    const overheadVal = financeDashOverhead
+      .filter(item => !item.isRevenue && !OVERHEAD_EXCLUDE.has(item.category))
+      .reduce((sum, item) => sum + Math.abs(item.amount || 0), 0);
+
+    // Same per-ASIN expense rollup as ProfitibilityDashboard
+    const perAsinExpenses = t ? (
+      Math.abs(t.fbaFulfillmentFee || 0) +
+      Math.abs(t.referralCommission || 0) +
+      Math.abs(t.closingFee || 0) +
+      Math.abs(t.technologyFee || 0) +
+      Math.abs(t.shippingChargeback || 0) +
+      Math.abs(t.giftWrapChargeback || 0) +
+      Math.abs(t.fbaDisposalFee || 0) +
+      Math.abs(t.fbaReversedReimbursement || 0) +
+      Math.abs(t.refundedAmount || 0) +
+      Math.abs(t.refundCommission || 0) -
+      Math.abs(t.refundedReferralFee || 0) -
+      Math.abs(t.refundedPromotion || 0) -
+      Math.abs(t.restockingFee || 0) +
+      Math.abs(t.promotionsDiscount || 0) +
+      Math.abs(t.shippingDiscount || 0) +
+      Math.abs(t.taxDiscount || 0) +
+      Math.abs(t.shippingTaxDiscount || 0) +
+      Math.abs(t.tdsDeducted || 0) +
+      Math.abs(t.tcsCollected || 0) +
+      Math.abs(t.otherExpenses || 0)
+    ) : 0;
+
+    const displayTotalExpenses = perAsinExpenses + overheadVal - reimbursements;
+    const grossProfitRawVal = totalSalesVal - displayTotalExpenses - ppcSpentVal - totalCogsVal;
     const grossProfitVal = Math.abs(grossProfitRawVal);
+    const showGrossProfitSlice = grossProfitRawVal >= 0;
 
-    const saleValuesVal = [
-      grossProfitVal,
-      ppcSpentVal,
-      displayAmazonFees,
-      otherExpensesVal,
-      displayRefunds,
+    const grossProfitBreakdown = [
+      { label: 'Total Sales', amount: totalSalesVal },
+      { label: 'Amazon Fees', amount: -amazonFeesVal },
+      { label: 'Refunds & Promotions', amount: -refundsPromosVal },
+      ...(showAdditionalAmazonSlice
+        ? [{ label: 'Additional Amazon Fees', amount: -additionalAmazonFeesVal }]
+        : []),
+      { label: 'Overhead', amount: -overheadVal },
+      { label: 'Reimbursements', amount: reimbursements },
+      { label: 'PPC Spend', amount: -ppcSpentVal },
+    ];
+
+    const ppcBreakdown = [
+      { label: 'Total Ad Spend', amount: ppcSpentVal },
+      ...(t?.adsSpendSP ? [{ label: 'Sponsored Products (SP)', amount: Math.abs(t.adsSpendSP) }] : []),
+      ...(t?.adsSpendSD ? [{ label: 'Sponsored Display (SD)', amount: Math.abs(t.adsSpendSD) }] : []),
+    ];
+
+    const amazonFeesBreakdown = t ? [
+      { label: 'FBA Fulfillment', amount: Math.abs(t.fbaFulfillmentFee || 0) },
+      { label: 'Referral Commission', amount: Math.abs(t.referralCommission || 0) },
+      { label: 'Closing Fee', amount: Math.abs(t.closingFee || 0) },
+      { label: 'Technology Fee', amount: Math.abs(t.technologyFee || 0) },
+      { label: 'Shipping Chargeback', amount: Math.abs(t.shippingChargeback || 0) },
+      { label: 'Gift Wrap Chargeback', amount: Math.abs(t.giftWrapChargeback || 0) },
+      { label: 'FBA Disposal Fee', amount: Math.abs(t.fbaDisposalFee || 0) },
+      { label: 'Compensated Clawback', amount: Math.abs(t.fbaReversedReimbursement || 0) },
+    ].filter((f) => f.amount > 0.01) : [];
+
+    const refundsPromosBreakdown = t ? [
+      { label: 'Refunded Amount', amount: Math.abs(t.refundedAmount || 0) },
+      { label: 'Refund Commission', amount: Math.abs(t.refundCommission || 0) },
+      { label: 'Promotions Discount', amount: Math.abs(t.promotionsDiscount || 0) },
+      { label: 'Shipping Discount', amount: Math.abs(t.shippingDiscount || 0) },
+    ].filter((f) => f.amount > 0.01) : [];
+
+    const additionalAmazonFeesBreakdown = additionalAmazonFeesBreakdownWithCogs.length > 0
+      ? additionalAmazonFeesBreakdownWithCogs
+      : (showAdditionalAmazonSlice ? [{ label: 'Uncategorized fees', amount: uncategorizedAmazonFeesVal }] : []);
+
+    const overheadBreakdown = financeDashOverhead
+      .filter((oh) => !oh.isRevenue && !OVERHEAD_EXCLUDE.has(oh.category) && Math.abs(oh.amount || 0) > 0.01)
+      .map((oh) => ({ label: oh.category, amount: Math.abs(oh.amount || 0) }))
+      .sort((a, b) => b.amount - a.amount);
+
+    const visibleSlices = [
+      ...(showGrossProfitSlice ? [{
+        id: 'grossProfit',
+        label: 'Gross Profit',
+        value: grossProfitVal,
+        displayAmount: grossProfitRawVal,
+        breakdown: grossProfitBreakdown,
+      }] : []),
+      {
+        id: 'ppc',
+        label: 'PPC Spend',
+        value: ppcSpentVal,
+        displayAmount: ppcSpentVal,
+        breakdown: ppcBreakdown,
+      },
+      {
+        id: 'amazonFees',
+        label: 'Amazon Fees',
+        value: amazonFeesVal,
+        displayAmount: amazonFeesVal,
+        breakdown: amazonFeesBreakdown,
+      },
+      {
+        id: 'refundsPromos',
+        label: 'Refunds & Promotions',
+        value: refundsPromosVal,
+        displayAmount: refundsPromosVal,
+        breakdown: refundsPromosBreakdown,
+      },
+      ...(showAdditionalAmazonSlice ? [{
+        id: 'additionalAmazon',
+        label: 'Additional Amazon Fees',
+        value: additionalAmazonFeesVal,
+        displayAmount: additionalAmazonFeesVal,
+        breakdown: additionalAmazonFeesBreakdown,
+      }] : []),
+      {
+        id: 'overhead',
+        label: 'Overhead',
+        value: overheadVal,
+        displayAmount: overheadVal,
+        breakdown: overheadBreakdown,
+      },
     ];
 
     return {
@@ -248,81 +360,76 @@ const TotalSales = () => {
       ppcSpent: ppcSpentVal,
       grossProfitRaw: grossProfitRawVal,
       grossProfit: grossProfitVal,
-      saleValues: saleValuesVal,
+      visibleSlices,
+      hasFinanceData: !!t,
     };
   }, [
-    salesData,
-    profitSummary,
-    expenseReportSnapshot,
-    expenseFallback,
-    calendarMode,
-    startDate,
-    endDate,
+    financeDashTotals,
+    financeDashAsinWise,
+    financeDashOverhead,
     filteredPPCMetrics,
     ppcSummary,
-    info?.TotalWeeklySale,
+    cogsValues,
   ]);
 
-  const { totalSales, grossProfitRaw, grossProfit, saleValues } = pieMetrics;
+  const { totalSales, grossProfitRaw, visibleSlices, hasFinanceData } = pieMetrics;
 
   const handleNavigateToProfitability = () => {
     navigate('/seller-central-checker/profitibility-dashboard');
   };
 
-  const chartData = {
-    series: saleValues,
-    options: {
-      chart: {
-        type: "pie",
-        fontFamily: "'Inter', sans-serif",
-        events: {
-          dataPointSelection: function() {
-            handleNavigateToProfitability();
-          }
-        }
-      },
-      labels: labelData,
-      colors: [
-        grossProfitRaw < 0 ? "#64748b" : "#059669",
-        "#d97706",
-        "#ea580c",
-        "#dc2626",
-        "#9333ea",
-      ],
-      legend: { show: false },
-      dataLabels: { enabled: false },
-      plotOptions: {
-        pie: { donut: { size: '0%' } }
-      },
-      stroke: {
-        width: 2,
-        colors: ['#161b22']
-      },
-      responsive: [{
-        breakpoint: 768,
-        options: {
-          chart: { height: 280, width: 280 }
-        }
-      }]
-    },
-  };
-
-  const getDisplayDates = () => {
-    if (startDate && endDate) return { startDate, endDate };
-    if (hasSalesData && salesData?.dateRange?.startDate && salesData?.dateRange?.endDate) {
-      return { startDate: salesData.dateRange.startDate, endDate: salesData.dateRange.endDate };
-    }
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const calcStart = new Date(yesterday);
-    calcStart.setDate(yesterday.getDate() - 30);
+  const chartData = useMemo(() => {
+    const colors = visibleSlices.map((slice) => {
+      if (slice.id === 'grossProfit') return PIE_COLORS.grossProfit(grossProfitRaw);
+      return PIE_COLORS[slice.id] || '#64748b';
+    });
     return {
-      startDate: calcStart.toISOString().split('T')[0],
-      endDate: yesterday.toISOString().split('T')[0],
+      series: visibleSlices.map((s) => s.value),
+      options: {
+        chart: {
+          type: 'pie',
+          fontFamily: "'Inter', sans-serif",
+          events: {
+            dataPointSelection: function () {
+              handleNavigateToProfitability();
+            },
+          },
+        },
+        labels: visibleSlices.map((s) => s.label),
+        colors,
+        legend: { show: false },
+        dataLabels: { enabled: false },
+        plotOptions: {
+          pie: { donut: { size: '0%' } },
+        },
+        stroke: {
+          width: 2,
+          colors: ['#161b22'],
+        },
+        responsive: [{
+          breakpoint: 768,
+          options: {
+            chart: { height: 280, width: 280 },
+          },
+        }],
+      },
     };
-  };
+  }, [visibleSlices, grossProfitRaw]);
 
-  const displayDates = getDisplayDates();
+  const displayDates = useMemo(() => {
+    if (effectiveFinanceDates.ready) {
+      return {
+        startDate: effectiveFinanceDates.startDate,
+        endDate: effectiveFinanceDates.endDate,
+      };
+    }
+    if (financeDashMeta?.startDate && financeDashMeta?.endDate) {
+      return { startDate: financeDashMeta.startDate, endDate: financeDashMeta.endDate };
+    }
+    return { startDate: null, endDate: null };
+  }, [effectiveFinanceDates, financeDashMeta]);
+
+  const showEmptyState = !loading && !hasFinanceData;
 
   return (
     <div className="p-1.5 h-full bg-transparent rounded relative flex flex-col">
@@ -336,7 +443,7 @@ const TotalSales = () => {
               onMouseEnter={() => setOpenToolTipTopSales(true)}
               onMouseLeave={() => setOpenToolTipTopSales(false)}
             />
-            {openToolTipTopSales && <ToolTipBoxLeft Information="Total revenue generated during the selected date range."/>}
+            {openToolTipTopSales && <ToolTipBoxLeft Information="Total product sales from finance data (DailySkuFinance) for the selected date range."/>}
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -348,7 +455,7 @@ const TotalSales = () => {
               onMouseEnter={() => setOpenToolTipGrossProfit(true)}
               onMouseLeave={() => setOpenToolTipGrossProfit(false)}
             />
-            {openToolTipGrossProfit && <TooltipBox Information="Gross profit after deducting ad spend, storage fees, FBA fees, and product return refunds from sales revenue."/>}
+            {openToolTipGrossProfit && <TooltipBox Information="Sales minus Amazon fees, refunds, overhead, PPC spend, and COGS (when entered) — same calculation as the Profitability dashboard."/>}
           </div>
         </div>
       </div>
@@ -387,9 +494,13 @@ const TotalSales = () => {
               <SkeletonChart height={260} />
             </div>
             <div className="lg:col-span-3 flex flex-col justify-between h-full gap-2 p-1.5">
-              <SkeletonContent rows={6} />
+              <SkeletonContent rows={5} />
             </div>
           </>
+        ) : showEmptyState ? (
+          <div className="lg:col-span-5 flex items-center justify-center py-8">
+            <p className="text-sm text-gray-400">No finance data available for this period. Run integration to sync finance data.</p>
+          </div>
         ) : (
           <>
             <div className="lg:col-span-2 flex justify-center items-center w-full">
@@ -405,32 +516,59 @@ const TotalSales = () => {
             </div>
 
             <div className="lg:col-span-3 flex flex-col justify-between h-full gap-2">
-              {labelData.map((label, index) => {
-                const value = saleValues[index];
-                const percentage = totalSales > 0 ? Math.round((value / totalSales) * 100) : 0;
+              {visibleSlices.map((slice, index) => {
+                const percentage = totalSales > 0 ? Math.round((slice.value / totalSales) * 100) : 0;
+                const hasBreakdown = slice.breakdown.length > 0;
+                const dropdownAbove = index >= visibleSlices.length - 2;
 
                 return (
                   <div
-                    key={index}
-                    onClick={() => handleNavigateToProfitability()}
-                    className="flex items-center justify-between p-2.5 bg-[#21262d] rounded hover:bg-blue-500/20 border border-transparent hover:border-blue-500/40 transition-all cursor-pointer group flex-1"
-                    title={`Click to view ${label} details in Profitability Dashboard`}
+                    key={slice.id}
+                    className="relative flex-1"
+                    onMouseEnter={() => hasBreakdown && setHoveredSlice(index)}
+                    onMouseLeave={() => setHoveredSlice(null)}
                   >
-                    <div className="flex items-center gap-2">
+                    <div
+                      onClick={() => handleNavigateToProfitability()}
+                      className="flex items-center justify-between p-2.5 bg-[#21262d] rounded hover:bg-blue-500/20 border border-transparent hover:border-blue-500/40 transition-all cursor-pointer group h-full"
+                    >
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="w-3 h-3 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: chartData.options.colors[index] }}
+                        ></div>
+                        <p className="text-sm font-medium text-gray-200 group-hover:text-blue-400 transition-colors">{slice.label}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold text-gray-100">
+                          {formatCurrencyWithLocale(slice.displayAmount, currency)}
+                        </p>
+                        <span className="bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded text-xs font-medium min-w-[2.5rem] text-center">
+                          {percentage}%
+                        </span>
+                      </div>
+                    </div>
+
+                    {hoveredSlice === index && hasBreakdown && (
                       <div
-                        className="w-3 h-3 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: chartData.options.colors[index] }}
-                      ></div>
-                      <p className="text-sm font-medium text-gray-200 group-hover:text-blue-400 transition-colors">{label}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-gray-100">
-                        {formatCurrencyWithLocale((index === 0 ? grossProfitRaw : value), currency)}
-                      </p>
-                      <span className="bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded text-xs font-medium min-w-[2.5rem] text-center">
-                        {percentage}%
-                      </span>
-                    </div>
+                        className={`absolute right-0 z-50 w-56 rounded-lg shadow-xl overflow-hidden ${dropdownAbove ? 'bottom-full mb-1' : 'top-full mt-1'}`}
+                        style={{ background: '#161b22', border: '1px solid #30363d' }}
+                      >
+                        <div className="px-3 py-2 border-b" style={{ borderColor: '#30363d' }}>
+                          <p className="text-[11px] font-semibold text-gray-300 uppercase tracking-wide">{slice.label} Breakdown</p>
+                        </div>
+                        <div className="p-2 max-h-48 overflow-y-auto">
+                          {slice.breakdown.map((item, idx) => (
+                            <div key={idx} className="flex items-center justify-between px-2 py-1.5 rounded hover:bg-[#21262d]">
+                              <span className="text-[11px] text-gray-400 truncate mr-2">{item.label}</span>
+                              <span className={`text-[11px] font-medium whitespace-nowrap ${item.amount < 0 ? 'text-red-400' : 'text-gray-200'}`}>
+                                {item.amount < 0 ? '-' : ''}{currency}{Math.abs(item.amount).toFixed(2)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}

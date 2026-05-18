@@ -51,7 +51,10 @@ const getTotalSales = async (req, res) => {
             after: "2025-03-01T00:00:00Z",
             before: "2025-03-07T23:59:59Z",
             SessionToken: temporaryCredentials.SessionToken,
-            AccessToken: "Atza|IwEBIPpEipI_wTzmJB8Ueu6wcjVMRvGw2Qk_uynf8T26ELJRR6IkTZVFyA7ioyxBf6SOTZNReLxVU1iTBC406CGgbP860LiEEkehgkj6ufLYnY6ufEeGgUD3sxovj0rEdgQ0VYJsbFijwmNMjO6ZK0WHH_cugtN8LkXC9Z7_n74ioDuDsbTBnwiGnd_JRPXcy6IMDCxPDkL7M53nPPhoxhXysBsTCKs_A6xO-xVDKy8kBOzqLN_lypfzPrBfeVzjS-tpl9N4Kj8n_0GuEgUUV-IAPeGocLcknyJ2gL3_8w_URodBlcO3j2Y3jHjm1916cnAPjfZ0kO3YvWYk3Eb2GjkV7Rvl9MD-4aUn9KKgEmd5-H2jnQ"
+            AccessToken: process.env.SPAPI_ACCESS_TOKEN
+        }
+        if (!process.env.SPAPI_ACCESS_TOKEN) {
+            return res.status(400).json({ success: false, message: "Missing SPAPI_ACCESS_TOKEN in environment (test endpoint)." });
         }
         const result = await getshipment(dataToSend, "67e2fa4a782037804651ddd3", "sellingpartnerapi-na.amazon.com", "US", "NA");
         //dataToSend,"67e2fa4a782037804651ddd3","sellingpartnerapi-na.amazon.com","US","NA"
@@ -78,214 +81,564 @@ const testAmazonAds = async (req, res) => {
     })
 }
 
+  /**
+   * Resolve Amazon Ads credentials from the seller account stored in Mongo.
+   * Used by the snapshot-style test endpoints (campaigns / ad groups / negative
+   * keywords) so callers don't have to paste tokens by hand.
+   *
+   * Returns { accessToken, profileId, refreshToken, country, region }.
+   * Throws an Error (with a `.status` property) on validation / lookup failure.
+   */
+  const resolveAdsCredsFromDb = async ({ userId, country, region }) => {
+    if (!userId) {
+      const err = new Error('userId is required when fetchTokenFromDB is true.');
+      err.status = 400;
+      throw err;
+    }
+    if (!region) {
+      const err = new Error('region is required (NA, EU, or FE).');
+      err.status = 400;
+      throw err;
+    }
+
+    const Seller = require('../../models/user-auth/sellerCentralModel.js');
+    const { generateAdsAccessToken } = require('../../Services/AmazonAds/GenerateToken.js');
+    const { getProfileById } = require('../../Services/AmazonAds/GenerateProfileId.js');
+    const mongooseLib = require('mongoose');
+
+    const userIdQuery = (typeof userId === 'string' && mongooseLib.Types.ObjectId.isValid(userId))
+      ? new mongooseLib.Types.ObjectId(userId)
+      : userId;
+
+    const sellerCentral = await Seller.findOne({ User: userIdQuery }).sort({ createdAt: -1 });
+    if (!sellerCentral) {
+      const err = new Error('Seller account not found for the provided userId.');
+      err.status = 404;
+      throw err;
+    }
+
+    const wantedCountry = country || 'US';
+    const sellerAccount = (sellerCentral.sellerAccount || []).find(
+      (acc) => acc.country === wantedCountry && acc.region === region
+    );
+    if (!sellerAccount) {
+      const err = new Error(`Seller account not found for country=${wantedCountry}, region=${region}.`);
+      err.status = 404;
+      throw err;
+    }
+
+    if (!sellerAccount.adsRefreshToken) {
+      const err = new Error('Ads refresh token not found for this user. Please connect Amazon Ads account first.');
+      err.status = 400;
+      throw err;
+    }
+
+    const refreshToken = sellerAccount.adsRefreshToken;
+    const accessToken = await generateAdsAccessToken(refreshToken);
+    if (!accessToken) {
+      const err = new Error('Failed to generate Ads access token. The refresh token may be invalid or expired.');
+      err.status = 500;
+      throw err;
+    }
+
+    let profileId = sellerAccount.ProfileId;
+    if (!profileId) {
+      try {
+        const profiles = await getProfileById(accessToken, region, wantedCountry, userId);
+        if (Array.isArray(profiles) && profiles.length > 0) {
+          const target = (wantedCountry || '').toUpperCase();
+          const match = profiles.find(
+            (p) => (p.countryCode || '').toUpperCase() === target
+          ) || profiles[0];
+          profileId = match.profileId?.toString();
+        }
+      } catch (profileErr) {
+        console.error('Error fetching profile ID:', profileErr.message);
+      }
+    }
+
+    if (!profileId) {
+      const err = new Error('Could not resolve Amazon Ads profile ID for this account.');
+      err.status = 400;
+      throw err;
+    }
+
+    return {
+      accessToken,
+      profileId: String(profileId),
+      refreshToken,
+      country: sellerAccount.country || wantedCountry,
+      region,
+    };
+  };
+
+  /**
+   * POST /api/test/testGetCampaigns
+   * Body: {
+   *   userId, country, region,         // required when fetchTokenFromDB is true
+   *   fetchTokenFromDB: true,          // resolve creds from seller account
+   *   // OR
+   *   accessToken, profileId           // explicit creds
+   * }
+   * Snapshot service – no date range. Stores latest campaigns under metricDate=yesterday(UTC).
+   */
   const testGetCampaigns = async (req, res) => {
-    const { accessToken, profileId } = req.body;
-    const result = await getCampaign(accessToken,profileId,"NA","681b7e41525925e8abb7d3c6","US");
-    return res.status(200).json({
-        data: result
-    })
-  }
+    try {
+      const { fetchTokenFromDB, userId, country, region } = req.body;
+      let { accessToken, profileId } = req.body;
+      let resolvedCountry = country || 'US';
+      let resolvedRegion = region;
+      let resolvedUserId = userId;
 
+      if (fetchTokenFromDB) {
+        const creds = await resolveAdsCredsFromDb({ userId, country, region });
+        accessToken = creds.accessToken;
+        profileId = creds.profileId;
+        resolvedCountry = creds.country;
+        resolvedRegion = creds.region;
+      }
 
+      if (!accessToken || !profileId || !resolvedRegion || !resolvedUserId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Missing required fields',
+          message: 'Provide either (userId + country + region + fetchTokenFromDB:true) OR (accessToken + profileId + userId + region).'
+        });
+      }
 
+      const result = await getCampaign(accessToken, profileId, resolvedRegion, resolvedUserId, resolvedCountry);
+      return res.status(200).json({
+        success: true,
+        metadata: { userId: resolvedUserId, country: resolvedCountry, region: resolvedRegion, profileId },
+        data: result,
+      });
+    } catch (error) {
+      console.error('❌ Error in testGetCampaigns:', error);
+      return res.status(error.status || 500).json({
+        success: false,
+        error: error.message || 'Internal server error',
+      });
+    }
+  };
 
+  /**
+   * Load stored campaign IDs for a user/country/region from the latest
+   * Campaign snapshot (matches what `testGetCampaigns` writes).
+   */
+  const loadStoredCampaignIds = async (userId, country, region) => {
+    const Campaign = require('../../models/amazon-ads/CampaignModel.js');
+    const { loadLatestSnapshotDoc } = require('../../utils/ppcSnapshotLoader.js');
+    const doc = await loadLatestSnapshotDoc(Campaign, String(userId), country, region);
+    const rows = doc?.campaignData || [];
+    const ids = rows
+      .map((c) => c && c.campaignId)
+      .filter((id) => id != null && id !== '')
+      .map(String);
+    return { ids: Array.from(new Set(ids)), snapshotMetricDate: doc?.metricDate || null };
+  };
+
+  /**
+   * Load stored ad-group IDs for a user/country/region from the latest
+   * AdsGroup snapshot (matches what `testGetAdGroups` writes).
+   */
+  const loadStoredAdGroupIds = async (userId, country, region) => {
+    const AdsGroup = require('../../models/amazon-ads/adsgroupModel.js');
+    const { loadLatestSnapshotDoc } = require('../../utils/ppcSnapshotLoader.js');
+    const doc = await loadLatestSnapshotDoc(AdsGroup, String(userId), country, region);
+    const rows = doc?.adsGroupData || [];
+    const ids = rows
+      .map((g) => g && g.adGroupId)
+      .filter((id) => id != null && id !== '')
+      .map(String);
+    return { ids: Array.from(new Set(ids)), snapshotMetricDate: doc?.metricDate || null };
+  };
+
+  /**
+   * POST /api/test/testGetAdGroups
+   * Body: {
+   *   userId, country, region, fetchTokenFromDB: true   // OR accessToken + profileId
+   *   campaignIds: ["123","456"]                         // optional — explicit override
+   *   autoLookup: true                                   // optional, default true
+   * }
+   *
+   * Behaviour:
+   * - If `campaignIds` is omitted or empty AND `autoLookup` is not false,
+   *   the latest Campaign snapshot in Mongo is used to populate the list.
+   * - If you pass a non-empty `campaignIds`, it is used as-is.
+   * - Snapshot service – no date range.
+   */
   const testGetAdGroups = async (req, res) => {
-    const { accessToken, region,profileId,campaignIds } = req.body;
-    const result = await getAdGroups(accessToken,profileId,"NA","681b7e41525925e8abb7d3c6","US",["384401447418864","296211985111834","501765201108807"]);
-    return res.status(200).json({
-        data: result
-    })
-  }
+    try {
+      const { fetchTokenFromDB, userId, country, region, campaignIds, autoLookup } = req.body;
+      let { accessToken, profileId } = req.body;
+      let resolvedCountry = country || 'US';
+      let resolvedRegion = region;
+      let resolvedUserId = userId;
 
+      if (fetchTokenFromDB) {
+        const creds = await resolveAdsCredsFromDb({ userId, country, region });
+        accessToken = creds.accessToken;
+        profileId = creds.profileId;
+        resolvedCountry = creds.country;
+        resolvedRegion = creds.region;
+      }
+
+      if (!accessToken || !profileId || !resolvedRegion || !resolvedUserId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Missing required fields',
+          message: 'Provide either (userId + country + region + fetchTokenFromDB:true) OR (accessToken + profileId + userId + region).'
+        });
+      }
+
+      const explicitIds = Array.isArray(campaignIds) ? campaignIds.map(String) : [];
+      const shouldAutoLookup = autoLookup !== false && explicitIds.length === 0;
+      let ids = explicitIds;
+      let campaignSource = 'request body';
+      let campaignsSnapshotDate = null;
+
+      if (shouldAutoLookup) {
+        const lookup = await loadStoredCampaignIds(resolvedUserId, resolvedCountry, resolvedRegion);
+        ids = lookup.ids;
+        campaignsSnapshotDate = lookup.snapshotMetricDate;
+        campaignSource = `database (Campaign snapshot${campaignsSnapshotDate ? ` @ ${campaignsSnapshotDate}` : ''})`;
+
+        if (ids.length === 0) {
+          return res.status(409).json({
+            success: false,
+            error: 'No campaigns found in database for this user/country/region.',
+            message: 'Run POST /api/test/testGetCampaigns first, or pass campaignIds explicitly in the request body.',
+            metadata: { userId: resolvedUserId, country: resolvedCountry, region: resolvedRegion },
+          });
+        }
+      }
+
+      const result = await getAdGroups(accessToken, profileId, resolvedRegion, resolvedUserId, resolvedCountry, ids);
+      return res.status(200).json({
+        success: true,
+        metadata: {
+          userId: resolvedUserId,
+          country: resolvedCountry,
+          region: resolvedRegion,
+          profileId,
+          campaignIdCount: ids.length,
+          campaignIdsSource: campaignSource,
+          campaignsSnapshotDate,
+        },
+        data: result,
+      });
+    } catch (error) {
+      console.error('❌ Error in testGetAdGroups:', error);
+      return res.status(error.status || 500).json({
+        success: false,
+        error: error.message || 'Internal server error',
+      });
+    }
+  };
+
+  /**
+   * POST /api/test/testGetKeywords
+   * NOTE: despite the name, this endpoint hits `getNegativeKeywords`.
+   * Body: {
+   *   userId, country, region, fetchTokenFromDB: true    // OR accessToken + profileId
+   *   campaignIds: ["..."],                              // optional — explicit override
+   *   adGroupIds:  ["..."],                              // optional — explicit override
+   *   autoLookup: true                                    // optional, default true
+   * }
+   *
+   * Behaviour:
+   * - If `campaignIds` is omitted/empty AND `autoLookup` is not false → loaded from the latest Campaign snapshot.
+   * - If `adGroupIds` is omitted/empty AND `autoLookup` is not false → loaded from the latest AdsGroup snapshot.
+   * - Snapshot service – no date range.
+   */
   const testGetKeywords = async (req, res) => {
-    const { accessToken, region,profileId } = req.body;
-    const campaignId=["384401447418864","344856825901105","304447074514909"]
-    const adGroupId=["430568511470558","507081767760505","366695316274140"]
-    const result = await getNegativeKeywords(accessToken,"3813192246011322","684b2156d5c2340ff1b7bd2b","US",region,campaignId,adGroupId);
-    return res.status(200).json({
-        data: result
-    })
-  }
+    try {
+      const { fetchTokenFromDB, userId, country, region, campaignIds, adGroupIds, autoLookup } = req.body;
+      let { accessToken, profileId } = req.body;
+      let resolvedCountry = country || 'US';
+      let resolvedRegion = region;
+      let resolvedUserId = userId;
 
+      if (fetchTokenFromDB) {
+        const creds = await resolveAdsCredsFromDb({ userId, country, region });
+        accessToken = creds.accessToken;
+        profileId = creds.profileId;
+        resolvedCountry = creds.country;
+        resolvedRegion = creds.region;
+      }
+
+      if (!accessToken || !profileId || !resolvedRegion || !resolvedUserId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Missing required fields',
+          message: 'Provide either (userId + country + region + fetchTokenFromDB:true) OR (accessToken + profileId + userId + region).'
+        });
+      }
+
+      const explicitCIds = Array.isArray(campaignIds) ? campaignIds.map(String) : [];
+      const explicitAIds = Array.isArray(adGroupIds) ? adGroupIds.map(String) : [];
+      const shouldAutoLookup = autoLookup !== false;
+
+      let cIds = explicitCIds;
+      let aIds = explicitAIds;
+      let campaignSource = 'request body';
+      let adGroupSource = 'request body';
+      let campaignsSnapshotDate = null;
+      let adGroupsSnapshotDate = null;
+
+      if (shouldAutoLookup && cIds.length === 0) {
+        const lookup = await loadStoredCampaignIds(resolvedUserId, resolvedCountry, resolvedRegion);
+        cIds = lookup.ids;
+        campaignsSnapshotDate = lookup.snapshotMetricDate;
+        campaignSource = `database (Campaign snapshot${campaignsSnapshotDate ? ` @ ${campaignsSnapshotDate}` : ''})`;
+      }
+
+      if (shouldAutoLookup && aIds.length === 0) {
+        const lookup = await loadStoredAdGroupIds(resolvedUserId, resolvedCountry, resolvedRegion);
+        aIds = lookup.ids;
+        adGroupsSnapshotDate = lookup.snapshotMetricDate;
+        adGroupSource = `database (AdsGroup snapshot${adGroupsSnapshotDate ? ` @ ${adGroupsSnapshotDate}` : ''})`;
+      }
+
+      if (cIds.length === 0 || aIds.length === 0) {
+        return res.status(409).json({
+          success: false,
+          error: 'Insufficient prerequisite data',
+          message: 'No campaigns and/or ad groups stored for this user/country/region. Run testGetCampaigns and testGetAdGroups first, or pass campaignIds/adGroupIds explicitly.',
+          metadata: {
+            userId: resolvedUserId,
+            country: resolvedCountry,
+            region: resolvedRegion,
+            campaignIdCount: cIds.length,
+            adGroupIdCount: aIds.length,
+          },
+        });
+      }
+
+      const result = await getNegativeKeywords(
+        accessToken,
+        profileId,
+        resolvedUserId,
+        resolvedCountry,
+        resolvedRegion,
+        cIds,
+        aIds
+      );
+      return res.status(200).json({
+        success: true,
+        metadata: {
+          userId: resolvedUserId,
+          country: resolvedCountry,
+          region: resolvedRegion,
+          profileId,
+          campaignIdCount: cIds.length,
+          adGroupIdCount: aIds.length,
+          campaignIdsSource: campaignSource,
+          adGroupIdsSource: adGroupSource,
+          campaignsSnapshotDate,
+          adGroupsSnapshotDate,
+        },
+        data: result,
+      });
+    } catch (error) {
+      console.error('❌ Error in testGetKeywords:', error);
+      return res.status(error.status || 500).json({
+        success: false,
+        error: error.message || 'Internal server error',
+      });
+    }
+  };
+
+  /**
+   * POST /api/test/testGetRegularKeywords
+   * Fetches the **regular / manual** keyword set (Sponsored Products) from
+   * Amazon Ads via `getKeywords` and stores a snapshot in the `Keyword`
+   * collection. This is the data the Auto Campaign Insights tab reads.
+   *
+   * NOTE: distinct from `testGetKeywords`, which is misnamed and actually
+   * fetches **negative** keywords.
+   *
+   * Body: {
+   *   userId, country, region, fetchTokenFromDB: true    // OR accessToken + profileId
+   * }
+   *
+   * Snapshot service – no date range. Stores under metricDate=yesterday(UTC).
+   */
+  const testGetRegularKeywords = async (req, res) => {
+    try {
+      const { fetchTokenFromDB, userId, country, region } = req.body;
+      let { accessToken, profileId } = req.body;
+      let resolvedCountry = country || 'US';
+      let resolvedRegion = region;
+      let resolvedUserId = userId;
+
+      if (fetchTokenFromDB) {
+        const creds = await resolveAdsCredsFromDb({ userId, country, region });
+        accessToken = creds.accessToken;
+        profileId = creds.profileId;
+        resolvedCountry = creds.country;
+        resolvedRegion = creds.region;
+      }
+
+      if (!accessToken || !profileId || !resolvedRegion || !resolvedUserId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Missing required fields',
+          message: 'Provide either (userId + country + region + fetchTokenFromDB:true) OR (accessToken + profileId + userId + region).'
+        });
+      }
+
+      const result = await getKeywords(
+        accessToken,
+        profileId,
+        resolvedUserId,
+        resolvedCountry,
+        resolvedRegion
+      );
+
+      return res.status(200).json({
+        success: true,
+        metadata: {
+          userId: resolvedUserId,
+          country: resolvedCountry,
+          region: resolvedRegion,
+          profileId,
+        },
+        data: result,
+      });
+    } catch (error) {
+      console.error('❌ Error in testGetRegularKeywords:', error);
+      return res.status(error.status || 500).json({
+        success: false,
+        error: error.message || 'Internal server error',
+      });
+    }
+  };
+
+  /**
+   * POST /api/test/testGetPPCSpendsBySKU
+   * Body: {
+   *   userId, country, region, fetchTokenFromDB: true,  // required for DB creds
+   *   startDate, endDate,                               // optional YYYY-MM-DD
+   *   // OR accessToken, profileId, userId, region
+   * }
+   * Fetches SP + SD advertised-product reports → ProductWiseSponsoredAdsItem.
+   */
   const testGetPPCSpendsBySKU = async (req, res) => {
     try {
-      const { accessToken, region, profileId, userId, country, fetchTokenFromDB } = req.body;
-      
-      // If fetchTokenFromDB is true, get token from database
-      let adsAccessToken = accessToken;
-      let adsProfileId = profileId;
-      let testUserId = userId || "684b2156d5c2340ff1b7bd2b";
-      let testCountry = country || "US";
-      
-      if (fetchTokenFromDB && userId) {
-        const Seller = require('../../models/user-auth/sellerCentralModel.js');
-        const { generateAdsAccessToken } = require('../../Services/AmazonAds/GenerateToken.js');
-        const { getProfileById } = require('../../Services/AmazonAds/GenerateProfileId.js');
-        
-        const sellerAccount = await Seller.findOne({ userId: userId });
-        
-        if (!sellerAccount) {
-          return res.status(404).json({
-            success: false,
-            error: 'Seller account not found for the provided userId'
-          });
-        }
-        
-        if (!sellerAccount.adsRefreshToken) {
-          return res.status(400).json({
-            success: false,
-            error: 'Ads refresh token not found for this user. Please connect Amazon Ads account first.'
-          });
-        }
-        
-        // Generate access token from refresh token
-        adsAccessToken = await generateAdsAccessToken(sellerAccount.adsRefreshToken);
-        
-        if (!adsAccessToken) {
-          return res.status(500).json({
-            success: false,
-            error: 'Failed to generate Ads access token. Please check refresh token validity.'
-          });
-        }
-        
-        // Get profile ID if not provided
-        if (!adsProfileId && sellerAccount.adsProfileId) {
-          adsProfileId = sellerAccount.adsProfileId;
-        } else if (!adsProfileId) {
-          // Try to get profile ID
-          try {
-            const profiles = await getProfileById(adsAccessToken, region || 'NA');
-            if (profiles && profiles.length > 0) {
-              adsProfileId = profiles[0].profileId;
-            }
-          } catch (profileError) {
-            console.error('Error fetching profile ID:', profileError.message);
-          }
-        }
-        
-        testUserId = userId;
-        testCountry = sellerAccount.country || country || "US";
+      const { fetchTokenFromDB, userId, country, region, startDate, endDate } = req.body;
+      let { accessToken, profileId } = req.body;
+      let resolvedCountry = country || 'US';
+      let resolvedRegion = region;
+      let resolvedUserId = userId;
+      let adsRefreshToken = req.body.refreshToken || null;
+
+      if (fetchTokenFromDB) {
+        const creds = await resolveAdsCredsFromDb({ userId, country, region });
+        accessToken = creds.accessToken;
+        profileId = creds.profileId;
+        adsRefreshToken = creds.refreshToken;
+        resolvedCountry = creds.country;
+        resolvedRegion = creds.region;
       }
-      
-      // Validate required parameters
-      if (!adsAccessToken) {
+
+      if (!accessToken || !profileId || !resolvedRegion || !resolvedUserId) {
         return res.status(400).json({
           success: false,
-          error: 'accessToken is required. Either provide it in the request body or set fetchTokenFromDB to true with a valid userId.'
+          error: 'Missing required fields',
+          message: 'Provide either (userId + country + region + fetchTokenFromDB:true) OR (accessToken + profileId + userId + region).',
         });
       }
-      
-      if (!adsProfileId) {
+
+      const validRegions = ['NA', 'EU', 'FE'];
+      if (!validRegions.includes(resolvedRegion)) {
         return res.status(400).json({
           success: false,
-          error: 'profileId is required. Either provide it in the request body or ensure the user has a profileId in the database.'
+          error: `Invalid region: ${resolvedRegion}. Valid values: ${validRegions.join(', ')}`,
         });
       }
-      
+
+      console.log('🧪 Testing GetPPCProductWise (getPPCSpendsBySKU):', {
+        userId: resolvedUserId,
+        country: resolvedCountry,
+        region: resolvedRegion,
+        profileId,
+        startDate: startDate || '(default 30-day window)',
+        endDate: endDate || '(default 30-day window)',
+      });
+
+      const result = await getPPCSpendsBySKU(
+        accessToken,
+        profileId,
+        resolvedUserId,
+        resolvedCountry,
+        resolvedRegion,
+        adsRefreshToken,
+        { startDate, endDate }
+      );
+
+      if (!result?.success) {
+        return res.status(500).json({
+          success: false,
+          error: result?.message || result?.error || 'getPPCSpendsBySKU failed',
+          data: result,
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: result.message || 'Product-wise PPC data fetched and stored successfully',
+        data: result,
+        metadata: {
+          userId: resolvedUserId,
+          country: resolvedCountry,
+          region: resolvedRegion,
+          profileId,
+          startDate: startDate || null,
+          endDate: endDate || null,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      console.error('❌ Error in testGetPPCSpendsBySKU:', error);
+      return res.status(error.status || 500).json({
+        success: false,
+        error: error.message || 'Internal server error',
+      });
+    }
+  };
+
+  const testGetWastedSpendKeywords = async (req, res) => {
+    try {
+      const {
+        accessToken,
+        profileId,
+        userId,
+        country,
+        region,
+        refreshToken,
+        fetchTokenFromDB,
+        testMode: requestedTestMode,
+        startDate,
+        endDate,
+      } = req.body;
+
+      // Default to 'full' if testMode is not provided
+      const testMode = requestedTestMode || 'full';
+
+      // Validate region / userId early so DB-resolution can use them
       if (!region) {
         return res.status(400).json({
           success: false,
-          error: 'region is required. Valid values: NA, EU, FE'
+          error: 'region is required (NA, EU, or FE)'
         });
       }
-      
-      // Validate region
+
       const validRegions = ['NA', 'EU', 'FE'];
       if (!validRegions.includes(region)) {
         return res.status(400).json({
           success: false,
-          error: `Invalid region: ${region}. Valid values are: ${validRegions.join(', ')}`
-        });
-      }
-      
-      console.log('🧪 Testing Search Keywords API:', {
-        userId: testUserId,
-        country: testCountry,
-        region: region,
-        profileId: adsProfileId,
-        hasAccessToken: !!adsAccessToken
-      });
-      
-      // Call the getSearchKeywords function
-      const result = await getSearchKeywords(
-        adsAccessToken,
-        adsProfileId,
-        testUserId,
-        testCountry,
-        region
-      );
-      
-      return res.status(200).json({
-        success: true,
-        message: 'Search Keywords data retrieved successfully',
-        data: result,
-        metadata: {
-          userId: testUserId,
-          country: testCountry,
-          region: region,
-          profileId: adsProfileId,
-          timestamp: new Date().toISOString()
-        }
-      });
-      
-    } catch (error) {
-      console.error('❌ Error in testGetPPCSpendsBySKU:', error);
-      
-      // Handle specific error types
-      if (error.response) {
-        const status = error.response.status || 500;
-        const errorData = error.response.data || {};
-        
-        return res.status(status).json({
-          success: false,
-          error: 'Amazon Ads API Error',
-          message: error.message,
-          details: errorData,
-          statusCode: status
-        });
-      }
-      
-      // Handle token-related errors
-      if (error.message && (
-        error.message.includes('token') || 
-        error.message.includes('unauthorized') ||
-        error.message.includes('401')
-      )) {
-        return res.status(401).json({
-          success: false,
-          error: 'Authentication Error',
-          message: error.message,
-          suggestion: 'Please check if your access token is valid or try setting fetchTokenFromDB to true to refresh the token.'
-        });
-      }
-      
-      return res.status(500).json({
-        success: false,
-        error: 'Internal Server Error',
-        message: error.message || 'An unexpected error occurred while fetching search keywords'
-      });
-    }
-  }
-
-  const testGetWastedSpendKeywords = async (req, res) => {
-    try {
-      const { accessToken, profileId, userId, country, region, refreshToken, testMode: requestedTestMode } = req.body;
-      
-      // Default to 'full' if testMode is not provided
-      const testMode = requestedTestMode || 'full';
-
-      // Validate required parameters
-      if (!accessToken) {
-        return res.status(400).json({
-          success: false,
-          error: 'accessToken is required'
-        });
-      }
-
-      if (!profileId) {
-        return res.status(400).json({
-          success: false,
-          error: 'profileId is required'
+          error: `Invalid region: ${region}. Must be one of: ${validRegions.join(', ')}`
         });
       }
 
@@ -296,36 +649,118 @@ const testAmazonAds = async (req, res) => {
         });
       }
 
-      if (!country) {
+      // Mutable copies — may be overwritten by fetchTokenFromDB branch
+      let adsAccessToken = accessToken;
+      let adsProfileId = profileId;
+      let adsRefreshToken = refreshToken;
+      let resolvedCountry = country || 'US';
+
+      // Optional: resolve credentials from the user's seller account
+      // (matches the pattern used by testSearchKeywords / testGetPPCSpendsBySKU).
+      if (fetchTokenFromDB) {
+        try {
+          const Seller = require('../../models/user-auth/sellerCentralModel.js');
+          const { generateAdsAccessToken } = require('../../Services/AmazonAds/GenerateToken.js');
+          const { getProfileById } = require('../../Services/AmazonAds/GenerateProfileId.js');
+          const mongooseLib = require('mongoose');
+
+          const userIdQuery = (typeof userId === 'string' && mongooseLib.Types.ObjectId.isValid(userId))
+            ? new mongooseLib.Types.ObjectId(userId)
+            : userId;
+
+          const sellerCentral = await Seller.findOne({ User: userIdQuery }).sort({ createdAt: -1 });
+          if (!sellerCentral) {
+            return res.status(404).json({
+              success: false,
+              error: 'Seller account not found for the provided userId',
+              suggestion: 'Ensure the user has connected their Amazon Seller Central account.'
+            });
+          }
+
+          const sellerAccount = (sellerCentral.sellerAccount || []).find(
+            (acc) => acc.country === resolvedCountry && acc.region === region
+          );
+          if (!sellerAccount) {
+            return res.status(404).json({
+              success: false,
+              error: `Seller account not found for country=${resolvedCountry}, region=${region}`,
+              availableAccounts: (sellerCentral.sellerAccount || []).map((acc) => ({
+                country: acc.country,
+                region: acc.region,
+                hasAdsToken: !!acc.adsRefreshToken,
+              })),
+            });
+          }
+
+          if (!sellerAccount.adsRefreshToken) {
+            return res.status(400).json({
+              success: false,
+              error: 'Ads refresh token not found for this user. Please connect Amazon Ads account first.'
+            });
+          }
+
+          adsRefreshToken = sellerAccount.adsRefreshToken;
+          adsAccessToken = await generateAdsAccessToken(adsRefreshToken);
+          if (!adsAccessToken) {
+            return res.status(500).json({
+              success: false,
+              error: 'Failed to generate Ads access token. The refresh token may be invalid or expired.'
+            });
+          }
+
+          if (!adsProfileId && sellerAccount.ProfileId) {
+            adsProfileId = sellerAccount.ProfileId;
+          } else if (!adsProfileId) {
+            try {
+              const profiles = await getProfileById(adsAccessToken, region, resolvedCountry, userId);
+              if (Array.isArray(profiles) && profiles.length > 0) {
+                const target = (resolvedCountry || '').toUpperCase();
+                const match = profiles.find(
+                  (p) => (p.countryCode || '').toUpperCase() === target
+                ) || profiles[0];
+                adsProfileId = match.profileId?.toString();
+              }
+            } catch (profileError) {
+              console.error('Error fetching profile ID:', profileError.message);
+            }
+          }
+
+          resolvedCountry = sellerAccount.country || resolvedCountry;
+        } catch (resolveError) {
+          console.error('Error resolving credentials from DB:', resolveError.message);
+          return res.status(500).json({
+            success: false,
+            error: 'Failed to resolve credentials from database',
+            message: resolveError.message,
+          });
+        }
+      }
+
+      // Validate final credentials
+      if (!adsAccessToken) {
         return res.status(400).json({
           success: false,
-          error: 'country is required'
+          error: 'accessToken is required. Either provide it in the request body or set fetchTokenFromDB: true with a valid userId.'
         });
       }
 
-      if (!region) {
+      if (!adsProfileId) {
         return res.status(400).json({
           success: false,
-          error: 'region is required (NA, EU, or FE)'
-        });
-      }
-
-      // Validate region
-      const validRegions = ['NA', 'EU', 'FE'];
-      if (!validRegions.includes(region)) {
-        return res.status(400).json({
-          success: false,
-          error: `Invalid region: ${region}. Must be one of: ${validRegions.join(', ')}`
+          error: 'profileId is required. Either provide it in the request body or ensure the user has a ProfileId stored for this region/country.'
         });
       }
 
       console.log('Testing GetWastedSpendKeywords with params:', {
-        profileId,
+        profileId: adsProfileId,
         userId,
-        country,
+        country: resolvedCountry,
         region,
-        hasAccessToken: !!accessToken,
-        hasRefreshToken: !!refreshToken,
+        startDate: startDate || '(default 30-day window)',
+        endDate: endDate || '(default 30-day window)',
+        hasAccessToken: !!adsAccessToken,
+        hasRefreshToken: !!adsRefreshToken,
+        tokenSource: fetchTokenFromDB ? 'database' : 'request body',
         testMode: testMode || 'full'
       });
 
@@ -346,22 +781,25 @@ const testAmazonAds = async (req, res) => {
         try {
           console.log('📡 Step 1: Testing API call...');
           console.log('Calling getKeywordPerformanceReport with:', {
-            profileId,
+            profileId: adsProfileId,
             userId,
-            country,
+            country: resolvedCountry,
             region,
-            hasAccessToken: !!accessToken,
-            hasRefreshToken: !!refreshToken,
+            startDate: startDate || '(default)',
+            endDate: endDate || '(default)',
+            hasAccessToken: !!adsAccessToken,
+            hasRefreshToken: !!adsRefreshToken,
             testMode
           });
-          
+
           const apiResult = await getKeywordPerformanceReport(
-            accessToken,
-            profileId,
+            adsAccessToken,
+            adsProfileId,
             userId,
-            country,
+            resolvedCountry,
             region,
-            refreshToken
+            adsRefreshToken,
+            { startDate, endDate }
           );
           
           console.log('API call completed, result:', {
@@ -401,7 +839,7 @@ const testAmazonAds = async (req, res) => {
         try {
           console.log('💾 Step 2: Testing database retrieval...');
           const dbData = await adsKeywordsPerformanceModel
-            .findOne({ userId, country, region })
+            .findOne({ userId, country: resolvedCountry, region })
             .sort({ createdAt: -1 })
             .lean();
 
@@ -978,7 +1416,7 @@ const testGetProductWiseFBAData = async (req, res) => {
 // Dedicated test function for Search Keywords
 const testSearchKeywords = async (req, res) => {
   try {
-    const { accessToken, region, profileId, userId, country, fetchTokenFromDB } = req.body;
+    const { accessToken, region, profileId, userId, country, fetchTokenFromDB, startDate, endDate } = req.body;
     
     // Import required modules
         const Seller = require('../../models/user-auth/sellerCentralModel.js');
@@ -1164,12 +1602,14 @@ const testSearchKeywords = async (req, res) => {
       country: testCountry,
       region: region,
       profileId: adsProfileId,
+      startDate: startDate || '(default 30-day window)',
+      endDate: endDate || '(default 30-day window)',
       hasAccessToken: !!adsAccessToken,
       hasRefreshToken: !!adsRefreshToken,
       tokenSource: fetchTokenFromDB ? 'database' : 'request body',
       usingTokenManager: !!adsRefreshToken
     });
-    
+
     // Use TokenManager if we have refresh tokens, otherwise call directly
     let result;
     if (adsRefreshToken && testUserId) {
@@ -1180,7 +1620,7 @@ const testSearchKeywords = async (req, res) => {
         testUserId,
         spRefreshToken,
         adsRefreshToken
-      )(adsAccessToken, adsProfileId, testUserId, testCountry, region);
+      )(adsAccessToken, adsProfileId, testUserId, testCountry, region, adsRefreshToken, { startDate, endDate });
             } else {
       // Call directly without TokenManager (no automatic refresh)
       console.log('⚠️ Calling without TokenManager - no refresh token available');
@@ -1189,10 +1629,12 @@ const testSearchKeywords = async (req, res) => {
         adsProfileId,
         testUserId,
         testCountry,
-                region
-            );
+        region,
+        null,
+        { startDate, endDate }
+      );
     }
-    
+
     return res.status(200).json({
       success: true,
       message: 'Search Keywords data retrieved successfully',
@@ -1202,6 +1644,8 @@ const testSearchKeywords = async (req, res) => {
         country: testCountry,
         region: region,
         profileId: adsProfileId,
+        startDate: startDate || null,
+        endDate: endDate || null,
         timestamp: new Date().toISOString()
       }
     });
@@ -2250,6 +2694,7 @@ const testPPCMetrics = async (req, res) => {
         overallRoas: result.data.overallRoas,
         totalImpressions: result.data.totalImpressions,
         totalClicks: result.data.totalClicks,
+        totalUnitsSoldClicks1d: result.data.totalUnitsSoldClicks1d ?? 0,
         ctr: result.data.ctr,
         cpc: result.data.cpc
       },
@@ -2317,7 +2762,7 @@ const testPPCMetrics = async (req, res) => {
  */
 const testAllAdsServices = async (req, res) => {
   try {
-    const { userId, country, region } = req.body;
+    const { userId, country, region, startDate, endDate } = req.body;
     if (!userId || !country || !region) {
       return res.status(400).json({
         success: false,
@@ -2404,9 +2849,11 @@ const testAllAdsServices = async (req, res) => {
     const apiResults = {};
 
     // First batch: PPC Spends by SKU, Keyword Performance, PPC Spends Date Wise, PPC Metrics, PPC Units Sold
+    // Report-style services honour { startDate, endDate } from req.body and only ingest that window.
+    const reportRangeOpts = { startDate, endDate };
     const batch1 = await Promise.allSettled([
-      tokenManager.wrapAdsFunction(getPPCSpendsBySKU, userId, RefreshToken, AdsRefreshToken)(adsAccessToken, profileId, userId, country, region, AdsRefreshToken),
-      tokenManager.wrapAdsFunction(getKeywordPerformanceReport, userId, RefreshToken, AdsRefreshToken)(adsAccessToken, profileId, userId, country, region, AdsRefreshToken),
+      tokenManager.wrapAdsFunction(getPPCSpendsBySKU, userId, RefreshToken, AdsRefreshToken)(adsAccessToken, profileId, userId, country, region, AdsRefreshToken, reportRangeOpts),
+      tokenManager.wrapAdsFunction(getKeywordPerformanceReport, userId, RefreshToken, AdsRefreshToken)(adsAccessToken, profileId, userId, country, region, AdsRefreshToken, reportRangeOpts),
       tokenManager.wrapAdsFunction(getPPCSpendsDateWise, userId, RefreshToken, AdsRefreshToken)(adsAccessToken, profileId, userId, country, region, AdsRefreshToken),
       getPPCMetrics(adsAccessToken, profileId, userId, country, region, AdsRefreshToken, null, null, true),
       getPPCUnitsSold(adsAccessToken, profileId, userId, country, region, AdsRefreshToken, null, null, true)
@@ -2447,9 +2894,10 @@ const testAllAdsServices = async (req, res) => {
     apiResults.adGroupsData = processResult(batch3[0], 'Ad Groups Data');
 
     // Fourth batch: Negative Keywords, Search Keywords, Keyword Recommendations
+    // Search Keywords is report-style → forward the same { startDate, endDate } window.
     const batch4Promises = [
       tokenManager.wrapAdsFunction(getNegativeKeywords, userId, RefreshToken, AdsRefreshToken)(adsAccessToken, profileId, userId, country, region, campaignIdArray || [], adGroupIdArray || []),
-      tokenManager.wrapAdsFunction(getSearchKeywords, userId, RefreshToken, AdsRefreshToken)(adsAccessToken, profileId, userId, country, region, AdsRefreshToken)
+      tokenManager.wrapAdsFunction(getSearchKeywords, userId, RefreshToken, AdsRefreshToken)(adsAccessToken, profileId, userId, country, region, AdsRefreshToken, reportRangeOpts)
     ];
     if (asinArray.length > 0) {
       batch4Promises.push(
@@ -2623,7 +3071,7 @@ const testStoreIssuesSummaryAndChunks = async (req, res) => {
 module.exports = { testReport, getTotalSales, 
    testAmazonAds,
    testGetCampaigns,testGetAdGroups,
-   testGetKeywords,testGetPPCSpendsBySKU,testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations,
+   testGetKeywords,testGetRegularKeywords,testGetPPCSpendsBySKU,testGetBrand,testSendEmailOnRegistered,testLedgerSummaryReport,testGetProductWiseFBAData,testGetWastedSpendKeywords,testSearchKeywords,testFbaInventoryPlanningData,testKeywordRecommendations,
    testKeywordRecommendationsFromDB,
    getStoredKeywordRecommendations,
    testPPCMetrics,

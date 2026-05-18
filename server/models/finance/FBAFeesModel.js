@@ -35,3 +35,6 @@ const FBAFeesSchema = new Schema({
         }
     }]
 }, { timestamps: true });
+
+const FBAFees = mongoose.models.FBAFees || mongoose.model('FBAFees', FBAFeesSchema);
+module.exports = FBAFees;

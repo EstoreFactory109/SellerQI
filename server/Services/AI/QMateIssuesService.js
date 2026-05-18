@@ -509,6 +509,8 @@ async function getQMateIssuesContext(userId, country, region, options = {}) {
                 conversionErrors: counts?.totalConversionErrors || metadata?.totalConversionErrors || 0,
                 accountErrors: counts?.totalAccountErrors || metadata?.totalAccountErrors || 0,
                 numberOfProductsWithIssues: counts?.numberOfProductsWithIssues || metadata?.numberOfProductsWithIssues || 0,
+                totalActiveProducts: counts?.totalActiveProducts ?? metadata?.totalActiveProducts ?? 0,
+                isStale: Boolean(counts?.isStale),
                 accountHealthPercentage: metadata?.accountHealthPercentage || null,
                 lastCalculatedAt: counts?.lastCalculatedAt || metadata?.lastCalculatedAt
             },

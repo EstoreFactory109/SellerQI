@@ -972,7 +972,7 @@ const PPCDashboard = () => {
       
       const campaign = campaignTotals.get(campaignId);
       campaign.totalSpend += parseFloat(product.spend) || 0;
-      campaign.totalSales += parseFloat(product.salesIn30Days) || parseFloat(product.sales30d) || 0;
+      campaign.totalSales += parseFloat(product.sales) || parseFloat(product.salesIn30Days) || parseFloat(product.sales30d) || 0;
     });
     
     const result = Array.from(campaignTotals.values());
@@ -1407,11 +1407,11 @@ const PPCDashboard = () => {
    */
   
   // Get auto campaigns
-  const autoCampaigns = campaignData.filter(campaign => campaign.targetingType === 'auto');
+  const autoCampaigns = campaignData.filter(campaign => (campaign.targetingTypeLower || campaign.targetingType || '').toLowerCase() === 'auto');
   const autoCampaignIds = autoCampaigns.map(campaign => campaign.campaignId);
   
   // Get manual campaigns for checking if keywords exist there
-  const manualCampaigns = campaignData.filter(campaign => campaign.targetingType === 'manual');
+  const manualCampaigns = campaignData.filter(campaign => (campaign.targetingTypeLower || campaign.targetingType || '').toLowerCase() === 'manual');
   const manualCampaignIds = manualCampaigns.map(campaign => campaign.campaignId);
   
   // Get keywords from manual campaigns - these are the keywords we want to check against

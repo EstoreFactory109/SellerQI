@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { useSelector, useDispatch } from 'react-redux';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronLeft, ChevronRight, TrendingUp, DollarSign, Gauge, Package, AlertTriangle, Calendar, Pause, CheckCircle, XCircle, X, Ban, MoreVertical, Loader2, Check, Square, Minus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, TrendingUp, DollarSign, Gauge, Package, Calendar, Pause, CheckCircle, XCircle, X, Ban, MoreVertical, Loader2, Check, Square, Minus, Eye, MousePointerClick, Percent, Target, Coins } from 'lucide-react';
 import Calender, { isClickInsideGaCalDropdown } from '../../Components/Calender/Calender.jsx';
 import DownloadReport from '../../Components/DownloadReport/DownloadReport.jsx';
 import { formatCurrencyWithLocale, formatYAxisCurrency } from '../../utils/currencyUtils.js';
@@ -421,13 +421,16 @@ const PPCDashboard = () => {
   
   const refetchPPCData = () => {
     const currentTab = selectedTab;
+    const dateParams = {};
+    if (info?.startDate) dateParams.startDate = info.startDate;
+    if (info?.endDate) dateParams.endDate = info.endDate;
     switch (currentTab) {
-      case 0: dispatch(fetchHighAcosCampaigns({ page: 1, limit: itemsPerPage })); break;
-      case 1: dispatch(fetchWastedSpendKeywords({ page: 1, limit: itemsPerPage })); break;
+      case 0: dispatch(fetchHighAcosCampaigns({ page: 1, limit: itemsPerPage, ...dateParams })); break;
+      case 1: dispatch(fetchWastedSpendKeywords({ page: 1, limit: itemsPerPage, ...dateParams })); break;
       case 2: dispatch(fetchCampaignsWithoutNegatives({ page: 1, limit: itemsPerPage })); break;
-      case 3: dispatch(fetchTopPerformingKeywords({ page: 1, limit: itemsPerPage })); break;
-      case 4: dispatch(fetchSearchTermsZeroSales({ page: 1, limit: itemsPerPage })); break;
-      case 5: dispatch(fetchAutoCampaignInsights({ page: 1, limit: itemsPerPage })); break;
+      case 3: dispatch(fetchTopPerformingKeywords({ page: 1, limit: itemsPerPage, ...dateParams })); break;
+      case 4: dispatch(fetchSearchTermsZeroSales({ page: 1, limit: itemsPerPage, ...dateParams })); break;
+      case 5: dispatch(fetchAutoCampaignInsights({ page: 1, limit: itemsPerPage, ...dateParams })); break;
     }
   };
 
@@ -440,8 +443,8 @@ const PPCDashboard = () => {
         keywordId: String(id),
         adType: 'SP',
       });
-      dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage }));
-      dispatch(fetchPPCTabCounts());
+      dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage, startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
+      dispatch(fetchPPCTabCounts({ startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
       setFeedbackPopup({ show: true, type: 'success', message: 'Keyword paused successfully.' });
     } catch (err) {
       const msg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to pause keyword';
@@ -467,8 +470,8 @@ const PPCDashboard = () => {
         }],
         level: 'adGroup',
       });
-      dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage }));
-      dispatch(fetchPPCTabCounts());
+      dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage, startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
+      dispatch(fetchPPCTabCounts({ startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
       setFeedbackPopup({ show: true, type: 'success', message: 'Keyword added to negative keywords successfully.' });
     } catch (err) {
       const msg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to add keyword to negative.';
@@ -492,8 +495,8 @@ const PPCDashboard = () => {
         matchType,
         adType: 'SP',
       });
-      dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage }));
-      dispatch(fetchPPCTabCounts());
+      dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage, startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
+      dispatch(fetchPPCTabCounts({ startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
       setFeedbackPopup({ show: true, type: 'success', message: 'Keyword paused and added to negative successfully.' });
     } catch (err) {
       const msg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to pause and add to negative.';
@@ -517,8 +520,8 @@ const PPCDashboard = () => {
         adType: 'SP',
       });
       setSelectedWastedKeys([]);
-      dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage }));
-      dispatch(fetchPPCTabCounts());
+      dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage, startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
+      dispatch(fetchPPCTabCounts({ startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
       setFeedbackPopup({ show: true, type: 'success', message: `${toPause.length} keyword(s) paused successfully.` });
     } catch (err) {
       const msg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to pause keywords.';
@@ -546,8 +549,8 @@ const PPCDashboard = () => {
         level: 'adGroup',
       });
       setSelectedWastedKeys([]);
-      dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage }));
-      dispatch(fetchPPCTabCounts());
+      dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage, startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
+      dispatch(fetchPPCTabCounts({ startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
       setFeedbackPopup({ show: true, type: 'success', message: `${toAdd.length} keyword(s) added to negative successfully.` });
     } catch (err) {
       const msg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to add keywords to negative.';
@@ -583,8 +586,8 @@ const PPCDashboard = () => {
         adType: 'SP',
       });
       setSelectedWastedKeys([]);
-      dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage }));
-      dispatch(fetchPPCTabCounts());
+      dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage, startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
+      dispatch(fetchPPCTabCounts({ startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
       setFeedbackPopup({ show: true, type: 'success', message: `${toProcess.length} keyword(s) paused and added to negative successfully.` });
     } catch (err) {
       const msg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to pause and add to negative.';
@@ -621,11 +624,22 @@ const PPCDashboard = () => {
     autoInsights: false
   });
   
-  // Fetch KPI summary and tab counts on mount (tab counts used to show only tabs with data)
+  // Fetch KPI summary (date-range-aware) and tab counts on mount.
+  //
+  // The KPI summary aggregation runs entirely in MongoDB and honours the
+  // Calendar's startDate / endDate. Whenever the user picks a new range we
+  // refetch with the new bounds so PPC Sales, Spend, ACOS, TACOS and Units
+  // Sold all reflect the same window.
   useEffect(() => {
-    dispatch(fetchPPCKPISummary());
-    dispatch(fetchPPCTabCounts());
-  }, [dispatch]);
+    const useCalendarRange = shouldUseCalendarDateRange(info?.startDate, info?.endDate, info?.calendarMode);
+    if (useCalendarRange) {
+      dispatch(fetchPPCKPISummary({ startDate: info.startDate, endDate: info.endDate }));
+      dispatch(fetchPPCTabCounts({ startDate: info.startDate, endDate: info.endDate }));
+    } else {
+      dispatch(fetchPPCKPISummary());
+      dispatch(fetchPPCTabCounts());
+    }
+  }, [dispatch, info?.startDate, info?.endDate, info?.calendarMode]);
   
   // Fetch initial data for the first tab (High ACOS) on mount
   useEffect(() => {
@@ -1072,7 +1086,7 @@ const PPCDashboard = () => {
       
       const campaign = campaignTotals.get(campaignId);
       campaign.totalSpend += parseFloat(product.spend) || 0;
-      campaign.totalSales += parseFloat(product.salesIn30Days) || parseFloat(product.sales30d) || 0;
+      campaign.totalSales += parseFloat(product.sales) || parseFloat(product.salesIn30Days) || parseFloat(product.sales30d) || 0;
     });
     
     const result = Array.from(campaignTotals.values());
@@ -1216,8 +1230,43 @@ const PPCDashboard = () => {
     return aggregatedSearchTerms.filter(term => term.clicks >= 10 && term.sales < 0.01);
   }, [computeLegacyData, aggregatedSearchTerms]);
   
-  // Transform the data for the chart - prioritize PPCMetrics model data
+  // Transform the data for the chart — PRIMARY source is the backend
+  // aggregated timeseries from /api/pagewise/ppc/summary, which already
+  // matches the calendar's date window. Legacy paths kept as fallbacks
+  // for users who haven't yet hit the new endpoint.
   const chartData = useMemo(() => {
+    // PRIMARY: backend per-day aggregation (already date-range scoped server-side)
+    const timeseries = ppcKPISummary?.timeseries;
+    if (Array.isArray(timeseries) && timeseries.length > 0) {
+      const built = timeseries
+        .map((item) => {
+          if (!item || !item.date) return null;
+          const date = localDayFromMetricDate(item.date) ?? new Date(item.date);
+          const formattedDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          return {
+            date: formattedDate,
+            rawDate: item.date,
+            ppcSales: Number(item.sales || 0),
+            spend: Number(item.spend || 0),
+            acos: Number(item.acos || 0),
+            impressions: Number(item.impressions || 0),
+            clicks: Number(item.clicks || 0),
+            ctr: Number(item.ctr || 0),
+            cpc: Number(item.cpc || 0),
+            roas: Number(item.roas || 0),
+          };
+        })
+        .filter(Boolean);
+
+      built.sort((a, b) => {
+        const da = localDayFromMetricDate(a.rawDate)?.getTime() ?? new Date(a.rawDate).getTime();
+        const db = localDayFromMetricDate(b.rawDate)?.getTime() ?? new Date(b.rawDate).getTime();
+        return da - db;
+      });
+
+      return built;
+    }
+
     // Check if date range is selected
     const isDateRangeSelected = shouldUseCalendarDateRange(info?.startDate, info?.endDate, info?.calendarMode);
     
@@ -1229,7 +1278,7 @@ const PPCDashboard = () => {
       );
     }
     
-    // PRIMARY: Use PPCMetrics model dateWiseMetrics
+    // FALLBACK 1: Use PPCMetrics model dateWiseMetrics
     if (filteredPPCMetricsData && filteredPPCMetricsData.length > 0) {
       console.log("🟢 CHART DATA: Using PPCMetrics model dateWiseMetrics");
       console.log('PPCMetrics data points:', filteredPPCMetricsData.length);
@@ -1304,7 +1353,7 @@ const PPCDashboard = () => {
     // Last resort: Return empty data with zero values
     console.log("🔴 CHART DATA: Using empty data fallback");
     return createEmptyChartData();
-  }, [ppcDateWiseMetrics, filteredDateWiseTotalCosts, dateWiseTotalCosts, info?.startDate, info?.endDate, info?.calendarMode]);
+  }, [ppcKPISummary?.timeseries, ppcDateWiseMetrics, filteredDateWiseTotalCosts, dateWiseTotalCosts, info?.startDate, info?.endDate, info?.calendarMode]);
   
   // Final debug: Log the actual chart data being used
   if (info?.startDate && info?.endDate) {
@@ -1510,11 +1559,11 @@ const PPCDashboard = () => {
    */
   
   // Get auto campaigns
-  const autoCampaigns = campaignData.filter(campaign => campaign.targetingType === 'auto');
+  const autoCampaigns = campaignData.filter(campaign => (campaign.targetingTypeLower || campaign.targetingType || '').toLowerCase() === 'auto');
   const autoCampaignIds = autoCampaigns.map(campaign => campaign.campaignId);
   
   // Get manual campaigns for checking if keywords exist there
-  const manualCampaigns = campaignData.filter(campaign => campaign.targetingType === 'manual');
+  const manualCampaigns = campaignData.filter(campaign => (campaign.targetingTypeLower || campaign.targetingType || '').toLowerCase() === 'manual');
   const manualCampaignIds = manualCampaigns.map(campaign => campaign.campaignId);
   
   // Get keywords from manual campaigns - these are the keywords we want to check against
@@ -1742,181 +1791,137 @@ const PPCDashboard = () => {
     });
   }, [ppcDateWiseMetrics, info?.startDate, info?.endDate, isDateRangeSelected]);
 
-  // Use Redux data for KPI values - prioritize new optimized ppcKPISummary endpoint
+  // KPI values for the Campaign Audit page top boxes.
+  //
+  // The new `/api/pagewise/ppc/summary` endpoint now performs a date-range
+  // aggregation entirely in MongoDB and is automatically re-fetched whenever
+  // the Calendar selection changes (see useEffect above). So `ppcKPISummary`
+  // is always the authoritative source for ALL five PPC KPIs over the
+  // currently selected window. Legacy slices remain only as zero-data
+  // fallbacks for users whose accounts haven't been ingested yet.
   const kpiData = useMemo(() => {
-    // Calculate spend based on date range selection
     let spend = 0;
     let ppcSales = 0;
-    let acos = 0;
-    
-    if (isDateRangeSelected) {
-      // PRIMARY: Use filtered PPCMetrics data
-      if (filteredPPCMetricsForKPI.length > 0) {
-        spend = filteredPPCMetricsForKPI.reduce((sum, item) => sum + (item.spend || 0), 0);
-        ppcSales = filteredPPCMetricsForKPI.reduce((sum, item) => sum + (item.sales || 0), 0);
-        console.log('=== KPI Calculation (PPCMetrics Filtered) ===');
-        console.log('Using filtered PPCMetrics spend:', spend);
-        console.log('Using filtered PPCMetrics sales:', ppcSales);
-        console.log('Filtered data points:', filteredPPCMetricsForKPI.length);
-      } else if (filteredDateWiseTotalCosts.length > 0) {
-        // FALLBACK: Use legacy filtered data
-        spend = filteredDateWiseTotalCosts.reduce((sum, item) => sum + (item.totalCost || 0), 0);
-        ppcSales = filteredDateWiseTotalCosts.reduce((sum, item) => sum + (parseFloat(item.sales) || 0), 0);
-        console.log('=== KPI Calculation (Legacy Filtered) ===');
-        console.log('Using filtered legacy spend:', spend);
-        console.log('Using filtered legacy sales:', ppcSales);
-      }
+    let unitsSold = 0;
+    let tacos = null; // null = compute on-frontend if backend didn't provide it
+    let impressions = 0;
+    let clicks = 0;
+    let ctr = null; // null = derive from clicks/impressions
+    let cpc = null;
+    let roas = null;
+
+    if (ppcKPISummary && (ppcKPISummary.spend > 0 || ppcKPISummary.sales > 0 || ppcKPISummary.unitsSold > 0)) {
+      // PRIMARY: date-range aggregate from /api/pagewise/ppc/summary
+      spend = Number(ppcKPISummary.spend || 0);
+      ppcSales = Number(ppcKPISummary.sales || 0);
+      unitsSold = Number(ppcKPISummary.unitsSold || 0);
+      tacos = ppcKPISummary.tacos != null ? Number(ppcKPISummary.tacos) : null;
+      impressions = Number(ppcKPISummary.impressions || 0);
+      clicks = Number(ppcKPISummary.clicks || 0);
+      ctr = ppcKPISummary.ctr != null ? Number(ppcKPISummary.ctr) : null;
+      cpc = ppcKPISummary.cpc != null ? Number(ppcKPISummary.cpc) : null;
+      roas = ppcKPISummary.roas != null ? Number(ppcKPISummary.roas) : null;
+    } else if (ppcSummary?.totalSpend > 0 || ppcSummary?.totalSales > 0) {
+      // Fallback 1: PPCMetrics model rollup (no date filter)
+      spend = Number(ppcSummary.totalSpend || 0);
+      ppcSales = Number(ppcSummary.totalSales || 0);
+      unitsSold = Number(ppcSummary.totalUnits || 0);
+      impressions = Number(ppcSummary.totalImpressions || 0);
+      clicks = Number(ppcSummary.totalClicks || 0);
     } else {
-      // PRIMARY: Use new optimized ppcKPISummary endpoint
-      if (ppcKPISummary?.spend > 0 || ppcKPISummary?.sales > 0) {
-        spend = ppcKPISummary.spend || 0;
-        ppcSales = ppcKPISummary.sales || 0;
-        console.log('=== KPI Calculation (Optimized ppcKPISummary) ===');
-        console.log('ppcKPISummary spend:', spend);
-        console.log('ppcKPISummary sales:', ppcSales);
-        console.log('ppcKPISummary acos:', acos);
-      } else if (ppcSummary?.totalSpend > 0 || ppcSummary?.totalSales > 0) {
-        // FALLBACK: Use PPCMetrics model summary
-        spend = ppcSummary.totalSpend || 0;
-        ppcSales = ppcSummary.totalSales || 0;
-        console.log('=== KPI Calculation (PPCMetrics Model) ===');
-        console.log('PPCMetrics totalSpend:', spend);
-        console.log('PPCMetrics totalSales:', ppcSales);
-        console.log('PPCMetrics overallAcos:', acos);
-      } else {
-        // FALLBACK: Use legacy sponsoredAdsMetrics
-        const adsPPCSpend = Number(sponsoredAdsMetrics?.totalCost || 0);
-        spend = adsPPCSpend > 0 ? adsPPCSpend : Number(info?.accountFinance?.ProductAdsPayment || 0);
-        ppcSales = sponsoredAdsMetrics?.totalSalesIn30Days || 0;
-        console.log('=== KPI Calculation (Legacy Fallback) ===');
-        console.log('sponsoredAdsMetrics?.totalCost:', adsPPCSpend);
-        console.log('sponsoredAdsMetrics?.totalSalesIn30Days:', ppcSales);
-      }
+      // Fallback 2: legacy sponsoredAdsMetrics (e.g. first-load / not-yet-ingested users)
+      const adsPPCSpend = Number(sponsoredAdsMetrics?.totalCost || 0);
+      spend = adsPPCSpend > 0 ? adsPPCSpend : Number(info?.accountFinance?.ProductAdsPayment || 0);
+      ppcSales = Number(sponsoredAdsMetrics?.totalSalesIn30Days || 0);
+      unitsSold = Number(sponsoredAdsMetrics?.totalProductsPurchased || 0);
+      impressions = Number(sponsoredAdsMetrics?.totalImpressions || 0);
+      clicks = Number(sponsoredAdsMetrics?.totalClicks || 0);
     }
-    
-    if (ppcSales > 0) {
-      acos = (spend / ppcSales) * 100;
-    }
-    
-    // TACoS: use backend value when available (ppcKPISummary), else compute from total sales
-    let tacos = 0;
-    if (ppcKPISummary?.tacos != null) {
-      tacos = ppcKPISummary.tacos;
-    } else {
+
+    const acos = ppcSales > 0 ? (spend / ppcSales) * 100 : 0;
+
+    // TACoS: prefer the backend value (uses SalesOnlyMetrics aggregated over
+    // the same window as PPC). Only fall back to the page's `info.TotalSales`
+    // / `TotalWeeklySale` if the backend didn't supply one.
+    if (tacos == null) {
       let totalSales = 0;
       const totalSalesData = info?.TotalSales;
-      if (totalSalesData && Array.isArray(totalSalesData) && totalSalesData.length > 0) {
+      if (Array.isArray(totalSalesData) && totalSalesData.length > 0) {
         totalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
       } else {
         totalSales = Number(info?.TotalWeeklySale || 0);
       }
       tacos = totalSales > 0 ? (spend / totalSales) * 100 : 0;
     }
-    
-    // Calculate units sold - use PPCUnitsSold model as primary source
-    // Simplified to only use 1-day attribution (units sold within 1 day of click)
-    let unitsSold = 0;
-    
-    // Helper to get units from dashboardPPCUnitsSold with date filtering
-    const getUnitsFromDashboardData = (startDateStr, endDateStr) => {
-      if (!dashboardPPCUnitsSold?.dateWiseUnits?.length) return 0;
-      
-      const start = parseLocalDate(startDateStr);
-      const end = parseLocalDate(endDateStr);
-      start.setHours(0, 0, 0, 0);
-      end.setHours(23, 59, 59, 999);
-      
-      // Filter and sum units for the date range
-      const filteredUnits = dashboardPPCUnitsSold.dateWiseUnits.filter(item => {
-        const itemDate = new Date(item.date);
-        return itemDate >= start && itemDate <= end;
-      });
-      
-      return filteredUnits.reduce((sum, day) => sum + (day.units || 0), 0);
-    };
-    
-    // Priority order:
-    // 1. Filtered API data (when date range selected)
-    // 2. Dashboard PPCUnitsSold with date filtering
-    // 3. API PPCUnitsSold (total)
-    // 4. Dashboard PPCUnitsSold totals
-    // 5. Legacy sponsoredAdsMetrics.totalProductsPurchased
-    
-    if (isDateRangeSelected) {
-      // When date range is selected, use filtered data
-      if (hasFilteredUnitsSold && filteredUnitsSoldTotal !== null && filteredUnitsSoldTotal > 0) {
-        unitsSold = filteredUnitsSoldTotal;
-      } else if (dashboardPPCUnitsSold?.dateWiseUnits?.length > 0) {
-        // Use dashboard data for filtering
-        unitsSold = getUnitsFromDashboardData(info.startDate, info.endDate);
-      } else if (sponsoredAdsMetrics?.totalProductsPurchased > 0) {
-        // Use legacy data as fallback for date range
-        unitsSold = sponsoredAdsMetrics.totalProductsPurchased;
-      }
-    } else if (ppcKPISummary?.unitsSold > 0) {
-      // PRIMARY: Use new optimized ppcKPISummary endpoint
-      unitsSold = ppcKPISummary.unitsSold;
-    } else if (ppcUnitsSoldTotal !== null && ppcUnitsSoldTotal > 0) {
-      // Use data from separate API call
-      unitsSold = ppcUnitsSoldTotal;
-    } else if (dashboardPPCUnitsSold?.totalUnits > 0) {
-      // Use data from main dashboard load (totalUnits is now a number)
-      unitsSold = dashboardPPCUnitsSold.totalUnits;
-    } else if (sponsoredAdsMetrics?.totalProductsPurchased > 0) {
-      // Use legacy sponsored ads data
-      unitsSold = sponsoredAdsMetrics.totalProductsPurchased;
-    } else {
-      // Fallback to ppcSummary or 0
-      unitsSold = ppcSummary?.totalUnits || 0;
-    }
-    
-    // Get total issues from server-side calculation or optimized endpoint
-    // This counts campaign/keyword-level issues:
-    // - High ACOS Campaigns (ACOS > 40%)
-    // - Wasted Spend Keywords (cost > 0, sales < 0.01)
-    // - Search Terms with Zero Sales (clicks >= 10, sales < 0.01)
-    // - Auto Campaign Insights needing migration
-    const totalIssues = ppcKPISummary?.totalIssues ?? info?.totalSponsoredAdsErrors ?? 0;
-    
+
+    // Derive engagement KPIs locally if backend didn't supply them (fallback paths).
+    if (ctr == null) ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
+    if (cpc == null) cpc = clicks > 0 ? spend / clicks : 0;
+    if (roas == null) roas = spend > 0 ? ppcSales / spend : 0;
+
     return [
-      { 
-        label: 'PPC Sales', 
+      {
+        label: 'PPC Sales',
         value: formatCurrencyWithLocale(ppcSales, currency),
         icon: TrendingUp,
         color: 'blue'
       },
-      { 
-        label: 'Spend', 
+      {
+        label: 'Spend',
         value: formatCurrencyWithLocale(spend, currency),
         icon: DollarSign,
         color: 'blue'
       },
-      { 
-        label: 'ACoS %', 
+      {
+        label: 'ACoS %',
         value: `${acos.toFixed(2)}%`,
         icon: Gauge,
         color: 'blue'
       },
-      { 
-        label: 'TACoS %', 
+      {
+        label: 'TACoS %',
         value: `${tacos.toFixed(2)}%`,
         icon: Gauge,
         color: 'blue'
       },
-      { 
-        label: 'Units Sold', 
-        value: `${unitsSold}`,
+      {
+        label: 'Units Sold',
+        value: `${Number(unitsSold || 0).toLocaleString()}`,
         icon: Package,
         color: 'blue'
       },
-      { 
-        label: 'Total Issues', 
-        value: `${totalIssues}`,
-        icon: AlertTriangle,
+      {
+        label: 'Impressions',
+        value: `${Number(impressions || 0).toLocaleString()}`,
+        icon: Eye,
+        color: 'blue'
+      },
+      {
+        label: 'Clicks',
+        value: `${Number(clicks || 0).toLocaleString()}`,
+        icon: MousePointerClick,
+        color: 'blue'
+      },
+      {
+        label: 'CTR %',
+        value: `${Number(ctr || 0).toFixed(2)}%`,
+        icon: Percent,
+        color: 'blue'
+      },
+      {
+        label: 'CPC',
+        value: formatCurrencyWithLocale(cpc, currency),
+        icon: Coins,
+        color: 'blue'
+      },
+      {
+        label: 'ROAS',
+        value: `${Number(roas || 0).toFixed(2)}x`,
+        icon: Target,
         color: 'blue'
       },
     ];
-  }, [info?.TotalSales, info?.TotalWeeklySale, info?.accountFinance, info?.startDate, info?.endDate, isDateRangeSelected, sponsoredAdsMetrics, filteredDateWiseTotalCosts, ppcSummary, filteredPPCMetricsForKPI, currency, ppcUnitsSoldTotal, filteredUnitsSoldTotal, hasFilteredUnitsSold, filteredUnitsSoldLoading, dashboardPPCUnitsSold, info?.totalSponsoredAdsErrors, ppcKPISummary]);
+  }, [ppcKPISummary, ppcSummary, sponsoredAdsMetrics, info?.TotalSales, info?.TotalWeeklySale, info?.accountFinance, currency]);
 
   const formatYAxis = (value) => {
     return formatYAxisCurrency(value, currency);
@@ -2177,9 +2182,9 @@ const PPCDashboard = () => {
       <div className='overflow-y-auto' style={{ height: 'calc(100vh - 72px)', scrollBehavior: 'smooth' }}>
         <div className='px-2 lg:px-3 py-1.5 pb-1'>
           {/* KPI Cards - skeleton when summary loading */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2 mb-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-2 mb-2">
             {ppcKPISummaryLoading ? (
-              Array.from({ length: 6 }).map((_, index) => (
+              Array.from({ length: 10 }).map((_, index) => (
                 <motion.div
                   key={`skeleton-${index}`}
                   initial={{ opacity: 0, y: 20 }}
@@ -2452,36 +2457,51 @@ const PPCDashboard = () => {
                         <table className="w-full table-fixed">
                           <thead>
                             <tr className="border-b border-[#30363d]">
-                              <th className="w-2/5 text-left py-2 px-2 text-xs font-medium text-gray-400">Campaign</th>
-                              <th className="w-1/5 text-center py-2 px-2 text-xs font-medium text-gray-400">Spend</th>
-                              <th className="w-1/5 text-center py-2 px-2 text-xs font-medium text-gray-400">Sales</th>
-                              <th className="w-1/5 text-center py-2 px-2 text-xs font-medium text-gray-400">ACoS %</th>
+                              <th className="w-[28%] text-left py-2 px-2 text-xs font-medium text-gray-400">Campaign</th>
+                              <th className="w-[12%] text-center py-2 px-2 text-xs font-medium text-gray-400">Spend</th>
+                              <th className="w-[12%] text-center py-2 px-2 text-xs font-medium text-gray-400">Sales</th>
+                              <th className="w-[12%] text-center py-2 px-2 text-xs font-medium text-gray-400">ACoS %</th>
+                              <th className="w-[12%] text-center py-2 px-2 text-xs font-medium text-gray-400">CTR %</th>
+                              <th className="w-[12%] text-center py-2 px-2 text-xs font-medium text-gray-400">CPC</th>
+                              <th className="w-[12%] text-center py-2 px-2 text-xs font-medium text-gray-400">ROAS</th>
                             </tr>
                           </thead>
                           <tbody>
                             {highAcosLoading && highAcosCampaignsData.length === 0 ? (
-                              <TableSkeletonRows columns={4} rows={5} />
+                              <TableSkeletonRows columns={7} rows={5} />
                             ) : highAcosCampaignsData.length === 0 ? (
                               <tr>
-                                <td colSpan={4} className="text-center py-6 text-gray-400 text-xs">
+                                <td colSpan={7} className="text-center py-6 text-gray-400 text-xs">
                                   No data available
                                 </td>
                               </tr>
                             ) : (
                               <>
-                                {highAcosCampaignsData.map((campaign, idx) => (
+                                {highAcosCampaignsData.map((campaign, idx) => {
+                                  const spend = Number(campaign.spend ?? campaign.totalSpend ?? 0);
+                                  const sales = Number(campaign.sales ?? campaign.totalSales ?? 0);
+                                  const impressions = Number(campaign.impressions ?? campaign.totalImpressions ?? 0);
+                                  const clicks = Number(campaign.clicks ?? campaign.totalClicks ?? 0);
+                                  const ctr = campaign.ctr != null ? Number(campaign.ctr) : (impressions > 0 ? (clicks / impressions) * 100 : 0);
+                                  const cpc = campaign.cpc != null ? Number(campaign.cpc) : (clicks > 0 ? spend / clicks : 0);
+                                  const roas = campaign.roas != null ? Number(campaign.roas) : (spend > 0 ? sales / spend : 0);
+                                  return (
                                   <tr key={idx} className="border-b border-[#30363d]">
-                                    <td className="w-2/5 py-2 px-2 text-xs text-gray-100 break-words">
+                                    <td className="w-[28%] py-2 px-2 text-xs text-gray-100 break-words">
                                       {campaign.campaignName}
                                     </td>
-                                    <td className="w-1/5 py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(campaign.spend || campaign.totalSpend, currency)}</td>
-                                    <td className="w-1/5 py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(campaign.sales || campaign.totalSales, currency)}</td>
-                                    <td className="w-1/5 py-2 px-2 text-xs text-center font-medium text-red-400 whitespace-nowrap">
+                                    <td className="w-[12%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(spend, currency)}</td>
+                                    <td className="w-[12%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(sales, currency)}</td>
+                                    <td className="w-[12%] py-2 px-2 text-xs text-center font-medium text-red-400 whitespace-nowrap">
                                       {(campaign.acos || 0).toFixed(2)}%
                                     </td>
+                                    <td className="w-[12%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{ctr.toFixed(2)}%</td>
+                                    <td className="w-[12%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(cpc, currency)}</td>
+                                    <td className="w-[12%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{roas.toFixed(2)}x</td>
                                   </tr>
-                                ))}
-                                {highAcosLoading ? <TableSkeletonRows columns={4} rows={3} /> : null}
+                                  );
+                                })}
+                                {highAcosLoading ? <TableSkeletonRows columns={7} rows={3} /> : null}
                               </>
                             )}
                           </tbody>
@@ -2938,44 +2958,59 @@ const PPCDashboard = () => {
                         <table className="w-full table-fixed">
                           <thead>
                             <tr className="border-b border-[#30363d]">
-                              <th className="w-[25%] text-left py-2 px-2 text-xs font-medium text-gray-400">Search Term</th>
-                              <th className="w-[30%] text-left py-2 px-2 text-xs font-medium text-gray-400">Campaign Name</th>
-                              <th className="w-[25%] text-left py-2 px-2 text-xs font-medium text-gray-400">Ad Group</th>
-                              <th className="w-[10%] text-center py-2 px-2 text-xs font-medium text-gray-400">Sales</th>
-                              <th className="w-[10%] text-center py-2 px-2 text-xs font-medium text-gray-400">ACoS %</th>
+                              <th className="w-[20%] text-left py-2 px-2 text-xs font-medium text-gray-400">Search Term</th>
+                              <th className="w-[22%] text-left py-2 px-2 text-xs font-medium text-gray-400">Campaign Name</th>
+                              <th className="w-[18%] text-left py-2 px-2 text-xs font-medium text-gray-400">Ad Group</th>
+                              <th className="w-[8%] text-center py-2 px-2 text-xs font-medium text-gray-400">Sales</th>
+                              <th className="w-[8%] text-center py-2 px-2 text-xs font-medium text-gray-400">ACoS %</th>
+                              <th className="w-[8%] text-center py-2 px-2 text-xs font-medium text-gray-400">CTR %</th>
+                              <th className="w-[8%] text-center py-2 px-2 text-xs font-medium text-gray-400">CPC</th>
+                              <th className="w-[8%] text-center py-2 px-2 text-xs font-medium text-gray-400">ROAS</th>
                             </tr>
                           </thead>
                           <tbody>
                             {autoInsightsLoading && autoInsightsData.length === 0 ? (
-                              <TableSkeletonRows columns={5} rows={5} />
+                              <TableSkeletonRows columns={8} rows={5} />
                             ) : autoInsightsData.length === 0 ? (
                               <tr>
-                                <td colSpan={5} className="text-center py-6 text-gray-400 text-xs">
+                                <td colSpan={8} className="text-center py-6 text-gray-400 text-xs">
                                   No data available
                                 </td>
                               </tr>
                             ) : (
                               <>
-                                {autoInsightsData.map((insight, idx) => (
+                                {autoInsightsData.map((insight, idx) => {
+                                  const spend = Number(insight.spend || 0);
+                                  const sales = Number(insight.sales || 0);
+                                  const impressions = Number(insight.impressions || 0);
+                                  const clicks = Number(insight.clicks || 0);
+                                  const ctr = insight.ctr != null ? Number(insight.ctr) : (impressions > 0 ? (clicks / impressions) * 100 : 0);
+                                  const cpc = insight.cpc != null ? Number(insight.cpc) : (clicks > 0 ? spend / clicks : 0);
+                                  const roas = insight.roas != null ? Number(insight.roas) : (spend > 0 ? sales / spend : 0);
+                                  return (
                                   <tr key={idx} className="border-b border-[#30363d]">
-                                  <td className="w-[25%] py-2 px-2 text-xs text-gray-100 break-words">
+                                  <td className="w-[20%] py-2 px-2 text-xs text-gray-100 break-words">
                                     {insight.searchTerm}
                                   </td>
-                                  <td className="w-[30%] py-2 px-2 text-xs text-gray-300 break-words">
+                                  <td className="w-[22%] py-2 px-2 text-xs text-gray-300 break-words">
                                     {insight.campaignName}
                                   </td>
-                                  <td className="w-[25%] py-2 px-2 text-xs text-gray-300 break-words">
+                                  <td className="w-[18%] py-2 px-2 text-xs text-gray-300 break-words">
                                     {insight.adGroupName || 'N/A'}
                                   </td>
-                                  <td className="w-[10%] py-2 px-2 text-xs text-center font-medium text-green-400 whitespace-nowrap">
-                                    {formatCurrencyWithLocale(insight.sales, currency)}
+                                  <td className="w-[8%] py-2 px-2 text-xs text-center font-medium text-green-400 whitespace-nowrap">
+                                    {formatCurrencyWithLocale(sales, currency)}
                                   </td>
-                                  <td className="w-[10%] py-2 px-2 text-xs text-center font-medium whitespace-nowrap text-gray-300">
+                                  <td className="w-[8%] py-2 px-2 text-xs text-center font-medium whitespace-nowrap text-gray-300">
                                     {(insight.acos || 0).toFixed(2)}%
                                   </td>
+                                  <td className="w-[8%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{ctr.toFixed(2)}%</td>
+                                  <td className="w-[8%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(cpc, currency)}</td>
+                                  <td className="w-[8%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{roas.toFixed(2)}x</td>
                                 </tr>
-                                ))}
-                                {autoInsightsLoading ? <TableSkeletonRows columns={5} rows={3} /> : null}
+                                  );
+                                })}
+                                {autoInsightsLoading ? <TableSkeletonRows columns={8} rows={3} /> : null}
                               </>
                             )}
                           </tbody>

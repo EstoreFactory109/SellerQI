@@ -65,37 +65,67 @@ async function saveProductWiseSponsoredAdsData(userId, country, region, sponsore
             };
         }
 
-        // Save items to separate collection
-        const itemsToInsert = sponsoredAdsArray.map(item => ({
+        // Map to ProductWiseSponsoredAdsItem schema (adType, sales, purchases, …)
+        const itemsToInsert = sponsoredAdsArray
+            .filter((item) => item?.asin && item?.campaignId && item?.date)
+            .map((item) => ({
+                userId: userObjectId,
+                country,
+                region,
+                batchId,
+                adType: item.adType === 'SD' ? 'SD' : 'SP',
+                date: item.date,
+                asin: item.asin,
+                sku: item.sku || '',
+                spend: Number(item.spend) || 0,
+                sales: Number(item.sales ?? item.salesIn7Days ?? item.salesIn14Days ?? item.salesIn30Days) || 0,
+                purchases: Number(item.purchases ?? item.purchasedIn7Days ?? item.purchasedIn14Days ?? item.purchasedIn30Days) || 0,
+                unitsSoldClicks: Number(item.unitsSoldClicks) || 0,
+                campaignId: item.campaignId,
+                campaignName: item.campaignName || 'Unknown',
+                impressions: Number(item.impressions) || 0,
+                adGroupId: item.adGroupId || '',
+                adGroupName: item.adGroupName || '',
+                clicks: Number(item.clicks) || 0,
+            }));
+
+        if (itemsToInsert.length === 0) {
+            logger.warn('No valid Product-wise Sponsored Ads rows to insert after filtering', {
+                userId: userObjectId.toString(),
+                country,
+                region,
+                rawCount: itemCount,
+            });
+            return {
+                success: true,
+                message: 'No valid rows to save',
+                itemCount: 0,
+                batchId: batchId.toString(),
+            };
+        }
+
+        const distinctDates = [...new Set(itemsToInsert.map((r) => r.date))];
+        await ProductWiseSponsoredAdsItem.deleteMany({
             userId: userObjectId,
             country,
             region,
-            batchId,
-            date: item.date || '',
-            asin: item.asin || '',
-            spend: item.spend || 0,
-            salesIn7Days: item.salesIn7Days || 0,
-            salesIn14Days: item.salesIn14Days || 0,
-            salesIn30Days: item.salesIn30Days || 0,
-            campaignId: item.campaignId || '',
-            campaignName: item.campaignName || '',
-            impressions: item.impressions || 0,
-            adGroupId: item.adGroupId || '',
-            clicks: item.clicks || 0,
-            purchasedIn7Days: item.purchasedIn7Days || 0,
-            purchasedIn14Days: item.purchasedIn14Days || 0,
-            purchasedIn30Days: item.purchasedIn30Days || 0
-        }));
+            date: { $in: distinctDates },
+        });
 
-        // Use insertMany with ordered:false for better performance
-        await ProductWiseSponsoredAdsItem.insertMany(itemsToInsert, { ordered: false });
+        const insertResult = await ProductWiseSponsoredAdsItem.insertMany(itemsToInsert, { ordered: false });
+        const insertedCount = Array.isArray(insertResult) ? insertResult.length : itemsToInsert.length;
+
+        if (insertedCount === 0) {
+            throw new Error('insertMany returned 0 documents — check schema validation');
+        }
 
         logger.info('Product-wise Sponsored Ads data saved successfully', {
             userId: userObjectId.toString(),
             country,
             region,
-            itemCount,
-            batchId: batchId.toString()
+            itemCount: insertedCount,
+            rawCount: itemCount,
+            batchId: batchId.toString(),
         });
 
         // Clean up old batches (keep only last 3)
@@ -136,11 +166,11 @@ async function saveProductWiseSponsoredAdsData(userId, country, region, sponsore
         return {
             success: true,
             message: 'Data saved successfully',
-            itemCount,
+            itemCount: insertedCount,
             batchId: batchId.toString(),
             userId: userObjectId.toString(),
             country,
-            region
+            region,
         };
 
     } catch (error) {
@@ -194,22 +224,32 @@ async function getProductWiseSponsoredAdsData(userId, country, region) {
             });
 
             // Transform to match the old format structure
-            const sponsoredAds = newFormatItems.map(item => ({
-                date: item.date,
-                asin: item.asin,
-                spend: item.spend,
-                salesIn7Days: item.salesIn7Days,
-                salesIn14Days: item.salesIn14Days,
-                salesIn30Days: item.salesIn30Days,
-                campaignId: item.campaignId,
-                campaignName: item.campaignName,
-                impressions: item.impressions,
-                adGroupId: item.adGroupId,
-                clicks: item.clicks,
-                purchasedIn7Days: item.purchasedIn7Days,
-                purchasedIn14Days: item.purchasedIn14Days,
-                purchasedIn30Days: item.purchasedIn30Days
-            }));
+            const sponsoredAds = newFormatItems.map((item) => {
+                const sales = Number(item.sales) || 0;
+                const purchases = Number(item.purchases) || 0;
+                const isSd = item.adType === 'SD';
+                return {
+                    date: item.date,
+                    asin: item.asin,
+                    adType: item.adType,
+                    spend: item.spend,
+                    sales,
+                    purchases,
+                    unitsSoldClicks: Number(item.unitsSoldClicks) || 0,
+                    salesIn7Days: isSd ? 0 : (item.salesIn7Days ?? sales),
+                    salesIn14Days: isSd ? (item.salesIn14Days ?? sales) : 0,
+                    salesIn30Days: item.salesIn30Days ?? sales,
+                    campaignId: item.campaignId,
+                    campaignName: item.campaignName,
+                    impressions: item.impressions,
+                    adGroupId: item.adGroupId,
+                    adGroupName: item.adGroupName || '',
+                    clicks: item.clicks,
+                    purchasedIn7Days: isSd ? 0 : (item.purchasedIn7Days ?? purchases),
+                    purchasedIn14Days: isSd ? (item.purchasedIn14Days ?? purchases) : 0,
+                    purchasedIn30Days: item.purchasedIn30Days ?? purchases,
+                };
+            });
 
             // Return in the same format as old format
             return {

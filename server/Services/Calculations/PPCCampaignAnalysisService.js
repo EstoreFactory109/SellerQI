@@ -8,7 +8,6 @@
 
 const mongoose = require('mongoose');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel');
-const PPCUnitsSold = require('../../models/amazon-ads/PPCUnitsSoldModel');
 const IssueSummary = require('../../models/system/IssueSummaryModel');
 const adsKeywordsPerformanceModel = require('../../models/amazon-ads/adsKeywordsPerformanceModel');
 const SearchTerms = require('../../models/amazon-ads/SearchTermsModel');
@@ -18,7 +17,9 @@ const AdsGroup = require('../../models/amazon-ads/adsgroupModel');
 const Keyword = require('../../models/amazon-ads/keywordModel');
 const ProductWiseSponsoredAdsItem = require('../../models/amazon-ads/ProductWiseSponsoredAdsItemModel');
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel');
+const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel');
 const logger = require('../../utils/Logger');
+const { loadLatestSnapshotDoc } = require('../../utils/ppcSnapshotLoader');
 
 /**
  * Parse YYYY-MM-DD-like input as a local date range.
@@ -93,44 +94,295 @@ const createPaginationMeta = (page, limit, totalItems) => {
 };
 
 /**
- * Get PPC KPI Summary for the top boxes
- * Returns: spend, sales, acos, tacos, unitsSold, totalIssues
+ * Resolves a Mongo $match stage for collections that store one day per document
+ * inside an array field (adsKeywordsPerformance.keywordsData, SearchTerms.searchTermData).
+ *
+ * Tries the per-day window first ({metricDate: {$gte,$lte}}). If no per-day docs
+ * exist for the window, falls back to the latest legacy doc (no metricDate) so
+ * users who haven't been migrated still see something.
+ *
+ * Returns `null` when the user has no data at all.
  */
-const getPPCKPISummary = async (userId, country, region) => {
+const resolveDailyOrLegacyMatch = async (Model, baseMatch, startStr, endStr) => {
+    const dailyQuery = {
+        ...baseMatch,
+        metricDate: { $exists: true, $type: 'string', $ne: null },
+    };
+    if (startStr && endStr) {
+        dailyQuery.metricDate = { $gte: startStr, $lte: endStr };
+    }
+
+    const hasDaily = await Model.exists(dailyQuery);
+    if (hasDaily) return dailyQuery;
+
+    const legacy = await Model.findOne({
+        ...baseMatch,
+        $or: [{ metricDate: { $exists: false } }, { metricDate: null }],
+    })
+        .sort({ createdAt: -1 })
+        .select('_id')
+        .lean();
+
+    if (!legacy) return null;
+    return { ...baseMatch, _id: legacy._id };
+};
+
+/** Default ~31-day string window (UTC) for product-wise / report-style data when no range passed. */
+const defaultReportWindowStrings = () => {
+    const now = new Date();
+    const endD = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
+    const startD = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1 - 30));
+    return { startStr: startD.toISOString().split('T')[0], endStr: endD.toISOString().split('T')[0] };
+};
+
+/**
+ * Resolve the (startDate, endDate) window for the KPI summary.
+ * - If both dates are provided (YYYY-MM-DD), they're used as-is.
+ * - Otherwise we fall back to the production default: yesterday-30 … yesterday (UTC).
+ */
+const resolveKpiDateRange = (startDate, endDate) => {
+    const norm = (v) => toYyyyMmDd(v);
+    const s = norm(startDate);
+    const e = norm(endDate);
+    if (s && e) {
+        const isCustom = s <= e;
+        if (!isCustom) {
+            // Caller passed start > end — swap to keep query valid; flag as custom.
+            return { startDate: e, endDate: s, isCustom: true };
+        }
+        return { startDate: s, endDate: e, isCustom: true };
+    }
+    const { startStr, endStr } = defaultReportWindowStrings();
+    return { startDate: startStr, endDate: endStr, isCustom: false };
+};
+
+/**
+ * Aggregate PPC totals (sales / spend / units / impressions / clicks) over the
+ * given date range — entirely in MongoDB.
+ *
+ * One `$match` on `metricDate` + one `$group` per collection. Output is at
+ * most a single document. No per-day rows are pulled back into Node.
+ */
+const aggregatePpcTotals = async (userIdStr, country, region, startDate, endDate) => {
+    const rows = await PPCMetrics.aggregate([
+        {
+            $match: {
+                userId: userIdStr,
+                country,
+                region,
+                metricDate: { $gte: startDate, $lte: endDate },
+            },
+        },
+        {
+            $group: {
+                _id: null,
+                totalSales: { $sum: { $ifNull: ['$summary.totalSales', 0] } },
+                totalSpend: { $sum: { $ifNull: ['$summary.totalSpend', 0] } },
+                totalImpressions: { $sum: { $ifNull: ['$summary.totalImpressions', 0] } },
+                totalClicks: { $sum: { $ifNull: ['$summary.totalClicks', 0] } },
+                totalUnitsSoldClicks1d: { $sum: { $ifNull: ['$summary.totalUnitsSoldClicks1d', 0] } },
+                totalPurchases: { $sum: { $ifNull: ['$summary.totalPurchases', 0] } },
+                daysWithData: { $sum: 1 },
+                minDate: { $min: '$metricDate' },
+                maxDate: { $max: '$metricDate' },
+            },
+        },
+    ]);
+    return rows && rows[0]
+        ? rows[0]
+        : {
+              totalSales: 0,
+              totalSpend: 0,
+              totalImpressions: 0,
+              totalClicks: 0,
+              totalUnitsSoldClicks1d: 0,
+              totalPurchases: 0,
+              daysWithData: 0,
+              minDate: null,
+              maxDate: null,
+          };
+};
+
+/**
+ * Aggregate per-day PPC metrics for the selected window — drives the
+ * "PPC Performance Over Time" chart. One row per calendar day, derived
+ * fields (acos/ctr/cpc/roas) computed in-pipeline from the sums.
+ *
+ * Defensive: $group on metricDate so duplicate per-day docs (if any) sum
+ * cleanly instead of getting overwritten.
+ */
+const aggregatePpcDaily = async (userIdStr, country, region, startDate, endDate) => {
+    return PPCMetrics.aggregate([
+        {
+            $match: {
+                userId: userIdStr,
+                country,
+                region,
+                metricDate: { $gte: startDate, $lte: endDate },
+            },
+        },
+        {
+            $group: {
+                _id: '$metricDate',
+                sales: { $sum: { $ifNull: ['$summary.totalSales', 0] } },
+                spend: { $sum: { $ifNull: ['$summary.totalSpend', 0] } },
+                impressions: { $sum: { $ifNull: ['$summary.totalImpressions', 0] } },
+                clicks: { $sum: { $ifNull: ['$summary.totalClicks', 0] } },
+                unitsSold: { $sum: { $ifNull: ['$summary.totalUnitsSoldClicks1d', 0] } },
+            },
+        },
+        {
+            $addFields: {
+                acos: {
+                    $cond: [{ $gt: ['$sales', 0] },
+                        { $multiply: [{ $divide: ['$spend', '$sales'] }, 100] }, 0],
+                },
+                ctr: {
+                    $cond: [{ $gt: ['$impressions', 0] },
+                        { $multiply: [{ $divide: ['$clicks', '$impressions'] }, 100] }, 0],
+                },
+                cpc: {
+                    $cond: [{ $gt: ['$clicks', 0] }, { $divide: ['$spend', '$clicks'] }, 0],
+                },
+                roas: {
+                    $cond: [{ $gt: ['$spend', 0] }, { $divide: ['$sales', '$spend'] }, 0],
+                },
+            },
+        },
+        { $sort: { _id: 1 } },
+        {
+            $project: {
+                _id: 0,
+                date: '$_id',
+                sales: { $round: ['$sales', 2] },
+                spend: { $round: ['$spend', 2] },
+                impressions: 1,
+                clicks: 1,
+                unitsSold: 1,
+                acos: { $round: ['$acos', 2] },
+                ctr: { $round: ['$ctr', 2] },
+                cpc: { $round: ['$cpc', 2] },
+                roas: { $round: ['$roas', 2] },
+            },
+        },
+    ]);
+};
+
+/**
+ * Aggregate total (organic + PPC) sales over the same window from the per-day
+ * SalesOnlyMetrics collection. Used as the TACOS denominator.
+ *
+ * NOTE: SalesOnlyMetrics stores `User` as an ObjectId, distinct from
+ * PPCMetrics' string userId.
+ */
+const aggregateTotalSales = async (userId, country, region, startDate, endDate) => {
+    let userObjectId = null;
+    try {
+        userObjectId =
+            typeof userId === 'string'
+                ? new mongoose.Types.ObjectId(userId)
+                : userId;
+    } catch (_) {
+        return { totalSales: 0, currencyCode: 'USD', daysWithData: 0 };
+    }
+
+    const rows = await SalesOnlyMetrics.aggregate([
+        {
+            $match: {
+                User: userObjectId,
+                region,
+                country,
+                date: { $gte: startDate, $lte: endDate },
+            },
+        },
+        {
+            $group: {
+                _id: null,
+                totalSales: { $sum: { $ifNull: ['$sales.amount', 0] } },
+                unitsSold: { $sum: { $ifNull: ['$unitsSold', 0] } },
+                currencyCode: { $first: '$sales.currencyCode' },
+                daysWithData: { $sum: 1 },
+            },
+        },
+    ]);
+    return rows && rows[0]
+        ? rows[0]
+        : { totalSales: 0, unitsSold: 0, currencyCode: 'USD', daysWithData: 0 };
+};
+
+/**
+ * Get PPC KPI Summary for the top boxes of the Campaign Audit page.
+ *
+ * - Honors `{ startDate, endDate }` from the request (YYYY-MM-DD).
+ * - All summation happens inside MongoDB — no per-day rows are pulled into Node.
+ *
+ * Returns: { spend, sales, acos, tacos, unitsSold, totalSales, totalIssues, dateRange, dataAvailability }
+ */
+const getPPCKPISummary = async (userId, country, region, startDate = null, endDate = null) => {
     const startTime = Date.now();
-    logger.info(`[PPCCampaignAnalysis] Getting KPI summary for user: ${userId}`);
+
+    const window = resolveKpiDateRange(startDate, endDate);
+    logger.info(
+        `[PPCCampaignAnalysis] KPI summary user=${userId} country=${country} region=${region} ` +
+            `window=${window.startDate}→${window.endDate} custom=${window.isCustom}`
+    );
 
     try {
         const userIdStr = userId?.toString() || userId;
 
-        // Fetch data in parallel (EconomicsMetrics for total sales → TACoS)
-        const [ppcMetrics, ppcUnitsSold, issueSummary, economicsMetrics] = await Promise.all([
-            PPCMetrics.findLatestForUser(userIdStr, country, region),
-            PPCUnitsSold.findLatestForUser(userIdStr, country, region),
+        const [ppcTotals, salesTotals, issueSummary, ppcDaily] = await Promise.all([
+            aggregatePpcTotals(userIdStr, country, region, window.startDate, window.endDate),
+            aggregateTotalSales(userIdStr, country, region, window.startDate, window.endDate),
             IssueSummary.getIssueSummary(userId, country, region),
-            EconomicsMetrics.findOne({ User: userIdStr, country, region }).sort({ createdAt: -1 }).select('totalSales').lean()
+            aggregatePpcDaily(userIdStr, country, region, window.startDate, window.endDate),
         ]);
 
-        const spend = ppcMetrics?.summary?.totalSpend || 0;
-        const totalSales = economicsMetrics?.totalSales?.amount ?? 0;
-        const tacos = totalSales > 0 ? Math.round((spend / totalSales) * 100 * 100) / 100 : 0;
+        const ppcSales = Number(ppcTotals.totalSales || 0);
+        const ppcSpend = Number(ppcTotals.totalSpend || 0);
+        const totalSales = Number(salesTotals.totalSales || 0);
+        const unitsSold = Math.round(Number(ppcTotals.totalUnitsSoldClicks1d || 0));
+        const orders = Math.round(Number(ppcTotals.totalPurchases || 0));
+        const impressions = Math.round(Number(ppcTotals.totalImpressions || 0));
+        const clicks = Math.round(Number(ppcTotals.totalClicks || 0));
+
+        const acos = ppcSales > 0 ? Math.round((ppcSpend / ppcSales) * 100 * 100) / 100 : 0;
+        const roas = ppcSpend > 0 ? Math.round((ppcSales / ppcSpend) * 100) / 100 : 0;
+        const tacos = totalSales > 0 ? Math.round((ppcSpend / totalSales) * 100 * 100) / 100 : 0;
+        const ctr = impressions > 0 ? Math.round((clicks / impressions) * 100 * 100) / 100 : 0;
+        const cpc = clicks > 0 ? Math.round((ppcSpend / clicks) * 100) / 100 : 0;
 
         const summary = {
-            spend,
-            sales: ppcMetrics?.summary?.totalSales || 0,
-            acos: ppcMetrics?.summary?.overallAcos || 0,
+            spend: Math.round(ppcSpend * 100) / 100,
+            sales: Math.round(ppcSales * 100) / 100,
+            totalSales: Math.round(totalSales * 100) / 100,
+            currencyCode: salesTotals.currencyCode || 'USD',
+            acos,
             tacos,
-            roas: ppcMetrics?.summary?.overallRoas || 0,
-            impressions: ppcMetrics?.summary?.totalImpressions || 0,
-            clicks: ppcMetrics?.summary?.totalClicks || 0,
-            ctr: ppcMetrics?.summary?.ctr || 0,
-            cpc: ppcMetrics?.summary?.cpc || 0,
-            unitsSold: ppcUnitsSold?.totalUnits || ppcUnitsSold?.summary?.totalUnits || 0,
+            roas,
+            impressions,
+            clicks,
+            ctr,
+            cpc,
+            unitsSold,
+            orders,
             totalIssues: issueSummary?.totalSponsoredAdsErrors || 0,
-            dateRange: ppcMetrics?.dateRange || null
+            timeseries: Array.isArray(ppcDaily) ? ppcDaily : [],
+            dateRange: { startDate: window.startDate, endDate: window.endDate },
+            dataAvailability: {
+                isCustomDateRange: window.isCustom,
+                ppcDaysWithData: ppcTotals.daysWithData || 0,
+                salesDaysWithData: salesTotals.daysWithData || 0,
+                ppcDateRangeCovered:
+                    ppcTotals.minDate && ppcTotals.maxDate
+                        ? { startDate: ppcTotals.minDate, endDate: ppcTotals.maxDate }
+                        : null,
+            },
         };
 
-        logger.info(`[PPCCampaignAnalysis] KPI summary fetched in ${Date.now() - startTime}ms`);
+        logger.info(
+            `[PPCCampaignAnalysis] KPI summary fetched in ${Date.now() - startTime}ms ` +
+                `(ppcDays=${summary.dataAvailability.ppcDaysWithData}, salesDays=${summary.dataAvailability.salesDaysWithData})`
+        );
         return summary;
     } catch (error) {
         logger.error('[PPCCampaignAnalysis] Error getting KPI summary:', error);
@@ -149,35 +401,41 @@ const getHighAcosCampaigns = async (userId, country, region, page = 1, limit = 1
     try {
         const userIdObj = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
 
-        // Find the latest batch
-        const latestItem = await ProductWiseSponsoredAdsItem.findOne({ userId: userIdObj, country, region })
-            .sort({ createdAt: -1 })
-            .select('batchId')
-            .lean();
-
-        if (!latestItem || !latestItem.batchId) {
-            return { data: [], pagination: createPaginationMeta(page, limit, 0) };
+        const matchStage = { userId: userIdObj, country, region };
+        const startStr = startDate && endDate ? toYyyyMmDd(startDate) : null;
+        const endStr = startDate && endDate ? toYyyyMmDd(endDate) : null;
+        if (startStr && endStr) {
+            matchStage.date = { $gte: startStr, $lte: endStr };
+        } else {
+            const w = defaultReportWindowStrings();
+            matchStage.date = { $gte: w.startStr, $lte: w.endStr };
         }
 
-        // Build match stage with optional date filter
-        const matchStage = { batchId: latestItem.batchId };
-        if (startDate && endDate) {
-            const startStr = toYyyyMmDd(startDate);
-            const endStr = toYyyyMmDd(endDate);
+        let effectiveMatch = { ...matchStage };
+        const countInWindow = await ProductWiseSponsoredAdsItem.countDocuments(effectiveMatch);
+        if (countInWindow === 0) {
+            const latestItem = await ProductWiseSponsoredAdsItem.findOne({ userId: userIdObj, country, region })
+                .sort({ createdAt: -1 })
+                .select('batchId')
+                .lean();
+            if (!latestItem || !latestItem.batchId) {
+                return { data: [], pagination: createPaginationMeta(page, limit, 0) };
+            }
+            effectiveMatch = { userId: userIdObj, country, region, batchId: latestItem.batchId };
             if (startStr && endStr) {
-                matchStage.date = { $gte: startStr, $lte: endStr };
+                effectiveMatch.date = { $gte: startStr, $lte: endStr };
             }
         }
 
         // Aggregate by campaign to get total spend and sales
         const aggregationPipeline = [
-            { $match: matchStage },
+            { $match: effectiveMatch },
             {
                 $group: {
                     _id: '$campaignId',
                     campaignName: { $first: '$campaignName' },
                     totalSpend: { $sum: '$spend' },
-                    totalSales: { $sum: '$salesIn30Days' },
+                    totalSales: { $sum: { $ifNull: ['$sales', { $ifNull: ['$salesIn30Days', 0] }] } },
                     totalImpressions: { $sum: '$impressions' },
                     totalClicks: { $sum: '$clicks' }
                 }
@@ -188,6 +446,27 @@ const getHighAcosCampaigns = async (userId, country, region, page = 1, limit = 1
                         $cond: [
                             { $gt: ['$totalSales', 0] },
                             { $multiply: [{ $divide: ['$totalSpend', '$totalSales'] }, 100] },
+                            0
+                        ]
+                    },
+                    ctr: {
+                        $cond: [
+                            { $gt: ['$totalImpressions', 0] },
+                            { $multiply: [{ $divide: ['$totalClicks', '$totalImpressions'] }, 100] },
+                            0
+                        ]
+                    },
+                    cpc: {
+                        $cond: [
+                            { $gt: ['$totalClicks', 0] },
+                            { $divide: ['$totalSpend', '$totalClicks'] },
+                            0
+                        ]
+                    },
+                    roas: {
+                        $cond: [
+                            { $gt: ['$totalSpend', 0] },
+                            { $divide: ['$totalSales', '$totalSpend'] },
                             0
                         ]
                     }
@@ -222,6 +501,9 @@ const getHighAcosCampaigns = async (userId, country, region, page = 1, limit = 1
                     acos: { $round: ['$acos', 2] },
                     impressions: '$totalImpressions',
                     clicks: '$totalClicks',
+                    ctr: { $round: ['$ctr', 2] },
+                    cpc: { $round: ['$cpc', 2] },
+                    roas: { $round: ['$roas', 2] },
                     _id: 0
                 }
             }
@@ -251,95 +533,103 @@ const getWastedSpendKeywords = async (userId, country, region, page = 1, limit =
     try {
         const userIdObj = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
 
-        // Find the latest keywords document and filter for ENABLED keywords at database level
-        const keywordsDocs = await adsKeywordsPerformanceModel.aggregate([
-            { $match: { userId: userIdObj, country, region } },
-            { $sort: { createdAt: -1 } },
-            { $limit: 1 },
-            {
-                $project: {
-                    keywordsData: {
-                        $filter: {
-                            input: '$keywordsData',
-                            as: 'kw',
-                            cond: { $eq: ['$$kw.adKeywordStatus', 'ENABLED'] }
-                        }
-                    }
-                }
-            }
-        ]);
+        const startStr = startDate && endDate ? toYyyyMmDd(startDate) : null;
+        const endStr = startDate && endDate ? toYyyyMmDd(endDate) : null;
+        const window = startStr && endStr ? { startStr, endStr } : defaultReportWindowStrings();
 
-        const keywordsDoc = keywordsDocs[0] || null;
-
-        if (!keywordsDoc || !keywordsDoc.keywordsData || keywordsDoc.keywordsData.length === 0) {
+        const match = await resolveDailyOrLegacyMatch(
+            adsKeywordsPerformanceModel,
+            { userId: userIdObj, country, region },
+            window.startStr,
+            window.endStr
+        );
+        if (!match) {
             return { data: [], pagination: createPaginationMeta(page, limit, 0) };
         }
 
-        let keywordsData = keywordsDoc.keywordsData;
-
-        // Filter by date if provided
-        const dateRange = buildInclusiveDateRange(startDate, endDate);
-        if (dateRange) {
-            keywordsData = keywordsData.filter(k => {
-                return isInInclusiveRange(k.date, dateRange);
-            });
-        }
-
-        // Aggregate by keyword+campaign+adGroup
-        const aggregatedMap = new Map();
-        keywordsData.forEach(keyword => {
-            const uniqueKey = `${keyword.keyword || ''}|${keyword.campaignId || ''}|${keyword.adGroupId || keyword.adGroupName || ''}`;
-            
-            if (aggregatedMap.has(uniqueKey)) {
-                const existing = aggregatedMap.get(uniqueKey);
-                existing.cost += parseFloat(keyword.cost) || 0;
-                existing.attributedSales30d += parseFloat(keyword.attributedSales30d) || 0;
-                existing.impressions += parseFloat(keyword.impressions) || 0;
-                existing.clicks += parseFloat(keyword.clicks) || 0;
-            } else {
-                aggregatedMap.set(uniqueKey, {
-                    keyword: keyword.keyword,
-                    keywordId: keyword.keywordId,
-                    campaignName: keyword.campaignName,
-                    campaignId: keyword.campaignId,
-                    adGroupName: keyword.adGroupName,
-                    adGroupId: keyword.adGroupId,
-                    matchType: keyword.matchType,
-                    cost: parseFloat(keyword.cost) || 0,
-                    attributedSales30d: parseFloat(keyword.attributedSales30d) || 0,
-                    impressions: parseFloat(keyword.impressions) || 0,
-                    clicks: parseFloat(keyword.clicks) || 0,
-                    adKeywordStatus: keyword.adKeywordStatus || null
-                });
-            }
-        });
-
-        // Filter for wasted spend (cost > 0 and sales < 0.01)
-        const wastedKeywords = Array.from(aggregatedMap.values())
-            .filter(k => k.cost > 0 && k.attributedSales30d < 0.01)
-            .sort((a, b) => b.cost - a.cost);
-
-        const totalItems = wastedKeywords.length;
         const skip = (page - 1) * limit;
-        const paginatedData = wastedKeywords.slice(skip, skip + limit).map(k => ({
-            keyword: k.keyword,
-            keywordId: k.keywordId,
-            campaignName: k.campaignName || 'Unknown Campaign',
-            campaignId: k.campaignId,
-            adGroupName: k.adGroupName,
-            adGroupId: k.adGroupId,
-            matchType: k.matchType,
-            spend: parseFloat(k.cost.toFixed(2)),
-            sales: parseFloat(k.attributedSales30d.toFixed(2)),
-            impressions: k.impressions,
-            clicks: k.clicks,
-            status: k.adKeywordStatus || null
-        }));
+        const aggregationResult = await adsKeywordsPerformanceModel.aggregate([
+            { $match: match },
+            { $unwind: '$keywordsData' },
+            { $match: { 'keywordsData.adKeywordStatus': 'ENABLED' } },
+            {
+                $group: {
+                    _id: {
+                        keyword: '$keywordsData.keyword',
+                        campaignId: '$keywordsData.campaignId',
+                        adGroupKey: { $ifNull: ['$keywordsData.adGroupId', '$keywordsData.adGroupName'] },
+                    },
+                    keyword: { $first: '$keywordsData.keyword' },
+                    keywordId: { $first: '$keywordsData.keywordId' },
+                    campaignName: { $first: '$keywordsData.campaignName' },
+                    campaignId: { $first: '$keywordsData.campaignId' },
+                    adGroupName: { $first: '$keywordsData.adGroupName' },
+                    adGroupId: { $first: '$keywordsData.adGroupId' },
+                    matchType: { $first: '$keywordsData.matchType' },
+                    status: { $last: '$keywordsData.adKeywordStatus' },
+                    spend: { $sum: { $ifNull: ['$keywordsData.cost', 0] } },
+                    sales: { $sum: { $ifNull: ['$keywordsData.attributedSales30d', 0] } },
+                    impressions: { $sum: { $ifNull: ['$keywordsData.impressions', 0] } },
+                    clicks: { $sum: { $ifNull: ['$keywordsData.clicks', 0] } },
+                },
+            },
+            { $match: { spend: { $gt: 0 }, sales: { $lt: 0.01 } } },
+            {
+                $addFields: {
+                    ctr: {
+                        $cond: [{ $gt: ['$impressions', 0] },
+                            { $multiply: [{ $divide: ['$clicks', '$impressions'] }, 100] }, 0],
+                    },
+                    cpc: {
+                        $cond: [{ $gt: ['$clicks', 0] }, { $divide: ['$spend', '$clicks'] }, 0],
+                    },
+                    roas: {
+                        $cond: [{ $gt: ['$spend', 0] }, { $divide: ['$sales', '$spend'] }, 0],
+                    },
+                },
+            },
+            { $sort: { spend: -1 } },
+            {
+                $facet: {
+                    total: [{ $count: 'count' }],
+                    totalSpend: [{ $group: { _id: null, sum: { $sum: '$spend' } } }],
+                    data: [
+                        { $skip: skip },
+                        { $limit: limit },
+                        {
+                            $project: {
+                                _id: 0,
+                                keyword: 1,
+                                keywordId: 1,
+                                campaignName: { $ifNull: ['$campaignName', 'Unknown Campaign'] },
+                                campaignId: 1,
+                                adGroupName: 1,
+                                adGroupId: 1,
+                                matchType: 1,
+                                status: 1,
+                                spend: { $round: ['$spend', 2] },
+                                sales: { $round: ['$sales', 2] },
+                                impressions: 1,
+                                clicks: 1,
+                                ctr: { $round: ['$ctr', 2] },
+                                cpc: { $round: ['$cpc', 2] },
+                                roas: { $round: ['$roas', 2] },
+                            },
+                        },
+                    ],
+                },
+            },
+        ]);
 
-        logger.info(`[PPCCampaignAnalysis] Wasted spend keywords fetched in ${Date.now() - startTime}ms, count: ${paginatedData.length}`);
+        const facet = aggregationResult[0] || { total: [], totalSpend: [], data: [] };
+        const totalItems = facet.total[0]?.count || 0;
+        const totalWastedSpend = Math.round((facet.totalSpend[0]?.sum || 0) * 100) / 100;
+
+        logger.info(`[PPCCampaignAnalysis] Wasted spend keywords fetched in ${Date.now() - startTime}ms, count: ${facet.data.length}`);
         return {
-            data: paginatedData,
-            pagination: createPaginationMeta(page, limit, totalItems)
+            data: facet.data,
+            pagination: createPaginationMeta(page, limit, totalItems),
+            totalWastedSpend,
         };
     } catch (error) {
         logger.error('[PPCCampaignAnalysis] Error getting wasted spend keywords:', error);
@@ -358,11 +648,10 @@ const getCampaignsWithoutNegatives = async (userId, country, region, page = 1, l
     try {
         const userIdStr = userId?.toString() || userId;
 
-        // Fetch campaigns, negative keywords, and ad groups in parallel
         const [campaignDoc, negKeywordsDoc, adsGroupDoc] = await Promise.all([
-            Campaign.findOne({ userId: userIdStr, country, region }).sort({ createdAt: -1 }).lean(),
-            NegativeKeywords.findOne({ userId: userIdStr, country, region }).sort({ createdAt: -1 }).lean(),
-            AdsGroup.findOne({ userId: userIdStr, country, region }).sort({ createdAt: -1 }).lean()
+            loadLatestSnapshotDoc(Campaign, userIdStr, country, region),
+            loadLatestSnapshotDoc(NegativeKeywords, userIdStr, country, region),
+            loadLatestSnapshotDoc(AdsGroup, userIdStr, country, region)
         ]);
 
         const campaignData = campaignDoc?.campaignData || [];
@@ -438,83 +727,108 @@ const getTopPerformingKeywords = async (userId, country, region, page = 1, limit
     try {
         const userIdObj = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
 
-        // Find the latest keywords document
-        const keywordsDoc = await adsKeywordsPerformanceModel.findOne({ userId: userIdObj, country, region })
-            .sort({ createdAt: -1 })
-            .lean();
+        const startStr = startDate && endDate ? toYyyyMmDd(startDate) : null;
+        const endStr = startDate && endDate ? toYyyyMmDd(endDate) : null;
+        const window = startStr && endStr ? { startStr, endStr } : defaultReportWindowStrings();
 
-        if (!keywordsDoc || !keywordsDoc.keywordsData || keywordsDoc.keywordsData.length === 0) {
+        const match = await resolveDailyOrLegacyMatch(
+            adsKeywordsPerformanceModel,
+            { userId: userIdObj, country, region },
+            window.startStr,
+            window.endStr
+        );
+        if (!match) {
             return { data: [], pagination: createPaginationMeta(page, limit, 0) };
         }
 
-        let keywordsData = keywordsDoc.keywordsData;
-
-        // Filter by date if provided
-        const dateRange = buildInclusiveDateRange(startDate, endDate);
-        if (dateRange) {
-            keywordsData = keywordsData.filter(k => {
-                return isInInclusiveRange(k.date, dateRange);
-            });
-        }
-
-        // Aggregate by keyword+campaign+adGroup
-        const aggregatedMap = new Map();
-        keywordsData.forEach(keyword => {
-            const uniqueKey = `${keyword.keyword || ''}|${keyword.campaignId || ''}|${keyword.adGroupId || keyword.adGroupName || ''}`;
-            
-            if (aggregatedMap.has(uniqueKey)) {
-                const existing = aggregatedMap.get(uniqueKey);
-                existing.cost += parseFloat(keyword.cost) || 0;
-                existing.attributedSales30d += parseFloat(keyword.attributedSales30d) || 0;
-                existing.impressions += parseFloat(keyword.impressions) || 0;
-                existing.clicks += parseFloat(keyword.clicks) || 0;
-            } else {
-                aggregatedMap.set(uniqueKey, {
-                    keyword: keyword.keyword,
-                    keywordId: keyword.keywordId,
-                    campaignName: keyword.campaignName,
-                    campaignId: keyword.campaignId,
-                    adGroupName: keyword.adGroupName,
-                    adGroupId: keyword.adGroupId,
-                    matchType: keyword.matchType,
-                    cost: parseFloat(keyword.cost) || 0,
-                    attributedSales30d: parseFloat(keyword.attributedSales30d) || 0,
-                    impressions: parseFloat(keyword.impressions) || 0,
-                    clicks: parseFloat(keyword.clicks) || 0
-                });
-            }
-        });
-
-        // Filter for top performing (ACOS < 20%, sales > 100, impressions > 1000)
-        const topKeywords = Array.from(aggregatedMap.values())
-            .map(k => {
-                const acos = k.attributedSales30d > 0 ? (k.cost / k.attributedSales30d) * 100 : 0;
-                return { ...k, acos };
-            })
-            .filter(k => k.acos < 20 && k.acos > 0 && k.attributedSales30d > 100 && k.impressions > 1000)
-            .sort((a, b) => b.attributedSales30d - a.attributedSales30d);
-
-        const totalItems = topKeywords.length;
         const skip = (page - 1) * limit;
-        const paginatedData = topKeywords.slice(skip, skip + limit).map(k => ({
-            keyword: k.keyword,
-            keywordId: k.keywordId,
-            campaignName: k.campaignName || 'Unknown Campaign',
-            campaignId: k.campaignId,
-            adGroupName: k.adGroupName,
-            adGroupId: k.adGroupId,
-            matchType: k.matchType,
-            spend: parseFloat(k.cost.toFixed(2)),
-            sales: parseFloat(k.attributedSales30d.toFixed(2)),
-            impressions: k.impressions,
-            clicks: k.clicks,
-            acos: parseFloat(k.acos.toFixed(2))
-        }));
+        const aggregationResult = await adsKeywordsPerformanceModel.aggregate([
+            { $match: match },
+            { $unwind: '$keywordsData' },
+            {
+                $group: {
+                    _id: {
+                        keyword: '$keywordsData.keyword',
+                        campaignId: '$keywordsData.campaignId',
+                        adGroupKey: { $ifNull: ['$keywordsData.adGroupId', '$keywordsData.adGroupName'] },
+                    },
+                    keyword: { $first: '$keywordsData.keyword' },
+                    keywordId: { $first: '$keywordsData.keywordId' },
+                    campaignName: { $first: '$keywordsData.campaignName' },
+                    campaignId: { $first: '$keywordsData.campaignId' },
+                    adGroupName: { $first: '$keywordsData.adGroupName' },
+                    adGroupId: { $first: '$keywordsData.adGroupId' },
+                    matchType: { $first: '$keywordsData.matchType' },
+                    spend: { $sum: { $ifNull: ['$keywordsData.cost', 0] } },
+                    sales: { $sum: { $ifNull: ['$keywordsData.attributedSales30d', 0] } },
+                    impressions: { $sum: { $ifNull: ['$keywordsData.impressions', 0] } },
+                    clicks: { $sum: { $ifNull: ['$keywordsData.clicks', 0] } },
+                },
+            },
+            {
+                $addFields: {
+                    acos: {
+                        $cond: [{ $gt: ['$sales', 0] },
+                            { $multiply: [{ $divide: ['$spend', '$sales'] }, 100] }, 0],
+                    },
+                    ctr: {
+                        $cond: [{ $gt: ['$impressions', 0] },
+                            { $multiply: [{ $divide: ['$clicks', '$impressions'] }, 100] }, 0],
+                    },
+                    cpc: {
+                        $cond: [{ $gt: ['$clicks', 0] }, { $divide: ['$spend', '$clicks'] }, 0],
+                    },
+                    roas: {
+                        $cond: [{ $gt: ['$spend', 0] }, { $divide: ['$sales', '$spend'] }, 0],
+                    },
+                },
+            },
+            {
+                $match: {
+                    acos: { $gt: 0, $lt: 20 },
+                    sales: { $gt: 100 },
+                    impressions: { $gt: 1000 },
+                },
+            },
+            { $sort: { sales: -1 } },
+            {
+                $facet: {
+                    total: [{ $count: 'count' }],
+                    data: [
+                        { $skip: skip },
+                        { $limit: limit },
+                        {
+                            $project: {
+                                _id: 0,
+                                keyword: 1,
+                                keywordId: 1,
+                                campaignName: { $ifNull: ['$campaignName', 'Unknown Campaign'] },
+                                campaignId: 1,
+                                adGroupName: 1,
+                                adGroupId: 1,
+                                matchType: 1,
+                                spend: { $round: ['$spend', 2] },
+                                sales: { $round: ['$sales', 2] },
+                                impressions: 1,
+                                clicks: 1,
+                                acos: { $round: ['$acos', 2] },
+                                ctr: { $round: ['$ctr', 2] },
+                                cpc: { $round: ['$cpc', 2] },
+                                roas: { $round: ['$roas', 2] },
+                            },
+                        },
+                    ],
+                },
+            },
+        ]);
 
-        logger.info(`[PPCCampaignAnalysis] Top performing keywords fetched in ${Date.now() - startTime}ms, count: ${paginatedData.length}`);
+        const facet = aggregationResult[0] || { total: [], data: [] };
+        const totalItems = facet.total[0]?.count || 0;
+
+        logger.info(`[PPCCampaignAnalysis] Top performing keywords fetched in ${Date.now() - startTime}ms, count: ${facet.data.length}`);
         return {
-            data: paginatedData,
-            pagination: createPaginationMeta(page, limit, totalItems)
+            data: facet.data,
+            pagination: createPaginationMeta(page, limit, totalItems),
         };
     } catch (error) {
         logger.error('[PPCCampaignAnalysis] Error getting top performing keywords:', error);
@@ -533,76 +847,91 @@ const getSearchTermsZeroSales = async (userId, country, region, page = 1, limit 
     try {
         const userIdStr = userId?.toString() || userId;
 
-        // Find the latest search terms document
-        const searchTermsDoc = await SearchTerms.findOne({ userId: userIdStr, country, region })
-            .sort({ createdAt: -1 })
-            .lean();
+        const startStr = startDate && endDate ? toYyyyMmDd(startDate) : null;
+        const endStr = startDate && endDate ? toYyyyMmDd(endDate) : null;
+        const window = startStr && endStr ? { startStr, endStr } : defaultReportWindowStrings();
 
-        if (!searchTermsDoc || !searchTermsDoc.searchTermData || searchTermsDoc.searchTermData.length === 0) {
+        const match = await resolveDailyOrLegacyMatch(
+            SearchTerms,
+            { userId: userIdStr, country, region },
+            window.startStr,
+            window.endStr
+        );
+        if (!match) {
             return { data: [], pagination: createPaginationMeta(page, limit, 0) };
         }
 
-        let searchTermData = searchTermsDoc.searchTermData;
-
-        // Filter by date if provided
-        const dateRange = buildInclusiveDateRange(startDate, endDate);
-        if (dateRange) {
-            searchTermData = searchTermData.filter(st => {
-                return isInInclusiveRange(st.date, dateRange);
-            });
-        }
-
-        // Aggregate by searchTerm+campaign+adGroup
-        const aggregatedMap = new Map();
-        searchTermData.forEach(term => {
-            const uniqueKey = `${term.searchTerm || ''}|${term.campaignId || ''}|${term.adGroupId || term.adGroupName || ''}`;
-            
-            if (aggregatedMap.has(uniqueKey)) {
-                const existing = aggregatedMap.get(uniqueKey);
-                existing.sales += parseFloat(term.sales) || 0;
-                existing.spend += parseFloat(term.spend) || 0;
-                existing.clicks += parseFloat(term.clicks) || 0;
-                existing.impressions += parseFloat(term.impressions) || 0;
-            } else {
-                aggregatedMap.set(uniqueKey, {
-                    searchTerm: term.searchTerm,
-                    keyword: term.keyword,
-                    campaignName: term.campaignName,
-                    campaignId: term.campaignId,
-                    adGroupName: term.adGroupName,
-                    adGroupId: term.adGroupId,
-                    sales: parseFloat(term.sales) || 0,
-                    spend: parseFloat(term.spend) || 0,
-                    clicks: parseFloat(term.clicks) || 0,
-                    impressions: parseFloat(term.impressions) || 0
-                });
-            }
-        });
-
-        // Filter for zero sales (clicks >= 10 and sales < 0.01)
-        const zeroSalesTerms = Array.from(aggregatedMap.values())
-            .filter(t => t.clicks >= 10 && t.sales < 0.01)
-            .sort((a, b) => b.spend - a.spend);
-
-        const totalItems = zeroSalesTerms.length;
         const skip = (page - 1) * limit;
-        const paginatedData = zeroSalesTerms.slice(skip, skip + limit).map(t => ({
-            searchTerm: t.searchTerm,
-            keyword: t.keyword,
-            campaignName: t.campaignName || 'Unknown Campaign',
-            campaignId: t.campaignId,
-            adGroupName: t.adGroupName,
-            adGroupId: t.adGroupId,
-            clicks: t.clicks,
-            spend: parseFloat(t.spend.toFixed(2)),
-            sales: parseFloat(t.sales.toFixed(2)),
-            impressions: t.impressions
-        }));
+        const aggregationResult = await SearchTerms.aggregate([
+            { $match: match },
+            { $unwind: '$searchTermData' },
+            {
+                $group: {
+                    _id: {
+                        searchTerm: '$searchTermData.searchTerm',
+                        campaignId: '$searchTermData.campaignId',
+                        adGroupKey: { $ifNull: ['$searchTermData.adGroupId', '$searchTermData.adGroupName'] },
+                    },
+                    searchTerm: { $first: '$searchTermData.searchTerm' },
+                    keyword: { $first: '$searchTermData.keyword' },
+                    campaignName: { $first: '$searchTermData.campaignName' },
+                    campaignId: { $first: '$searchTermData.campaignId' },
+                    adGroupName: { $first: '$searchTermData.adGroupName' },
+                    adGroupId: { $first: '$searchTermData.adGroupId' },
+                    sales: { $sum: { $ifNull: ['$searchTermData.sales', 0] } },
+                    spend: { $sum: { $ifNull: ['$searchTermData.spend', 0] } },
+                    clicks: { $sum: { $ifNull: ['$searchTermData.clicks', 0] } },
+                    impressions: { $sum: { $ifNull: ['$searchTermData.impressions', 0] } },
+                },
+            },
+            { $match: { clicks: { $gte: 10 }, sales: { $lt: 0.01 } } },
+            {
+                $addFields: {
+                    ctr: {
+                        $cond: [{ $gt: ['$impressions', 0] },
+                            { $multiply: [{ $divide: ['$clicks', '$impressions'] }, 100] }, 0],
+                    },
+                    cpc: {
+                        $cond: [{ $gt: ['$clicks', 0] }, { $divide: ['$spend', '$clicks'] }, 0],
+                    },
+                },
+            },
+            { $sort: { spend: -1 } },
+            {
+                $facet: {
+                    total: [{ $count: 'count' }],
+                    data: [
+                        { $skip: skip },
+                        { $limit: limit },
+                        {
+                            $project: {
+                                _id: 0,
+                                searchTerm: 1,
+                                keyword: 1,
+                                campaignName: { $ifNull: ['$campaignName', 'Unknown Campaign'] },
+                                campaignId: 1,
+                                adGroupName: 1,
+                                adGroupId: 1,
+                                clicks: 1,
+                                spend: { $round: ['$spend', 2] },
+                                sales: { $round: ['$sales', 2] },
+                                impressions: 1,
+                                ctr: { $round: ['$ctr', 2] },
+                                cpc: { $round: ['$cpc', 2] },
+                            },
+                        },
+                    ],
+                },
+            },
+        ]);
 
-        logger.info(`[PPCCampaignAnalysis] Search terms with zero sales fetched in ${Date.now() - startTime}ms, count: ${paginatedData.length}`);
+        const facet = aggregationResult[0] || { total: [], data: [] };
+        const totalItems = facet.total[0]?.count || 0;
+
+        logger.info(`[PPCCampaignAnalysis] Search terms with zero sales fetched in ${Date.now() - startTime}ms, count: ${facet.data.length}`);
         return {
-            data: paginatedData,
-            pagination: createPaginationMeta(page, limit, totalItems)
+            data: facet.data,
+            pagination: createPaginationMeta(page, limit, totalItems),
         };
     } catch (error) {
         logger.error('[PPCCampaignAnalysis] Error getting search terms with zero sales:', error);
@@ -621,113 +950,145 @@ const getAutoCampaignInsights = async (userId, country, region, page = 1, limit 
     try {
         const userIdStr = userId?.toString() || userId;
 
-        // Fetch search terms, campaigns, and keywords in parallel
-        const [searchTermsDoc, campaignDoc, keywordDoc] = await Promise.all([
-            SearchTerms.findOne({ userId: userIdStr, country, region }).sort({ createdAt: -1 }).lean(),
-            Campaign.findOne({ userId: userIdStr, country, region }).sort({ createdAt: -1 }).lean(),
-            Keyword.findOne({ userId: userIdStr, country, region }).sort({ createdAt: -1 }).lean()
+        // Pre-fetch the two reference sets (tiny snapshot docs). Avoiding $lookup
+        // here keeps the heavy aggregation purely against SearchTerms.
+        const [campaignDoc, keywordDoc] = await Promise.all([
+            loadLatestSnapshotDoc(Campaign, userIdStr, country, region),
+            loadLatestSnapshotDoc(Keyword, userIdStr, country, region),
         ]);
-
-        if (!searchTermsDoc || !searchTermsDoc.searchTermData || searchTermsDoc.searchTermData.length === 0) {
-            return { data: [], pagination: createPaginationMeta(page, limit, 0) };
-        }
 
         const campaignData = campaignDoc?.campaignData || [];
         const keywords = keywordDoc?.keywordData || [];
 
-        let searchTermData = searchTermsDoc.searchTermData;
+        const autoCampaignIds = campaignData
+            .filter((c) => (c.targetingTypeLower || c.targetingType || '').toLowerCase() === 'auto')
+            .map((c) => c.campaignId)
+            .filter((id) => id != null);
 
-        // Filter by date if provided
-        const dateRange = buildInclusiveDateRange(startDate, endDate);
-        if (dateRange) {
-            searchTermData = searchTermData.filter(st => {
-                return isInInclusiveRange(st.date, dateRange);
-            });
+        if (autoCampaignIds.length === 0) {
+            return { data: [], pagination: createPaginationMeta(page, limit, 0) };
         }
 
-        // Identify auto and manual campaigns
-        const autoCampaigns = campaignData.filter(c => c.targetingType === 'auto');
-        const autoCampaignIds = new Set(autoCampaigns.map(c => c.campaignId));
-        
-        const manualCampaigns = campaignData.filter(c => c.targetingType === 'manual');
-        const manualCampaignIds = new Set(manualCampaigns.map(c => c.campaignId));
-
-        // Get keywords from manual campaigns (lowercase for comparison)
-        const manualKeywords = new Set(
-            keywords
-                .filter(k => manualCampaignIds.has(k.campaignId))
-                .map(k => (k.keywordText || '').toLowerCase())
+        const manualCampaignIds = new Set(
+            campaignData.filter((c) => (c.targetingTypeLower || c.targetingType || '').toLowerCase() === 'manual').map((c) => c.campaignId)
         );
+        const manualKeywordsLower = Array.from(new Set(
+            keywords
+                .filter((k) => manualCampaignIds.has(k.campaignId))
+                .map((k) => (k.keywordText || '').toLowerCase())
+                .filter(Boolean)
+        ));
 
-        // Aggregate search terms
-        const aggregatedMap = new Map();
-        searchTermData.forEach(term => {
-            const uniqueKey = `${term.searchTerm || ''}|${term.campaignId || ''}|${term.adGroupId || term.adGroupName || ''}`;
-            
-            if (aggregatedMap.has(uniqueKey)) {
-                const existing = aggregatedMap.get(uniqueKey);
-                existing.sales += parseFloat(term.sales) || 0;
-                existing.spend += parseFloat(term.spend) || 0;
-                existing.clicks += parseFloat(term.clicks) || 0;
-                existing.impressions += parseFloat(term.impressions) || 0;
-            } else {
-                aggregatedMap.set(uniqueKey, {
-                    searchTerm: term.searchTerm,
-                    keyword: term.keyword,
-                    campaignName: term.campaignName,
-                    campaignId: term.campaignId,
-                    adGroupName: term.adGroupName,
-                    adGroupId: term.adGroupId,
-                    sales: parseFloat(term.sales) || 0,
-                    spend: parseFloat(term.spend) || 0,
-                    clicks: parseFloat(term.clicks) || 0,
-                    impressions: parseFloat(term.impressions) || 0
-                });
-            }
-        });
+        const startStr = startDate && endDate ? toYyyyMmDd(startDate) : null;
+        const endStr = startDate && endDate ? toYyyyMmDd(endDate) : null;
+        const window = startStr && endStr ? { startStr, endStr } : defaultReportWindowStrings();
 
-        // Filter for auto campaign insights
-        const autoInsights = Array.from(aggregatedMap.values())
-            .filter(t => {
-                // Must have sales > 30
-                if (t.sales <= 30) return false;
-                // Must belong to an auto campaign
-                if (!t.campaignId || !autoCampaignIds.has(t.campaignId)) return false;
-                // Must NOT exist in manual campaigns
-                const existsInManual = manualKeywords.has((t.searchTerm || '').toLowerCase());
-                return !existsInManual;
-            })
-            .map(t => {
-                const acos = t.sales > 0 ? (t.spend / t.sales) * 100 : 0;
-                return {
-                    ...t,
-                    acos,
-                    action: 'Migrate to Manual Campaign'
-                };
-            })
-            .sort((a, b) => b.sales - a.sales);
+        const match = await resolveDailyOrLegacyMatch(
+            SearchTerms,
+            { userId: userIdStr, country, region },
+            window.startStr,
+            window.endStr
+        );
+        if (!match) {
+            return { data: [], pagination: createPaginationMeta(page, limit, 0) };
+        }
 
-        const totalItems = autoInsights.length;
         const skip = (page - 1) * limit;
-        const paginatedData = autoInsights.slice(skip, skip + limit).map(t => ({
-            searchTerm: t.searchTerm,
-            keyword: t.keyword || '',
-            campaignName: t.campaignName || 'Unknown Campaign',
-            campaignId: t.campaignId,
-            adGroupName: t.adGroupName,
-            adGroupId: t.adGroupId,
-            sales: parseFloat(t.sales.toFixed(2)),
-            spend: parseFloat(t.spend.toFixed(2)),
-            clicks: t.clicks,
-            impressions: t.impressions,
-            acos: parseFloat(t.acos.toFixed(2)),
-            action: t.action
-        }));
+        const aggregationResult = await SearchTerms.aggregate([
+            { $match: match },
+            { $unwind: '$searchTermData' },
+            { $match: { 'searchTermData.campaignId': { $in: autoCampaignIds } } },
+            ...(manualKeywordsLower.length > 0
+                ? [{
+                    $match: {
+                        $expr: {
+                            $not: {
+                                $in: [
+                                    { $toLower: { $ifNull: ['$searchTermData.searchTerm', ''] } },
+                                    manualKeywordsLower,
+                                ],
+                            },
+                        },
+                    },
+                }]
+                : []),
+            {
+                $group: {
+                    _id: {
+                        searchTerm: '$searchTermData.searchTerm',
+                        campaignId: '$searchTermData.campaignId',
+                        adGroupKey: { $ifNull: ['$searchTermData.adGroupId', '$searchTermData.adGroupName'] },
+                    },
+                    searchTerm: { $first: '$searchTermData.searchTerm' },
+                    keyword: { $first: '$searchTermData.keyword' },
+                    campaignName: { $first: '$searchTermData.campaignName' },
+                    campaignId: { $first: '$searchTermData.campaignId' },
+                    adGroupName: { $first: '$searchTermData.adGroupName' },
+                    adGroupId: { $first: '$searchTermData.adGroupId' },
+                    sales: { $sum: { $ifNull: ['$searchTermData.sales', 0] } },
+                    spend: { $sum: { $ifNull: ['$searchTermData.spend', 0] } },
+                    clicks: { $sum: { $ifNull: ['$searchTermData.clicks', 0] } },
+                    impressions: { $sum: { $ifNull: ['$searchTermData.impressions', 0] } },
+                },
+            },
+            { $match: { sales: { $gt: 30 } } },
+            {
+                $addFields: {
+                    acos: {
+                        $cond: [{ $gt: ['$sales', 0] },
+                            { $multiply: [{ $divide: ['$spend', '$sales'] }, 100] }, 0],
+                    },
+                    ctr: {
+                        $cond: [{ $gt: ['$impressions', 0] },
+                            { $multiply: [{ $divide: ['$clicks', '$impressions'] }, 100] }, 0],
+                    },
+                    cpc: {
+                        $cond: [{ $gt: ['$clicks', 0] }, { $divide: ['$spend', '$clicks'] }, 0],
+                    },
+                    roas: {
+                        $cond: [{ $gt: ['$spend', 0] }, { $divide: ['$sales', '$spend'] }, 0],
+                    },
+                },
+            },
+            { $sort: { sales: -1 } },
+            {
+                $facet: {
+                    total: [{ $count: 'count' }],
+                    data: [
+                        { $skip: skip },
+                        { $limit: limit },
+                        {
+                            $project: {
+                                _id: 0,
+                                searchTerm: 1,
+                                keyword: { $ifNull: ['$keyword', ''] },
+                                campaignName: { $ifNull: ['$campaignName', 'Unknown Campaign'] },
+                                campaignId: 1,
+                                adGroupName: 1,
+                                adGroupId: 1,
+                                sales: { $round: ['$sales', 2] },
+                                spend: { $round: ['$spend', 2] },
+                                clicks: 1,
+                                impressions: 1,
+                                acos: { $round: ['$acos', 2] },
+                                ctr: { $round: ['$ctr', 2] },
+                                cpc: { $round: ['$cpc', 2] },
+                                roas: { $round: ['$roas', 2] },
+                                action: { $literal: 'Migrate to Manual Campaign' },
+                            },
+                        },
+                    ],
+                },
+            },
+        ]);
 
-        logger.info(`[PPCCampaignAnalysis] Auto campaign insights fetched in ${Date.now() - startTime}ms, count: ${paginatedData.length}`);
+        const facet = aggregationResult[0] || { total: [], data: [] };
+        const totalItems = facet.total[0]?.count || 0;
+
+        logger.info(`[PPCCampaignAnalysis] Auto campaign insights fetched in ${Date.now() - startTime}ms, count: ${facet.data.length}`);
         return {
-            data: paginatedData,
-            pagination: createPaginationMeta(page, limit, totalItems)
+            data: facet.data,
+            pagination: createPaginationMeta(page, limit, totalItems),
         };
     } catch (error) {
         logger.error('[PPCCampaignAnalysis] Error getting auto campaign insights:', error);
@@ -739,19 +1100,21 @@ const getAutoCampaignInsights = async (userId, country, region, page = 1, limit 
  * Get tab counts for all campaign analysis tabs
  * Used to show counts in tab labels without loading full data
  */
-const getTabCounts = async (userId, country, region) => {
+const getTabCounts = async (userId, country, region, startDate = null, endDate = null) => {
     const startTime = Date.now();
-    logger.info(`[PPCCampaignAnalysis] Getting tab counts for user: ${userId}`);
+    logger.info(`[PPCCampaignAnalysis] Getting tab counts for user: ${userId} window=${startDate || 'default'}→${endDate || 'default'}`);
 
     try {
-        // Fetch all tab data with limit 0 to get just counts
+        // Fetch all tab data with limit 0 to get just counts. The five tabs
+        // with a time dimension honor the Calendar window; "Campaigns Without
+        // Negatives" is snapshot-based and ignores the dates.
         const [highAcos, wastedSpend, noNegatives, topKeywords, zeroSales, autoInsights] = await Promise.all([
-            getHighAcosCampaigns(userId, country, region, 1, 1),
-            getWastedSpendKeywords(userId, country, region, 1, 1),
+            getHighAcosCampaigns(userId, country, region, 1, 1, startDate, endDate),
+            getWastedSpendKeywords(userId, country, region, 1, 1, startDate, endDate),
             getCampaignsWithoutNegatives(userId, country, region, 1, 1),
-            getTopPerformingKeywords(userId, country, region, 1, 1),
-            getSearchTermsZeroSales(userId, country, region, 1, 1),
-            getAutoCampaignInsights(userId, country, region, 1, 1)
+            getTopPerformingKeywords(userId, country, region, 1, 1, startDate, endDate),
+            getSearchTermsZeroSales(userId, country, region, 1, 1, startDate, endDate),
+            getAutoCampaignInsights(userId, country, region, 1, 1, startDate, endDate)
         ]);
 
         const counts = {
@@ -771,10 +1134,24 @@ const getTabCounts = async (userId, country, region) => {
     }
 };
 
+/**
+ * Total wasted spend for dashboard / KPI boxes — same rules as Campaign Audit Tab 1.
+ * Aggregates per-day keyword docs, groups by keyword+campaign+adGroup, ENABLED only,
+ * spend > 0 && sales < 0.01.
+ */
+const getTotalWastedSpend = async (userId, country, region, startDate = null, endDate = null) => {
+    const result = await getWastedSpendKeywords(userId, country, region, 1, 1, startDate, endDate);
+    return {
+        totalItems: result.pagination?.totalItems || 0,
+        totalWastedSpend: result.totalWastedSpend ?? 0,
+    };
+};
+
 module.exports = {
     getPPCKPISummary,
     getHighAcosCampaigns,
     getWastedSpendKeywords,
+    getTotalWastedSpend,
     getCampaignsWithoutNegatives,
     getTopPerformingKeywords,
     getSearchTermsZeroSales,

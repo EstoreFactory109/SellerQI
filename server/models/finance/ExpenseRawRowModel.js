@@ -42,6 +42,7 @@ const ExpenseRawRowSchema = new mongoose.Schema(
     amountType: { type: String, default: '' },
     amountDescription: { type: String, default: '' },
     sku: { type: String, default: 'N/A' },
+    asin: { type: String, default: '', index: true },
     orderId: { type: String, default: '' },
     transactionType: { type: String, default: '' },
     postedDate: { type: Date, default: null },
@@ -53,6 +54,7 @@ const ExpenseRawRowSchema = new mongoose.Schema(
 
 ExpenseRawRowSchema.index({ User: 1, country: 1, region: 1 });
 ExpenseRawRowSchema.index({ User: 1, country: 1, region: 1, postedDate: -1 });
+ExpenseRawRowSchema.index({ User: 1, country: 1, region: 1, asin: 1, postedDate: -1 });
 ExpenseRawRowSchema.index({ reportId: 1, User: 1 });
 ExpenseRawRowSchema.index({ User: 1, country: 1, region: 1, dedupKey: 1 }, { unique: true, sparse: true });
 

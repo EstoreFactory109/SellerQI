@@ -17,8 +17,11 @@ const logger = require('../../utils/Logger.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
+const mongoose = require('mongoose');
 const AsinWiseSalesRun = require('../../models/finance/AsinWiseSalesRunModel.js');
 const AsinWiseSalesItem = require('../../models/finance/AsinWiseSalesItemModel.js');
+const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
+const DataFetchTracking = require('../../models/system/DataFetchTrackingModel.js');
 
 // Chunk size for yielding to event loop during large data processing
 const YIELD_CHUNK_SIZE = 500;
@@ -257,7 +260,7 @@ const getTop4ProductsByIssuesOptimized = async (userId, region, country) => {
  * OPTIMIZED: Get top 4 products to fix by highest sales with issues.
  *
  * Data sources:
- * - Sales: AsinWiseSalesRun + AsinWiseSalesItem (same finance source as profitability page)
+ * - Sales: DailySkuFinance (new unified finance flow)
  * - Issues: Seller.sellerAccount[].products
  */
 const getTop4ProductsBySalesWithIssuesOptimized = async (userId, region, country) => {
@@ -272,33 +275,14 @@ const getTop4ProductsBySalesWithIssuesOptimized = async (userId, region, country
             return asinMatch ? asinMatch[0] : compact;
         };
 
-        let [latestSalesRun, sellerData] = await Promise.all([
-            AsinWiseSalesRun.findOne(
-                { User: userId, country, region },
-                { _id: 1, generatedAt: 1, country: 1, region: 1 }
-            ).sort({ generatedAt: -1 }).lean(),
+        const { getSyncStatus } = require('../Finance/FinanceDashboardReadService.js');
+        const [syncStatus, sellerData] = await Promise.all([
+            getSyncStatus({ userId, country, region }),
             Seller.findOne(
                 { User: userId },
                 { sellerAccount: 1 }
             ).lean()
         ]);
-
-        // Fallback: if strict country/region run is unavailable, use latest run for the user.
-        if (!latestSalesRun?._id) {
-            latestSalesRun = await AsinWiseSalesRun.findOne(
-                { User: userId },
-                { _id: 1, generatedAt: 1, country: 1, region: 1 }
-            ).sort({ generatedAt: -1 }).lean();
-        }
-
-        if (!latestSalesRun?._id) {
-            return [];
-        }
-
-        const salesRows = await AsinWiseSalesItem.find(
-            { runId: latestSalesRun._id },
-            { asin: 1, last30Days: 1, _id: 0 }
-        ).lean();
 
         const sellerAccounts = Array.isArray(sellerData?.sellerAccount) ? sellerData.sellerAccount : [];
         const matchedAccount =
@@ -327,18 +311,50 @@ const getTop4ProductsBySalesWithIssuesOptimized = async (userId, region, country
             });
         }
 
-        const salesByAsin = new Map();
-        for (const saleRow of (salesRows || [])) {
-            const asin = normalizeAsin(saleRow?.asin);
-            if (!asin) continue;
-            const prev = salesByAsin.get(asin) || { sales: 0, quantity: 0 };
-            prev.sales += Number(saleRow?.last30Days?.totalRevenue || 0);
-            prev.quantity += Number(saleRow?.last30Days?.totalUnits || 0);
-            salesByAsin.set(asin, prev);
+        if (issueByAsin.size === 0) {
+            return [];
         }
 
-        // Build from issue products first (never empty when issue products exist),
-        // then enrich with sales if available.
+        // Determine date range from the new finance flow
+        const endDate = syncStatus?.latestDate || new Date().toISOString().slice(0, 10);
+        const start = new Date(endDate);
+        start.setDate(start.getDate() - 29);
+        const startDate = syncStatus?.earliestDate
+            ? (start.toISOString().slice(0, 10) < syncStatus.earliestDate
+                ? syncStatus.earliestDate
+                : start.toISOString().slice(0, 10))
+            : start.toISOString().slice(0, 10);
+
+        const userObjId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+
+        const salesRows = await DailySkuFinance.aggregate([
+            {
+                $match: {
+                    User: userObjId,
+                    country,
+                    region,
+                    date: { $gte: startDate, $lte: endDate },
+                },
+            },
+            {
+                $group: {
+                    _id: '$asin',
+                    sales: { $sum: '$productSales' },
+                    quantity: { $sum: '$units' },
+                },
+            },
+        ]);
+
+        const salesByAsin = new Map();
+        for (const row of salesRows) {
+            const asin = normalizeAsin(row._id);
+            if (!asin) continue;
+            salesByAsin.set(asin, {
+                sales: Math.round((row.sales || 0) * 100) / 100,
+                quantity: Number(row.quantity || 0),
+            });
+        }
+
         const products = Array.from(issueByAsin.entries())
             .map(([asin, issueMeta]) => {
                 const salesMeta = salesByAsin.get(asin) || { sales: 0, quantity: 0 };
@@ -362,11 +378,11 @@ const getTop4ProductsBySalesWithIssuesOptimized = async (userId, region, country
             userId,
             region,
             country,
-            salesRows: salesRows.length,
+            financeRows: salesRows.length,
             issueCandidates: issueByAsin.size,
             salesMatchedCandidates: Array.from(issueByAsin.keys()).filter((asin) => salesByAsin.has(asin)).length,
             productsWithIssues: products.length,
-            salesSnapshotAt: latestSalesRun.generatedAt,
+            dateRange: `${startDate} → ${endDate}`,
             elapsedMs: Date.now() - startTime
         });
 
@@ -692,13 +708,13 @@ const calculateSponsoredAdsErrors = (
     // 4. Auto Campaign Insights - Only count those that need migration
     // Get auto campaigns
     const autoCampaigns = Array.isArray(campaignData) 
-        ? campaignData.filter(campaign => campaign.targetingType === 'auto')
+        ? campaignData.filter(campaign => (campaign.targetingTypeLower || campaign.targetingType || '').toLowerCase() === 'auto')
         : [];
     const autoCampaignIds = autoCampaigns.map(campaign => campaign.campaignId);
     
     // Get manual campaigns for checking if keywords exist there
     const manualCampaigns = Array.isArray(campaignData)
-        ? campaignData.filter(campaign => campaign.targetingType === 'manual')
+        ? campaignData.filter(campaign => (campaign.targetingTypeLower || campaign.targetingType || '').toLowerCase() === 'manual')
         : [];
     const manualCampaignIds = manualCampaigns.map(campaign => campaign.campaignId);
     

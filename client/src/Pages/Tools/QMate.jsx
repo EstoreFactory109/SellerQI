@@ -1125,6 +1125,8 @@ const QMate = () => {
         followUps: assistantPayload.follow_up_questions || [],
         needsClarification: Boolean(assistantPayload.needs_clarification),
         clarifyingQuestions: Array.isArray(assistantPayload.clarifying_questions) ? assistantPayload.clarifying_questions : [],
+        // Phase 3 / Task 3.4: new structured clarification options (preferred)
+        clarificationOptions: Array.isArray(assistantPayload.clarification_options) ? assistantPayload.clarification_options : [],
         contentActions: assistantPayload.content_actions || [],
         suggestedTitle: assistantPayload.suggested_title || null,
         suggestedBulletPoints: assistantPayload.suggested_bullet_points || null,
@@ -1435,24 +1437,63 @@ const QMate = () => {
                       </div>
                     )}
 
-                    {message.role === 'assistant' && message.needsClarification && message.clarifyingQuestions && message.clarifyingQuestions.length > 0 && (
-                      <div className="mt-3">
-                        <p className="text-[11px] font-semibold text-amber-400/90 mb-1">
-                          Please choose one so I can help:
-                        </p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {message.clarifyingQuestions.map((q, idx) => (
-                            <button
-                              key={idx}
-                              type="button"
-                              onClick={() => handleSuggestionClick(q)}
-                              className="text-[11px] px-2 py-1 rounded-full bg-[#161b22] border border-amber-500/40 hover:border-amber-400/70 text-gray-300 hover:text-white transition-colors"
-                            >
-                              {q}
-                            </button>
-                          ))}
+                    {/*
+                      Phase 3 / Task 3.4: clarification rendering.
+                      Prefer the new structured `clarificationOptions` array
+                      (each entry is { id, label, resolved_prompt }) and fall
+                      back to the legacy `clarifyingQuestions` string array
+                      so older server responses still render as clickable chips.
+                      Both paths call `handleSuggestionClick`, the same helper
+                      used by follow-up chips, which fills the input box.
+                    */}
+                    {message.role === 'assistant' && message.needsClarification && (
+                      (message.clarificationOptions && message.clarificationOptions.length > 0) ? (
+                        <div className="mt-3">
+                          <p className="text-[11px] font-semibold text-amber-400/90 mb-1.5">
+                            I need a bit more detail to give you the best answer:
+                          </p>
+                          <div className="flex flex-col gap-1.5">
+                            {message.clarificationOptions.map((option, idx) => (
+                              <button
+                                key={option.id || idx}
+                                type="button"
+                                onClick={() => handleSuggestionClick(option.resolved_prompt || option.label)}
+                                className="text-left text-[12px] px-3 py-2 rounded-lg bg-[#161b22] border border-amber-500/40 hover:border-amber-400/70 hover:bg-[#1a2028] text-gray-200 hover:text-white transition-colors flex items-center gap-2"
+                              >
+                                <span className="flex-1 leading-snug">{option.label}</span>
+                                {option.needs_followup && (
+                                  <span className="text-[10px] text-amber-400/70 shrink-0">needs detail</span>
+                                )}
+                              </button>
+                            ))}
+                          </div>
                         </div>
-                      </div>
+                      ) : (
+                        message.clarifyingQuestions && message.clarifyingQuestions.length > 0 && (
+                          <div className="mt-3">
+                            <p className="text-[11px] font-semibold text-amber-400/90 mb-1">
+                              Please choose one so I can help:
+                            </p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {message.clarifyingQuestions.map((q, idx) => {
+                                // Strip "Option N:" prefix if present for the button label.
+                                const labelMatch = typeof q === 'string' && q.match(/^Option\s*\d+[:\s]*(.*)/i);
+                                const label = labelMatch ? labelMatch[1] : q;
+                                return (
+                                  <button
+                                    key={idx}
+                                    type="button"
+                                    onClick={() => handleSuggestionClick(q)}
+                                    className="text-[11px] px-2 py-1 rounded-full bg-[#161b22] border border-amber-500/40 hover:border-amber-400/70 text-gray-300 hover:text-white transition-colors"
+                                  >
+                                    {label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )
+                      )
                     )}
 
                     {message.role === 'assistant' && message.followUps && message.followUps.length > 0 && (
@@ -1461,16 +1502,28 @@ const QMate = () => {
                           You can ask:
                         </p>
                         <div className="flex flex-wrap gap-1.5">
-                          {message.followUps.map((q, idx) => (
-                            <button
-                              key={idx}
-                              type="button"
-                              onClick={() => handleSuggestionClick(q)}
-                              className="text-[11px] px-2 py-1 rounded-full bg-[#161b22] border border-[#30363d] hover:border-blue-500/60 text-gray-300 hover:text-white transition-colors"
-                            >
-                              {q}
-                            </button>
-                          ))}
+                          {/*
+                            Phase 4 / Task 4.2: follow-ups can be either a
+                            legacy string ("Show me X") or a structured
+                            { label, prompt } object emitted by FollowUpGenerator.
+                            Display `label`, send `prompt` on click — both
+                            collapse to the same string when the entry is plain.
+                          */}
+                          {message.followUps.map((item, idx) => {
+                            const isStructured = item && typeof item === 'object' && typeof item.label === 'string';
+                            const label = isStructured ? item.label : String(item || '');
+                            const prompt = isStructured ? (item.prompt || item.label) : String(item || '');
+                            return (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => handleSuggestionClick(prompt)}
+                                className="text-[11px] px-2 py-1 rounded-full bg-[#161b22] border border-[#30363d] hover:border-blue-500/60 text-gray-300 hover:text-white transition-colors"
+                              >
+                                {label}
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     )}

@@ -1,5 +1,7 @@
 const mongoose = require('mongoose');
 const ExpenseRawRow = require('../../models/finance/ExpenseRawRowModel.js');
+const ExpenseReportRun = require('../../models/finance/ExpenseReportRunModel.js');
+const ExpenseSkuAgg = require('../../models/finance/ExpenseSkuAggModel.js');
 const AsinWiseSalesRun = require('../../models/finance/AsinWiseSalesRunModel.js');
 const AsinWiseSalesItem = require('../../models/finance/AsinWiseSalesItemModel.js');
 const AsinWiseSalesDateItem = require('../../models/finance/AsinWiseSalesDateItemModel.js');
@@ -39,25 +41,189 @@ function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+/**
+ * Build ASIN ↔ SKU mappings from the seller's product catalog.
+ *
+ * A single ASIN can map to multiple SKUs (e.g., FBA + MFN variants, multi-warehouse,
+ * or historical relisting). Expense rows are stored per-SKU, so to get accurate
+ * expenses for an ASIN we must sum across ALL of its SKUs.
+ *
+ * @returns {{
+ *   asinToInfo: Map<string, { skus: string[], productName: string }>,
+ *   skuToAsin: Map<string, string>
+ * }}
+ */
 async function getAsinSkuMap(userId, country, region) {
+  const empty = { asinToInfo: new Map(), skuToAsin: new Map() };
   const seller = await Seller.findOne({ User: toObjectId(userId) })
     .sort({ createdAt: -1 })
     .lean();
-  if (!seller) return new Map();
+  if (!seller) return empty;
 
   const account = (seller.sellerAccount || []).find(
     (a) => a.country === country && a.region === region
   );
-  if (!account || !account.products) return new Map();
+  if (!account || !account.products) return empty;
+
+  const asinToInfo = new Map();
+  const skuToAsin = new Map();
+  for (const p of account.products) {
+    const asin = p.asin;
+    const sku = (p.sku || '').trim();
+    if (!asin) continue;
+
+    const existing = asinToInfo.get(asin) || { skus: [], productName: '' };
+    if (sku && !existing.skus.includes(sku)) existing.skus.push(sku);
+    if (!existing.productName && p.itemName) existing.productName = p.itemName;
+    asinToInfo.set(asin, existing);
+
+    if (sku) skuToAsin.set(sku, asin);
+  }
+  return { asinToInfo, skuToAsin };
+}
+
+/**
+ * Map period-based queries (7/14/30 days) to the pre-computed period stored
+ * in ExpenseSkuAgg. `daysBack` default at ingestion is 30, so `'all'` is the
+ * full ingestion window ≈ last 30 days.
+ */
+function mapPeriodDaysToAggPeriod(periodDays) {
+  const n = Number(periodDays);
+  if (n === 7) return 'last7';
+  if (n === 14) return 'last14';
+  if (n === 30) return 'all';
+  return null;
+}
+
+async function getLatestExpenseRunId(userId, country, region) {
+  const run = await ExpenseReportRun.findOne({
+    User: toObjectId(userId),
+    country,
+    region,
+  })
+    .sort({ generatedAt: -1 })
+    .select({ _id: 1 })
+    .lean();
+  return run ? run._id : null;
+}
+
+/**
+ * Build sku → expense-summary map from the pre-computed ExpenseSkuAgg
+ * collection. Used for period-based profitability queries (7/14/30), where
+ * the ingestion pipeline has already aggregated per-SKU totals at save time.
+ *
+ * We drop `Advertising / PPC` entries from the breakdown (PPC has sku='N/A'
+ * in practice but filtering defensively) and exclude empty/'N/A' SKU docs
+ * since they are not attributable to an ASIN.
+ */
+async function buildSkuExpMapFromAgg({ userId, country, region, aggPeriod }) {
+  const runId = await getLatestExpenseRunId(userId, country, region);
+  if (!runId) return new Map();
+
+  const skuDocs = await ExpenseSkuAgg.find({ runId, period: aggPeriod }).lean();
 
   const map = new Map();
-  for (const p of account.products) {
-    if (p.asin) {
-      map.set(p.asin, {
-        sku: p.sku || '',
-        productName: p.itemName || '',
-      });
-    }
+  for (const doc of skuDocs) {
+    const sku = (doc.sku || '').trim();
+    if (!sku || sku === 'N/A') continue;
+
+    const breakdown = (doc.breakdown || [])
+      .filter((b) => b && b.category && b.category !== 'Advertising / PPC')
+      .map((b) => ({
+        category: b.category,
+        amount: Math.abs(round2(b.amount)),
+      }))
+      .sort((a, b) => b.amount - a.amount);
+
+    const totalExpenses = round2(breakdown.reduce((s, b) => s + b.amount, 0));
+    const amazonFees = round2(
+      breakdown.reduce(
+        (sum, b) => (isAmazonFee(b.category) ? sum + b.amount : sum),
+        0
+      )
+    );
+
+    map.set(sku, {
+      totalExpenses,
+      amazonFees: Math.abs(amazonFees),
+      // ExpenseSkuAgg breakdown is keyed by category only — no per-SKU refund
+      // split is stored, so refunds aren't available in this path. The
+      // profitability table UI doesn't render per-row refunds today.
+      refunds: 0,
+      breakdown,
+    });
+  }
+  return map;
+}
+
+/**
+ * Build sku → expense-summary map from ExpenseRawRow by aggregating rows
+ * whose `postedDate` falls in the given window. Used for custom date-range
+ * queries (where pre-computed aggregates don't cover the arbitrary window).
+ */
+async function buildSkuExpMapFromRaw({ userId, country, region, fromDate, toDate }) {
+  const uid = toObjectId(userId);
+  const expBySku = await ExpenseRawRow.aggregate([
+    {
+      $match: {
+        User: uid,
+        country,
+        region,
+        postedDate: { $gte: fromDate, $lte: toDate },
+        category: { $ne: 'Advertising / PPC' },
+      },
+    },
+    {
+      $group: {
+        _id: { sku: '$sku', category: '$category' },
+        amount: { $sum: '$amount' },
+        count: { $sum: 1 },
+        refundAmount: {
+          $sum: { $cond: [{ $eq: ['$transactionType', 'Refund'] }, '$amount', 0] },
+        },
+      },
+    },
+    {
+      $group: {
+        _id: '$_id.sku',
+        totalExpenses: { $sum: '$amount' },
+        refunds: { $sum: '$refundAmount' },
+        breakdown: {
+          $push: {
+            category: '$_id.category',
+            amount: '$amount',
+            count: '$count',
+          },
+        },
+      },
+    },
+  ]);
+
+  const map = new Map();
+  for (const r of expBySku) {
+    const rawSku = (r._id || '').trim();
+    if (!rawSku || rawSku === 'N/A') continue;
+
+    const breakdown = (r.breakdown || [])
+      .map((b) => ({
+        category: b.category,
+        amount: Math.abs(round2(b.amount)),
+        count: Number(b.count) || 0,
+      }))
+      .sort((a, b) => b.amount - a.amount);
+    const totalExpenses = round2(breakdown.reduce((s, b) => s + b.amount, 0));
+    const amazonFees = round2(
+      breakdown.reduce(
+        (sum, b) => (isAmazonFee(b.category) ? sum + b.amount : sum),
+        0
+      )
+    );
+    map.set(rawSku, {
+      totalExpenses,
+      amazonFees: Math.abs(amazonFees),
+      refunds: Math.abs(round2(r.refunds)),
+      breakdown,
+    });
   }
   return map;
 }
@@ -286,108 +452,106 @@ async function getChartByDateRange({ userId, country, region, from, to }) {
 // 3) TABLE (ASIN-keyed, joined sales + expenses)
 // ──────────────────────────────────────────────────────────────
 
-/** Full profitability table rows (same logic as paginated `getTable`). */
-async function buildAllProfitabilityTableRows(userId, country, region, fromDate, toDate) {
-  const uid = toObjectId(userId);
+/**
+ * Full profitability table rows (same logic as paginated `getTable`).
+ *
+ * Expense source selection:
+ *  - `aggPeriod` set ('last7' | 'last14' | 'all')  → pre-computed ExpenseSkuAgg.
+ *    Used for period-based endpoints (7/14/30 days) where the expense ingestion
+ *    already aggregated per-SKU totals at save time (see ExpenseReportService).
+ *    This avoids re-aggregating raw rows and avoids dropping rows whose
+ *    `postedDate` is null (e.g. Debt Recovery, Loan Servicing), which the raw
+ *    postedDate window query silently excludes.
+ *  - `aggPeriod` null  → ExpenseRawRow aggregation filtered by postedDate window.
+ *    Used for arbitrary custom date ranges not covered by pre-computed periods.
+ */
+async function buildAllProfitabilityTableRows(
+  userId,
+  country,
+  region,
+  fromDate,
+  toDate,
+  aggPeriod = null
+) {
   const fromStr = formatDateKey(fromDate);
   const toStr = formatDateKey(toDate);
 
-  const [asinSkuMap, allRunIds, expBySku] = await Promise.all([
+  const [{ asinToInfo, skuToAsin }, allRunIds, skuExpMap] = await Promise.all([
     getAsinSkuMap(userId, country, region),
     getAllSalesRunIds(userId, country, region),
-    ExpenseRawRow.aggregate([
-      {
-        $match: {
-          User: uid,
-          country,
-          region,
-          postedDate: { $gte: fromDate, $lte: toDate },
-          category: { $ne: 'Advertising / PPC' },
-        },
-      },
-      {
-        $group: {
-          _id: { sku: '$sku', category: '$category' },
-          amount: { $sum: '$amount' },
-          count: { $sum: 1 },
-          hasRefund: {
-            $sum: { $cond: [{ $eq: ['$transactionType', 'Refund'] }, 1, 0] },
-          },
-          refundAmount: {
-            $sum: { $cond: [{ $eq: ['$transactionType', 'Refund'] }, '$amount', 0] },
-          },
-        },
-      },
-      {
-        $group: {
-          _id: '$_id.sku',
-          totalExpenses: { $sum: '$amount' },
-          refunds: { $sum: '$refundAmount' },
-          breakdown: {
-            $push: {
-              category: '$_id.category',
-              amount: '$amount',
-              count: '$count',
-            },
-          },
-        },
-      },
-    ]),
+    aggPeriod
+      ? buildSkuExpMapFromAgg({ userId, country, region, aggPeriod })
+      : buildSkuExpMapFromRaw({ userId, country, region, fromDate, toDate }),
   ]);
 
-  const skuExpMap = new Map(
-    expBySku.map((r) => {
-      const breakdown = (r.breakdown || [])
-        .map((b) => ({
-          category: b.category,
-          amount: Math.abs(round2(b.amount)),
-          count: Number(b.count) || 0,
-        }))
-        .sort((a, b) => b.amount - a.amount);
-      const totalExpenses = round2(breakdown.reduce((s, b) => s + b.amount, 0));
-      const amazonFees = round2(
-        breakdown.reduce((sum, b) => {
-          if (!isAmazonFee(b.category)) return sum;
-          return sum + (Number(b.amount) || 0);
-        }, 0)
-      );
-      return [
-        r._id || 'N/A',
-        {
-          totalExpenses,
-          amazonFees: Math.abs(amazonFees),
-          refunds: Math.abs(round2(r.refunds)),
-          breakdown,
-        },
-      ];
-    })
-  );
+  // Aggregate per-SKU expense data across a set of SKUs belonging to the same
+  // ASIN. Merges breakdowns by category so the UI shows a single coherent
+  // per-ASIN breakdown instead of one SKU's partial view.
+  const aggregateExpensesForSkus = (skus) => {
+    const breakdownMap = new Map();
+    let totalExpenses = 0;
+    let amazonFees = 0;
+    let refunds = 0;
+    const seen = new Set();
+
+    for (const sku of skus) {
+      if (!sku || seen.has(sku)) continue;
+      seen.add(sku);
+      const exp = skuExpMap.get(sku);
+      if (!exp) continue;
+
+      totalExpenses += exp.totalExpenses;
+      amazonFees += exp.amazonFees;
+      refunds += exp.refunds;
+
+      for (const b of exp.breakdown || []) {
+        const cur = breakdownMap.get(b.category) || { amount: 0, count: 0 };
+        cur.amount += Number(b.amount) || 0;
+        cur.count += Number(b.count) || 0;
+        breakdownMap.set(b.category, cur);
+      }
+    }
+
+    const breakdown = Array.from(breakdownMap.entries())
+      .map(([category, v]) => ({
+        category,
+        amount: round2(v.amount),
+        count: v.count,
+      }))
+      .sort((a, b) => b.amount - a.amount);
+
+    return {
+      totalExpenses: round2(totalExpenses),
+      amazonFees: round2(amazonFees),
+      refunds: round2(refunds),
+      breakdown,
+    };
+  };
 
   let salesByAsin = [];
   if (allRunIds.length) {
     salesByAsin = await aggregateSalesDateItemsAcrossRuns(allRunIds, fromStr, toStr, 'asin');
   }
 
-  const skuToAsinMap = new Map();
-  for (const [asin, info] of asinSkuMap) {
-    if (info.sku) skuToAsinMap.set(info.sku, asin);
-  }
-
   const rows = [];
   const seenAsins = new Set();
+  const consumedSkus = new Set();
 
   for (const sale of salesByAsin) {
     const asin = sale._id;
     seenAsins.add(asin);
-    const sellerInfo = asinSkuMap.get(asin) || {};
-    const sku = sellerInfo.sku || '';
-    const exp = skuExpMap.get(sku) || { totalExpenses: 0, amazonFees: 0, refunds: 0, breakdown: [] };
+    const sellerInfo = asinToInfo.get(asin) || { skus: [], productName: '' };
+    const skus = sellerInfo.skus || [];
+    const exp = aggregateExpensesForSkus(skus);
+    for (const s of skus) consumedSkus.add(s);
+
     const totalSales = round2(sale.totalRevenue);
     const grossProfit = round2(totalSales - exp.totalExpenses);
 
     rows.push({
       asin,
-      sku,
+      sku: skus[0] || '',
+      skus,
       productName: sellerInfo.productName || '',
       totalSales,
       unitsSold: Number(sale.totalUnits) || 0,
@@ -399,36 +563,66 @@ async function buildAllProfitabilityTableRows(userId, country, region, fromDate,
     });
   }
 
-  for (const [sku, exp] of skuExpMap) {
-    const asin = skuToAsinMap.get(sku);
-    if (asin && !seenAsins.has(asin)) {
-      const sellerInfo = asinSkuMap.get(asin) || {};
-      rows.push({
-        asin,
-        sku,
-        productName: sellerInfo.productName || '',
-        totalSales: 0,
-        unitsSold: 0,
-        totalExpenses: exp.totalExpenses,
-        amazonFees: exp.amazonFees,
-        refunds: exp.refunds,
-        breakdown: exp.breakdown || [],
-        grossProfit: round2(0 - exp.totalExpenses),
-      });
-    }
+  // Expense-only rows: SKUs that have expenses in the window but whose ASIN
+  // had no sales. Walk through unused expense SKUs, resolve to ASIN via
+  // skuToAsin, and sum across all sibling SKUs of that ASIN.
+  for (const sku of skuExpMap.keys()) {
+    if (consumedSkus.has(sku)) continue;
+    const asin = skuToAsin.get(sku);
+    if (!asin || seenAsins.has(asin)) continue;
+
+    seenAsins.add(asin);
+    const sellerInfo = asinToInfo.get(asin) || { skus: [sku], productName: '' };
+    const skus = sellerInfo.skus && sellerInfo.skus.length ? sellerInfo.skus : [sku];
+    const exp = aggregateExpensesForSkus(skus);
+    for (const s of skus) consumedSkus.add(s);
+
+    rows.push({
+      asin,
+      sku: skus[0] || sku,
+      skus,
+      productName: sellerInfo.productName || '',
+      totalSales: 0,
+      unitsSold: 0,
+      totalExpenses: exp.totalExpenses,
+      amazonFees: exp.amazonFees,
+      refunds: exp.refunds,
+      breakdown: exp.breakdown,
+      grossProfit: round2(0 - exp.totalExpenses),
+    });
   }
 
   rows.sort((a, b) => b.totalSales - a.totalSales);
   return { rows };
 }
 
-async function getTable({ userId, country, region, fromDate, toDate, page = 1, limit = 10 }) {
-  const { rows: allRows } = await buildAllProfitabilityTableRows(userId, country, region, fromDate, toDate);
+async function getTable({
+  userId,
+  country,
+  region,
+  fromDate,
+  toDate,
+  page = 1,
+  limit = 10,
+  aggPeriod = null,
+}) {
+  const { rows: allRows } = await buildAllProfitabilityTableRows(
+    userId,
+    country,
+    region,
+    fromDate,
+    toDate,
+    aggPeriod
+  );
 
-  const totalItems = allRows.length;
+  // Keep backend pagination aligned with frontend table visibility:
+  // frontend renders only rows with a non-empty SKU.
+  const visibleRows = allRows.filter((row) => row && row.sku && String(row.sku).trim() !== '');
+
+  const totalItems = visibleRows.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / limit));
   const startIdx = (page - 1) * limit;
-  const paginated = allRows.slice(startIdx, startIdx + limit);
+  const paginated = visibleRows.slice(startIdx, startIdx + limit);
 
   return {
     rows: paginated,
@@ -443,17 +637,33 @@ async function getTable({ userId, country, region, fromDate, toDate, page = 1, l
 }
 
 /** One table row for an ASIN (same pipeline as `/api/profitability/table`). */
-async function getTableRowByAsin({ userId, country, region, fromDate, toDate, asin }) {
+async function getTableRowByAsin({
+  userId,
+  country,
+  region,
+  fromDate,
+  toDate,
+  asin,
+  aggPeriod = null,
+}) {
   const normalized = String(asin || '').trim().toUpperCase();
   if (!/^[A-Z0-9]{10}$/.test(normalized)) return null;
-  const { rows } = await buildAllProfitabilityTableRows(userId, country, region, fromDate, toDate);
+  const { rows } = await buildAllProfitabilityTableRows(
+    userId,
+    country,
+    region,
+    fromDate,
+    toDate,
+    aggPeriod
+  );
   return rows.find((r) => (r.asin || '').trim().toUpperCase() === normalized) || null;
 }
 
 async function getTableRowByAsinByPeriod({ userId, country, region, periodDays, asin }) {
   const fromDate = getPeriodStartDate(periodDays);
   const toDate = new Date();
-  return getTableRowByAsin({ userId, country, region, fromDate, toDate, asin });
+  const aggPeriod = mapPeriodDaysToAggPeriod(periodDays);
+  return getTableRowByAsin({ userId, country, region, fromDate, toDate, asin, aggPeriod });
 }
 
 async function getTableRowByAsinByDateRange({ userId, country, region, from, to, asin }) {
@@ -464,7 +674,8 @@ async function getTableRowByAsinByDateRange({ userId, country, region, from, to,
 async function getTableByPeriod({ userId, country, region, periodDays, page, limit }) {
   const fromDate = getPeriodStartDate(periodDays);
   const toDate = new Date();
-  return getTable({ userId, country, region, fromDate, toDate, page, limit });
+  const aggPeriod = mapPeriodDaysToAggPeriod(periodDays);
+  return getTable({ userId, country, region, fromDate, toDate, page, limit, aggPeriod });
 }
 
 async function getTableByDateRange({ userId, country, region, from, to, page, limit }) {

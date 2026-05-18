@@ -1,0 +1,282 @@
+const logger = require('../../../../utils/Logger.js');
+const { buildLLMContext } = require('../helpers/LLMContextBuilder.js');
+const { rankIssueDrivers } = require('../helpers/ReasonRanking.js');
+const { validateAnswer } = require('../helpers/ResponseValidator.js');
+const { generateFollowUps } = require('../helpers/FollowUpGenerator.js');
+const { needsClarification, CLARIFY_FALLBACK_MESSAGE } = require('../guards/VagueQueryGuard.js');
+const { isGenericResponse, GENERIC_FALLBACK_MESSAGE } = require('../guards/ResponseFilter.js');
+const { softenResponse } = require('../helpers/ResponseSoftener.js');
+const { isOnboardingQuery, CAPABILITIES_ANSWER, CAPABILITIES_FOLLOW_UPS } = require('../helpers/IntentGuards.js');
+const { hasAsin } = require('../helpers/EntityGuards.js');
+
+function formatContext(context) {
+    const iss = context.issues;
+    return `
+DATA SUMMARY:
+
+Sales: ${context.sales != null ? context.sales : 'data not available'}
+Profit: ${context.profit != null ? context.profit : 'data not available'}
+Ad Spend: ${context.adSpend != null ? context.adSpend : 'data not available'}
+
+Issues:
+- Total: ${iss != null ? iss.total : 'data not available'}
+- Inventory: ${iss != null ? iss.inventory : 'data not available'}
+- PPC: ${iss != null ? iss.ppc : 'data not available'}
+- Ranking: ${iss != null ? iss.ranking : 'data not available'}
+- Conversion: ${iss != null ? iss.conversion : 'data not available'}
+- Profitability: ${iss != null ? iss.profitability : 'data not available'}
+
+Top Products:
+${JSON.stringify(context.topProducts ?? [], null, 2)}
+
+Inventory:
+${JSON.stringify(context.inventory ?? null, null, 2)}
+`;
+}
+
+function buildDriverBlock(rankedDrivers) {
+    if (!Array.isArray(rankedDrivers) || rankedDrivers.length === 0) {
+        return '(no positive issue counts in summary — do not invent issues)';
+    }
+    return rankedDrivers.map((d) => `${d.type}: ${d.impact}`).join('\n');
+}
+
+function isContextEffectivelyEmpty(context) {
+    if (!context || typeof context !== 'object') return true;
+    if (Object.keys(context).length === 0) return true;
+    return Object.values(context).every(
+        (v) =>
+            v == null ||
+            (Array.isArray(v) && v.length === 0) ||
+            (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0)
+    );
+}
+
+function validateResponse(response) {
+    if (!response || typeof response !== 'object') return false;
+    if (!response.answer || typeof response.answer !== 'string') return false;
+    return true;
+}
+
+async function handleSuggestionIntent({
+    interpretation,
+    unifiedData,
+    question,
+    createCompletionWithFallback,
+    client,
+    executionPlan,
+}) {
+    const outputFormat = interpretation?.outputPreference?.format || 'unspecified';
+    const asinPresent =
+        hasAsin(question) ||
+        (Array.isArray(interpretation?.entities?.asins) && interpretation.entities.asins.length > 0);
+
+    if (!asinPresent && isOnboardingQuery(question)) {
+        logger.info('[QMate][Suggestion] Onboarding query — returning canned response');
+        return {
+            status: 200,
+            answer_markdown: CAPABILITIES_ANSWER,
+            chart_suggestions: [],
+            follow_up_questions: [...CAPABILITIES_FOLLOW_UPS],
+            needs_clarification: false,
+            clarifying_questions: [],
+            intent_interpretation: interpretation,
+            responseSource: 'canned',
+            dataConfidence: 'none',
+            dataSources: [],
+        };
+    }
+
+    const context = buildLLMContext(unifiedData, interpretation);
+
+    if (!context || Object.keys(context).length === 0 || isContextEffectivelyEmpty(context)) {
+        logger.info('[QMate][Suggestion] No relevant context — returning data-unavailable response');
+        return {
+            status: 200,
+            answer_markdown: "I couldn't find relevant data for this query.",
+            chart_suggestions: [],
+            follow_up_questions: [],
+            needs_clarification: false,
+            clarifying_questions: [],
+            intent_interpretation: interpretation,
+            responseSource: 'data_unavailable',
+            dataConfidence: 'none',
+            dataSources: [],
+        };
+    }
+
+    if (!asinPresent && needsClarification(question)) {
+        logger.info('[QMate][Suggestion] Vague query without ASIN — returning clarification fallback');
+        return {
+            status: 200,
+            answer_markdown: CLARIFY_FALLBACK_MESSAGE,
+            chart_suggestions: [],
+            follow_up_questions: [],
+            needs_clarification: false,
+            clarifying_questions: [],
+            intent_interpretation: interpretation,
+            responseSource: 'clarification',
+            dataConfidence: 'none',
+            dataSources: [],
+        };
+    }
+
+    const rankedDrivers = rankIssueDrivers(context);
+    const driverSummary = buildDriverBlock(rankedDrivers);
+    const reinforcedContext = `User Context:
+- Amazon seller account query
+- Focus on business metrics (sales, ads, inventory, profit)
+`;
+    const formattedContext =
+        `${reinforcedContext}\n\n${formatContext(context).trim()}\n\nTOP ISSUE DRIVERS (ranked by impact):\n${driverSummary}\n\n` +
+        'Instructions:\n' +
+        '- Focus on highest-impact drivers first when explaining causes.\n' +
+        '- Consider multiple factors (inventory, ads, ranking, conversion, profitability) when the data supports them.\n' +
+        '- Do not ignore other non-zero signals in the summary.\n';
+
+    const messages = [
+        {
+            role: 'system',
+            content: `You are QMate, an AI assistant for Amazon sellers.
+
+STRICT RULES:
+- You ONLY answer questions related to Amazon seller analytics and performance
+- Use ONLY the provided DATA SUMMARY and TOP ISSUE DRIVERS
+- Do NOT behave like a general-purpose assistant
+- Do NOT list capabilities or unrelated topics
+- Do NOT answer off-topic questions
+- If unclear, ask one clarification about Amazon metrics (sales, ads, inventory, profitability, listings)
+
+FORBIDDEN in your answer:
+- Phrases like "I can help with many things" or broad capability lists
+- Generic assistant disclaimers
+
+STYLE:
+- concise, data-driven, business-focused
+
+STYLE RULES:
+- Be conversational and natural — write like a human analyst, not a form
+- Do NOT present numbered options ("Option 1 / Option 2") unless the user explicitly asks for a choice
+- Guide the user instead of forcing choices
+- Keep responses short and helpful
+
+Also respect output_format when writing the answer string: if single_number, one concise numeric line with unit/currency; if list, concise bullets; if graph, briefly describe what to chart from the data only.
+
+Return JSON:
+{
+  "answer": "...",
+  "confidence": "high | medium | low"
+}
+
+CRITICAL DATA RULES — FOLLOW THESE WITHOUT EXCEPTION:
+1. ONLY use numbers, metrics, and data points that appear in the provided context below. If a number is not in the context, say "I don't have that data available" instead of estimating or calculating.
+2. NEVER perform arithmetic on the provided numbers to derive new numbers unless the user explicitly asks for a calculation AND all input numbers are present in the context.
+3. When citing a metric, specify the exact time period it covers (e.g., "In the last 30 days, your total sales were $X").
+4. If the user asks about something not covered by the provided context data, say so honestly. Do not guess.
+5. Do NOT reference data from previous conversation turns unless it is re-provided in the current context.
+6. Keep your response concise and directly relevant to the user's question. Do not volunteer information about unrelated metrics.`,
+        },
+        {
+            role: 'user',
+            content: JSON.stringify({
+                question,
+                output_format: outputFormat,
+                intent_summary: {
+                    intent: interpretation?.intent,
+                    detailLevel: interpretation?.detailLevel,
+                },
+                data_summary_text: formattedContext,
+                ranked_issue_drivers: rankedDrivers,
+            }),
+        },
+    ];
+
+    const completion = await createCompletionWithFallback(client, messages);
+    const content = completion?.choices?.[0]?.message?.content || '{}';
+    let parsed = {};
+    try {
+        parsed = JSON.parse(content);
+    } catch (e) {
+        parsed = {};
+    }
+
+    logger.info('[QMate Debug]', {
+        query: question,
+        intent: interpretation?.intent,
+        service: executionPlan?.serviceType,
+        context,
+        rankedDrivers,
+        response: parsed,
+    });
+
+    if (!validateResponse(parsed)) {
+        logger.warn('[QMate][Suggestion] LLM response failed shape validation');
+        return {
+            status: 200,
+            answer_markdown: "I couldn't verify the answer from available data.",
+            chart_suggestions: [],
+            follow_up_questions: [],
+            needs_clarification: false,
+            clarifying_questions: [],
+            intent_interpretation: interpretation,
+            responseSource: 'data_unavailable',
+            dataConfidence: 'none',
+            dataSources: Object.keys(context),
+        };
+    }
+
+    const answerText = softenResponse(String(parsed.answer).trim());
+    if (!validateAnswer(answerText, context)) {
+        logger.warn('[QMate][Suggestion] Answer failed signal validation against context');
+        return {
+            status: 200,
+            answer_markdown: "I couldn't confidently determine the root cause from available data.",
+            chart_suggestions: [],
+            follow_up_questions: [],
+            needs_clarification: false,
+            clarifying_questions: [],
+            intent_interpretation: interpretation,
+            responseSource: 'data_unavailable',
+            dataConfidence: 'none',
+            dataSources: Object.keys(context),
+        };
+    }
+
+    if (isGenericResponse(answerText)) {
+        logger.info('[QMate][Suggestion] LLM produced generic response — returning canned fallback');
+        return {
+            status: 200,
+            answer_markdown: GENERIC_FALLBACK_MESSAGE,
+            chart_suggestions: [],
+            follow_up_questions: [],
+            needs_clarification: false,
+            clarifying_questions: [],
+            intent_interpretation: interpretation,
+            responseSource: 'canned',
+            dataConfidence: 'none',
+            dataSources: [],
+        };
+    }
+
+    logger.info('[QMate][Suggestion] Returning grounded LLM answer');
+    return {
+        status: 200,
+        answer_markdown: answerText,
+        chart_suggestions: [],
+        // Phase 4 / Task 4.1: deterministic, intent-templated follow-ups
+        // instead of LLM-generated suggestions.
+        follow_up_questions: generateFollowUps(
+            interpretation?.intent,
+            interpretation?.entities,
+            unifiedData
+        ),
+        needs_clarification: false,
+        clarifying_questions: [],
+        intent_interpretation: interpretation,
+        responseSource: 'llm_grounded',
+        dataConfidence: 'medium',
+        dataSources: Object.keys(context),
+    };
+}
+
+module.exports = { handleSuggestionIntent };

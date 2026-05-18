@@ -35,14 +35,18 @@ const sendSixMonthsFreePromotion = async () => {
 
         console.log(`Found ${users.length} users to send emails to`);
 
+        if (!process.env.ADMIN_USERNAME || !process.env.APP_PASSWORD) {
+            throw new Error('Missing SMTP credentials (ADMIN_USERNAME / APP_PASSWORD).');
+        }
+
         // Create email transporter
         const transporter = nodemailer.createTransport({
             host: "email-smtp.us-west-2.amazonaws.com",
             port: 587,
             secure: false,
             auth: {
-                user: 'AKIA2FN7DZKEYYDJEN77',
-                pass: 'BIL6H/1cR769EdaTP20/T+Gohw+FqxFE5a6yjkEdE0+z',
+                user: process.env.ADMIN_USERNAME,
+                pass: process.env.APP_PASSWORD,
             },
         });
 

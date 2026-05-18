@@ -32,14 +32,14 @@ const calculateSponsoredAdsMetrics = (productWiseSponsoredAds) => {
             totalCost += parseFloat(String(item.spend)) || 0;
         }
 
-        // Add sales in 30 days to total
-        if (item.salesIn30Days !== undefined && item.salesIn30Days !== null) {
-            totalSalesIn30Days += parseFloat(String(item.salesIn30Days)) || 0;
+        const salesVal = item.sales ?? item.salesIn30Days;
+        if (salesVal !== undefined && salesVal !== null) {
+            totalSalesIn30Days += parseFloat(String(salesVal)) || 0;
         }
 
-        // Add purchased in 30 days to total
-        if (item.purchasedIn30Days !== undefined && item.purchasedIn30Days !== null) {
-            totalProductsPurchased += parseFloat(String(item.purchasedIn30Days)) || 0;
+        const purchasedVal = item.purchases ?? item.purchasedIn30Days;
+        if (purchasedVal !== undefined && purchasedVal !== null) {
+            totalProductsPurchased += parseFloat(String(purchasedVal)) || 0;
         }
     });
     

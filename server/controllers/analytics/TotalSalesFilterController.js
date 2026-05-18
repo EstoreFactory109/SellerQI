@@ -18,7 +18,7 @@ const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
 
 /**
  * Filter total sales data based on date range
- * GET /api/total-sales/filter?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&periodType=last30|last7|custom
+ * GET /api/total-sales/filter?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&periodType=last30|last31|last7|custom
  */
 const filterTotalSales = asyncHandler(async (req, res) => {
     const userId = req.userId;
@@ -43,9 +43,9 @@ const filterTotalSales = asyncHandler(async (req, res) => {
     try {
         let result = {};
 
-        if (periodType === 'last30') {
-            // Last 30 days: Return total values from latest document
-            result = await getLast30DaysData(userId, country, region);
+        if (periodType === 'last31' || periodType === 'last30') {
+            // Last 30 days: Return total values from recent documents (also accepts last31 for backward compat)
+            result = await getLast31DaysData(userId, country, region);
         } else if (periodType === 'last7') {
             // Last 7 days: Get datewise values from latest document, sum them
             // Use dates from frontend if provided, otherwise calculate default
@@ -57,7 +57,7 @@ const filterTotalSales = asyncHandler(async (req, res) => {
             // Custom range: Check all documents, get datewise values for range, sum them
             result = await getCustomRangeData(userId, country, region, startDate, endDate);
         } else {
-            throw new ApiError(400, 'Invalid periodType. Must be: last30, last7, last14, or custom');
+            throw new ApiError(400, 'Invalid periodType. Must be: last31, last30, last7, last14, or custom');
         }
 
         logger.info('Total sales filter completed', {
@@ -87,36 +87,23 @@ const filterTotalSales = asyncHandler(async (req, res) => {
 });
 
 /**
- * Get last 30 days data - calculate totals by summing datewise values
- * 
- * IMPORTANT: To ensure consistency with custom range filter, we calculate
- * totalSales by summing datewiseSales instead of using stored pre-aggregated values.
- * This guarantees: same dates → same result, regardless of filter type.
+ * Get last 31 days data - aggregate from per-day documents.
+ * Uses the model's getRecentDays method for efficiency.
  */
-async function getLast30DaysData(userId, country, region) {
-    const latestMetrics = await SalesOnlyMetrics.findOne({
-        User: userId,
-        country: country,
-        region: region
-    }).sort({ createdAt: -1 });
+async function getLast31DaysData(userId, country, region) {
+    const recentData = await SalesOnlyMetrics.getRecentDays(userId, region, country, 31);
 
-    if (!latestMetrics) {
-        logger.warn('No economics metrics found for last 30 days', { userId, country, region });
+    if (!recentData || recentData.datewiseSales.length === 0) {
+        logger.warn('No sales-only metrics found for last 31 days', { userId, country, region });
         return createEmptyResult();
     }
 
-    // Use the exact same dynamic aggregation path as custom range.
-    const dateRange = latestMetrics.dateRange || {};
-    if (!dateRange.startDate || !dateRange.endDate) {
-        logger.warn('Latest sales-only metrics has missing dateRange; falling back to empty result', {
-            userId,
-            country,
-            region
-        });
+    const { startDate, endDate } = recentData.dateRange;
+    if (!startDate || !endDate) {
         return createEmptyResult();
     }
 
-    return await getCustomRangeData(userId, country, region, dateRange.startDate, dateRange.endDate);
+    return await getCustomRangeData(userId, country, region, startDate, endDate);
 }
 
 /**
@@ -182,279 +169,86 @@ async function getLast14DaysData(userId, country, region, startDateParam = null,
     return await getCustomRangeData(userId, country, region, startDateStr, endDateStr);
 }
 
+async function getTotalSalesFilteredData(userId, country, region, { periodType = 'last30', startDate = null, endDate = null } = {}) {
+    if (periodType === 'last31' || periodType === 'last30') {
+        return getLast31DaysData(userId, country, region);
+    }
+    if (periodType === 'last7') {
+        return getLast7DaysData(userId, country, region, startDate, endDate);
+    }
+    if (periodType === 'last14') {
+        return getLast14DaysData(userId, country, region, startDate, endDate);
+    }
+    if (periodType === 'custom') {
+        if (!startDate || !endDate) {
+            throw new Error('startDate and endDate are required for custom periodType');
+        }
+        return getCustomRangeData(userId, country, region, startDate, endDate);
+    }
+    throw new Error('Invalid periodType. Must be: last31, last30, last7, last14, or custom');
+}
+
 /**
- * Get custom range data - check all documents, get datewise values for range, sum them
- * 
- * IMPORTANT: All totals are calculated by summing datewise values.
- * This ensures consistency across all filter types since:
- * - Stored totalSales = sum(datewiseSales) (guaranteed by our calculation fix)
- * - Custom range totalSales = sum(filtered datewiseSales)
- * 
- * When dates match exactly, the result will be identical to getLast30DaysData
- * because we're summing the same datewise values.
- * 
- * Also aggregates ASIN-wise data from all documents for the date range.
+ * Get custom range data - use aggregation on per-day documents.
+ * Each SalesOnlyMetrics document represents a single day.
  */
 async function getCustomRangeData(userId, country, region, startDateStr, endDateStr) {
-    // Parse dates
     const startDate = new Date(startDateStr);
     startDate.setHours(0, 0, 0, 0);
     const endDate = new Date(endDateStr);
     endDate.setHours(23, 59, 59, 999);
 
-    // Get all economics metrics documents for this user, country, and region
-    const allMetrics = await SalesOnlyMetrics.find({
-        User: userId,
-        country: country,
-        region: region
-    }).sort({ createdAt: -1 });
+    const salesData = await SalesOnlyMetrics.getSalesForDateRange(
+        userId,
+        region,
+        country,
+        startDateStr,
+        endDateStr
+    );
 
-    if (!allMetrics || allMetrics.length === 0) {
-        logger.warn('No economics metrics found for custom range', { userId, country, region });
+    if (!salesData || salesData.datewiseSales.length === 0) {
+        logger.warn('No sales-only metrics found for custom range', { userId, country, region, startDateStr, endDateStr });
         return createEmptyResult();
     }
 
-    logger.info('Processing custom date range - calculating from datewise data', {
+    logger.info('Processing custom date range from per-day documents', {
         userId,
         country,
         region,
-        requestedRange: { startDate: startDateStr, endDate: endDateStr }
+        requestedRange: { startDate: startDateStr, endDate: endDateStr },
+        daysFound: salesData.datewiseSales.length
     });
 
-    // Aggregate data from all documents that overlap with the date range
-    let totalSales = 0;
-    let totalFbaFees = 0;
-    let totalAmazonFees = 0; // Total Amazon fees (for Profitability page)
-    let otherAmazonFees = 0; // Amazon fees excluding FBA (for Total Sales component)
-    let totalRefunds = 0;
-    let currencyCode = 'USD';
-    const processedDates = new Set(); // Track processed dates to avoid duplicates for sales
-    
-    // ASIN-wise aggregation: Map of "asin-date" -> asin data (to avoid duplicates)
-    const asinDateMap = new Map();
+    const totalSales = salesData.totalSales?.amount || 0;
+    const currencyCode = salesData.totalSales?.currencyCode || 'USD';
 
-    for (const metrics of allMetrics) {
-        // Check if document's date range overlaps with requested range.
-        // If dateRange is missing/incomplete, assume the document may contain
-        // relevant data — the per-item date filter below will still guard correctness.
-        let docOverlaps = true;
-        if (metrics.dateRange?.startDate && metrics.dateRange?.endDate) {
-            const docStartDate = new Date(metrics.dateRange.startDate);
-            const docEndDate = new Date(metrics.dateRange.endDate);
-            docStartDate.setHours(0, 0, 0, 0);
-            docEndDate.setHours(23, 59, 59, 999);
-            docOverlaps = startDate <= docEndDate && endDate >= docStartDate;
-        }
-
-        if (docOverlaps) {
-            // Get currency code from first document
-            if (!currencyCode && metrics.totalSales?.currencyCode) {
-                currencyCode = metrics.totalSales.currencyCode;
-            }
-
-            // Process datewise sales
-            const datewiseSales = metrics.datewiseSales || [];
-            datewiseSales.forEach(item => {
-                const itemDate = new Date(item.date);
-                const dateKey = itemDate.toISOString().split('T')[0];
-
-                // Only process if within range and not already processed
-                if (itemDate >= startDate && itemDate <= endDate && !processedDates.has(dateKey)) {
-                    totalSales += item.sales?.amount || 0;
-                    processedDates.add(dateKey);
-                }
-            });
-            
-            // Process ASIN-wise sales data
-            // For big accounts (isBig=true), asinWiseSales is stored in a separate collection
-            let asinWiseSales = metrics.asinWiseSales || [];
-            
-            // If this is a big account and asinWiseSales is empty, fetch from separate collection
-            if (metrics.isBig && asinWiseSales.length === 0) {
-                try {
-                    const bigAccountAsinDocs = await AsinWiseSalesForBigAccounts.findByMetricsId(metrics._id);
-                    if (bigAccountAsinDocs && bigAccountAsinDocs.length > 0) {
-                        // Flatten all ASIN sales from all date documents
-                        bigAccountAsinDocs.forEach(doc => {
-                            const docDate = doc.date;
-                            if (doc.asinSales && Array.isArray(doc.asinSales)) {
-                                doc.asinSales.forEach(asinSale => {
-                                    asinWiseSales.push({
-                                        date: docDate === 'no_date' ? null : docDate,
-                                        asin: asinSale.asin,
-                                        parentAsin: asinSale.parentAsin,
-                                        sales: asinSale.sales,
-                                        grossProfit: asinSale.grossProfit,
-                                        unitsSold: asinSale.unitsSold,
-                                        refunds: asinSale.refunds,
-                                        ppcSpent: asinSale.ppcSpent,
-                                        fbaFees: asinSale.fbaFees,
-                                        storageFees: asinSale.storageFees,
-                                        amazonFees: asinSale.amazonFees,
-                                        totalFees: asinSale.totalFees
-                                    });
-                                });
-                            }
-                        });
-                        logger.debug('Fetched ASIN-wise sales from separate collection for big account', {
-                            metricsId: metrics._id,
-                            totalAsinRecords: asinWiseSales.length
-                        });
-                    }
-                } catch (fetchError) {
-                    logger.error('Error fetching ASIN data for big account', {
-                        metricsId: metrics._id,
-                        error: fetchError.message
-                    });
-                }
-            }
-            
-            asinWiseSales.forEach(item => {
-                // Check if item has a date field (for daily breakdown)
-                if (item.date) {
-                    const itemDate = new Date(item.date);
-                    const dateKey = itemDate.toISOString().split('T')[0];
-                    
-                    // Only process if within date range
-                    if (itemDate >= startDate && itemDate <= endDate) {
-                        // Use "asin-date" as unique key to avoid duplicates
-                        const uniqueKey = `${item.asin}-${dateKey}`;
-                        
-                        if (!asinDateMap.has(uniqueKey)) {
-                            asinDateMap.set(uniqueKey, {
-                                date: item.date,
-                                asin: item.asin,
-                                parentAsin: item.parentAsin || null,
-                                sales: item.sales || { amount: 0, currencyCode: 'USD' },
-                                grossProfit: item.grossProfit || { amount: 0, currencyCode: 'USD' },
-                                unitsSold: item.unitsSold || 0,
-                                refunds: item.refunds || { amount: 0, currencyCode: 'USD' },
-                                ppcSpent: item.ppcSpent || { amount: 0, currencyCode: 'USD' },
-                                fbaFees: item.fbaFees || { amount: 0, currencyCode: 'USD' },
-                                storageFees: item.storageFees || { amount: 0, currencyCode: 'USD' },
-                                amazonFees: item.amazonFees || { amount: 0, currencyCode: 'USD' },
-                                totalFees: item.totalFees || { amount: 0, currencyCode: 'USD' }
-                            });
-                        }
-                    }
-                } else {
-                    // For data without dates (aggregated), include if document overlaps with range
-                    // Use just ASIN as key since there's no date
-                    const uniqueKey = `${item.asin}-nodatе`;
-                    
-                    if (!asinDateMap.has(uniqueKey)) {
-                        asinDateMap.set(uniqueKey, {
-                            date: null,
-                            asin: item.asin,
-                            parentAsin: item.parentAsin || null,
-                            sales: item.sales || { amount: 0, currencyCode: 'USD' },
-                            grossProfit: item.grossProfit || { amount: 0, currencyCode: 'USD' },
-                            unitsSold: item.unitsSold || 0,
-                            refunds: item.refunds || { amount: 0, currencyCode: 'USD' },
-                            ppcSpent: item.ppcSpent || { amount: 0, currencyCode: 'USD' },
-                            fbaFees: item.fbaFees || { amount: 0, currencyCode: 'USD' },
-                            storageFees: item.storageFees || { amount: 0, currencyCode: 'USD' },
-                            amazonFees: item.amazonFees || { amount: 0, currencyCode: 'USD' },
-                            totalFees: item.totalFees || { amount: 0, currencyCode: 'USD' }
-                        });
-                    }
-                }
-            });
-        }
-    }
-    
-    // Convert ASIN-wise data map to array
-    const asinWiseSalesArray = Array.from(asinDateMap.values());
-    
-    logger.info('ASIN-wise data aggregated for custom range', {
-        userId,
-        country,
-        region,
-        totalAsinRecords: asinWiseSalesArray.length,
-        dateRange: { startDate: startDateStr, endDate: endDateStr }
-    });
-    
-    // Get PPC spent from actual datewise PPC data (not estimated)
     let totalPpcSpent = await getDatewisePPCSpend(userId, country, region, startDateStr, endDateStr);
-    
-    // Fallback to proportional calculation if no datewise PPC data found
-    if (totalPpcSpent === 0) {
-        // Calculate proportional PPC from economics metrics as fallback
-        for (const metrics of allMetrics) {
-            if (metrics.dateRange?.startDate && metrics.dateRange?.endDate) {
-                const docStartDate = new Date(metrics.dateRange.startDate);
-                const docEndDate = new Date(metrics.dateRange.endDate);
-                docStartDate.setHours(0, 0, 0, 0);
-                docEndDate.setHours(23, 59, 59, 999);
 
-                if (startDate <= docEndDate && endDate >= docStartDate) {
-                    const overlapDays = calculateOverlapDays(startDate, endDate, docStartDate, docEndDate);
-                    const docTotalDays = Math.ceil((docEndDate - docStartDate + 1) / (1000 * 60 * 60 * 24));
-                    if (docTotalDays > 0) {
-                        const proportion = overlapDays / docTotalDays;
-                        totalPpcSpent += (metrics.ppcSpent?.amount || 0) * proportion;
-                    }
-                }
-            }
-        }
-    }
-
-    // Prepare datewise data for chart - aggregate by date across all documents
-    const datewiseChartDataMap = new Map();
-    const processedChartDates = new Set();
-    
-    for (const metrics of allMetrics) {
-        // Same overlap guard as above — missing dateRange means "assume overlap"
-        let chartDocOverlaps = true;
-        if (metrics.dateRange?.startDate && metrics.dateRange?.endDate) {
-            const docStartDate = new Date(metrics.dateRange.startDate);
-            const docEndDate = new Date(metrics.dateRange.endDate);
-            docStartDate.setHours(0, 0, 0, 0);
-            docEndDate.setHours(23, 59, 59, 999);
-            chartDocOverlaps = startDate <= docEndDate && endDate >= docStartDate;
-        }
-
-        if (chartDocOverlaps) {
-            const datewiseSales = metrics.datewiseSales || [];
-
-            // Process sales - use existing grossProfit from datewiseSales
-            // The grossProfit in datewiseSales is already calculated correctly (netSales - cogs)
-            datewiseSales.forEach(item => {
-                const itemDate = new Date(item.date);
-                const dateKey = itemDate.toISOString().split('T')[0];
-                
-                if (itemDate >= startDate && itemDate <= endDate && !processedChartDates.has(dateKey)) {
-                    const displayDate = itemDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                    datewiseChartDataMap.set(dateKey, {
-                        date: displayDate,
-                        totalSales: item.sales?.amount || 0,
-                        grossProfit: item.grossProfit?.amount || 0, // Use existing grossProfit from database
-                        originalDate: item.date
-                    });
-                    processedChartDates.add(dateKey);
-                }
-            });
-        }
-    }
-    
-    const datewiseChartData = Array.from(datewiseChartDataMap.values())
-        .sort((a, b) => new Date(a.originalDate) - new Date(b.originalDate));
+    const datewiseChartData = salesData.datewiseSales.map((item) => {
+        const itemDate = new Date(item.date);
+        const displayDate = itemDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        return {
+            date: displayDate,
+            totalSales: item.sales?.amount || 0,
+            grossProfit: item.grossProfit?.amount || 0,
+            originalDate: item.date
+        };
+    }).sort((a, b) => new Date(a.originalDate) - new Date(b.originalDate));
 
     return {
         totalSales: { amount: parseFloat(totalSales.toFixed(2)), currencyCode },
-        // Sales-only mode: gross profit is not persisted; force to 0.
         grossProfit: { amount: 0, currencyCode },
         ppcSpent: { amount: parseFloat(totalPpcSpent.toFixed(2)), currencyCode },
-        fbaFees: { amount: parseFloat(totalFbaFees.toFixed(2)), currencyCode },
-        amazonFees: { amount: parseFloat(totalAmazonFees.toFixed(2)), currencyCode }, // Total Amazon fees (for Profitability page)
-        otherAmazonFees: { amount: parseFloat(otherAmazonFees.toFixed(2)), currencyCode }, // Amazon fees excluding FBA (from feeBreakdown, for Total Sales component)
-        refunds: { amount: parseFloat(totalRefunds.toFixed(2)), currencyCode },
+        fbaFees: { amount: 0, currencyCode },
+        amazonFees: { amount: 0, currencyCode },
+        otherAmazonFees: { amount: 0, currencyCode },
+        refunds: { amount: 0, currencyCode },
         dateRange: {
             startDate: formatDate(startDate),
             endDate: formatDate(endDate)
         },
         datewiseChartData: datewiseChartData,
-        asinWiseSales: asinWiseSalesArray, // ASIN-wise data aggregated from all documents for the date range
+        asinWiseSales: [],
         currencyCode
     };
 }
@@ -558,6 +352,7 @@ function createEmptyResult() {
 }
 
 module.exports = {
-    filterTotalSales
+    filterTotalSales,
+    getTotalSalesFilteredData,
 };
 

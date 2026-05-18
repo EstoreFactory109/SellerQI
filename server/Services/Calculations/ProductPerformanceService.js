@@ -71,7 +71,7 @@ function aggregateProductPerformance({
                     clicks: 0
                 };
                 existing.ppcSpend += item.spend || 0;
-                existing.ppcSales += item.salesIn7Days || item.salesIn14Days || item.salesIn30Days || 0;
+                existing.ppcSales += item.sales || item.salesIn7Days || item.salesIn14Days || item.salesIn30Days || 0;
                 existing.impressions += item.impressions || 0;
                 existing.clicks += item.clicks || 0;
                 ppcMap.set(key, existing);
@@ -388,7 +388,7 @@ async function fetchPPCDataForAsin(userId, country, region, asin) {
                     _id: '$batchId',
                     createdAt: { $first: '$createdAt' },
                     totalSpend: { $sum: '$spend' },
-                    totalSales: { $sum: '$salesIn30Days' },
+                    totalSales: { $sum: { $ifNull: ['$sales', { $ifNull: ['$salesIn30Days', 0] }] } },
                     totalImpressions: { $sum: '$impressions' },
                     totalClicks: { $sum: '$clicks' }
                 }

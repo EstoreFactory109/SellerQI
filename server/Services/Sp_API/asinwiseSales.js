@@ -80,6 +80,90 @@ function httpsRequest(options, postData = null) {
   });
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ─────────────────────────────────────────────
+// SP-API retry helper for rate-limited endpoints.
+// Handles 429 / 503 with exponential backoff, honors `retry-after` when present,
+// and enforces a floor matching /orders/v0/orders' 60s sustained refill rate
+// when called in `orders` mode so we do not retry before a token exists.
+// ─────────────────────────────────────────────
+const SP_API_RETRY_DEFAULTS = {
+  orders: {
+    maxAttempts: 10,
+    baseBackoffMs: 2000,
+    maxBackoffMs: 120000,
+    min429WaitMs: 60000, // one token-refill period for /orders/v0/orders
+  },
+  orderItems: {
+    // /orders/v0/orders/{id}/orderItems — rate 0.5 req/s, burst 30 — much friendlier.
+    maxAttempts: 6,
+    baseBackoffMs: 1000,
+    maxBackoffMs: 30000,
+    min429WaitMs: 2000,
+  },
+};
+
+function readHeader(headers, name) {
+  if (!headers) return undefined;
+  // `headers` from node's http/https is a plain object with lowercased keys.
+  return headers[name] || headers[name.toLowerCase()];
+}
+
+function computeSpApiBackoffMs(statusCode, headers, attempt, cfg) {
+  const retryAfterRaw = readHeader(headers, "retry-after");
+  const retryAfterMs = retryAfterRaw ? parseInt(retryAfterRaw, 10) * 1000 : NaN;
+
+  let waitMs;
+  if (Number.isFinite(retryAfterMs) && retryAfterMs > 0) {
+    waitMs = retryAfterMs;
+  } else {
+    waitMs = cfg.baseBackoffMs * Math.pow(2, attempt) + Math.random() * 1000;
+  }
+  if (statusCode === 429) {
+    waitMs = Math.max(waitMs, cfg.min429WaitMs);
+  }
+  return Math.min(cfg.maxBackoffMs, waitMs);
+}
+
+/**
+ * Wrap an SP-API request with throttle-aware retries.
+ * `mode` selects the retry profile: 'orders' or 'orderItems'.
+ * `requestFn` must return `{ statusCode, headers, body }` (matching httpsRequest).
+ */
+async function spApiRequestWithRetry(mode, requestFn, label = "SP-API") {
+  const cfg = SP_API_RETRY_DEFAULTS[mode] || SP_API_RETRY_DEFAULTS.orders;
+
+  for (let attempt = 0; attempt < cfg.maxAttempts; attempt++) {
+    const res = await requestFn();
+    const statusCode = res?.statusCode;
+    const isRetryable = statusCode === 429 || statusCode === 503;
+
+    if (isRetryable && attempt < cfg.maxAttempts - 1) {
+      const waitMs = computeSpApiBackoffMs(statusCode, res.headers, attempt, cfg);
+      logger.warn(
+        `[${label}] ${statusCode} (rate limit / transient); retry ${attempt + 1}/${cfg.maxAttempts} in ${Math.round(waitMs / 1000)}s`
+      );
+      await sleep(waitMs);
+      continue;
+    }
+
+    return res;
+  }
+
+  throw new Error(`${label} failed: throttled — exhausted retries`);
+}
+
+function deriveNextDelayFromRateLimitHeader(headers) {
+  const rateHeader = readHeader(headers, "x-amzn-RateLimit-Limit");
+  if (!rateHeader) return 0;
+  const rate = parseFloat(rateHeader);
+  if (!Number.isFinite(rate) || rate <= 0) return 0;
+  return Math.ceil((1000 / rate) * 1.25);
+}
+
 function downloadContent(url, isGzip = false) {
   return new Promise((resolve, reject) => {
     const parsedUrl = new URL(url);
@@ -246,7 +330,12 @@ async function fetchOrdersReport(accessToken, baseUrl, marketplaceId, startDate,
 //    Use as supplement to fill missing prices from report
 // ─────────────────────────────────────────────
 
-async function fetchOrders(accessToken, baseUrl, marketplaceId, createdAfter) {
+// Static floor for pagination pacing. The adaptive delay derived from Amazon's
+// x-amzn-RateLimit-Limit header may raise this further at runtime.
+const ORDERS_PAGE_STATIC_DELAY_MS = 3000;
+const ORDER_ITEMS_PAGE_STATIC_DELAY_MS = 2000;
+
+async function fetchOrders(accessToken, baseUrl, marketplaceId, createdAfter, createdBefore = null) {
   const allOrders = [];
   let nextToken = null;
   let page = 1;
@@ -262,18 +351,28 @@ async function fetchOrders(accessToken, baseUrl, marketplaceId, createdAfter) {
         MarketplaceIds: marketplaceId,
         CreatedAfter: createdAfter,
       });
+      if (createdBefore) {
+        params.set('CreatedBefore', createdBefore);
+      }
       path = `/orders/v0/orders?${params.toString()}`;
     }
 
-    const res = await httpsRequest({
-      hostname: baseUrl,
-      path,
-      method: "GET",
-      headers: { "x-amz-access-token": accessToken },
-    });
+    const res = await spApiRequestWithRetry(
+      "orders",
+      () =>
+        httpsRequest({
+          hostname: baseUrl,
+          path,
+          method: "GET",
+          headers: { "x-amz-access-token": accessToken },
+        }),
+      "Orders"
+    );
 
-    if (res.body.errors) {
-      throw new Error(`getOrders failed: ${JSON.stringify(res.body.errors)}`);
+    if (!res || res.statusCode < 200 || res.statusCode >= 300 || res.body?.errors) {
+      throw new Error(
+        `getOrders failed (status=${res?.statusCode}): ${JSON.stringify(res?.body?.errors || res?.body)}`
+      );
     }
 
     const orders = res.body.payload?.Orders || [];
@@ -282,7 +381,9 @@ async function fetchOrders(accessToken, baseUrl, marketplaceId, createdAfter) {
     page++;
 
     if (nextToken) {
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      const adaptive = deriveNextDelayFromRateLimitHeader(res.headers);
+      const delay = Math.max(ORDERS_PAGE_STATIC_DELAY_MS, adaptive);
+      await sleep(delay);
     }
   } while (nextToken);
 
@@ -300,15 +401,22 @@ async function fetchOrderItems(accessToken, baseUrl, orderId) {
       path += `?NextToken=${encodeURIComponent(nextToken)}`;
     }
 
-    const res = await httpsRequest({
-      hostname: baseUrl,
-      path,
-      method: "GET",
-      headers: { "x-amz-access-token": accessToken },
-    });
+    const res = await spApiRequestWithRetry(
+      "orderItems",
+      () =>
+        httpsRequest({
+          hostname: baseUrl,
+          path,
+          method: "GET",
+          headers: { "x-amz-access-token": accessToken },
+        }),
+      `OrderItems(${orderId})`
+    );
 
-    if (res.body.errors) {
-      throw new Error(`getOrderItems failed for ${orderId}: ${JSON.stringify(res.body.errors)}`);
+    if (!res || res.statusCode < 200 || res.statusCode >= 300 || res.body?.errors) {
+      throw new Error(
+        `getOrderItems failed for ${orderId} (status=${res?.statusCode}): ${JSON.stringify(res?.body?.errors || res?.body)}`
+      );
     }
 
     const items = res.body.payload?.OrderItems || [];
@@ -316,7 +424,9 @@ async function fetchOrderItems(accessToken, baseUrl, orderId) {
     nextToken = res.body.payload?.NextToken || null;
 
     if (nextToken) {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const adaptive = deriveNextDelayFromRateLimitHeader(res.headers);
+      const delay = Math.max(ORDER_ITEMS_PAGE_STATIC_DELAY_MS, adaptive);
+      await sleep(delay);
     }
   } while (nextToken);
 
@@ -395,14 +505,65 @@ function getOrdersFetchRangeUtc(days = 30) {
   return { startDateISO: startDay.toISOString(), endDateISO: yesterdayEnd.toISOString() };
 }
 
+/**
+ * ┌──────────────────────────────────────────────────────────────────┐
+ * │  FIX 1 — normaliseReportData                                    │
+ * │                                                                  │
+ * │  Two new filters added to exclude non-sale rows that were        │
+ * │  previously counted as real sales with ₹0 revenue:              │
+ * │                                                                  │
+ * │  A) Non-Amazon / MCF orders (sales-channel = "Non-Amazon")       │
+ * │     These are Multi-Channel Fulfillment orders where the seller  │
+ * │     sold on another platform (Flipkart, Shopify, own website)    │
+ * │     and Amazon only handled warehousing & shipping.              │
+ * │     Revenue is always ₹0 in the report because Amazon did not   │
+ * │     process the payment — the other platform did.                │
+ * │     Order IDs start with "S02-" prefix.                          │
+ * │     Ref: Amazon MCF Seller Central guide —                       │
+ * │       https://supplychain.amazon.com/learn/seller-central-guide  │
+ * │     Ref: Amazon MCF best practices for developers —              │
+ * │       https://developer.amazonservices.com/mcf-best-practices    │
+ * │                                                                  │
+ * │  B) Zero-price orders (item-price = 0, order-status = Shipped)   │
+ * │     These are free replacement shipments. When a customer        │
+ * │     receives a damaged/defective item, Amazon ships a new one    │
+ * │     at no charge. The original sale was recorded earlier with    │
+ * │     full revenue; this replacement has item-price = 0.           │
+ * │     Verified against raw report data: 12 such rows found in a   │
+ * │     30-day sample, all on Amazon.in with Shipped status.         │
+ * └──────────────────────────────────────────────────────────────────┘
+ */
 function normaliseReportData(reportRows) {
   const items = [];
+  let skippedNonAmazon = 0;
+  let skippedZeroPrice = 0;
 
   for (const row of reportRows) {
+    // 1. Skip cancelled orders (existing filter — unchanged)
     if ((row["order-status"] || "").toLowerCase() === "cancelled") continue;
+
+    // 2. [FIX 1-A] Skip Non-Amazon / MCF orders
+    //    These are sold on other platforms, fulfilled by Amazon FBA.
+    //    sales-channel = "Non-Amazon", order IDs start with "S02-".
+    //    item-price is always empty/zero because Amazon didn't process payment.
+    const salesChannel = (row["sales-channel"] || "").toLowerCase();
+    if (salesChannel === "non-amazon") {
+      skippedNonAmazon++;
+      continue;
+    }
 
     const price = parseFloat(row["item-price"]) || 0;
     const quantity = parseInt(row["quantity"], 10) || 0;
+
+    // 3. [FIX 1-B] Skip zero-price orders (free replacements)
+    //    These are shipped orders with item-price = 0.0 on Amazon.in.
+    //    The original sale with full revenue was counted in a prior period.
+    if (price === 0) {
+      skippedZeroPrice++;
+      continue;
+    }
+
+    // 4. Skip rows where both price and quantity are zero (existing safety net)
     if (price === 0 && quantity === 0) continue;
 
     const date = parseToDateStr(row["purchase-date"]);
@@ -423,9 +584,25 @@ function normaliseReportData(reportRows) {
     });
   }
 
+  if (skippedNonAmazon > 0) {
+    logger.info(`[Sales] Skipped ${skippedNonAmazon} Non-Amazon/MCF orders (sold on other platforms)`);
+  }
+  if (skippedZeroPrice > 0) {
+    logger.info(`[Sales] Skipped ${skippedZeroPrice} zero-price orders (free replacements)`);
+  }
+
   return items;
 }
 
+/**
+ * ┌──────────────────────────────────────────────────────────────────┐
+ * │  FIX 1 — normaliseOrdersApiData                                 │
+ * │                                                                  │
+ * │  Same two filters applied to Orders API data path:               │
+ * │  A) Skip orders where SalesChannel = "Non-Amazon" (MCF)          │
+ * │  B) Skip order items where ItemPrice.Amount = 0 (replacements)   │
+ * └──────────────────────────────────────────────────────────────────┘
+ */
 function normaliseOrdersApiData(orders, orderItemsMap) {
   const items = [];
 
@@ -434,11 +611,21 @@ function normaliseOrdersApiData(orders, orderItemsMap) {
     const orderStatus = order.OrderStatus || "";
     if (orderStatus.toLowerCase() === "canceled") continue;
 
+    // [FIX 1-A] Skip Non-Amazon / MCF orders from Orders API as well.
+    //           MCF orders have SalesChannel = "Non-Amazon".
+    const salesChannel = (order.SalesChannel || "").toLowerCase();
+    if (salesChannel === "non-amazon") continue;
+
     const date = parseToDateStr(order.PurchaseDate);
     if (!date) continue;
 
     const orderItems = orderItemsMap.get(orderId) || [];
     for (const item of orderItems) {
+      const itemPrice = parseFloat(item.ItemPrice?.Amount) || 0;
+
+      // [FIX 1-B] Skip zero-price items (free replacements)
+      if (itemPrice === 0) continue;
+
       items.push({
         orderId,
         asin: item.ASIN || "",
@@ -446,7 +633,7 @@ function normaliseOrdersApiData(orders, orderItemsMap) {
         productName: item.Title || "",
         date,
         quantity: parseInt(item.QuantityOrdered, 10) || 0,
-        itemPrice: parseFloat(item.ItemPrice?.Amount) || 0,
+        itemPrice,
         itemTax: parseFloat(item.ItemTax?.Amount) || 0,
         promotionDiscount: parseFloat(item.PromotionDiscount?.Amount) || 0,
         currency: item.ItemPrice?.CurrencyCode || "",
@@ -718,7 +905,7 @@ async function getSalesReport(config) {
   if (dataSource === "api" || (dataSource === "both" && normalisedItems.length === 0)) {
     try {
       logger.info("[Sales] Fetching from Orders API...");
-      const orders = await fetchOrders(accessToken, baseUrl, marketplaceId, startDateISO);
+      const orders = await fetchOrders(accessToken, baseUrl, marketplaceId, startDateISO, endDateISO);
 
       const activeOrders = orders.filter(
         (o) => o.OrderStatus !== "Canceled" && o.OrderStatus !== "Cancelled"
@@ -749,13 +936,25 @@ async function getSalesReport(config) {
   // Step 4: Calculate sales
   const salesData = calculateSales(normalisedItems);
 
-  logger.info(`[Sales] Done. ${salesData.totalAsins} ASINs found.`);
+  // Step 5: Extract unique order IDs from normalised items.
+  //         These are needed by the expense system (Fix 2) to determine whether
+  //         an expense belongs to the current sales period or a prior period.
+  //         Order IDs are lost during ASIN/date aggregation in calculateSales(),
+  //         so we extract them here before that information is discarded.
+  const orderIds = [...new Set(
+    normalisedItems
+      .map((item) => item.orderId)
+      .filter((id) => id && id.length > 0)
+  )];
+
+  logger.info(`[Sales] Done. ${salesData.totalAsins} ASINs found. ${orderIds.length} unique order IDs extracted.`);
   logger.info(`[Sales] 7D: ${salesData.summary.last7Days.totalUnits} units / ${salesData.summary.last7Days.totalRevenue}`);
   logger.info(`[Sales] 14D: ${salesData.summary.last14Days.totalUnits} units / ${salesData.summary.last14Days.totalRevenue}`);
   logger.info(`[Sales] 30D: ${salesData.summary.last30Days.totalUnits} units / ${salesData.summary.last30Days.totalRevenue}`);
 
   return {
     data: salesData,
+    orderIds,
     metadata: {
       country: countryUpper,
       region,

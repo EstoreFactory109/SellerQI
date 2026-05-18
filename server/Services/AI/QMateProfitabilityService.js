@@ -575,10 +575,17 @@ async function getDatewiseProfitability(userId, country, region) {
             : userId;
         const userIdStr = userId?.toString() || userId;
         
-        const [economicsMetrics, ppcMetrics] = await Promise.all([
+        const [economicsMetrics, ppcRollupPb] = await Promise.all([
             EconomicsMetrics.findLatest(userObjectId, region, country),
-            PPCMetrics.findLatestForUser(userIdStr, country, region)
+            PPCMetrics.rollupLastDays(userIdStr, country, region, 30)
         ]);
+        const ppcMetrics =
+            ppcRollupPb && ppcRollupPb.found
+                ? {
+                      summary: ppcRollupPb.summary,
+                      dateWiseMetrics: ppcRollupPb.dateWiseMetrics || []
+                  }
+                : null;
         
         if (!economicsMetrics) {
             return {
@@ -947,9 +954,8 @@ async function getQMateProfitabilityContext(userId, country, region, options = {
     try {
         // Sales-only mode: prioritize `SalesOnlyMetrics` so we don't depend on grossProfit/fees/refunds.
         // If sales-only data exists, return a minimal profitability context with grossProfit forced to 0.
-        const salesOnlyMetrics = await SalesOnlyMetrics.findLatest(userId, region, country)
-            .select('totalSales datewiseSales dateRange')
-            .lean();
+        // Per-day model: findLatest aggregates recent 31 days into { totalSales, datewiseSales, dateRange }
+        const salesOnlyMetrics = await SalesOnlyMetrics.findLatest(userId, region, country);
 
         if (salesOnlyMetrics) {
             const currencyCode = salesOnlyMetrics?.totalSales?.currencyCode || 'USD';

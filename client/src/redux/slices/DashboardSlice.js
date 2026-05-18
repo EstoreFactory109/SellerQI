@@ -30,9 +30,24 @@ const DashboardDataSlice = createSlice({
         if (state.DashBoardInfo) {
           state.DashBoardInfo.calendarMode = action.payload;
         }
-      }
+      },
+      /** Update only calendar fields — avoids wiping dashboard data on profitability page. */
+      setDashboardDateRange: (state, action) => {
+        if (!state.DashBoardInfo) {
+          state.DashBoardInfo = {};
+        }
+        if (action.payload.startDate != null) {
+          state.DashBoardInfo.startDate = action.payload.startDate;
+        }
+        if (action.payload.endDate != null) {
+          state.DashBoardInfo.endDate = action.payload.endDate;
+        }
+        if (action.payload.calendarMode != null) {
+          state.DashBoardInfo.calendarMode = action.payload.calendarMode;
+        }
+      },
     },
   });
 
-  export const { setDashboardInfo,UpdateDashboardInfo,setCalendarMode } = DashboardDataSlice.actions;
+  export const { setDashboardInfo, UpdateDashboardInfo, setCalendarMode, setDashboardDateRange } = DashboardDataSlice.actions;
   export default DashboardDataSlice.reducer;

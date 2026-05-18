@@ -17,9 +17,13 @@ const TotalSales = async (SessionToken) => {
             "host": host,
             "user-agent": "MyApp/1.0",
             "content-type": "application/json",
-            "x-amz-access-token":"Atza|IwEBIGXpi1hA8BPXecq_S9V32TG7Ic2EjHRxUHxF-ozqdCE_Ky5vpB2sp_AEUuMJPXPbL0VfLvy1kksBmikPIC2iM2Q3lKI2e4sd_5dGT2Lb36_--TQQGckcNrd-wGGtKIM5VmroKISWjl7zKKUfAs57JzXfuzrFS8oHbSC-1AOCkHQa6tljWjqNpBwguYcn_Y4YZsbW5UHTWHFQFipBczV86yBMOC4tludY4HYgGDdvkEWj07gAZLe7W1Fewf559lGUbECnoOMMCY5OjZpfuEVAgBfyTDk3tGSCAcJRAKMm3kCyROlBGsekVYMfIRZYdSFZ5v7E87nxK1GR-zge8lWkRmKHs5uorycnr2OEpVvcHSNbfg"
+            "x-amz-access-token": process.env.SPAPI_ACCESS_TOKEN
         }
     };
+
+    if (!process.env.SPAPI_ACCESS_TOKEN) {
+        throw new Error('Missing SPAPI_ACCESS_TOKEN in environment (this is a test script).');
+    }
 
     // AWS Signature V4 signing
     aws4.sign(request, {

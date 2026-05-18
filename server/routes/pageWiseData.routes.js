@@ -95,6 +95,8 @@ const {
     getTabCounts
 } = require('../controllers/analytics/PPCCampaignAnalysisController.js');
 
+const { getAsinDailyAggregation } = require('../controllers/analytics/ProductWiseAsinDailyController.js');
+
 const { pauseKeyword, pauseKeywordsBulk } = require('../controllers/analytics/PauseKeywordController.js');
 const { addToNegativeKeywords } = require('../controllers/analytics/AddToNegativeController.js');
 const { pauseAndAddToNegative, pauseAndAddToNegativeBulk } = require('../controllers/analytics/PauseAndAddToNegativeController.js');
@@ -243,6 +245,11 @@ router.get('/ppc/zero-sales', auth, getLocation, analyseDataCache(600, 'ppc-zero
 // Query params: page, limit, startDate, endDate
 // Cache TTL: 10 minutes (only page 1 cached)
 router.get('/ppc/auto-insights', auth, getLocation, analyseDataCache(600, 'ppc-auto-insights'), getAutoCampaignInsights);
+
+// ASIN daily PPC aggregation (ProductWiseSponsoredAdsItem — spend + sales per ASIN per date)
+// Query params: startDate, endDate (YYYY-MM-DD; default last 30 days through yesterday)
+// Cache TTL: 10 minutes
+router.get('/ppc/asin-daily', auth, getLocation, analyseDataCache(600, 'ppc-asin-daily'), getAsinDailyAggregation);
 
 // Pause keyword (used by Wasted Spend Keywords table)
 // POST body: { keywordId: string, adType?: "SP" | "SB" | "SD" }

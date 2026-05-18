@@ -1,9 +1,36 @@
 const axios = require('axios');
 const zlib = require('zlib');
 const { promisify } = require('util');
+const mongoose = require('mongoose');
 const adsKeywordsPerformanceModel = require('../../models/amazon-ads/adsKeywordsPerformanceModel');
 const gunzip = promisify(zlib.gunzip);
 const { generateAdsAccessToken } = require('./GenerateToken.js');
+const { toYyyyMmDd } = require('../../utils/metricDateKey.js');
+const { resolveReportDateRange } = require('../../utils/reportDateRange.js');
+
+/**
+ * Keyword performance report → `adsKeywordsPerformance` (per-day upsert via metricDate).
+ * Same stored rows back Campaign Audit **Wasted spend** and **Top performing** tabs (read path merges days).
+ */
+function mapKeywordPerformanceRow(row) {
+    const dateRaw = row.date != null ? String(row.date) : '';
+    const metricDay = toYyyyMmDd(dateRaw) || dateRaw.substring(0, 10) || null;
+    return {
+        date: metricDay,
+        keywordId: Number(row.keywordId) || 0,
+        attributedSales30d: parseFloat(row.sales7d) || 0,
+        cost: parseFloat(row.cost) || 0,
+        adGroupName: String(row.adGroupName || ''),
+        matchType: String(row.matchType || ''),
+        campaignId: Number(row.campaignId) || 0,
+        clicks: parseInt(row.clicks, 10) || 0,
+        impressions: parseInt(row.impressions, 10) || 0,
+        keyword: String(row.keyword || ''),
+        campaignName: String(row.campaignName || ''),
+        adGroupId: Number(row.adGroupId) || 0,
+        adKeywordStatus: row.adKeywordStatus != null ? String(row.adKeywordStatus) : undefined
+    };
+}
 
 // Analyze raw buffer (for debugging)
 function analyzeRawData(data) {
@@ -85,10 +112,12 @@ async function getKeywordReportId(accessToken, profileId, startDate, endDate, re
                         "campaignName",
                         "adGroupName",
                         "matchType",
+                        "impressions",
                         "clicks",
                         "cost",
-                        "attributedSales30d",
-                        "impressions",
+                        "sales7d",
+                        "purchases7d",
+                        "unitsSoldClicks7d",
                         "campaignId",
                         "adGroupId",
                         "adKeywordStatus"
@@ -277,19 +306,12 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
 }
 
 // Orchestrator function
-async function getKeywordPerformanceReport(accessToken, profileId,userId,country, region, refreshToken = null) {
-    // UTC-based dates matching Expences.js: yesterday − 30 days → yesterday
-    const now = new Date();
-    const endDateObj = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
-    const startDateObj = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1 - 30));
-    
-    const formatDate = (date) => {
-        return date.toISOString().split('T')[0];
-    };
-    
-    const startDate = formatDate(startDateObj);
-    const endDate = formatDate(endDateObj);
-    
+// `options.startDate` / `options.endDate` (YYYY-MM-DD) override the default
+// "yesterday-30 … yesterday" Pacific window. Used by the test controller so a
+// caller can request a specific date range from Amazon.
+async function getKeywordPerformanceReport(accessToken, profileId, userId, country, region, refreshToken = null, options = {}) {
+    const { startDate, endDate, isCustom } = resolveReportDateRange(options);
+
     console.log('🚀 Starting keyword performance report generation', {
         profileId,
         userId,
@@ -297,6 +319,7 @@ async function getKeywordPerformanceReport(accessToken, profileId,userId,country
         region,
         startDate,
         endDate,
+        customDateRange: isCustom,
         hasRefreshToken: !!refreshToken
     });
     
@@ -370,22 +393,44 @@ async function getKeywordPerformanceReport(accessToken, profileId,userId,country
                 data = Array.isArray(reportContent) ? reportContent : (data ? [data] : []);
             }
 
-            console.log(`📊 Processing ${data.length} keyword records for storage`);
+            console.log(`📊 Processing ${data.length} keyword records for storage (per-day upsert)`);
 
-            const adsKeywordsPerformanceData = await adsKeywordsPerformanceModel.create({
-                userId: userId,
-                country: country,
-                region: region,
-                keywordsData: data
-            });
-            
-            console.log(`✅ Successfully stored ${data.length} keywords in database`);
-            
+            const userIdObj = mongoose.Types.ObjectId.isValid(String(userId))
+                ? new mongoose.Types.ObjectId(String(userId))
+                : userId;
+
+            const byDay = new Map();
+            for (const row of data) {
+                const mapped = mapKeywordPerformanceRow(row);
+                const day = mapped.date;
+                if (!day) continue;
+                if (!byDay.has(day)) byDay.set(day, []);
+                byDay.get(day).push(mapped);
+            }
+
+            for (const [metricDate, keywordsData] of byDay) {
+                await adsKeywordsPerformanceModel.upsertKeywordsForDate(
+                    userIdObj,
+                    country,
+                    region,
+                    metricDate,
+                    keywordsData
+                );
+            }
+
+            const merged = await adsKeywordsPerformanceModel.findMergedKeywordsData(userIdObj, country, region, {});
+            console.log(`✅ Stored keyword performance across ${byDay.size} day(s); merged row count: ${merged.length}`);
+
             return {
                 success: true,
                 reportId: reportStatus.reportId,
                 location: reportStatus.location,
-                data: adsKeywordsPerformanceData.keywordsData
+                data: {
+                    userId: userIdObj,
+                    country,
+                    region,
+                    keywordsData: merged
+                }
             };
         } else {
             console.error('❌ Report generation failed:', reportStatus.error);

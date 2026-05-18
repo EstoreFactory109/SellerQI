@@ -18,6 +18,19 @@ const QMateAccountService = require('./QMateAccountService.js');
 const QMateKeywordService = require('./QMateKeywordService.js');
 const { interpretPrompt } = require('../../QMate/interpreter/PromptInterpreter.js');
 const { getDashboardPhase3 } = require('../Calculations/DashboardSummaryService.js');
+const { runLayeredQMatePipeline } = require('./layers/index.js');
+const { createInterpretationContract } = require('./layers/contracts.js');
+const { buildExecutionPlan } = require('./layers/ServiceRouter.js');
+const { enforceDomain } = require('./layers/guards/DomainGuard.js');
+const { filterGenericAnswerMarkdown } = require('./layers/guards/ResponseFilter.js');
+const ResponseValidator = require('./layers/helpers/ResponseValidator.js');
+const { generateFollowUps } = require('./layers/helpers/FollowUpGenerator.js');
+const {
+    isOnboardingQuery,
+    CAPABILITIES_ANSWER,
+    CAPABILITIES_FOLLOW_UPS,
+} = require('./layers/helpers/IntentGuards.js');
+const { extractAsin, hasAsin } = require('./layers/helpers/EntityGuards.js');
 
 let openaiClient = null;
 const INTERPRETER_CONFIDENCE_THRESHOLD = 0.35;
@@ -78,6 +91,18 @@ function isPostActionMissingRequiredFields(interpreted) {
     return false;
 }
 
+// Phase 3 / Task 3.3: Legacy "Option N" text resolver.
+//
+// New clients send the structured `resolved_prompt` directly as the next
+// message (see `clarification_options` in QMateController.handleChat), so no
+// special parsing is needed for them — the prompt is already a complete,
+// answerable question and proceeds through normal interpretation.
+//
+// This function is retained for backward compatibility with older clients
+// that still post the literal "Option 1" / "Option 2" text from the legacy
+// `clarifying_questions` string list. It can be removed once telemetry
+// confirms no clients hit this branch. When this branch fires, we log it
+// so we can monitor migration.
 function resolveClarificationChoice(question, chatHistory = []) {
     const raw = String(question || '').trim();
     const q = raw.toLowerCase();
@@ -160,6 +185,7 @@ async function createCompletionWithFallback(client, messages) {
         try {
             const completion = await client.chat.completions.create({
                 model,
+                temperature: 0,
                 response_format: { type: 'json_object' },
                 messages,
             });
@@ -190,10 +216,26 @@ async function generateClarificationFromModel(client, { question, reason, interp
         }))
         : [];
 
+    // Phase 3 / Task 3.1: ask the model for structured clarification options
+    // so the frontend can render them as clickable buttons. We still emit
+    // a flat `clarifying_questions` string array on the way out for backward
+    // compatibility.
     const messages = [
         {
             role: 'system',
-            content: 'You are a clarification assistant. Ask all essential clarifications in one response. For each clarification, return exactly one question with exactly 4 options. Avoid unnecessary/silly clarifications for simple prompts. Return strict JSON with keys: answer_markdown (string), needs_clarification (boolean), clarifying_questions (string[]). No extra keys.'
+            content:
+                'You are a clarification assistant for an Amazon seller analytics chatbot called QMate. ' +
+                'Ask all essential clarifications in one response. Avoid unnecessary/silly clarifications for simple prompts.\n\n' +
+                'You must respond with a JSON object in this exact format:\n' +
+                '{\n' +
+                '  "message": "Brief clarifying question text",\n' +
+                '  "options": [\n' +
+                '    { "id": "opt_1", "label": "Short label for option 1", "resolved_prompt": "The full unambiguous question this option represents" },\n' +
+                '    { "id": "opt_2", "label": "Short label for option 2", "resolved_prompt": "The full unambiguous question this option represents" }\n' +
+                '  ]\n' +
+                '}\n' +
+                'Provide 2-3 options maximum. Each resolved_prompt must be a complete, answerable question about Amazon seller data.\n' +
+                'Respond with ONLY the JSON, no markdown fences, no explanation.'
         },
         ...trimmedHistory,
         {
@@ -210,17 +252,53 @@ async function generateClarificationFromModel(client, { question, reason, interp
         const completion = await createCompletionWithFallback(client, messages);
         const content = completion?.choices?.[0]?.message?.content || '{}';
         const parsed = JSON.parse(content);
-        const clarifyingQuestions = Array.isArray(parsed.clarifying_questions)
-            ? parsed.clarifying_questions
-                .filter((q) => typeof q === 'string' && q.trim())
-                .map((q) => q.trim())
-                .slice(0, 3)
-            : [];
+
+        // Sanitize structured options from the model.
+        const rawOptions = Array.isArray(parsed.options) ? parsed.options : [];
+        const clarificationOptions = rawOptions
+            .map((opt, idx) => {
+                if (!opt || typeof opt !== 'object') return null;
+                const label = typeof opt.label === 'string' ? opt.label.trim() : '';
+                const resolvedPrompt = typeof opt.resolved_prompt === 'string'
+                    ? opt.resolved_prompt.trim()
+                    : '';
+                if (!label || !resolvedPrompt) return null;
+                return {
+                    id: typeof opt.id === 'string' && opt.id.trim() ? opt.id.trim() : `opt_${idx + 1}`,
+                    label,
+                    resolved_prompt: resolvedPrompt,
+                    ...(opt.icon ? { icon: String(opt.icon) } : {}),
+                    ...(opt.needs_followup ? { needs_followup: true } : {}),
+                };
+            })
+            .filter(Boolean)
+            .slice(0, 4);
+
+        // Backward-compat string mirror — derived from option labels with the
+        // "Option N: ..." prefix the legacy regex resolver expects.
+        const clarifyingQuestions = clarificationOptions.length > 0
+            ? clarificationOptions.map((opt, idx) => `Option ${idx + 1}: ${opt.label}`)
+            : (Array.isArray(parsed.clarifying_questions)
+                ? parsed.clarifying_questions
+                    .filter((q) => typeof q === 'string' && q.trim())
+                    .map((q) => q.trim())
+                    .slice(0, 3)
+                : []);
+
+        const rawClarify =
+            typeof parsed.message === 'string' && parsed.message.trim()
+                ? parsed.message.trim()
+                : typeof parsed.answer_markdown === 'string' && parsed.answer_markdown.trim()
+                    ? parsed.answer_markdown.trim()
+                    : `I need one clarification before answering. ${reason || ''}`.trim();
+
+        logger.info('[QMate] Clarification model generated structured options', {
+            optionsCount: clarificationOptions.length,
+        });
+
         return {
             status: 200,
-            answer_markdown: typeof parsed.answer_markdown === 'string' && parsed.answer_markdown.trim()
-                ? parsed.answer_markdown.trim()
-                : `I need one clarification before answering. ${reason || ''}`.trim(),
+            answer_markdown: filterGenericAnswerMarkdown(rawClarify),
             chart_suggestions: [],
             follow_up_questions: [],
             needs_clarification: true,
@@ -229,6 +307,7 @@ async function generateClarificationFromModel(client, { question, reason, interp
                 : [
                     'Question 1: What output format do you want? | Option A: Single number | Option B: Full analysis | Option C: Chart | Option D: Action request',
                 ],
+            clarification_options: clarificationOptions,
             intent_interpretation: interpretation || undefined,
             interpretation_reason: reason || undefined,
             original_question: question || undefined,
@@ -243,6 +322,7 @@ async function generateClarificationFromModel(client, { question, reason, interp
             chart_suggestions: [],
             follow_up_questions: [],
             needs_clarification: true,
+            clarification_options: [],
             intent_interpretation: interpretation || undefined,
             interpretation_reason: reason || undefined,
             original_question: question || undefined,
@@ -2746,6 +2826,14 @@ Your account is in moderate shape. You have AUD 8,093 in sales with 21.5% profit
 - End with numbered Action Plan
 
 Remember: **never** fabricate raw numbers. Only interpret the structured context you receive.
+
+CRITICAL DATA RULES — FOLLOW THESE WITHOUT EXCEPTION:
+1. ONLY use numbers, metrics, and data points that appear in the provided context below. If a number is not in the context, say "I don't have that data available" instead of estimating or calculating.
+2. NEVER perform arithmetic on the provided numbers to derive new numbers unless the user explicitly asks for a calculation AND all input numbers are present in the context.
+3. When citing a metric, specify the exact time period it covers (e.g., "In the last 30 days, your total sales were $X").
+4. If the user asks about something not covered by the provided context data, say so honestly. Do not guess.
+5. Do NOT reference data from previous conversation turns unless it is re-provided in the current context.
+6. Keep your response concise and directly relevant to the user's question. Do not volunteer information about unrelated metrics.
 `;
 
 /**
@@ -3013,6 +3101,11 @@ const buildModelContext = (dashboardData, question, ppcMetrics = null, cogsValue
 class QMateService {
     /**
      * Generate an AI response for a given user question.
+     *
+     * @deprecated — No longer called from generateResponseOptimized.
+     * Retained for backward compatibility but should be removed after
+     * confirming no other callers exist.
+     *
      * @param {Object} params
      * @param {string} params.userId
      * @param {string} params.country
@@ -3063,8 +3156,12 @@ class QMateService {
         let ppcMetrics = null;
         try {
             const ppcStart = Date.now();
-            ppcMetrics = await PPCMetrics.findLatestForUser(userId, country, region);
-            logger.info('[QMate] PPCMetrics.findLatestForUser completed', {
+            const ppcRollupQmMain = await PPCMetrics.rollupLastDays(userId, country, region, 30);
+            ppcMetrics =
+                ppcRollupQmMain && ppcRollupQmMain.found
+                    ? { summary: ppcRollupQmMain.summary, dateWiseMetrics: ppcRollupQmMain.dateWiseMetrics }
+                    : null;
+            logger.info('[QMate] PPCMetrics.rollupLastDays completed', {
                 userId,
                 country,
                 region,
@@ -3222,6 +3319,7 @@ class QMateService {
         if (!answer_markdown) {
             answer_markdown = "Here’s what I found based on your account data. If you’d like more detail on a specific area, ask a follow-up question below.";
         }
+        answer_markdown = filterGenericAnswerMarkdown(answer_markdown);
 
         const chart_suggestions = Array.isArray(parsed.chart_suggestions)
             ? parsed.chart_suggestions
@@ -3436,42 +3534,190 @@ class QMateService {
         const { cleaned: questionCleaned, wasTruncated: promptTruncated } = clearPrompt(question);
         const effectiveQuestion = questionCleaned || question?.trim() || '';
         const allowDefaultSalesAnswer = isSimpleLast30DaySalesRequest(effectiveQuestion);
+        // Phase 3 / Task 3.3: structured clarification clicks arrive as the
+        // full `resolved_prompt` and need no special handling — they fall
+        // straight through to normal interpretation. The legacy "Option N"
+        // regex resolver below is only for older clients that haven't migrated
+        // to `clarification_options`.
         const clarificationChoice = resolveClarificationChoice(effectiveQuestion, chatHistory);
+        if (clarificationChoice) {
+            logger.info('[QMate] Legacy option resolution triggered — client should migrate to structured clarification_options', {
+                style: clarificationChoice.style,
+                hasBase: Boolean(clarificationChoice.baseQuestion),
+            });
+        }
         const effectiveQuestionForInterpretation = clarificationChoice?.resolvedPrompt || effectiveQuestion;
-        const interpreted = interpretPrompt({
+        // Phase 2 / Task 2.1: interpretPrompt now runs the regex classifier and
+        // an LLM classifier in parallel; pass the OpenAI client and recent chat
+        // history so the LLM classifier can run and resolve pronoun references.
+        const interpreted = await interpretPrompt({
             prompt: effectiveQuestionForInterpretation,
-            context: { country, region, startDate, endDate, calendarMode },
+            context: {
+                country,
+                region,
+                startDate,
+                endDate,
+                calendarMode,
+                openAIClient: client,
+                chatHistory: Array.isArray(chatHistory) ? chatHistory : [],
+            },
         });
+
+        const asinInQuery = extractAsin(effectiveQuestionForInterpretation);
+        if (asinInQuery) {
+            logger.info('[QMate] ASIN detected', {
+                asin: asinInQuery,
+                query: effectiveQuestionForInterpretation,
+                intent: interpreted?.intent,
+            });
+            if (!interpreted.intent || interpreted.intent === 'other') {
+                interpreted.intent = 'value_lookup';
+                if (interpreted.routing) {
+                    interpreted.routing.engine = 'information_engine';
+                    interpreted.routing.reason = 'asin_intent_safety';
+                }
+            }
+        }
+
+        const domainCheck = enforceDomain(effectiveQuestionForInterpretation);
+        if (domainCheck.blocked && !asinInQuery) {
+            logger.info('[QMate] Domain guard blocked — returning canned response', {
+                query: effectiveQuestionForInterpretation,
+            });
+            return {
+                status: 200,
+                answer_markdown: domainCheck.message,
+                chart_suggestions: [],
+                follow_up_questions: [],
+                needs_clarification: false,
+                clarifying_questions: [],
+                intent_interpretation: interpreted,
+                responseSource: 'canned',
+                dataConfidence: 'none',
+                dataSources: [],
+            };
+        }
+
+        if (!asinInQuery && isOnboardingQuery(effectiveQuestionForInterpretation)) {
+            logger.info('[QMate] Onboarding/capabilities query — returning canned response');
+            return {
+                status: 200,
+                answer_markdown: CAPABILITIES_ANSWER,
+                chart_suggestions: [],
+                follow_up_questions: [...CAPABILITIES_FOLLOW_UPS],
+                needs_clarification: false,
+                clarifying_questions: [],
+                intent_interpretation: interpreted,
+                responseSource: 'canned',
+                dataConfidence: 'none',
+                dataSources: [],
+            };
+        }
+
+        const layeredResponse = await runLayeredQMatePipeline({
+            interpretation: interpreted,
+            rawQuestion: question,
+            cleanedQuestion: effectiveQuestionForInterpretation,
+            chatHistory,
+            userContext: { userId, country, region },
+            runtimeContext: { startDate, endDate, calendarMode },
+            skipClarification:
+                Boolean(asinInQuery) ||
+                allowDefaultSalesAnswer ||
+                isSimpleEnoughToSkipClarification(effectiveQuestion, interpreted),
+            clarificationThreshold: INTERPRETER_CONFIDENCE_THRESHOLD,
+            modelTools: { client, createCompletionWithFallback },
+        });
+        const executionPlanForLog = buildExecutionPlan(createInterpretationContract(interpreted));
+        if (layeredResponse) {
+            logger.info('[QMate] Debug', {
+                query: effectiveQuestionForInterpretation,
+                intent: interpreted?.intent,
+                serviceUsed: executionPlanForLog?.serviceType,
+                dataRequirementKeys: Object.keys(executionPlanForLog?.dataRequirements || {}),
+                entityKeys: interpreted?.entities
+                    ? Object.keys(interpreted.entities).filter((k) => interpreted.entities[k] != null)
+                    : [],
+                response: {
+                    answerPreview: String(layeredResponse.answer_markdown || '').slice(0, 800),
+                    needs_clarification: layeredResponse.needs_clarification,
+                },
+            });
+            logger.info('[QMate] Layered architecture response', {
+                userId,
+                country,
+                region,
+                durationMs: Date.now() - startTime,
+                needsClarification: !!layeredResponse.needs_clarification,
+                hasError: !!layeredResponse.error,
+            });
+            if (layeredResponse.answer_markdown) {
+                layeredResponse.answer_markdown = filterGenericAnswerMarkdown(String(layeredResponse.answer_markdown));
+            }
+            logger.info('[QMate] Returning layered pipeline response', {
+                responseSource: layeredResponse.responseSource || 'layered_pipeline',
+            });
+            return {
+                ...layeredResponse,
+                responseSource: layeredResponse.responseSource || 'layered_pipeline',
+                dataConfidence: layeredResponse.dataConfidence || 'high',
+                dataSources: layeredResponse.dataSources || [],
+            };
+        }
 
         // If user selected a clarification option but we couldn't resolve prior question context,
         // provide a direct recovery message (avoid repeating the same clarification loop).
         if (clarificationChoice && !clarificationChoice.baseQuestion) {
-            return await generateClarificationFromModel(client, {
+            logger.info('[QMate] Clarification choice without resolvable base question — returning clarification');
+            const clarification = await generateClarificationFromModel(client, {
                 question: effectiveQuestion,
                 reason: 'Could not map this selection to the original question from conversation history.',
                 interpretation: interpreted,
                 chatHistory
             });
+            return {
+                ...clarification,
+                responseSource: 'clarification',
+                dataConfidence: 'none',
+                dataSources: [],
+            };
         }
 
         // Confidence guardrail: ask a focused clarification instead of returning noisy results.
         if (!allowDefaultSalesAnswer && !isSimpleEnoughToSkipClarification(effectiveQuestion, interpreted) && (interpreted?.confidence || 0) < INTERPRETER_CONFIDENCE_THRESHOLD) {
-            return await generateClarificationFromModel(client, {
+            logger.info('[QMate] Confidence below threshold — returning clarification', {
+                confidence: interpreted?.confidence || 0,
+                threshold: INTERPRETER_CONFIDENCE_THRESHOLD,
+            });
+            const clarification = await generateClarificationFromModel(client, {
                 question: effectiveQuestion,
                 reason: 'I could not confidently infer what you need from this prompt.',
                 interpretation: interpreted,
                 chatHistory
             });
+            return {
+                ...clarification,
+                responseSource: 'clarification',
+                dataConfidence: 'none',
+                dataSources: [],
+            };
         }
 
         // POST action guardrail: never proceed with ambiguous or under-specified action intents.
         if (isPostActionMissingRequiredFields(interpreted)) {
-            return await generateClarificationFromModel(client, {
+            logger.info('[QMate] Post action missing required fields — returning clarification');
+            const clarification = await generateClarificationFromModel(client, {
                 question: effectiveQuestion,
                 reason: 'I detected an action request, but action type or targets are missing.',
                 interpretation: interpreted,
                 chatHistory
             });
+            return {
+                ...clarification,
+                responseSource: 'clarification',
+                dataConfidence: 'none',
+                dataSources: [],
+            };
         }
 
         // Extract ASIN from question if user is asking about a specific ASIN
@@ -3537,14 +3783,31 @@ class QMateService {
                 calendarMode
             });
 
-            // If both core services failed, fall back to legacy method
+            // If both core services failed, return an explicit data-unavailable response
+            // (do NOT fall back into the legacy generateResponse path — that obscured errors
+            // and produced hallucinated answers; see QMate-Fix-Spec-For-Claude-Code.md Task 1.2).
             if (!metricsResult.success && !issuesResult.success) {
-                logger.warn('[QMate] Optimized services failed, falling back to legacy method', {
+                logger.warn('[QMate] Both metrics and issues fetch failed — returning data-unavailable response instead of legacy fallback', {
                     userId,
                     metricsError: metricsResult.error,
                     issuesError: issuesResult.error
                 });
-                return this.generateResponse({ userId, country, region, question, chatHistory });
+                return {
+                    status: 200,
+                    answer_markdown: "I'm sorry, I wasn't able to retrieve the data needed to answer your question right now. This could be due to a temporary data sync issue. Please try again in a moment, or try rephrasing your question to focus on a specific metric like sales, profit, or PPC performance.",
+                    chart_suggestions: [],
+                    follow_up_questions: [
+                        'What were my total sales in the last 30 days?',
+                        'Show me my PPC performance',
+                        'What are my current listing issues?'
+                    ],
+                    needs_clarification: false,
+                    clarifying_questions: [],
+                    intent_interpretation: interpreted,
+                    responseSource: 'data_unavailable',
+                    dataConfidence: 'none',
+                    dataSources: [],
+                };
             }
 
             // Sensible default for common sales query to avoid unnecessary clarification loops.
@@ -3552,6 +3815,7 @@ class QMateService {
                 const totalSales = metricsResult?.data?.summary?.totalSales;
                 const currency = metricsResult?.data?.summary?.currency || 'USD';
                 if (typeof totalSales === 'number' && !Number.isNaN(totalSales)) {
+                    logger.info('[QMate] Deterministic shortcut: default last-30-days sales answer');
                     return {
                         status: 200,
                         answer_markdown: `Total sales for the last 30 days: ${currency} ${Number(totalSales).toFixed(2)}.`,
@@ -3562,6 +3826,9 @@ class QMateService {
                         ],
                         needs_clarification: false,
                         intent_interpretation: interpreted,
+                        responseSource: 'deterministic_shortcut',
+                        dataConfidence: 'high',
+                        dataSources: ['metrics'],
                     };
                 }
             }
@@ -3594,6 +3861,7 @@ class QMateService {
                 }
 
                 if (grossProfit !== null && !Number.isNaN(grossProfit)) {
+                    logger.info('[QMate] Deterministic shortcut: gross profit last-30-days');
                     return {
                         status: 200,
                         answer_markdown: `Gross profit for the last 30 days: ${currency} ${Number(grossProfit).toFixed(2)}.`,
@@ -3604,6 +3872,9 @@ class QMateService {
                         ],
                         needs_clarification: false,
                         intent_interpretation: interpreted,
+                        responseSource: 'deterministic_shortcut',
+                        dataConfidence: 'high',
+                        dataSources: ['metrics'],
                     };
                 }
             }
@@ -3633,6 +3904,7 @@ class QMateService {
                 if (typeof wastedSpend === 'number' && !Number.isNaN(wastedSpend)) {
                     const currency = metricsResult?.data?.summary?.currency || 'USD';
                     const amount = Number(wastedSpend).toFixed(2);
+                    logger.info('[QMate] Deterministic shortcut: money wasted in ads value lookup');
                     return {
                         status: 200,
                         answer_markdown: `Money Wasted in Ads is ${currency} ${amount} for the selected period.`,
@@ -3644,24 +3916,34 @@ class QMateService {
                         ],
                         needs_clarification: false,
                         intent_interpretation: interpreted,
+                        responseSource: 'deterministic_shortcut',
+                        dataConfidence: 'high',
+                        dataSources: ['metrics', 'dashboardPhase3'],
                     };
                 }
             }
 
-            // Step 2: Build optimized model context from ALL pre-computed data
+            // Step 2: Build a unified fetchResults object keyed by data source name.
+            // Phase 1, Task 1.3: this object is passed to buildOptimizedModelContext along
+            // with the interpretation so the model only sees data relevant to the intent.
+            const fetchResults = {
+                metrics: metricsResult.success ? metricsResult.data : null,
+                issues: issuesResult.success ? issuesResult.data : null,
+                ppc: ppcResult.success ? ppcResult.data : null,
+                profitability: profitabilityResult.success ? profitabilityResult.data : null,
+                inventory: inventoryResult.success ? inventoryResult.data : null,
+                reimbursement: reimbursementResult.success ? reimbursementResult.data : null,
+                products: productsResult.success ? productsResult.data : null,
+                account: accountResult.success ? accountResult.data : null,
+                keywords: keywordResult.success ? keywordResult.data : null,
+            };
+
+            // Step 2.1: Build optimized model context, scoped to the data sources relevant
+            // to the classified intent (anti-hallucination — see Phase 1 Task 1.3).
             const modelContext = buildOptimizedModelContext(
-                metricsResult.data,
-                issuesResult.data,
-                effectiveQuestion,
-                {
-                    ppc: ppcResult.success ? ppcResult.data : null,
-                    profitability: profitabilityResult.success ? profitabilityResult.data : null,
-                    inventory: inventoryResult.success ? inventoryResult.data : null,
-                    reimbursement: reimbursementResult.success ? reimbursementResult.data : null,
-                    products: productsResult.success ? productsResult.data : null,
-                    account: accountResult.success ? accountResult.data : null,
-                    keywords: keywordResult.success ? keywordResult.data : null
-                }
+                fetchResults,
+                interpreted,
+                effectiveQuestion
             );
             
             const effectiveModelContext = isAccountHealthOnlyQuestion(effectiveQuestion)
@@ -3678,6 +3960,7 @@ class QMateService {
                     accountErrors
                 );
 
+                logger.info('[QMate] Deterministic shortcut: account health only question');
                 return {
                     status: 200,
                     answer_markdown,
@@ -3688,6 +3971,9 @@ class QMateService {
                         'What changed in my account health compared to last week?'
                     ],
                     needs_clarification: false,
+                    responseSource: 'deterministic_shortcut',
+                    dataConfidence: 'high',
+                    dataSources: ['account'],
                 };
             }
 
@@ -3760,6 +4046,26 @@ class QMateService {
                 };
             }
 
+            // Phase 1 / Task 1.5: Validate numbers in the LLM response against the
+            // context we actually sent. Log warnings but do not yet strip — the
+            // monitoring data informs a future automated cleanup step.
+            try {
+                const contextUsed = contextWithHistory;
+                const numericValidation = ResponseValidator.validateNumbersAgainstContext(aiRaw, contextUsed);
+                if (!numericValidation.valid) {
+                    logger.warn('[QMate] Response contains numbers not in context', {
+                        userId,
+                        warnings: numericValidation.warnings.slice(0, 10),
+                    });
+                } else {
+                    logger.info('[QMate] Response numeric validation passed');
+                }
+            } catch (validationError) {
+                logger.warn('[QMate] Numeric validation step failed', {
+                    message: validationError.message,
+                });
+            }
+
             // Step 5: Parse model JSON safely
             let parsed;
             try {
@@ -3794,6 +4100,7 @@ class QMateService {
             if (!answer_markdown) {
                 answer_markdown = "Here's what I found based on your account data. If you'd like more detail on a specific area, ask a follow-up question below.";
             }
+            answer_markdown = filterGenericAnswerMarkdown(answer_markdown);
 
             const chart_suggestions = Array.isArray(parsed.chart_suggestions)
                 ? parsed.chart_suggestions
@@ -3807,9 +4114,15 @@ class QMateService {
                         xField: 'date',
                     }]
                     : chart_suggestions;
-            const follow_up_questions = Array.isArray(parsed.follow_up_questions)
-                ? parsed.follow_up_questions
-                : [];
+            // Phase 4 / Task 4.1: replace LLM-generated follow-ups with
+            // deterministic intent-templated ones. The LLM is no longer
+            // trusted to suggest answerable follow-ups — FollowUpGenerator
+            // picks templates we know we can resolve.
+            const follow_up_questions = generateFollowUps(
+                interpreted?.intent,
+                interpreted?.entities,
+                null
+            );
             const needs_clarification = Boolean(parsed.needs_clarification);
             const clarifying_questions = Array.isArray(parsed.clarifying_questions)
                 ? parsed.clarifying_questions.filter((q) => typeof q === 'string' && q.trim()).map((q) => q.trim()).slice(0, 5)
@@ -4140,6 +4453,10 @@ class QMateService {
                 }));
             }
 
+            logger.info('[QMate] Returning legacy optimized LLM response', {
+                responseSource: 'legacy_llm',
+                availableSources: Object.keys(fetchResults).filter((k) => fetchResults[k] != null),
+            });
             return {
                 status: 200,
                 answer_markdown,
@@ -4161,6 +4478,9 @@ class QMateService {
                 wasted_keywords_offset: wasted_keywords_offset > 0 ? wasted_keywords_offset : undefined,
                 intent_interpretation: interpreted,
                 post_action_preview: interpreted.intent === 'post_action' ? interpreted.postAction : undefined,
+                responseSource: 'legacy_llm',
+                dataConfidence: 'low',
+                dataSources: Object.keys(fetchResults).filter((k) => fetchResults[k] != null),
             };
 
         } catch (error) {
@@ -4179,20 +4499,114 @@ class QMateService {
 }
 
 /**
+ * Map the classified intent + entities to the set of data source keys whose
+ * fetch results are relevant to the user's question. Anything outside this set
+ * is excluded from the LLM context so the model can't invent cross-domain
+ * answers (e.g. quoting PPC numbers when the user asked about inventory).
+ *
+ * Keys returned here must match the keys in the `fetchResults` object built
+ * inside `generateResponseOptimized`.
+ *
+ * @param {Object} interpretation - Output of interpretPrompt
+ * @returns {string[]} Relevant data source keys
+ */
+function getRelevantSourcesForIntent(interpretation) {
+    const intent = interpretation?.intent || '';
+    const engine = interpretation?.routing?.engine || '';
+    const metrics = interpretation?.entities?.metrics || [];
+    const hasAsin = (interpretation?.entities?.asins || []).length > 0;
+
+    // Base sources always included
+    const sources = new Set(['metrics']);
+
+    // Intent-based source selection
+    const intentSourceMap = {
+        'sales_query':        ['metrics'],
+        'profit_query':       ['metrics', 'profitability'],
+        'ppc_query':          ['metrics', 'ppc', 'keywords'],
+        'ppc_optimization':   ['metrics', 'ppc', 'keywords'],
+        'issue_query':        ['issues'],
+        'inventory_query':    ['metrics', 'inventory'],
+        'reimbursement_query':['reimbursement'],
+        'account_health':     ['account'],
+        'product_query':      ['products', 'metrics'],
+        'keyword_query':      ['keywords', 'ppc'],
+        'value_lookup':       ['metrics'],
+        'comparison':         ['metrics', 'profitability'],
+        'top_products':       ['metrics', 'profitability'],
+    };
+
+    // Add sources for the detected intent
+    const intentSources = intentSourceMap[intent] || [];
+    intentSources.forEach((s) => sources.add(s));
+
+    // If suggestion engine, add broader context
+    if (engine === 'suggestion_engine') {
+        ['issues', 'ppc', 'profitability', 'products'].forEach((s) => sources.add(s));
+    }
+
+    // If ASIN present, add products
+    if (hasAsin) {
+        sources.add('products');
+    }
+
+    // Entity-based metric detection
+    const metricStr = metrics.join(' ').toLowerCase();
+    if (metricStr.includes('ppc') || metricStr.includes('acos') || metricStr.includes('roas') || metricStr.includes('ad')) {
+        sources.add('ppc');
+    }
+    if (metricStr.includes('profit') || metricStr.includes('margin') || metricStr.includes('cogs')) {
+        sources.add('profitability');
+    }
+    if (metricStr.includes('inventory') || metricStr.includes('stock') || metricStr.includes('fba')) {
+        sources.add('inventory');
+    }
+
+    return Array.from(sources);
+}
+
+/**
  * Build optimized model context from pre-computed services data.
  * This replaces buildModelContext when using optimized services.
- * 
- * @param {Object} metricsData - Data from QMateMetricsService.getQMateMetricsContext
- * @param {Object} issuesData - Data from QMateIssuesService.getQMateIssuesContext
- * @param {string} question - User's question
- * @param {Object} additionalData - Data from other specialized services
+ *
+ * Phase 1 / Task 1.3: signature now accepts a unified `fetchResults` object
+ * (keyed by data source name) and the `interpretation` from interpretPrompt.
+ * Only the data sources relevant to the classified intent are forwarded to
+ * the LLM — see `getRelevantSourcesForIntent`.
+ *
+ * @param {Object} fetchResults - Unified data fetch results keyed by source
+ * @param {Object} interpretation - Output of interpretPrompt
+ * @param {string} [question] - User's question (used for pagination heuristics)
  * @returns {Object} Context object for AI model
  */
-const buildOptimizedModelContext = (metricsData, issuesData, question, additionalData = {}) => {
+const buildOptimizedModelContext = (fetchResults = {}, interpretation = null, question = '') => {
+    // Filter to only the data sources relevant to the classified intent so the
+    // LLM cannot mix unrelated domains into the answer.
+    const relevantSources = getRelevantSourcesForIntent(interpretation);
+    const filteredResults = {};
+    for (const key of relevantSources) {
+        if (fetchResults && fetchResults[key] != null) {
+            filteredResults[key] = fetchResults[key];
+        }
+    }
+    logger.info('[QMate] buildOptimizedModelContext source filter applied', {
+        intent: interpretation?.intent || null,
+        engine: interpretation?.routing?.engine || null,
+        relevantSources,
+        availableSources: Object.keys(fetchResults || {}).filter((k) => fetchResults[k] != null),
+        forwardedSources: Object.keys(filteredResults),
+    });
+
     // Handle null/undefined data gracefully
-    const metrics = metricsData || {};
-    const issues = issuesData || {};
-    const { ppc, profitability: profitabilityExtended, inventory, reimbursement, products, account, keywords } = additionalData;
+    const metrics = filteredResults.metrics || {};
+    const issues = filteredResults.issues || {};
+    const ppc = filteredResults.ppc || null;
+    const profitabilityExtended = filteredResults.profitability || null;
+    const inventory = filteredResults.inventory || null;
+    const reimbursement = filteredResults.reimbursement || null;
+    const products = filteredResults.products || null;
+    const account = filteredResults.account || null;
+    const keywords = filteredResults.keywords || null;
 
     const summary = metrics.summary ? {
         brand: metrics.summary.brand || null,

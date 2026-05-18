@@ -339,13 +339,15 @@ const getProfitabilityIssues = asyncHandler(async (req, res) => {
     const Country = req.country;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
+    const startDate = req.query.startDate || null;
+    const endDate = req.query.endDate || null;
 
     try {
         const startTime = Date.now();
-        logger.info(`[PERF] Getting profitability issues for user ${userId}, page ${page}, limit ${limit}`);
+        logger.info(`[PERF] Getting profitability issues for user ${userId}, page ${page}, limit ${limit}, range ${startDate}..${endDate}`);
 
         const ProfitabilityIssuesService = require('../../Services/Calculations/ProfitabilityIssuesService.js');
-        const issuesData = await ProfitabilityIssuesService.getProfitabilityIssues(userId, Country, Region, page, limit);
+        const issuesData = await ProfitabilityIssuesService.getProfitabilityIssues(userId, Country, Region, page, limit, startDate, endDate);
         
         const totalTime = Date.now() - startTime;
         logger.info(`[PERF] Profitability issues TOTAL time: ${totalTime}ms`);
@@ -370,13 +372,15 @@ const getProfitabilityIssuesSummary = asyncHandler(async (req, res) => {
     const userId = req.userId;
     const Region = req.region;
     const Country = req.country;
+    const startDate = req.query.startDate || null;
+    const endDate = req.query.endDate || null;
 
     try {
         const startTime = Date.now();
-        logger.info(`[PERF] Getting profitability issues summary for user ${userId}`);
+        logger.info(`[PERF] Getting profitability issues summary for user ${userId}, range ${startDate}..${endDate}`);
 
         const ProfitabilityIssuesService = require('../../Services/Calculations/ProfitabilityIssuesService.js');
-        const summaryData = await ProfitabilityIssuesService.getProfitabilityIssuesSummary(userId, Country, Region);
+        const summaryData = await ProfitabilityIssuesService.getProfitabilityIssuesSummary(userId, Country, Region, startDate, endDate);
         
         const totalTime = Date.now() - startTime;
         logger.info(`[PERF] Profitability issues summary TOTAL time: ${totalTime}ms`);
@@ -1754,6 +1758,7 @@ const getProductPPCIssues = asyncHandler(async (req, res) => {
     const Region = req.region;
     const Country = req.country;
     const { asin } = req.params;
+    const { startDate, endDate } = req.query;
 
     try {
         if (!asin) {
@@ -1770,7 +1775,9 @@ const getProductPPCIssues = asyncHandler(async (req, res) => {
             userId,
             region: Region,
             country: Country,
-            asin
+            asin,
+            startDate,
+            endDate
         });
 
         if (!result.success) {
@@ -1801,6 +1808,7 @@ const getProductWastedSpendKeywords = asyncHandler(async (req, res) => {
     const { asin } = req.params;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
+    const { startDate, endDate } = req.query;
 
     try {
         if (!asin) {
@@ -1817,7 +1825,9 @@ const getProductWastedSpendKeywords = asyncHandler(async (req, res) => {
             country: Country,
             asin,
             page,
-            limit
+            limit,
+            startDate,
+            endDate
         });
 
         return res.status(200).json(
@@ -1842,6 +1852,7 @@ const getProductTopPerformingKeywords = asyncHandler(async (req, res) => {
     const { asin } = req.params;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
+    const { startDate, endDate } = req.query;
 
     try {
         if (!asin) {
@@ -1858,7 +1869,9 @@ const getProductTopPerformingKeywords = asyncHandler(async (req, res) => {
             country: Country,
             asin,
             page,
-            limit
+            limit,
+            startDate,
+            endDate
         });
 
         return res.status(200).json(
@@ -1883,6 +1896,7 @@ const getProductSearchTermsZeroSales = asyncHandler(async (req, res) => {
     const { asin } = req.params;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
+    const { startDate, endDate } = req.query;
 
     try {
         if (!asin) {
@@ -1899,7 +1913,9 @@ const getProductSearchTermsZeroSales = asyncHandler(async (req, res) => {
             country: Country,
             asin,
             page,
-            limit
+            limit,
+            startDate,
+            endDate
         });
 
         return res.status(200).json(
@@ -1922,6 +1938,7 @@ const getProductPPCKeywordTabCounts = asyncHandler(async (req, res) => {
     const Region = req.region;
     const Country = req.country;
     const { asin } = req.params;
+    const { startDate, endDate } = req.query;
 
     try {
         if (!asin) {
@@ -1936,7 +1953,9 @@ const getProductPPCKeywordTabCounts = asyncHandler(async (req, res) => {
             userId,
             region: Region,
             country: Country,
-            asin
+            asin,
+            startDate,
+            endDate
         });
 
         return res.status(200).json(

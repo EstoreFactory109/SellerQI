@@ -237,48 +237,11 @@ async function fetchAndStoreSalesOnlyData(userId, refreshToken, region, country)
     }
 
     const { totalSales, datewiseSales } = salesResult.data;
-
-    // Compute last7Days + last14Days based on the query endDate (yesterday)
-    const end = new Date(`${endDateStr}T00:00:00.000Z`);
-
-    const last7Start = new Date(end);
-    last7Start.setDate(last7Start.getDate() - 6);
-    const last7StartStr = toLocalDateString(last7Start);
-
-    const last14Start = new Date(end);
-    last14Start.setDate(last14Start.getDate() - 13);
-    const last14StartStr = toLocalDateString(last14Start);
-
     const currencyCode = totalSales?.currencyCode || datewiseSales?.[0]?.sales?.currencyCode || 'USD';
 
-    const last7Items = (datewiseSales || []).filter((d) => d.date >= last7StartStr && d.date <= endDateStr);
-    const last14Items = (datewiseSales || []).filter((d) => d.date >= last14StartStr && d.date <= endDateStr);
-
-    const last7Total = last7Items.reduce((sum, item) => sum + (item.sales?.amount || 0), 0);
-    const last14Total = last14Items.reduce((sum, item) => sum + (item.sales?.amount || 0), 0);
-
-    const last7Days = {
-      totalSales: {
-        amount: parseFloat(last7Total.toFixed(2)),
-        currencyCode,
-      },
-      startDate: last7StartStr,
-      endDate: endDateStr,
-    };
-
-    const last14Days = {
-      totalSales: {
-        amount: parseFloat(last14Total.toFixed(2)),
-        currencyCode,
-      },
-      startDate: last14StartStr,
-      endDate: endDateStr,
-    };
-
-    // Persist: `SalesOnlyMetrics` expects grossProfit to exist (we store 0 always)
     const mappedDatewiseSales = (datewiseSales || []).map((d) => ({
       date: d.date,
-      sales: d.sales,
+      sales: d.sales || { amount: 0, currencyCode },
       grossProfit: { amount: 0, currencyCode: d.sales?.currencyCode || currencyCode },
       unitsSold: 0,
     }));
@@ -287,16 +250,7 @@ async function fetchAndStoreSalesOnlyData(userId, refreshToken, region, country)
       userId,
       region,
       country,
-      dateRange: { startDate: startDateStr, endDate: endDateStr },
-      totalSales: {
-        amount: parseFloat((totalSales?.amount || 0).toFixed(2)),
-        currencyCode,
-      },
       datewiseSales: mappedDatewiseSales,
-      last7Days,
-      last14Days,
-      queryId: null,
-      documentId: null,
     });
 
     logger.info('[MCP SalesOnly] Saved sales-only metrics', {

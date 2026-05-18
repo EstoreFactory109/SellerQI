@@ -343,7 +343,7 @@ const testFetchSearchTerms = async (req, res) => {
             timestamp: new Date().toISOString()
         });
 
-        const { userId, region, country, refreshToken, accessToken, profileId } = req.body;
+        const { userId, region, country, refreshToken, accessToken, profileId, startDate, endDate } = req.body;
 
         logger.info('📥 [Test] Request body parsed', {
             userId: !!userId,
@@ -488,13 +488,15 @@ const testFetchSearchTerms = async (req, res) => {
             userId,
             region,
             country,
+            startDate: startDate || '(default 30-day window)',
+            endDate: endDate || '(default 30-day window)',
             hasAccessToken: !!finalAccessToken,
             hasProfileId: !!finalProfileId,
             hasRefreshToken: !!finalRefreshToken,
             timestamp: new Date().toISOString()
         });
 
-        // Call the service to fetch and store search terms
+        // Call the service to fetch and store search terms (honours custom window).
         let result;
         try {
             logger.info('🔄 [Test] Invoking getSearchKeywords service...');
@@ -504,7 +506,8 @@ const testFetchSearchTerms = async (req, res) => {
                 userId,
                 country,
                 region,
-                finalRefreshToken
+                finalRefreshToken,
+                { startDate, endDate }
             );
             logger.info('✅ [Test] getSearchKeywords service completed', {
                 success: result?.success,

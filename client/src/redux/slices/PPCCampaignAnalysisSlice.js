@@ -22,14 +22,20 @@ const initialState = {
         data: null,
         loading: false,
         error: null,
-        lastFetched: null
+        lastFetched: null,
+        // Tracks the (startDate, endDate) pair the cached `data` was computed for.
+        // Cleared whenever the Calendar selection changes so the next dispatch refetches.
+        lastRangeKey: null
     },
     // Tab counts for badges
     tabCounts: {
         data: null,
         loading: false,
         error: null,
-        lastFetched: null
+        lastFetched: null,
+        // Range key the cached `data` was computed for — clears every time the
+        // Calendar selection changes so the next dispatch refetches.
+        lastRangeKey: null
     },
     // Tab 0: High ACOS Campaigns
     highAcos: { ...initialTabState },
@@ -49,22 +55,39 @@ const initialState = {
 const CACHE_DURATION = 5 * 60 * 1000;
 
 /**
- * Fetch PPC KPI Summary
+ * Fetch PPC KPI Summary for the Campaign Audit page top boxes.
+ *
+ * Accepts an optional `{ startDate, endDate }` from the Calendar.
+ * - Both dates (YYYY-MM-DD) → sent as query params; backend aggregates over that window.
+ * - Either missing → backend falls back to the default last-30-day window.
+ *
+ * The frontend cache is keyed on the (startDate, endDate) pair, so each
+ * Calendar selection has its own cache slot (no stale defaults).
  */
 export const fetchPPCKPISummary = createAsyncThunk(
     'ppcCampaignAnalysis/fetchSummary',
-    async (_, { getState, rejectWithValue }) => {
+    async (arg = {}, { getState, rejectWithValue }) => {
         try {
+            const { startDate = null, endDate = null, force = false } = arg || {};
             const state = getState();
-            const lastFetched = state.ppcCampaignAnalysis?.summary?.lastFetched;
-            
-            // Return cached data if still valid
-            if (lastFetched && (Date.now() - lastFetched) < CACHE_DURATION) {
-                return state.ppcCampaignAnalysis.summary.data;
+            const summarySlice = state.ppcCampaignAnalysis?.summary || {};
+            const lastFetched = summarySlice.lastFetched;
+            const lastKey = summarySlice.lastRangeKey;
+            const rangeKey = `${startDate || 'default'}__${endDate || 'default'}`;
+
+            // Return cached data if the same window was fetched recently
+            if (!force && lastFetched && lastKey === rangeKey && (Date.now() - lastFetched) < CACHE_DURATION) {
+                return summarySlice.data;
             }
-            
-            const response = await axiosInstance.get('/api/pagewise/ppc/summary');
-            return response.data.data;
+
+            const params = {};
+            if (startDate && endDate) {
+                params.startDate = startDate;
+                params.endDate = endDate;
+            }
+
+            const response = await axiosInstance.get('/api/pagewise/ppc/summary', { params });
+            return { data: response.data.data, rangeKey };
         } catch (error) {
             console.error('Error fetching PPC KPI summary:', error);
             return rejectWithValue(error.response?.data?.message || 'Failed to fetch PPC summary');
@@ -77,18 +100,28 @@ export const fetchPPCKPISummary = createAsyncThunk(
  */
 export const fetchPPCTabCounts = createAsyncThunk(
     'ppcCampaignAnalysis/fetchTabCounts',
-    async (_, { getState, rejectWithValue }) => {
+    async (arg = {}, { getState, rejectWithValue }) => {
         try {
+            const { startDate = null, endDate = null, force = false } = arg || {};
             const state = getState();
-            const lastFetched = state.ppcCampaignAnalysis?.tabCounts?.lastFetched;
-            
-            // Return cached data if still valid
-            if (lastFetched && (Date.now() - lastFetched) < CACHE_DURATION) {
-                return state.ppcCampaignAnalysis.tabCounts.data;
+            const tabCountsSlice = state.ppcCampaignAnalysis?.tabCounts || {};
+            const lastFetched = tabCountsSlice.lastFetched;
+            const lastKey = tabCountsSlice.lastRangeKey;
+            const rangeKey = `${startDate || 'default'}__${endDate || 'default'}`;
+
+            // Return cached data only if the same window was fetched recently
+            if (!force && lastFetched && lastKey === rangeKey && (Date.now() - lastFetched) < CACHE_DURATION) {
+                return { data: tabCountsSlice.data, rangeKey };
             }
-            
-            const response = await axiosInstance.get('/api/pagewise/ppc/tab-counts');
-            return response.data.data;
+
+            const params = {};
+            if (startDate && endDate) {
+                params.startDate = startDate;
+                params.endDate = endDate;
+            }
+
+            const response = await axiosInstance.get('/api/pagewise/ppc/tab-counts', { params });
+            return { data: response.data.data, rangeKey };
         } catch (error) {
             console.error('Error fetching PPC tab counts:', error);
             return rejectWithValue(error.response?.data?.message || 'Failed to fetch tab counts');
@@ -260,8 +293,13 @@ const ppcCampaignAnalysisSlice = createSlice({
             })
             .addCase(fetchPPCKPISummary.fulfilled, (state, action) => {
                 state.summary.loading = false;
-                state.summary.data = action.payload;
+                // Payload shape: { data, rangeKey } — the thunk wraps the response
+                // with the (startDate, endDate) key it was fetched for so we can
+                // invalidate the cache automatically when the Calendar changes.
+                const payload = action.payload || {};
+                state.summary.data = payload.data !== undefined ? payload.data : payload;
                 state.summary.lastFetched = Date.now();
+                state.summary.lastRangeKey = payload.rangeKey || null;
             })
             .addCase(fetchPPCKPISummary.rejected, (state, action) => {
                 state.summary.loading = false;
@@ -275,8 +313,13 @@ const ppcCampaignAnalysisSlice = createSlice({
             })
             .addCase(fetchPPCTabCounts.fulfilled, (state, action) => {
                 state.tabCounts.loading = false;
-                state.tabCounts.data = action.payload;
+                // Thunk now returns { data, rangeKey }; older callers that
+                // expected `payload` to be the raw counts dict are no longer
+                // present.
+                const payload = action.payload || {};
+                state.tabCounts.data = payload.data ?? payload;
                 state.tabCounts.lastFetched = Date.now();
+                state.tabCounts.lastRangeKey = payload.rangeKey || null;
             })
             .addCase(fetchPPCTabCounts.rejected, (state, action) => {
                 state.tabCounts.loading = false;

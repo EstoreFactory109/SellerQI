@@ -59,16 +59,15 @@ async function run() {
 
   await mongoose.connect(MONGODB_URI);
   try {
-    const latest = await adsKeywordsPerformanceModel
-      .findOne({
-        userId: new mongoose.Types.ObjectId(userId),
-        country,
-        region,
-      })
-      .sort({ createdAt: -1 })
-      .lean();
+    const merged = await adsKeywordsPerformanceModel.findMergedKeywordsData(
+      new mongoose.Types.ObjectId(userId),
+      country,
+      region,
+      {}
+    );
+    const rows = Array.isArray(merged) ? merged : [];
 
-    if (!latest) {
+    if (rows.length === 0) {
       console.log(
         JSON.stringify(
           {
@@ -83,7 +82,6 @@ async function run() {
       return;
     }
 
-    const rows = Array.isArray(latest.keywordsData) ? latest.keywordsData : [];
     const wastedRows = rows.filter((kw) => {
       const cost = Number(kw?.cost) || 0;
       const sales = Number(kw?.attributedSales30d) || 0;
@@ -98,7 +96,6 @@ async function run() {
         {
           success: true,
           input: { userId, country, region },
-          fetchedAt: latest.createdAt,
           totalKeywords: rows.length,
           wastedKeywordsCount: wastedRows.length,
           totalWastedSpend,

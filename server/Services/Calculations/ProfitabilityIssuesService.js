@@ -1,162 +1,36 @@
 /**
  * ProfitabilityIssuesService - Detailed Profitability Issues
  * 
- * This service provides detailed profitability issues for products with:
- * - Negative profit (netProfit < 0)
- * - Low margin (profitMargin < 10%)
- * 
- * OPTIMIZED: Uses pre-computed profitabilityErrorDetails from IssuesDataChunks
- * to avoid expensive real-time calculations and OOM issues.
- * Falls back to real-time calculation only if pre-computed data is unavailable.
+ * Sources data from the new finance flow (DailySkuFinance) via
+ * FinanceDashboardReadService.getAsinWisePL so that issues are
+ * consistent with what the profitability dashboard displays.
+ *
+ * Accepts optional startDate / endDate to match the calendar range.
+ * Falls back to pre-computed IssuesDataChunks when available (legacy).
  */
 
 const logger = require('../../utils/Logger.js');
 const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
-const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
-const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
+const { getAsinWisePL } = require('../Finance/FinanceDashboardReadService.js');
 const { getProductWiseSponsoredAdsData } = require('../amazon-ads/ProductWiseSponsoredAdsService.js');
 
-/**
- * Get ASIN-wise PPC sales from EconomicsMetrics (handles big accounts)
- */
-const getAsinPpcSalesFromEconomics = async (economicsMetrics) => {
-    if (!economicsMetrics) {
-        return { asinPpcSales: {}, totalSales: 0, totalGrossProfit: 0 };
-    }
+// ── Issue calculation (unchanged logic) ──
 
-    let totalSales = 0;
-    let totalGrossProfit = 0;
-    
-    if (Array.isArray(economicsMetrics.datewiseSales) && economicsMetrics.datewiseSales.length > 0) {
-        economicsMetrics.datewiseSales.forEach(item => {
-            totalSales += item.sales?.amount || 0;
-            totalGrossProfit += item.grossProfit?.amount || 0;
-        });
-        totalSales = parseFloat(totalSales.toFixed(2));
-        totalGrossProfit = parseFloat(totalGrossProfit.toFixed(2));
-    } else {
-        totalSales = economicsMetrics.totalSales?.amount || 0;
-        totalGrossProfit = economicsMetrics.grossProfit?.amount || 0;
-    }
-
-    const asinPpcSales = {};
-
-    const isBigAccount = economicsMetrics.isBig === true;
-    const hasEmptyAsinData = !economicsMetrics.asinWiseSales || economicsMetrics.asinWiseSales.length === 0;
-    const isLegacyBigAccount = hasEmptyAsinData && (economicsMetrics.totalSales?.amount > 5000);
-
-    if ((isBigAccount || isLegacyBigAccount) && hasEmptyAsinData) {
-        try {
-            const bigAccountAsinDocs = await AsinWiseSalesForBigAccounts.findByMetricsId(economicsMetrics._id);
-            
-            if (bigAccountAsinDocs && bigAccountAsinDocs.length > 0) {
-                bigAccountAsinDocs.forEach(doc => {
-                    if (doc.asinSales && Array.isArray(doc.asinSales)) {
-                        doc.asinSales.forEach(item => {
-                            if (item.asin) {
-                                const asin = item.asin;
-                                const fbaFees = item.fbaFees?.amount || 0;
-                                const storageFees = item.storageFees?.amount || 0;
-                                const totalFees = item.totalFees?.amount || 0;
-                                const amazonFees = item.amazonFees?.amount || totalFees;
-                                
-                                if (asinPpcSales[asin]) {
-                                    asinPpcSales[asin].sales += item.sales?.amount || 0;
-                                    asinPpcSales[asin].ppcSpent += item.ppcSpent?.amount || 0;
-                                    asinPpcSales[asin].grossProfit += item.grossProfit?.amount || 0;
-                                    asinPpcSales[asin].fbaFees += fbaFees;
-                                    asinPpcSales[asin].storageFees += storageFees;
-                                    asinPpcSales[asin].totalFees += totalFees;
-                                    asinPpcSales[asin].amazonFees += amazonFees;
-                                    asinPpcSales[asin].unitsSold += item.unitsSold || 0;
-                                } else {
-                                    asinPpcSales[asin] = {
-                                        sales: item.sales?.amount || 0,
-                                        ppcSpent: item.ppcSpent?.amount || 0,
-                                        grossProfit: item.grossProfit?.amount || 0,
-                                        fbaFees: fbaFees,
-                                        storageFees: storageFees,
-                                        totalFees: totalFees,
-                                        amazonFees: amazonFees,
-                                        unitsSold: item.unitsSold || 0
-                                    };
-                                }
-                            }
-                        });
-                    }
-                });
-            }
-        } catch (error) {
-            logger.error('Error fetching ASIN data for big account', { error: error.message });
-        }
-    } else if (Array.isArray(economicsMetrics.asinWiseSales)) {
-        economicsMetrics.asinWiseSales.forEach(item => {
-            if (item.asin) {
-                const asin = item.asin;
-                const fbaFees = item.fbaFees?.amount || 0;
-                const storageFees = item.storageFees?.amount || 0;
-                const totalFees = item.totalFees?.amount || 0;
-                const amazonFees = item.amazonFees?.amount || totalFees;
-                
-                if (asinPpcSales[asin]) {
-                    asinPpcSales[asin].sales += item.sales?.amount || 0;
-                    asinPpcSales[asin].ppcSpent += item.ppcSpent?.amount || 0;
-                    asinPpcSales[asin].grossProfit += item.grossProfit?.amount || 0;
-                    asinPpcSales[asin].fbaFees += fbaFees;
-                    asinPpcSales[asin].storageFees += storageFees;
-                    asinPpcSales[asin].totalFees += totalFees;
-                    asinPpcSales[asin].amazonFees += amazonFees;
-                    asinPpcSales[asin].unitsSold += item.unitsSold || 0;
-                } else {
-                    asinPpcSales[asin] = {
-                        sales: item.sales?.amount || 0,
-                        ppcSpent: item.ppcSpent?.amount || 0,
-                        grossProfit: item.grossProfit?.amount || 0,
-                        fbaFees: fbaFees,
-                        storageFees: storageFees,
-                        totalFees: totalFees,
-                        amazonFees: amazonFees,
-                        unitsSold: item.unitsSold || 0
-                    };
-                }
-            }
-        });
-    }
-
-    return { asinPpcSales, totalSales, totalGrossProfit };
-};
-
-/**
- * Calculate profitability issues (SAME LOGIC as DashboardCalculation.calculateProfitabilityErrors)
- * 
- * Issue criteria:
- * - Negative profit: netProfit < 0
- * - Low margin: profitMargin < 10% but netProfit >= 0
- * 
- * @param {Array} profitabilityData - Array of profitability data with full details
- * @returns {Object} { totalErrors, issues: [] }
- */
 const calculateProfitabilityIssues = (profitabilityData) => {
     let totalErrors = 0;
     const issues = [];
     
     profitabilityData.forEach((item) => {
-        // Calculate net profit: Sales - Ads Spend - Amazon Fees
-        // This is the SAME calculation as DashboardCalculation.calculateProfitabilityErrors
         const sales = item.sales || 0;
         const adsSpend = item.ads || 0;
         const amazonFees = item.amzFee || item.totalFees || 0;
         const netProfit = sales - adsSpend - amazonFees;
-        
-        // Calculate profit margin
         const profitMargin = sales > 0 ? (netProfit / sales) * 100 : 0;
         
-        // Count as error if profit margin is below 10% or negative (SAME criteria as DashboardCalculation)
         if (profitMargin < 10 || netProfit < 0) {
             totalErrors++;
             
-            // Determine issue type and severity
             let issueType, severity, recommendation;
             
             if (netProfit < 0) {
@@ -188,26 +62,19 @@ const calculateProfitabilityIssues = (profitabilityData) => {
         }
     });
     
-    // Sort by severity (critical > high > medium) then by absolute profit margin
     issues.sort((a, b) => {
         const severityOrder = { critical: 0, high: 1, medium: 2 };
-        const severityDiff = severityOrder[a.severity] - severityOrder[b.severity];
-        if (severityDiff !== 0) return severityDiff;
-        
-        // Then by profit margin (most negative first)
-        return a.profitMargin - b.profitMargin;
+        const diff = severityOrder[a.severity] - severityOrder[b.severity];
+        return diff !== 0 ? diff : a.profitMargin - b.profitMargin;
     });
     
     return { totalErrors, issues };
 };
 
-/**
- * Generate recommendation for negative profit products
- */
+// ── Recommendation helpers (unchanged) ──
+
 const getRecommendationForNegativeProfit = (item, profitMargin, adsSpend, amazonFees) => {
     const sales = item.sales || 0;
-    
-    // Calculate which cost is the biggest contributor
     const adsRatio = sales > 0 ? (adsSpend / sales) * 100 : 0;
     const feesRatio = sales > 0 ? (amazonFees / sales) * 100 : 0;
     
@@ -242,9 +109,6 @@ const getRecommendationForNegativeProfit = (item, profitMargin, adsSpend, amazon
     }
 };
 
-/**
- * Generate recommendation for low margin products
- */
 const getRecommendationForLowMargin = (item, profitMargin, adsSpend, amazonFees) => {
     const sales = item.sales || 0;
     const adsRatio = sales > 0 ? (adsSpend / sales) * 100 : 0;
@@ -273,42 +137,114 @@ const getRecommendationForLowMargin = (item, profitMargin, adsSpend, amazonFees)
     }
 };
 
-/**
- * Get detailed profitability issues for a user
- * 
- * OPTIMIZED: Uses pre-computed profitabilityErrorDetails from IssuesDataChunks
- * with in-memory pagination. Falls back to real-time calculation only if unavailable.
- * 
- * @param {string} userId - User ID
- * @param {string} country - Country code
- * @param {string} region - Region code
- * @param {number} page - Page number (1-indexed)
- * @param {number} limit - Items per page
- * @returns {Promise<Object>} Paginated profitability issues
- */
-const getProfitabilityIssues = async (userId, country, region, page = 1, limit = 10) => {
-    const startTime = Date.now();
-    logger.info(`[PERF] ProfitabilityIssuesService.getProfitabilityIssues starting for user ${userId}, page ${page}`);
+// ── Data fetching from new finance flow ──
 
-    // Try to get pre-computed profitability issues from IssuesDataChunks
+async function buildProfitabilityFromFinanceFlow(userId, country, region, startDate, endDate) {
+    const [asinWiseRows, sellerData, productWiseSponsoredAds] = await Promise.all([
+        getAsinWisePL({ userId, country, region, startDate, endDate }),
+        Seller.findOne(
+            { User: userId },
+            { 'sellerAccount': { $elemMatch: { region, country } } }
+        ).lean(),
+        getProductWiseSponsoredAdsData(userId, country, region),
+    ]);
+
+    const products = sellerData?.sellerAccount?.[0]?.products || [];
+    const productInfoMap = new Map();
+    const activeProductSet = new Set();
+    products.forEach(p => {
+        if (p.asin) {
+            productInfoMap.set(p.asin, { itemName: p.itemName, sku: p.sku, status: p.status, price: p.price });
+            if (p.status === 'Active') activeProductSet.add(p.asin);
+        }
+    });
+
+    const adsSpendByAsin = new Map();
+    if (productWiseSponsoredAds?.sponsoredAds) {
+        productWiseSponsoredAds.sponsoredAds.forEach(item => {
+            if (item?.asin) {
+                const spend = parseFloat(item.spend) || 0;
+                adsSpendByAsin.set(item.asin, (adsSpendByAsin.get(item.asin) || 0) + spend);
+            }
+        });
+    }
+
+    const allProfitabilityData = [];
+    asinWiseRows.forEach(row => {
+        if (!activeProductSet.has(row.asin)) return;
+        const productInfo = productInfoMap.get(row.asin) || {};
+        const adsSpend = adsSpendByAsin.get(row.asin) || 0;
+        const totalExpenses = Math.abs(row.totalExpenses || 0);
+        allProfitabilityData.push({
+            asin: row.asin,
+            itemName: productInfo.itemName || null,
+            sku: row.sku || productInfo.sku || null,
+            quantity: row.units || 0,
+            sales: row.productSales || 0,
+            ads: adsSpend,
+            amzFee: totalExpenses,
+            totalFees: totalExpenses,
+            amazonFees: totalExpenses,
+            fbaFees: Math.abs(row.fbaFulfillmentFee || 0),
+            storageFees: 0,
+        });
+    });
+
+    return { allProfitabilityData, activeProductCount: activeProductSet.size };
+}
+
+// ── Public API ──
+
+const getProfitabilityIssues = async (userId, country, region, page = 1, limit = 10, startDate = null, endDate = null) => {
+    const startTime = Date.now();
+    logger.info(`[PERF] ProfitabilityIssuesService.getProfitabilityIssues starting`, { userId, page, startDate, endDate });
+
+    // If date range is provided, always compute real-time from DailySkuFinance
+    if (startDate && endDate) {
+        const { allProfitabilityData } = await buildProfitabilityFromFinanceFlow(userId, country, region, startDate, endDate);
+        const issuesData = calculateProfitabilityIssues(allProfitabilityData);
+
+        const totalItems = issuesData.totalErrors;
+        const totalPages = Math.ceil(totalItems / limit);
+        const startIndex = (page - 1) * limit;
+        const paginatedIssues = issuesData.issues.slice(startIndex, startIndex + limit);
+
+        const issuesSummary = { negative_profit: 0, low_margin: 0, critical: 0, high: 0, medium: 0 };
+        issuesData.issues.forEach(issue => {
+            if (issue.issueType === 'negative_profit') issuesSummary.negative_profit++;
+            if (issue.issueType === 'low_margin') issuesSummary.low_margin++;
+            if (issue.severity === 'critical') issuesSummary.critical++;
+            if (issue.severity === 'high') issuesSummary.high++;
+            if (issue.severity === 'medium') issuesSummary.medium++;
+        });
+
+        const fetchTime = Date.now() - startTime;
+        logger.info(`[PERF] ProfitabilityIssuesService.getProfitabilityIssues (finance-flow) completed in ${fetchTime}ms, found ${totalItems} issues`);
+
+        return {
+            issues: paginatedIssues,
+            summary: {
+                totalIssues: totalItems,
+                byType: { negativeProfitProducts: issuesSummary.negative_profit, lowMarginProducts: issuesSummary.low_margin },
+                bySeverity: { critical: issuesSummary.critical, high: issuesSummary.high, medium: issuesSummary.medium },
+            },
+            pagination: { page, limit, totalItems, totalPages, hasMore: page < totalPages },
+            source: 'finance-flow',
+            dateRange: { startDate, endDate },
+            Country: country,
+        };
+    }
+
+    // No date range: try pre-computed data (legacy fast path)
     const preComputedIssues = await IssuesDataChunks.getFieldData(userId, country, region, 'profitabilityErrorDetails');
     
     if (preComputedIssues && preComputedIssues.length > 0) {
-        // Use pre-computed data with pagination
         const totalItems = preComputedIssues.length;
         const totalPages = Math.ceil(totalItems / limit);
         const startIndex = (page - 1) * limit;
         const paginatedIssues = preComputedIssues.slice(startIndex, startIndex + limit);
         
-        // Calculate summary from full data
-        const issuesSummary = {
-            negative_profit: 0,
-            low_margin: 0,
-            critical: 0,
-            high: 0,
-            medium: 0
-        };
-        
+        const issuesSummary = { negative_profit: 0, low_margin: 0, critical: 0, high: 0, medium: 0 };
         preComputedIssues.forEach(issue => {
             if (issue.issueType === 'negative_profit') issuesSummary.negative_profit++;
             if (issue.issueType === 'low_margin') issuesSummary.low_margin++;
@@ -324,131 +260,33 @@ const getProfitabilityIssues = async (userId, country, region, page = 1, limit =
             issues: paginatedIssues,
             summary: {
                 totalIssues: totalItems,
-                byType: {
-                    negativeProfitProducts: issuesSummary.negative_profit,
-                    lowMarginProducts: issuesSummary.low_margin
-                },
-                bySeverity: {
-                    critical: issuesSummary.critical,
-                    high: issuesSummary.high,
-                    medium: issuesSummary.medium
-                }
+                byType: { negativeProfitProducts: issuesSummary.negative_profit, lowMarginProducts: issuesSummary.low_margin },
+                bySeverity: { critical: issuesSummary.critical, high: issuesSummary.high, medium: issuesSummary.medium },
             },
-            pagination: {
-                page,
-                limit,
-                totalItems,
-                totalPages,
-                hasMore: page < totalPages
-            },
+            pagination: { page, limit, totalItems, totalPages, hasMore: page < totalPages },
             source: 'precomputed',
-            Country: country
+            Country: country,
         };
     }
-    
-    // Fallback: Real-time calculation (for cases where pre-computed data doesn't exist)
-    logger.info(`[PERF] No pre-computed profitability issues found, falling back to real-time calculation`);
-    
-    // Fetch required data in parallel
-    const [economicsMetricsData, sellerData, productWiseSponsoredAds] = await Promise.all([
-        EconomicsMetrics.findLatest(userId, region, country),
-        Seller.findOne(
-            { User: userId },
-            { 
-                'sellerAccount': {
-                    $elemMatch: { region, country }
-                }
-            }
-        ).lean(),
-        getProductWiseSponsoredAdsData(userId, country, region)
-    ]);
 
-    let processedEconomicsMetrics = economicsMetricsData;
-    if (economicsMetricsData && economicsMetricsData.toObject) {
-        processedEconomicsMetrics = economicsMetricsData.toObject();
-    }
+    // No pre-computed data and no dates: real-time from DailySkuFinance using a 30-day window
+    logger.info('[PERF] No pre-computed data, computing from DailySkuFinance with 30-day window');
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const fallbackEnd = yesterday.toISOString().slice(0, 10);
+    const fallbackStart = new Date(yesterday);
+    fallbackStart.setDate(yesterday.getDate() - 29);
+    const fallbackStartStr = fallbackStart.toISOString().slice(0, 10);
 
-    // Get ASIN-wise data from economics (handles big accounts)
-    const economicsData = await getAsinPpcSalesFromEconomics(processedEconomicsMetrics);
-
-    // Extract products from seller data
-    const products = sellerData?.sellerAccount?.[0]?.products || [];
-    
-    // Create product info map
-    const productInfoMap = new Map();
-    products.forEach(p => {
-        if (p.asin) {
-            productInfoMap.set(p.asin, {
-                itemName: p.itemName,
-                sku: p.sku,
-                status: p.status,
-                price: p.price
-            });
-        }
-    });
-
-    // Get active products only
-    const activeProductSet = new Set();
-    products.forEach(p => {
-        if (p.status === 'Active') {
-            activeProductSet.add(p.asin);
-        }
-    });
-
-    // Build ads spend map from sponsored ads data
-    const adsSpendByAsin = new Map();
-    if (productWiseSponsoredAds && productWiseSponsoredAds.sponsoredAds) {
-        productWiseSponsoredAds.sponsoredAds.forEach(item => {
-            if (item && item.asin) {
-                const spend = parseFloat(item.spend) || 0;
-                adsSpendByAsin.set(item.asin, (adsSpendByAsin.get(item.asin) || 0) + spend);
-            }
-        });
-    }
-
-    // Build profitability data for active products (same structure as DashboardCalculation)
-    const allProfitabilityData = [];
-    
-    Object.entries(economicsData.asinPpcSales).forEach(([asin, data]) => {
-        if (!activeProductSet.has(asin)) return;
-        
-        const productInfo = productInfoMap.get(asin) || {};
-        const adsSpend = adsSpendByAsin.get(asin) || 0;
-        
-        allProfitabilityData.push({
-            asin,
-            itemName: productInfo.itemName || null,
-            sku: productInfo.sku || null,
-            quantity: data.unitsSold || 0,
-            sales: data.sales || 0,
-            ads: adsSpend,
-            amzFee: data.totalFees || 0,
-            totalFees: data.totalFees || 0,
-            amazonFees: data.amazonFees || data.totalFees || 0,
-            fbaFees: data.fbaFees || 0,
-            storageFees: data.storageFees || 0
-        });
-    });
-
-    // Calculate profitability issues (SAME logic as DashboardCalculation.calculateProfitabilityErrors)
+    const { allProfitabilityData } = await buildProfitabilityFromFinanceFlow(userId, country, region, fallbackStartStr, fallbackEnd);
     const issuesData = calculateProfitabilityIssues(allProfitabilityData);
 
-    // Apply pagination to issues only (not all products)
     const totalItems = issuesData.totalErrors;
     const totalPages = Math.ceil(totalItems / limit);
     const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
-    const paginatedIssues = issuesData.issues.slice(startIndex, endIndex);
+    const paginatedIssues = issuesData.issues.slice(startIndex, startIndex + limit);
 
-    // Group issues by type for summary
-    const issuesSummary = {
-        negative_profit: 0,
-        low_margin: 0,
-        critical: 0,
-        high: 0,
-        medium: 0
-    };
-    
+    const issuesSummary = { negative_profit: 0, low_margin: 0, critical: 0, high: 0, medium: 0 };
     issuesData.issues.forEach(issue => {
         if (issue.issueType === 'negative_profit') issuesSummary.negative_profit++;
         if (issue.issueType === 'low_margin') issuesSummary.low_margin++;
@@ -458,149 +296,82 @@ const getProfitabilityIssues = async (userId, country, region, page = 1, limit =
     });
 
     const fetchTime = Date.now() - startTime;
-    logger.info(`[PERF] ProfitabilityIssuesService.getProfitabilityIssues (real-time) completed in ${fetchTime}ms, found ${totalItems} issues`);
+    logger.info(`[PERF] ProfitabilityIssuesService.getProfitabilityIssues (realtime-fallback) completed in ${fetchTime}ms, found ${totalItems} issues`);
 
     return {
         issues: paginatedIssues,
         summary: {
             totalIssues: totalItems,
-            byType: {
-                negativeProfitProducts: issuesSummary.negative_profit,
-                lowMarginProducts: issuesSummary.low_margin
-            },
-            bySeverity: {
-                critical: issuesSummary.critical,
-                high: issuesSummary.high,
-                medium: issuesSummary.medium
-            }
+            byType: { negativeProfitProducts: issuesSummary.negative_profit, lowMarginProducts: issuesSummary.low_margin },
+            bySeverity: { critical: issuesSummary.critical, high: issuesSummary.high, medium: issuesSummary.medium },
         },
-        pagination: {
-            page,
-            limit,
-            totalItems,
-            totalPages,
-            hasMore: page < totalPages
-        },
+        pagination: { page, limit, totalItems, totalPages, hasMore: page < totalPages },
         source: 'realtime',
-        dateRange: processedEconomicsMetrics?.dateRange || null,
-        Country: country
+        dateRange: { startDate: fallbackStartStr, endDate: fallbackEnd },
+        Country: country,
     };
 };
 
-/**
- * Get profitability issues summary (no pagination, just counts)
- * Fast endpoint for dashboard overview
- * 
- * OPTIMIZED: Uses pre-computed data from IssuesDataChunks metadata
- */
-const getProfitabilityIssuesSummary = async (userId, country, region) => {
+const getProfitabilityIssuesSummary = async (userId, country, region, startDate = null, endDate = null) => {
     const startTime = Date.now();
-    logger.info(`[PERF] ProfitabilityIssuesService.getProfitabilityIssuesSummary starting for user ${userId}`);
+    logger.info(`[PERF] ProfitabilityIssuesService.getProfitabilityIssuesSummary starting`, { userId, startDate, endDate });
 
-    // First try to get from pre-computed metadata
-    const metadata = await IssuesDataChunks.getMetadata(userId, country, region);
-    
-    if (metadata && metadata.totalProfitabilityErrors !== undefined) {
-        // Get active products count from chunk stats
-        const activeProductStats = await IssuesDataChunks.getChunkStats(userId, country, region, 'ActiveProducts');
-        
+    if (startDate && endDate) {
+        const { allProfitabilityData, activeProductCount } = await buildProfitabilityFromFinanceFlow(userId, country, region, startDate, endDate);
+        const issuesData = calculateProfitabilityIssues(allProfitabilityData);
+
         const fetchTime = Date.now() - startTime;
-        logger.info(`[PERF] ProfitabilityIssuesService.getProfitabilityIssuesSummary (pre-computed) completed in ${fetchTime}ms`);
-        
+        logger.info(`[PERF] ProfitabilityIssuesSummary (finance-flow) completed in ${fetchTime}ms`);
+
         return {
-            totalIssues: metadata.totalProfitabilityErrors || 0,
+            totalIssues: issuesData.totalErrors,
             byType: {
-                negativeProfitProducts: 0, // Not stored separately in metadata
-                lowMarginProducts: 0
+                negativeProfitProducts: issuesData.issues.filter(i => i.issueType === 'negative_profit').length,
+                lowMarginProducts: issuesData.issues.filter(i => i.issueType === 'low_margin').length,
             },
-            activeProducts: activeProductStats.totalItems || 0,
-            source: 'precomputed',
-            lastCalculatedAt: metadata.lastCalculatedAt
+            activeProducts: activeProductCount,
+            source: 'finance-flow',
+            dateRange: { startDate, endDate },
         };
     }
-    
-    // Fallback: Real-time calculation
-    logger.info(`[PERF] No pre-computed summary found, falling back to real-time calculation`);
-    
-    // Fetch required data in parallel
-    const [economicsMetricsData, sellerData, productWiseSponsoredAds] = await Promise.all([
-        EconomicsMetrics.findLatest(userId, region, country),
-        Seller.findOne(
-            { User: userId },
-            { 
-                'sellerAccount': {
-                    $elemMatch: { region, country }
-                }
-            }
-        ).lean(),
-        getProductWiseSponsoredAdsData(userId, country, region)
-    ]);
 
-    let processedEconomicsMetrics = economicsMetricsData;
-    if (economicsMetricsData && economicsMetricsData.toObject) {
-        processedEconomicsMetrics = economicsMetricsData.toObject();
+    // Legacy pre-computed fast path
+    const metadata = await IssuesDataChunks.getMetadata(userId, country, region);
+    if (metadata && metadata.totalProfitabilityErrors !== undefined) {
+        const activeProductStats = await IssuesDataChunks.getChunkStats(userId, country, region, 'ActiveProducts');
+        const fetchTime = Date.now() - startTime;
+        logger.info(`[PERF] ProfitabilityIssuesSummary (pre-computed) completed in ${fetchTime}ms`);
+        return {
+            totalIssues: metadata.totalProfitabilityErrors || 0,
+            byType: { negativeProfitProducts: 0, lowMarginProducts: 0 },
+            activeProducts: activeProductStats.totalItems || 0,
+            source: 'precomputed',
+            lastCalculatedAt: metadata.lastCalculatedAt,
+        };
     }
 
-    const economicsData = await getAsinPpcSalesFromEconomics(processedEconomicsMetrics);
+    // Fallback 30-day window
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const fallbackEnd = yesterday.toISOString().slice(0, 10);
+    const fallbackStart = new Date(yesterday);
+    fallbackStart.setDate(yesterday.getDate() - 29);
+    const fallbackStartStr = fallbackStart.toISOString().slice(0, 10);
 
-    const products = sellerData?.sellerAccount?.[0]?.products || [];
-    
-    // Get active products only
-    const activeProductSet = new Set();
-    products.forEach(p => {
-        if (p.status === 'Active') {
-            activeProductSet.add(p.asin);
-        }
-    });
-
-    // Build ads spend map
-    const adsSpendByAsin = new Map();
-    if (productWiseSponsoredAds && productWiseSponsoredAds.sponsoredAds) {
-        productWiseSponsoredAds.sponsoredAds.forEach(item => {
-            if (item && item.asin) {
-                const spend = parseFloat(item.spend) || 0;
-                adsSpendByAsin.set(item.asin, (adsSpendByAsin.get(item.asin) || 0) + spend);
-            }
-        });
-    }
-
-    // Count issues (SAME logic as DashboardCalculation.calculateProfitabilityErrors)
-    let totalErrors = 0;
-    let negativeProfitCount = 0;
-    let lowMarginCount = 0;
-    
-    Object.entries(economicsData.asinPpcSales).forEach(([asin, data]) => {
-        if (!activeProductSet.has(asin)) return;
-        
-        const sales = data.sales || 0;
-        const adsSpend = adsSpendByAsin.get(asin) || 0;
-        const totalFees = data.totalFees || 0;
-        const netProfit = sales - adsSpend - totalFees;
-        const profitMargin = sales > 0 ? (netProfit / sales) * 100 : 0;
-        
-        // SAME criteria as DashboardCalculation
-        if (profitMargin < 10 || netProfit < 0) {
-            totalErrors++;
-            if (netProfit < 0) {
-                negativeProfitCount++;
-            } else {
-                lowMarginCount++;
-            }
-        }
-    });
-
+    const { allProfitabilityData, activeProductCount } = await buildProfitabilityFromFinanceFlow(userId, country, region, fallbackStartStr, fallbackEnd);
+    const issuesData = calculateProfitabilityIssues(allProfitabilityData);
     const fetchTime = Date.now() - startTime;
-    logger.info(`[PERF] ProfitabilityIssuesService.getProfitabilityIssuesSummary (real-time) completed in ${fetchTime}ms`);
+    logger.info(`[PERF] ProfitabilityIssuesSummary (realtime-fallback) completed in ${fetchTime}ms`);
 
     return {
-        totalIssues: totalErrors,
+        totalIssues: issuesData.totalErrors,
         byType: {
-            negativeProfitProducts: negativeProfitCount,
-            lowMarginProducts: lowMarginCount
+            negativeProfitProducts: issuesData.issues.filter(i => i.issueType === 'negative_profit').length,
+            lowMarginProducts: issuesData.issues.filter(i => i.issueType === 'low_margin').length,
         },
-        activeProducts: activeProductSet.size,
+        activeProducts: activeProductCount,
         source: 'realtime',
-        dateRange: processedEconomicsMetrics?.dateRange || null
+        dateRange: { startDate: fallbackStartStr, endDate: fallbackEnd },
     };
 };
 

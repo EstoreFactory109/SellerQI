@@ -14,13 +14,16 @@ const BASE_URIS = {
 };
 
 // Report types for different campaign types
-// Using 30-day attribution window (sales30d) for all campaign types for consistency
-// Note: SP supports sales30d, SB/SD use 'sales' which is their default 14-day attribution
+// SP: columns use sales1d / purchases1d / unitsSoldClicks1d (single-window daily rows)
+// SB/SD: sales / purchases / units (Amazon naming per report type)
 const CAMPAIGN_TYPES = {
     SPONSORED_PRODUCTS: {
         adProduct: 'SPONSORED_PRODUCTS',
         reportTypeId: 'spCampaigns',
-        salesMetric: 'sales30d',
+        // SP Seller Central default = 7-day attribution
+        // sales7d ALREADY includes halo (all products purchased after ad click)
+        // attributedSalesSameSku7d = only the advertised product
+        defaultSalesMetric: 'sales7d',
         columns: [
             "date",
             "campaignId",
@@ -29,14 +32,39 @@ const CAMPAIGN_TYPES = {
             "cost",
             "impressions",
             "clicks",
+            // Sales (includes halo — all products purchased after click)
+            "sales1d",
+            "sales7d",
+            "sales14d",
             "sales30d",
-            "purchases30d"
+            // Sales SAME SKU only (advertised product)
+            "attributedSalesSameSku1d",
+            "attributedSalesSameSku7d",
+            "attributedSalesSameSku14d",
+            "attributedSalesSameSku30d",
+            // Purchases (orders)
+            "purchases1d",
+            "purchases7d",
+            "purchases14d",
+            "purchases30d",
+            // Units sold (advertised product)
+            "unitsSoldClicks1d",
+            "unitsSoldClicks7d",
+            "unitsSoldClicks14d",
+            "unitsSoldClicks30d",
+            // Units sold SAME SKU
+            "unitsSoldSameSku1d",
+            "unitsSoldSameSku7d",
+            "unitsSoldSameSku14d",
+            "unitsSoldSameSku30d"
         ]
     },
     SPONSORED_BRANDS: {
         adProduct: 'SPONSORED_BRANDS',
         reportTypeId: 'sbCampaigns',
-        salesMetric: 'sales',
+        // SB Seller Central default = 14-day attribution
+        // SB uses 'sales' (not sales14d), 'purchases' (not purchases14d), 'unitsSoldClicks' (not unitsSoldClicks14d)
+        defaultSalesMetric: 'sales',
         columns: [
             "date",
             "campaignId",
@@ -46,14 +74,23 @@ const CAMPAIGN_TYPES = {
             "impressions",
             "clicks",
             "sales",
+            "salesClicks",
             "purchases",
-            "unitsSold"
+            "purchasesClicks",
+            "unitsSoldClicks",
+            "newToBrandSales",
+            "newToBrandPurchases",
+            "newToBrandUnitsSold",
+            "detailPageViews",
+            "brandedSearches"
         ]
     },
     SPONSORED_DISPLAY: {
         adProduct: 'SPONSORED_DISPLAY',
         reportTypeId: 'sdCampaigns',
-        salesMetric: 'sales',
+        // SD Seller Central default = 14-day attribution
+        // SD uses 'sales' (not sales14d), 'purchases' (not purchases14d), 'unitsSoldClicks' (not unitsSoldClicks14d)
+        defaultSalesMetric: 'sales',
         columns: [
             "date",
             "campaignId",
@@ -63,8 +100,14 @@ const CAMPAIGN_TYPES = {
             "impressions",
             "clicks",
             "sales",
+            "salesClicks",
             "purchases",
-            "unitsSold"
+            "purchasesClicks",
+            "unitsSoldClicks",
+            "newToBrandSales",
+            "newToBrandPurchases",
+            "newToBrandUnitsSold",
+            "detailPageViews"
         ]
     }
 };
@@ -304,13 +347,27 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
  */
 async function processReportData(reportData, campaignType) {
     const config = CAMPAIGN_TYPES[campaignType];
-    const salesMetric = config.salesMetric;
+    const defaultSalesMetric = config.defaultSalesMetric;
     
     const metrics = {
-        totalSales: 0,
+        totalSales: 0,      // uses defaultSalesMetric
         totalSpend: 0,
         totalImpressions: 0,
         totalClicks: 0,
+        totalUnitsSoldClicks1d: 0,
+        // All attribution window totals
+        totalSales1d: 0,
+        totalSales7d: 0,
+        totalSales14d: 0,
+        totalSales30d: 0,
+        totalPurchases1d: 0,
+        totalPurchases7d: 0,
+        totalPurchases14d: 0,
+        totalPurchases30d: 0,
+        totalUnits1d: 0,
+        totalUnits7d: 0,
+        totalUnits14d: 0,
+        totalUnits30d: 0,
         dateWiseData: {},
         campaigns: []
     };
@@ -325,46 +382,104 @@ async function processReportData(reportData, campaignType) {
         const chunk = reportData.slice(i, i + CHUNK_SIZE);
         
         for (const row of chunk) {
-            // Get sales from the appropriate column based on campaign type
-            // SP uses sales30d, SB/SD use 'sales' (which is 14-day by default)
-            const sales = parseFloat(row[salesMetric] || row.sales30d || row.sales || 0);
             const spend = parseFloat(row.cost || 0);
             const impressions = parseInt(row.impressions || 0);
             const clicks = parseInt(row.clicks || 0);
             const date = row.date;
 
-            metrics.totalSales += sales;
+            // Extract all attribution windows
+            // SP has explicit windows: sales1d, sales7d, sales14d, sales30d
+            // SB/SD use: sales (=14d default), purchases, unitsSoldClicks
+            const sales1d = parseFloat(row.sales1d || 0);
+            const sales7d = parseFloat(row.sales7d || 0);
+            const sales14d = parseFloat(row.sales14d || row.sales || 0);
+            const sales30d = parseFloat(row.sales30d || 0);
+            const purchases1d = parseFloat(row.purchases1d || 0);
+            const purchases7d = parseFloat(row.purchases7d || 0);
+            const purchases14d = parseFloat(row.purchases14d || row.purchases || 0);
+            const purchases30d = parseFloat(row.purchases30d || 0);
+            const units1d = parseInt(row.unitsSoldClicks1d || 0);
+            const units7d = parseInt(row.unitsSoldClicks7d || 0);
+            const units14d = parseInt(row.unitsSoldClicks14d || row.unitsSoldClicks || 0);
+            const units30d = parseInt(row.unitsSoldClicks30d || 0);
+
+            // Default metrics use the Seller Central default attribution window:
+            //   SP: 7d — sales7d ALREADY includes halo (all products purchased after click)
+            //   SB/SD: 14d — 'sales' column IS the 14d default
+            const defaultSales = parseFloat(row[defaultSalesMetric] || row.sales || 0);
+            const defaultPurchases = campaignType === 'SPONSORED_PRODUCTS'
+                ? purchases7d : purchases14d;
+            const defaultUnits = campaignType === 'SPONSORED_PRODUCTS'
+                ? units7d : units14d;
+
+            metrics.totalSales += defaultSales;
             metrics.totalSpend += spend;
             metrics.totalImpressions += impressions;
             metrics.totalClicks += clicks;
+            metrics.totalUnitsSoldClicks1d += defaultUnits;
+
+            // Attribution window totals
+            metrics.totalSales1d += sales1d;
+            metrics.totalSales7d += sales7d;
+            metrics.totalSales14d += sales14d;
+            metrics.totalSales30d += sales30d;
+            metrics.totalPurchases1d += purchases1d;
+            metrics.totalPurchases7d += purchases7d;
+            metrics.totalPurchases14d += purchases14d;
+            metrics.totalPurchases30d += purchases30d;
+            metrics.totalUnits1d += units1d;
+            metrics.totalUnits7d += units7d;
+            metrics.totalUnits14d += units14d;
+            metrics.totalUnits30d += units30d;
 
             // Date-wise aggregation
             if (date) {
                 if (!metrics.dateWiseData[date]) {
                     metrics.dateWiseData[date] = {
-                        sales: 0,
-                        spend: 0,
-                        impressions: 0,
-                        clicks: 0
+                        sales: 0, spend: 0, impressions: 0, clicks: 0,
+                        // All windows
+                        sales1d: 0, sales7d: 0, sales14d: 0, sales30d: 0,
+                        purchases1d: 0, purchases7d: 0, purchases14d: 0, purchases30d: 0,
+                        units1d: 0, units7d: 0, units14d: 0, units30d: 0,
+                        unitsSoldClicks1d: 0
                     };
                 }
-                
-                metrics.dateWiseData[date].sales += sales;
-                metrics.dateWiseData[date].spend += spend;
-                metrics.dateWiseData[date].impressions += impressions;
-                metrics.dateWiseData[date].clicks += clicks;
+                const d = metrics.dateWiseData[date];
+                d.sales += defaultSales;
+                d.spend += spend;
+                d.impressions += impressions;
+                d.clicks += clicks;
+                d.unitsSoldClicks1d += defaultUnits;
+                d.sales1d += sales1d;
+                d.sales7d += sales7d;
+                d.sales14d += sales14d;
+                d.sales30d += sales30d;
+                d.purchases1d += purchases1d;
+                d.purchases7d += purchases7d;
+                d.purchases14d += purchases14d;
+                d.purchases30d += purchases30d;
+                d.units1d += units1d;
+                d.units7d += units7d;
+                d.units14d += units14d;
+                d.units30d += units30d;
             }
 
             // Campaign-level data
             if (row.campaignId) {
                 metrics.campaigns.push({
+                    date: date || null,
                     campaignId: row.campaignId,
                     campaignName: row.campaignName,
                     campaignStatus: row.campaignStatus,
-                    sales: sales,
+                    sales: defaultSales,
                     spend: spend,
                     impressions: impressions,
-                    clicks: clicks
+                    clicks: clicks,
+                    unitsSoldClicks1d: defaultUnits,
+                    purchases: defaultPurchases,
+                    sales1d, sales7d, sales14d, sales30d,
+                    purchases1d, purchases7d, purchases14d, purchases30d,
+                    units1d, units7d, units14d, units30d
                 });
             }
         }
@@ -376,6 +491,37 @@ async function processReportData(reportData, campaignType) {
     }
 
     return metrics;
+}
+
+/**
+ * Merge per-row campaign snapshots into one row per campaignId (sums across dates).
+ */
+function aggregateCampaignRows(rows) {
+    if (!rows || !rows.length) return [];
+    const map = new Map();
+    for (const row of rows) {
+        const id = row.campaignId != null ? String(row.campaignId) : '';
+        if (!id) continue;
+        if (!map.has(id)) {
+            map.set(id, {
+                campaignId: row.campaignId,
+                campaignName: row.campaignName || '',
+                campaignStatus: row.campaignStatus || '',
+                sales: 0,
+                spend: 0,
+                impressions: 0,
+                clicks: 0,
+                unitsSoldClicks1d: 0
+            });
+        }
+        const agg = map.get(id);
+        agg.sales += Number(row.sales) || 0;
+        agg.spend += Number(row.spend) || 0;
+        agg.impressions += Number(row.impressions) || 0;
+        agg.clicks += Number(row.clicks) || 0;
+        agg.unitsSoldClicks1d += Number(row.unitsSoldClicks1d) || 0;
+    }
+    return Array.from(map.values());
 }
 
 /**
@@ -391,17 +537,23 @@ function combineMetrics(reportResults, startDate, endDate) {
         totalSpend: 0,
         totalImpressions: 0,
         totalClicks: 0,
+        totalUnitsSoldClicks1d: 0,
         overallAcos: 0,
         overallRoas: 0,
         ctr: 0,
         cpc: 0,
         dateWiseMetrics: {},
         campaignTypeBreakdown: {
-            sponsoredProducts: { sales: 0, spend: 0, impressions: 0, clicks: 0, acos: 0 },
-            sponsoredBrands: { sales: 0, spend: 0, impressions: 0, clicks: 0, acos: 0 },
-            sponsoredDisplay: { sales: 0, spend: 0, impressions: 0, clicks: 0, acos: 0 }
+            sponsoredProducts: { sales: 0, spend: 0, impressions: 0, clicks: 0, acos: 0, unitsSoldClicks1d: 0 },
+            sponsoredBrands: { sales: 0, spend: 0, impressions: 0, clicks: 0, acos: 0, unitsSoldClicks1d: 0 },
+            sponsoredDisplay: { sales: 0, spend: 0, impressions: 0, clicks: 0, acos: 0, unitsSoldClicks1d: 0 }
         },
-        processedCampaignTypes: []
+        processedCampaignTypes: [],
+        campaignSummaries: {
+            sponsoredProducts: [],
+            sponsoredBrands: [],
+            sponsoredDisplay: []
+        }
     };
 
     const campaignTypeMap = {
@@ -423,6 +575,7 @@ function combineMetrics(reportResults, startDate, endDate) {
         combined.totalSpend += metrics.totalSpend;
         combined.totalImpressions += metrics.totalImpressions;
         combined.totalClicks += metrics.totalClicks;
+        combined.totalUnitsSoldClicks1d += metrics.totalUnitsSoldClicks1d || 0;
 
         if (mappedType) {
             combined.campaignTypeBreakdown[mappedType] = {
@@ -430,10 +583,12 @@ function combineMetrics(reportResults, startDate, endDate) {
                 spend: metrics.totalSpend,
                 impressions: metrics.totalImpressions,
                 clicks: metrics.totalClicks,
+                unitsSoldClicks1d: metrics.totalUnitsSoldClicks1d || 0,
                 acos: metrics.totalSales > 0 
                     ? parseFloat(((metrics.totalSpend / metrics.totalSales) * 100).toFixed(2)) 
                     : 0
             };
+            combined.campaignSummaries[mappedType] = aggregateCampaignRows(metrics.campaigns || []);
         }
 
         // Merge date-wise data
@@ -445,6 +600,7 @@ function combineMetrics(reportResults, startDate, endDate) {
                     spend: 0,
                     impressions: 0,
                     clicks: 0,
+                    unitsSoldClicks1d: 0,
                     acos: 0,
                     roas: 0,
                     ctr: 0,
@@ -456,6 +612,7 @@ function combineMetrics(reportResults, startDate, endDate) {
             combined.dateWiseMetrics[date].spend += metrics.dateWiseData[date].spend;
             combined.dateWiseMetrics[date].impressions += metrics.dateWiseData[date].impressions;
             combined.dateWiseMetrics[date].clicks += metrics.dateWiseData[date].clicks;
+            combined.dateWiseMetrics[date].unitsSoldClicks1d += metrics.dateWiseData[date].unitsSoldClicks1d || 0;
         });
     });
 
@@ -498,6 +655,113 @@ function combineMetrics(reportResults, startDate, endDate) {
     return combined;
 }
 
+const CAMPAIGN_TYPE_MAP = {
+    SPONSORED_PRODUCTS: 'sponsoredProducts',
+    SPONSORED_BRANDS: 'sponsoredBrands',
+    SPONSORED_DISPLAY: 'sponsoredDisplay'
+};
+
+/**
+ * Build one metrics payload per calendar day for DB storage (one document per metricDate).
+ */
+function buildDailyMetricsDocuments(reportResults, profileId) {
+    const emptyBreakdown = () => ({
+        sponsoredProducts: { sales: 0, spend: 0, impressions: 0, clicks: 0, acos: 0, unitsSoldClicks1d: 0 },
+        sponsoredBrands: { sales: 0, spend: 0, impressions: 0, clicks: 0, acos: 0, unitsSoldClicks1d: 0 },
+        sponsoredDisplay: { sales: 0, spend: 0, impressions: 0, clicks: 0, acos: 0, unitsSoldClicks1d: 0 }
+    });
+
+    const allDates = new Set();
+    reportResults.forEach(({ metrics }) => {
+        if (metrics?.dateWiseData && typeof metrics.dateWiseData === 'object') {
+            Object.keys(metrics.dateWiseData).forEach((d) => allDates.add(d));
+        }
+    });
+
+    const sortedDates = Array.from(allDates).sort((a, b) => a.localeCompare(b));
+    const dailyDocs = [];
+
+    for (const d of sortedDates) {
+        const breakdown = emptyBreakdown();
+        let totalSales = 0;
+        let totalSpend = 0;
+        let totalImpressions = 0;
+        let totalClicks = 0;
+        let totalUnits = 0;
+        const processedSet = new Set();
+        const summaries = {
+            sponsoredProducts: [],
+            sponsoredBrands: [],
+            sponsoredDisplay: []
+        };
+
+        reportResults.forEach(({ campaignType, metrics, skipped }) => {
+            if (skipped || !metrics) return;
+            const mapped = CAMPAIGN_TYPE_MAP[campaignType];
+            if (!mapped) return;
+
+            const day = metrics.dateWiseData && metrics.dateWiseData[d];
+            if (!day) return;
+
+            processedSet.add(campaignType);
+            breakdown[mapped] = {
+                sales: day.sales || 0,
+                spend: day.spend || 0,
+                impressions: day.impressions || 0,
+                clicks: day.clicks || 0,
+                unitsSoldClicks1d: day.unitsSoldClicks1d || 0,
+                acos:
+                    day.sales > 0
+                        ? parseFloat(((day.spend / day.sales) * 100).toFixed(2))
+                        : 0
+            };
+
+            totalSales += day.sales || 0;
+            totalSpend += day.spend || 0;
+            totalImpressions += day.impressions || 0;
+            totalClicks += day.clicks || 0;
+            totalUnits += day.unitsSoldClicks1d || 0;
+
+            const rowsForDay = (metrics.campaigns || []).filter((c) => c.date === d);
+            summaries[mapped] = aggregateCampaignRows(rowsForDay);
+        });
+
+        const overallAcos =
+            totalSales > 0 ? parseFloat(((totalSpend / totalSales) * 100).toFixed(2)) : 0;
+        const overallRoas =
+            totalSpend > 0 ? parseFloat((totalSales / totalSpend).toFixed(2)) : 0;
+        const ctr =
+            totalImpressions > 0
+                ? parseFloat(((totalClicks / totalImpressions) * 100).toFixed(2))
+                : 0;
+        const cpc =
+            totalClicks > 0 ? parseFloat((totalSpend / totalClicks).toFixed(2)) : 0;
+
+        dailyDocs.push({
+            metricDate: d,
+            profileId,
+            dateRange: { startDate: d, endDate: d },
+            summary: {
+                totalSales,
+                totalSpend,
+                totalImpressions,
+                totalClicks,
+                totalUnitsSoldClicks1d: totalUnits,
+                overallAcos,
+                overallRoas,
+                ctr,
+                cpc
+            },
+            campaignTypeBreakdown: breakdown,
+            processedCampaignTypes: Array.from(processedSet),
+            campaignSummaries: summaries,
+            dateWiseMetrics: []
+        });
+    }
+
+    return dailyDocs;
+}
+
 /**
  * Main function to get PPC metrics
  * @param {string} accessToken - Amazon Ads access token
@@ -534,11 +798,25 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
             }
         } : null;
 
-        // Calculate dates if not provided (local timezone: yesterday − 30 days → yesterday)
-        const now = new Date();
-        const fmtLocal = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-        const calculatedEndDate = endDate || fmtLocal(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
-        const calculatedStartDate = startDate || fmtLocal(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1 - 30));
+        // Calculate dates if not provided
+        // Amazon Ads reports use the marketplace's timezone for date grouping.
+        // For NA (US), this is Pacific Time. We compute "yesterday" in Pacific
+        // to match the Finance API's Pacific-time convention.
+        const PACIFIC_OFFSET_MS = 7 * 60 * 60 * 1000; // UTC-7 (PDT)
+        const nowUtc = Date.now();
+        const nowPacific = new Date(nowUtc - PACIFIC_OFFSET_MS);
+        const fmtDate = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+        
+        // Yesterday in Pacific time
+        const yesterdayPacific = new Date(nowPacific);
+        yesterdayPacific.setUTCDate(yesterdayPacific.getUTCDate() - 1);
+        
+        const calculatedEndDate = endDate || fmtDate(yesterdayPacific);
+        
+        // 30 days total: yesterday back to yesterday-29
+        const startPacific = new Date(yesterdayPacific);
+        startPacific.setUTCDate(startPacific.getUTCDate() - 29);
+        const calculatedStartDate = startDate || fmtDate(startPacific);
 
         console.log(`📅 [GetPPCMetrics] Date range: ${calculatedStartDate} to ${calculatedEndDate}`);
 
@@ -565,7 +843,7 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
                 reportResults.push({ 
                     campaignType: reportResult.campaignType, 
                     skipped: true,
-                    metrics: { totalSales: 0, totalSpend: 0, totalImpressions: 0, totalClicks: 0, dateWiseData: {}, campaigns: [] }
+                    metrics: { totalSales: 0, totalSpend: 0, totalImpressions: 0, totalClicks: 0, totalUnitsSoldClicks1d: 0, dateWiseData: {}, campaigns: [] }
                 });
                 continue;
             }
@@ -615,7 +893,7 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
                         campaignType: reportResult.campaignType, 
                         skipped: true,
                         error: reportStatus.error,
-                        metrics: { totalSales: 0, totalSpend: 0, totalImpressions: 0, totalClicks: 0, dateWiseData: {}, campaigns: [] }
+                        metrics: { totalSales: 0, totalSpend: 0, totalImpressions: 0, totalClicks: 0, totalUnitsSoldClicks1d: 0, dateWiseData: {}, campaigns: [] }
                     });
                 }
             } catch (error) {
@@ -624,7 +902,7 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
                     campaignType: reportResult.campaignType, 
                     skipped: true,
                     error: error.message,
-                    metrics: { totalSales: 0, totalSpend: 0, totalImpressions: 0, totalClicks: 0, dateWiseData: {}, campaigns: [] }
+                    metrics: { totalSales: 0, totalSpend: 0, totalImpressions: 0, totalClicks: 0, totalUnitsSoldClicks1d: 0, dateWiseData: {}, campaigns: [] }
                 });
             }
         }
@@ -634,39 +912,32 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
 
         console.log(`🎉 [GetPPCMetrics] Completed! Total Sales: $${combinedMetrics.totalSales.toFixed(2)}, Total Spend: $${combinedMetrics.totalSpend.toFixed(2)}, ACOS: ${combinedMetrics.overallAcos}%`);
 
-        // Save to database if requested
+        // Save one document per calendar day
         let savedRecord = null;
+        let documentsSaved = 0;
         if (saveToDatabase) {
             try {
-                console.log(`💾 [GetPPCMetrics] Saving metrics to database...`);
-                savedRecord = await PPCMetrics.upsertMetrics(
-                    userId,
-                    country,
-                    region,
-                    calculatedStartDate,
-                    calculatedEndDate,
-                    {
-                        profileId: profileId,
-                        dateRange: combinedMetrics.dateRange,
-                        summary: {
-                            totalSales: combinedMetrics.totalSales,
-                            totalSpend: combinedMetrics.totalSpend,
-                            totalImpressions: combinedMetrics.totalImpressions,
-                            totalClicks: combinedMetrics.totalClicks,
-                            overallAcos: combinedMetrics.overallAcos,
-                            overallRoas: combinedMetrics.overallRoas,
-                            ctr: combinedMetrics.ctr,
-                            cpc: combinedMetrics.cpc
-                        },
-                        campaignTypeBreakdown: combinedMetrics.campaignTypeBreakdown,
-                        dateWiseMetrics: combinedMetrics.dateWiseMetrics,
-                        processedCampaignTypes: combinedMetrics.processedCampaignTypes
-                    }
+                const dailyDocs = buildDailyMetricsDocuments(reportResults, profileId);
+                const userIdStr = userId?.toString() || userId;
+                console.log(`💾 [GetPPCMetrics] Saving ${dailyDocs.length} per-day metric documents...`);
+
+                for (const doc of dailyDocs) {
+                    const { metricDate, ...payload } = doc;
+                    savedRecord = await PPCMetrics.upsertMetricsForDate(
+                        userIdStr,
+                        country,
+                        region,
+                        metricDate,
+                        payload
+                    );
+                    documentsSaved += 1;
+                }
+
+                console.log(
+                    `✅ [GetPPCMetrics] Saved ${documentsSaved} daily PPC metric document(s). Last ID: ${savedRecord?._id}`
                 );
-                console.log(`✅ [GetPPCMetrics] Metrics saved to database with ID: ${savedRecord._id}`);
             } catch (saveError) {
                 console.error(`⚠️ [GetPPCMetrics] Failed to save metrics to database:`, saveError.message);
-                // Don't throw - continue to return the data even if save fails
             }
         }
 
@@ -680,7 +951,8 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
                 region: region,
                 profileId: profileId,
                 processedAt: new Date().toISOString(),
-                savedToDatabase: !!savedRecord,
+                savedToDatabase: documentsSaved > 0,
+                documentsSaved,
                 recordId: savedRecord?._id?.toString() || null
             }
         };
@@ -701,4 +973,3 @@ module.exports = {
     CAMPAIGN_TYPES,
     BASE_URIS
 };
-

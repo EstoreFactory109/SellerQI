@@ -3,37 +3,16 @@ const mongoose = require('mongoose');
 /**
  * SalesOnlyMetricsModel
  *
- * Stores only sales totals + daily (date-wise) sales for a user/country/region range.
+ * Stores ONE document per day per user/country/region.
+ * No pre-calculated totals - all aggregations happen at query time in the database.
  *
- * This intentionally mirrors the shape of `EconomicsMetrics.datewiseSales` entries
- * enough for existing chart readers to keep working (grossProfit is always 0).
+ * This design allows fast date-range queries via indexed aggregation.
  */
 
 const monetaryAmountSchema = new mongoose.Schema(
   {
     amount: { type: Number, required: true, default: 0 },
     currencyCode: { type: String, required: true, default: 'USD' },
-  },
-  { _id: false }
-);
-
-const datewiseSalesSchema = new mongoose.Schema(
-  {
-    date: { type: String, required: true }, // YYYY-MM-DD
-    sales: { type: monetaryAmountSchema, required: true },
-    // Kept for compatibility with existing mapping code.
-    grossProfit: { type: monetaryAmountSchema, required: true, default: { amount: 0, currencyCode: 'USD' } },
-    // Optional: some readers reference unitsSold; MCP Sales/Traffic does not provide unitsSold.
-    unitsSold: { type: Number, required: false, default: 0 },
-  },
-  { _id: false }
-);
-
-const periodSummarySchema = new mongoose.Schema(
-  {
-    totalSales: { type: monetaryAmountSchema, required: true },
-    startDate: { type: String, required: true }, // YYYY-MM-DD
-    endDate: { type: String, required: true }, // YYYY-MM-DD
   },
   { _id: false }
 );
@@ -53,66 +32,251 @@ const salesOnlyMetricsSchema = new mongoose.Schema(
       index: true,
     },
     country: {
-      // Country/marketplace code (US, UK, DE, AU, etc.)
       type: String,
       required: true,
       index: true,
     },
-    dateRange: {
-      startDate: { type: String, required: true }, // YYYY-MM-DD
-      endDate: { type: String, required: true }, // YYYY-MM-DD
+    date: {
+      type: String,
+      required: true,
+      index: true,
     },
 
-    // Totals for the entire dateRange
-    totalSales: { type: monetaryAmountSchema, required: true },
+    sales: { type: monetaryAmountSchema, required: true },
+    grossProfit: {
+      type: monetaryAmountSchema,
+      required: true,
+      default: { amount: 0, currencyCode: 'USD' },
+    },
+    unitsSold: { type: Number, required: false, default: 0 },
 
-    // Daily series for the dateRange
-    datewiseSales: { type: [datewiseSalesSchema], default: [] },
-
-    // Precomputed fixed periods to avoid recomputation in readers
-    last7Days: { type: periodSummarySchema, required: false },
-    last14Days: { type: periodSummarySchema, required: false },
-
-    // Bookkeeping
-    queryId: { type: String, required: false, index: true },
-    documentId: { type: String, required: false },
-    processedAt: { type: Date, default: Date.now },
     dataSource: { type: String, enum: ['DataKiosk'], default: 'DataKiosk' },
   },
   { timestamps: true }
 );
 
+salesOnlyMetricsSchema.index(
+  { User: 1, country: 1, region: 1, date: 1 },
+  { unique: true }
+);
 salesOnlyMetricsSchema.index({ User: 1, country: 1, region: 1, createdAt: -1 });
-salesOnlyMetricsSchema.index({ User: 1, region: 1, country: 1, 'dateRange.startDate': 1, 'dateRange.endDate': 1 });
 
-// Static method to find by date range
-salesOnlyMetricsSchema.statics.findByDateRange = function (userId, region, startDate, endDate) {
+/**
+ * Find all daily docs for a user/country/region within a date range.
+ * Returns array sorted by date ascending.
+ */
+salesOnlyMetricsSchema.statics.findByDateRange = function (
+  userId,
+  region,
+  country,
+  startDate,
+  endDate
+) {
   return this.find({
     User: userId,
-    region: region,
-    'dateRange.startDate': startDate,
-    'dateRange.endDate': endDate,
-  }).sort({ createdAt: -1 });
+    region,
+    country,
+    date: { $gte: startDate, $lte: endDate },
+  }).sort({ date: 1 });
 };
 
-// Static method to find latest metrics
-salesOnlyMetricsSchema.statics.findLatest = function (userId, region, country = 'US') {
-  return this.findOne({
-    User: userId,
-    region: region,
-    country: country,
-  }).sort({ createdAt: -1 });
-};
+/**
+ * Get total sales for a date range using database aggregation.
+ * All calculations happen in MongoDB, not JavaScript.
+ * Returns { totalSales, currencyCode, datewiseSales[], dateRange }
+ */
+salesOnlyMetricsSchema.statics.getSalesForDateRange = async function (
+  userId,
+  region,
+  country,
+  startDate,
+  endDate
+) {
+  const userObjectId =
+    typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
 
-// Static method to find by user + region (+ optional country)
-salesOnlyMetricsSchema.statics.findByUserRegionCountry = function (userId, region, country) {
-  const query = {
-    User: userId,
-    region: region,
+  const result = await this.aggregate([
+    {
+      $match: {
+        User: userObjectId,
+        region,
+        country,
+        date: { $gte: startDate, $lte: endDate },
+      },
+    },
+    { $sort: { date: 1 } },
+    {
+      $group: {
+        _id: null,
+        totalSales: { $sum: '$sales.amount' },
+        currencyCode: { $first: '$sales.currencyCode' },
+        count: { $sum: 1 },
+        datewiseSales: {
+          $push: {
+            date: '$date',
+            sales: '$sales',
+            grossProfit: '$grossProfit',
+            unitsSold: '$unitsSold',
+          },
+        },
+        minDate: { $min: '$date' },
+        maxDate: { $max: '$date' },
+      },
+    },
+  ]);
+
+  if (!result || result.length === 0) {
+    return {
+      totalSales: { amount: 0, currencyCode: 'USD' },
+      datewiseSales: [],
+      dateRange: { startDate, endDate },
+    };
+  }
+
+  const r = result[0];
+  return {
+    totalSales: { amount: r.totalSales, currencyCode: r.currencyCode || 'USD' },
+    datewiseSales: r.datewiseSales,
+    dateRange: { startDate: r.minDate, endDate: r.maxDate },
   };
-  if (country) query.country = country;
-  return this.find(query).sort({ createdAt: -1 });
+};
+
+/**
+ * Get recent data for a user/country/region using database aggregation.
+ * First finds the most recent date, then aggregates data for the last N days.
+ * All calculations happen in MongoDB.
+ */
+salesOnlyMetricsSchema.statics.getRecentDays = async function (
+  userId,
+  region,
+  country,
+  days = 31
+) {
+  const userObjectId =
+    typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+
+  const result = await this.aggregate([
+    {
+      $match: {
+        User: userObjectId,
+        region,
+        country,
+      },
+    },
+    { $sort: { date: -1 } },
+    { $limit: days },
+    { $sort: { date: 1 } },
+    {
+      $group: {
+        _id: null,
+        totalSales: { $sum: '$sales.amount' },
+        currencyCode: { $first: '$sales.currencyCode' },
+        count: { $sum: 1 },
+        datewiseSales: {
+          $push: {
+            date: '$date',
+            sales: '$sales',
+            grossProfit: '$grossProfit',
+            unitsSold: '$unitsSold',
+          },
+        },
+        minDate: { $min: '$date' },
+        maxDate: { $max: '$date' },
+      },
+    },
+  ]);
+
+  if (!result || result.length === 0) {
+    return {
+      totalSales: { amount: 0, currencyCode: 'USD' },
+      datewiseSales: [],
+      dateRange: { startDate: null, endDate: null },
+    };
+  }
+
+  const r = result[0];
+  return {
+    totalSales: { amount: r.totalSales, currencyCode: r.currencyCode || 'USD' },
+    datewiseSales: r.datewiseSales,
+    dateRange: { startDate: r.minDate, endDate: r.maxDate },
+  };
+};
+
+/**
+ * Backward-compatible findLatest that returns data in the old format.
+ * Uses database aggregation for recent 31 days.
+ */
+salesOnlyMetricsSchema.statics.findLatest = async function (
+  userId,
+  region,
+  country = 'US'
+) {
+  const data = await this.getRecentDays(userId, region, country, 31);
+
+  return {
+    User: userId,
+    region,
+    country,
+    dateRange: data.dateRange,
+    totalSales: data.totalSales,
+    datewiseSales: data.datewiseSales,
+    last7Days: null,
+    last14Days: null,
+  };
+};
+
+/**
+ * Find by user + region (+ optional country) using database aggregation.
+ * All calculations happen in MongoDB.
+ */
+salesOnlyMetricsSchema.statics.findByUserRegionCountry = async function (
+  userId,
+  region,
+  country
+) {
+  const userObjectId =
+    typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+
+  const matchQuery = { User: userObjectId, region };
+  if (country) matchQuery.country = country;
+
+  const result = await this.aggregate([
+    { $match: matchQuery },
+    { $sort: { date: -1 } },
+    { $limit: 31 },
+    { $sort: { date: 1 } },
+    {
+      $group: {
+        _id: { country: '$country' },
+        totalSales: { $sum: '$sales.amount' },
+        currencyCode: { $first: '$sales.currencyCode' },
+        datewiseSales: {
+          $push: {
+            date: '$date',
+            sales: '$sales',
+            grossProfit: '$grossProfit',
+            unitsSold: '$unitsSold',
+          },
+        },
+        minDate: { $min: '$date' },
+        maxDate: { $max: '$date' },
+      },
+    },
+  ]);
+
+  if (!result || result.length === 0) return [];
+
+  return result.map((r) => ({
+    User: userId,
+    region,
+    country: r._id.country,
+    dateRange: {
+      startDate: r.minDate,
+      endDate: r.maxDate,
+    },
+    totalSales: { amount: r.totalSales, currencyCode: r.currencyCode || 'USD' },
+    datewiseSales: r.datewiseSales,
+  }));
 };
 
 module.exports = mongoose.model('SalesOnlyMetrics', salesOnlyMetricsSchema);
-

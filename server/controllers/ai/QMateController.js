@@ -81,6 +81,7 @@ const handleChat = asyncHandler(async (req, res) => {
         follow_up_questions,
         needs_clarification,
         clarifying_questions,
+        clarification_options,
         load_more_available,
         content_actions,
         suggested_title,
@@ -98,8 +99,17 @@ const handleChat = asyncHandler(async (req, res) => {
             content: answer_markdown || '',
             charts: chart_suggestions || [],
             follow_up_questions: follow_up_questions || [],
-            needs_clarification: Boolean(needs_clarification),
+            // Phase 3 / Task 3.2: ship both representations. Legacy clients
+            // keep reading `clarifying_questions` (string array); new clients
+            // render `clarification_options` (structured `{id,label,resolved_prompt}`)
+            // as clickable buttons.
+            needs_clarification:
+                Boolean(needs_clarification) ||
+                Boolean(result.clarification && result.clarification.needed),
             clarifying_questions: Array.isArray(clarifying_questions) ? clarifying_questions : [],
+            clarification_options: Array.isArray(clarification_options)
+                ? clarification_options
+                : (Array.isArray(result.clarification?.options) ? result.clarification.options : []),
             // Pagination for large data lists
             load_more_available: load_more_available || null,
             // Fix It functionality fields
@@ -112,6 +122,10 @@ const handleChat = asyncHandler(async (req, res) => {
             wasted_keywords: wasted_keywords || null,
             wasted_keywords_total: wasted_keywords_total || null,
             wasted_keywords_offset: wasted_keywords_offset || null,
+            // Response provenance metadata (Phase 1 — anti-hallucination visibility)
+            response_source: result.responseSource || 'unknown',
+            data_confidence: result.dataConfidence || 'low',
+            data_sources: Array.isArray(result.dataSources) ? result.dataSources : [],
         },
     };
 

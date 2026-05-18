@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Check, AlertTriangle, X, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Table, TrendingDown, DollarSign, Package, Target, Loader2, CheckCircle2, Calendar } from 'lucide-react';
 import { useSelector, useDispatch } from 'react-redux';
 import { setCogsValue, fetchCogs, saveCogsToDb, selectCogsSaving, selectSavedCogsValues } from '../../redux/slices/cogsSlice';
+import { computeRowCogs } from '../../utils/cogsCalculations.js';
 import { updateProfitabilityErrors } from '../../redux/slices/errorsSlice';
 import { formatCurrencyWithLocale } from '../../utils/currencyUtils';
 import { parseLocalDate } from '../../utils/dateUtils';
@@ -51,10 +52,14 @@ const ProfitTable = ({
     totalProducts: serverTotalProducts = 0,
     onLoadMore = null,
     onPageChange = null,
-    // New profitability table props (ASIN-keyed joined data)
-    profitTableData = null,
-    profitTablePagination = null,
-    onProfitTablePageChange = null,
+    // Finance dashboard ASIN-wise data (from DailySkuFinance)
+    financeDashAsinWise = null,
+    // Parent-child ASIN relationships (from AsinRelationship model)
+    financeDashRelationships = null,
+    // Account-level overhead expenses (from DailyOverheadFinance)
+    financeDashOverhead = null,
+    /** When true, only render finance-dashboard rows (no legacy dashboard Redux fallback). */
+    useFinanceTableOnly = false,
 }) => {
     // Use phased loading if pagination handler is provided (indicates phased loading mode)
     // This prevents falling back to legacy data while waiting for server response
@@ -708,30 +713,231 @@ const ProfitTable = ({
       };
     }, [processedProducts]);
 
-    // ── NEW PROFITABILITY TABLE (ASIN-keyed with joined sales + expenses) ──
-    if (profitTableData && Array.isArray(profitTableData)) {
-      const pPag = profitTablePagination || {};
-      const filteredRows = profitTableData.filter(row => row.sku && row.sku.trim() !== '');
+    // ── FINANCE DASHBOARD TABLE (ASIN-wise from DailySkuFinance with parent-child grouping) ──
+    if (financeDashAsinWise && Array.isArray(financeDashAsinWise) && financeDashAsinWise.length > 0) {
+      const productDetailsMap = new Map();
+      totalProducts.forEach(p => productDetailsMap.set(p.asin, p));
 
-      // Generate suggestions from new flow data
+      const signedMoneyColor = (n) => {
+        const v = Number(n || 0);
+        if (v > 0) return '#22c55e';
+        if (v < 0) return '#f87171';
+        return '#9ca3af';
+      };
+
+      /** Expenses are stored as positive magnitudes; show as negative outflows in the table. */
+      const displayExpenseAmount = (amount) => {
+        const v = Number(amount || 0);
+        if (Math.abs(v) < 0.005) return 0;
+        return -Math.abs(v);
+      };
+
+      const computeRowExpenses = (row) => {
+        const perAsin =
+          Math.abs(row.fbaFulfillmentFee || 0) +
+          Math.abs(row.referralCommission || 0) +
+          Math.abs(row.closingFee || 0) +
+          Math.abs(row.technologyFee || 0) +
+          Math.abs(row.shippingChargeback || 0) +
+          Math.abs(row.giftWrapChargeback || 0) +
+          Math.abs(row.fbaDisposalFee || 0) +
+          Math.abs(row.fbaReversedReimbursement || 0) +
+          Math.abs(row.refundedAmount || 0) +
+          Math.abs(row.refundCommission || 0) -
+          Math.abs(row.refundedReferralFee || 0) -
+          Math.abs(row.refundedPromotion || 0) -
+          Math.abs(row.restockingFee || 0) +
+          Math.abs(row.promotionsDiscount || 0) +
+          Math.abs(row.shippingDiscount || 0) +
+          Math.abs(row.taxDiscount || 0) +
+          Math.abs(row.shippingTaxDiscount || 0) +
+          Math.abs(row.tdsDeducted || 0) +
+          Math.abs(row.tcsCollected || 0) +
+          Math.abs(row.otherExpenses || 0) +
+          Math.abs(row.adsSpend || 0);
+        const reimbursements = Math.abs(row.fbaInventoryReimbursement || 0);
+        return perAsin - reimbursements;
+      };
+
+      const addGroupItems = (items) => (
+        items
+          .filter(i => Number(i.amount || 0) !== 0)
+          .map(i => ({ ...i, amount: Math.round(Number(i.amount || 0) * 100) / 100 }))
+      );
+
+      const adsBreakdownItems = (row) => {
+        const items = [];
+        const sp = Math.abs(row.adsSpendSP || 0);
+        const sd = Math.abs(row.adsSpendSD || 0);
+        if (sp > 0) items.push({ label: 'Sponsored Products (SP)', amount: -sp });
+        if (sd > 0) items.push({ label: 'Sponsored Display (SD)', amount: -sd });
+        const totalAds = Math.abs(row.adsSpend || 0);
+        if (items.length === 0 && totalAds > 0) {
+          items.push({ label: 'Advertising / PPC', amount: -totalAds });
+        }
+        return addGroupItems(items);
+      };
+
+      const buildBreakdownGroups = (row, { asinForCogs = null } = {}) => {
+        const rowCogs = computeRowCogs(row, cogsValues, asinForCogs || row?.asin);
+        const groups = [
+          {
+            label: 'Amazon Fees',
+            items: addGroupItems([
+              { label: 'FBA Per Unit Fulfillment Fee', amount: row.fbaFulfillmentFee },
+              { label: 'Referral Fee', amount: row.referralCommission },
+              { label: 'Closing Fee', amount: row.closingFee },
+              { label: 'Technology Fee', amount: row.technologyFee },
+              { label: 'Shipping Chargeback', amount: row.shippingChargeback },
+              { label: 'Gift Wrap Chargeback', amount: row.giftWrapChargeback },
+            ]),
+          },
+          {
+            label: 'Advertising / PPC',
+            items: adsBreakdownItems(row),
+          },
+          {
+            label: 'Refund Cost',
+            items: addGroupItems([
+              { label: 'Refunded Amount', amount: row.refundedAmount },
+              { label: 'Refund Commission', amount: row.refundCommission },
+              { label: 'Refunded Referral Fee', amount: row.refundedReferralFee },
+              { label: 'Promotion (reversed)', amount: row.refundedPromotion },
+              { label: 'Restocking Fee', amount: row.restockingFee },
+            ]),
+          },
+          {
+            label: 'Reimbursements',
+            items: addGroupItems([
+              { label: 'FBA Inventory Reimbursement', amount: row.fbaInventoryReimbursement },
+              { label: 'Compensated Clawback', amount: row.fbaReversedReimbursement },
+            ]),
+          },
+          {
+            label: 'Promotions & Discounts',
+            items: addGroupItems([
+              { label: 'Promotions Discount', amount: row.promotionsDiscount },
+              { label: 'Shipping Discount', amount: row.shippingDiscount },
+            ]),
+          },
+          {
+            label: 'Tax',
+            items: addGroupItems([
+              { label: 'Sales Tax', amount: row.salesTaxCollected },
+              { label: 'Shipping Tax', amount: row.shippingTaxCollected },
+              { label: 'Gift Wrap Tax', amount: row.giftWrapTaxCollected },
+              { label: 'Marketplace Facilitator Tax', amount: row.marketplaceFacilitatorTax },
+              { label: 'Tax Discount', amount: row.taxDiscount },
+              { label: 'Shipping Tax Discount', amount: row.shippingTaxDiscount },
+              { label: 'TDS (India)', amount: row.tdsDeducted },
+              { label: 'TCS (India)', amount: row.tcsCollected },
+            ]),
+          },
+          {
+            label: 'Additional Amazon Fees',
+            items: Array.isArray(row.otherExpensesBreakdown) && row.otherExpensesBreakdown.length > 0
+              ? addGroupItems(row.otherExpensesBreakdown.map(item => ({ label: item.category, amount: item.amount })))
+              : addGroupItems([{ label: 'Uncategorized fees', amount: row.otherExpenses }]),
+          },
+          ...(rowCogs > 0.01 ? [{
+            label: 'COGS',
+            items: addGroupItems([{ label: 'Cost of Goods Sold', amount: -rowCogs }]),
+          }] : []),
+        ];
+
+        return groups
+          .filter(g => g.items.length > 0)
+          .map(g => ({ ...g, total: Math.round(g.items.reduce((s, i) => s + Number(i.amount || 0), 0) * 100) / 100 }));
+      };
+
+      const filteredRows = financeDashAsinWise.filter(row => row.asin && row.asin.trim() !== '');
+
+      // Build parent-child grouped data
+      const asinToParent = financeDashRelationships?.asinToParent || {};
+      const parentGroupsMap = new Map();
+
+      filteredRows.forEach(row => {
+        const parentAsin = asinToParent[row.asin] || row.asin;
+        if (!parentGroupsMap.has(parentAsin)) {
+          parentGroupsMap.set(parentAsin, {
+            parentAsin,
+            children: [],
+            totals: {
+              productSales: 0, units: 0, totalExpenses: 0, totalRevenue: 0, netAmount: 0,
+              fbaFulfillmentFee: 0, referralCommission: 0, closingFee: 0, technologyFee: 0,
+              shippingChargeback: 0, giftWrapChargeback: 0,
+              refundedAmount: 0, refundCommission: 0, refundedReferralFee: 0,
+              refundedPromotion: 0, restockingFee: 0,
+              fbaInventoryReimbursement: 0, fbaReversedReimbursement: 0,
+              promotionsDiscount: 0, shippingDiscount: 0,
+              salesTaxCollected: 0, shippingTaxCollected: 0, giftWrapTaxCollected: 0,
+              marketplaceFacilitatorTax: 0, taxDiscount: 0, shippingTaxDiscount: 0,
+              tdsDeducted: 0, tcsCollected: 0,
+              fbaDisposalFee: 0, otherExpenses: 0, otherExpensesBreakdown: [],
+              adsSpend: 0, adsSpendSP: 0, adsSpendSD: 0,
+            },
+          });
+        }
+        const group = parentGroupsMap.get(parentAsin);
+        group.children.push(row);
+        const t = group.totals;
+        const accFields = [
+          'productSales','units','totalExpenses','totalRevenue','netAmount',
+          'fbaFulfillmentFee','referralCommission','closingFee','technologyFee',
+          'shippingChargeback','giftWrapChargeback',
+          'refundedAmount','refundCommission','refundedReferralFee','refundedPromotion','restockingFee',
+          'fbaInventoryReimbursement','fbaReversedReimbursement',
+          'promotionsDiscount','shippingDiscount',
+          'salesTaxCollected','shippingTaxCollected','giftWrapTaxCollected',
+          'marketplaceFacilitatorTax','taxDiscount','shippingTaxDiscount',
+          'tdsDeducted','tcsCollected',
+          'fbaDisposalFee','otherExpenses',
+          'adsSpend','adsSpendSP','adsSpendSD',
+        ];
+        for (const f of accFields) { t[f] += row[f] || 0; }
+        if (Array.isArray(row.otherExpensesBreakdown)) {
+          const merged = new Map((t.otherExpensesBreakdown || []).map(item => [item.category, Number(item.amount || 0)]));
+          row.otherExpensesBreakdown.forEach(item => {
+            const prev = merged.get(item.category) || 0;
+            merged.set(item.category, prev + Number(item.amount || 0));
+          });
+          t.otherExpensesBreakdown = Array.from(merged.entries()).map(([category, amount]) => ({ category, amount }));
+        }
+      });
+
+      const groupedRows = Array.from(parentGroupsMap.values())
+        .sort((a, b) => b.totals.productSales - a.totals.productSales);
+
+      const financeRowDisplayName = (row, catalogDetail) => {
+        const n = row?.productName != null ? String(row.productName).trim() : '';
+        if (n) return n;
+        return catalogDetail?.itemName || catalogDetail?.title || `Product ${row.asin}`;
+      };
+
+      const financeParentDisplayName = (children, parentAsin, catalogDetail) => {
+        for (const c of children) {
+          const n = c?.productName != null ? String(c.productName).trim() : '';
+          if (n) return n;
+        }
+        return catalogDetail?.itemName || catalogDetail?.title || `Product ${parentAsin}`;
+      };
+
+      const parentCount = groupedRows.length;
+      const childCount = filteredRows.length - parentCount;
+
       if (setSuggestionsData && filteredRows.length > 0) {
         const newSuggestions = [];
-        filteredRows.forEach(row => {
-          const cogsPerUnit = cogsValues[row.asin] || 0;
-          const totalCogs = cogsPerUnit * (row.unitsSold || 0);
-          const gp = row.grossProfit || 0;
-          const netProfit = gp - totalCogs;
-          const margin = row.totalSales > 0 ? (netProfit / row.totalSales) * 100 : 0;
+        groupedRows.forEach(group => {
+          const t = group.totals;
+          const cogsPerUnit = cogsValues[group.parentAsin] || 0;
+          const totalCogs = cogsPerUnit * (t.units || 0);
+          const grossProfit = (t.productSales || 0) - computeRowExpenses(t);
+          const netProfit = grossProfit - totalCogs;
+          const margin = t.productSales > 0 ? (netProfit / t.productSales) * 100 : 0;
           if (margin < 0) {
-            newSuggestions.push(`ASIN ${row.asin} (${row.sku}): Negative margin (${margin.toFixed(1)}%). Consider increasing selling price or reducing costs.`);
+            newSuggestions.push(`ASIN ${group.parentAsin}: Negative margin (${margin.toFixed(1)}%). Consider increasing selling price or reducing costs.`);
           } else if (margin < 10) {
-            newSuggestions.push(`ASIN ${row.asin} (${row.sku}): Very low margin (${margin.toFixed(1)}%). Review expenses and COGS to improve profitability.`);
-          }
-          if (cogsPerUnit > 0 && row.totalSales > 0) {
-            const cogsPercentage = (totalCogs / row.totalSales) * 100;
-            if (cogsPercentage > 60) {
-              newSuggestions.push(`ASIN ${row.asin}: COGS consuming ${cogsPercentage.toFixed(1)}% of sales. Explore alternative suppliers.`);
-            }
+            newSuggestions.push(`ASIN ${group.parentAsin}: Very low margin (${margin.toFixed(1)}%). Review expenses and COGS to improve profitability.`);
           }
         });
         if (newSuggestions.length > 0) {
@@ -739,12 +945,129 @@ const ProfitTable = ({
         }
       }
 
+      const renderFinanceRow = (row, rowNum, isChild) => {
+        const cogsPerUnit = cogsValues[row.asin] || 0;
+        const totalCogs = cogsPerUnit * (row.units || 0);
+        const rowExpenseTotal = computeRowExpenses(row);
+        const grossProfit = (row.productSales || 0) - rowExpenseTotal;
+        const netProfit = grossProfit - totalCogs;
+        const isExpBreakdownOpen = expandedRows.has(`exp_${row.asin}`);
+        const breakdownGroups = buildBreakdownGroups(row, { asinForCogs: row.asin });
+        const productDetail = productDetailsMap.get(row.asin);
+        const productName = financeRowDisplayName(row, productDetail);
+
+        return (
+          <React.Fragment key={row.asin}>
+            <tr
+              style={{ borderBottom: '1px solid #30363d', background: isChild ? 'rgba(59, 130, 246, 0.06)' : 'transparent' }}
+              className="hover:bg-[#21262d]/60 transition-colors"
+            >
+              <td className="px-2 py-2 text-center text-xs" style={{ color: '#9ca3af' }}>
+                {isChild ? <div className="ml-2 w-0.5 h-4 rounded mx-auto" style={{ background: '#3b82f6' }} /> : rowNum}
+              </td>
+              <td className="px-3 py-2 text-left">
+                <span className={`text-xs font-medium truncate block ${isChild ? 'pl-2' : ''}`} style={{ color: '#f3f4f6' }} title={productName}>
+                  {productName}
+                </span>
+              </td>
+              <td className="px-3 py-2 text-left">
+                <div className="flex flex-col">
+                  <span className="text-xs font-mono px-1.5 py-0.5 rounded whitespace-nowrap inline-block" style={isChild ? { color: '#3b82f6', background: 'rgba(59, 130, 246, 0.15)' } : { color: '#60a5fa' }}>{row.asin || 'N/A'}</span>
+                  {isChild && <span className="text-[9px] mt-0.5" style={{ color: '#3b82f6' }}>Child</span>}
+                </div>
+              </td>
+              <td className="px-2 py-2 text-left">
+                <span className="text-[10px] font-mono truncate block" style={{ color: '#9ca3af' }} title={row.sku || ''}>{row.sku}</span>
+              </td>
+              <td className="px-2 py-2 text-center text-xs font-medium" style={{ color: '#f3f4f6' }}>
+                {formatCurrencyWithLocale(row.productSales || 0, currency)}
+              </td>
+              <td className="px-2 py-2 text-center text-xs" style={{ color: '#9ca3af' }}>
+                {row.units || 0}
+              </td>
+              <td className="px-2 py-2 text-center text-xs" style={{ color: signedMoneyColor(displayExpenseAmount(rowExpenseTotal)) }}>
+                <div className="flex items-center justify-center gap-1">
+                  <span>{formatCurrencyWithLocale(displayExpenseAmount(rowExpenseTotal), currency)}</span>
+                  <button
+                    onClick={() => {
+                      const key = `exp_${row.asin}`;
+                      setExpandedRows(prev => {
+                        const next = new Set(prev);
+                        next.has(key) ? next.delete(key) : next.add(key);
+                        return next;
+                      });
+                    }}
+                    className="p-0.5 rounded hover:bg-[#30363d] transition-colors"
+                    title="View expense breakdown"
+                    style={{ color: '#60a5fa' }}
+                  >
+                    {isExpBreakdownOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                  </button>
+                </div>
+              </td>
+              <td className="px-2 py-2 text-center">
+                <div className="flex items-center justify-center gap-1">
+                  <span className="text-[10px]" style={{ color: '#9ca3af' }}>{cogsCurrencySymbol}</span>
+                  <input type="number" min="0" step="0.01" value={cogsValues[row.asin] ?? ''} onChange={(e) => handleCogsChange(row.asin, e.target.value)} placeholder="0.00" className="w-14 text-center text-xs rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-blue-500" style={{ background: '#1a1a1a', color: '#f3f4f6', border: '1px solid #30363d' }} />
+                  <button onClick={() => handleSaveCogs(row.asin, row.sku)} disabled={cogsSaving[row.asin] || !needsSave(row.asin)} className="p-0.5 rounded transition-colors" style={needsSave(row.asin) ? { background: 'rgba(34,197,94,0.2)', color: '#22c55e' } : { color: '#30363d' }} title={cogsSaving[row.asin] ? 'Saving...' : needsSave(row.asin) ? 'Click to save COGS' : 'Enter COGS value to save'}>
+                    {cogsSaving[row.asin] ? <Loader2 className="w-3 h-3 animate-spin" /> : isSaved(row.asin) ? <CheckCircle2 className="w-3 h-3" /> : <Check className="w-3 h-3" />}
+                  </button>
+                </div>
+              </td>
+              <td className="px-2 py-2 text-center text-xs font-medium" style={{ color: grossProfit >= 0 ? '#22c55e' : '#f87171' }}>
+                {formatCurrencyWithLocale(grossProfit, currency)}
+              </td>
+              <td className="px-2 py-2 text-center text-xs font-medium">
+                {cogsPerUnit > 0 ? (
+                  <span style={{ color: netProfit >= 0 ? '#22c55e' : '#f87171' }}>{formatCurrencyWithLocale(netProfit, currency)}</span>
+                ) : (
+                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded border" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa', borderColor: 'rgba(59, 130, 246, 0.3)' }}>+COGS</span>
+                )}
+              </td>
+            </tr>
+            {isExpBreakdownOpen && (
+              <tr style={{ background: '#1a1f26' }}>
+                <td colSpan={10} className="px-6 py-3">
+                  <div className="text-[10px] font-semibold uppercase mb-2" style={{ color: '#9ca3af' }}>Expense Breakdown</div>
+                  {breakdownGroups.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {breakdownGroups.map((group, gIdx) => (
+                        <div key={gIdx} className="rounded p-2" style={{ background: '#21262d' }}>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#93c5fd' }}>{group.label}</span>
+                            <span className="text-[10px] font-semibold" style={{ color: signedMoneyColor(group.total) }}>{formatCurrencyWithLocale(group.total, currency)}</span>
+                          </div>
+                          <div className="space-y-1">
+                            {group.items.map((item, iIdx) => (
+                              <div key={iIdx} className="flex items-center justify-between gap-2">
+                                <span className="text-[10px] truncate" style={{ color: '#d1d5db' }} title={item.label}>{item.label}</span>
+                                <span className="text-[10px] whitespace-nowrap font-medium" style={{ color: signedMoneyColor(item.amount) }}>{formatCurrencyWithLocale(item.amount, currency)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-[10px]" style={{ color: '#6b7280' }}>No expense data for this SKU</span>
+                  )}
+                </td>
+              </tr>
+            )}
+          </React.Fragment>
+        );
+      };
+
       return (
         <div className="rounded-lg overflow-hidden" style={{ background: '#161b22', border: '1px solid #30363d' }}>
           <div className="p-3 border-b" style={{ background: '#21262d', borderBottom: '1px solid #30363d' }}>
             <div className="flex items-center gap-2">
               <Table className="w-4 h-4" style={{ color: '#3b82f6' }} />
               <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Product Profitability Analysis</h3>
+              <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa' }}>{parentCount} products</span>
+              {childCount > 0 && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#93c5fd' }}>+{childCount} variations</span>
+              )}
             </div>
           </div>
 
@@ -757,51 +1080,76 @@ const ProfitTable = ({
                   <th className="w-24 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>ASIN</th>
                   <th className="w-20 px-2 py-2 text-left text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>SKU</th>
                   <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Sales</th>
-                  <th className="w-16 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Units</th>
+                  <th className="w-16 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Units Sold</th>
                   <th className="w-28 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Expenses</th>
-                  <th className="w-28 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>COGS</th>
+                  <th className="w-28 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>COGS/Unit</th>
                   <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Gross</th>
                   <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Net</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredRows.length === 0 ? (
+                {groupedRows.length === 0 ? (
                   <tr><td colSpan={10} className="text-center py-8 text-sm" style={{ color: '#9ca3af' }}>No profitability data available</td></tr>
-                ) : filteredRows.map((row, idx) => {
-                  const cogsPerUnit = cogsValues[row.asin] || 0;
-                  const totalCogs = cogsPerUnit * (row.unitsSold || 0);
-                  const grossProfit = row.grossProfit || 0;
+                ) : groupedRows.map((group, gIdx) => {
+                  const hasChildren = group.children.length > 1;
+                  const isGroupExpanded = expandedRows.has(`grp_${group.parentAsin}`);
+                  const t = group.totals;
+                  const parentDetail = productDetailsMap.get(group.parentAsin);
+                  const parentName = financeParentDisplayName(group.children, group.parentAsin, parentDetail);
+                  const cogsPerUnit = cogsValues[group.parentAsin] || 0;
+                  const totalCogs = cogsPerUnit * (t.units || 0);
+                  const parentExpenseTotal = computeRowExpenses(t);
+                  const grossProfit = (t.productSales || 0) - parentExpenseTotal;
                   const netProfit = grossProfit - totalCogs;
-                  const rowNum = ((pPag.page || 1) - 1) * (pPag.limit || 10) + idx + 1;
-                  const isExpBreakdownOpen = expandedRows.has(`exp_${row.asin}`);
+                  const parentBreakdown = buildBreakdownGroups(t, { asinForCogs: group.parentAsin });
+                  const isExpBreakdownOpen = expandedRows.has(`exp_${group.parentAsin}`);
+
+                  if (!hasChildren) {
+                    return renderFinanceRow(group.children[0], gIdx + 1, false);
+                  }
 
                   return (
-                    <React.Fragment key={row.asin || idx}>
+                    <React.Fragment key={group.parentAsin}>
+                      {/* Parent aggregated row */}
                       <tr style={{ borderBottom: '1px solid #30363d' }} className="hover:bg-[#21262d]/60 transition-colors">
-                        <td className="px-2 py-2 text-center text-xs" style={{ color: '#9ca3af' }}>{rowNum}</td>
+                        <td className="px-2 py-2 text-center text-xs" style={{ color: '#9ca3af' }}>{gIdx + 1}</td>
                         <td className="px-3 py-2 text-left">
-                          <span className="text-xs font-medium truncate block" style={{ color: '#f3f4f6' }} title={row.productName || ''}>
-                            {row.productName || 'N/A'}
-                          </span>
+                          <span className="text-xs font-medium truncate block" style={{ color: '#f3f4f6' }} title={parentName}>{parentName}</span>
+                          <span className="text-[10px]" style={{ color: '#60a5fa' }}>{group.children.length} variation{group.children.length > 1 ? 's' : ''}</span>
                         </td>
                         <td className="px-3 py-2 text-left">
-                          <span className="text-xs font-mono" style={{ color: '#60a5fa' }}>{row.asin || 'N/A'}</span>
+                          <div className="flex flex-col">
+                            <span className="text-xs font-mono px-1.5 py-0.5 rounded whitespace-nowrap inline-block font-semibold" style={{ color: '#60a5fa', background: 'rgba(59, 130, 246, 0.15)' }}>{group.parentAsin}</span>
+                            <span className="text-[9px] mt-0.5 font-medium" style={{ color: '#60a5fa' }}>Parent</span>
+                          </div>
                         </td>
                         <td className="px-2 py-2 text-left">
-                          <span className="text-[10px] font-mono truncate block" style={{ color: '#9ca3af' }} title={row.sku || ''}>{row.sku}</span>
+                          <button
+                            onClick={() => {
+                              const key = `grp_${group.parentAsin}`;
+                              setExpandedRows(prev => {
+                                const next = new Set(prev);
+                                next.has(key) ? next.delete(key) : next.add(key);
+                                return next;
+                              });
+                            }}
+                            className="flex items-center gap-1 px-2 py-1 rounded transition-colors text-[10px] font-medium"
+                            style={isGroupExpanded ? { background: 'rgba(59, 130, 246, 0.2)', color: '#3b82f6', border: '1px solid #3b82f6' } : { background: '#1a1a1a', color: '#3b82f6', border: '1px solid #3b82f6' }}
+                          >
+                            {isGroupExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                            {isGroupExpanded ? 'Collapse' : 'Expand'}
+                          </button>
                         </td>
                         <td className="px-2 py-2 text-center text-xs font-medium" style={{ color: '#f3f4f6' }}>
-                          {formatCurrencyWithLocale(row.totalSales || 0, currency)}
+                          {formatCurrencyWithLocale(t.productSales || 0, currency)}
                         </td>
-                        <td className="px-2 py-2 text-center text-xs" style={{ color: '#9ca3af' }}>
-                          {row.unitsSold || 0}
-                        </td>
-                        <td className="px-2 py-2 text-center text-xs" style={{ color: '#f87171' }}>
+                        <td className="px-2 py-2 text-center text-xs" style={{ color: '#9ca3af' }}>{t.units || 0}</td>
+                        <td className="px-2 py-2 text-center text-xs" style={{ color: signedMoneyColor(displayExpenseAmount(parentExpenseTotal)) }}>
                           <div className="flex items-center justify-center gap-1">
-                            <span>{formatCurrencyWithLocale(row.totalExpenses || 0, currency)}</span>
+                            <span>{formatCurrencyWithLocale(displayExpenseAmount(parentExpenseTotal), currency)}</span>
                             <button
                               onClick={() => {
-                                const key = `exp_${row.asin}`;
+                                const key = `exp_${group.parentAsin}`;
                                 setExpandedRows(prev => {
                                   const next = new Set(prev);
                                   next.has(key) ? next.delete(key) : next.add(key);
@@ -809,124 +1157,80 @@ const ProfitTable = ({
                                 });
                               }}
                               className="p-0.5 rounded hover:bg-[#30363d] transition-colors"
-                              title="View expense breakdown"
                               style={{ color: '#60a5fa' }}
                             >
                               {isExpBreakdownOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                             </button>
                           </div>
                         </td>
-                        <td className="px-2 py-2 text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            <span className="text-[10px]" style={{ color: '#9ca3af' }}>{cogsCurrencySymbol}</span>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={cogsValues[row.asin] ?? ''}
-                              onChange={(e) => handleCogsChange(row.asin, e.target.value)}
-                              placeholder="0.00"
-                              className="w-14 text-center text-xs rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-blue-500"
-                              style={{ background: '#1a1a1a', color: '#f3f4f6', border: '1px solid #30363d' }}
-                            />
-                            <button
-                              onClick={() => handleSaveCogs(row.asin, row.sku)}
-                              disabled={cogsSaving[row.asin] || !needsSave(row.asin)}
-                              className="p-0.5 rounded transition-colors"
-                              style={needsSave(row.asin) ? { background: 'rgba(34,197,94,0.2)', color: '#22c55e' } : { color: '#30363d' }}
-                              title={cogsSaving[row.asin] ? 'Saving...' : needsSave(row.asin) ? 'Click to save COGS' : 'Enter COGS value to save'}
-                            >
-                              {cogsSaving[row.asin] ? <Loader2 className="w-3 h-3 animate-spin" /> : isSaved(row.asin) ? <CheckCircle2 className="w-3 h-3" /> : <Check className="w-3 h-3" />}
-                            </button>
-                          </div>
-                        </td>
+                        <td className="px-2 py-2 text-center text-xs italic" style={{ color: '#6b7280' }}>See children</td>
                         <td className="px-2 py-2 text-center text-xs font-medium" style={{ color: grossProfit >= 0 ? '#22c55e' : '#f87171' }}>
                           {formatCurrencyWithLocale(grossProfit, currency)}
                         </td>
-                        <td className="px-2 py-2 text-center text-xs font-medium">
-                          {cogsPerUnit > 0 ? (
-                            <span style={{ color: netProfit >= 0 ? '#22c55e' : '#f87171' }}>
-                              {formatCurrencyWithLocale(netProfit, currency)}
-                            </span>
-                          ) : (
-                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded border" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa', borderColor: 'rgba(59, 130, 246, 0.3)' }}>
-                              +COGS
-                            </span>
-                          )}
-                        </td>
+                        <td className="px-2 py-2 text-center text-xs italic" style={{ color: '#6b7280' }}>See children</td>
                       </tr>
                       {isExpBreakdownOpen && (
                         <tr style={{ background: '#1a1f26' }}>
                           <td colSpan={10} className="px-6 py-3">
-                            <div className="text-[10px] font-semibold uppercase mb-2" style={{ color: '#9ca3af' }}>Expense Breakdown</div>
-                            {row.breakdown && row.breakdown.length > 0 ? (
-                              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-x-4 gap-y-1.5">
-                                {row.breakdown.map((b, bIdx) => (
-                                  <div key={bIdx} className="flex items-center justify-between gap-2 px-2 py-1 rounded" style={{ background: '#21262d' }}>
-                                    <span className="text-[10px] truncate" style={{ color: '#d1d5db' }} title={b.category}>{b.category}</span>
-                                    <span className="text-[10px] font-medium whitespace-nowrap" style={{ color: '#f87171' }}>{formatCurrencyWithLocale(b.amount, currency)}</span>
+                            <div className="text-[10px] font-semibold uppercase mb-2" style={{ color: '#9ca3af' }}>Aggregated Expense Breakdown</div>
+                            {parentBreakdown.length > 0 ? (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                {parentBreakdown.map((group, gIdx) => (
+                                  <div key={gIdx} className="rounded p-2" style={{ background: '#21262d' }}>
+                                    <div className="flex items-center justify-between mb-1.5">
+                                      <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#93c5fd' }}>{group.label}</span>
+                                      <span className="text-[10px] font-semibold" style={{ color: signedMoneyColor(group.total) }}>{formatCurrencyWithLocale(group.total, currency)}</span>
+                                    </div>
+                                    <div className="space-y-1">
+                                      {group.items.map((item, iIdx) => (
+                                        <div key={iIdx} className="flex items-center justify-between gap-2">
+                                          <span className="text-[10px] truncate" style={{ color: '#d1d5db' }} title={item.label}>{item.label}</span>
+                                          <span className="text-[10px] whitespace-nowrap font-medium" style={{ color: signedMoneyColor(item.amount) }}>{formatCurrencyWithLocale(item.amount, currency)}</span>
+                                        </div>
+                                      ))}
+                                    </div>
                                   </div>
                                 ))}
                               </div>
                             ) : (
-                              <span className="text-[10px]" style={{ color: '#6b7280' }}>No expense data for this SKU</span>
+                              <span className="text-[10px]" style={{ color: '#6b7280' }}>No expense data</span>
                             )}
                           </td>
                         </tr>
                       )}
+                      {/* Expanded children */}
+                      {isGroupExpanded && group.children
+                        .sort((a, b) => (b.productSales || 0) - (a.productSales || 0))
+                        .map(child => renderFinanceRow(child, null, true))
+                      }
                     </React.Fragment>
                   );
                 })}
               </tbody>
             </table>
           </div>
-
-          {/* Pagination — centered under the table */}
-          {pPag.totalPages > 1 && (
-            <div
-              className="flex flex-col items-center justify-center gap-2 px-4 py-3 border-t"
-              style={{ borderTop: '1px solid #30363d', background: '#21262d' }}
-            >
-              <span className="text-[10px]" style={{ color: '#9ca3af' }}>
-                Page {pPag.page} of {pPag.totalPages} ({pPag.totalItems} items)
-              </span>
-              <div className="flex items-center justify-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => onProfitTablePageChange && onProfitTablePageChange(pPag.page - 1)}
-                  disabled={pPag.page <= 1}
-                  className="p-2 rounded-lg transition-colors disabled:opacity-30"
-                  style={
-                    pPag.page <= 1
-                      ? { background: '#21262d', color: '#6b7280' }
-                      : { background: '#1a1a1a', color: '#f3f4f6', border: '1px solid #30363d' }
-                  }
-                  aria-label="Previous page"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onProfitTablePageChange && onProfitTablePageChange(pPag.page + 1)}
-                  disabled={!pPag.hasMore}
-                  className="p-2 rounded-lg transition-colors disabled:opacity-30"
-                  style={
-                    !pPag.hasMore
-                      ? { background: '#21262d', color: '#6b7280' }
-                      : { background: '#1a1a1a', color: '#f3f4f6', border: '1px solid #30363d' }
-                  }
-                  aria-label="Next page"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
               </div>
-            </div>
-          )}
+      );
+    }
+
+    if (useFinanceTableOnly && (!financeDashAsinWise || financeDashAsinWise.length === 0)) {
+      return (
+        <div className="rounded-lg overflow-hidden" style={{ background: '#161b22', border: '1px solid #30363d' }}>
+          <div className="p-8 flex flex-col items-center justify-center gap-3" style={{ minHeight: 200 }}>
+            {tableLoading ? (
+              <>
+                <Loader2 className="w-8 h-8 animate-spin" style={{ color: '#60a5fa' }} />
+                <span style={{ color: '#9ca3af', fontSize: '12px' }}>Loading profitability data…</span>
+              </>
+            ) : (
+              <span style={{ color: '#9ca3af', fontSize: '12px' }}>No profitability data for the selected date range.</span>
+            )}
+          </div>
         </div>
       );
     }
 
-    // ── LEGACY TABLE (fallback when profitTableData is not available) ──
+    // ── LEGACY TABLE (fallback when financeDashAsinWise is not available) ──
     return (
       <div className="rounded-lg overflow-hidden" style={{ background: '#161b22', border: '1px solid #30363d' }}>
         {/* Enhanced Header */}
@@ -963,8 +1267,8 @@ const ProfitTable = ({
                 <th className="w-1/5 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Product</th>
                 <th className="w-28 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>ASIN</th>
                 <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Sales</th>
-                <th className="w-16 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Units</th>
-                <th className="w-32 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>COGS</th>
+                <th className="w-16 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Units Sold</th>
+                <th className="w-32 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>COGS/Unit</th>
                 <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Ad Spend</th>
                 <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Amz Fees</th>
                 <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Gross</th>

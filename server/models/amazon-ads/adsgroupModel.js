@@ -13,6 +13,11 @@ const adsgroupSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+    metricDate: {
+        type: String,
+        required: false,
+        index: true
+    },
     adsGroupData:[{
         adGroupId: {
             type: String,
@@ -39,6 +44,13 @@ const adsgroupSchema = new mongoose.Schema({
 
 // Compound index for efficient queries
 adsgroupSchema.index({ userId: 1, country: 1, region: 1, createdAt: -1 });
+adsgroupSchema.index(
+    { userId: 1, country: 1, region: 1, metricDate: 1 },
+    {
+        unique: true,
+        partialFilterExpression: { metricDate: { $exists: true, $type: 'string' } }
+    }
+);
 
 const AdsGroup = mongoose.model('AdsGroup', adsgroupSchema);
 

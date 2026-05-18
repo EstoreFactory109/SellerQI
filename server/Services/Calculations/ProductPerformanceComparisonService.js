@@ -339,7 +339,7 @@ function aggregatePreviousPerformance(prevBuyBoxData, prevEconomicsData, prevPpc
                     acos: 0
                 };
                 existing.ppcSpend += item.spend || 0;
-                existing.ppcSales += item.salesIn7Days || item.salesIn14Days || item.salesIn30Days || 0;
+                existing.ppcSales += item.sales || item.salesIn7Days || item.salesIn14Days || item.salesIn30Days || 0;
                 if (existing.ppcSales > 0) {
                     existing.acos = (existing.ppcSpend / existing.ppcSales) * 100;
                 }

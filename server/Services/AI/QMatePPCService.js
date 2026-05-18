@@ -25,6 +25,18 @@ const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
 const PPCCampaignAnalysisService = require('../Calculations/PPCCampaignAnalysisService.js');
 const mongoose = require('mongoose');
+const adsKeywordsPerformance = require('../../models/amazon-ads/adsKeywordsPerformanceModel.js');
+const SearchTerms = require('../../models/amazon-ads/SearchTermsModel.js');
+
+async function getMergedKeywordsLean(userId, country, region) {
+    const uid =
+        typeof userId === 'string' && mongoose.Types.ObjectId.isValid(userId)
+            ? new mongoose.Types.ObjectId(userId)
+            : userId;
+    const rows = await adsKeywordsPerformance.findMergedKeywordsData(uid, country, region, {});
+    if (!rows?.length) return null;
+    return { keywordsData: rows };
+}
 
 /**
  * Get high ACOS campaigns for optimization
@@ -40,10 +52,7 @@ async function getHighAcosCampaigns(userId, country, region, acosThreshold = 50)
     const startTime = Date.now();
     
     try {
-        const userIdStr = userId?.toString() || userId;
-        
-        const keywordsData = await adsKeywordsPerformance.findOne({ userId, country, region })
-            .sort({ createdAt: -1 }).lean();
+        const keywordsData = await getMergedKeywordsLean(userId, country, region);
         
         if (!keywordsData || !keywordsData.keywordsData) {
             return {
@@ -142,8 +151,7 @@ async function getZeroSalesKeywords(userId, country, region, minSpend = 5) {
     const startTime = Date.now();
     
     try {
-        const keywordsData = await adsKeywordsPerformance.findOne({ userId, country, region })
-            .sort({ createdAt: -1 }).lean();
+        const keywordsData = await getMergedKeywordsLean(userId, country, region);
         
         if (!keywordsData || !keywordsData.keywordsData) {
             return {
@@ -217,8 +225,7 @@ async function getTopPerformingKeywords(userId, country, region, limit = 20) {
     const startTime = Date.now();
     
     try {
-        const keywordsData = await adsKeywordsPerformance.findOne({ userId, country, region })
-            .sort({ createdAt: -1 }).lean();
+        const keywordsData = await getMergedKeywordsLean(userId, country, region);
         
         if (!keywordsData || !keywordsData.keywordsData) {
             return {
@@ -293,10 +300,14 @@ async function getSearchTermAnalysis(userId, country, region) {
     const startTime = Date.now();
     
     try {
-        const searchTermsData = await SearchTerms.findOne({ userId, country, region })
-            .sort({ createdAt: -1 }).lean();
-        
-        if (!searchTermsData || !searchTermsData.searchTermData) {
+        const searchTermsData = await SearchTerms.findMergedSearchTermData(
+            userId?.toString() || userId,
+            country,
+            region,
+            {}
+        );
+
+        if (!searchTermsData || searchTermsData.length === 0) {
             return {
                 success: false,
                 source: 'none',
@@ -304,8 +315,8 @@ async function getSearchTermAnalysis(userId, country, region) {
                 data: null
             };
         }
-        
-        const terms = searchTermsData.searchTermData;
+
+        const terms = searchTermsData;
         
         // Separate converting and non-converting terms
         const convertingTerms = terms
@@ -384,11 +395,15 @@ async function getCampaignOverview(userId, country, region) {
     try {
         const userIdStr = userId?.toString() || userId;
         
-        const [campaignData, ppcMetrics] = await Promise.all([
+        const [campaignData, ppcRollupOverview] = await Promise.all([
             Campaign.findOne({ userId: userIdStr, country, region })
                 .sort({ createdAt: -1 }).lean(),
-            PPCMetrics.findLatestForUser(userIdStr, country, region)
+            PPCMetrics.rollupLastDays(userIdStr, country, region, 30)
         ]);
+        const ppcMetrics =
+            ppcRollupOverview && ppcRollupOverview.found
+                ? { summary: ppcRollupOverview.summary }
+                : null;
         
         if (!campaignData || !campaignData.campaignData) {
             return {
@@ -570,7 +585,7 @@ async function getQMatePPCContext(userId, country, region, options = {}) {
         // Fetch all PPC data in parallel - using same sources as dashboard
         const [
             kpiSummary,
-            ppcMetrics,
+            ppcRollupQm,
             tabCounts,
             highAcosData,
             wastedSpendData,
@@ -582,8 +597,8 @@ async function getQMatePPCContext(userId, country, region, options = {}) {
         ] = await Promise.all([
             // KPI Summary (same as dashboard top boxes)
             PPCCampaignAnalysisService.getPPCKPISummary(userId, country, region),
-            // PPCMetrics for dateWise data and campaign breakdown
-            PPCMetrics.findLatestForUser(userIdStr, country, region),
+            // PPCMetrics rollup (~30d) for dateWise series; per-type breakdown lives on daily docs only
+            PPCMetrics.rollupLastDays(userIdStr, country, region, 30),
             // Tab counts for overview
             PPCCampaignAnalysisService.getTabCounts(userId, country, region),
             // All 6 tabs data (same as dashboard tabs) - get more items for QMate context
@@ -596,6 +611,16 @@ async function getQMatePPCContext(userId, country, region, options = {}) {
             // PPC issues from IssuesDataChunks
             getPPCIssues(userId, country, region)
         ]);
+
+        const ppcMetrics =
+            ppcRollupQm && ppcRollupQm.found
+                ? {
+                      summary: ppcRollupQm.summary,
+                      dateWiseMetrics: ppcRollupQm.dateWiseMetrics || [],
+                      dateRange: ppcRollupQm.dateRange,
+                      campaignTypeBreakdown: null
+                  }
+                : null;
         
         // Build context matching dashboard structure
         const context = {

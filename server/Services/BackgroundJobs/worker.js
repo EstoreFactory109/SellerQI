@@ -181,6 +181,11 @@ async function runWithLockExtension(job, asyncFn) {
 /**
  * Process a phased scheduled job (new architecture).
  * Executes one phase, then enqueues the next phase as a separate BullMQ job.
+ *
+ * Pipeline resilience: a phase failure (thrown or returned { success: false }) is
+ * logged and recorded on the phase's JobStatus row, but the pipeline still enqueues
+ * the next phase. The worker job itself always resolves successfully so BullMQ does
+ * not retry a failing phase and block downstream phases from running.
  */
 async function processScheduledPhase(job) {
     const { userId, phase, country, region, parentJobId, phaseData } = job.data;
@@ -195,58 +200,139 @@ async function processScheduledPhase(job) {
         metadata: { country, region, phase, parentJobId: effectiveParentJobId }
     });
 
-    let result;
-    switch (phase) {
-        case scheduledPhases.PHASES.INIT:
-            result = await ScheduledIntegration.executeScheduledInitPhase(userId, region, country);
-            break;
-        case scheduledPhases.PHASES.BATCH_1_2:
-            result = await ScheduledIntegration.executeScheduledBatch1And2Phase(userId, region, country, phaseData || {});
-            break;
-        case scheduledPhases.PHASES.BATCH_3_4:
-            result = await ScheduledIntegration.executeScheduledBatch3And4Phase(userId, region, country, phaseData || {});
-            break;
-        case scheduledPhases.PHASES.CALC_REVIEW:
-            result = await ScheduledIntegration.executeScheduledCalcReviewPhase(userId, region, country, phaseData || {});
-            break;
-        case scheduledPhases.PHASES.FINALIZE:
-            result = await ScheduledIntegration.executeScheduledFinalizePhase(userId, region, country, phaseData || {});
-            break;
-        default:
-            throw new Error(`Unknown scheduled phase: ${phase}`);
+    let phaseOutcome;
+    try {
+        let raw;
+        switch (phase) {
+            case scheduledPhases.PHASES.INIT:
+                raw = await ScheduledIntegration.executeScheduledInitPhase(userId, region, country);
+                break;
+            case scheduledPhases.PHASES.BATCH_1_2:
+                raw = await ScheduledIntegration.executeScheduledBatch1And2Phase(userId, region, country, phaseData || {});
+                break;
+            case scheduledPhases.PHASES.ADS:
+                raw = await ScheduledIntegration.executeScheduledAdsPhase(userId, region, country, phaseData || {});
+                break;
+            // V2 split phases: BATCH_3 → FINANCE → BATCH_4
+            case scheduledPhases.PHASES.BATCH_3:
+                raw = await ScheduledIntegration.executeScheduledBatch3Phase(userId, region, country, phaseData || {});
+                break;
+            case scheduledPhases.PHASES.FINANCE:
+                raw = await ScheduledIntegration.executeScheduledFinancePhase(userId, region, country, phaseData || {});
+                break;
+            case scheduledPhases.PHASES.BATCH_4:
+                raw = await ScheduledIntegration.executeScheduledBatch4Phase(userId, region, country, phaseData || {});
+                break;
+            // LEGACY: drain in-flight `sched_batch_3_4` jobs from pre-split deploys.
+            // Routes to combined runner and chains to `sched_calc_review` via LEGACY_NEXT_PHASE.
+            case scheduledPhases.PHASES.BATCH_3_4_LEGACY:
+                raw = await ScheduledIntegration.executeScheduledBatch3And4Phase(userId, region, country, phaseData || {});
+                break;
+            case scheduledPhases.PHASES.CALC_REVIEW:
+                raw = await ScheduledIntegration.executeScheduledCalcReviewPhase(userId, region, country, phaseData || {});
+                break;
+            case scheduledPhases.PHASES.FINALIZE:
+                raw = await ScheduledIntegration.executeScheduledFinalizePhase(userId, region, country, phaseData || {});
+                break;
+            default:
+                throw new Error(`Unknown scheduled phase: ${phase}`);
+        }
+        phaseOutcome = (raw && typeof raw === 'object')
+            ? raw
+            : { success: false, error: `Phase ${phase} returned an invalid result` };
+    } catch (error) {
+        logger.error(`[Worker:${WORKER_NAME}] Scheduled phase ${phase} threw unexpectedly for user ${userId}:`, error);
+        phaseOutcome = {
+            success: false,
+            error: error?.message || String(error),
+            stack: error?.stack,
+            threw: true
+        };
     }
 
-    if (!result.success) {
-        throw new Error(result.error || `Phase ${phase} failed`);
-    }
-
+    const phaseSucceeded = phaseOutcome.success === true;
     const duration = Date.now() - jobStartTime;
     const nextPhase = scheduledPhases.getNextPhase(phase);
 
-    if (nextPhase) {
-        const nextJobData = scheduledPhases.createNextPhaseJobData(nextPhase, job.data, result);
-        const nextJobId = scheduledPhases.generatePhaseJobId(effectiveParentJobId, nextPhase);
-
-        const queue = getQueue();
-        await queue.add('process-user-data', nextJobData, {
-            jobId: nextJobId,
-            attempts: 3,
-            backoff: { type: 'exponential', delay: 60000 },
-            timeout: 2 * 60 * 60 * 1000
-        });
-
-        logger.info(`[Worker:${WORKER_NAME}] Phase ${phase} completed, enqueued next: ${nextPhase}`, { userId, duration, nextJobId });
-    } else {
-        logger.info(`[Worker:${WORKER_NAME}] All scheduled phases completed for user ${userId}, ${country}-${region}`, { duration });
+    if (!phaseSucceeded) {
+        logger.error(
+            `[Worker:${WORKER_NAME}] Scheduled phase ${phase} did not succeed for user ${userId} — pipeline will continue`,
+            {
+                userId,
+                phase,
+                nextPhase,
+                error: phaseOutcome.error,
+                statusCode: phaseOutcome.statusCode,
+                threw: !!phaseOutcome.threw
+            }
+        );
     }
 
-    await updateJobStatus(job.id, userId, 'completed', {
-        completedAt: new Date().toISOString(),
-        duration,
-        metadata: { country, region, phase, nextPhase, parentJobId: effectiveParentJobId }
-    });
+    if (nextPhase) {
+        try {
+            const nextJobData = scheduledPhases.createNextPhaseJobData(
+                nextPhase,
+                job.data,
+                phaseSucceeded ? phaseOutcome : {}
+            );
+            const nextJobId = scheduledPhases.generatePhaseJobId(effectiveParentJobId, nextPhase);
 
-    return { success: true, phase, nextPhase, duration, completed: !nextPhase };
+            const queue = getQueue();
+            await queue.add('process-user-data', nextJobData, {
+                jobId: nextJobId,
+                attempts: 3,
+                backoff: { type: 'exponential', delay: 60000 },
+                timeout: 2 * 60 * 60 * 1000
+            });
+
+            logger.info(
+                `[Worker:${WORKER_NAME}] Scheduled phase ${phase} ${phaseSucceeded ? 'completed' : 'FAILED — continuing'}, enqueued next: ${nextPhase}`,
+                { userId, duration, nextJobId }
+            );
+        } catch (enqueueError) {
+            logger.error(
+                `[Worker:${WORKER_NAME}] Failed to enqueue next scheduled phase ${nextPhase} for user ${userId}:`,
+                enqueueError
+            );
+            // Don't rethrow — record enqueue failure on the phase JobStatus row below and keep the worker job successful.
+        }
+    } else {
+        logger.info(
+            `[Worker:${WORKER_NAME}] All scheduled phases done for user ${userId}, ${country}-${region} (final phase success=${phaseSucceeded})`,
+            { duration }
+        );
+    }
+
+    try {
+        await updateJobStatus(job.id, userId, phaseSucceeded ? 'completed' : 'failed', {
+            [phaseSucceeded ? 'completedAt' : 'failedAt']: new Date().toISOString(),
+            duration,
+            error: phaseSucceeded ? undefined : (phaseOutcome.error || `Phase ${phase} failed`),
+            stack: phaseSucceeded ? undefined : phaseOutcome.stack,
+            attemptNumber: job.attemptsMade + 1,
+            maxAttempts: job.opts.attempts,
+            metadata: {
+                country,
+                region,
+                phase,
+                nextPhase,
+                parentJobId: effectiveParentJobId,
+                phaseSucceeded
+            }
+        });
+    } catch (statusError) {
+        logger.warn(`[Worker:${WORKER_NAME}] Could not update scheduled phase JobStatus row: ${statusError.message}`);
+    }
+
+    return {
+        success: true, // worker-level success — pipeline advanced
+        phase,
+        phaseSucceeded,
+        nextPhase,
+        duration,
+        completed: !nextPhase,
+        error: phaseSucceeded ? undefined : phaseOutcome.error
+    };
 }
 
 /**

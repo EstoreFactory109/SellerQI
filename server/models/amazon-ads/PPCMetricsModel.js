@@ -1,70 +1,33 @@
 const mongoose = require("mongoose");
 
-// Schema for campaign type breakdown (SP, SB, SD)
+// Schema for campaign type breakdown (SP, SB, SD) — aligns with GetPPCMetrics CAMPAIGN_TYPES (sales1d vs sales, purchases1d vs purchases)
 const campaignTypeMetricsSchema = new mongoose.Schema({
-    sales: {
-        type: Number,
-        default: 0
-    },
-    spend: {
-        type: Number,
-        default: 0
-    },
-    impressions: {
-        type: Number,
-        default: 0
-    },
-    clicks: {
-        type: Number,
-        default: 0
-    },
-    acos: {
-        type: Number,
-        default: 0
-    }
+    sales: { type: Number, default: 0 },
+    spend: { type: Number, default: 0 },
+    impressions: { type: Number, default: 0 },
+    clicks: { type: Number, default: 0 },
+    acos: { type: Number, default: 0 },
+    roas: { type: Number, default: 0 },
+    unitsSoldClicks1d: { type: Number, default: 0 },
+    purchases: { type: Number, default: 0 }
 }, { _id: false });
 
-// Schema for date-wise metrics
-const dateWiseMetricsSchema = new mongoose.Schema({
-    date: {
-        type: String,
-        required: true
-    },
-    sales: {
-        type: Number,
-        default: 0
-    },
-    spend: {
-        type: Number,
-        default: 0
-    },
-    impressions: {
-        type: Number,
-        default: 0
-    },
-    clicks: {
-        type: Number,
-        default: 0
-    },
-    acos: {
-        type: Number,
-        default: 0
-    },
-    roas: {
-        type: Number,
-        default: 0
-    },
-    ctr: {
-        type: Number,
-        default: 0
-    },
-    cpc: {
-        type: Number,
-        default: 0
-    }
+const campaignSummaryRowSchema = new mongoose.Schema({
+    campaignId: { type: mongoose.Schema.Types.Mixed, required: true },
+    campaignName: { type: String, default: "" },
+    campaignStatus: { type: String, default: "" },
+    sales: { type: Number, default: 0 },
+    spend: { type: Number, default: 0 },
+    impressions: { type: Number, default: 0 },
+    clicks: { type: Number, default: 0 },
+    unitsSoldClicks1d: { type: Number, default: 0 },
+    purchases: { type: Number, default: 0 }
 }, { _id: false });
 
-// Main PPC Metrics schema
+/**
+ * One document = one calendar day of PPC metrics for user/country/region.
+ * metricDate: YYYY-MM-DD
+ */
 const ppcMetricsSchema = new mongoose.Schema({
     userId: {
         type: String,
@@ -82,117 +45,108 @@ const ppcMetricsSchema = new mongoose.Schema({
         enum: ["NA", "EU", "FE"],
         index: true
     },
+    /** Single day this row represents */
+    metricDate: {
+        type: String,
+        required: true,
+        index: true
+    },
     profileId: {
         type: String,
         required: false
     },
+    /** Redundant copy for compatibility (startDate === endDate === metricDate) */
     dateRange: {
-        startDate: {
-            type: String,
-            required: true
-        },
-        endDate: {
-            type: String,
-            required: true
-        }
+        startDate: { type: String, required: true },
+        endDate: { type: String, required: true }
     },
     summary: {
-        totalSales: {
-            type: Number,
-            default: 0
-        },
-        totalSpend: {
-            type: Number,
-            default: 0
-        },
-        totalImpressions: {
-            type: Number,
-            default: 0
-        },
-        totalClicks: {
-            type: Number,
-            default: 0
-        },
-        overallAcos: {
-            type: Number,
-            default: 0
-        },
-        overallRoas: {
-            type: Number,
-            default: 0
-        },
-        ctr: {
-            type: Number,
-            default: 0
-        },
-        cpc: {
-            type: Number,
-            default: 0
-        }
+        totalSales: { type: Number, default: 0 },
+        totalSpend: { type: Number, default: 0 },
+        totalImpressions: { type: Number, default: 0 },
+        totalClicks: { type: Number, default: 0 },
+        overallAcos: { type: Number, default: 0 },
+        overallRoas: { type: Number, default: 0 },
+        ctr: { type: Number, default: 0 },
+        cpc: { type: Number, default: 0 },
+        totalUnitsSoldClicks1d: { type: Number, default: 0 },
+        /** Order count from report (purchases1d for SP, purchases for SB/SD) */
+        totalPurchases: { type: Number, default: 0 }
     },
     campaignTypeBreakdown: {
-        sponsoredProducts: {
-            type: campaignTypeMetricsSchema,
-            default: () => ({})
-        },
-        sponsoredBrands: {
-            type: campaignTypeMetricsSchema,
-            default: () => ({})
-        },
-        sponsoredDisplay: {
-            type: campaignTypeMetricsSchema,
-            default: () => ({})
-        }
+        sponsoredProducts: { type: campaignTypeMetricsSchema, default: () => ({}) },
+        sponsoredBrands: { type: campaignTypeMetricsSchema, default: () => ({}) },
+        sponsoredDisplay: { type: campaignTypeMetricsSchema, default: () => ({}) }
     },
+    /** Deprecated on per-day docs (empty). Kept for legacy reads / compatibility */
     dateWiseMetrics: {
-        type: [dateWiseMetricsSchema],
+        type: [mongoose.Schema.Types.Mixed],
         default: []
     },
     processedCampaignTypes: {
         type: [String],
         default: []
+    },
+    campaignSummaries: {
+        sponsoredProducts: { type: [campaignSummaryRowSchema], default: [] },
+        sponsoredBrands: { type: [campaignSummaryRowSchema], default: [] },
+        sponsoredDisplay: { type: [campaignSummaryRowSchema], default: [] }
     }
 }, { timestamps: true });
 
-// Compound index for efficient queries
-ppcMetricsSchema.index({ userId: 1, country: 1, region: 1, 'dateRange.startDate': 1, 'dateRange.endDate': 1 });
+ppcMetricsSchema.index(
+    { userId: 1, country: 1, region: 1, metricDate: 1 },
+    {
+        unique: true,
+        partialFilterExpression: { metricDate: { $exists: true, $type: "string" } }
+    }
+);
 
-// Index for finding latest record for a user/country/region
-ppcMetricsSchema.index({ userId: 1, country: 1, region: 1, createdAt: -1 });
+ppcMetricsSchema.index({ userId: 1, country: 1, region: 1, metricDate: -1 });
 
-// Static method to find latest metrics for a user
+/** Most recent calendar day with stored PPC data */
 ppcMetricsSchema.statics.findLatestForUser = async function(userId, country, region) {
-    return this.findOne({ userId, country, region })
-        .sort({ createdAt: -1 })
+    const userIdStr = userId?.toString() || userId;
+    return this.findOne({ userId: userIdStr, country, region })
+        .sort({ metricDate: -1 })
         .lean();
 };
 
-// Static method to find metrics by date range
-ppcMetricsSchema.statics.findByDateRange = async function(userId, country, region, startDate, endDate) {
-    return this.findOne({
-        userId,
-        country,
-        region,
-        'dateRange.startDate': startDate,
-        'dateRange.endDate': endDate
-    }).lean();
+/** Exact single-day document */
+ppcMetricsSchema.statics.findByMetricDate = async function(userId, country, region, metricDate) {
+    const userIdStr = userId?.toString() || userId;
+    return this.findOne({ userId: userIdStr, country, region, metricDate }).lean();
 };
 
-// Static method to upsert metrics (update if exists, create if not)
-ppcMetricsSchema.statics.upsertMetrics = async function(userId, country, region, startDate, endDate, metricsData) {
+/** @deprecated Multi-day docs removed — use findByMetricDate */
+ppcMetricsSchema.statics.findByDateRange = async function(userId, country, region, startDate, endDate) {
+    const userIdStr = userId?.toString() || userId;
+    if (startDate === endDate) {
+        return this.findOne({ userId: userIdStr, country, region, metricDate: startDate }).lean();
+    }
+    return this.find({
+        userId: userIdStr,
+        country,
+        region,
+        metricDate: { $gte: startDate, $lte: endDate }
+    })
+        .sort({ metricDate: 1 })
+        .lean();
+};
+
+/**
+ * Upsert one calendar day of metrics (primary storage path).
+ */
+ppcMetricsSchema.statics.upsertMetricsForDate = async function(userId, country, region, metricDate, metricsData) {
+    const userIdStr = userId?.toString() || userId;
     return this.findOneAndUpdate(
-        {
-            userId,
-            country,
-            region,
-            'dateRange.startDate': startDate,
-            'dateRange.endDate': endDate
-        },
+        { userId: userIdStr, country, region, metricDate },
         {
             $set: {
-                userId,
+                userId: userIdStr,
                 country,
                 region,
+                metricDate,
                 ...metricsData
             }
         },
@@ -204,62 +158,141 @@ ppcMetricsSchema.statics.upsertMetrics = async function(userId, country, region,
     );
 };
 
-// Static method to calculate metrics for a custom date range from ALL stored documents
-// Searches through historical data, not just the latest document
 ppcMetricsSchema.statics.calculateMetricsForDateRange = async function(userId, country, region, startDate, endDate) {
     const userIdStr = userId?.toString() || userId;
-    
-    // Helper function to normalize date to YYYY-MM-DD format
+
     const normalizeDate = (dateStr) => {
         if (!dateStr) return null;
         return dateStr.substring(0, 10);
     };
-    
+
     const normalizedStart = normalizeDate(startDate);
     const normalizedEnd = normalizeDate(endDate);
-    
-    console.log('[PPCMetrics.calculateMetricsForDateRange] userId:', userIdStr, 'country:', country, 'region:', region);
-    console.log('[PPCMetrics.calculateMetricsForDateRange] Searching ALL documents for date range:', normalizedStart, 'to', normalizedEnd);
-    
-    // Find ALL documents for this user/country/region
-    // Sort by createdAt DESC so newer documents are processed first (for deduplication preference)
+
+    console.log("[PPCMetrics.calculateMetricsForDateRange] userId:", userIdStr, "country:", country, "region:", region);
+    console.log("[PPCMetrics.calculateMetricsForDateRange] Range:", normalizedStart, "to", normalizedEnd);
+
+    const dailyDocs = await this.find({
+        userId: userIdStr,
+        country,
+        region,
+        metricDate: { $gte: normalizedStart, $lte: normalizedEnd }
+    })
+        .sort({ metricDate: 1 })
+        .lean();
+
+    if (dailyDocs.length > 0) {
+        const dateWiseMetrics = dailyDocs.map((doc) => {
+            const s = doc.summary || {};
+            const sales = s.totalSales || 0;
+            const spend = s.totalSpend || 0;
+            const impressions = s.totalImpressions || 0;
+            const clicks = s.totalClicks || 0;
+            let acos = s.overallAcos || 0;
+            let roas = s.overallRoas || 0;
+            let ctr = s.ctr || 0;
+            let cpc = s.cpc || 0;
+            if (sales > 0 && spend >= 0) {
+                acos = parseFloat(((spend / sales) * 100).toFixed(2));
+                roas = parseFloat((sales / spend).toFixed(2));
+            }
+            if (impressions > 0) {
+                ctr = parseFloat(((clicks / impressions) * 100).toFixed(2));
+            }
+            if (clicks > 0) {
+                cpc = parseFloat((spend / clicks).toFixed(2));
+            }
+            return {
+                date: doc.metricDate,
+                sales,
+                spend,
+                impressions,
+                clicks,
+                unitsSoldClicks1d: s.totalUnitsSoldClicks1d || 0,
+                purchases: s.totalPurchases || 0,
+                acos,
+                roas,
+                ctr,
+                cpc
+            };
+        });
+
+        const totals = dateWiseMetrics.reduce(
+            (acc, day) => {
+                acc.sales += day.sales || 0;
+                acc.spend += day.spend || 0;
+                acc.impressions += day.impressions || 0;
+                acc.clicks += day.clicks || 0;
+                acc.unitsSoldClicks1d += day.unitsSoldClicks1d || 0;
+                acc.purchases += day.purchases || 0;
+                return acc;
+            },
+            { sales: 0, spend: 0, impressions: 0, clicks: 0, unitsSoldClicks1d: 0, purchases: 0 }
+        );
+
+        const overallAcos = totals.sales > 0 ? (totals.spend / totals.sales) * 100 : 0;
+        const overallRoas = totals.spend > 0 ? totals.sales / totals.spend : 0;
+        const ctr = totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : 0;
+        const cpc = totals.clicks > 0 ? totals.spend / totals.clicks : 0;
+
+        return {
+            found: true,
+            isFiltered: true,
+            dateRange: { startDate, endDate },
+            summary: {
+                totalSales: parseFloat(totals.sales.toFixed(2)),
+                totalSpend: parseFloat(totals.spend.toFixed(2)),
+                totalImpressions: totals.impressions,
+                totalClicks: totals.clicks,
+                totalUnitsSoldClicks1d: Math.round(totals.unitsSoldClicks1d || 0),
+                totalPurchases: Math.round(totals.purchases || 0),
+                overallAcos: parseFloat(overallAcos.toFixed(2)),
+                overallRoas: parseFloat(overallRoas.toFixed(2)),
+                ctr: parseFloat(ctr.toFixed(2)),
+                cpc: parseFloat(cpc.toFixed(2))
+            },
+            dateWiseMetrics,
+            numberOfDays: dateWiseMetrics.length,
+            dataAvailability: {
+                requestedRange: { startDate: normalizedStart, endDate: normalizedEnd },
+                documentsInRange: dailyDocs.length,
+                source: "perDayDocuments"
+            }
+        };
+    }
+
+    // Legacy: older documents stored one row per sync with dateWiseMetrics[] spanning many days
     const allRecords = await this.find({ userId: userIdStr, country, region })
         .sort({ createdAt: -1 })
         .lean();
-    
-    console.log('[PPCMetrics.calculateMetricsForDateRange] Total documents found:', allRecords.length);
-    
+
+    console.log("[PPCMetrics.calculateMetricsForDateRange] Legacy path, documents:", allRecords.length);
+
     if (!allRecords || allRecords.length === 0) {
-        console.log('[PPCMetrics.calculateMetricsForDateRange] No documents found');
         return null;
     }
-    
-    // Use a Map to deduplicate dates - prefer data from newer documents
+
     const dateDataMap = new Map();
     let documentsWithData = 0;
-    
+
     for (const record of allRecords) {
         if (!record.dateWiseMetrics || record.dateWiseMetrics.length === 0) {
             continue;
         }
-        
-        // Check if this document's date range overlaps with requested range
+
         const docStart = normalizeDate(record.dateRange?.startDate);
         const docEnd = normalizeDate(record.dateRange?.endDate);
-        
-        // Skip if no overlap
-        if (docEnd < normalizedStart || docStart > normalizedEnd) {
+
+        if (!docStart || !docEnd || docEnd < normalizedStart || docStart > normalizedEnd) {
             continue;
         }
-        
+
         documentsWithData++;
-        
-        // Extract date-wise data that falls within requested range
+
         for (const dayData of record.dateWiseMetrics) {
             const itemDate = normalizeDate(dayData.date);
-            
+
             if (itemDate && itemDate >= normalizedStart && itemDate <= normalizedEnd) {
-                // Only add if we haven't seen this date yet (prefer newer document's data)
                 if (!dateDataMap.has(itemDate)) {
                     dateDataMap.set(itemDate, {
                         date: itemDate,
@@ -267,6 +300,8 @@ ppcMetricsSchema.statics.calculateMetricsForDateRange = async function(userId, c
                         spend: dayData.spend || 0,
                         impressions: dayData.impressions || 0,
                         clicks: dayData.clicks || 0,
+                        unitsSoldClicks1d: dayData.unitsSoldClicks1d || 0,
+                        purchases: dayData.purchases || 0,
                         acos: dayData.acos || 0,
                         roas: dayData.roas || 0,
                         ctr: dayData.ctr || 0,
@@ -276,10 +311,7 @@ ppcMetricsSchema.statics.calculateMetricsForDateRange = async function(userId, c
             }
         }
     }
-    
-    console.log('[PPCMetrics.calculateMetricsForDateRange] Documents with overlapping data:', documentsWithData);
-    console.log('[PPCMetrics.calculateMetricsForDateRange] Unique dates found:', dateDataMap.size);
-    
+
     if (dateDataMap.size === 0) {
         return {
             found: false,
@@ -289,13 +321,15 @@ ppcMetricsSchema.statics.calculateMetricsForDateRange = async function(userId, c
                 totalSpend: 0,
                 totalImpressions: 0,
                 totalClicks: 0,
+                totalUnitsSoldClicks1d: 0,
+                totalPurchases: 0,
                 overallAcos: 0,
                 overallRoas: 0,
                 ctr: 0,
                 cpc: 0
             },
             dateWiseMetrics: [],
-            message: 'No data available for the selected date range',
+            message: "No data available for the selected date range",
             dataAvailability: {
                 requestedRange: { startDate: normalizedStart, endDate: normalizedEnd },
                 documentsSearched: allRecords.length,
@@ -303,31 +337,29 @@ ppcMetricsSchema.statics.calculateMetricsForDateRange = async function(userId, c
             }
         };
     }
-    
-    // Convert Map to array and sort by date
-    const filteredMetrics = Array.from(dateDataMap.values())
-        .sort((a, b) => a.date.localeCompare(b.date));
-    
-    // Calculate summary totals
-    const totals = filteredMetrics.reduce((acc, day) => {
-        acc.sales += day.sales || 0;
-        acc.spend += day.spend || 0;
-        acc.impressions += day.impressions || 0;
-        acc.clicks += day.clicks || 0;
-        return acc;
-    }, {
-        sales: 0,
-        spend: 0,
-        impressions: 0,
-        clicks: 0
-    });
-    
-    // Calculate derived metrics
+
+    const filteredMetrics = Array.from(dateDataMap.values()).sort((a, b) =>
+        a.date.localeCompare(b.date)
+    );
+
+    const totals = filteredMetrics.reduce(
+        (acc, day) => {
+            acc.sales += day.sales || 0;
+            acc.spend += day.spend || 0;
+            acc.impressions += day.impressions || 0;
+            acc.clicks += day.clicks || 0;
+            acc.unitsSoldClicks1d += day.unitsSoldClicks1d || 0;
+            acc.purchases += day.purchases || 0;
+            return acc;
+        },
+        { sales: 0, spend: 0, impressions: 0, clicks: 0, unitsSoldClicks1d: 0, purchases: 0 }
+    );
+
     const overallAcos = totals.sales > 0 ? (totals.spend / totals.sales) * 100 : 0;
     const overallRoas = totals.spend > 0 ? totals.sales / totals.spend : 0;
     const ctr = totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : 0;
     const cpc = totals.clicks > 0 ? totals.spend / totals.clicks : 0;
-    
+
     return {
         found: true,
         isFiltered: true,
@@ -337,6 +369,8 @@ ppcMetricsSchema.statics.calculateMetricsForDateRange = async function(userId, c
             totalSpend: parseFloat(totals.spend.toFixed(2)),
             totalImpressions: totals.impressions,
             totalClicks: totals.clicks,
+            totalUnitsSoldClicks1d: Math.round(totals.unitsSoldClicks1d || 0),
+            totalPurchases: Math.round(totals.purchases || 0),
             overallAcos: parseFloat(overallAcos.toFixed(2)),
             overallRoas: parseFloat(overallRoas.toFixed(2)),
             ctr: parseFloat(ctr.toFixed(2)),
@@ -347,12 +381,26 @@ ppcMetricsSchema.statics.calculateMetricsForDateRange = async function(userId, c
         dataAvailability: {
             requestedRange: { startDate: normalizedStart, endDate: normalizedEnd },
             documentsSearched: allRecords.length,
-            documentsWithData: documentsWithData
+            documentsWithData: documentsWithData,
+            source: "legacyDateWiseMetrics"
         }
     };
+};
+
+/**
+ * Roll up per-day documents for the last N calendar days (inclusive of ~31 days when days=30).
+ * Matches default GetPPCMetrics sync window (yesterday back through yesterday−30).
+ */
+ppcMetricsSchema.statics.rollupLastDays = async function(userId, country, region, days = 30) {
+    const userIdStr = userId?.toString() || userId;
+    const now = new Date();
+    const fmt = (d) =>
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const endDate = fmt(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+    const startDate = fmt(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1 - days));
+    return this.calculateMetricsForDateRange(userIdStr, country, region, startDate, endDate);
 };
 
 const PPCMetrics = mongoose.model("PPCMetrics", ppcMetricsSchema);
 
 module.exports = PPCMetrics;
-

@@ -17,13 +17,23 @@ const ORDER_CONFIG = {
   // Delay between each solicitation request (ms) to respect rate limits
   delayBetweenRequests: 1000,
 
-  // Brief pause between Orders API pagination calls to reduce 429s
-  delayBetweenOrderPagesMs: 750,
+  // Gap between Orders API pagination calls.
+  // /orders/v0/orders documented limits: rate 0.0167 req/s (1/min), burst 20.
+  // 3s keeps us well inside the burst while leaving headroom; adaptive delay
+  // from the x-amzn-RateLimit-Limit header (below) will slow us down further
+  // if Amazon signals a lower rate at runtime.
+  delayBetweenOrderPagesMs: 3000,
 };
 
-const ORDERS_FETCH_MAX_ATTEMPTS = 6;
+// Retry tuning for /orders/v0/orders (rate 0.0167 req/s → one token per 60s after
+// burst is depleted). We need enough total wait for the bucket to refill under
+// real-world dynamic throttling, where Amazon can reduce the effective rate.
+const ORDERS_FETCH_MAX_ATTEMPTS = 10;
 const ORDERS_FETCH_BASE_BACKOFF_MS = 2000;
-const ORDERS_FETCH_MAX_BACKOFF_MS = 60000;
+const ORDERS_FETCH_MAX_BACKOFF_MS = 120000;
+// Floor for 429 waits when Amazon does not provide a `retry-after` header.
+// Matches the sustained 1 req / 60s refill rate.
+const ORDERS_FETCH_MIN_429_WAIT_MS = 60000;
 
 // ─── HELPERS ───────────────────────────────────────────────────────────────────
 function sleep(ms) {
@@ -126,8 +136,51 @@ function signRequest({ method, url, accessToken, body = "", awsConfig }) {
 }
 
 /**
+ * Compute backoff for a throttled Orders API call.
+ * Priority: honor Amazon's `retry-after` header when present; otherwise use
+ * exponential growth with jitter, but never less than the sustained-rate floor
+ * (60s) on 429 — since that is how long a single token takes to refill.
+ */
+function computeOrdersBackoffMs(response, attempt) {
+  const retryAfterRaw = response.headers.get("retry-after");
+  const retryAfterMs = retryAfterRaw ? parseInt(retryAfterRaw, 10) * 1000 : NaN;
+  const is429 = response.status === 429;
+
+  let waitMs;
+  if (Number.isFinite(retryAfterMs) && retryAfterMs > 0) {
+    waitMs = retryAfterMs;
+  } else {
+    waitMs = ORDERS_FETCH_BASE_BACKOFF_MS * Math.pow(2, attempt) + Math.random() * 1000;
+  }
+
+  // On 429, never wait less than one token-refill period.
+  if (is429) {
+    waitMs = Math.max(waitMs, ORDERS_FETCH_MIN_429_WAIT_MS);
+  }
+
+  return Math.min(ORDERS_FETCH_MAX_BACKOFF_MS, waitMs);
+}
+
+/**
+ * Derive an additional per-page delay from Amazon's own `x-amzn-RateLimit-Limit`
+ * header (requests/second). Adds a 25% safety margin. Returns 0 if the header
+ * is missing or malformed so the caller can fall back to a static delay.
+ */
+function derivePageDelayFromRateLimitHeader(response) {
+  const rateHeader = response.headers.get("x-amzn-RateLimit-Limit");
+  if (!rateHeader) return 0;
+  const rate = parseFloat(rateHeader);
+  if (!Number.isFinite(rate) || rate <= 0) return 0;
+  const baseDelay = 1000 / rate; // ms between requests at Amazon's stated rate
+  return Math.ceil(baseDelay * 1.25);
+}
+
+/**
  * Single GET with retries on SP-API throttle (429) and transient unavailability (503).
  * `buildHeaders` is invoked on every attempt so SigV4 x-amz-date stays fresh after backoff waits.
+ *
+ * Returns `{ data, recommendedNextDelayMs }` — the caller uses the recommended
+ * delay to pace the next pagination call based on Amazon's live rate-limit header.
  */
 async function fetchOrdersPageWithRetry(url, buildHeaders) {
   for (let attempt = 0; attempt < ORDERS_FETCH_MAX_ATTEMPTS; attempt++) {
@@ -142,14 +195,7 @@ async function fetchOrdersPageWithRetry(url, buildHeaders) {
 
     const isRetryableThrottle = response.status === 429 || response.status === 503;
     if (isRetryableThrottle && attempt < ORDERS_FETCH_MAX_ATTEMPTS - 1) {
-      const retryAfterRaw = response.headers.get("retry-after");
-      let waitMs = retryAfterRaw ? parseInt(retryAfterRaw, 10) * 1000 : NaN;
-      if (!Number.isFinite(waitMs) || waitMs < 0) {
-        waitMs = Math.min(
-          ORDERS_FETCH_MAX_BACKOFF_MS,
-          ORDERS_FETCH_BASE_BACKOFF_MS * Math.pow(2, attempt) + Math.random() * 500
-        );
-      }
+      const waitMs = computeOrdersBackoffMs(response, attempt);
       console.warn(
         `Orders API ${response.status} (rate limit / transient); retry ${attempt + 1}/${ORDERS_FETCH_MAX_ATTEMPTS} in ${Math.round(waitMs / 1000)}s`
       );
@@ -162,7 +208,8 @@ async function fetchOrdersPageWithRetry(url, buildHeaders) {
       throw new Error(`Orders API failed: ${response.status}`);
     }
 
-    return data;
+    const recommendedNextDelayMs = derivePageDelayFromRateLimitHeader(response);
+    return { data, recommendedNextDelayMs };
   }
 
   throw new Error("Orders API failed: 429 — exhausted retries");
@@ -197,7 +244,7 @@ async function fetchOrders(
     if (nextToken) params.set("NextToken", nextToken);
 
     const url     = `${normalizedEndpoint}/orders/v0/orders?${params.toString()}`;
-    const data = await fetchOrdersPageWithRetry(url, () =>
+    const { data, recommendedNextDelayMs } = await fetchOrdersPageWithRetry(url, () =>
       signRequest({
         method: "GET",
         url,
@@ -214,8 +261,17 @@ async function fetchOrders(
     console.log(`  Page ${page}: ${orders.length} orders (total: ${allOrders.length})`);
     page++;
 
-    if (nextToken && ORDER_CONFIG.delayBetweenOrderPagesMs > 0) {
-      await sleep(ORDER_CONFIG.delayBetweenOrderPagesMs);
+    if (nextToken) {
+      // Pace pagination: take the larger of (a) our static floor and (b) the
+      // rate implied by Amazon's live x-amzn-RateLimit-Limit header. This lets
+      // us use burst capacity when available and slow down when Amazon tells us to.
+      const pageDelay = Math.max(
+        ORDER_CONFIG.delayBetweenOrderPagesMs,
+        recommendedNextDelayMs || 0
+      );
+      if (pageDelay > 0) {
+        await sleep(pageDelay);
+      }
     }
 
   } while (nextToken);

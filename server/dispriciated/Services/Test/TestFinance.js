@@ -38,9 +38,13 @@ const listFinancialEventsMethod = async () => {
                     "host": host,
                     "user-agent": "MyApp/1.0",
                     "content-type": "application/json",
-                    "x-amz-access-token": "Atza|IwEBIL-emlOlYU6cpR2eB4PbLxBdidQ42sICeX8g95h7M1a3IzZsZbJdSiOcdKNU48AkcsmECyhEjSpNzhPgl4o0dUbr1E3cm37XbH6jWmAuoYHqeOWBUFwSRfMDd3tTAFUrpfbuuGqlkZpFutLckDVmZfuHGb2kAmryX4e-oWAK7-Tz4M4vvHfvSuX65lVxLl7BoWcXGFRK4NTYL7dTFZA4RWLDeazKSoNW72Tt290DXskEs1EgRpkBUs-QYo2iZP5DoSielPiT6ungMe2cBkZABurkRnycYqXMa-RpxGr2kkVibfXiAfHlmZKUODC4FnOAHhxwR-gf0pXbJ2T_if6dtSTgTkOIVMY_jt0YKtK2laqBzw"
+                    "x-amz-access-token": process.env.SPAPI_ACCESS_TOKEN
                 }
             };
+
+            if (!process.env.SPAPI_ACCESS_TOKEN) {
+                throw new Error('Missing SPAPI_ACCESS_TOKEN in environment (this is a test script).');
+            }
 
             aws4.sign(request, {
                 accessKeyId: process.env.AWS_ACCESS_KEY,

@@ -49,6 +49,7 @@ const expensesRoute=require('../routes/expenses.routes.js')
 const fbaInventoryRoute=require('../routes/fbaInventory.routes.js')
 const asinWiseSalesRoute=require('../routes/asinWiseSales.routes.js')
 const profitabilityRoute=require('../routes/profitability.routes.js')
+const financeDashboardRoute=require('../routes/financeDashboard.routes.js')
 const integrationRoute=require('../routes/integration.routes.js')
 const alertsRoute=require('../routes/alerts.routes.js')
 const qmateRoute=require('../routes/qmate.routes.js')
@@ -65,6 +66,16 @@ const config = require('../config/config.js')
 const { globalErrorHandler } = require('../middlewares/errorHandler.js')
 // Global rate limiter disabled - only authentication rate limiters are active
 // const { globalRateLimiter } = require('../middlewares/rateLimiting.js')
+
+// ============================================================================
+// Test routes gating
+// ============================================================================
+// By default: enabled in non-production, disabled in production.
+// Override: set ENABLE_TEST_ROUTES=true to force-enable (useful for staging).
+const testRoutesEnabled =
+    process.env.ENABLE_TEST_ROUTES === 'true' ||
+    (process.env.NODE_ENV && process.env.NODE_ENV !== 'production') ||
+    !process.env.NODE_ENV;
 
 
 app.use(cors({origin:process.env.CORS_ORIGIN_DOMAIN,credentials:true}))
@@ -142,7 +153,9 @@ app.use('/app',userRoute)
 app.use('/app/token',tokenRoute)
 app.use('/app/info',spapiroute)
 app.use('/app/analyse',analysingRoute)
-app.use('/app/test',testRoute);
+if (testRoutesEnabled) {
+    app.use('/app/test', testRoute);
+}
 app.use('/app/accountHistory',accountHistoryRoute)
 app.use('/app/cache',cacheRoute)
 app.use('/app/jobs',backgroundJobsRoute)
@@ -158,26 +171,31 @@ app.use('/app/reimbursements',reimbursementRoute)
 app.use('/app/mcp',mcpRoute)
 app.use('/api/pagewise',pageWiseDataRoute)
 app.use('/api/total-sales',totalSalesFilterRoute)
-app.use('/api/test',testRoute)
-app.use('/api/test/buybox',buyboxTestRoute)
-app.use('/api/test/mcp-economics',mcpEconomicsTestRoute)
-app.use('/api/test/mcp-sales-only',mcpSalesOnlyTestRoute)
-app.use('/api/test/inventory',inventoryReportsTestRoute)
-app.use('/api/test/search-terms',searchTermsTestRoute)
-app.use('/api/test/restock-inventory',restockInventoryTestRoute)
-app.use('/api/test/reimbursement',reimbursementTestRoute)
-app.use('/api/test/shipment',shipmentTestRoute)
-app.use('/api/test/inactive-sku-issues',inactiveSKUIssuesTestRoute)
-app.use('/api/test/active-products',activeProductsTestRoute)
-app.use('/api/test/merchant-listings',merchantListingsTestRoute)
-app.use('/api/test/update-product-content',updateProductContentTestRoute)
-app.use('/api/test/six-month-maintenance',sixMonthUserMaintenanceTestRoute)
+if (testRoutesEnabled) {
+    app.use('/api/test', testRoute);
+    app.use('/api/test/buybox', buyboxTestRoute);
+    app.use('/api/test/mcp-economics', mcpEconomicsTestRoute);
+    app.use('/api/test/mcp-sales-only', mcpSalesOnlyTestRoute);
+    app.use('/api/test/inventory', inventoryReportsTestRoute);
+    app.use('/api/test/search-terms', searchTermsTestRoute);
+    app.use('/api/test/restock-inventory', restockInventoryTestRoute);
+    app.use('/api/test/reimbursement', reimbursementTestRoute);
+    app.use('/api/test/shipment', shipmentTestRoute);
+    app.use('/api/test/inactive-sku-issues', inactiveSKUIssuesTestRoute);
+    app.use('/api/test/active-products', activeProductsTestRoute);
+    app.use('/api/test/merchant-listings', merchantListingsTestRoute);
+    app.use('/api/test/update-product-content', updateProductContentTestRoute);
+    app.use('/api/test/six-month-maintenance', sixMonthUserMaintenanceTestRoute);
+} else {
+    logger.info('Test routes are disabled (production-safe). Set ENABLE_TEST_ROUTES=true to enable.');
+}
 app.use('/api/listings',updateProductContentRoute)
 app.use('/api/cogs',cogsRoute)
 app.use('/api/expenses',expensesRoute)
 app.use('/api/fba-inventory',fbaInventoryRoute)
 app.use('/api/asin-wise-sales',asinWiseSalesRoute)
 app.use('/api/profitability',profitabilityRoute)
+app.use('/api/finance-dashboard',financeDashboardRoute)
 app.use('/api/integration',integrationRoute)
 app.use('/api/alerts',alertsRoute)
 app.use('/api/qmate',qmateRoute)
@@ -270,6 +288,15 @@ const redisConnection = async () => {
 };
  
 // Background jobs initialization
+//
+// Cron ownership is controlled by env flag `CRON_PRODUCER_STANDALONE`:
+//   - false / unset  → API server runs all crons in-process (original behavior, backward-compatible)
+//   - true           → API server is HTTP-only; crons run in the dedicated
+//                      `cron-producer` PM2 process (see cronProducerStandalone.js)
+//
+// Rationale: decoupling cron from HTTP lets us safely scale API to multiple
+// instances and survive API restarts without missing job production windows.
+// Default unchanged so the existing single-instance deploy keeps working.
 const initializeBackgroundJobs = async () => {
     // Check if background jobs are disabled via config file
     const backgroundJobsEnabled = config.backgroundJobs?.enabled !== false;
@@ -277,6 +304,15 @@ const initializeBackgroundJobs = async () => {
     if (!backgroundJobsEnabled) {
         logger.warn('⚠️  Background jobs are DISABLED (config.backgroundJobs.enabled = false)');
         logger.warn('⚠️  Automatic data fetching is inactive - manual testing mode');
+        return;
+    }
+
+    // When the dedicated cron-producer PM2 process is responsible for crons,
+    // the API server must NOT register any cron schedulers. Doing so would
+    // cause duplicate enqueueing every hour (one tick per API instance + one
+    // tick from cron-producer).
+    if (process.env.CRON_PRODUCER_STANDALONE === 'true') {
+        logger.info('🟢 CRON_PRODUCER_STANDALONE=true — API server is HTTP-only; all crons run in the cron-producer process.');
         return;
     }
 

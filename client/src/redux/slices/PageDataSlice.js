@@ -101,6 +101,15 @@ const initialState = {
         error: null,
         lastFetched: null
     },
+    // Profitability page date range (isolated from main dashboard Redux)
+    profitabilityDates: {
+        startDate: null,
+        endDate: null,
+        calendarMode: 'default',
+        loading: false,
+        bootstrapped: false,
+        error: null,
+    },
     // PPC Dashboard Data
     ppc: {
         data: null,
@@ -666,6 +675,23 @@ export const fetchProfitabilityData = createAsyncThunk(
  * Returns: Total Sales, Total PPC Sales, Total Ad Spend, ACOS%, Amazon Fees, Gross Profit
  * Expected time: ~50-100ms
  */
+/**
+ * Bootstrap profitability page dates from DataFetchTracking (no main dashboard).
+ */
+export const fetchProfitabilityDateRange = createAsyncThunk(
+    'pageData/fetchProfitabilityDateRange',
+    async (_, { rejectWithValue }) => {
+        try {
+            const response = await axiosInstance.get('/api/finance-dashboard/date-range');
+            return response.data.data;
+        } catch (error) {
+            return rejectWithValue(
+                error.response?.data?.message || 'Failed to fetch profitability date range'
+            );
+        }
+    }
+);
+
 export const fetchProfitabilityMetrics = createAsyncThunk(
     'pageData/fetchProfitabilityMetrics',
     async (_, { getState, dispatch, rejectWithValue }) => {
@@ -813,12 +839,12 @@ export const fetchProfitabilityTable = createAsyncThunk(
  */
 export const fetchProfitabilityIssues = createAsyncThunk(
     'pageData/fetchProfitabilityIssues',
-    async ({ page = 1, limit = 10 } = {}, { getState, dispatch, rejectWithValue }) => {
+    async ({ page = 1, limit = 10, startDate = null, endDate = null } = {}, { getState, dispatch, rejectWithValue }) => {
         try {
             const state = getState();
             
-            // Only use cache for page 1
-            if (page === 1) {
+            // Only use cache for page 1 when dates haven't changed
+            if (page === 1 && !startDate && !endDate) {
                 const lastFetched = state.pageData?.profitabilityIssues?.lastFetched;
                 if (lastFetched && (Date.now() - lastFetched) < CACHE_TTL_MS) {
                     return {
@@ -829,8 +855,13 @@ export const fetchProfitabilityIssues = createAsyncThunk(
                     };
                 }
             }
+
+            let url = `/api/pagewise/profitability/issues?page=${page}&limit=${limit}`;
+            if (startDate && endDate) {
+                url += `&startDate=${startDate}&endDate=${endDate}`;
+            }
             
-            const response = await axiosInstance.get(`/api/pagewise/profitability/issues?page=${page}&limit=${limit}`);
+            const response = await axiosInstance.get(url);
             const data = response.data.data;
             
             // Sync to DashboardSlice for backward compatibility
@@ -2318,7 +2349,15 @@ const pageDataSlice = createSlice({
                     state[page].lastFetched = null;
                 }
             });
-        }
+        },
+        /** Calendar / preset changes on the profitability page only */
+        setProfitabilityDateRange: (state, action) => {
+            const { startDate, endDate, calendarMode } = action.payload;
+            if (startDate != null) state.profitabilityDates.startDate = startDate;
+            if (endDate != null) state.profitabilityDates.endDate = endDate;
+            if (calendarMode != null) state.profitabilityDates.calendarMode = calendarMode;
+            state.profitabilityDates.bootstrapped = true;
+        },
     },
     extraReducers: (builder) => {
         // Multi-phase Dashboard Loading
@@ -2457,6 +2496,23 @@ const pageDataSlice = createSlice({
             })
         
         // Phased Profitability: Metrics (Phase 1 - KPI boxes)
+            .addCase(fetchProfitabilityDateRange.pending, (state) => {
+                state.profitabilityDates.loading = true;
+                state.profitabilityDates.error = null;
+            })
+            .addCase(fetchProfitabilityDateRange.fulfilled, (state, action) => {
+                state.profitabilityDates.loading = false;
+                state.profitabilityDates.startDate = action.payload?.startDate || null;
+                state.profitabilityDates.endDate = action.payload?.endDate || null;
+                state.profitabilityDates.calendarMode = action.payload?.calendarMode || 'default';
+                state.profitabilityDates.bootstrapped = Boolean(
+                    action.payload?.startDate && action.payload?.endDate
+                );
+            })
+            .addCase(fetchProfitabilityDateRange.rejected, (state, action) => {
+                state.profitabilityDates.loading = false;
+                state.profitabilityDates.error = action.payload;
+            })
             .addCase(fetchProfitabilityMetrics.pending, (state) => {
                 state.profitabilityMetrics.loading = true;
                 state.profitabilityMetrics.error = null;
@@ -3256,7 +3312,8 @@ export const {
     clearAllPageData, 
     clearPageData, 
     forceRefresh, 
-    forceRefreshAll 
+    forceRefreshAll,
+    setProfitabilityDateRange,
 } = pageDataSlice.actions;
 
 export default pageDataSlice.reducer;

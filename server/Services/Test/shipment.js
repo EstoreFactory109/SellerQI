@@ -5,6 +5,10 @@ const getShipmentDetails = async (shipmentId, SessionToken) => {
     const host = "sellingpartnerapi-na.amazon.com";
     const path = `/fba/inbound/v0/shipments/${shipmentId}/items`;
 
+    if (!process.env.SPAPI_ACCESS_TOKEN) {
+        throw new Error('Missing SPAPI_ACCESS_TOKEN in environment (this is a test script).');
+    }
+
     let request = {
         host,
         path,
@@ -13,7 +17,7 @@ const getShipmentDetails = async (shipmentId, SessionToken) => {
             "host": host,
             "user-agent": "MyApp/1.0",
             "content-type": "application/json",
-            "x-amz-access-token":"Atza|IwEBIJfGdqYYwnr8NBQY7Zp-xk1kWFmcZakyXrZEexqYzN7jpN8zEC3re9vtYXbpWwhGnU1ppPi9SE9h8cnPHEgN228rUbRvTOPuW2R6pTZs1x5PWEIyMkZnGutKA3rjXO_ruoFrhpvDTxqoCjPGHGsiKrgzlfXg77r_A279fLfQiranAoPMbNd7L441fUuL_0_V-UztlncY8ThydfULje_fiwNQDjA4i-gLzZPztPB2jg9HXOU8cyakxl1SXGlhDUvhM-ltpaVZJXGTpMFxhPaUJjqlfrNxGF2vaMf__G5TaeQwuBWH-RIX33TrHMxD9j4xEgehyYaSTnIR8rdeutJ6TCJXxhBCx69sP2vEAN6RaNg4CA" // You can pass this as an arg if needed
+            "x-amz-access-token": process.env.SPAPI_ACCESS_TOKEN
         }
     };
 
@@ -37,6 +41,10 @@ const getshipment = async (SessionToken) => {
     const queryParams = "ShipmentStatusList=WORKING,SHIPPED,RECEIVING,CLOSED,CANCELLED,DELETED,ERROR,IN_TRANSIT&QueryType=SHIPMENT&MarketplaceId=ATVPDKIKX0DER";
     const path = `/fba/inbound/v0/shipments?${queryParams}`;
 
+    if (!process.env.SPAPI_ACCESS_TOKEN) {
+        throw new Error('Missing SPAPI_ACCESS_TOKEN in environment (this is a test script).');
+    }
+
     let request = {
         host,
         path,
@@ -45,7 +53,7 @@ const getshipment = async (SessionToken) => {
             "host": host,
             "user-agent": "MyApp/1.0",
             "content-type": "application/json",
-            "x-amz-access-token": "Atza|IwEBIJfGdqYYwnr8NBQY7Zp-xk1kWFmcZakyXrZEexqYzN7jpN8zEC3re9vtYXbpWwhGnU1ppPi9SE9h8cnPHEgN228rUbRvTOPuW2R6pTZs1x5PWEIyMkZnGutKA3rjXO_ruoFrhpvDTxqoCjPGHGsiKrgzlfXg77r_A279fLfQiranAoPMbNd7L441fUuL_0_V-UztlncY8ThydfULje_fiwNQDjA4i-gLzZPztPB2jg9HXOU8cyakxl1SXGlhDUvhM-ltpaVZJXGTpMFxhPaUJjqlfrNxGF2vaMf__G5TaeQwuBWH-RIX33TrHMxD9j4xEgehyYaSTnIR8rdeutJ6TCJXxhBCx69sP2vEAN6RaNg4CA" // You can pass this too if needed
+            "x-amz-access-token": process.env.SPAPI_ACCESS_TOKEN
         }
     };
 

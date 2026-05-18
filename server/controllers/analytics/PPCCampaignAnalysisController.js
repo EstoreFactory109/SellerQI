@@ -14,13 +14,23 @@ const PPCCampaignAnalysisService = require('../../Services/Calculations/PPCCampa
 
 /**
  * Get PPC KPI Summary for the top boxes
- * Returns: spend, sales, acos, tacos, unitsSold, totalIssues
+ *
+ * Returns: spend, sales, totalSales, acos, tacos, unitsSold, totalIssues, dateRange
+ *
+ * Query params:
+ *   - startDate (optional, YYYY-MM-DD) — Calendar.start; falls back to last-30d window
+ *   - endDate   (optional, YYYY-MM-DD) — Calendar.end;   falls back to last-30d window
+ *
+ * Both `startDate` and `endDate` must be passed together. If only one is
+ * supplied it is ignored and the default window is used.
  */
 const getPPCKPISummary = asyncHandler(async (req, res) => {
     const startTime = Date.now();
     const userId = req.userId;
     const Region = req.region;
     const Country = req.country;
+    const startDate = req.query.startDate || null;
+    const endDate = req.query.endDate || null;
 
     if (!userId || !Country || !Region) {
         logger.error('[PPCCampaignAnalysis] Missing required parameters', { userId, Country, Region });
@@ -30,10 +40,18 @@ const getPPCKPISummary = asyncHandler(async (req, res) => {
     }
 
     try {
-        logger.info(`[PPCCampaignAnalysis] Getting KPI summary for user: ${userId}`);
-        
-        const summary = await PPCCampaignAnalysisService.getPPCKPISummary(userId, Country, Region);
-        
+        logger.info(
+            `[PPCCampaignAnalysis] Getting KPI summary user=${userId} startDate=${startDate || '(default)'} endDate=${endDate || '(default)'}`
+        );
+
+        const summary = await PPCCampaignAnalysisService.getPPCKPISummary(
+            userId,
+            Country,
+            Region,
+            startDate,
+            endDate
+        );
+
         logger.info(`[PPCCampaignAnalysis] KPI summary returned in ${Date.now() - startTime}ms`);
         return res.status(200).json(
             new ApiResponse(200, summary, 'PPC KPI summary retrieved successfully')
@@ -301,11 +319,19 @@ const getTabCounts = asyncHandler(async (req, res) => {
         );
     }
 
+    const { startDate, endDate } = req.query;
+
     try {
-        logger.info(`[PPCCampaignAnalysis] Getting tab counts for user: ${userId}`);
-        
-        const counts = await PPCCampaignAnalysisService.getTabCounts(userId, Country, Region);
-        
+        logger.info(`[PPCCampaignAnalysis] Getting tab counts for user: ${userId} window=${startDate || 'default'}→${endDate || 'default'}`);
+
+        const counts = await PPCCampaignAnalysisService.getTabCounts(
+            userId,
+            Country,
+            Region,
+            startDate || null,
+            endDate || null
+        );
+
         logger.info(`[PPCCampaignAnalysis] Tab counts returned in ${Date.now() - startTime}ms`);
         return res.status(200).json(
             new ApiResponse(200, counts, 'Tab counts retrieved successfully')

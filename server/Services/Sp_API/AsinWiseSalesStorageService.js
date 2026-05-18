@@ -4,6 +4,7 @@ const logger = require('../../utils/Logger.js');
 const AsinWiseSalesRun = require('../../models/finance/AsinWiseSalesRunModel.js');
 const AsinWiseSalesItem = require('../../models/finance/AsinWiseSalesItemModel.js');
 const AsinWiseSalesDateItem = require('../../models/finance/AsinWiseSalesDateItemModel.js');
+const SalesOrderId = require('../../models/finance/SalesOrderIdModel.js');
 
 const { getSalesReport } = require('./asinwiseSales.js');
 
@@ -28,6 +29,10 @@ async function persistAsinWiseSalesResult({ userId, country, regionModel, result
 
   const metadata = result?.metadata || {};
   const data = result?.data || {};
+
+  // ── Collect order IDs from the result (added by Fix 1) ──
+  // getSalesReport() now returns result.orderIds alongside result.data
+  const orderIds = Array.isArray(result?.orderIds) ? result.orderIds : [];
 
   const run = await AsinWiseSalesRun.create({
     User: userObjectId,
@@ -114,6 +119,31 @@ async function persistAsinWiseSalesResult({ userId, country, regionModel, result
   for (const chunk of chunkArray(dateDocs, CHUNK_INSERT_SIZE)) {
     if (chunk.length === 0) continue;
     await AsinWiseSalesDateItem.insertMany(chunk, { ordered: false });
+  }
+
+  // ┌──────────────────────────────────────────────────────────────────┐
+  // │  NEW: Persist order IDs for expense matching (Fix 2 prep)       │
+  // │                                                                  │
+  // │  These are the amazon-order-ids from the sales report that      │
+  // │  passed all filters (not cancelled, not MCF, not zero-price).   │
+  // │  The expense system will query this collection to determine     │
+  // │  whether an expense belongs to the current sales period.        │
+  // └──────────────────────────────────────────────────────────────────┘
+  if (orderIds.length > 0) {
+    const orderIdDocs = orderIds.map((oid) => ({
+      runId,
+      User: userObjectId,
+      country,
+      region: regionModel,
+      orderId: oid,
+    }));
+
+    for (const chunk of chunkArray(orderIdDocs, CHUNK_INSERT_SIZE)) {
+      if (chunk.length === 0) continue;
+      await SalesOrderId.insertMany(chunk, { ordered: false });
+    }
+
+    logger.info(`[AsinWiseSalesStorageService] Saved ${orderIds.length} order IDs to SalesOrderId.`);
   }
 
   return runId;
@@ -209,6 +239,40 @@ async function buildAsinWiseSalesResponseFromDB({ userId, country, regionModel }
   };
 }
 
+/**
+ * Get the set of order IDs from the latest sales run for a user/country/region.
+ * Used by the expense system (Fix 2) to match expenses to current-period sales.
+ *
+ * @param {Object} params
+ * @param {string} params.userId
+ * @param {string} params.country
+ * @param {string} params.regionModel - 'NA' | 'EU' | 'FE'
+ * @returns {Set<string>} Set of amazon-order-ids from the latest sales run
+ */
+async function getSalesOrderIdSet({ userId, country, regionModel }) {
+  const userObjectId =
+    typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+
+  // Find the latest sales run
+  const latestRun = await AsinWiseSalesRun.findOne({
+    User: userObjectId,
+    country,
+    region: regionModel,
+  })
+    .sort({ generatedAt: -1 })
+    .select('_id')
+    .lean();
+
+  if (!latestRun) return new Set();
+
+  // Get all order IDs for that run
+  const orderIdDocs = await SalesOrderId.find({ runId: latestRun._id })
+    .select('orderId')
+    .lean();
+
+  return new Set(orderIdDocs.map((doc) => doc.orderId));
+}
+
 async function fetchPersistAndReturnAsinWiseSales({
   userId,
   country,
@@ -258,5 +322,5 @@ async function fetchPersistAndReturnAsinWiseSales({
 module.exports = {
   fetchPersistAndReturnAsinWiseSales,
   buildAsinWiseSalesResponseFromDB,
+  getSalesOrderIdSet,
 };
-

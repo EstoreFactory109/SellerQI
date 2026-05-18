@@ -49,6 +49,37 @@ const analyseDataCache = (cacheDurationInSeconds = 3600, pageType = 'dashboard')
                 const comparison = req.query.comparison || 'none';
                 cacheKey = `analyse_data:${pageType}:${userId}:${country}:${region}:${adminId || 'null'}:comparison${comparison}`;
             }
+
+            // For ppc-summary endpoint, include the Calendar date range in the
+            // cache key so each (startDate, endDate) window has its own slot.
+            // Without this, picking a new range from the Calendar would return a
+            // cached response computed over the previous range.
+            if (pageType === 'ppc-summary') {
+                const startDate = (req.query.startDate || '').toString().trim();
+                const endDate = (req.query.endDate || '').toString().trim();
+                if (startDate || endDate) {
+                    cacheKey = `analyse_data:${pageType}:${userId}:${country}:${region}:${adminId || 'null'}:start${startDate || 'none'}:end${endDate || 'none'}`;
+                }
+            }
+
+            // Same date-range awareness for ppc-tab-counts — counts depend on
+            // the selected Calendar window (e.g., zero-sales search terms in
+            // April 1-30 vs May 1-15). Cache must distinguish those windows.
+            if (pageType === 'ppc-tab-counts') {
+                const startDate = (req.query.startDate || '').toString().trim();
+                const endDate = (req.query.endDate || '').toString().trim();
+                if (startDate || endDate) {
+                    cacheKey = `analyse_data:${pageType}:${userId}:${country}:${region}:${adminId || 'null'}:start${startDate || 'none'}:end${endDate || 'none'}`;
+                }
+            }
+
+            if (pageType === 'ppc-asin-daily') {
+                const startDate = (req.query.startDate || '').toString().trim();
+                const endDate = (req.query.endDate || '').toString().trim();
+                if (startDate || endDate) {
+                    cacheKey = `analyse_data:${pageType}:${userId}:${country}:${region}:${adminId || 'null'}:start${startDate || 'none'}:end${endDate || 'none'}`;
+                }
+            }
             
             // For your-products-v2/products endpoint, include status + page + limit in cache key
             if (pageType === 'your-products-v2-products') {

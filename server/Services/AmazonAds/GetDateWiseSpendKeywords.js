@@ -4,6 +4,7 @@ const { promisify } = require('util');
 const { generateAdsAccessToken } = require('./GenerateToken');
 const gunzip = promisify(zlib.gunzip);
 const GetDateWisePPCspendModel = require('../../models/amazon-ads/GetDateWisePPCspendModel.js');
+const { resolveReportDateRange } = require('../../utils/reportDateRange.js');
 
 // Base URIs for different regions
 const BASE_URIS = {
@@ -12,9 +13,13 @@ const BASE_URIS = {
     'FE': 'https://advertising-api-fe.amazon.com'
 };
 
-async function getReportId(accessToken, profileId, region, tokenRefreshCallback = null) {
+async function getReportId(accessToken, profileId, region, tokenRefreshCallback = null, startDate, endDate) {
     let currentAccessToken = accessToken;
     let hasRetried = false;
+
+    if (!startDate || !endDate) {
+        throw new Error('getReportId requires startDate and endDate (YYYY-MM-DD).');
+    }
 
     while (true) {
         try {
@@ -35,15 +40,6 @@ async function getReportId(accessToken, profileId, region, tokenRefreshCallback 
                 'Content-Type': 'application/vnd.createasyncreportrequest.v3+json'
             };
 
-            // Calculate dynamic dates (UTC-based, matching Expences.js: yesterday − 30 days → yesterday)
-            const now = new Date();
-            const endDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
-            const startDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1 - 30));
-            
-            const formatDate = (date) => {
-                return date.toISOString().split('T')[0];
-            };
-
             // Generate unique report name to prevent duplicate requests
             const timestamp = Date.now();
             const uniqueReportName = `ASIN/SKU Performance Report - ${timestamp}`;
@@ -51,8 +47,8 @@ async function getReportId(accessToken, profileId, region, tokenRefreshCallback 
             // Set up request body for ASIN/SKU level data
             const body = {
                 "name": uniqueReportName,
-                "startDate": formatDate(startDate),
-                "endDate": formatDate(endDate),
+                "startDate": startDate,
+                "endDate": endDate,
                 "configuration": {
                     "adProduct": "SPONSORED_PRODUCTS",
                     "reportTypeId": "spCampaigns",
@@ -333,11 +329,14 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
     }
 }
 
-async function getPPCSpendsDateWise(accessToken, profileId, userId, country, region, refreshToken = null) {
+async function getPPCSpendsDateWise(accessToken, profileId, userId, country, region, refreshToken = null, options = {}) {
             // console.log(`Getting PPC spends by ASIN/SKU for region: ${region}`);
 
             console.log("Profile Id",profileId);
     try {
+        const { startDate, endDate, isCustom } = resolveReportDateRange(options);
+        console.log(`📡 [GetDateWiseSpendKeywords] PPC spends date-wise for region: ${region}, country: ${country}, userId: ${userId}, window: ${startDate} → ${endDate}, customDateRange: ${isCustom}`);
+
         // Add a small delay to prevent rapid successive requests
         await new Promise(resolve => setTimeout(resolve, 1000));
 
@@ -359,7 +358,7 @@ async function getPPCSpendsDateWise(accessToken, profileId, userId, country, reg
         } : null;
 
         // Get the report ID first (with token refresh support)
-        const reportData = await getReportId(accessToken, profileId, region, tokenRefreshCallback);
+        const reportData = await getReportId(accessToken, profileId, region, tokenRefreshCallback, startDate, endDate);
 
         if (!reportData || !reportData.reportId) {
             throw new Error('Failed to get report ID');

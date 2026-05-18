@@ -23,6 +23,9 @@ const { GetListingItemIssuesForInactive } = require('../Sp_API/GetListingItemsIs
 const limit = require('promise-limit')(3); // Limit to 3 concurrent promises
 const DataFetchTrackingService = require('../system/DataFetchTrackingService.js');
 const { runFbaInventorySyncForMarketplace } = require('../Sp_API/FbaInventoryStorageService.js');
+// Incremental dashboard slice writes — additive, non-fatal (see DashboardSliceService).
+const dashboardSliceService = require('../dashboard/DashboardSliceService.js');
+const { SLICE_KEYS } = dashboardSliceService;
 
 class ScheduledIntegration {
     /**
@@ -136,37 +139,28 @@ class ScheduledIntegration {
 
             // Start tracking ONLY on Mon/Wed/Fri when calendar-affecting services run
             // Calendar-affecting services: mcpEconomicsData, ppcMetricsAggregated, ppcSpendsDateWise,
-            // adsKeywordsPerformanceData, searchKeywords, ppcSpendsBySKU, ppcUnitsSold, campaignData
+            // adsKeywordsPerformanceData, searchKeywords, ppcSpendsBySKU, campaignData
             // These are the only services whose data can be filtered by calendar date range
             const isCalendarAffectingDay = dayOfWeek === 1 || dayOfWeek === 3 || dayOfWeek === 5; // Mon/Wed/Fri
             
             if (isCalendarAffectingDay) {
-                // Calculate the data date range (30 days ending yesterday)
-                const endDate = new Date();
-                endDate.setDate(endDate.getDate() - 1); // Yesterday
-                const startDate = new Date(endDate);
-                startDate.setDate(startDate.getDate() - 30); // 30 days before yesterday
-                
-                const formatDate = (date) => {
-                    const year = date.getFullYear();
-                    const month = String(date.getMonth() + 1).padStart(2, '0');
-                    const day = String(date.getDate()).padStart(2, '0');
-                    return `${year}-${month}-${day}`;
-                };
+                // Use Pacific-time "yesterday" to match FinanceService's date logic
+                const { getDefaultReportDateRange } = require('../../utils/reportDateRange.js');
+                const trackingRange = getDefaultReportDateRange(30);
                 
                 try {
                     trackingEntry = await DataFetchTrackingService.startTracking(
                         userId,
                         Country,
                         Region,
-                        { startDate: formatDate(startDate), endDate: formatDate(endDate) },
+                        { startDate: trackingRange.startDate, endDate: trackingRange.endDate },
                         loggingHelper?.sessionId || null
                     );
                     logger.info('[ScheduledIntegration] Calendar tracking started (Mon/Wed/Fri)', {
                         trackingId: trackingEntry._id,
                         dayName: trackingEntry.dayName,
                         dayOfWeek: dayOfWeek,
-                        dataRange: { startDate: formatDate(startDate), endDate: formatDate(endDate) }
+                        dataRange: trackingRange
                     });
                 } catch (trackingError) {
                     logger.warn('[ScheduledIntegration] Failed to start calendar tracking (non-critical)', {
@@ -878,6 +872,15 @@ class ScheduledIntegration {
         const runBatch = (n) => !_batchFilter || _batchFilter.includes(n);
 
         const apiData = {};
+
+        // Daily schedules fetch only yesterday's data (Pacific time, consistent with reportDateRange.js).
+        const PACIFIC_OFFSET_MS = 7 * 60 * 60 * 1000;
+        const _nowPacific = new Date(Date.now() - PACIFIC_OFFSET_MS);
+        const _yesterdayPacific = new Date(Date.UTC(
+            _nowPacific.getUTCFullYear(), _nowPacific.getUTCMonth(), _nowPacific.getUTCDate() - 1
+        ));
+        const scheduleYesterday = _yesterdayPacific.toISOString().split('T')[0];
+        logger.info(`ScheduledIntegration: Daily date window = ${scheduleYesterday} (yesterday Pacific)`);
         
         // Get functions scheduled for today
         const scheduledFunctions = getFunctionsForDay(dayOfWeek);
@@ -920,7 +923,7 @@ class ScheduledIntegration {
         };
 
         // Process scheduled functions in batches (same structure as Integration.js)
-        // First batch: V2/V1 Seller Performance, PPC Spends by SKU, Ads Keywords Performance, PPC Spends Date Wise
+        // First batch: V2/V1 Seller Performance
         logger.info("First Batch Starts");
         const firstBatchPromises = [];
         const firstBatchServiceNames = [];
@@ -930,10 +933,19 @@ class ScheduledIntegration {
         const secondBatchPromises = [];
         const secondBatchServiceNames = [];
 
-        // Third batch: Shipment, Brand, Ad Groups, MCP SalesOnly, BuyBox, Expense Report, ASIN-wise sales
+        // Ads batch: PPC async report services (isolated into sched_ads phase).
+        // PPCMetrics, PPCProductWise, PPCUnitsSold, DateWiseSpend, WastedSpend.
+        const adsBatchPromises = [];
+        const adsBatchServiceNames = [];
+
+        // Third batch: Shipment, Brand, Ad Groups, MCP SalesOnly, BuyBox
         logger.info("Third Batch Starts");
         const thirdBatchPromises = [];
         const thirdBatchServiceNames = [];
+
+        // Finance batch: Isolated Finance Sync (runs between Third and Fourth)
+        const financeBatchPromises = [];
+        const financeBatchServiceNames = [];
 
         // Fourth batch: Negative Keywords, Search Keywords, Keyword Recommendations
         logger.info("Fourth Batch Starts");
@@ -954,8 +966,12 @@ class ScheduledIntegration {
 
         // Helper function to determine batch number for a function key
         const getBatchNumber = (functionKey) => {
-            // Batch 1: V2/V1 Seller Performance, PPC Spends by SKU, Ads Keywords Performance, PPC Spends Date Wise, PPC Metrics Aggregated
-            if (['v2data', 'v1data', 'ppcSpendsBySKU', 'adsKeywordsPerformanceData', 'ppcSpendsDateWise', 'ppcMetricsAggregated', 'ppcUnitsSold'].includes(functionKey)) {
+            // Ads batch: PPC async report services (isolated into sched_ads phase, 40-50 min)
+            if (['ppcSpendsBySKU', 'adsKeywordsPerformanceData', 'ppcSpendsDateWise', 'ppcMetricsAggregated'].includes(functionKey)) {
+                return 'ads';
+            }
+            // Batch 1: V2/V1 Seller Performance
+            if (['v2data', 'v1data'].includes(functionKey)) {
                 return 1;
             }
             // Batch 2: Restock Inventory, FBA Inventory Planning, Stranded Inventory, Inbound Non-Compliance, Product Reviews, Ads Keywords, Campaign Data, Reimbursement Data & Calculations
@@ -965,9 +981,17 @@ class ScheduledIntegration {
                  'calculateDisposedInventoryReimbursement'].includes(functionKey)) {
                 return 2;
             }
-            // Batch 3: Shipment Data, Brand Data, Ad Groups Data, MCP SalesOnly, MCP BuyBox, Expense Report
-            if (['shipment', 'brandData', 'adGroupsData', 'mcpEconomicsData', 'mcpBuyBoxData', 'expenseReport', 'asinWiseSales'].includes(functionKey)) {
+            // Batch 3: Shipment Data, Brand Data, Ad Groups Data, MCP SalesOnly, MCP BuyBox
+            if (['shipment', 'brandData', 'adGroupsData', 'mcpEconomicsData', 'mcpBuyBoxData'].includes(functionKey)) {
                 return 3;
+            }
+            // Finance: ISOLATED from batch 3 because syncFinanceData polls Amazon for 10-25 min
+            // and was previously pinning a worker slot inside the old batch_3_4 phase.
+            // Uses a string identifier so `runBatch('finance')` only fires from the dedicated
+            // `sched_finance` phase (and from the legacy `executeScheduledBatch3And4Phase` which
+            // passes `[3, 'finance', 4]` for in-flight job drain).
+            if (functionKey === 'financeSync') {
+                return 'finance';
             }
             // Batch 4: Negative Keywords, Search Keywords, Keyword Recommendations
             if (['negativeKeywords', 'searchKeywords', 'keywordRecommendations'].includes(functionKey)) {
@@ -1003,9 +1027,17 @@ class ScheduledIntegration {
                     secondBatchPromises.push(promise);
                     secondBatchServiceNames.push(description);
                     break;
+                case 'ads':
+                    adsBatchPromises.push(promise);
+                    adsBatchServiceNames.push(description);
+                    break;
                 case 3:
                     thirdBatchPromises.push(promise);
                     thirdBatchServiceNames.push(description);
+                    break;
+                case 'finance':
+                    financeBatchPromises.push(promise);
+                    financeBatchServiceNames.push(description);
                     break;
                 case 4:
                     fourthBatchPromises.push(promise);
@@ -1173,9 +1205,9 @@ class ScheduledIntegration {
                             return { success: false, error: error.message || 'MCP SalesOnly fetch failed', data: null };
                         });
                 } else if (functionKey === 'ppcMetricsAggregated') {
-                    // PPC Metrics Aggregated - special handling with different parameters
+                    // PPC Metrics Aggregated — daily schedule fetches yesterday only
                     // getPPCMetrics(accessToken, profileId, userId, country, region, refreshToken, startDate, endDate, saveToDatabase)
-                    promise = serviceFunction(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, null, null, true)
+                    promise = serviceFunction(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, scheduleYesterday, scheduleYesterday, true)
                         .then(result => {
                             if (result && result.success !== false) {
                                 logger.info('PPC Metrics Aggregated succeeded', { userId, region: Region, country: Country });
@@ -1222,8 +1254,13 @@ class ScheduledIntegration {
                             });
                             return { success: false, error: error.message || 'MCP BuyBox fetch failed', data: null };
                         });
-                } else if (functionKey === 'expenseReport') {
-                    // Expense Report: fetch Finance API data, persist raw rows, recalculate totals
+                } else if (functionKey === 'financeSync') {
+                    // Daily schedule targets yesterday only (Pacific-style UTC-7).
+                    // Integration handles first-time 30-day backfill; daily schedule
+                    // just keeps the data current one day at a time. Pending-order
+                    // backfill still runs inside syncFinanceData regardless.
+                    const _yesterdayStr = new Date(Date.now() - 7 * 3600000 - 86400000)
+                        .toISOString().slice(0, 10);
                     promise = serviceFunction({
                         userId,
                         country: Country,
@@ -1232,61 +1269,50 @@ class ScheduledIntegration {
                         accessToken: AccessToken,
                         clientId: process.env.SPAPI_CLIENT_ID,
                         clientSecret: process.env.SPAPI_CLIENT_SECRET,
+                        forceDates: [_yesterdayStr, _yesterdayStr],
                     })
                         .then(result => {
-                            logger.info('Expense Report succeeded', { userId, region: Region, country: Country, hasNewData: result?.hasNewData });
-                            return { success: true, data: result, error: null };
-                        })
-                        .catch(error => {
-                            logger.error('Error in Expense Report promise chain', {
-                                error: error.message,
-                                stack: error.stack,
+                            logger.info('Finance Sync succeeded', {
                                 userId,
                                 region: Region,
-                                country: Country
-                            });
-                            return { success: false, error: error.message || 'Expense Report fetch failed', data: null };
-                        });
-                } else if (functionKey === 'asinWiseSales') {
-                    promise = serviceFunction({
-                        userId,
                         country: Country,
-                        regionModel: Region,
-                        refreshToken: RefreshToken,
-                        accessToken: AccessToken,
-                        clientId: process.env.SPAPI_CLIENT_ID,
-                        clientSecret: process.env.SPAPI_CLIENT_SECRET,
-                    })
-                        .then(result => {
-                            logger.info('ASIN-wise sales succeeded', {
-                                userId,
-                                region: Region,
-                                country: Country,
-                                totalAsins: result?.data?.totalAsins,
+                                status: result?.status,
+                                startDate: result?.startDate,
+                                endDate: result?.endDate,
                             });
                             return { success: true, data: result, error: null };
                         })
                         .catch(error => {
-                            logger.error('Error in ASIN-wise sales promise chain', {
+                            logger.error('Error in Finance Sync promise chain', {
                                 error: error.message,
                                 stack: error.stack,
                                 userId,
                                 region: Region,
                                 country: Country,
                             });
-                            return { success: false, error: error.message || 'ASIN-wise sales fetch failed', data: null };
+                            return { success: false, error: error.message || 'Finance Sync failed', data: null };
                         });
                 } else if (requiresAdsToken) {
-                    // Standard Ads function
-                    if (functionKey === 'campaignData') {
+                    // Daily report services — pass yesterday-only date window via options
+                    const dailyDateOpts = { startDate: scheduleYesterday, endDate: scheduleYesterday };
+
+                    if (functionKey === 'ppcSpendsBySKU' || functionKey === 'adsKeywordsPerformanceData' || functionKey === 'ppcSpendsDateWise') {
+                        // fn(accessToken, profileId, userId, country, region, refreshToken, options)
+                        promise = tokenManager.wrapAdsFunction(serviceFunction, userId, RefreshToken, AdsRefreshToken)(
+                            AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, dailyDateOpts
+                        );
+                    } else if (functionKey === 'searchKeywords') {
+                        // fn(accessToken, profileId, userId, country, region, refreshToken, options)
+                        promise = tokenManager.wrapAdsFunction(serviceFunction, userId, RefreshToken, AdsRefreshToken)(
+                            AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, dailyDateOpts
+                        );
+                    } else if (functionKey === 'campaignData') {
+                        // Entity snapshot — no date range
                         promise = tokenManager.wrapAdsFunction(serviceFunction, userId, RefreshToken, AdsRefreshToken)(
                             AdsAccessToken, ProfileId, Region, userId, Country
                         );
-                    } else if (functionKey === 'searchKeywords') {
-                        promise = tokenManager.wrapAdsFunction(serviceFunction, userId, RefreshToken, AdsRefreshToken)(
-                            AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken
-                        );
                     } else {
+                        // Entity endpoints (adsKeywords, etc.) — no date range
                         promise = tokenManager.wrapAdsFunction(serviceFunction, userId, RefreshToken, AdsRefreshToken)(
                             AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken
                         );
@@ -1422,6 +1448,28 @@ class ScheduledIntegration {
         }
         logger.info("Second Batch Ends");
 
+        // Ads Batch (isolated into sched_ads phase): PPC async report services.
+        // These take 40-50 min (report create → poll → download → parse) so they
+        // run in their own phase to avoid pinning the batch_1_2 worker slot.
+        if (adsBatchPromises.length > 0 && runBatch('ads')) {
+            logger.info("Ads Batch Starts");
+            const adsBatchResults = await Promise.allSettled(adsBatchPromises);
+            let resultIndex = 0;
+            for (const serviceName of adsBatchServiceNames) {
+                const functionKey = Object.keys(scheduledFunctions).find(key =>
+                    scheduledFunctions[key].description === serviceName
+                );
+                if (functionKey && resultIndex < adsBatchResults.length) {
+                    const dataKey = scheduledFunctions[functionKey].apiDataKey || functionKey;
+                    if (!apiData[dataKey]) {
+                        apiData[dataKey] = processApiResult(adsBatchResults[resultIndex], serviceName);
+                    }
+                    resultIndex++;
+                }
+            }
+        }
+        logger.info("Ads Batch Ends");
+
         // Third Batch
         if (thirdBatchPromises.length > 0 && runBatch(3)) {
             logger.info("Third Batch Starts");
@@ -1463,6 +1511,30 @@ class ScheduledIntegration {
             }
         }
         logger.info("Third Batch Ends");
+
+        // Finance Batch (isolated): syncFinanceData runs alone here.
+        // The old combined batch_3_4 phase used to keep this serialised after batch 3 which
+        // held the worker slot for 10-25 min while Amazon report polling ran. The new
+        // `sched_finance` phase calls `fetchScheduledApiData` with `_batchFilter: ['finance']`
+        // so it can run alone without pinning batch 3 / batch 4 work.
+        if (financeBatchPromises.length > 0 && runBatch('finance')) {
+            logger.info("Finance Batch Starts");
+            const financeBatchResults = await Promise.allSettled(financeBatchPromises);
+            let resultIndex = 0;
+            for (const serviceName of financeBatchServiceNames) {
+                const functionKey = Object.keys(scheduledFunctions).find(key =>
+                    scheduledFunctions[key].description === serviceName
+                );
+                if (functionKey && resultIndex < financeBatchResults.length) {
+                    const dataKey = scheduledFunctions[functionKey].apiDataKey || functionKey;
+                    if (!apiData[dataKey]) {
+                        apiData[dataKey] = processApiResult(financeBatchResults[resultIndex], serviceName);
+                    }
+                    resultIndex++;
+                }
+            }
+            logger.info("Finance Batch Ends");
+        }
 
         // Fourth Batch
         if (fourthBatchPromises.length > 0 && runBatch(4)) {
@@ -2148,16 +2220,16 @@ class ScheduledIntegration {
             const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
             logger.info(`[ScheduledIntegration:InitPhase] Processing for ${dayNames[dayOfWeek]} (day ${dayOfWeek})`, { userId, Region, Country });
 
+            // DataFetchTracking runs every day now that PPC reports are daily.
+            // Previously gated to Mon/Wed/Fri only.
             let trackingEntryId = null;
-            const isCalendarAffectingDay = dayOfWeek === 1 || dayOfWeek === 3 || dayOfWeek === 5;
-            if (isCalendarAffectingDay) {
-                const endDate = new Date(); endDate.setDate(endDate.getDate() - 1);
-                const startDate = new Date(endDate); startDate.setDate(startDate.getDate() - 30);
-                const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            {
+                const { getDefaultReportDateRange } = require('../../utils/reportDateRange.js');
+                const trackingRange = getDefaultReportDateRange(30);
                 try {
-                    const entry = await DataFetchTrackingService.startTracking(userId, Country, Region, { startDate: fmt(startDate), endDate: fmt(endDate) }, sessionId);
+                    const entry = await DataFetchTrackingService.startTracking(userId, Country, Region, { startDate: trackingRange.startDate, endDate: trackingRange.endDate }, sessionId);
                     trackingEntryId = entry._id.toString();
-                    logger.info('[ScheduledIntegration:InitPhase] Calendar tracking started', { trackingId: trackingEntryId, dayName: dayNames[dayOfWeek] });
+                    logger.info('[ScheduledIntegration:InitPhase] Calendar tracking started', { trackingId: trackingEntryId, dayName: dayNames[dayOfWeek], dataRange: trackingRange });
                 } catch (te) {
                     logger.warn('[ScheduledIntegration:InitPhase] Failed to start calendar tracking', { error: te.message });
                 }
@@ -2179,6 +2251,25 @@ class ScheduledIntegration {
             logger.info(`[ScheduledIntegration:InitPhase] Completed for user ${userId}`, {
                 asinCount: productData.asinArray?.length || 0,
                 inactiveCount: inactiveProductData.inactiveSkuArray?.length || 0
+            });
+
+            // DashboardSlice write (additive, non-fatal): "listings" summary used by
+            // finalize's slice-assembler path. The active/inactive counts here mirror
+            // what `productWiseError` length renders on the dashboard today.
+            await dashboardSliceService.writeSlice({
+                userId,
+                country: Country,
+                region: Region,
+                sliceKey: SLICE_KEYS.LISTINGS,
+                producedByPhase: 'sched_init',
+                data: {
+                    activeProductCount: productData.asinArray?.length || 0,
+                    inactiveProductCount: inactiveProductData.inactiveSkuArray?.length || 0,
+                    hasAdsAccount: !!AdsRefreshToken,
+                    sellerId: sellerId || null,
+                    dayOfWeek,
+                    capturedAt: new Date().toISOString()
+                }
             });
 
             if (loggingHelper) {
@@ -2287,6 +2378,100 @@ class ScheduledIntegration {
         return { asinArray, skuArray, inactiveAsinArray, inactiveSkuArray };
     }
 
+    // =========================================================================
+    // DashboardSlice helpers (additive, non-fatal — see DashboardSliceService).
+    // Function-key → slice categorisation. Keeping it static here means the
+    // mapping lives next to the phase logic that produces it; if a new service
+    // is added to ScheduleConfig.js, only this map needs updating.
+    // =========================================================================
+    static _SLICE_CATEGORY_MAP = {
+        // Ads slice (sched_ads phase — PPC async report services)
+        ads: [
+            'ppcSpendsBySKU', 'adsKeywordsPerformanceData', 'ppcSpendsDateWise',
+            'ppcMetricsAggregated'
+        ],
+        // PPC slice (entity endpoints that remain in batch_3/batch_4 via Mon/Wed/Fri)
+        ppc: ['adsKeywords', 'campaignData'],
+        // Inventory slice (batch 2)
+        inventory: [
+            'RestockinventoryData', 'fbaInventoryPlanningData',
+            'strandedInventoryData', 'inboundNonComplianceData'
+        ],
+        // Performance slice (batch 1/2 — V2/V1 perf + reviews + ledger/reimbursement reads)
+        performance: [
+            'v2data', 'v1data', 'productReview',
+            'ledgerSummaryViewData', 'ledgerDetailViewData', 'fbaReimbursementsData',
+            'calculateShipmentDiscrepancy', 'calculateLostInventoryReimbursement',
+            'calculateDamagedInventoryReimbursement', 'calculateDisposedInventoryReimbursement'
+        ],
+        // MCP slice (batch 3 — shipment + brand + adGroups + MCP SalesOnly + BuyBox)
+        mcp: ['shipment', 'brandData', 'adGroupsData', 'mcpEconomicsData', 'mcpBuyBoxData'],
+        // Finance slice (isolated finance phase)
+        finance: ['financeSync'],
+        // Keywords slice (batch 4)
+        keywords: ['negativeKeywords', 'searchKeywords', 'keywordRecommendations'],
+        // Issues slice (calc_review phase)
+        issues: ['issueSummary', 'productIssues', 'issuesData', 'reviewOrderIngestion', 'reviewRequestSender']
+    };
+
+    /**
+     * Build a single slice payload from a phase's apiData.
+     * Returns null when no matching service ran (so we don't overwrite a
+     * previously-written slice with empty data).
+     */
+    static _buildSlicePayload(sliceKey, apiData) {
+        const keys = ScheduledIntegration._SLICE_CATEGORY_MAP[sliceKey] || [];
+        const services = {};
+        let ran = 0;
+        let succeeded = 0;
+        let failed = 0;
+        const errors = [];
+
+        for (const k of keys) {
+            const v = apiData ? apiData[k] : undefined;
+            if (!v || typeof v !== 'object' || !('success' in v)) continue;
+            ran += 1;
+            services[k] = { success: !!v.success, error: v.error || null };
+            if (v.success) succeeded += 1;
+            else { failed += 1; if (v.error) errors.push({ service: k, error: v.error }); }
+        }
+
+        if (ran === 0) return null;
+
+        return {
+            services,
+            counts: { ran, succeeded, failed },
+            errors,
+            producedAt: new Date().toISOString()
+        };
+    }
+
+    /**
+     * Write the slice documents that belong to a given phase.
+     * Slice writes never throw — DashboardSliceService swallows errors.
+     *
+     * @param {string} phaseName  - e.g. 'sched_batch_1_2'
+     * @param {Array<string>} sliceKeys - which slices this phase produces
+     * @param {Object} args - { userId, country, region, apiData }
+     */
+    static async _writePhaseSlices(phaseName, sliceKeys, args) {
+        const { userId, country, region, apiData } = args;
+        await Promise.all(
+            sliceKeys.map(sliceKey => {
+                const data = ScheduledIntegration._buildSlicePayload(sliceKey, apiData);
+                if (!data) return null;
+                return dashboardSliceService.writeSlice({
+                    userId,
+                    country,
+                    region,
+                    sliceKey,
+                    producedByPhase: phaseName,
+                    data
+                });
+            })
+        );
+    }
+
     /**
      * Phase 2: BATCH_1_2
      * Runs original batches 1 and 2 (reports, PPC, inventory).
@@ -2311,6 +2496,14 @@ class ScheduledIntegration {
                 }
             }
 
+            // DashboardSlice writes (additive, non-fatal): this phase produces the
+            // inventory + performance slices. PPC report data moved to sched_ads phase.
+            await this._writePhaseSlices(
+                'sched_batch_1_2',
+                [SLICE_KEYS.INVENTORY, SLICE_KEYS.PERFORMANCE],
+                { userId, country: Country, region: Region, apiData }
+            );
+
             logger.info(`[ScheduledIntegration:Batch1And2Phase] Completed for user ${userId}`, { servicesRun: Object.keys(phaseApiResults).length });
             return {
                 success: true,
@@ -2323,11 +2516,20 @@ class ScheduledIntegration {
     }
 
     /**
-     * Phase 3: BATCH_3_4
-     * Runs original batches 3 and 4 (shipments, economics, keywords).
+     * Phase: ADS (new, post-split from batch_1_2)
+     *
+     * All PPC async report services: PPCMetrics, PPCProductWise, PPCUnitsSold,
+     * DateWiseSpend, WastedSpendKeywords. These take 40-50 min because of the
+     * async report create → poll → download → parse cycle with Amazon Ads API.
+     *
+     * Isolating them means sched_batch_1_2 completes in 3-5 min (reports + inventory)
+     * instead of 40-50 min, freeing the worker slot much earlier.
+     *
+     * These now run daily (moved from Mon/Wed/Fri) so the dashboard always shows
+     * yesterday's ad spend.
      */
-    static async executeScheduledBatch3And4Phase(userId, Region, Country, phaseData = {}) {
-        logger.info(`[ScheduledIntegration:Batch3And4Phase] Starting for user ${userId}, ${Country}-${Region}`);
+    static async executeScheduledAdsPhase(userId, Region, Country, phaseData = {}) {
+        logger.info(`[ScheduledIntegration:AdsPhase] Starting for user ${userId}, ${Country}-${Region}`);
         try {
             const ctx = await this._prepareForBatchPhase(userId, Region, Country, phaseData);
             const dayOfWeek = phaseData.dayOfWeek !== undefined ? phaseData.dayOfWeek : new Date().getDay();
@@ -2336,7 +2538,7 @@ class ScheduledIntegration {
                 ...ctx, marketplaceIds: ctx.marketplaceIds, userId, Country, Region,
                 productData: { asinArray: ctx.productArrays.asinArray, skuArray: ctx.productArrays.skuArray, ProductDetails: [] },
                 dataToSend: ctx.dataToSend, loggingHelper: null, dayOfWeek,
-                _batchFilter: [3, 4]
+                _batchFilter: ['ads']
             });
 
             const phaseApiResults = {};
@@ -2346,13 +2548,236 @@ class ScheduledIntegration {
                 }
             }
 
-            logger.info(`[ScheduledIntegration:Batch3And4Phase] Completed for user ${userId}`, { servicesRun: Object.keys(phaseApiResults).length });
+            // DashboardSlice write (additive, non-fatal): "ads" slice summarises PPC report results.
+            await this._writePhaseSlices(
+                'sched_ads',
+                [SLICE_KEYS.ADS],
+                { userId, country: Country, region: Region, apiData }
+            );
+
+            logger.info(`[ScheduledIntegration:AdsPhase] Completed for user ${userId}`, { servicesRun: Object.keys(phaseApiResults).length });
             return {
                 success: true,
                 dataForNextPhase: { apiResults: { ...(phaseData.apiResults || {}), ...phaseApiResults } }
             };
         } catch (error) {
-            logger.error(`[ScheduledIntegration:Batch3And4Phase] Failed for user ${userId}:`, error);
+            logger.error(`[ScheduledIntegration:AdsPhase] Failed for user ${userId}:`, error);
+            return { success: false, error: error.message, statusCode: 500 };
+        }
+    }
+
+    /**
+     * LEGACY Phase: BATCH_3_4 (combined)
+     *
+     * Kept ONLY to drain in-flight `sched_batch_3_4` jobs that existed at deploy time
+     * (their pipelines were enqueued before the split). New pipelines never enqueue
+     * this phase — `sched_batch_1_2` now chains to `sched_batch_3`.
+     *
+     * Filter includes `'finance'` so legacy jobs still get finance synced before
+     * advancing to `sched_calc_review` (see `LEGACY_NEXT_PHASE` in scheduledPhases.js).
+     *
+     * Safe to delete once the queue is verified empty of `sched_batch_3_4` jobs:
+     *   redis-cli -n 0 KEYS 'bullmq:user-data-processing:*sched_batch_3_4*'
+     */
+    static async executeScheduledBatch3And4Phase(userId, Region, Country, phaseData = {}) {
+        logger.info(`[ScheduledIntegration:Batch3And4Phase][LEGACY] Starting for user ${userId}, ${Country}-${Region}`);
+        try {
+            const ctx = await this._prepareForBatchPhase(userId, Region, Country, phaseData);
+            const dayOfWeek = phaseData.dayOfWeek !== undefined ? phaseData.dayOfWeek : new Date().getDay();
+
+            const apiData = await this.fetchScheduledApiData({
+                ...ctx, marketplaceIds: ctx.marketplaceIds, userId, Country, Region,
+                productData: { asinArray: ctx.productArrays.asinArray, skuArray: ctx.productArrays.skuArray, ProductDetails: [] },
+                dataToSend: ctx.dataToSend, loggingHelper: null, dayOfWeek,
+                _batchFilter: [3, 'finance', 4]
+            });
+
+            const phaseApiResults = {};
+            for (const [key, value] of Object.entries(apiData)) {
+                if (value && typeof value === 'object' && !Array.isArray(value) && 'success' in value) {
+                    phaseApiResults[key] = { success: value.success, error: value.error || null };
+                }
+            }
+
+            logger.info(`[ScheduledIntegration:Batch3And4Phase][LEGACY] Completed for user ${userId}`, { servicesRun: Object.keys(phaseApiResults).length });
+            return {
+                success: true,
+                dataForNextPhase: { apiResults: { ...(phaseData.apiResults || {}), ...phaseApiResults } }
+            };
+        } catch (error) {
+            logger.error(`[ScheduledIntegration:Batch3And4Phase][LEGACY] Failed for user ${userId}:`, error);
+            return { success: false, error: error.message, statusCode: 500 };
+        }
+    }
+
+    /**
+     * Phase: BATCH_3 (new, post-split)
+     *
+     * Runs shipment, brand, adGroups, MCP SalesOnly, MCP BuyBox.
+     * Excludes Finance Sync (moved to its own `sched_finance` phase).
+     * Typical duration: ~3-5 min. Releases the worker slot before Finance Sync polling.
+     */
+    static async executeScheduledBatch3Phase(userId, Region, Country, phaseData = {}) {
+        logger.info(`[ScheduledIntegration:Batch3Phase] Starting for user ${userId}, ${Country}-${Region}`);
+        try {
+            const ctx = await this._prepareForBatchPhase(userId, Region, Country, phaseData);
+            const dayOfWeek = phaseData.dayOfWeek !== undefined ? phaseData.dayOfWeek : new Date().getDay();
+
+            const apiData = await this.fetchScheduledApiData({
+                ...ctx, marketplaceIds: ctx.marketplaceIds, userId, Country, Region,
+                productData: { asinArray: ctx.productArrays.asinArray, skuArray: ctx.productArrays.skuArray, ProductDetails: [] },
+                dataToSend: ctx.dataToSend, loggingHelper: null, dayOfWeek,
+                _batchFilter: [3]
+            });
+
+            const phaseApiResults = {};
+            for (const [key, value] of Object.entries(apiData)) {
+                if (value && typeof value === 'object' && !Array.isArray(value) && 'success' in value) {
+                    phaseApiResults[key] = { success: value.success, error: value.error || null };
+                }
+            }
+
+            // DashboardSlice write (additive, non-fatal): "mcp" slice rolls up shipment,
+            // brand, adGroups, MCP SalesOnly and MCP BuyBox into one summary doc.
+            await this._writePhaseSlices(
+                'sched_batch_3',
+                [SLICE_KEYS.MCP],
+                { userId, country: Country, region: Region, apiData }
+            );
+
+            logger.info(`[ScheduledIntegration:Batch3Phase] Completed for user ${userId}`, { servicesRun: Object.keys(phaseApiResults).length });
+            return {
+                success: true,
+                dataForNextPhase: { apiResults: { ...(phaseData.apiResults || {}), ...phaseApiResults } }
+            };
+        } catch (error) {
+            logger.error(`[ScheduledIntegration:Batch3Phase] Failed for user ${userId}:`, error);
+            return { success: false, error: error.message, statusCode: 500 };
+        }
+    }
+
+    /**
+     * Phase: FINANCE (new, post-split)
+     *
+     * Isolated execution of `syncFinanceData` ONLY. This phase polls Amazon for
+     * 10-25 minutes (Sales Report + Finance API). Isolating it means the worker
+     * slot it pins doesn't block any other batch services — batch 3 has already
+     * released its slot, and batch 4 (keywords) gets its own slot from a different
+     * worker via the next BullMQ job hop.
+     *
+     * If Finance Sync fails, the pipeline still advances to `sched_batch_4`
+     * (worker.js never fails the pipeline on a single phase failure).
+     */
+    static async executeScheduledFinancePhase(userId, Region, Country, phaseData = {}) {
+        logger.info(`[ScheduledIntegration:FinancePhase] Starting for user ${userId}, ${Country}-${Region}`);
+        try {
+            const ctx = await this._prepareForBatchPhase(userId, Region, Country, phaseData);
+            const dayOfWeek = phaseData.dayOfWeek !== undefined ? phaseData.dayOfWeek : new Date().getDay();
+
+            const apiData = await this.fetchScheduledApiData({
+                ...ctx, marketplaceIds: ctx.marketplaceIds, userId, Country, Region,
+                productData: { asinArray: ctx.productArrays.asinArray, skuArray: ctx.productArrays.skuArray, ProductDetails: [] },
+                dataToSend: ctx.dataToSend, loggingHelper: null, dayOfWeek,
+                _batchFilter: ['finance']
+            });
+
+            const phaseApiResults = {};
+            for (const [key, value] of Object.entries(apiData)) {
+                if (value && typeof value === 'object' && !Array.isArray(value) && 'success' in value) {
+                    phaseApiResults[key] = { success: value.success, error: value.error || null };
+                }
+            }
+
+            // DashboardSlice write (additive, non-fatal). The finance slice also records
+            // the synced date range so finalize can show data-freshness on the dashboard.
+            const financeRaw = apiData?.financeSync || null;
+            const financeSummary = (financeRaw && financeRaw.success && financeRaw.data) ? {
+                status: financeRaw.data.status || null,
+                startDate: financeRaw.data.startDate || null,
+                endDate: financeRaw.data.endDate || null
+            } : null;
+            await this._writePhaseSlices(
+                'sched_finance',
+                [SLICE_KEYS.FINANCE],
+                {
+                    userId,
+                    country: Country,
+                    region: Region,
+                    // Inject the summary so _buildSlicePayload uses it via the financeSync entry
+                    apiData
+                }
+            );
+            // Augment the finance slice with the synced date range (cheap second write).
+            if (financeSummary) {
+                await dashboardSliceService.writeSlice({
+                    userId,
+                    country: Country,
+                    region: Region,
+                    sliceKey: SLICE_KEYS.FINANCE,
+                    producedByPhase: 'sched_finance',
+                    data: {
+                        services: { financeSync: { success: true, error: null } },
+                        counts: { ran: 1, succeeded: 1, failed: 0 },
+                        errors: [],
+                        sync: financeSummary,
+                        producedAt: new Date().toISOString()
+                    }
+                });
+            }
+
+            logger.info(`[ScheduledIntegration:FinancePhase] Completed for user ${userId}`, { servicesRun: Object.keys(phaseApiResults).length });
+            return {
+                success: true,
+                dataForNextPhase: { apiResults: { ...(phaseData.apiResults || {}), ...phaseApiResults } }
+            };
+        } catch (error) {
+            logger.error(`[ScheduledIntegration:FinancePhase] Failed for user ${userId}:`, error);
+            return { success: false, error: error.message, statusCode: 500 };
+        }
+    }
+
+    /**
+     * Phase: BATCH_4 (new, post-split)
+     *
+     * Runs negativeKeywords, searchKeywords, keywordRecommendations.
+     * In the legacy combined batch_3_4 these waited behind Finance Sync polling
+     * for 10-25 min for no reason; now they start as soon as Batch 3 finishes
+     * (worker slot freed) regardless of Finance phase state.
+     */
+    static async executeScheduledBatch4Phase(userId, Region, Country, phaseData = {}) {
+        logger.info(`[ScheduledIntegration:Batch4Phase] Starting for user ${userId}, ${Country}-${Region}`);
+        try {
+            const ctx = await this._prepareForBatchPhase(userId, Region, Country, phaseData);
+            const dayOfWeek = phaseData.dayOfWeek !== undefined ? phaseData.dayOfWeek : new Date().getDay();
+
+            const apiData = await this.fetchScheduledApiData({
+                ...ctx, marketplaceIds: ctx.marketplaceIds, userId, Country, Region,
+                productData: { asinArray: ctx.productArrays.asinArray, skuArray: ctx.productArrays.skuArray, ProductDetails: [] },
+                dataToSend: ctx.dataToSend, loggingHelper: null, dayOfWeek,
+                _batchFilter: [4]
+            });
+
+            const phaseApiResults = {};
+            for (const [key, value] of Object.entries(apiData)) {
+                if (value && typeof value === 'object' && !Array.isArray(value) && 'success' in value) {
+                    phaseApiResults[key] = { success: value.success, error: value.error || null };
+                }
+            }
+
+            // DashboardSlice write (additive, non-fatal): "keywords" slice (neg/search/recs).
+            await this._writePhaseSlices(
+                'sched_batch_4',
+                [SLICE_KEYS.KEYWORDS],
+                { userId, country: Country, region: Region, apiData }
+            );
+
+            logger.info(`[ScheduledIntegration:Batch4Phase] Completed for user ${userId}`, { servicesRun: Object.keys(phaseApiResults).length });
+            return {
+                success: true,
+                dataForNextPhase: { apiResults: { ...(phaseData.apiResults || {}), ...phaseApiResults } }
+            };
+        } catch (error) {
+            logger.error(`[ScheduledIntegration:Batch4Phase] Failed for user ${userId}:`, error);
             return { success: false, error: error.message, statusCode: 500 };
         }
     }
@@ -2394,6 +2819,15 @@ class ScheduledIntegration {
                 }
             }
 
+            // DashboardSlice write (additive, non-fatal): "issues" slice rolls up the
+            // calculator outputs (issue summary, productIssues, issuesData) + review
+            // ingestion/sender. This is the last per-phase slice before finalize.
+            await this._writePhaseSlices(
+                'sched_calc_review',
+                [SLICE_KEYS.ISSUES],
+                { userId, country: Country, region: Region, apiData }
+            );
+
             logger.info(`[ScheduledIntegration:CalcReviewPhase] Completed for user ${userId}`, { servicesRun: Object.keys(phaseApiResults).length });
             return {
                 success: true,
@@ -2406,9 +2840,30 @@ class ScheduledIntegration {
     }
 
     /**
-     * Phase 5: FINALIZE
-     * Run Analyse, update cache, add account history, complete tracking,
-     * mark daily update complete.
+     * Phase 7: FINALIZE
+     *
+     * Two execution modes, controlled by env flag `USE_SLICE_ASSEMBLER`:
+     *
+     *   1. **Slice-assembler mode** (when `USE_SLICE_ASSEMBLER=true` AND slices
+     *      meet `SLICE_MIN_FOR_ASSEMBLY`):
+     *      - Read all DashboardSlice docs in a single Mongo query
+     *      - Merge them into a dashboard object
+     *      - Compute lightweight cross-slice metrics (health %, service totals)
+     *      - Cache the merged dashboard at the standard `analyse_data:...` key
+     *      - Write account history from slice rollups
+     *      - SKIPS `Analyse()` — this is the "lightweight finalize" target
+     *
+     *   2. **Legacy mode** (default, or when slices are insufficient or assembler
+     *      throws / returns failure):
+     *      - Runs `Analyse()` as before, calls `analyseData()`, caches result,
+     *      - Writes account history from Analyse output
+     *      - Identical behaviour to pre-V2 finalize — guaranteed dashboard parity
+     *
+     * Rollout note: ship with `USE_SLICE_ASSEMBLER=false` (default). Verify
+     * `db.dashboardslices.countDocuments()` grows per phase tick for ~24h. Once
+     * slice payloads have been enriched to match the React dashboard contract,
+     * flip the flag per environment. Slice assembler failures auto-fallback to
+     * legacy, so an unexpected slice gap can't break finalize.
      */
     static async executeScheduledFinalizePhase(userId, Region, Country, phaseData = {}) {
         logger.info(`[ScheduledIntegration:FinalizePhase] Starting for user ${userId}, ${Country}-${Region}`);
@@ -2417,7 +2872,7 @@ class ScheduledIntegration {
         const apiResults = phaseData.apiResults || {};
 
         try {
-            // Build a summary from accumulated apiResults across all phases
+            // Build a summary from accumulated apiResults across all phases (used by both modes)
             const successful = [];
             const failed = [];
             for (const [key, result] of Object.entries(apiResults)) {
@@ -2432,7 +2887,7 @@ class ScheduledIntegration {
                 totalServices, successful: successful.length, failed: failed.length, successPercentage: `${successPercentage}%`
             });
 
-            // Complete DataFetchTracking
+            // Complete DataFetchTracking (mode-agnostic — same in both paths)
             if (trackingEntryId) {
                 try {
                     if (failed.length === 0 && successful.length > 0) {
@@ -2451,6 +2906,40 @@ class ScheduledIntegration {
                 await this.handleSuccess(userId, Country, Region);
             }
 
+            // ============== Mode selection ==============
+            const useAssembler = process.env.USE_SLICE_ASSEMBLER === 'true';
+            let assemblerMode = 'legacy';
+            let assemblerSummary = null;
+
+            if (useAssembler) {
+                try {
+                    const sliceCheck = await dashboardSliceService.hasMinimumSlices(userId, Country, Region);
+                    logger.info('[ScheduledIntegration:FinalizePhase] Slice readiness check', {
+                        sliceCount: sliceCheck.count,
+                        threshold: dashboardSliceService.SLICE_MIN_FOR_ASSEMBLY,
+                        ready: sliceCheck.ready,
+                        sliceKeys: sliceCheck.sliceKeys
+                    });
+                    if (sliceCheck.ready) {
+                        const sliced = await this._finalizeFromSlices(userId, Country, Region, sliceCheck);
+                        if (sliced && sliced.success) {
+                            assemblerMode = 'sliced';
+                            assemblerSummary = sliced;
+                        } else {
+                            logger.warn('[ScheduledIntegration:FinalizePhase] Slice assembler returned non-success; falling back to Analyse()');
+                        }
+                    }
+                } catch (assemblerError) {
+                    logger.error('[ScheduledIntegration:FinalizePhase] Slice assembler threw; falling back to Analyse()', {
+                        error: assemblerError?.message,
+                        stack: assemblerError?.stack
+                    });
+                }
+            }
+
+            // ============== Legacy mode (Analyse-based) ==============
+            // Runs when the flag is off, slices are insufficient, or assembler failed.
+            if (assemblerMode !== 'sliced') {
             // Run Analyse once (used for both account history and Redis cache)
             const { AnalyseService } = require('../main/Analyse.js');
             const analysisResult = await AnalyseService.Analyse(userId, Country, Region);
@@ -2487,9 +2976,10 @@ class ScheduledIntegration {
                 logger.info(`[ScheduledIntegration:FinalizePhase] Updated Redis cache for ${cacheKey}`);
             } catch (cacheError) {
                 logger.error('[ScheduledIntegration:FinalizePhase] Cache update error', { error: cacheError.message });
+                }
             }
 
-            // Mark daily update complete
+            // Mark daily update complete (mode-agnostic)
             const { UserSchedulingService } = require('../BackgroundJobs/UserSchedulingService.js');
             await UserSchedulingService.markDailyUpdateComplete(userId, Country, Region);
 
@@ -2501,10 +2991,18 @@ class ScheduledIntegration {
                 } catch (le) { logger.warn('[ScheduledIntegration:FinalizePhase] Session end error', { error: le.message }); }
             }
 
-            logger.info(`[ScheduledIntegration:FinalizePhase] Completed for user ${userId}, ${Country}-${Region}`);
+            logger.info(`[ScheduledIntegration:FinalizePhase] Completed for user ${userId}, ${Country}-${Region}`, { mode: assemblerMode });
             return {
                 success: true,
-                summary: { overallSuccess, successPercentage, totalServices, successful: successful.length, failed: failed.length }
+                summary: {
+                    overallSuccess,
+                    successPercentage,
+                    totalServices,
+                    successful: successful.length,
+                    failed: failed.length,
+                    finalizeMode: assemblerMode,
+                    assembler: assemblerSummary
+                }
             };
         } catch (error) {
             logger.error(`[ScheduledIntegration:FinalizePhase] Failed for user ${userId}:`, error);
@@ -2516,6 +3014,98 @@ class ScheduledIntegration {
             }
             return { success: false, error: error.message, statusCode: 500 };
         }
+    }
+
+    /**
+     * Finalize implementation that reads DashboardSlice docs and merges them
+     * into a dashboard payload WITHOUT calling Analyse().
+     *
+     * This is gated behind `USE_SLICE_ASSEMBLER=true` in the parent method.
+     * Returns `{ success: false }` on any internal error so the parent can
+     * fall back to the legacy Analyse() path.
+     */
+    static async _finalizeFromSlices(userId, country, region, sliceCheck) {
+        logger.info('[ScheduledIntegration:FinalizePhase:Sliced] Assembling dashboard from slices', {
+            userId, country, region, sliceCount: sliceCheck.count
+        });
+
+        const slices = await dashboardSliceService.readAllSlices(userId, country, region);
+        if (!slices || Object.keys(slices).length === 0) {
+            logger.warn('[ScheduledIntegration:FinalizePhase:Sliced] readAllSlices returned empty — falling back');
+            return { success: false, reason: 'no_slices' };
+        }
+
+        // Merge: dashboard is a map of sliceKey → slice.data
+        const dashboard = { ...slices };
+
+        // Lightweight cross-slice metrics
+        let totalServicesRun = 0;
+        let totalServicesFailed = 0;
+        const allErrors = [];
+        for (const slice of Object.values(slices)) {
+            if (!slice || typeof slice !== 'object') continue;
+            if (slice.counts) {
+                totalServicesRun += (slice.counts.ran || 0);
+                totalServicesFailed += (slice.counts.failed || 0);
+            }
+            if (Array.isArray(slice.errors)) {
+                allErrors.push(...slice.errors);
+            }
+        }
+        const healthPercentage = totalServicesRun > 0
+            ? Math.round(((totalServicesRun - totalServicesFailed) / totalServicesRun) * 100)
+            : 0;
+
+        const listings = slices.listings || {};
+        const totalProducts = (listings.activeProductCount || 0) + (listings.inactiveProductCount || 0);
+
+        dashboard._slicedMeta = {
+            sliceCount: sliceCheck.count,
+            sliceKeys: sliceCheck.sliceKeys,
+            totalServicesRun,
+            totalServicesFailed,
+            healthPercentage,
+            assembledAt: new Date().toISOString(),
+            assemblerVersion: 1
+        };
+
+        // Write to the canonical Redis cache key so dashboard reads pick it up.
+        // (If the slice contract isn't yet rich enough for the React app, set
+        //  USE_SLICE_ASSEMBLER=false — the legacy Analyse path will resume.)
+        try {
+            const { getRedisClient } = require('../../config/redisConn.js');
+            const redisClient = getRedisClient();
+            const cacheKey = `analyse_data:${userId}:${country}:${region}:null`;
+            await redisClient.setEx(cacheKey, 3600, JSON.stringify(dashboard));
+            logger.info(`[ScheduledIntegration:FinalizePhase:Sliced] Wrote sliced dashboard to ${cacheKey}`);
+        } catch (cacheError) {
+            logger.error('[ScheduledIntegration:FinalizePhase:Sliced] Cache write failed', { error: cacheError?.message });
+            return { success: false, reason: 'cache_write_failed' };
+        }
+
+        // Account history from slice rollups (lightweight)
+        try {
+            const { addAccountHistory } = require('../History/addAccountHistory.js');
+            const issuesSlice = slices.issues || {};
+            const productsWithErrors = (issuesSlice.counts && issuesSlice.counts.failed) || 0;
+            await addAccountHistory(
+                userId, country, region,
+                healthPercentage, totalProducts, productsWithErrors, totalServicesFailed
+            );
+        } catch (historyError) {
+            logger.error('[ScheduledIntegration:FinalizePhase:Sliced] Account history error', { error: historyError?.message });
+            // History failure is non-fatal — sliced dashboard already cached.
+        }
+
+        return {
+            success: true,
+            mode: 'sliced',
+            healthPercentage,
+            totalProducts,
+            totalServicesRun,
+            totalServicesFailed,
+            sliceCount: sliceCheck.count
+        };
     }
 }
 
