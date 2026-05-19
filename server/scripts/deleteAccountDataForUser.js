@@ -72,7 +72,7 @@ const ExpenseAmazonFeeCategoryAgg = require('../models/finance/ExpenseAmazonFeeC
 const AsinWiseSalesRun = require('../models/finance/AsinWiseSalesRunModel.js');
 const AsinWiseSalesItem = require('../models/finance/AsinWiseSalesItemModel.js');
 const AsinWiseSalesDateItem = require('../models/finance/AsinWiseSalesDateItemModel.js');
-const SalesOrderId = require('../models/finance/SalesorderidModel.js');
+const SalesOrderId = require('../models/finance/SalesOrderIdModel.js');
 
 // ── Inventory ──
 const ProductWiseFBAData = require('../models/inventory/ProductWiseFBADataModel.js');
