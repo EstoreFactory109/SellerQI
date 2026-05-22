@@ -228,6 +228,12 @@ async function processScheduledPhase(job) {
             case scheduledPhases.PHASES.BATCH_3_4_LEGACY:
                 raw = await ScheduledIntegration.executeScheduledBatch3And4Phase(userId, region, country, phaseData || {});
                 break;
+            // One-shot ads catch-up enqueued by freshnessSweeper for missing past
+            // PPC days. NOT part of PHASE_ORDER, so the worker will NOT chain to
+            // another phase after this completes (getNextPhase returns null).
+            case scheduledPhases.PHASES.ADS_CATCHUP:
+                raw = await ScheduledIntegration.executeAdsCatchupPhase(userId, region, country, phaseData || {});
+                break;
             case scheduledPhases.PHASES.CALC_REVIEW:
                 raw = await ScheduledIntegration.executeScheduledCalcReviewPhase(userId, region, country, phaseData || {});
                 break;
@@ -270,10 +276,14 @@ async function processScheduledPhase(job) {
 
     if (nextPhase) {
         try {
+            // Always pass the phase outcome (even on failure) so the next phase
+            // and the FinalizePhase can read accumulated apiResults — including
+            // failure records. The previous behaviour dropped the failing
+            // phase's results, hiding partial outages from finalize.
             const nextJobData = scheduledPhases.createNextPhaseJobData(
                 nextPhase,
                 job.data,
-                phaseSucceeded ? phaseOutcome : {}
+                phaseOutcome
             );
             const nextJobId = scheduledPhases.generatePhaseJobId(effectiveParentJobId, nextPhase);
 

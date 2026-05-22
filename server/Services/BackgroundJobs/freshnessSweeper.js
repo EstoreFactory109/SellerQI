@@ -1,0 +1,267 @@
+/**
+ * freshnessSweeper.js
+ *
+ * Ads-only catch-up sweeper.
+ *
+ * The daily ads phase (`sched_ads`) only fetches yesterday's PPC data. Unlike
+ * finance (which incremental-fills up to a 7-day gap via FinanceSyncLog), ads
+ * has no built-in gap recovery — a day that fails past the 4-attempt cap is
+ * permanently missing in PPCMetrics until something fills it.
+ *
+ * This sweeper bridges that gap:
+ *
+ *   For each connected account (Seller with valid Ads refreshToken):
+ *     - Look at PPCMetrics rows for the last ADS_LOOKBACK_DAYS days.
+ *     - For each missing date (excluding yesterday; the daily handles that):
+ *         - Enqueue a `sched_ads_catchup` BullMQ job for that single date.
+ *
+ * Internal ads logic guarantee:
+ *   This module does NOT modify GetPPCMetrics.js or any ads service file.
+ *   It only enqueues jobs that route through worker.js → ScheduledIntegration.
+ *   executeAdsCatchupPhase(), which invokes the existing functions with custom
+ *   per-day date arguments.
+ *
+ * Dedup / quota safety:
+ *   - BullMQ `jobId` is deterministic per (account, date), so the same gap is
+ *     never enqueued twice.
+ *   - Per-tick cap (MAX_ENQUEUES_PER_TICK) protects against floods.
+ *   - Yesterday is excluded — the daily ads phase owns that date.
+ *
+ * Called by `freshnessSweeperStandalone.js` (PM2 app) on a cron schedule.
+ */
+
+const Seller = require('../../models/user-auth/sellerCentralModel.js');
+const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
+const { getQueue } = require('./queue.js');
+const scheduledPhases = require('./scheduledPhases.js');
+const logger = require('../../utils/Logger.js');
+
+// How far back to scan for missing days.
+const ADS_LOOKBACK_DAYS = 7;
+
+// Hard cap on enqueues per sweeper tick. Protects BullMQ from flooding when
+// many accounts have many missing days after a long outage.
+const MAX_ENQUEUES_PER_TICK = 50;
+
+// Job options for catch-up jobs.
+const CATCHUP_JOB_OPTS = {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 60_000 },
+    // 2-hour timeout matches the worker's normal phase timeout. Ads async
+    // reports usually finish in 30-45 minutes per call.
+    timeout: 2 * 60 * 60 * 1000,
+    // Keep failed jobs around for a week so the sweeper sees them via
+    // queue.getJob(jobId) and doesn't re-enqueue every 2 hours. After a week,
+    // failed jobs are purged; if the date is still missing then, sweeper will
+    // try again. This bounds re-attempts to ~once per week per permanently-
+    // failing date.
+    removeOnComplete: { age: 24 * 3600, count: 200 },
+    removeOnFail: { age: 7 * 24 * 3600, count: 1000 }
+};
+
+const PACIFIC_OFFSET_MS = 7 * 60 * 60 * 1000;
+
+/**
+ * UTC yesterday in Pacific (matches what the daily ads phase fetches).
+ */
+function pacificYesterdayISO() {
+    const ms = Date.now() - PACIFIC_OFFSET_MS - 24 * 60 * 60 * 1000;
+    return new Date(ms).toISOString().substring(0, 10);
+}
+
+/**
+ * Array of YYYY-MM-DD strings for the last `lookbackDays` ending at
+ * yesterday-Pacific (exclusive of today). Yesterday itself is INCLUDED here
+ * because the sweeper may run before the daily ads phase has fired for the
+ * day. The "exclude yesterday if it just synced" check happens later.
+ */
+function lastNDates(lookbackDays) {
+    const end = pacificYesterdayISO();
+    const out = [];
+    const endDate = new Date(`${end}T00:00:00.000Z`);
+    for (let i = 0; i < lookbackDays; i++) {
+        const d = new Date(endDate);
+        d.setUTCDate(d.getUTCDate() - i);
+        out.push(d.toISOString().substring(0, 10));
+    }
+    return out;
+}
+
+/**
+ * Build deterministic jobId for catch-up jobs. Same (account, date) → same id.
+ */
+function buildCatchupJobId(userId, country, region, date) {
+    return `ads-catchup-${userId}-${country}-${region}-${date}`;
+}
+
+/**
+ * Per-account: find PPCMetrics dates already present in the lookback window
+ * and return the *missing* dates that need catching up.
+ *
+ * `excludeYesterday` is true after we've confirmed the daily ads phase ran
+ * today (no useful info yet — we just rely on existing job dedup).
+ */
+async function findMissingDatesForAccount(userId, country, region) {
+    const lookback = lastNDates(ADS_LOOKBACK_DAYS);
+    const userIdStr = userId.toString();
+
+    const present = await PPCMetrics.find({
+        userId: userIdStr,
+        country,
+        region,
+        metricDate: { $in: lookback }
+    }).select({ metricDate: 1, _id: 0 }).lean();
+
+    const presentSet = new Set(present.map(p => p.metricDate));
+    const yesterday = pacificYesterdayISO();
+
+    // Exclude yesterday from catch-up — that's the daily phase's job.
+    return lookback.filter(d => d !== yesterday && !presentSet.has(d));
+}
+
+/**
+ * Skip enqueue if a job for (account, date) is already in any pending state.
+ * For completed/failed past jobs we let BullMQ's removeOn* purge them
+ * eventually — until then, sweeper sees them and skips, which throttles
+ * re-attempts on permanently broken dates to once per week.
+ */
+async function shouldSkipEnqueue(queue, jobId) {
+    const existing = await queue.getJob(jobId);
+    if (!existing) return false;
+
+    let state;
+    try {
+        state = await existing.getState();
+    } catch (_) {
+        return false;
+    }
+
+    if (state === 'waiting' || state === 'active' || state === 'delayed') {
+        return true; // in flight — definitely skip
+    }
+    if (state === 'completed' || state === 'failed') {
+        // Already attempted recently. Skip until BullMQ purges.
+        return true;
+    }
+    // Unknown state — skip defensively.
+    return true;
+}
+
+/**
+ * Main entry: scan all connected ads accounts, enqueue catch-up jobs for
+ * missing past dates, capped by MAX_ENQUEUES_PER_TICK.
+ *
+ * Returns a summary object suitable for logging.
+ */
+async function sweep() {
+    const startedAt = Date.now();
+    const queue = getQueue();
+
+    const summary = {
+        accountsScanned: 0,
+        accountsWithMissing: 0,
+        candidateDates: 0,
+        enqueued: 0,
+        skippedDup: 0,
+        skippedCap: 0,
+        errors: 0,
+        durationMs: 0
+    };
+
+    // Pull all sellers with at least one ads-connected account.
+    // We hold the entire list in memory; for current scale (~thousands of
+    // accounts) this is fine. If it grows, paginate this.
+    const sellers = await Seller.find(
+        { 'sellerAccount.adsRefreshToken': { $exists: true, $ne: null, $ne: '' } },
+        { User: 1, sellerAccount: 1 }
+    ).lean();
+
+    for (const seller of sellers) {
+        if (summary.enqueued >= MAX_ENQUEUES_PER_TICK) {
+            // Continue scanning to count remaining candidates, but stop enqueueing.
+            // This gives an honest "we hit the cap" signal in the summary.
+        }
+        if (!Array.isArray(seller.sellerAccount)) continue;
+
+        for (const acct of seller.sellerAccount) {
+            if (!acct || !acct.country || !acct.region) continue;
+            if (!acct.adsRefreshToken) continue;
+
+            const country = acct.country.toUpperCase();
+            const region = acct.region.toUpperCase();
+
+            summary.accountsScanned++;
+
+            let missing;
+            try {
+                missing = await findMissingDatesForAccount(seller.User, country, region);
+            } catch (err) {
+                summary.errors++;
+                logger.warn(`[FreshnessSweeper] Missing-date scan failed for ${seller.User} ${country}-${region}: ${err.message}`);
+                continue;
+            }
+
+            if (missing.length === 0) continue;
+            summary.accountsWithMissing++;
+            summary.candidateDates += missing.length;
+
+            // Sort oldest-first so older gaps get filled before newer ones.
+            missing.sort();
+
+            for (const date of missing) {
+                if (summary.enqueued >= MAX_ENQUEUES_PER_TICK) {
+                    summary.skippedCap++;
+                    continue;
+                }
+
+                const jobId = buildCatchupJobId(seller.User, country, region, date);
+                let skip;
+                try {
+                    skip = await shouldSkipEnqueue(queue, jobId);
+                } catch (_) {
+                    skip = false;
+                }
+                if (skip) {
+                    summary.skippedDup++;
+                    continue;
+                }
+
+                const jobData = {
+                    userId: seller.User.toString(),
+                    country,
+                    region,
+                    phase: scheduledPhases.PHASES.ADS_CATCHUP,
+                    parentJobId: jobId, // catch-up is its own parent — no chaining
+                    enqueuedAt: new Date().toISOString(),
+                    enqueuedBy: 'freshness-sweeper',
+                    phaseData: { catchupDate: date }
+                };
+
+                try {
+                    await queue.add('process-user-data', jobData, {
+                        jobId,
+                        ...CATCHUP_JOB_OPTS
+                    });
+                    summary.enqueued++;
+                    logger.info(`[FreshnessSweeper] Enqueued ads catch-up: ${seller.User} ${country}-${region} ${date}`);
+                } catch (err) {
+                    summary.errors++;
+                    logger.warn(`[FreshnessSweeper] Enqueue failed for ${jobId}: ${err.message}`);
+                }
+            }
+        }
+    }
+
+    summary.durationMs = Date.now() - startedAt;
+    logger.info('[FreshnessSweeper] Sweep complete', summary);
+    return summary;
+}
+
+module.exports = {
+    sweep,
+    findMissingDatesForAccount,
+    buildCatchupJobId,
+    // Exposed for tests / scripts
+    ADS_LOOKBACK_DAYS,
+    MAX_ENQUEUES_PER_TICK
+};

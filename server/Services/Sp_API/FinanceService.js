@@ -30,6 +30,81 @@ const POLL_INTERVAL_MS = 15000;
 const MAX_POLL_ATTEMPTS = 40;
 const PACIFIC_OFFSET_HOURS = 7;
 
+// ─────────────────────────────────────────────
+// TOKEN MANAGER — auto-renew SP-API access tokens
+//
+// SP-API LWA access tokens expire after ~1 hour. The full daily sync
+// chain (INIT → BATCH → ADS → FINANCE) routinely exceeds that, so a
+// token minted at the start of the pipeline is often already dead by
+// the time Finance runs (or the long Report poll crosses the boundary).
+//
+// This helper:
+//   - Proactively refreshes when the in-memory token is near expiry
+//   - Transparently refreshes + retries on "Unauthorized / token expired"
+//     responses from SP-API
+//
+// All existing behaviour is preserved — callers that pass an explicit
+// accessToken still get the same flow; the manager just guarantees it
+// stays fresh and never bubbles an expired-token failure to the user.
+// ─────────────────────────────────────────────
+const ACCESS_TOKEN_TTL_MS = 55 * 60 * 1000; // refresh 5 min before 60-min Amazon TTL
+
+function isAccessTokenExpiredError(err) {
+  if (!err) return false;
+  const msg = (err.message || String(err)).toLowerCase();
+  return (
+    msg.includes('access token you provided has expired') ||
+    msg.includes('access token has expired') ||
+    msg.includes('"code":"unauthorized"') ||
+    msg.includes('invalidaccesstoken') ||
+    (msg.includes('unauthorized') && msg.includes('access'))
+  );
+}
+
+function createTokenManager({ accessToken, refreshToken, clientId, clientSecret }) {
+  let current = accessToken || null;
+  // An inherited token has unknown age. Treat it as having ~5 min of life left
+  // so the very next staleness check will refresh if the call takes a while,
+  // but we still try the inherited token first (avoids an unnecessary refresh).
+  let issuedAt = accessToken ? Date.now() - ACCESS_TOKEN_TTL_MS + (5 * 60 * 1000) : 0;
+
+  async function refresh() {
+    if (!refreshToken || !clientId || !clientSecret) {
+      throw new Error('[FinanceService] Cannot refresh SP-API access token — missing refreshToken/clientId/clientSecret.');
+    }
+    logger.info('[FinanceService] Refreshing SP-API access token…');
+    current = await getAccessToken(clientId, clientSecret, refreshToken);
+    issuedAt = Date.now();
+    return current;
+  }
+
+  async function getValidToken() {
+    if (!current || (Date.now() - issuedAt) >= ACCESS_TOKEN_TTL_MS) {
+      await refresh();
+    }
+    return current;
+  }
+
+  async function withRetry(fn) {
+    const token = await getValidToken();
+    try {
+      return await fn(token);
+    } catch (err) {
+      if (!isAccessTokenExpiredError(err)) throw err;
+      logger.warn(`[FinanceService] SP-API call failed with expired token. Refreshing and retrying once… (${err.message})`);
+      const fresh = await refresh();
+      return fn(fresh);
+    }
+  }
+
+  return {
+    get token() { return current; },
+    getValidToken,
+    refresh,
+    withRetry,
+  };
+}
+
 // Settlement lag buffer by region.
 const SETTLEMENT_LAG = {
   NA: { beforeDays: 5 },
@@ -132,31 +207,44 @@ function downloadContent(url, isGzip) {
 
 // ═══════════════════════════════════════════════
 // SALES REPORT API
+//
+// All three calls below go through `tokenManager.withRetry` so an
+// expired access token is refreshed transparently. `pollReportStatus`
+// loops for up to 10 minutes and can easily cross the 60-min token
+// boundary if the pipeline has been running a while — each poll
+// validates/refreshes independently.
 // ═══════════════════════════════════════════════
-async function createReport(accessToken, baseUrl, marketplaceId, startDate, endDate) {
+async function createReport(tokenManager, baseUrl, marketplaceId, startDate, endDate) {
   const postData = JSON.stringify({ reportType: REPORT_TYPE, marketplaceIds: [marketplaceId], dataStartTime: startDate, dataEndTime: endDate });
-  const res = await httpsRequest({ hostname: baseUrl, path: '/reports/2021-06-30/reports', method: 'POST', headers: { 'x-amz-access-token': accessToken, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) } }, postData);
-  if (res.body.errors) throw new Error(`createReport failed: ${JSON.stringify(res.body.errors)}`);
-  return res.body.reportId;
+  return tokenManager.withRetry(async (accessToken) => {
+    const res = await httpsRequest({ hostname: baseUrl, path: '/reports/2021-06-30/reports', method: 'POST', headers: { 'x-amz-access-token': accessToken, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) } }, postData);
+    if (res.body.errors) throw new Error(`createReport failed: ${JSON.stringify(res.body.errors)}`);
+    return res.body.reportId;
+  });
 }
 
-async function pollReportStatus(accessToken, baseUrl, reportId) {
+async function pollReportStatus(tokenManager, baseUrl, reportId) {
   for (let attempt = 1; attempt <= MAX_POLL_ATTEMPTS; attempt++) {
-    const res = await httpsRequest({ hostname: baseUrl, path: `/reports/2021-06-30/reports/${encodeURIComponent(reportId)}`, method: 'GET', headers: { 'x-amz-access-token': accessToken } });
-    if (res.body.errors) throw new Error(`getReport failed: ${JSON.stringify(res.body.errors)}`);
-    const status = res.body.processingStatus;
+    const body = await tokenManager.withRetry(async (accessToken) => {
+      const res = await httpsRequest({ hostname: baseUrl, path: `/reports/2021-06-30/reports/${encodeURIComponent(reportId)}`, method: 'GET', headers: { 'x-amz-access-token': accessToken } });
+      if (res.body.errors) throw new Error(`getReport failed: ${JSON.stringify(res.body.errors)}`);
+      return res.body;
+    });
+    const status = body.processingStatus;
     logger.info(`[Report] Poll #${attempt}: status = ${status}`);
-    if (status === 'DONE') return res.body.reportDocumentId;
+    if (status === 'DONE') return body.reportDocumentId;
     if (status === 'CANCELLED' || status === 'FATAL') throw new Error(`Report failed: ${status}`);
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
   }
   throw new Error(`Report did not complete within ${(MAX_POLL_ATTEMPTS * POLL_INTERVAL_MS) / 1000}s`);
 }
 
-async function getReportDocumentUrl(accessToken, baseUrl, reportDocumentId) {
-  const res = await httpsRequest({ hostname: baseUrl, path: `/reports/2021-06-30/documents/${encodeURIComponent(reportDocumentId)}`, method: 'GET', headers: { 'x-amz-access-token': accessToken } });
-  if (res.body.errors) throw new Error(`getReportDocument failed: ${JSON.stringify(res.body.errors)}`);
-  return res.body;
+async function getReportDocumentUrl(tokenManager, baseUrl, reportDocumentId) {
+  return tokenManager.withRetry(async (accessToken) => {
+    const res = await httpsRequest({ hostname: baseUrl, path: `/reports/2021-06-30/documents/${encodeURIComponent(reportDocumentId)}`, method: 'GET', headers: { 'x-amz-access-token': accessToken } });
+    if (res.body.errors) throw new Error(`getReportDocument failed: ${JSON.stringify(res.body.errors)}`);
+    return res.body;
+  });
 }
 
 function parseTsv(rawData) {
@@ -173,11 +261,12 @@ function parseTsv(rawData) {
   return rows;
 }
 
-async function fetchSalesReport(accessToken, baseUrl, marketplaceId, startDate, endDate) {
+async function fetchSalesReport(tokenManager, baseUrl, marketplaceId, startDate, endDate) {
   logger.info(`[SalesReport] Requesting: ${startDate} → ${endDate}`);
-  const reportId = await createReport(accessToken, baseUrl, marketplaceId, startDate, endDate);
-  const reportDocumentId = await pollReportStatus(accessToken, baseUrl, reportId);
-  const docInfo = await getReportDocumentUrl(accessToken, baseUrl, reportDocumentId);
+  const reportId = await createReport(tokenManager, baseUrl, marketplaceId, startDate, endDate);
+  const reportDocumentId = await pollReportStatus(tokenManager, baseUrl, reportId);
+  const docInfo = await getReportDocumentUrl(tokenManager, baseUrl, reportDocumentId);
+  // The report document URL is a pre-signed S3 URL — no access token needed.
   const rawData = await downloadContent(docInfo.url, docInfo.compressionAlgorithm === 'GZIP');
   const rows = parseTsv(rawData);
   logger.info(`[SalesReport] Parsed ${rows.length} rows`);
@@ -543,13 +632,15 @@ async function persistDailyBuckets({ userId, country, regionModel, marketplaceId
 // actual per-day numbers (10/10 days exact match for FBA fees,
 // Commission, Refund cost, and Reimbursements).
 // ═══════════════════════════════════════════════
-async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDate, endDate, accessToken, refreshToken, clientId, clientSecret }) {
+async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDate, endDate, accessToken, refreshToken, clientId, clientSecret, tokenManager: inheritedTokenManager }) {
   const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
   const regionInternal = internalRegionFromModel(regionModel);
   const { baseUrl, marketplaceId } = resolveMarketplaceAndRegion(country.toUpperCase(), regionInternal);
 
-  let token = accessToken;
-  if (!token) token = await getAccessToken(clientId, clientSecret, refreshToken);
+  // Auto-renewing token manager: covers both the Reports API and the
+  // Finance API legs. If the caller supplied one (e.g. syncFinanceData
+  // chaining step1 → step2), reuse it so we don't lose lifetime tracking.
+  const tokenManager = inheritedTokenManager || createTokenManager({ accessToken, refreshToken, clientId, clientSecret });
 
   // ── Sales Report (Pacific Time boundaries) ──
   const salesStartISO = `${startDate}T${String(PACIFIC_OFFSET_HOURS).padStart(2, '0')}:00:00.000Z`;
@@ -558,7 +649,7 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
   const salesEndISO = `${formatDateUTC(endDateObj)}T${String(PACIFIC_OFFSET_HOURS - 1).padStart(2, '0')}:59:59.999Z`;
 
   logger.info(`[Step1] Sales Report: ${startDate} → ${endDate} (Pacific)`);
-  const reportRows = await fetchSalesReport(token, baseUrl, marketplaceId, salesStartISO, salesEndISO);
+  const reportRows = await fetchSalesReport(tokenManager, baseUrl, marketplaceId, salesStartISO, salesEndISO);
   const salesOrderMap = parseSalesReportRows(reportRows);
 
   // ── Finance API: (startDate - buffer) → TODAY ──
@@ -572,11 +663,15 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
   const finEnd = new Date(Date.now() - 3 * 60 * 1000);
 
   logger.info(`[Step1] Finance API: ${finStart.toISOString()} → ${finEnd.toISOString()}`);
-  const fetchResult = await fetchNewFinanceData({
+  // `tokenRefresher` lets fetchTransactions refresh mid-pagination without
+  // restarting from page 1. Outer withRetry covers the rare case where the
+  // token dies before pagination begins.
+  const fetchResult = await tokenManager.withRetry((token) => fetchNewFinanceData({
     refreshToken, accessToken: token, clientId, clientSecret,
     country: country.toUpperCase(), region: regionInternal,
     postedAfter: finStart.toISOString(), postedBefore: finEnd.toISOString(),
-  });
+    tokenRefresher: () => tokenManager.refresh(),
+  }));
 
   const expenseRows = fetchResult.expenseRows || [];
   const revenueRows = fetchResult.revenueRows || [];
@@ -1000,7 +1095,7 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
   }
 
   logger.info(`[Step1] Done. ${saved.skuDocCount} SKU docs. ${pendingOrders.length} pending.`);
-  return { salesOrders: salesOrderMap.size, skuDocs: saved.skuDocCount, overheadDocs: saved.overheadDocCount, pendingOrders: pendingOrders.length, token, marketplaceId, baseUrl };
+  return { salesOrders: salesOrderMap.size, skuDocs: saved.skuDocCount, overheadDocs: saved.overheadDocCount, pendingOrders: pendingOrders.length, token: tokenManager.token, tokenManager, marketplaceId, baseUrl };
 }
 
 // ═══════════════════════════════════════════════
@@ -1010,7 +1105,7 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
 // Refunds/Reimbursements are already handled in Step 1 via
 // posted-date placement and don't need order-ID-based backfill.
 // ═══════════════════════════════════════════════
-async function backfillPendingExpenses({ userId, country, regionModel, accessToken, refreshToken, clientId, clientSecret }) {
+async function backfillPendingExpenses({ userId, country, regionModel, accessToken, refreshToken, clientId, clientSecret, tokenManager: inheritedTokenManager }) {
   const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
   const regionInternal = internalRegionFromModel(regionModel);
 
@@ -1020,7 +1115,7 @@ async function backfillPendingExpenses({ userId, country, regionModel, accessTok
 
   if (pendingOrders.length === 0) {
     logger.info('[Step2] No pending expense orders. Skipping backfill.');
-    return { resolved: 0, stillPending: 0, expired: 0 };
+    return { resolved: 0, stillPending: 0, expired: 0, token: accessToken, tokenManager: inheritedTokenManager };
   }
 
   logger.info(`[Step2] Backfilling ${pendingOrders.length} pending orders...`);
@@ -1033,15 +1128,15 @@ async function backfillPendingExpenses({ userId, country, regionModel, accessTok
   finStart.setUTCDate(finStart.getUTCDate() - buffer.beforeDays);
   const finEnd = new Date(Date.now() - 3 * 60 * 1000);
 
-  let token = accessToken;
-  if (!token) token = await getAccessToken(clientId, clientSecret, refreshToken);
+  const tokenManager = inheritedTokenManager || createTokenManager({ accessToken, refreshToken, clientId, clientSecret });
 
   logger.info(`[Step2] Finance API: ${finStart.toISOString()} → ${finEnd.toISOString()}`);
-  const fetchResult = await fetchNewFinanceData({
+  const fetchResult = await tokenManager.withRetry((token) => fetchNewFinanceData({
     refreshToken, accessToken: token, clientId, clientSecret,
     country: country.toUpperCase(), region: regionInternal,
     postedAfter: finStart.toISOString(), postedBefore: finEnd.toISOString(),
-  });
+    tokenRefresher: () => tokenManager.refresh(),
+  }));
 
   const expenseRows = fetchResult.expenseRows || [];
   const revenueRows = fetchResult.revenueRows || [];
@@ -1168,14 +1263,19 @@ async function backfillPendingExpenses({ userId, country, regionModel, accessTok
   }
 
   logger.info(`[Step2] Done. Resolved: ${resolved}, Still pending: ${stillPending}, Expired: ${expired}`);
-  return { resolved, stillPending, expired, token };
+  return { resolved, stillPending, expired, token: tokenManager.token, tokenManager };
 }
 
 // ═══════════════════════════════════════════════
 // MAIN: SYNC FINANCE DATA
 // ═══════════════════════════════════════════════
-async function syncFinanceData({ userId, country, regionModel, refreshToken, accessToken, clientId = process.env.SPAPI_CLIENT_ID, clientSecret = process.env.SPAPI_CLIENT_SECRET, backfillDays = 30, forceDates = null }) {
+async function syncFinanceData({ userId, country, regionModel, refreshToken, accessToken, clientId = process.env.SPAPI_CLIENT_ID, clientSecret = process.env.SPAPI_CLIENT_SECRET, backfillDays = 30, forceDates = null, maxIncrementalDays = null }) {
   const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+
+  // One token manager for the whole sync — step1/step2/relationships share
+  // a single lifetime, so a mid-sync refresh in any phase is visible to the
+  // next phase without re-issuing tokens.
+  const tokenManager = createTokenManager({ accessToken, refreshToken, clientId, clientSecret });
 
   const now = new Date();
   const yesterdayPacificMs = now.getTime() - (PACIFIC_OFFSET_HOURS * 60 * 60 * 1000) - (24 * 60 * 60 * 1000);
@@ -1195,21 +1295,34 @@ async function syncFinanceData({ userId, country, regionModel, refreshToken, acc
       logger.info(`[Sync] Backfill ${backfillDays} days: ${startDate} → ${endDate}`);
     } else if (latestSync.date >= yesterdayStr) {
       logger.info(`[Sync] Up to date (latest: ${latestSync.date}). Running backfill only.`);
-      const step2 = await backfillPendingExpenses({ userId, country, regionModel, accessToken, refreshToken, clientId, clientSecret });
-      await syncRelationshipsIfNeeded({ userId, country, regionModel, startDate: latestSync.date, endDate: latestSync.date, accessToken: step2.token, refreshToken, clientId, clientSecret });
+      const step2 = await backfillPendingExpenses({ userId, country, regionModel, accessToken, refreshToken, clientId, clientSecret, tokenManager });
+      await syncRelationshipsIfNeeded({ userId, country, regionModel, startDate: latestSync.date, endDate: latestSync.date, accessToken: tokenManager.token, refreshToken, clientId, clientSecret });
       return { status: 'up_to_date', latestDate: latestSync.date, backfill: step2 };
     } else {
       const nextDay = new Date(latestSync.date + 'T00:00:00.000Z');
       nextDay.setUTCDate(nextDay.getUTCDate() + 1);
       startDate = formatDateUTC(nextDay);
       endDate = yesterdayStr;
+      // Soft cap so a long-broken account can't drag a 60-day fetch into the
+      // daily window. The remaining days will be picked up by the freshness
+      // sweeper (or by subsequent daily runs, advancing one window at a time).
+      if (maxIncrementalDays && maxIncrementalDays > 0) {
+        const gapDays = Math.round((new Date(`${endDate}T00:00:00.000Z`) - new Date(`${startDate}T00:00:00.000Z`)) / 86400000) + 1;
+        if (gapDays > maxIncrementalDays) {
+          const clampedStart = new Date(`${endDate}T00:00:00.000Z`);
+          clampedStart.setUTCDate(clampedStart.getUTCDate() - (maxIncrementalDays - 1));
+          const clampedStartStr = formatDateUTC(clampedStart);
+          logger.warn(`[Sync] Incremental gap ${gapDays}d exceeds maxIncrementalDays=${maxIncrementalDays}; clamping ${startDate} → ${clampedStartStr}. Remaining ${gapDays - maxIncrementalDays}d will sync on later runs.`);
+          startDate = clampedStartStr;
+        }
+      }
       logger.info(`[Sync] Incremental: ${startDate} → ${endDate}`);
     }
   }
 
-  const step1 = await fetchNewSalesAndExpenses({ userId, country, regionModel, startDate, endDate, accessToken, refreshToken, clientId, clientSecret });
-  const step2 = await backfillPendingExpenses({ userId, country, regionModel, accessToken: step1.token, refreshToken, clientId, clientSecret });
-  await syncRelationshipsIfNeeded({ userId, country, regionModel, startDate, endDate, accessToken: step2.token || step1.token, refreshToken, clientId, clientSecret });
+  const step1 = await fetchNewSalesAndExpenses({ userId, country, regionModel, startDate, endDate, accessToken, refreshToken, clientId, clientSecret, tokenManager });
+  const step2 = await backfillPendingExpenses({ userId, country, regionModel, accessToken: tokenManager.token, refreshToken, clientId, clientSecret, tokenManager });
+  await syncRelationshipsIfNeeded({ userId, country, regionModel, startDate, endDate, accessToken: tokenManager.token, refreshToken, clientId, clientSecret });
 
   return {
     status: 'completed', startDate, endDate,
@@ -1270,4 +1383,7 @@ module.exports = {
   buildOverheadBuckets,
   EXPENSE_CATEGORY_TO_FIELD,
   REVENUE_CATEGORY_TO_FIELD,
+  // Token auto-renewal helpers
+  createTokenManager,
+  isAccessTokenExpiredError,
 };

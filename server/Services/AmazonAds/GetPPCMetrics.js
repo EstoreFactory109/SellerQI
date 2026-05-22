@@ -115,9 +115,32 @@ const CAMPAIGN_TYPES = {
 /**
  * Create a report request for a specific campaign type
  */
+// Amazon Ads API responds with 429 (and sometimes 400 "Throttled - Deprecated
+// resource") when a tenant exceeds per-second request quota. The whole report
+// call is idempotent at this stage (we haven't created a report yet), so it's
+// safe to back off and retry. Capped to MAX_THROTTLE_RETRIES so a permanently-
+// throttled endpoint doesn't hang the pipeline.
+const MAX_THROTTLE_RETRIES = 4;
+const THROTTLE_BASE_DELAY_MS = 5000;
+
+function isAdsThrottleError(error) {
+    if (!error?.response) return false;
+    if (error.response.status === 429) return true;
+    // The deprecated v2 endpoints sometimes return 400 with a "Throttled" body.
+    const body = error.response.data;
+    if (!body) return false;
+    const text = typeof body === 'string' ? body : JSON.stringify(body);
+    return /throttl/i.test(text);
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function createReport(accessToken, profileId, region, campaignType, startDate, endDate, tokenRefreshCallback = null) {
     let currentAccessToken = accessToken;
     let hasRetried = false;
+    let throttleRetries = 0;
 
     while (true) {
         try {
@@ -177,18 +200,30 @@ async function createReport(accessToken, profileId, region, campaignType, startD
                 }
             }
 
+            // ★ 429 / throttled — back off and retry instead of dropping the
+            //   call. Important for the deprecated v2 endpoints that throttle
+            //   aggressively. The throttle check comes BEFORE the 400/404 skip
+            //   below so a 400-with-throttle-body doesn't get silently dropped.
+            if (isAdsThrottleError(error) && throttleRetries < MAX_THROTTLE_RETRIES) {
+                throttleRetries++;
+                const delay = THROTTLE_BASE_DELAY_MS * Math.pow(3, throttleRetries - 1);
+                console.warn(`⏳ [GetPPCMetrics] Throttled creating report for ${campaignType} (retry ${throttleRetries}/${MAX_THROTTLE_RETRIES}). Waiting ${delay}ms…`);
+                await sleep(delay);
+                continue;
+            }
+
             if (error.response) {
                 console.error(`API Error Response for ${campaignType}:`, {
                     status: error.response.status,
                     data: error.response.data
                 });
-                
+
                 // Some campaign types might not be available for this seller
                 if (error.response.status === 400 || error.response.status === 404) {
                     console.log(`⚠️ [GetPPCMetrics] ${campaignType} not available for this seller, skipping...`);
                     return { reportId: null, skipped: true, campaignType };
                 }
-                
+
                 const enhancedError = new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
                 enhancedError.response = error.response;
                 enhancedError.status = error.response.status;
@@ -215,6 +250,7 @@ async function checkReportStatus(reportId, accessToken, profileId, region, token
         const url = `${baseUri}/reporting/reports/${reportId}`;
         let currentAccessToken = accessToken;
         let attempts = 0;
+        let throttleRetries = 0;
 
         // Infinite loop - only exits on COMPLETED or FAILURE status
         while (true) {
@@ -283,6 +319,17 @@ async function checkReportStatus(reportId, accessToken, profileId, region, token
                     attempts++;
                     continue;
                 }
+                // ★ 429 throttle during status polling — back off and retry the
+                //   same poll. Bounded by MAX_THROTTLE_RETRIES so we eventually
+                //   give up (the report itself is still in flight on Amazon's
+                //   side and a later poll will pick up where we left off).
+                if (isAdsThrottleError(error) && throttleRetries < MAX_THROTTLE_RETRIES) {
+                    throttleRetries++;
+                    const delay = THROTTLE_BASE_DELAY_MS * Math.pow(3, throttleRetries - 1);
+                    console.warn(`⏳ [GetPPCMetrics] Throttled polling report ${reportId} (retry ${throttleRetries}/${MAX_THROTTLE_RETRIES}). Waiting ${delay}ms…`);
+                    await sleep(delay);
+                    continue;
+                }
                 throw error;
             }
         }
@@ -303,6 +350,7 @@ async function checkReportStatus(reportId, accessToken, profileId, region, token
 async function downloadReportData(location, accessToken, profileId, tokenRefreshCallback = null) {
     let currentAccessToken = accessToken;
     let hasRetried = false;
+    let throttleRetries = 0;
 
     while (true) {
         try {
@@ -331,6 +379,16 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
                 } catch (refreshError) {
                     throw new Error(`Token refresh failed during download: ${refreshError.message}`);
                 }
+            }
+
+            // ★ 429 throttle during report-document download — back off and
+            //   retry. The pre-signed download URL stays valid throughout.
+            if (isAdsThrottleError(err) && throttleRetries < MAX_THROTTLE_RETRIES) {
+                throttleRetries++;
+                const delay = THROTTLE_BASE_DELAY_MS * Math.pow(3, throttleRetries - 1);
+                console.warn(`⏳ [GetPPCMetrics] Throttled downloading report (retry ${throttleRetries}/${MAX_THROTTLE_RETRIES}). Waiting ${delay}ms…`);
+                await sleep(delay);
+                continue;
             }
 
             if (err.response) {

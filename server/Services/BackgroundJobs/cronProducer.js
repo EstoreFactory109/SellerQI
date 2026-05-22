@@ -46,6 +46,8 @@ async function enqueueUsersForDailyUpdate() {
         let accountsEnqueued = 0;
         let accountsSkipped = 0;
         let accountsFailed = 0;
+        let accountsCapped = 0;
+        let accountsAlreadyDone = 0;
 
         for (const schedule of usersNeedingUpdate) {
             const userId = schedule.userId?._id?.toString();
@@ -61,10 +63,52 @@ async function enqueueUsersForDailyUpdate() {
                 for (const account of seller.sellerAccount) {
                     if (!account.country || !account.region) continue;
 
+                    // Per-account gating (A.4): skip if already succeeded today,
+                    // or if the per-account retry cap is reached. Prevents dead-
+                    // token accounts from burning API quota all day. The user-
+                    // level `getUsersNeedingDailyUpdate` filter only checks the
+                    // user-level lastDailyUpdate, so we re-check at the account
+                    // level here.
+                    try {
+                        const gate = await UserSchedulingService.shouldAttemptAccountUpdate(
+                            userId, account.country, account.region
+                        );
+                        if (!gate.eligible) {
+                            if (gate.reason === 'done') accountsAlreadyDone++;
+                            else if (gate.reason === 'capped') {
+                                accountsCapped++;
+                                logger.warn(
+                                    `[CronProducer] Skipping ${userId} ${account.country}-${account.region} — retry cap reached (${gate.attempts} attempts today)`
+                                );
+                            } else {
+                                accountsSkipped++;
+                            }
+                            continue;
+                        }
+                    } catch (gateError) {
+                        // Gate is best-effort. If the gate check fails, fall back
+                        // to the previous behaviour (always attempt) rather than
+                        // accidentally pausing a healthy account.
+                        logger.warn(
+                            `[CronProducer] Eligibility gate failed for ${userId} ${account.country}-${account.region}, attempting anyway: ${gateError.message}`
+                        );
+                    }
+
                     try {
                         const result = await enqueueScheduledAccountJob(userId, account.country, account.region);
                         if (result.success) {
                             accountsEnqueued++;
+                            // Count this attempt so the cap applies. Best-effort —
+                            // failures here are logged but don't unwind the enqueue.
+                            try {
+                                await UserSchedulingService.recordAccountAttempt(
+                                    userId, account.country, account.region
+                                );
+                            } catch (counterError) {
+                                logger.warn(
+                                    `[CronProducer] Failed to record attempt for ${userId} ${account.country}-${account.region}: ${counterError.message}`
+                                );
+                            }
                         } else {
                             accountsSkipped++;
                         }
@@ -85,10 +129,21 @@ async function enqueueUsersForDailyUpdate() {
             accountsEnqueued,
             accountsSkipped,
             accountsFailed,
+            accountsCapped,
+            accountsAlreadyDone,
             queueStats
         });
 
-        return { success: true, usersFound: usersNeedingUpdate.length, accountsEnqueued, accountsSkipped, accountsFailed, queueStats };
+        return {
+            success: true,
+            usersFound: usersNeedingUpdate.length,
+            accountsEnqueued,
+            accountsSkipped,
+            accountsFailed,
+            accountsCapped,
+            accountsAlreadyDone,
+            queueStats
+        };
 
     } catch (error) {
         logger.error('[CronProducer] Error in daily update enqueue process:', error);

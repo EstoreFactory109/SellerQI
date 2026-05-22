@@ -37,7 +37,13 @@ const PHASES = {
     CALC_REVIEW: 'sched_calc_review',
     FINALIZE: 'sched_finalize',
     // Legacy: pre-split combined batch. Not part of PHASE_ORDER. Drained via LEGACY_NEXT_PHASE.
-    BATCH_3_4_LEGACY: 'sched_batch_3_4'
+    BATCH_3_4_LEGACY: 'sched_batch_3_4',
+    // One-shot ads-only catch-up enqueued by freshnessSweeper for accounts with
+    // missing past PPC days. Deliberately NOT in PHASE_ORDER so `getNextPhase`
+    // returns null for it — a catch-up job never chains into BATCH_4 / CALC /
+    // FINALIZE. It fetches the requested catchupDate's ads data via the
+    // existing service functions and exits.
+    ADS_CATCHUP: 'sched_ads_catchup'
 };
 
 const PHASE_ORDER = [
@@ -132,7 +138,9 @@ function getAllPhaseJobIds(parentJobId) {
 }
 
 function isValidPhase(phase) {
-    return PHASE_ORDER.includes(phase) || phase === PHASES.BATCH_3_4_LEGACY;
+    return PHASE_ORDER.includes(phase)
+        || phase === PHASES.BATCH_3_4_LEGACY
+        || phase === PHASES.ADS_CATCHUP;
 }
 
 function getPhaseDescription(phase) {
@@ -145,7 +153,8 @@ function getPhaseDescription(phase) {
         [PHASES.BATCH_4]: 'Fetching keyword data (negative, search, recommendations)',
         [PHASES.CALC_REVIEW]: 'Running calculations and processing reviews',
         [PHASES.FINALIZE]: 'Finalizing - analysis, cache update, and completion',
-        [PHASES.BATCH_3_4_LEGACY]: '[legacy] Combined batch 3+4 - drains to calc_review'
+        [PHASES.BATCH_3_4_LEGACY]: '[legacy] Combined batch 3+4 - drains to calc_review',
+        [PHASES.ADS_CATCHUP]: '[catchup] Fetching ads data for a single missing past date'
     };
     return descriptions[phase] || 'Unknown phase';
 }

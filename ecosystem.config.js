@@ -256,6 +256,45 @@ module.exports = {
             }
         },
         {
+            // Freshness Sweeper (Layer B): ads catch-up for missing past PPC days.
+            //
+            // The daily ads phase only fetches yesterday. If a past day failed
+            // past the per-day retry cap, that day stays missing in PPCMetrics.
+            // This sweeper scans for those gaps every few hours and enqueues
+            // one-shot `sched_ads_catchup` BullMQ jobs to fill them.
+            //
+            // The actual fetch runs in the existing scheduled `worker` pool
+            // (uses the new ADS_CATCHUP case there). This process only
+            // detects gaps and enqueues — no heavy lifting here.
+            //
+            // Distributed lock guards against double-sweeping if scaled to N>1.
+            // Default cadence: every 3 hours.
+            //
+            // Rollback: stop this PM2 app OR set FRESHNESS_SWEEPER_DISABLED=true.
+            // Nothing else in the system depends on it.
+            name: 'freshness-sweeper',
+            script: './server/Services/BackgroundJobs/freshnessSweeperStandalone.js',
+            instances: 1,
+            exec_mode: 'fork',
+            env: {
+                NODE_ENV: 'production',
+                TIMEZONE: process.env.TIMEZONE || 'UTC',
+                FRESHNESS_SWEEPER_CRON: process.env.FRESHNESS_SWEEPER_CRON || '0 */3 * * *'
+            },
+            error_file: './logs/pm2-freshness-sweeper-error.log',
+            out_file: './logs/pm2-freshness-sweeper-out.log',
+            log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+            merge_logs: true,
+            autorestart: true,
+            max_restarts: 20,
+            min_uptime: '10s',
+            max_memory_restart: '512M',
+            kill_timeout: 30 * 1000,
+            watch: false,
+            env_production: { NODE_ENV: 'production' },
+            env_development: { NODE_ENV: 'development' }
+        },
+        {
             // Delete User Worker - processes 'full-user-data-deletion' queue
             // Purges all remaining user data after User + Seller are deleted (hybrid delete flow)
             name: 'delete-user-worker',

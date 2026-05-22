@@ -152,11 +152,29 @@ async function getAccessToken(clientId, clientSecret, refreshToken) {
 // NOTE: postedAfter and postedBefore must be > 2 minutes before request time.
 //       If they're more than 180 days apart, response is empty.
 // ═════════════════════════════════════════════════════════════════════════════
-async function fetchTransactions(accessToken, baseUrl, postedAfter, postedBefore, marketplaceId) {
+// `tokenRefresher` (optional) is a `() => Promise<string>` that returns a
+// fresh SP-API access token. When supplied, this loop will transparently
+// refresh the token if Amazon responds with "Unauthorized / access token
+// expired" and continue from the same page — pagination is NOT restarted.
+function isExpiredTokenResponse(res) {
+  if (!res) return false;
+  if (res.statusCode === 401 || res.statusCode === 403) return true;
+  if (!Array.isArray(res.body?.errors)) return false;
+  return res.body.errors.some((e) => {
+    if (!e) return false;
+    if (e.code === "Unauthorized" || e.code === "InvalidAccessToken") return true;
+    const blob = `${e.message || ""} ${e.details || ""}`.toLowerCase();
+    return blob.includes("access token") && (blob.includes("expired") || blob.includes("invalid"));
+  });
+}
+
+async function fetchTransactions(accessToken, baseUrl, postedAfter, postedBefore, marketplaceId, tokenRefresher = null) {
   const allTransactions = [];
   let nextToken = null;
   let pageCount = 0;
+  let currentToken = accessToken;
   const MAX_RETRIES = 5;
+  const MAX_AUTH_REFRESHES_PER_PAGE = 2;
 
   do {
     let path;
@@ -172,13 +190,26 @@ async function fetchTransactions(accessToken, baseUrl, postedAfter, postedBefore
     }
 
     let res;
+    let authRefreshCount = 0;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       res = await httpsRequest({
         hostname: baseUrl,
         path,
         method: "GET",
-        headers: { "x-amz-access-token": accessToken },
+        headers: { "x-amz-access-token": currentToken },
       });
+
+      // ★ Auto-renew on expired access token. Does not consume a throttle
+      //   retry — token errors are independent of rate-limit retries.
+      if (isExpiredTokenResponse(res) && tokenRefresher && authRefreshCount < MAX_AUTH_REFRESHES_PER_PAGE) {
+        authRefreshCount++;
+        logger.warn(
+          `[Finance API v2024-06-19] Access token expired on page ${pageCount + 1} (auth retry ${authRefreshCount}/${MAX_AUTH_REFRESHES_PER_PAGE}). Refreshing…`
+        );
+        currentToken = await tokenRefresher();
+        attempt--; // retry the same page with the new token without burning a throttle attempt
+        continue;
+      }
 
       const isThrottled =
         res.statusCode === 429 ||
@@ -983,6 +1014,11 @@ async function fetchNewFinanceData(config) {
     // ★ NEW: Override marketplaceId if you want a specific marketplace
     //   (otherwise resolved from country)
     marketplaceIdOverride,
+    // ★ NEW: () => Promise<string>. If supplied, fetchTransactions uses this
+    //   to renew the access token mid-pagination when Amazon returns
+    //   Unauthorized/expired. Without it, callers fall back to the old
+    //   behaviour (throw on first token failure).
+    tokenRefresher,
   } = config;
 
   const countryUpper = country.toUpperCase();
@@ -1032,8 +1068,10 @@ async function fetchNewFinanceData(config) {
     logger.info(`[Finance Fetch v2024-06-19] Explicit window: ${formatDateDDMMYYYY(startDate)} → ${formatDateDDMMYYYY(endDate)}`);
   }
 
-  // ★ Pass marketplaceId to filter at the API level — solves multi-marketplace mixing
-  const transactions = await fetchTransactions(accessToken, baseUrl, postedAfter, postedBefore, marketplaceId);
+  // ★ Pass marketplaceId to filter at the API level — solves multi-marketplace mixing.
+  // ★ Pass tokenRefresher (when provided) so mid-pagination expiry is recoverable
+  //   without restarting from page 1.
+  const transactions = await fetchTransactions(accessToken, baseUrl, postedAfter, postedBefore, marketplaceId, tokenRefresher);
 
   const expenseRows = parseTransactionsV2024(transactions);
   const revenueRows = extractRevenueFromTransactions(transactions);

@@ -1255,12 +1255,19 @@ class ScheduledIntegration {
                             return { success: false, error: error.message || 'MCP BuyBox fetch failed', data: null };
                         });
                 } else if (functionKey === 'financeSync') {
-                    // Daily schedule targets yesterday only (Pacific-style UTC-7).
-                    // Integration handles first-time 30-day backfill; daily schedule
-                    // just keeps the data current one day at a time. Pending-order
-                    // backfill still runs inside syncFinanceData regardless.
-                    const _yesterdayStr = new Date(Date.now() - 7 * 3600000 - 86400000)
-                        .toISOString().slice(0, 10);
+                    // Daily schedule does NOT pin forceDates anymore — instead it
+                    // lets syncFinanceData's incremental branch (FinanceService.js
+                    // `if (!latestSync) → backfill / else → latestSync+1 → yesterday`)
+                    // fill whatever gap exists. This means a missed day on Monday
+                    // self-heals on Tuesday's run.
+                    //
+                    // `backfillDays: 1` caps the first-time fallback at 1 day so
+                    // the daily schedule never triggers a 30-day window. The full
+                    // 30-day backfill is reserved for the integration worker
+                    // (`Integration.js`) where `backfillDays` defaults to 30.
+                    //
+                    // Pending-order backfill still runs inside syncFinanceData
+                    // regardless of which branch is taken.
                     promise = serviceFunction({
                         userId,
                         country: Country,
@@ -1269,7 +1276,8 @@ class ScheduledIntegration {
                         accessToken: AccessToken,
                         clientId: process.env.SPAPI_CLIENT_ID,
                         clientSecret: process.env.SPAPI_CLIENT_SECRET,
-                        forceDates: [_yesterdayStr, _yesterdayStr],
+                        backfillDays: 1,
+                        maxIncrementalDays: 7,
                     })
                         .then(result => {
                             logger.info('Finance Sync succeeded', {
@@ -2555,13 +2563,146 @@ class ScheduledIntegration {
                 { userId, country: Country, region: Region, apiData }
             );
 
-            logger.info(`[ScheduledIntegration:AdsPhase] Completed for user ${userId}`, { servicesRun: Object.keys(phaseApiResults).length });
+            // Honest phase status: the worker pipeline always advances to the
+            // next phase, but the *recorded* outcome on this row must reflect
+            // whether any ads service actually returned data. Finalize uses
+            // these flags to decide whether to stamp lastDailyUpdate (A.3).
+            //
+            // We treat the phase as failed only when EVERY ads service either
+            // didn't run or returned success: false. A single successful service
+            // is enough to count the phase as a (partial) success.
+            const adsServiceKeys = ['ppcSpendsBySKU', 'adsKeywordsPerformanceData', 'ppcSpendsDateWise', 'ppcMetricsAggregated'];
+            const adsResults = adsServiceKeys
+                .map(k => phaseApiResults[k])
+                .filter(r => r && typeof r === 'object');
+            const anyAdsSucceeded = adsResults.some(r => r.success === true);
+            const adsRan = adsResults.length > 0;
+            const phaseSucceeded = !adsRan || anyAdsSucceeded;
+            const phaseError = phaseSucceeded
+                ? null
+                : (adsResults.find(r => r.error)?.error || 'No ads services returned data');
+
+            logger.info(`[ScheduledIntegration:AdsPhase] Completed for user ${userId}`, {
+                servicesRun: Object.keys(phaseApiResults).length,
+                adsServicesRan: adsResults.length,
+                anyAdsSucceeded,
+                phaseSucceeded
+            });
             return {
-                success: true,
+                success: phaseSucceeded,
+                error: phaseError,
                 dataForNextPhase: { apiResults: { ...(phaseData.apiResults || {}), ...phaseApiResults } }
             };
         } catch (error) {
             logger.error(`[ScheduledIntegration:AdsPhase] Failed for user ${userId}:`, error);
+            return { success: false, error: error.message, statusCode: 500 };
+        }
+    }
+
+    /**
+     * Phase: ADS_CATCHUP (one-shot, NOT chained)
+     *
+     * Enqueued by `freshnessSweeper` for accounts with missing past PPC days.
+     * Fetches all four PPC report services for a single `catchupDate` and writes
+     * to the same `PPCMetrics` / `SponsoredAds` / `adsKeywordsPerformance`
+     * collections that the daily `sched_ads` phase writes to.
+     *
+     * Why it's a separate phase (instead of overloading sched_ads):
+     *  - `sched_ads` is part of PHASE_ORDER and chains to BATCH_4 → CALC → FINALIZE.
+     *    A catch-up should NOT trigger calc/finalize for an old day.
+     *  - This phase is absent from PHASE_ORDER, so `getNextPhase` returns null
+     *    and the worker stops after running it.
+     *
+     * Internal logic guarantee:
+     *  - Calls the existing 4 ads service functions with the catchupDate as
+     *    both startDate and endDate. Those functions handle their own report
+     *    creation, polling, parsing, and per-date upsert writes. NO ads code
+     *    is modified by this phase.
+     *
+     * Expected phaseData shape:
+     *   { catchupDate: 'YYYY-MM-DD' }
+     */
+    static async executeAdsCatchupPhase(userId, Region, Country, phaseData = {}) {
+        const catchupDate = phaseData?.catchupDate;
+        logger.info(`[ScheduledIntegration:AdsCatchupPhase] Starting for user ${userId}, ${Country}-${Region}, date=${catchupDate}`);
+
+        if (!catchupDate || !/^\d{4}-\d{2}-\d{2}$/.test(catchupDate)) {
+            const err = `Invalid catchupDate: ${catchupDate}. Expected YYYY-MM-DD.`;
+            logger.error(`[ScheduledIntegration:AdsCatchupPhase] ${err}`);
+            return { success: false, error: err };
+        }
+
+        try {
+            const ctx = await this._prepareForBatchPhase(userId, Region, Country, phaseData);
+            const { AdsAccessToken, AdsRefreshToken, ProfileId } = ctx;
+
+            if (!AdsAccessToken || !ProfileId) {
+                logger.warn(`[ScheduledIntegration:AdsCatchupPhase] No ads token/profile — skipping`, { userId, Country, Region });
+                return { success: false, error: 'Ads token/profile unavailable' };
+            }
+
+            // Lazy-require the ads service modules so a syntax error in one
+            // can't break unrelated phases at module-load time.
+            const { getPPCMetrics } = require('../AmazonAds/GetPPCMetrics.js');
+            const { getPPCSpendsBySKU } = require('../AmazonAds/GetPPCProductWise.js');
+            const { getKeywordPerformanceReport } = require('../AmazonAds/GetWastedSpendKeywords.js');
+            const { getPPCSpendsDateWise } = require('../AmazonAds/GetDateWiseSpendKeywords.js');
+
+            const dateOpts = { startDate: catchupDate, endDate: catchupDate };
+            const results = {};
+
+            // Each service is wrapped so a failure of one doesn't abort the
+            // others — analogous to Promise.allSettled in fetchScheduledApiData.
+            const safeRun = async (label, fn) => {
+                try {
+                    const value = await fn();
+                    results[label] = { success: true, error: null };
+                    return value;
+                } catch (err) {
+                    logger.warn(`[ScheduledIntegration:AdsCatchupPhase] ${label} failed for ${catchupDate}: ${err.message}`);
+                    results[label] = { success: false, error: err.message };
+                    return null;
+                }
+            };
+
+            await Promise.all([
+                safeRun('ppcMetricsAggregated', () =>
+                    getPPCMetrics(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, catchupDate, catchupDate, true)
+                ),
+                safeRun('ppcSpendsBySKU', () =>
+                    tokenManager.wrapAdsFunction(getPPCSpendsBySKU, userId, ctx.RefreshToken, AdsRefreshToken)(
+                        AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, dateOpts
+                    )
+                ),
+                safeRun('adsKeywordsPerformanceData', () =>
+                    tokenManager.wrapAdsFunction(getKeywordPerformanceReport, userId, ctx.RefreshToken, AdsRefreshToken)(
+                        AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, dateOpts
+                    )
+                ),
+                safeRun('ppcSpendsDateWise', () =>
+                    tokenManager.wrapAdsFunction(getPPCSpendsDateWise, userId, ctx.RefreshToken, AdsRefreshToken)(
+                        AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, dateOpts
+                    )
+                )
+            ]);
+
+            const anySucceeded = Object.values(results).some(r => r?.success === true);
+            const succeededCount = Object.values(results).filter(r => r?.success === true).length;
+
+            logger.info(`[ScheduledIntegration:AdsCatchupPhase] Completed for user ${userId}, date=${catchupDate}`, {
+                succeededCount,
+                totalServices: Object.keys(results).length,
+                anySucceeded
+            });
+
+            return {
+                success: anySucceeded,
+                error: anySucceeded ? null : 'All ads services failed during catch-up',
+                catchupDate,
+                results
+            };
+        } catch (error) {
+            logger.error(`[ScheduledIntegration:AdsCatchupPhase] Failed for user ${userId}, date=${catchupDate}:`, error);
             return { success: false, error: error.message, statusCode: 500 };
         }
     }
@@ -2725,9 +2866,19 @@ class ScheduledIntegration {
                 });
             }
 
-            logger.info(`[ScheduledIntegration:FinancePhase] Completed for user ${userId}`, { servicesRun: Object.keys(phaseApiResults).length });
+            // Honest phase status: success iff syncFinanceData returned success.
+            // Finalize uses this to decide whether to stamp lastDailyUpdate (A.3).
+            const financeSucceeded = !!(apiData?.financeSync?.success);
+            const financeError = financeSucceeded ? null : (apiData?.financeSync?.error || 'Finance sync did not return success');
+
+            logger.info(`[ScheduledIntegration:FinancePhase] Completed for user ${userId}`, {
+                servicesRun: Object.keys(phaseApiResults).length,
+                financeSucceeded,
+                syncStatus: financeSummary?.status || null
+            });
             return {
-                success: true,
+                success: financeSucceeded,
+                error: financeError,
                 dataForNextPhase: { apiResults: { ...(phaseData.apiResults || {}), ...phaseApiResults } }
             };
         } catch (error) {
@@ -2979,9 +3130,34 @@ class ScheduledIntegration {
                 }
             }
 
-            // Mark daily update complete (mode-agnostic)
+            // Mark daily update complete — but ONLY when the critical data
+            // phases (finance + at least one ads service) actually returned
+            // data. If they didn't, leave lastDailyUpdate untouched so the
+            // hourly cron tick will retry this account on the next run.
+            //
+            // Without this gate, a phase that failed to produce data would
+            // still flip lastDailyUpdate to "today", and `getUsersNeedingDailyUpdate`
+            // would skip the account for the rest of the day — the exact
+            // silent-skip behaviour that caused May 22's data hole.
             const { UserSchedulingService } = require('../BackgroundJobs/UserSchedulingService.js');
-            await UserSchedulingService.markDailyUpdateComplete(userId, Country, Region);
+            const financeOk = !!(apiResults?.financeSync?.success);
+            const adsServiceKeys = ['ppcSpendsBySKU', 'adsKeywordsPerformanceData', 'ppcSpendsDateWise', 'ppcMetricsAggregated'];
+            const anyAdsOk = adsServiceKeys.some(k => apiResults?.[k]?.success === true);
+            const adsRan = adsServiceKeys.some(k => apiResults?.[k] && typeof apiResults[k] === 'object' && 'success' in apiResults[k]);
+            // Treat ads as "ok" when no ads service ran at all (e.g. user has no
+            // ads connection) — we only block on ads failures that actually
+            // surfaced from an attempted fetch.
+            const adsOk = !adsRan || anyAdsOk;
+            const canMarkComplete = financeOk && adsOk;
+
+            if (canMarkComplete) {
+                await UserSchedulingService.markDailyUpdateComplete(userId, Country, Region);
+                logger.info(`[ScheduledIntegration:FinalizePhase] Marked daily update complete for ${userId} ${Country}-${Region}`);
+            } else {
+                logger.warn(`[ScheduledIntegration:FinalizePhase] Skipping markDailyUpdateComplete — finance/ads did not return data; next cron tick will retry.`, {
+                    userId, country: Country, region: Region, financeOk, anyAdsOk, adsRan
+                });
+            }
 
             // End logging session
             if (phaseData.sessionId) {

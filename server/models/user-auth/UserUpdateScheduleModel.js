@@ -34,6 +34,21 @@ const UserUpdateScheduleSchema = new mongoose.Schema({
         lastDailyUpdate: {
             type: Date,
             default: null
+        },
+        // Number of times the daily pipeline has been enqueued for this account
+        // since the last UTC-day rollover. Capped via MAX_DAILY_ATTEMPTS in
+        // UserSchedulingService to prevent dead-token accounts from burning API
+        // quota with hourly retries for 24 straight hours.
+        dailyAttempts: {
+            type: Number,
+            default: 0
+        },
+        // UTC midnight of the day `dailyAttempts` is counted against. When the
+        // current UTC day is newer than this, the counter is reset lazily on
+        // next access (see UserSchedulingService.shouldAttemptAccountUpdate).
+        dailyAttemptsResetAt: {
+            type: Date,
+            default: null
         }
     }]
 }, {

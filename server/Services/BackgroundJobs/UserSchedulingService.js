@@ -3,8 +3,97 @@ const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const UserUpdateSchedule = require('../../models/user-auth/UserUpdateScheduleModel.js');
 const logger = require('../../utils/Logger.js');
 
+// Per-account, per-UTC-day cap on how many times the daily pipeline will be
+// enqueued. Prevents an account with bad SP-API tokens (or any other persistent
+// fetch failure) from burning API quota with 23 retries in a day. Tuned so that
+// transient failures (a single missed hour) still recover within the day, but
+// a permanently broken account is paused until tomorrow.
+const MAX_DAILY_ATTEMPTS = 4;
+
 class UserSchedulingService {
-    
+
+    /**
+     * UTC midnight of the given Date. Used as the "day key" for retry counters.
+     */
+    static _startOfUtcDay(d = new Date()) {
+        return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0));
+    }
+
+    /**
+     * Decide whether the daily pipeline should be enqueued for this specific
+     * (user, country, region) account right now. Returns:
+     *   { eligible: true }                      — enqueue it
+     *   { eligible: false, reason: 'done' }     — already succeeded today
+     *   { eligible: false, reason: 'capped' }   — too many failed attempts today
+     *   { eligible: false, reason: 'missing' }  — schedule row not found
+     *
+     * Lazily resets `dailyAttempts` when the UTC day rolls over.
+     */
+    static async shouldAttemptAccountUpdate(userId, country, region) {
+        const schedule = await UserUpdateSchedule.findOne({ userId });
+        if (!schedule || !Array.isArray(schedule.sellerAccounts)) {
+            return { eligible: false, reason: 'missing' };
+        }
+        const acct = schedule.sellerAccounts.find(
+            (a) => a.country === country && a.region === region
+        );
+        if (!acct) return { eligible: false, reason: 'missing' };
+
+        const startOfToday = this._startOfUtcDay();
+
+        // Already succeeded today — caller should skip.
+        if (acct.lastDailyUpdate && acct.lastDailyUpdate >= startOfToday) {
+            return { eligible: false, reason: 'done' };
+        }
+
+        // Lazy reset: if the counter is from a previous UTC day, treat it as 0.
+        const counterStale = !acct.dailyAttemptsResetAt || acct.dailyAttemptsResetAt < startOfToday;
+        const attempts = counterStale ? 0 : (acct.dailyAttempts || 0);
+
+        if (attempts >= MAX_DAILY_ATTEMPTS) {
+            return { eligible: false, reason: 'capped', attempts };
+        }
+        return { eligible: true, attempts };
+    }
+
+    /**
+     * Atomically increment `dailyAttempts` for a (user, country, region).
+     * Resets the counter to 1 if the stored resetAt is older than today UTC.
+     * Returns the new attempt count.
+     */
+    static async recordAccountAttempt(userId, country, region) {
+        const now = new Date();
+        const startOfToday = this._startOfUtcDay(now);
+
+        // First try: increment if resetAt is current.
+        const incRes = await UserUpdateSchedule.updateOne(
+            { userId },
+            { $inc: { 'sellerAccounts.$[elem].dailyAttempts': 1 } },
+            {
+                arrayFilters: [{
+                    'elem.country': country,
+                    'elem.region': region,
+                    'elem.dailyAttemptsResetAt': { $gte: startOfToday }
+                }]
+            }
+        );
+
+        // If the increment didn't match (counter is from yesterday or null),
+        // reset it to 1 and stamp today.
+        if (incRes.modifiedCount === 0) {
+            await UserUpdateSchedule.updateOne(
+                { userId },
+                {
+                    $set: {
+                        'sellerAccounts.$[elem].dailyAttempts': 1,
+                        'sellerAccounts.$[elem].dailyAttemptsResetAt': startOfToday
+                    }
+                },
+                { arrayFilters: [{ 'elem.country': country, 'elem.region': region }] }
+            );
+        }
+    }
+
     /**
      * Initialize scheduling for a new user
      * Assigns them a time slot to distribute load across 24 hours
@@ -67,15 +156,40 @@ class UserSchedulingService {
                 0, 0, 0, 0
             ));
 
+            // dailyUpdateHour is the user's assigned slot for the FIRST attempt of
+            // the day (load-spreading). We use $lte so that if the first attempt
+            // fails (e.g. transient 429 / token blip / partial phase failure),
+            // subsequent hourly ticks within the same UTC day will pick the user
+            // up again — bounded by MAX_DAILY_ATTEMPTS per account in
+            // shouldAttemptAccountUpdate(). Healthy users still run only once;
+            // the per-account "done" gate skips them on every later tick.
             const users = await UserUpdateSchedule.find({
-                dailyUpdateHour: currentHour,
+                dailyUpdateHour: { $lte: currentHour },
                 $or: [
                     { lastDailyUpdate: null },
                     { lastDailyUpdate: { $lt: startOfToday } } // Not updated today
                 ]
             }).populate('userId');
 
-            return users.filter(user => user.userId && user.userId.isVerified);
+            // Eligibility filter for the DAILY pipeline only:
+            //   - PRO and PRO-trial users (packageType === 'PRO', including those
+            //     whose isInTrialPeriod is true)
+            //   - Agency clients (managed by an agency under a single billing entity)
+            //
+            // Excluded by this filter: LITE, AGENCY-owner accounts without a Pro
+            // entitlement, expired/cancelled users still in the schedule table.
+            //
+            // NOTE: This filter applies ONLY to the daily scheduled pipeline.
+            // Integration worker (first-time onboarding) uses a separate path
+            // (`Integration.executeBatch3And4Phase` via integrationWorker.js)
+            // and is NOT affected — new sign-ups still get their initial 30-day
+            // fetch regardless of plan.
+            return users.filter(user => {
+                if (!user.userId || !user.userId.isVerified) return false;
+                const isPro = user.userId.packageType === 'PRO'; // covers both active Pro and Pro-trial
+                const isAgencyClient = user.userId.isAgencyClient === true;
+                return isPro || isAgencyClient;
+            });
         } catch (error) {
             logger.error('Error getting users needing daily update:', error);
             return [];
@@ -93,10 +207,17 @@ class UserSchedulingService {
         try {
             const now = new Date();
 
-            // Step 1: Update only the per-account lastDailyUpdate
+            // Step 1: Update only the per-account lastDailyUpdate.
+            // Also zero out the per-account retry counter so tomorrow starts fresh.
             await UserUpdateSchedule.updateOne(
                 { userId },
-                { $set: { 'sellerAccounts.$[elem].lastDailyUpdate': now } },
+                {
+                    $set: {
+                        'sellerAccounts.$[elem].lastDailyUpdate': now,
+                        'sellerAccounts.$[elem].dailyAttempts': 0,
+                        'sellerAccounts.$[elem].dailyAttemptsResetAt': UserSchedulingService._startOfUtcDay(now)
+                    }
+                },
                 { arrayFilters: [{ 'elem.country': country, 'elem.region': region }] }
             );
 
