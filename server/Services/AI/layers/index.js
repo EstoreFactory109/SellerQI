@@ -19,6 +19,7 @@ async function runLayeredQMatePipeline({
     skipClarification,
     clarificationThreshold,
     modelTools,
+    conversationContext = {},
 }) {
     const layerRequest = createLayerRequest({
         rawQuestion,
@@ -48,6 +49,8 @@ async function runLayeredQMatePipeline({
         threshold: clarificationThreshold,
         skipForSimple: skipClarification,
         question: cleanedQuestion,
+        // Phase 6 / Task 6.1: established-context bypass.
+        conversationContext,
     });
 
     if (clarificationDecision.ask) {

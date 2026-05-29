@@ -487,6 +487,41 @@ async function interpretPrompt(params) {
     }
   }
 
+  // --- Phase 5 / Task 5.3: Fill from structured conversation context ---
+  // The structured `conversationContext` (active ASINs, active time range)
+  // is a more reliable fallback than raw history scraping. Use it when the
+  // chat-history pass above did not resolve the reference.
+  if (context && context.conversationContext && entities) {
+    const convCtx = context.conversationContext || {};
+
+    // If still no ASINs after reference resolution, use active ASINs from context
+    if (
+      (!entities.asins || entities.asins.length === 0) &&
+      hasImplicitReference(normalizedPrompt) &&
+      Array.isArray(convCtx.activeAsins) &&
+      convCtx.activeAsins.length > 0
+    ) {
+      entities.asins = [convCtx.activeAsins[0]]; // most recent ASIN
+      entities._resolvedFromConversationContext = true;
+      logger.info(
+        `[QMate][Interpreter] Resolved ASIN from conversation context: ${entities.asins[0]}`
+      );
+    }
+
+    // If no time range, carry forward from context
+    const stillNoTimeRange =
+      !entities.timeRange ||
+      entities.timeRange === "none" ||
+      entities.timeRange?.type === "none";
+    if (stillNoTimeRange && convCtx.activeTimeRange) {
+      entities.timeRange = convCtx.activeTimeRange;
+      entities._timeResolvedFromConversationContext = true;
+      logger.info(
+        "[QMate][Interpreter] Resolved time range from conversation context"
+      );
+    }
+  }
+
   const rewrittenQuestion =
     engine === ENGINE.SUGGESTION
       ? rewriteSuggestionQuestion(normalizedPrompt, entities, outputPreference)

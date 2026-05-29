@@ -14,7 +14,7 @@ const handleChat = asyncHandler(async (req, res) => {
     const userId = req.userId;
     const country = req.country;
     const region = req.region;
-    const { message, messages: chatHistory, dateRange } = req.body || {};
+    const { message, messages: chatHistory, dateRange, chatId } = req.body || {};
 
     if (!userId) {
         return res
@@ -48,6 +48,24 @@ const handleChat = asyncHandler(async (req, res) => {
         calendarMode
     });
 
+    // Phase 5 / Task 5.2: load the structured conversation context persisted
+    // on the chat document so the interpreter can resolve implicit references
+    // (e.g. "that product", "the same period") against prior turns.
+    let existingConversationContext = {};
+    if (chatId && mongoose.Types.ObjectId.isValid(chatId)) {
+        try {
+            const chatDoc = await QMateChat.findOne({ _id: chatId, User: userId })
+                .select('conversationContext')
+                .lean();
+            existingConversationContext = chatDoc?.conversationContext || {};
+        } catch (ctxErr) {
+            logger.warn('[QMate] Failed to load conversation context', {
+                chatId,
+                message: ctxErr.message,
+            });
+        }
+    }
+
     // Use optimized method by default (reads from pre-computed data)
     // Falls back to legacy method internally if pre-computed data unavailable
     const result = await QMateService.generateResponseOptimized({
@@ -58,7 +76,8 @@ const handleChat = asyncHandler(async (req, res) => {
         chatHistory: Array.isArray(chatHistory) ? chatHistory : [],
         startDate,
         endDate,
-        calendarMode
+        calendarMode,
+        conversationContext: existingConversationContext,
     });
 
     if (!result || result.status !== 200) {
@@ -126,6 +145,9 @@ const handleChat = asyncHandler(async (req, res) => {
             response_source: result.responseSource || 'unknown',
             data_confidence: result.dataConfidence || 'low',
             data_sources: Array.isArray(result.dataSources) ? result.dataSources : [],
+            // Phase 5 / Task 5.2: structured cross-turn state for the frontend
+            // to persist back via PATCH /chats/:chatId.
+            conversationContext: result.conversationContext || {},
         },
     };
 
@@ -214,13 +236,13 @@ const getChat = asyncHandler(async (req, res) => {
 
 /**
  * PATCH /api/qmate/chats/:chatId
- * Body: { title?: string, messages?: Array<{ role, content, charts?, followUps? }> }
- * Updates chat title and/or messages.
+ * Body: { title?: string, messages?: Array<{ role, content, charts?, followUps? }>, conversationContext?: object }
+ * Updates chat title, messages, and/or conversation context.
  */
 const updateChat = asyncHandler(async (req, res) => {
     const userId = req.userId;
     const { chatId } = req.params;
-    const { title, messages: rawMessages } = req.body || {};
+    const { title, messages: rawMessages, conversationContext } = req.body || {};
     if (!userId) {
         return res.status(400).json(new ApiError(400, 'User ID is required.'));
     }
@@ -241,6 +263,11 @@ const updateChat = asyncHandler(async (req, res) => {
             charts: Array.isArray(m.charts) ? m.charts : [],
             followUps: Array.isArray(m.followUps) ? m.followUps : [],
         }));
+    }
+    // Phase 5 / Task 5.2: persist the structured conversation context so it
+    // can be loaded again on the next turn's POST /chat request.
+    if (conversationContext && typeof conversationContext === 'object') {
+        chat.conversationContext = conversationContext;
     }
     await chat.save();
     return res.status(200).json(

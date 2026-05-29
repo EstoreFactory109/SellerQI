@@ -1,0 +1,106 @@
+# ============================================================================
+# SellerQI — Deploy to EC2
+# ============================================================================
+#
+# Automatically deploys the latest main branch to your EC2 instance via SSH.
+# Can also be triggered manually from the GitHub Actions tab (workflow_dispatch).
+#
+# The frontend is built on the GitHub Actions runner (fast) and the built
+# dist/ folder is copied to EC2 via SCP -- avoids slow builds on the VM.
+#
+# ── ONE-TIME SETUP (do these before the first run) ──────────────────────────
+#
+# Add these GitHub Secrets (repo → Settings → Secrets and variables → Actions):
+#
+#   Connection:
+#      EC2_HOST                – EC2 public IP or hostname
+#      EC2_USERNAME            – root
+#      EC2_PASSWORD            – Your SSH password
+#
+#   Frontend env vars (copied from your client/.env on EC2):
+#      VITE_BASE_URI           – API base URL
+#      VITE_GOOGLE_CLIENT_ID   – Google OAuth client ID
+#      VITE_APP_ID             – Amazon SP-API application ID
+#      VITE_APP_BETA           – "true" or "false"
+#
+# The repo is already cloned on EC2 at ~/SellerQI.
+# After adding the secrets, every push to main deploys automatically.
+# ============================================================================
+
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Build frontend
+        working-directory: client
+        env:
+          VITE_BASE_URI: ${{ secrets.VITE_BASE_URI }}
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+          VITE_APP_ID: ${{ secrets.VITE_APP_ID }}
+          VITE_APP_BETA: ${{ secrets.VITE_APP_BETA }}
+        run: |
+          npm install
+          npm run build
+
+      - name: Copy built frontend to EC2
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          password: ${{ secrets.EC2_PASSWORD }}
+          source: client/dist/
+          target: ~/SellerQI/
+          overwrite: true
+
+      - name: Deploy server via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          password: ${{ secrets.EC2_PASSWORD }}
+          script_stop: true
+          command_timeout: 5m
+          script: |
+            set -e
+
+            cd SellerQI
+
+            echo "── Stopping all PM2 processes ──"
+            pm2 stop all || true
+            pm2 kill || true
+
+            echo "── Pulling latest changes ──"
+            git pull origin main
+
+            echo "── Installing server dependencies ──"
+            npm install --production
+
+            echo "── Starting PM2 processes ──"
+            pm2 start ecosystem.config.js
+            pm2 save
+
+            echo "── Deploy complete ──"
+            pm2 ls

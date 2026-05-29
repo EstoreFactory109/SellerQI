@@ -32,7 +32,7 @@ function createResolvedContextContract(payload = {}) {
         calendarMode: payload.calendarMode || 'default',
         startDate: payload.startDate || null,
         endDate: payload.endDate || null,
-        clarificationState: payload.clarificationState || { attempts: 0, maxAttempts: 2 },
+        clarificationState: payload.clarificationState || { attempts: 0, maxAttempts: 1 },
         derived: payload.derived || {},
         validationErrors: Array.isArray(payload.validationErrors) ? payload.validationErrors : [],
     };

@@ -133,6 +133,24 @@ function isAdsThrottleError(error) {
     return /throttl/i.test(text);
 }
 
+// Distinguish a true Amazon-side advertiser-permission revocation (the
+// user must re-authorize Amazon Ads on the dashboard) from a transient
+// 401 (which the TokenManager auto-refresh path already handles) or a
+// legitimate "not enabled" 400/404 ("this seller never had SB" etc.).
+//
+// Amazon's profile-revocation error reaches us as an `Error` object
+// whose `.message` includes BOTH the 401 status AND either
+// "does not have access to profile" or "Missing rights". Transient
+// token expiry uses different wording ("access token you provided has
+// expired"). So this matcher won't false-positive on token blips.
+function isAuthRevokedError(error) {
+    if (!error) return false;
+    const msg = (error.message || String(error)).toString();
+    if (!/401/.test(msg)) return false;
+    return /does not have access to profile/i.test(msg)
+        || /Missing rights/i.test(msg);
+}
+
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -620,9 +638,16 @@ function combineMetrics(reportResults, startDate, endDate) {
         'SPONSORED_DISPLAY': 'sponsoredDisplay'
     };
 
-    reportResults.forEach(({ campaignType, metrics, skipped }) => {
+    reportResults.forEach(({ campaignType, metrics, skipped, authRevoked }) => {
         if (skipped) {
-            console.log(`⏭️ Skipping ${campaignType} - not available for this seller`);
+            // Differentiate the two skip causes so the log doesn't conflate
+            // a true "not enabled for this seller" with a 401 profile-permission
+            // revocation. The aggregate check at the end of getPPCMetrics
+            // promotes the all-auth-revoked case into a hard failure.
+            const reason = authRevoked
+                ? 'auth revoked (Amazon Ads profile permission)'
+                : 'not available for this seller';
+            console.log(`⏭️ Skipping ${campaignType} - ${reason}`);
             return;
         }
 
@@ -880,12 +905,24 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
 
         // Create reports for all campaign types in parallel
         const campaignTypes = Object.keys(CAMPAIGN_TYPES);
-        const createReportPromises = campaignTypes.map(campaignType => 
+        const createReportPromises = campaignTypes.map(campaignType =>
             createReport(accessToken, profileId, region, campaignType, calculatedStartDate, calculatedEndDate, tokenRefreshCallback)
                 .then(result => ({ campaignType, ...result }))
                 .catch(error => {
                     console.error(`❌ Error creating report for ${campaignType}:`, error.message);
-                    return { campaignType, reportId: null, skipped: true, error: error.message };
+                    // Tag auth-revoked errors so the aggregate logic at the end
+                    // of this function can surface them as a real failure rather
+                    // than silently logging $0 success. Other errors (legit
+                    // 400/404 "not enabled", transient network blips) keep the
+                    // existing "skipped, treat as zeroes" behaviour so partial
+                    // data is still preserved across campaign types.
+                    return {
+                        campaignType,
+                        reportId: null,
+                        skipped: true,
+                        error: error.message,
+                        authRevoked: isAuthRevokedError(error)
+                    };
                 })
         );
 
@@ -898,9 +935,14 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
 
         for (const reportResult of reportCreationResults) {
             if (reportResult.skipped || !reportResult.reportId) {
-                reportResults.push({ 
-                    campaignType: reportResult.campaignType, 
+                reportResults.push({
+                    campaignType: reportResult.campaignType,
                     skipped: true,
+                    // Carry the auth-revoked flag forward from createReport's
+                    // .catch so the aggregate check at the end of the function
+                    // can detect "every campaign type had its profile rejected".
+                    authRevoked: reportResult.authRevoked === true,
+                    error: reportResult.error,
                     metrics: { totalSales: 0, totalSpend: 0, totalImpressions: 0, totalClicks: 0, totalUnitsSoldClicks1d: 0, dateWiseData: {}, campaigns: [] }
                 });
                 continue;
@@ -956,13 +998,52 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
                 }
             } catch (error) {
                 console.error(`❌ [GetPPCMetrics] Error processing ${reportResult.campaignType}:`, error.message);
-                reportResults.push({ 
-                    campaignType: reportResult.campaignType, 
+                reportResults.push({
+                    campaignType: reportResult.campaignType,
                     skipped: true,
                     error: error.message,
+                    authRevoked: isAuthRevokedError(error),
                     metrics: { totalSales: 0, totalSpend: 0, totalImpressions: 0, totalClicks: 0, totalUnitsSoldClicks1d: 0, dateWiseData: {}, campaigns: [] }
                 });
             }
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        // Auth-revoked aggregate check
+        //
+        // If EVERY campaign-type report failed with a 401 "does not have
+        // access to profile" error, the seller's Amazon Ads advertiser
+        // permission has been revoked upstream. Without this throw the
+        // function would silently log "$0 sales / $0 spend / Saved 0
+        // documents" and return success — the phase wrapper would then
+        // mark the run as succeeded, lastDailyUpdate would stamp, and
+        // the same broken account would silently waste a slot every
+        // day forever.
+        //
+        // We only escalate when EVERY result is auth-revoked. Partial
+        // failures (e.g. one campaign type 401-revoked, others fetched
+        // fine) still use the existing "skipped, count zero" behaviour
+        // so legitimate partial data is preserved.
+        //
+        // Throwing here propagates up through the outer try/catch
+        // (re-thrown at the catch block below) → the wrapper in
+        // fetchScheduledApiData marks `success: false` for this service
+        // → AdsPhase's `anyAdsSucceeded` becomes false if no other ads
+        // service succeeded → A.3 finalize gate skips
+        // markDailyUpdateComplete → the cron retries (up to the
+        // per-account daily cap), then caps out. Honest signal end-to-end.
+        const everyResultAuthRevoked =
+            reportResults.length > 0 &&
+            reportResults.every(r => r && r.authRevoked === true);
+        if (everyResultAuthRevoked) {
+            const sampleError = reportResults.find(r => r && r.error)?.error || '(no error message captured)';
+            const err = new Error(
+                `Amazon Ads profile permission revoked for user ${userId} (${country}-${region}). ` +
+                `All ${reportResults.length} campaign-type reports returned 401. ` +
+                `The seller needs to re-authorize Amazon Ads. Sample upstream error: ${sampleError}`
+            );
+            err.authRevoked = true;
+            throw err;
         }
 
         // Combine all metrics

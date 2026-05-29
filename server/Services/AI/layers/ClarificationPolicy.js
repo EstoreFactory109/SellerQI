@@ -1,8 +1,14 @@
 const { hasAsin } = require('./helpers/EntityGuards.js');
+const logger = require('../../../utils/Logger.js');
 
-function shouldAskClarification({ interpretation, resolvedContext, threshold = 0.35, skipForSimple = false, question = '' }) {
+// Phase 6 / Task 6.1: lowered from 2 to 1. The new UX is to pick the most
+// likely interpretation and answer it, offering alternatives as follow-ups,
+// rather than looping the user through repeated clarifications.
+const MAX_CLARIFICATION_ATTEMPTS = 1;
+
+function shouldAskClarification({ interpretation, resolvedContext, threshold = 0.35, skipForSimple = false, question = '', conversationContext = {} }) {
     const attempts = resolvedContext?.clarificationState?.attempts || 0;
-    const maxAttempts = resolvedContext?.clarificationState?.maxAttempts || 2;
+    const maxAttempts = resolvedContext?.clarificationState?.maxAttempts || MAX_CLARIFICATION_ATTEMPTS;
     const explicitLayer1Need = Boolean(interpretation?.clarification?.needed);
     const metrics = Array.isArray(interpretation?.entities?.metrics) ? interpretation.entities.metrics : [];
     const queryShape = interpretation?.entities?.queryShape || null;
@@ -22,6 +28,35 @@ function shouldAskClarification({ interpretation, resolvedContext, threshold = 0
     // Do not ask confidence-based clarification for clear metric value queries.
     if (isClearInfoMetricQuery) return { ask: false, exhausted: false, reason: 'metric_query_bypass' };
     if (skipForSimple) return { ask: false, exhausted: false, reason: 'simple_prompt_bypass' };
+
+    // --- Phase 6 / Task 6.1: additional leniency bypasses ---
+    // These run BEFORE the confidence threshold check below and short-circuit:
+    // if any matches we answer the query rather than asking for clarification.
+
+    // Bypass: If the query contains any recognized metric keyword, just answer it.
+    const recognizedMetrics = ['sales', 'revenue', 'profit', 'margin', 'ppc', 'acos', 'roas',
+        'spend', 'cost', 'units', 'orders', 'inventory', 'stock', 'issues', 'reimbursement',
+        'keyword', 'impression', 'click', 'conversion', 'bsr', 'rank', 'organic'];
+    const queryLower = (question || '').toLowerCase();
+    const hasRecognizedMetric = recognizedMetrics.some((m) => queryLower.includes(m));
+    if (hasRecognizedMetric) {
+        logger.info('[QMate][ClarificationPolicy] Bypassing clarification — recognized metric keyword in query');
+        return { ask: false, exhausted: false, reason: 'recognized_metric_bypass' };
+    }
+
+    // Bypass: If this is a "show me" / "give me" / "what is" style direct question.
+    const directPatterns = /^(show|give|tell|what|how much|how many|list|display|get|find|check|see)\b/i;
+    if (directPatterns.test(queryLower.trim())) {
+        logger.info('[QMate][ClarificationPolicy] Bypassing clarification — direct question pattern');
+        return { ask: false, exhausted: false, reason: 'direct_question_bypass' };
+    }
+
+    // Bypass: If conversation context has active entities (user has established context).
+    if (conversationContext?.activeAsins?.length > 0 || conversationContext?.turnCount > 1) {
+        logger.info('[QMate][ClarificationPolicy] Bypassing clarification — established conversation context');
+        return { ask: false, exhausted: false, reason: 'conversation_context_bypass' };
+    }
+
     if ((interpretation?.confidence || 0) < threshold) return { ask: true, exhausted: false };
     return { ask: false, exhausted: false };
 }

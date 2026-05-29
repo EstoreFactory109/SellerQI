@@ -89,7 +89,9 @@ function resolveRequestContext(params = {}) {
         calendarMode: resolvedRange.calendarMode,
         clarificationState: {
             attempts: clarificationAttempts,
-            maxAttempts: 2,
+            // Phase 6 / Task 6.1: lowered from 2 to 1 — answer the most likely
+            // interpretation instead of looping the user through clarifications.
+            maxAttempts: 1,
         },
         derived: {
             askedTimeRange: interpreted?.entities?.timeRange || null,

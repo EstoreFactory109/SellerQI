@@ -3094,6 +3094,61 @@ const buildModelContext = (dashboardData, question, ppcMetrics = null, cogsValue
     };
 };
 
+// --- Phase 5 / Task 5.2: conversation context tracking --------------------
+// `conversationContext` is a compact, structured summary of the conversation
+// (NOT raw chat messages). It is stored on the chat document in MongoDB and
+// loaded fresh on each turn so the interpreter can resolve implicit references
+// (e.g. "that product", "the same period").
+
+function dedupeArray(arr) {
+    return [...new Set(arr)];
+}
+
+function inferTaskContext(interpretation, existingCtx) {
+    const intent = interpretation?.intent;
+    if (['ppc_optimization', 'implementation_request'].includes(intent) &&
+        interpretation?.routing?.engine === 'implementation_engine') {
+        return 'ppc_optimization';
+    }
+    if (intent === 'how_to_fix' || interpretation?.entities?.metrics?.some((m) => m.includes('listing'))) {
+        return 'listing_fix';
+    }
+    return existingCtx?.taskContext || 'general';
+}
+
+function buildUpdatedConversationContext(existing, interpretation, result) {
+    const ctx = existing || {};
+
+    return {
+        // Merge new ASINs with existing (keep last 5)
+        activeAsins: dedupeArray([
+            ...(interpretation?.entities?.asins || []),
+            ...(ctx.activeAsins || []),
+        ]).slice(0, 5),
+
+        // Track what metrics were discussed
+        activeMetrics: dedupeArray([
+            ...(interpretation?.entities?.metrics || []),
+            ...(ctx.activeMetrics || []),
+        ]).slice(0, 10),
+
+        // Update time range if a new one was specified
+        activeTimeRange: interpretation?.entities?.timeRange?.type !== 'none'
+            ? (interpretation?.entities?.timeRange || ctx.activeTimeRange)
+            : ctx.activeTimeRange,
+
+        // Track last intent/engine for context
+        lastIntent: interpretation?.intent || ctx.lastIntent,
+        lastEngine: interpretation?.routing?.engine || ctx.lastEngine,
+        lastDataSources: result?.dataSources || ctx.lastDataSources || [],
+
+        // Infer task context
+        taskContext: inferTaskContext(interpretation, ctx),
+
+        turnCount: (ctx.turnCount || 0) + 1,
+    };
+}
+
 /**
  * QMateService
  * - Orchestrates fetching existing analytics and generating AI answers.
@@ -3527,8 +3582,33 @@ class QMateService {
      * @param {string} [params.startDate] - Start date for filtering (YYYY-MM-DD)
      * @param {string} [params.endDate] - End date for filtering (YYYY-MM-DD)
      * @param {string} [params.calendarMode] - Calendar mode (default, last7, custom)
+     * @param {Object} [params.conversationContext] - Structured cross-turn state (Phase 5)
      */
-    static async generateResponseOptimized({ userId, country, region, question, chatHistory = [], startDate, endDate, calendarMode = 'default' }) {
+    static async generateResponseOptimized(params = {}) {
+        // Phase 5 / Task 5.2: thin wrapper around the implementation. Whatever
+        // the implementation returns (one of many early-return shapes), we
+        // attach the updated structured `conversationContext` derived from the
+        // turn's interpretation so the controller can persist it.
+        const existingConversationContext = params.conversationContext || {};
+        const result = await QMateService._generateResponseOptimizedImpl(params);
+        if (result && typeof result === 'object') {
+            try {
+                const interpretation = result.intent_interpretation || null;
+                result.conversationContext = buildUpdatedConversationContext(
+                    existingConversationContext,
+                    interpretation,
+                    result
+                );
+            } catch (ctxErr) {
+                logger.warn('[QMate] Failed to build updated conversation context', {
+                    message: ctxErr.message,
+                });
+            }
+        }
+        return result;
+    }
+
+    static async _generateResponseOptimizedImpl({ userId, country, region, question, chatHistory = [], startDate, endDate, calendarMode = 'default', conversationContext = {} }) {
         const client = getOpenAIClient();
         const startTime = Date.now();
         const { cleaned: questionCleaned, wasTruncated: promptTruncated } = clearPrompt(question);
@@ -3560,6 +3640,9 @@ class QMateService {
                 calendarMode,
                 openAIClient: client,
                 chatHistory: Array.isArray(chatHistory) ? chatHistory : [],
+                // Phase 5 / Task 5.3: structured cross-turn state so the
+                // interpreter can fill missing ASINs/time ranges from context.
+                conversationContext: conversationContext || {},
             },
         });
 
@@ -3627,6 +3710,10 @@ class QMateService {
                 isSimpleEnoughToSkipClarification(effectiveQuestion, interpreted),
             clarificationThreshold: INTERPRETER_CONFIDENCE_THRESHOLD,
             modelTools: { client, createCompletionWithFallback },
+            // Phase 6 / Task 6.1: pass structured cross-turn context so the
+            // clarification policy can bypass clarification once the user has
+            // an established conversation.
+            conversationContext: conversationContext || {},
         });
         const executionPlanForLog = buildExecutionPlan(createInterpretationContract(interpreted));
         if (layeredResponse) {
@@ -4484,16 +4571,33 @@ class QMateService {
             };
 
         } catch (error) {
-            logger.error('[QMate] generateResponseOptimized failed, falling back to legacy', {
+            logger.error('[QMate] generateResponseOptimized failed — returning data-unavailable response instead of legacy fallback', {
                 error: error.message,
                 stack: error.stack,
                 userId,
                 country,
                 region
             });
-            
-            // Fall back to legacy method on any error
-            return this.generateResponse({ userId, country, region, question, chatHistory });
+
+            // Phase 1 / Task 1.2: do NOT fall into the legacy generateResponse
+            // path — it produced slow, unconstrained, hallucination-prone
+            // answers. Return an explicit data-unavailable response instead.
+            return {
+                status: 200,
+                answer_markdown: "I'm sorry, I ran into a problem while putting together your answer. This is usually temporary — please try again in a moment, or rephrase your question to focus on a specific metric like sales, profit, or PPC performance.",
+                chart_suggestions: [],
+                follow_up_questions: [
+                    'What were my total sales in the last 30 days?',
+                    'Show me my PPC performance',
+                    'What are my current listing issues?'
+                ],
+                needs_clarification: false,
+                clarifying_questions: [],
+                intent_interpretation: interpreted,
+                responseSource: 'data_unavailable',
+                dataConfidence: 'none',
+                dataSources: [],
+            };
         }
     }
 }

@@ -43,6 +43,27 @@ const QMateChatSchema = new mongoose.Schema(
       type: [QMateMessageSchema],
       default: [],
     },
+    // Phase 5 / Task 5.1: structured conversation state carried across turns.
+    // Not raw chat messages — a compact summary of active entities, time range,
+    // last intent/engine, and task context used to resolve implicit references.
+    conversationContext: {
+      type: {
+        activeAsins: { type: [String], default: [] },
+        activeMetrics: { type: [String], default: [] },
+        activeTimeRange: {
+          type: { type: String },
+          value: String,
+          startDate: String,
+          endDate: String,
+        },
+        lastIntent: String,
+        lastEngine: String,
+        lastDataSources: { type: [String], default: [] },
+        taskContext: String, // e.g., 'ppc_optimization', 'listing_fix', 'general'
+        turnCount: { type: Number, default: 0 },
+      },
+      default: {},
+    },
   },
   {
     timestamps: true,
