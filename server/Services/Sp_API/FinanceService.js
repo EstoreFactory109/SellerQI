@@ -115,6 +115,35 @@ const SETTLEMENT_LAG = {
 // Max age for pending orders — stop trying after this many days
 const MAX_PENDING_AGE_DAYS = 45;
 
+// Country → Sales Channel mapping for filtering the Sales Report.
+// The NA region report includes ALL NA marketplaces (US, CA, MX, BR) in one file,
+// each in their local currency. We must filter to the correct marketplace
+// to avoid mixing MXN/CAD/BRL amounts into USD totals.
+const COUNTRY_TO_SALES_CHANNEL = {
+  US: 'Amazon.com',
+  CA: 'Amazon.ca',
+  MX: 'Amazon.com.mx',
+  BR: 'Amazon.com.br',
+  UK: 'Amazon.co.uk',
+  GB: 'Amazon.co.uk',
+  DE: 'Amazon.de',
+  FR: 'Amazon.fr',
+  IT: 'Amazon.it',
+  ES: 'Amazon.es',
+  NL: 'Amazon.nl',
+  SE: 'Amazon.se',
+  PL: 'Amazon.pl',
+  BE: 'Amazon.com.be',
+  IN: 'Amazon.in',
+  TR: 'Amazon.com.tr',
+  AE: 'Amazon.ae',
+  SA: 'Amazon.sa',
+  EG: 'Amazon.eg',
+  JP: 'Amazon.co.jp',
+  AU: 'Amazon.com.au',
+  SG: 'Amazon.sg',
+};
+
 // ─────────────────────────────────────────────
 // DATE ASSIGNMENT PATTERN (Sellerboard-matched)
 //
@@ -273,12 +302,16 @@ async function fetchSalesReport(tokenManager, baseUrl, marketplaceId, startDate,
   return rows;
 }
 
-function parseSalesReportRows(reportRows) {
+function parseSalesReportRows(reportRows, country) {
   const orderMap = new Map();
   let totalItems = 0;
+  const salesChannel = country ? COUNTRY_TO_SALES_CHANNEL[country.toUpperCase()] : null;
+  let skippedChannel = 0;
   for (const row of reportRows) {
     if ((row['order-status'] || '').toLowerCase() === 'cancelled') continue;
     if ((row['sales-channel'] || '').toLowerCase() === 'non-amazon') continue;
+    // Filter by marketplace when country is specified (NA region returns US+CA+MX+BR mixed)
+    if (salesChannel && row['sales-channel'] !== salesChannel) { skippedChannel++; continue; }
     const price = parseFloat(row['item-price']) || 0;
     const pacificDate = toPacificDateStr(row['purchase-date']);
     if (!pacificDate) continue;
@@ -298,6 +331,7 @@ function parseSalesReportRows(reportRows) {
     item.totalUnits += parseInt(row['quantity'], 10) || 0;
     if (!item.asin && row['asin']) item.asin = row['asin'];
   }
+  if (skippedChannel > 0) logger.info(`[SalesReport] Skipped ${skippedChannel} rows from other marketplaces (filtering for ${salesChannel})`);
   logger.info(`[SalesReport] Valid orders: ${orderMap.size}, order-items (order×SKU): ${totalItems}`);
   return orderMap;
 }
@@ -650,7 +684,7 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
 
   logger.info(`[Step1] Sales Report: ${startDate} → ${endDate} (Pacific)`);
   const reportRows = await fetchSalesReport(tokenManager, baseUrl, marketplaceId, salesStartISO, salesEndISO);
-  const salesOrderMap = parseSalesReportRows(reportRows);
+  const salesOrderMap = parseSalesReportRows(reportRows, country);
 
   // ── Finance API: (startDate - buffer) → TODAY ──
   // We fetch a wider window than the sales report to catch:
