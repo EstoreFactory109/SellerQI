@@ -1343,15 +1343,38 @@ async function syncFinanceData({ userId, country, regionModel, refreshToken, acc
     }
   }
 
-  const step1 = await fetchNewSalesAndExpenses({ userId, country, regionModel, startDate, endDate, accessToken, refreshToken, clientId, clientSecret, tokenManager });
-  const step2 = await backfillPendingExpenses({ userId, country, regionModel, accessToken: tokenManager.token, refreshToken, clientId, clientSecret, tokenManager });
-  await syncRelationshipsIfNeeded({ userId, country, regionModel, startDate, endDate, accessToken: tokenManager.token, refreshToken, clientId, clientSecret });
+  try {
+    const step1 = await fetchNewSalesAndExpenses({ userId, country, regionModel, startDate, endDate, accessToken, refreshToken, clientId, clientSecret, tokenManager });
+    const step2 = await backfillPendingExpenses({ userId, country, regionModel, accessToken: tokenManager.token, refreshToken, clientId, clientSecret, tokenManager });
+    await syncRelationshipsIfNeeded({ userId, country, regionModel, startDate, endDate, accessToken: tokenManager.token, refreshToken, clientId, clientSecret });
 
-  return {
-    status: 'completed', startDate, endDate,
-    step1: { salesOrders: step1.salesOrders, skuDocs: step1.skuDocs, overheadDocs: step1.overheadDocs, pendingOrders: step1.pendingOrders },
-    step2: { resolved: step2.resolved, stillPending: step2.stillPending, expired: step2.expired },
-  };
+    return {
+      status: 'completed', startDate, endDate,
+      step1: { salesOrders: step1.salesOrders, skuDocs: step1.skuDocs, overheadDocs: step1.overheadDocs, pendingOrders: step1.pendingOrders },
+      step2: { resolved: step2.resolved, stillPending: step2.stillPending, expired: step2.expired },
+    };
+  } catch (err) {
+    // Write a 'failed' sync log so failures are visible in the database.
+    // Only write 'failed' for dates that don't already have a 'success' entry —
+    // avoids overwriting good data when a resync attempt fails.
+    logger.error(`[Sync] Finance sync failed for ${country}-${regionModel}: ${err.message}`, { userId, startDate, endDate, stack: err.stack });
+    try {
+      const dateList = [];
+      const d = new Date(`${startDate}T00:00:00.000Z`);
+      const endD = new Date(`${endDate}T00:00:00.000Z`);
+      while (d <= endD) { dateList.push(formatDateUTC(d)); d.setUTCDate(d.getUTCDate() + 1); }
+      for (const dateStr of dateList) {
+        await FinanceSyncLog.findOneAndUpdate(
+          { User: userObjectId, country: country.toUpperCase(), region: regionModel, date: dateStr, status: { $ne: 'success' } },
+          { User: userObjectId, country: country.toUpperCase(), region: regionModel, date: dateStr, fetchedAt: new Date(), status: 'failed', error: err.message.substring(0, 500) },
+          { upsert: true, new: true }
+        );
+      }
+    } catch (logErr) {
+      logger.error(`[Sync] Failed to write error sync log: ${logErr.message}`);
+    }
+    throw err;
+  }
 }
 
 async function syncRelationshipsIfNeeded({ userId, country, regionModel, startDate, endDate, accessToken, refreshToken, clientId, clientSecret }) {
