@@ -1205,9 +1205,18 @@ class ScheduledIntegration {
                             return { success: false, error: error.message || 'MCP SalesOnly fetch failed', data: null };
                         });
                 } else if (functionKey === 'ppcMetricsAggregated') {
-                    // PPC Metrics Aggregated — daily schedule fetches yesterday only
+                    // PPC Metrics Aggregated — daily schedule fetches the last 14 days
+                    // to capture the full attribution window across all campaign types:
+                    //   SP uses sales7d (7-day window)
+                    //   SB/SD use sales which is 14-day attribution
+                    // Re-fetching 14 days ensures every campaign type's metrics converge
+                    // to their final values. Uses upsertMetricsForDate (findOneAndUpdate)
+                    // so re-fetched days are cleanly overwritten with the latest data.
                     // getPPCMetrics(accessToken, profileId, userId, country, region, refreshToken, startDate, endDate, saveToDatabase)
-                    promise = serviceFunction(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, scheduleYesterday, scheduleYesterday, true)
+                    const _adsResyncStart = new Date(_yesterdayPacific);
+                    _adsResyncStart.setUTCDate(_adsResyncStart.getUTCDate() - 13);
+                    const adsResyncStartDate = _adsResyncStart.toISOString().split('T')[0];
+                    promise = serviceFunction(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, adsResyncStartDate, scheduleYesterday, true)
                         .then(result => {
                             if (result && result.success !== false) {
                                 logger.info('PPC Metrics Aggregated succeeded', { userId, region: Region, country: Country });
@@ -1266,6 +1275,11 @@ class ScheduledIntegration {
                     // 30-day backfill is reserved for the integration worker
                     // (`Integration.js`) where `backfillDays` defaults to 30.
                     //
+                    // `resyncDays: 5` re-fetches the last 5 days on every run to
+                    // correct orders that were captured as Pending/Unshipped but
+                    // later got cancelled. The Sales Report is a single API call
+                    // regardless of date range, so 5 days costs the same as 1 day.
+                    //
                     // Pending-order backfill still runs inside syncFinanceData
                     // regardless of which branch is taken.
                     promise = serviceFunction({
@@ -1278,6 +1292,7 @@ class ScheduledIntegration {
                         clientSecret: process.env.SPAPI_CLIENT_SECRET,
                         backfillDays: 1,
                         maxIncrementalDays: 7,
+                        resyncDays: 5,
                     })
                         .then(result => {
                             logger.info('Finance Sync succeeded', {
@@ -1301,8 +1316,14 @@ class ScheduledIntegration {
                             return { success: false, error: error.message || 'Finance Sync failed', data: null };
                         });
                 } else if (requiresAdsToken) {
-                    // Daily report services — pass yesterday-only date window via options
-                    const dailyDateOpts = { startDate: scheduleYesterday, endDate: scheduleYesterday };
+                    // Daily report services — fetch last 14 days to capture the full
+                    // attribution window (SP=7d, SB/SD=14d). A click on Day N can
+                    // generate an attributed sale up to 14 days later; re-fetching
+                    // ensures each day's metrics converge to their final values.
+                    const _adsResyncStartForOpts = new Date(_yesterdayPacific);
+                    _adsResyncStartForOpts.setUTCDate(_adsResyncStartForOpts.getUTCDate() - 13);
+                    const adsResyncStartForOpts = _adsResyncStartForOpts.toISOString().split('T')[0];
+                    const dailyDateOpts = { startDate: adsResyncStartForOpts, endDate: scheduleYesterday };
 
                     if (functionKey === 'ppcSpendsBySKU' || functionKey === 'adsKeywordsPerformanceData' || functionKey === 'ppcSpendsDateWise') {
                         // fn(accessToken, profileId, userId, country, region, refreshToken, options)

@@ -54,6 +54,10 @@ function periodDaysForExpenseFallback(calendarMode, fallbackPeriodDays = 30) {
  * - Pick totals with the same calendar rules as client expenseSnapshotCalendar.js.
  * - Refunds always from ExpenseReadService (same as /api/expenses/refunds* — not on snapshot).
  * - If no report snapshot, fall back to ExpenseReadService aggregates (same as /api/expenses/total*).
+ *
+ * @deprecated for standalone expense queries. FinanceEngine.buildExpenseBreakdownResponse()
+ * now handles "What are my expenses?" questions with dashboard-parity math.
+ * This function is still called by the legacy optimized path for non-finance queries.
  */
 async function getExpensesSnapshot({
     userId,
@@ -64,6 +68,7 @@ async function getExpensesSnapshot({
     calendarMode = 'default',
     fallbackPeriodDays = 30,
 }) {
+    logger.warn('[QMate][DEPRECATED] getExpensesSnapshot called — standalone expense queries should be handled by FinanceEngine');
     const mode = calendarMode || 'default';
     const periodDays = periodDaysForExpenseFallback(mode, fallbackPeriodDays);
     const useDateRangeForRaw = Boolean(startDate && endDate && mode !== 'default');

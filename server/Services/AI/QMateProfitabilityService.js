@@ -939,7 +939,12 @@ async function getAsinWiseProfitability(userId, country, region, limit = 100) {
 
 /**
  * Get complete profitability context for QMate AI
- * 
+ *
+ * @deprecated for finance-accuracy queries. The FinanceEngine now handles
+ * profit/expense/margin questions directly using FinanceDashboardReadService
+ * + shared financeCalculations.js. This service is still used by the
+ * suggestion_engine for broader product analysis context.
+ *
  * @param {string} userId - User ID
  * @param {string} country - Country code
  * @param {string} region - Region
@@ -948,6 +953,7 @@ async function getAsinWiseProfitability(userId, country, region, limit = 100) {
  * @returns {Promise<Object>} Complete profitability context
  */
 async function getQMateProfitabilityContext(userId, country, region, options = {}) {
+    logger.warn('[QMate][DEPRECATED] getQMateProfitabilityContext called — finance-accuracy queries should be handled by FinanceEngine');
     const startTime = Date.now();
     const { asinLimit = 100 } = options;
     

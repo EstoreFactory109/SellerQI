@@ -1,9 +1,24 @@
+const logger = require('../../../../../utils/Logger.js');
+
 function numeric(value) {
     const n = Number(value);
     return Number.isFinite(n) ? n : 0;
 }
 
+/**
+ * @deprecated Use FinanceEngine.handleFinanceQuery() instead.
+ * This function does NOT match the dashboard's expense/profit calculation:
+ * - Missing COGS subtraction
+ * - Missing overhead expenses
+ * - Missing per-field expense formula (uses aggregate totalExpenses instead)
+ * - adSpend potentially double-counted
+ *
+ * Retained for backward compatibility in non-finance suggestion_engine paths.
+ * The FinanceEngine intercept in layers/index.js handles finance queries
+ * before this function is reached.
+ */
 function buildProfitabilityDerived({ profitabilityParity, campaignAuditParity, reimbursement }) {
+    logger.warn('[QMate][DEPRECATED] buildProfitabilityDerived called — should be handled by FinanceEngine for finance queries');
     const summary = profitabilityParity?.summary || {};
     const expenses = profitabilityParity?.expenses || {};
     const snapshotTotals = profitabilityParity?.snapshot?.totals || {};

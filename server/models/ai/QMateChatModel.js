@@ -16,8 +16,11 @@ const QMateMessageSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.Mixed,
       default: [],
     },
+    // Follow-ups may be legacy strings OR structured { label, prompt } objects
+    // (Phase 4 deterministic follow-ups / FinanceEngine). Use an array of Mixed
+    // so both shapes persist — a [String] type throws a CastError on objects.
     followUps: {
-      type: [String],
+      type: [mongoose.Schema.Types.Mixed],
       default: [],
     },
   },

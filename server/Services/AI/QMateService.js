@@ -3611,6 +3611,7 @@ class QMateService {
     static async _generateResponseOptimizedImpl({ userId, country, region, question, chatHistory = [], startDate, endDate, calendarMode = 'default', conversationContext = {} }) {
         const client = getOpenAIClient();
         const startTime = Date.now();
+        logger.info(`[QMate][DEBUG-TRACE] generateResponseOptimized called — prompt: "${String(question || '').substring(0, 100)}"`);
         const { cleaned: questionCleaned, wasTruncated: promptTruncated } = clearPrompt(question);
         const effectiveQuestion = questionCleaned || question?.trim() || '';
         const allowDefaultSalesAnswer = isSimpleLast30DaySalesRequest(effectiveQuestion);
@@ -3770,8 +3771,29 @@ class QMateService {
             };
         }
 
+        // Never ask a confidence clarification when the query clearly knows what
+        // it wants: a recognized metric, a specific ASIN, a direct question, or a
+        // suggestion/implementation route. Mirrors the ClarificationPolicy
+        // bypasses so the legacy guardrail can't re-introduce format/clarify loops.
+        const ql = String(effectiveQuestion || '').toLowerCase();
+        const hasRecognizedMetric = ['sales', 'revenue', 'profit', 'margin', 'ppc', 'acos', 'roas',
+            'spend', 'cost', 'units', 'orders', 'inventory', 'stock', 'issues', 'reimbursement',
+            'keyword', 'impression', 'click', 'conversion', 'improve', 'optimize', 'optimise',
+            'reduce', 'increase', 'fee', 'expense'].some((m) => ql.includes(m));
+        const hasAsinForBypass = /\bB0[A-Z0-9]{8}\b/i.test(effectiveQuestion || '');
+        const isDirectQuestion = /^(how|what|why|show|give|tell|which|compare|list|display|get|find|check|see)\b/i.test(ql.trim());
+        const isSuggestionRoute =
+            interpreted?.routing?.engine === 'suggestion_engine' ||
+            interpreted?.routing?.engine === 'implementation_engine';
+        const clarificationBypass = hasRecognizedMetric || hasAsinForBypass || isDirectQuestion || isSuggestionRoute;
+        logger.info('[QMate][DEBUG-TRACE] Confidence guardrail bypass check', {
+            confidence: interpreted?.confidence || 0,
+            hasRecognizedMetric, hasAsinForBypass, isDirectQuestion, isSuggestionRoute, clarificationBypass,
+        });
+
         // Confidence guardrail: ask a focused clarification instead of returning noisy results.
-        if (!allowDefaultSalesAnswer && !isSimpleEnoughToSkipClarification(effectiveQuestion, interpreted) && (interpreted?.confidence || 0) < INTERPRETER_CONFIDENCE_THRESHOLD) {
+        if (!clarificationBypass && !allowDefaultSalesAnswer && !isSimpleEnoughToSkipClarification(effectiveQuestion, interpreted) && (interpreted?.confidence || 0) < INTERPRETER_CONFIDENCE_THRESHOLD) {
+            logger.info(`[QMate][DEBUG-TRACE] Returning clarification/unavailable from: ${(new Error().stack.split('\n')[1] || '').trim()}`);
             logger.info('[QMate] Confidence below threshold — returning clarification', {
                 confidence: interpreted?.confidence || 0,
                 threshold: INTERPRETER_CONFIDENCE_THRESHOLD,

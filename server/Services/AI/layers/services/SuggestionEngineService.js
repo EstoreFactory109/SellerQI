@@ -8,6 +8,84 @@ const { isGenericResponse, GENERIC_FALLBACK_MESSAGE } = require('../guards/Respo
 const { softenResponse } = require('../helpers/ResponseSoftener.js');
 const { isOnboardingQuery, CAPABILITIES_ANSWER, CAPABILITIES_FOLLOW_UPS } = require('../helpers/IntentGuards.js');
 const { hasAsin } = require('../helpers/EntityGuards.js');
+const { buildFinanceSuggestionContext } = require('./FinanceEngine.js');
+
+/**
+ * True when a suggestion/strategy question involves finance, so we should
+ * inject accurate FinanceEngine numbers before the LLM reasons about it.
+ * Robust to both the full interpretation (raw object) and the layer contract
+ * (rewrittenQuestion); also accepts the resolved question text directly.
+ */
+function isFinanceRelatedSuggestion(interpretation, question) {
+    const promptText = String(
+        question ||
+        interpretation?.rewrittenQuestion ||
+        interpretation?.raw?.normalizedPrompt ||
+        interpretation?.raw?.prompt ||
+        ''
+    ).toLowerCase();
+    const metrics = (interpretation?.entities?.metrics || []).join(' ').toLowerCase();
+    return /profit|margin|expense|fee|cost|sales|revenue|losing|money|improve|optimize|optimise|reduce|cut/.test(
+        `${promptText} ${metrics}`
+    );
+}
+
+/** Currency formatter for the injected finance block. */
+function fmtMoneySE(n) {
+    const v = Number(n || 0);
+    return `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/**
+ * Render the FinanceEngine context as an authoritative text block for the LLM.
+ * These numbers are the source of truth — they override any conflicting figures
+ * elsewhere in the prompt.
+ */
+function buildFinanceBlock(financeContext) {
+    const fs = financeContext.financeSummary || {};
+    const pa = financeContext.problemAreas || {};
+    const cmp = financeContext.comparison || null;
+    const lines = [];
+
+    lines.push('ACCURATE FINANCE CONTEXT (source of truth — use these exact numbers):');
+    lines.push(`- Total sales: ${fmtMoneySE(fs.totalSales)}`);
+    lines.push(`- Total expenses: ${fmtMoneySE(fs.displayTotalExpenses)} (includes Amazon fees, overhead, ad spend; reimbursements netted)`);
+    lines.push(`- Ad spend (PPC): ${fmtMoneySE(fs.adSpend)}`);
+    lines.push(`- COGS: ${fmtMoneySE(fs.totalCogs)}`);
+    lines.push(`- Profit: ${fmtMoneySE(fs.displayProfit)} (${Number(fs.profitMargin || 0).toFixed(1)}% margin)`);
+    lines.push(`- Refunds: ${fmtMoneySE(fs.refunds)}`);
+    lines.push(`- Account health: ${financeContext.healthIndicator}`);
+
+    if (cmp && cmp.deltas) {
+        const d = cmp.deltas;
+        lines.push('');
+        lines.push(`PERIOD-OVER-PERIOD (${cmp.overallDirection || 'n/a'}):`);
+        const delta = (label, x) =>
+            x ? `- ${label}: ${fmtMoneySE(x.current)} vs ${fmtMoneySE(x.previous)} (${Number(x.changePct || 0).toFixed(1)}%)` : null;
+        [delta('Sales', d.sales), delta('Expenses', d.expenses), delta('Ad spend', d.adSpend), delta('Profit', d.profit)]
+            .filter(Boolean)
+            .forEach((l) => lines.push(l));
+    }
+
+    const fmtProducts = (label, arr) => {
+        if (!Array.isArray(arr) || arr.length === 0) return;
+        lines.push('');
+        lines.push(`${label}:`);
+        arr.slice(0, 5).forEach((p) => {
+            if (p.grossProfit != null) {
+                lines.push(`- ${p.asin}${p.productName ? ` (${p.productName})` : ''}: sales ${fmtMoneySE(p.productSales)}, profit ${fmtMoneySE(p.grossProfit)} (${Number(p.profitMargin || 0).toFixed(1)}%)`);
+            } else {
+                lines.push(`- ${p.asin}${p.productName ? ` (${p.productName})` : ''}: sales ${fmtMoneySE(p.productSales)}, ${p.units} units`);
+            }
+        });
+    };
+    fmtProducts('LOSS-MAKING PRODUCTS', pa.losingProducts);
+    fmtProducts('LOW-MARGIN PRODUCTS (<15%)', pa.lowMarginProducts);
+    fmtProducts('HIGHEST FEE-RATIO PRODUCTS', pa.highFeeProducts);
+    fmtProducts('PRODUCTS MISSING COGS (profit understated)', pa.productsMissingCOGS);
+
+    return lines.join('\n');
+}
 
 function formatContext(context) {
     const iss = context.issues;
@@ -65,6 +143,7 @@ async function handleSuggestionIntent({
     createCompletionWithFallback,
     client,
     executionPlan,
+    resolvedContext,
 }) {
     const outputFormat = interpretation?.outputPreference?.format || 'unspecified';
     const asinPresent =
@@ -87,7 +166,39 @@ async function handleSuggestionIntent({
         };
     }
 
+    // Category G: for finance-related suggestions, run the FinanceEngine FIRST
+    // and inject its accurate numbers so the LLM reasons over correct figures
+    // (instead of the old conflicting Track A/Track B data). The suggestion
+    // engine still keeps its multi-domain context (PPC, issues, inventory).
+    let financeContext = null;
+    if (isFinanceRelatedSuggestion(interpretation, question)) {
+        try {
+            const userContext = {
+                userId: resolvedContext?.userId,
+                country: resolvedContext?.country,
+                region: resolvedContext?.region,
+            };
+            const requestDateRange = {
+                startDate: resolvedContext?.startDate,
+                endDate: resolvedContext?.endDate,
+                calendarMode: resolvedContext?.calendarMode,
+            };
+            financeContext = await buildFinanceSuggestionContext(interpretation, userContext, requestDateRange);
+            logger.info('[QMate][SuggestionEngine] Injected accurate finance context from FinanceEngine');
+        } catch (err) {
+            logger.warn('[QMate][SuggestionEngine] FinanceEngine context failed, using existing data:', err.message);
+        }
+    }
+
     const context = buildLLMContext(unifiedData, interpretation);
+
+    // Override the (possibly conflicting) finance numbers with FinanceEngine's.
+    if (financeContext && financeContext.financeSummary) {
+        const fs = financeContext.financeSummary;
+        context.sales = fs.totalSales;
+        context.profit = fs.displayProfit;
+        context.adSpend = fs.adSpend;
+    }
 
     if (!context || Object.keys(context).length === 0 || isContextEffectivelyEmpty(context)) {
         logger.info('[QMate][Suggestion] No relevant context — returning data-unavailable response');
@@ -127,12 +238,16 @@ async function handleSuggestionIntent({
 - Amazon seller account query
 - Focus on business metrics (sales, ads, inventory, profit)
 `;
+    const financeBlock = financeContext ? `\n\n${buildFinanceBlock(financeContext)}\n` : '';
     const formattedContext =
-        `${reinforcedContext}\n\n${formatContext(context).trim()}\n\nTOP ISSUE DRIVERS (ranked by impact):\n${driverSummary}\n\n` +
+        `${reinforcedContext}\n\n${formatContext(context).trim()}${financeBlock}\n\nTOP ISSUE DRIVERS (ranked by impact):\n${driverSummary}\n\n` +
         'Instructions:\n' +
         '- Focus on highest-impact drivers first when explaining causes.\n' +
         '- Consider multiple factors (inventory, ads, ranking, conversion, profitability) when the data supports them.\n' +
-        '- Do not ignore other non-zero signals in the summary.\n';
+        '- Do not ignore other non-zero signals in the summary.\n' +
+        (financeContext
+            ? '- Finance numbers in the ACCURATE FINANCE CONTEXT block are the source of truth; use those exact figures and do not recompute them.\n'
+            : '');
 
     const messages = [
         {
@@ -187,6 +302,7 @@ CRITICAL DATA RULES — FOLLOW THESE WITHOUT EXCEPTION:
                 },
                 data_summary_text: formattedContext,
                 ranked_issue_drivers: rankedDrivers,
+                accurate_finance_context: financeContext || undefined,
             }),
         },
     ];

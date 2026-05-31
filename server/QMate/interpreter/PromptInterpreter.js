@@ -12,6 +12,47 @@ const ENGINE = {
   IMPLEMENTATION: "implementation_engine"
 };
 
+// Output formats that are obvious from the intent — no need to ask the user
+// "single number / list / graph?". Keys cover BOTH the regex classifier intents
+// (suggestion, detailed_explanation, graph, post_action) and the LLM classifier
+// intents (how_to_fix, why_question, ppc_optimization, etc.).
+const AUTO_RESOLVE_OUTPUT = {
+  how_to_fix: "detailed_explanation",
+  why_question: "detailed_explanation",
+  ppc_optimization: "detailed_explanation",
+  implementation_request: "list",
+  suggestion: "detailed_explanation",
+  detailed_explanation: "detailed_explanation",
+  post_action: "list",
+  issue_query: "list",
+  comparison: "table",
+  trend_query: "graph",
+  graph: "graph",
+  top_products: "list",
+  greeting: "text",
+  capabilities_question: "text",
+  off_topic: "text",
+};
+
+/**
+ * Resolve an output format when the user did not explicitly request one, for
+ * cases where asking a "what format?" clarification would be wrong:
+ *   FIX A — known intent (how-to / why / suggestion / comparison / trend / ...)
+ *   FIX B — a specific ASIN is present (the user already knows what they want)
+ *   FIX C — suggestion_engine / implementation_engine (always an explanation/list)
+ * Returns a concrete format string, or null to leave it 'unspecified'
+ * (only generic information-engine queries get there).
+ */
+function autoResolveOutputPreference(intent, entities, engine) {
+  // FIX A — obvious-by-intent.
+  if (intent && AUTO_RESOLVE_OUTPUT[intent]) return AUTO_RESOLVE_OUTPUT[intent];
+  // FIX B — ASIN present → just answer, never ask for a format.
+  if (Array.isArray(entities?.asins) && entities.asins.length > 0) return "detailed_explanation";
+  // FIX C — suggestion / implementation engines produce explanations or action lists.
+  if (engine === ENGINE.SUGGESTION || engine === ENGINE.IMPLEMENTATION) return "detailed_explanation";
+  return null;
+}
+
 function normalizePrompt(prompt) {
   if (typeof prompt !== "string") {
     return "";
@@ -132,7 +173,13 @@ function buildClarificationPlan({
     engine === ENGINE.INFORMATION &&
     entities?.queryShape !== "action" &&
     entities?.queryShape !== "comparison";
-  if ((unknownIntent || confidence < 0.25) && !likelyInfoValueQuery) {
+  // Bypass the uncertain-intent clarification when the user clearly knows what
+  // they want: a specific ASIN, or a suggestion/implementation route (the user
+  // asked for advice/an action — never ask them to pick a format).
+  const asinPresent = Array.isArray(entities?.asins) && entities.asins.length > 0;
+  const suggestionOrImplementation =
+    engine === ENGINE.SUGGESTION || engine === ENGINE.IMPLEMENTATION;
+  if ((unknownIntent || confidence < 0.25) && !likelyInfoValueQuery && !asinPresent && !suggestionOrImplementation) {
     reasons.push("uncertain_intent");
     addOption({
       label: "Look up a specific number",
@@ -151,24 +198,12 @@ function buildClarificationPlan({
     });
   }
 
-  if (engine === ENGINE.SUGGESTION && outputPreference?.format === "unspecified") {
-    reasons.push("missing_output_format");
-    addOption({
-      label: "Show me a single number",
-      resolved_prompt: `${String(prompt || "").trim()} — return a single number only.`,
-      icon: "hash",
-    });
-    addOption({
-      label: "Show me a list with explanation",
-      resolved_prompt: `${String(prompt || "").trim()} — return a ranked list with brief reasoning.`,
-      icon: "list",
-    });
-    addOption({
-      label: "Show me a graph/trend",
-      resolved_prompt: `${String(prompt || "").trim()} — return a trend chart over time.`,
-      icon: "trending-up",
-    });
-  }
+  // NOTE: previously this asked "single number / list / graph?" whenever a
+  // suggestion-engine query had an unspecified output format. That was wrong —
+  // suggestion/how-to answers are always a detailed explanation or ranked list,
+  // and the format is now auto-resolved upstream (autoResolveOutputPreference).
+  // The format clarification has been removed so these questions are answered
+  // directly. (FIX C)
 
   if (engine === ENGINE.IMPLEMENTATION && postAction?.type && (!postAction.targets || !postAction.targets.length)) {
     reasons.push("missing_action_targets");
@@ -341,6 +376,8 @@ async function interpretPrompt(params) {
 
   const normalizedPrompt = normalizePrompt(params.prompt);
 
+  logger.info(`[QMate][DEBUG-TRACE] interpretPrompt called with prompt: "${normalizedPrompt.substring(0, 100)}"`);
+
   // --- Phase 2 / Task 2.1: Dual-classifier (regex + LLM) ---
   // Wrap the sync regex call in Promise.resolve so Promise.allSettled can
   // race it against the async LLM call. If the LLM call fails it returns a
@@ -450,6 +487,20 @@ async function interpretPrompt(params) {
     }
     if (postAction.type === "block_keywords" && (!postAction.targets || !postAction.targets.length)) {
       warnings.push("No explicit keyword targets found for block_keywords action");
+    }
+  }
+
+  logger.info(`[QMate][DEBUG-TRACE] Classification result — intent: ${classification?.intent}, confidence: ${classification?.confidence}, engine: ${engine}, source: ${useLLM ? 'llm' : 'regex'}`);
+  logger.info(`[QMate][DEBUG-TRACE] Entities — asins: ${JSON.stringify(entities?.asins)}, metrics: ${JSON.stringify(entities?.metrics)}, timeRange: ${JSON.stringify(entities?.timeRange)}`);
+
+  // Auto-resolve the output format when it is obvious (intent / ASIN present /
+  // suggestion-implementation engine). This runs AFTER engine is finalized so
+  // FIX C can see the real engine. It prevents the spurious "single number /
+  // list / graph?" clarification for how-to / suggestion / ASIN queries.
+  if (!outputPreference || outputPreference.format === "unspecified") {
+    const autoFormat = autoResolveOutputPreference(classification?.intent, entities, engine);
+    if (autoFormat) {
+      outputPreference = { format: autoFormat, confidence: 0.8, autoResolved: true };
     }
   }
 

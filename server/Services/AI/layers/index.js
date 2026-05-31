@@ -7,6 +7,8 @@ const { handleSuggestionIntent } = require('./services/SuggestionEngineService.j
 const { handlePostOperationIntent } = require('./services/PostOperationService.js');
 const { handleAsinDeepDive } = require('./services/AsinDeepDiveService.js');
 const { shouldAskClarification, buildDiscreteClarificationPrompt, buildDiscreteClarificationOptions } = require('./ClarificationPolicy.js');
+const { isFinanceQuery, handleFinanceQuery, narrateFinanceResult } = require('./services/FinanceEngine.js');
+const { generateFinanceFollowUps } = require('./helpers/FollowUpGenerator.js');
 const logger = require('../../../utils/Logger.js');
 
 async function runLayeredQMatePipeline({
@@ -52,6 +54,7 @@ async function runLayeredQMatePipeline({
         // Phase 6 / Task 6.1: established-context bypass.
         conversationContext,
     });
+    logger.info(`[QMate][DEBUG-TRACE] Pipeline — clarification result: ${JSON.stringify(clarificationDecision)}`);
 
     if (clarificationDecision.ask) {
         const layer1Questions = Array.isArray(interpretedContract?.clarification?.questions)
@@ -98,14 +101,22 @@ async function runLayeredQMatePipeline({
 
     if (clarificationDecision.exhausted) {
         logger.info('[QMate] Layered pipeline returning exhausted-clarification canned response');
+        // Include the user's ASIN in the example when one was detected, so the
+        // suggestion is concrete and actionable.
+        const exhaustedAsin =
+            (Array.isArray(interpretedContract?.entities?.asins) && interpretedContract.entities.asins[0]) ||
+            (String(cleanedQuestion || '').match(/\bB0[A-Z0-9]{8}\b/i) || [])[0] ||
+            'B0XXXXXXXXX';
         return {
             status: 200,
             answer_markdown:
-                'I could not confidently infer your request after two clarifications. Please ask again using one clear metric and one time range.',
+                "I'm having trouble understanding that question. Could you try asking about a specific metric? " +
+                `For example: "What are the sales for ${exhaustedAsin} in the last 30 days?" or ` +
+                `"Show me the profitability breakdown for ${exhaustedAsin}"`,
             chart_suggestions: [],
             follow_up_questions: [
-                'Example: What is gross profit for last 30 days?',
-                'Example: Show wasted ads spend value for last 14 days.',
+                `What are the sales for ${exhaustedAsin} in the last 30 days?`,
+                `Show me the profitability breakdown for ${exhaustedAsin}`,
             ],
             needs_clarification: false,
             intent_interpretation: interpretedContract,
@@ -114,6 +125,58 @@ async function runLayeredQMatePipeline({
             dataSources: [],
         };
     }
+
+    // --- Finance Engine intercept ---
+    // Finance questions are answered deterministically (numbers match the
+    // dashboard) and only narrated by the LLM. Placed AFTER clarification and
+    // BEFORE the legacy ServiceRouter/intent routing. If the engine errors or
+    // returns nothing, we fall through to the existing pipeline (degraded but
+    // not broken).
+    if (isFinanceQuery(interpretation)) {
+        try {
+            const financeResult = await handleFinanceQuery(
+                interpretation,
+                { userId: userContext.userId, country: userContext.country, region: userContext.region },
+                {
+                    startDate: runtimeContext.startDate,
+                    endDate: runtimeContext.endDate,
+                    calendarMode: runtimeContext.calendarMode,
+                }
+            );
+
+            if (financeResult && financeResult.type !== 'error') {
+                const narratedContent = await narrateFinanceResult(financeResult, rawQuestion, modelTools);
+
+                logger.info(`[QMate][FinanceEngine] Answered with type=${financeResult.type}, responseSource=finance_engine_deterministic`);
+
+                // Map to this codebase's response contract: the controller reads
+                // `answer_markdown` (→ content) and `chart_suggestions` (→ charts).
+                // `content`/`charts`/`financeResult` are included as harmless
+                // extras for spec fidelity and frontend raw access.
+                return {
+                    status: 200,
+                    answer_markdown: narratedContent,
+                    content: narratedContent,
+                    chart_suggestions: financeResult.charts || [],
+                    charts: financeResult.charts || [],
+                    follow_up_questions: generateFinanceFollowUps(financeResult.type, interpretation.entities),
+                    needs_clarification: false,
+                    clarifying_questions: [],
+                    intent_interpretation: interpretedContract,
+                    responseSource: 'finance_engine_deterministic',
+                    dataConfidence: 'high',
+                    dataSources: ['FinanceDashboardReadService', 'DailySkuFinance'],
+                    financeResult, // raw data for frontend if needed
+                };
+            }
+            // financeResult is error or null → fall through to existing pipeline.
+            logger.warn('[QMate][FinanceEngine] Finance query returned error/null, falling through to existing pipeline');
+        } catch (err) {
+            logger.error('[QMate][FinanceEngine] Error in finance engine, falling through:', err.message);
+            // Fall through to existing pipeline as a safety net.
+        }
+    }
+    // --- End Finance Engine intercept ---
 
     const executionPlan = buildExecutionPlan(interpretedContract);
     const unifiedData = await fetchUnifiedData({

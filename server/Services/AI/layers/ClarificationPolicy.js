@@ -7,6 +7,7 @@ const logger = require('../../../utils/Logger.js');
 const MAX_CLARIFICATION_ATTEMPTS = 1;
 
 function shouldAskClarification({ interpretation, resolvedContext, threshold = 0.35, skipForSimple = false, question = '', conversationContext = {} }) {
+    logger.info(`[QMate][DEBUG-TRACE] ClarificationPolicy called — intent: ${interpretation?.intent}, confidence: ${interpretation?.confidence}, engine: ${interpretation?.routing?.engine}`);
     const attempts = resolvedContext?.clarificationState?.attempts || 0;
     const maxAttempts = resolvedContext?.clarificationState?.maxAttempts || MAX_CLARIFICATION_ATTEMPTS;
     const explicitLayer1Need = Boolean(interpretation?.clarification?.needed);
@@ -20,11 +21,20 @@ function shouldAskClarification({ interpretation, resolvedContext, threshold = 0
     const hasAsinSignal =
         hasAsin(question) ||
         (Array.isArray(interpretation?.entities?.asins) && interpretation.entities.asins.length > 0);
-    if (attempts >= maxAttempts) return { ask: false, exhausted: true };
+    if (attempts >= maxAttempts) {
+        logger.info('[QMate][DEBUG-TRACE] ClarificationPolicy FINAL DECISION — shouldClarify: false, reason: exhausted');
+        return { ask: false, exhausted: true };
+    }
     // Clarification-first contract: explicit unresolved requirements from layer 1 always win.
-    if (explicitLayer1Need) return { ask: true, exhausted: false, reason: 'layer1_explicit' };
+    if (explicitLayer1Need) {
+        logger.info('[QMate][DEBUG-TRACE] ClarificationPolicy FINAL DECISION — shouldClarify: true, reason: layer1_explicit');
+        return { ask: true, exhausted: false, reason: 'layer1_explicit' };
+    }
     // ASIN presence is the strongest intent signal — never block on confidence when one is provided.
-    if (hasAsinSignal) return { ask: false, exhausted: false, reason: 'asin_bypass' };
+    if (hasAsinSignal) {
+        logger.info('[QMate][DEBUG-TRACE] ClarificationPolicy FINAL DECISION — shouldClarify: false, reason: asin_bypass');
+        return { ask: false, exhausted: false, reason: 'asin_bypass' };
+    }
     // Do not ask confidence-based clarification for clear metric value queries.
     if (isClearInfoMetricQuery) return { ask: false, exhausted: false, reason: 'metric_query_bypass' };
     if (skipForSimple) return { ask: false, exhausted: false, reason: 'simple_prompt_bypass' };
@@ -39,25 +49,32 @@ function shouldAskClarification({ interpretation, resolvedContext, threshold = 0
         'keyword', 'impression', 'click', 'conversion', 'bsr', 'rank', 'organic'];
     const queryLower = (question || '').toLowerCase();
     const hasRecognizedMetric = recognizedMetrics.some((m) => queryLower.includes(m));
+    logger.info(`[QMate][DEBUG-TRACE] Checking recognized_metric_bypass — queryLower: "${queryLower?.substring(0, 80)}", hasRecognizedMetric: ${hasRecognizedMetric}`);
     if (hasRecognizedMetric) {
-        logger.info('[QMate][ClarificationPolicy] Bypassing clarification — recognized metric keyword in query');
+        logger.info('[QMate][DEBUG-TRACE] ClarificationPolicy FINAL DECISION — shouldClarify: false, reason: recognized_metric_bypass');
         return { ask: false, exhausted: false, reason: 'recognized_metric_bypass' };
     }
 
     // Bypass: If this is a "show me" / "give me" / "what is" style direct question.
-    const directPatterns = /^(show|give|tell|what|how much|how many|list|display|get|find|check|see)\b/i;
+    const directPatterns = /^(show|give|tell|what|how much|how many|how to|how do|how can|why|list|display|get|find|check|see|which|compare)\b/i;
+    logger.info(`[QMate][DEBUG-TRACE] Checking direct_question_bypass — matches: ${directPatterns.test(queryLower.trim())}`);
     if (directPatterns.test(queryLower.trim())) {
-        logger.info('[QMate][ClarificationPolicy] Bypassing clarification — direct question pattern');
+        logger.info('[QMate][DEBUG-TRACE] ClarificationPolicy FINAL DECISION — shouldClarify: false, reason: direct_question_bypass');
         return { ask: false, exhausted: false, reason: 'direct_question_bypass' };
     }
 
     // Bypass: If conversation context has active entities (user has established context).
+    logger.info(`[QMate][DEBUG-TRACE] Checking conversation_context_bypass — activeAsins: ${conversationContext?.activeAsins?.length}, turnCount: ${conversationContext?.turnCount}`);
     if (conversationContext?.activeAsins?.length > 0 || conversationContext?.turnCount > 1) {
-        logger.info('[QMate][ClarificationPolicy] Bypassing clarification — established conversation context');
+        logger.info('[QMate][DEBUG-TRACE] ClarificationPolicy FINAL DECISION — shouldClarify: false, reason: conversation_context_bypass');
         return { ask: false, exhausted: false, reason: 'conversation_context_bypass' };
     }
 
-    if ((interpretation?.confidence || 0) < threshold) return { ask: true, exhausted: false };
+    if ((interpretation?.confidence || 0) < threshold) {
+        logger.info('[QMate][DEBUG-TRACE] ClarificationPolicy FINAL DECISION — shouldClarify: true, reason: low_confidence');
+        return { ask: true, exhausted: false };
+    }
+    logger.info('[QMate][DEBUG-TRACE] ClarificationPolicy FINAL DECISION — shouldClarify: false, reason: default_no_clarify');
     return { ask: false, exhausted: false };
 }
 

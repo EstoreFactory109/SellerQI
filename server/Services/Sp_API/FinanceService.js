@@ -1269,7 +1269,7 @@ async function backfillPendingExpenses({ userId, country, regionModel, accessTok
 // ═══════════════════════════════════════════════
 // MAIN: SYNC FINANCE DATA
 // ═══════════════════════════════════════════════
-async function syncFinanceData({ userId, country, regionModel, refreshToken, accessToken, clientId = process.env.SPAPI_CLIENT_ID, clientSecret = process.env.SPAPI_CLIENT_SECRET, backfillDays = 30, forceDates = null, maxIncrementalDays = null }) {
+async function syncFinanceData({ userId, country, regionModel, refreshToken, accessToken, clientId = process.env.SPAPI_CLIENT_ID, clientSecret = process.env.SPAPI_CLIENT_SECRET, backfillDays = 30, forceDates = null, maxIncrementalDays = null, resyncDays = 0 }) {
   const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
 
   // One token manager for the whole sync — step1/step2/relationships share
@@ -1294,15 +1294,38 @@ async function syncFinanceData({ userId, country, regionModel, refreshToken, acc
       endDate = yesterdayStr;
       logger.info(`[Sync] Backfill ${backfillDays} days: ${startDate} → ${endDate}`);
     } else if (latestSync.date >= yesterdayStr) {
-      logger.info(`[Sync] Up to date (latest: ${latestSync.date}). Running backfill only.`);
-      const step2 = await backfillPendingExpenses({ userId, country, regionModel, accessToken, refreshToken, clientId, clientSecret, tokenManager });
-      await syncRelationshipsIfNeeded({ userId, country, regionModel, startDate: latestSync.date, endDate: latestSync.date, accessToken: tokenManager.token, refreshToken, clientId, clientSecret });
-      return { status: 'up_to_date', latestDate: latestSync.date, backfill: step2 };
+      // Already up to date. If resyncDays is set, re-fetch recent days to
+      // correct orders that were cancelled after the original daily fetch.
+      if (resyncDays > 0) {
+        const resyncStart = new Date(`${yesterdayStr}T00:00:00.000Z`);
+        resyncStart.setUTCDate(resyncStart.getUTCDate() - (resyncDays - 1));
+        startDate = formatDateUTC(resyncStart);
+        endDate = yesterdayStr;
+        logger.info(`[Sync] Up to date but re-syncing last ${resyncDays} days to capture order cancellations: ${startDate} → ${endDate}`);
+      } else {
+        logger.info(`[Sync] Up to date (latest: ${latestSync.date}). Running backfill only.`);
+        const step2 = await backfillPendingExpenses({ userId, country, regionModel, accessToken, refreshToken, clientId, clientSecret, tokenManager });
+        await syncRelationshipsIfNeeded({ userId, country, regionModel, startDate: latestSync.date, endDate: latestSync.date, accessToken: tokenManager.token, refreshToken, clientId, clientSecret });
+        return { status: 'up_to_date', latestDate: latestSync.date, backfill: step2 };
+      }
     } else {
       const nextDay = new Date(latestSync.date + 'T00:00:00.000Z');
       nextDay.setUTCDate(nextDay.getUTCDate() + 1);
       startDate = formatDateUTC(nextDay);
       endDate = yesterdayStr;
+
+      // Extend backward by resyncDays to re-fetch recent days where orders
+      // may have been cancelled after the original sync captured them.
+      if (resyncDays > 0) {
+        const resyncStart = new Date(`${endDate}T00:00:00.000Z`);
+        resyncStart.setUTCDate(resyncStart.getUTCDate() - (resyncDays - 1));
+        const resyncStartStr = formatDateUTC(resyncStart);
+        if (resyncStartStr < startDate) {
+          logger.info(`[Sync] Extending start from ${startDate} to ${resyncStartStr} for ${resyncDays}-day cancellation correction window.`);
+          startDate = resyncStartStr;
+        }
+      }
+
       // Soft cap so a long-broken account can't drag a 60-day fetch into the
       // daily window. The remaining days will be picked up by the freshness
       // sweeper (or by subsequent daily runs, advancing one window at a time).
