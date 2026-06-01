@@ -686,6 +686,17 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
   const reportRows = await fetchSalesReport(tokenManager, baseUrl, marketplaceId, salesStartISO, salesEndISO);
   const salesOrderMap = parseSalesReportRows(reportRows, country);
 
+  // DEBUG — remove after testing
+  let debugTotal = 0, debugUnits = 0, debugOrders = 0;
+  for (const [, skuMap] of salesOrderMap) {
+    for (const [, item] of skuMap) {
+      debugTotal += item.totalPrice;
+      debugUnits += item.totalUnits;
+      debugOrders++;
+    }
+  }
+  logger.info(`[DEBUG] parseSalesReportRows returned: $${Math.round(debugTotal * 100) / 100} | ${debugUnits} units | ${debugOrders} order-items | country filter: ${country}`);
+
   // ── Finance API: (startDate - buffer) → TODAY ──
   // We fetch a wider window than the sales report to catch:
   //   - Shipment fees posted slightly after order date

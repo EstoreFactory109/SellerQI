@@ -10,7 +10,7 @@ import DeviceWrapper from './Components/DeviceWrapper/DeviceWrapper.jsx';
 ReactDOM.createRoot(document.getElementById('root')).render(
  
     <Provider store={store}>
-      <BrowserRouter>
+      <BrowserRouter unstable_useTransitions={false}>
         <DeviceWrapper>
           <App />
         </DeviceWrapper>

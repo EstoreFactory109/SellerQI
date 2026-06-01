@@ -13,12 +13,20 @@ class ErrorBoundary extends Component {
   }
 
   static getDerivedStateFromError(error) {
-    // Update state so the next render will show the fallback UI
     return { hasError: true };
   }
 
+  static getDerivedStateFromProps(props, state) {
+    if (props.resetKey !== undefined && state._prevResetKey !== props.resetKey && state.hasError) {
+      return { hasError: false, error: null, errorInfo: null, _prevResetKey: props.resetKey };
+    }
+    if (props.resetKey !== undefined && state._prevResetKey !== props.resetKey) {
+      return { _prevResetKey: props.resetKey };
+    }
+    return null;
+  }
+
   componentDidCatch(error, errorInfo) {
-    // Log the error for debugging
     console.error('ErrorBoundary caught an error:', error, errorInfo);
     
     this.setState({
@@ -26,7 +34,6 @@ class ErrorBoundary extends Component {
       errorInfo: errorInfo
     });
 
-    // You can also log the error to an error reporting service here
     if (this.props.onError) {
       this.props.onError(error, errorInfo);
     }

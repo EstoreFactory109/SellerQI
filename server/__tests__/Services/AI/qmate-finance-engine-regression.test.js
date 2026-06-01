@@ -14,6 +14,7 @@
 const FE = require('../../../Services/AI/layers/services/FinanceEngine.js');
 const readSvc = require('../../../Services/Finance/FinanceDashboardReadService.js');
 const Cogs = require('../../../models/finance/CogsModel.js');
+const PPCMetrics = require('../../../models/amazon-ads/PPCMetricsModel.js');
 const { computeDisplayTotalExpenses } = require('../../../shared/financeCalculations.js');
 
 // ── Mock interpretation builder (mirrors what the real interpreter produces) ──
@@ -253,6 +254,9 @@ describe('FinanceEngine — Section 2: Handler return shapes', () => {
         jest.spyOn(readSvc, 'getDashboard').mockResolvedValue(MOCK_DASHBOARD);
         jest.spyOn(readSvc, 'getAsinSnapshot').mockResolvedValue(MOCK_SNAPSHOT);
         jest.spyOn(Cogs, 'findOne').mockReturnValue({ lean: async () => ({ cogsEntries: MOCK_COGS.entries }) });
+        // Ad spend is now sourced from PPCMetrics (dashboard parity); stub it so
+        // comparison/why-analysis handlers don't hit the DB.
+        jest.spyOn(PPCMetrics, 'calculateMetricsForDateRange').mockResolvedValue({ found: true, summary: { totalSpend: 800 } });
     });
 
     it('summary_metrics → { type, metrics{ totalSales, displayProfit, profitMargin } }', () => {

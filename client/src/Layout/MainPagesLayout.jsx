@@ -4,6 +4,7 @@ import TopNav from '../Components/Navigation/TopNav'
 import LeftNavSection from '../Components/Navigation/LeftNavSection'
 import LeftNavSectionForTablet from '../Components/Navigation/LeftNavSectionForTablet'
 import TrialBanner from '../Components/TrialBanner/TrialBanner'
+import ErrorBoundary from '../Components/ErrorBoundary/ErrorBoundary'
 
 const MainPagesLayout = () => {
   const location = useLocation()
@@ -60,7 +61,9 @@ const MainPagesLayout = () => {
               style={{ overscrollBehaviorY: 'auto', overscrollBehaviorX: 'contain', scrollBehavior: 'smooth' }}
             >
                 <div className={location.pathname.includes('qmate') ? 'flex-1 min-h-0 flex flex-col lg:pt-0 pt-[8vh] pb-0' : 'lg:pt-0 pt-[8vh] pb-0'}>
-                    <Outlet/>
+                    <ErrorBoundary resetKey={location.pathname} title="Page Error" message="Something went wrong loading this page. Try navigating again or refreshing.">
+                        <Outlet/>
+                    </ErrorBoundary>
                 </div>
             </div>
         </section>

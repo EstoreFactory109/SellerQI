@@ -1986,7 +1986,7 @@ export const fetchYourProductsActiveV3 = createAsyncThunk(
             const normalizedSearch = (search || '').toString().trim();
             
             // For page 1, check cache (skip when clearing search — state may still hold search subset)
-            if (!forceRefresh && !normalizedSearch && page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
+            if (!forceRefresh && !normalizedSearch && page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS) {
                 devLog('[v3 Redux] Using cached Active products');
                 return { fromCache: true };
             }
@@ -2034,7 +2034,7 @@ export const fetchYourProductsInactiveV3 = createAsyncThunk(
             const state = getState();
             const existing = state.pageData?.yourProductsV3?.inactive;
             
-            if (page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
+            if (page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS) {
                 devLog('[v3 Redux] Using cached Inactive products');
                 return { fromCache: true };
             }
@@ -2081,7 +2081,7 @@ export const fetchYourProductsIncompleteV3 = createAsyncThunk(
             const state = getState();
             const existing = state.pageData?.yourProductsV3?.incomplete;
             
-            if (page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
+            if (page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS) {
                 devLog('[v3 Redux] Using cached Incomplete products');
                 return { fromCache: true };
             }
@@ -2129,7 +2129,7 @@ export const fetchYourProductsNonSellableV3 = createAsyncThunk(
             const existing = state.pageData?.yourProductsV3?.nonSellable;
             const normalizedSearch = (search || '').toString().trim();
             
-            if (!forceRefresh && !normalizedSearch && page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
+            if (!forceRefresh && !normalizedSearch && page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS) {
                 devLog('[v3 Redux] Using cached Non-Sellable products');
                 return { fromCache: true };
             }
@@ -2178,7 +2178,7 @@ export const fetchYourProductsWithoutAPlusV3 = createAsyncThunk(
             const existing = state.pageData?.yourProductsV3?.withoutAPlus;
             const normalizedSearch = (search || '').toString().trim();
             
-            if (!forceRefresh && !normalizedSearch && page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
+            if (!forceRefresh && !normalizedSearch && page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS) {
                 devLog('[v3 Redux] Using cached Without A+ products');
                 return { fromCache: true };
             }
@@ -2226,7 +2226,7 @@ export const fetchYourProductsNotTargetedInAdsV3 = createAsyncThunk(
             const existing = state.pageData?.yourProductsV3?.notTargetedInAds;
             const normalizedSearch = (search || '').toString().trim();
             
-            if (!forceRefresh && !normalizedSearch && page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
+            if (!forceRefresh && !normalizedSearch && page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS) {
                 devLog('[v3 Redux] Using cached Not Targeted in Ads products');
                 return { fromCache: true };
             }
@@ -2277,7 +2277,7 @@ export const fetchOptimizationProductsV3 = createAsyncThunk(
             const existing = state.pageData?.yourProductsV3?.optimization;
             const normalizedSearch = (search || '').toString().trim();
             
-            if (!forceRefresh && !normalizedSearch && page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS && existing.products?.length > 0) {
+            if (!forceRefresh && !normalizedSearch && page === 1 && !append && existing?.lastFetched && (Date.now() - existing.lastFetched) < V3_CACHE_TTL_MS) {
                 devLog('[v3 Redux] Using cached Optimization products');
                 return { fromCache: true };
             }

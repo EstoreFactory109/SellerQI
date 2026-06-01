@@ -310,11 +310,10 @@ const YourProducts = () => {
     if (activeTab === 'active') return; // Already loaded initially
     
     if (activeTab === 'optimization') {
-      const hasData = optimizationProductsRaw.length > 0;
       const lastFetched = v3Optimization?.lastFetched;
       const isStale = lastFetched && (Date.now() - lastFetched) > 15 * 60 * 1000;
       
-      if ((!hasData || isStale) && !optimizationLoading) {
+      if ((!lastFetched || isStale) && !optimizationLoading) {
         dispatch(fetchOptimizationProductsV3({ limit: itemsPerPage }));
       }
       return;
@@ -322,11 +321,10 @@ const YourProducts = () => {
     
     // For other tabs, fetch if not cached
     const tabData = currentTabData;
-    const hasData = tabData?.products?.length > 0;
     const lastFetched = tabData?.lastFetched;
     const isStale = lastFetched && (Date.now() - lastFetched) > 15 * 60 * 1000;
     
-    if (!hasData || isStale) {
+    if (!lastFetched || isStale) {
       if (!tabData?.loading) {
         switch (activeTab) {
           case 'nonSellable':

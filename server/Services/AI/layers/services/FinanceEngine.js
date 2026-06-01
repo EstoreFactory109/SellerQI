@@ -22,7 +22,37 @@ const {
 } = require('../../../../shared/financeCalculations.js');
 const DataFetchTracking = require('../../../../models/system/DataFetchTrackingModel.js');
 const Cogs = require('../../../../models/finance/CogsModel.js');
+const PPCMetrics = require('../../../../models/amazon-ads/PPCMetricsModel.js');
 const { getDefaultReportDateRange } = require('../../../../utils/reportDateRange.js');
+
+/**
+ * Resolve ad spend the SAME way the Profitability dashboard does: prefer the
+ * PPCMetrics date-range total (ProfitibilityDashboard.jsx getFilteredPPCSpend /
+ * ppcKPISummary.spend), falling back to the finance table's adsSpend only when
+ * PPCMetrics has no data. The finance table's per-SKU adsSpend can be materially
+ * lower than PPCMetrics (e.g. SP-only vs SP+SD+SB), which made QMate's profit
+ * read higher than the dashboard. This keeps the ad-spend input — and therefore
+ * profit — in lockstep with the dashboard.
+ *
+ * @returns {Promise<number>} ad spend for the window
+ */
+async function resolvePpcAdSpend(userContext, startDate, endDate, fallbackAdsSpend) {
+  const fallback = Number(fallbackAdsSpend || 0);
+  try {
+    const ppc = await PPCMetrics.calculateMetricsForDateRange(
+      userContext.userId,
+      userContext.country,
+      userContext.region,
+      startDate,
+      endDate
+    );
+    const ppcSpend = Number(ppc?.summary?.totalSpend || 0);
+    if (ppcSpend > 0) return ppcSpend;
+  } catch (err) {
+    logger.warn('[FinanceEngine] PPCMetrics ad-spend lookup failed; using finance adsSpend', { message: err.message });
+  }
+  return fallback;
+}
 
 // ── Date helpers (YYYY-MM-DD string math via UTC to avoid TZ drift) ──
 
@@ -86,6 +116,32 @@ function parsePeriodDays(interpretation, calendarMode) {
   return 30;
 }
 
+/**
+ * Detect a period the user EXPLICITLY typed in the prompt (e.g. "last 14 days",
+ * "last week", "last month"). Reads ONLY the extracted timeRange entity — not
+ * calendarMode and not a default — so it returns null when the user did not
+ * name a period. Used to let a typed period override the frontend calendar
+ * window (otherwise "last 14 days" gets ignored in favor of the dashboard's
+ * default 30-day range).
+ *
+ * @returns {number|null} number of days, or null if no explicit period typed
+ */
+function parseExplicitRelativePeriod(interpretation) {
+  const tr = interpretation?.entities?.timeRange;
+  if (!tr) return null;
+  const raw = String(tr.value || tr.raw || '').toLowerCase();
+  if (!raw) return null;
+  const m = raw.match(/(?:last|past)[_\s]+(\d+)[_\s]*days?/);
+  if (m) {
+    const n = parseInt(m[1], 10);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  if (/last[_\s]*7\b|last\s*week|past\s*week/.test(raw)) return 7;
+  if (/last[_\s]*14\b/.test(raw)) return 14;
+  if (/last[_\s]*30\b|last\s*month|past\s*month/.test(raw)) return 30;
+  return null;
+}
+
 // ── SECTION 2 — resolveFinanceDateRange ──
 
 /**
@@ -143,6 +199,27 @@ async function resolveFinanceDateRange(interpretation, userContext, requestDateR
     return resolved;
   }
 
+  // c2) Explicit relative period typed by the user ("last 14 days") OVERRIDES
+  //     the frontend calendar's default window — the user asked for a specific
+  //     span, so honor it (anchored to the same data end date the dashboard uses).
+  const promptPeriodDays = parseExplicitRelativePeriod(interpretation);
+  if (promptPeriodDays) {
+    const endDate = anchorEndDate;
+    let startDate = subtractDaysYmd(endDate, promptPeriodDays - 1);
+    if (anchorStartDate && startDate < anchorStartDate && promptPeriodDays >= 30) {
+      startDate = anchorStartDate;
+    }
+    const resolved = {
+      startDate,
+      endDate,
+      mode: promptPeriodDays === 7 ? 'last7' : promptPeriodDays === 14 ? 'last14' : promptPeriodDays === 30 ? 'default' : 'custom',
+      source: 'prompt_relative',
+      dayCount: dayCountInclusive(startDate, endDate),
+    };
+    logger.info('[FinanceEngine] Date range resolved from explicit prompt period (overrides frontend calendar)', resolved);
+    return resolved;
+  }
+
   // d) Frontend calendar passed concrete dates → use as-is.
   const reqStart = normalizeYmd(requestDateRange?.startDate);
   const reqEnd = normalizeYmd(requestDateRange?.endDate);
@@ -188,10 +265,32 @@ async function resolveFinanceDateRange(interpretation, userContext, requestDateR
 async function fetchCogsForUser(userContext) {
   const empty = { hasCOGS: false, entries: [], cogsMap: new Map() };
   try {
-    const doc = await Cogs.findOne({
+    // Primary: the COGS doc keyed by the request's country (same key the
+    // dashboard's CogsService.getCogs uses).
+    let doc = await Cogs.findOne({
       userId: userContext.userId,
       countryCode: userContext.country,
     }).lean();
+
+    // Fallback: COGS is per-unit product cost and is sometimes stored under a
+    // different countryCode (legacy default 'US', null, or another marketplace).
+    // When the country-keyed lookup finds no entries, use any COGS doc for the
+    // user so QMate subtracts the SAME COGS the dashboard does (prevents the
+    // profit-too-high mismatch). Only changes behavior when a doc exists under
+    // a different key; a user with no COGS stays empty.
+    if (!doc || !Array.isArray(doc.cogsEntries) || doc.cogsEntries.length === 0) {
+      const fallbackDoc = await Cogs.findOne({ userId: userContext.userId })
+        .sort({ updatedAt: -1 })
+        .lean();
+      if (fallbackDoc && Array.isArray(fallbackDoc.cogsEntries) && fallbackDoc.cogsEntries.length > 0) {
+        logger.warn('[FinanceEngine] COGS not found for countryCode; using fallback doc', {
+          requestedCountry: userContext.country,
+          fallbackCountryCode: fallbackDoc.countryCode,
+          entryCount: fallbackDoc.cogsEntries.length,
+        });
+        doc = fallbackDoc;
+      }
+    }
 
     const rawEntries = (doc && Array.isArray(doc.cogsEntries)) ? doc.cogsEntries : [];
     const entries = rawEntries.map((e) => ({
@@ -442,10 +541,11 @@ async function handleFinanceQuery(interpretation, userContext, requestDateRange)
     // c) Fetch COGS.
     const cogs = await fetchCogsForUser(userContext);
 
-    // d) Compute derived values using the SAME formulas as the frontend.
+    // d) Compute derived values using the SAME formulas + inputs as the frontend.
     const totals = dashboardData.totals || {};
     const totalSales = totals.productSales || 0;
-    const adSpend = totals.adsSpend || 0;
+    // Ad spend: PPCMetrics (dashboard's source), fall back to finance adsSpend.
+    const adSpend = await resolvePpcAdSpend(userContext, dateRange.startDate, dateRange.endDate, totals.adsSpend);
     const displayTotalExpenses = computeDisplayTotalExpenses(totals, dashboardData.overhead, adSpend);
     const totalCogs = computeTotalCogsFromAsinWise(dashboardData.asinWise, cogs);
     const displayProfit = computeDisplayProfit(totalSales, displayTotalExpenses, totalCogs);
@@ -467,6 +567,23 @@ async function handleFinanceQuery(interpretation, userContext, requestDateRange)
       // Refund cost (positive) — used by the comparison/why-analysis refund delta.
       refunds: Math.abs(totals.refundedAmount || 0),
     };
+
+    // Per-component breakdown — compare each line to the dashboard's expense
+    // breakdown dropdown to pinpoint any QMate-vs-dashboard discrepancy. The
+    // only inputs that can differ from the dashboard (given identical window +
+    // getDashboard data) are adSpend (dashboard uses PPCMetrics) and totalCogs.
+    logger.info('[FinanceEngine][PARITY-CHECK] profit components', {
+      window: `${dateRange.startDate}..${dateRange.endDate} (${dateRange.source})`,
+      totalSales,
+      adSpend,
+      perAsinExpensesPlusOverheadNetReimb: Number((displayTotalExpenses - Math.abs(adSpend || 0)).toFixed(2)),
+      displayTotalExpenses,
+      totalCogs,
+      hasCOGS: cogs.hasCOGS,
+      cogsEntryCount: (cogs.entries || []).length,
+      displayProfit,
+      profitMargin: Number(profitMargin.toFixed(2)),
+    });
 
     // f) Classify and g) route.
     const queryType = classifyFinanceQueryType(interpretation);
@@ -1155,7 +1272,8 @@ async function buildComparisonResponse(currentSummary, userContext, currentDateR
   // d) Previous-period summary via shared formulas.
   const prevTotals = prevDashboard.totals || {};
   const prevTotalSales = prevTotals.productSales || 0;
-  const prevAdSpend = prevTotals.adsSpend || 0;
+  // Ad spend from PPCMetrics (dashboard source), same as the current period.
+  const prevAdSpend = await resolvePpcAdSpend(userContext, prevStartDate, prevEndDate, prevTotals.adsSpend);
   const prevDisplayTotalExpenses = computeDisplayTotalExpenses(prevTotals, prevDashboard.overhead, prevAdSpend);
   const prevTotalCogs = computeTotalCogsFromAsinWise(prevDashboard.asinWise, cogs);
   const prevDisplayProfit = computeDisplayProfit(prevTotalSales, prevDisplayTotalExpenses, prevTotalCogs);
@@ -1732,10 +1850,10 @@ async function buildFinanceSuggestionContext(interpretation, userContext, reques
 
   const cogs = await fetchCogsForUser(userContext);
 
-  // Canonical finance summary — same shared formulas as handleFinanceQuery.
+  // Canonical finance summary — same shared formulas + inputs as handleFinanceQuery.
   const totals = dashboardData.totals || {};
   const totalSales = totals.productSales || 0;
-  const adSpend = totals.adsSpend || 0;
+  const adSpend = await resolvePpcAdSpend(userContext, dateRange.startDate, dateRange.endDate, totals.adsSpend);
   const displayTotalExpenses = computeDisplayTotalExpenses(totals, dashboardData.overhead, adSpend);
   const totalCogs = computeTotalCogsFromAsinWise(dashboardData.asinWise, cogs);
   const displayProfit = computeDisplayProfit(totalSales, displayTotalExpenses, totalCogs);
