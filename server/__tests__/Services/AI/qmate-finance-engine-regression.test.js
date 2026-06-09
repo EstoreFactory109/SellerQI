@@ -85,6 +85,12 @@ const CLASSIFIER_TEST_CASES = [
     { input: 'How many units of B0ABC12345 did I sell?', expected: 'single_asin', category: 'C', asins: ['B0ABC12345'] },
     { input: 'Compare B0ABC12345 vs B0XYZ67890', expected: 'asin_comparison', category: 'C', asins: ['B0ABC12345', 'B0XYZ67890'] },
     { input: 'Show me products with margin below 10%', expected: 'top_bottom_products', category: 'C' },
+    // ASIN + datewise cue → per-ASIN time series (NOT a single total).
+    { input: 'tell me the datewise sales of B0ABC12345 for last 7 days', expected: 'asin_time_series', category: 'C', asins: ['B0ABC12345'] },
+    { input: 'B0ABC12345 units per day', expected: 'asin_time_series', category: 'C', asins: ['B0ABC12345'] },
+    { input: 'show me sales of B0ABC12345 over time', expected: 'asin_time_series', category: 'C', asins: ['B0ABC12345'] },
+    // Guard: ASIN without a datewise cue stays single_asin.
+    { input: 'what is the profit for B0ABC12345', expected: 'single_asin', category: 'C', asins: ['B0ABC12345'] },
 
     // Category D: Trends → time_series
     { input: 'Show me my sales trend', expected: 'time_series', category: 'D' },
@@ -94,6 +100,14 @@ const CLASSIFIER_TEST_CASES = [
     { input: 'Show daily PPC spend vs sales', expected: 'time_series', category: 'D' },
     { input: 'What day had the highest sales?', expected: 'time_series', category: 'D' },
     { input: 'Are my fees increasing?', expected: 'time_series', category: 'D' },
+    // "datewise" / "per day" / "by date" must return the datewise chart, not a total.
+    { input: 'give me sales and profit datewise for last 7 days', expected: 'time_series', category: 'D' },
+    { input: 'sales date wise last 7 days', expected: 'time_series', category: 'D' },
+    { input: 'profit per day this week', expected: 'time_series', category: 'D' },
+    { input: 'show me sales and profit by date', expected: 'time_series', category: 'D' },
+    // Guard: average/per-unit queries stay summary (rule 3 wins over time_series).
+    { input: 'what is my average profit per day', expected: 'summary_metrics', category: 'A' },
+    { input: 'average daily sales', expected: 'summary_metrics', category: 'A' },
 
     // Category E: Comparisons → comparison
     { input: 'Compare this month to last month', expected: 'comparison', category: 'E' },
@@ -328,6 +342,50 @@ describe('FinanceEngine — Section 2: Handler return shapes', () => {
         expect(Array.isArray(r.dataPoints)).toBe(true);
         expect(r.trend).toBeDefined();
         expect(r.trend).toHaveProperty('direction');
+        // Default (no metric named) → Sales vs Profit.
+        expect(r.charts[0].yFields).toEqual([
+            { field: 'totalSales', label: 'Sales' },
+            { field: 'grossProfit', label: 'Gross Profit' },
+        ]);
+    });
+
+    it('time_series is metric-aware → plots the requested finance field', () => {
+        const interp = { raw: { prompt: 'units sold datewise', normalizedPrompt: 'units sold datewise' }, entities: {} };
+        const r = FE.buildTimeSeriesResponse(MOCK_DASHBOARD, MOCK_COGS, DATE_RANGE, interp);
+        expect(r.metrics).toEqual(['units']);
+        expect(r.trend.metric).toBe('units');
+        expect(r.charts[0].yFields).toEqual([{ field: 'units', label: 'Units' }]);
+    });
+
+    it('time_series metric-aware → expenses', () => {
+        const interp = { raw: { prompt: 'show me expenses per day', normalizedPrompt: 'show me expenses per day' }, entities: {} };
+        const r = FE.buildTimeSeriesResponse(MOCK_DASHBOARD, MOCK_COGS, DATE_RANGE, interp);
+        expect(r.metrics).toEqual(['totalExpenses']);
+        expect(r.charts[0].yFields).toEqual([{ field: 'totalExpenses', label: 'Expenses' }]);
+    });
+
+    it('asin_time_series → per-day rows for one ASIN, metric-aware', async () => {
+        jest.spyOn(readSvc, 'getAsinDateWise').mockResolvedValue([
+            { date: '2026-05-26', productName: 'Alpha', productSales: 369.92, totalExpenses: -160, units: 16, orderCount: 15 },
+            { date: '2026-05-27', productName: 'Alpha', productSales: 412.45, totalExpenses: -175, units: 18, orderCount: 17 },
+        ]);
+        const interp = { raw: { prompt: 'datewise sales of B0ABC12345', normalizedPrompt: 'datewise sales of B0ABC12345' }, entities: { asins: ['B0ABC12345'] } };
+        const r = await FE.buildAsinTimeSeriesResponse('B0ABC12345', USER_CTX, DATE_RANGE, interp);
+        expect(r.type).toBe('asin_time_series');
+        expect(r.asin).toBe('B0ABC12345');
+        expect(r.productName).toBe('Alpha');
+        expect(r.dataPoints).toHaveLength(2);
+        expect(r.dataPoints[0]).toMatchObject({ date: '2026-05-26', totalSales: 369.92 });
+        expect(r.metric).toBe('totalSales');
+        expect(r.charts[0].yFields).toEqual([{ field: 'totalSales', label: 'Sales' }]);
+    });
+
+    it('asin_time_series → notFound when the ASIN has no daily data', async () => {
+        jest.spyOn(readSvc, 'getAsinDateWise').mockResolvedValue([]);
+        const interp = { raw: { prompt: 'datewise sales of B0NONE00000', normalizedPrompt: 'datewise sales of B0NONE00000' }, entities: { asins: ['B0NONE00000'] } };
+        const r = await FE.buildAsinTimeSeriesResponse('B0NONE00000', USER_CTX, DATE_RANGE, interp);
+        expect(r.notFound).toBe(true);
+        expect(r.dataPoints).toEqual([]);
     });
 
     it('top_bottom_products → { type, products[] }', () => {
@@ -335,6 +393,43 @@ describe('FinanceEngine — Section 2: Handler return shapes', () => {
         const r = FE.buildTopBottomResponse(MOCK_DASHBOARD, MOCK_COGS, interp, DATE_RANGE);
         expect(r.type).toBe('top_bottom_products');
         expect(Array.isArray(r.products)).toBe(true);
+    });
+
+    // Honesty for "top N by profit" when fewer than N are actually profitable:
+    // a request for top 5 must not present break-even / loss products as winners.
+    it('top_bottom_products (by profit) → surfaces profitableCount + shortfall', () => {
+        const dash = {
+            ...MOCK_DASHBOARD,
+            asinWise: [
+                // Clearly profitable.
+                { asin: 'P1', productName: 'Winner', units: 100, productSales: 10000, adsSpend: 100, totalExpenses: -1000 },
+                // Clearly loss-making.
+                { asin: 'P2', productName: 'Loser', units: 50, productSales: 50, adsSpend: 300, totalExpenses: -900 },
+            ],
+        };
+        const interp = { rewrittenQuestion: 'top 5 products by profit', entities: {} };
+        const r = FE.buildTopBottomResponse(dash, { hasCOGS: false, cogsMap: new Map() }, interp, DATE_RANGE);
+        expect(r.isProfitRanked).toBe(true);
+        expect(r.requestedCount).toBe(5);
+        expect(r.profitableCount).toBe(1);          // only Winner has grossProfit > 0
+        expect(r.profitableInListShortfall).toBe(true);
+        const txt = FE.buildFallbackNarration(r);
+        expect(txt).toMatch(/Only 1 of your product/i);
+        expect(txt).toMatch(/break-even or a loss/i);
+    });
+
+    it('top_bottom_products (by profit, all profitable) → no shortfall', () => {
+        const dash = {
+            ...MOCK_DASHBOARD,
+            asinWise: [
+                { asin: 'P1', productName: 'A', units: 100, productSales: 10000, adsSpend: 100, totalExpenses: -1000 },
+                { asin: 'P2', productName: 'B', units: 100, productSales: 8000, adsSpend: 100, totalExpenses: -1000 },
+            ],
+        };
+        const interp = { rewrittenQuestion: 'top 5 products by profit', entities: {} };
+        const r = FE.buildTopBottomResponse(dash, { hasCOGS: false, cogsMap: new Map() }, interp, DATE_RANGE);
+        expect(r.profitableInListShortfall).toBe(false);
+        expect(r.profitableCount).toBe(2);
     });
 
     it('asin_profitability → { type, categories, summary }', () => {

@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { LOG_RETENTION, expireAfterSeconds } = require("../../config/logRetention.js");
 
 // Define the payment logs schema
 const PaymentLogsSchema = new mongoose.Schema(
@@ -212,6 +213,14 @@ PaymentLogsSchema.index({ subscriptionId: 1, createdAt: -1 });
 // Sparse unique index on webhookEventId to detect duplicate webhooks
 // Sparse allows multiple null values (for non-webhook events)
 PaymentLogsSchema.index({ webhookEventId: 1 }, { unique: true, sparse: true });
+
+// TTL index: auto-delete payment events older than the configured retention
+// window (default 365 days — financial/audit records, kept generously).
+// See server/config/logRetention.js before shortening this.
+PaymentLogsSchema.index(
+    { createdAt: 1 },
+    { expireAfterSeconds: expireAfterSeconds('paymentLogs'), name: LOG_RETENTION.paymentLogs.indexName }
+);
 
 /**
  * Check if a webhook event has already been processed

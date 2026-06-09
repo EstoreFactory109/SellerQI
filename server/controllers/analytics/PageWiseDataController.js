@@ -25,6 +25,7 @@ const AccountHistory = require('../../models/user-auth/AccountHistory.js');
 const User = require('../../models/user-auth/userModel.js');
 const { getProductWiseSponsoredAdsData } = require('../../Services/amazon-ads/ProductWiseSponsoredAdsService.js');
 const ProfitabilityService = require('../../Services/Calculations/ProfitabilityService.js');
+const { enrichProductsWithFbaInventory } = require('../../Services/inventory/AmazonInventoryDisplayMapper.js');
 
 /**
  * Get full dashboard data - calculates all data in backend
@@ -3018,7 +3019,7 @@ const getYourProductsActiveV3 = asyncHandler(async (req, res) => {
         }
 
         // Enrich products (NO A+, NO Ads)
-        const enrichedProducts = rawProducts.map(product => {
+        let enrichedProducts = rawProducts.map(product => {
             const key = product.asin?.toUpperCase() || '';
             const reviewData = reviewsMap.get(key) || {};
 
@@ -3035,6 +3036,12 @@ const getYourProductsActiveV3 = asyncHandler(async (req, res) => {
                 issueCount: product.issueCount || 0,
                 has_b2b_pricing: product.has_b2b_pricing || false
             };
+        });
+
+        enrichedProducts = await enrichProductsWithFbaInventory(enrichedProducts, {
+            userId: userObjectId,
+            country: Country,
+            region: Region,
         });
 
         const totalPages = Math.ceil(totalItems / limit);
@@ -3319,7 +3326,7 @@ const getYourProductsNonSellableV3 = asyncHandler(async (req, res) => {
         const products = result?.products || [];
 
         // Map products to response format; for Active with qty 0, keep status Active and set issue to "0 availability"
-        const responseProducts = products.map(p => {
+        let responseProducts = products.map(p => {
             const statusLower = (p.status || '').toLowerCase();
             const qty = p.quantity ?? 0;
             const isZeroAvailability = statusLower === 'active' && qty <= 0;
@@ -3333,6 +3340,12 @@ const getYourProductsNonSellableV3 = asyncHandler(async (req, res) => {
                 quantity: qty,
                 issues
             };
+        });
+
+        responseProducts = await enrichProductsWithFbaInventory(responseProducts, {
+            userId: userObjectId,
+            country: Country,
+            region: Region,
         });
 
         const totalPages = Math.ceil(totalItems / limit);

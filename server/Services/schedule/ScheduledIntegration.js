@@ -1270,10 +1270,22 @@ class ScheduledIntegration {
                     // fill whatever gap exists. This means a missed day on Monday
                     // self-heals on Tuesday's run.
                     //
-                    // `backfillDays: 1` caps the first-time fallback at 1 day so
-                    // the daily schedule never triggers a 30-day window. The full
-                    // 30-day backfill is reserved for the integration worker
-                    // (`Integration.js`) where `backfillDays` defaults to 30.
+                    // `backfillDays: 30` — when an account has NO finance history
+                    // at all (latestSync === null), seed the full 30-day window
+                    // here too. Previously this was `1`, which meant a newly
+                    // connected account whose integration-worker backfill failed
+                    // or was skipped would only ever get "yesterday" seeded — and
+                    // every prior day (e.g. last week's sales) stayed permanently
+                    // at $0 because the incremental cursor only moves forward.
+                    // `backfillDays` is ONLY consulted in the no-history branch,
+                    // so accounts that already have history are unaffected: they
+                    // continue through the incremental/resync path below.
+                    //
+                    // `maxIncrementalDays: 7` bounds a single catch-up run for an
+                    // account that already has history but fell >7 days behind.
+                    // The clamp in FinanceService now fills the OLDEST unfilled
+                    // days first (not the newest), so no day is ever orphaned —
+                    // the gap drains over consecutive runs.
                     //
                     // `resyncDays: 5` re-fetches the last 5 days on every run to
                     // correct orders that were captured as Pending/Unshipped but
@@ -1290,7 +1302,7 @@ class ScheduledIntegration {
                         accessToken: AccessToken,
                         clientId: process.env.SPAPI_CLIENT_ID,
                         clientSecret: process.env.SPAPI_CLIENT_SECRET,
-                        backfillDays: 1,
+                        backfillDays: 30,
                         maxIncrementalDays: 7,
                         resyncDays: 5,
                     })
@@ -2724,6 +2736,66 @@ class ScheduledIntegration {
             };
         } catch (error) {
             logger.error(`[ScheduledIntegration:AdsCatchupPhase] Failed for user ${userId}, date=${catchupDate}:`, error);
+            return { success: false, error: error.message, statusCode: 500 };
+        }
+    }
+
+    /**
+     * Phase: FINANCE_CATCHUP (one-shot, NOT chained)
+     *
+     * Enqueued by the finance reconciliation sweeper for accounts with missing /
+     * provisional / zero finance days. Re-fetches the requested day(s) via the
+     * SAME proven path as the test route — `syncFinanceData({ forceDates })` —
+     * so each day is recomputed and rewritten correctly. No new calculation.
+     *
+     * `phaseData.catchupDates` = array of 'YYYY-MM-DD'. We re-fetch the single
+     * span [min … max]; re-fetching any already-correct days in between is
+     * harmless (idempotent — the same calc reproduces the same value) and costs
+     * one Sales Report call regardless of span. The sweeper bounds the span.
+     *
+     * Absent from PHASE_ORDER → getNextPhase returns null → never chains onward.
+     */
+    static async executeFinanceCatchupPhase(userId, Region, Country, phaseData = {}) {
+        const dates = Array.isArray(phaseData?.catchupDates) ? phaseData.catchupDates.filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)) : [];
+        logger.info(`[ScheduledIntegration:FinanceCatchupPhase] Starting for user ${userId}, ${Country}-${Region}, dates=${dates.length}`);
+
+        if (dates.length === 0) {
+            logger.warn('[ScheduledIntegration:FinanceCatchupPhase] No valid catchupDates provided');
+            return { success: false, error: 'No valid catchupDates' };
+        }
+
+        try {
+            const sorted = [...dates].sort();
+            const forceStart = sorted[0];
+            const forceEnd = sorted[sorted.length - 1];
+
+            const ctx = await this._prepareForBatchPhase(userId, Region, Country, phaseData);
+            if (!ctx.AccessToken || !ctx.RefreshToken) {
+                logger.warn('[ScheduledIntegration:FinanceCatchupPhase] No SP-API tokens — skipping', { userId, Country, Region });
+                return { success: false, error: 'SP-API tokens unavailable' };
+            }
+
+            const { syncFinanceData } = require('../Sp_API/FinanceService.js');
+            const result = await syncFinanceData({
+                userId,
+                country: Country,
+                regionModel: Region,
+                refreshToken: ctx.RefreshToken,
+                accessToken: ctx.AccessToken,
+                clientId: process.env.SPAPI_CLIENT_ID,
+                clientSecret: process.env.SPAPI_CLIENT_SECRET,
+                forceDates: [forceStart, forceEnd],
+            });
+
+            logger.info(`[ScheduledIntegration:FinanceCatchupPhase] Completed for user ${userId}`, {
+                forceStart, forceEnd,
+                status: result?.status,
+                salesOrders: result?.step1?.salesOrders,
+                skuDocs: result?.step1?.skuDocs,
+            });
+            return { success: true, forceStart, forceEnd, status: result?.status || null };
+        } catch (error) {
+            logger.error(`[ScheduledIntegration:FinanceCatchupPhase] Failed for user ${userId}:`, error);
             return { success: false, error: error.message, statusCode: 500 };
         }
     }

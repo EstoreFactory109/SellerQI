@@ -88,7 +88,7 @@ async function releaseSweepLock(lockKey) {
 
 function setupSweeperCron() {
     const cron = require('node-cron');
-    const { sweep } = require('./freshnessSweeper.js');
+    const { sweep, sweepFinance } = require('./freshnessSweeper.js');
 
     const job = cron.schedule(SWEEP_INTERVAL_CRON, async () => {
         const lockKey = 'freshness-sweeper-tick';
@@ -99,8 +99,16 @@ function setupSweeperCron() {
         }
         try {
             logger.info('[FreshnessSweeperStandalone] Sweep tick starting (lock acquired)');
-            const summary = await sweep();
-            logger.info('[FreshnessSweeperStandalone] Sweep tick complete', summary);
+            const adsSummary = await sweep();
+            logger.info('[FreshnessSweeperStandalone] Ads sweep complete', adsSummary);
+            // Finance reconciliation runs in the same tick. Isolated in its own
+            // try so an ads-sweep issue can't block finance and vice-versa.
+            try {
+                const finSummary = await sweepFinance();
+                logger.info('[FreshnessSweeperStandalone] Finance sweep complete', finSummary);
+            } catch (finErr) {
+                logger.error('[FreshnessSweeperStandalone] Finance sweep failed', { error: finErr?.message, stack: finErr?.stack });
+            }
         } catch (error) {
             logger.error('[FreshnessSweeperStandalone] Sweep tick failed', { error: error?.message, stack: error?.stack });
         } finally {

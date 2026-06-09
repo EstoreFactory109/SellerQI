@@ -237,6 +237,38 @@ async function getDateWiseTotals({ userId, country, region, startDate, endDate }
   ]);
 }
 
+// ── Per-ASIN (or per-SKU) date-wise series ──
+// One row per calendar day for a SINGLE product, from DailySkuFinance
+// (the per-(User,country,region,sku,date) source). Powers QMate's "datewise
+// sales/expenses/units/profit for B0..." queries. Match by asin OR sku.
+async function getAsinDateWise({ userId, country, region, startDate, endDate, asin, sku }) {
+  const DATE_CHART_FIELDS = [
+    'totalRevenue', 'totalExpenses', 'totalTax', 'netAmount',
+    'units', 'orderCount', 'productSales',
+  ];
+
+  const match = buildBaseMatch(userId, country, region, startDate, endDate);
+  if (asin) match.asin = String(asin).trim().toUpperCase();
+  else if (sku) match.sku = String(sku).trim();
+
+  const group = { _id: '$date' };
+  const project = { _id: 0, date: '$_id' };
+  for (const f of DATE_CHART_FIELDS) {
+    group[f] = { $sum: `$${f}` };
+    project[f] = { $round: [`$${f}`, 2] };
+  }
+  // Carry the product name through for narration.
+  group.productName = { $first: '$productName' };
+  project.productName = 1;
+
+  return DailySkuFinance.aggregate([
+    { $match: match },
+    { $group: group },
+    { $sort: { _id: 1 } },
+    { $project: project },
+  ]);
+}
+
 // ── Step 5: Overhead from DailyOverheadFinance ──
 async function getOverhead({ userId, country, region, startDate, endDate }) {
   const match = buildBaseMatch(userId, country, region, startDate, endDate);
@@ -585,6 +617,7 @@ module.exports = {
   getTotals,
   getAsinWisePL,
   getDateWiseTotals,
+  getAsinDateWise,
   getOverhead,
   getRelationships,
   getDashboard,

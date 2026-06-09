@@ -30,13 +30,14 @@ import {
 } from '../../redux/slices/PageDataSlice.js';
 import { formatCurrencyWithLocale } from '../../utils/currencyUtils.js';
 import { SkeletonTableBody } from '../../Components/Skeleton/PageSkeletons.jsx';
+import AmazonFbaInventoryCell from '../../Components/Products/AmazonFbaInventoryCell.jsx';
 
 // Exactly 6 columns: 4 fixed (ASIN/SKU, Name, Issues or Recommendation, View) + 2 chosen from dropdown.
 // Product tabs: pick 2 from this list to fill columns 5 and 6.
 // NOTE: A+ Content and Targeted in Ads columns REMOVED for Active tab (V3 optimization)
 const PRODUCT_SELECTABLE_COLUMNS = [
   { id: 'price', label: 'Price' },
-  { id: 'quantity', label: 'Available Stocks' },
+  { id: 'quantity', label: 'FBA Inventory' },
   { id: 'starRating', label: 'Ratings ⭐' },
   { id: 'video', label: 'Videos' },
   { id: 'b2b', label: 'B2B Pricing' },
@@ -1007,7 +1008,14 @@ const YourProducts = () => {
                       const badge = getIssuesBadge(issueCount);
                       const renderProductChosenCell = (colId) => {
                         if (colId === 'price') return <span className="text-xs font-medium text-gray-100 whitespace-nowrap">{product.price ? formatCurrencyWithLocale(parseFloat(product.price), currency, 2) : '—'}</span>;
-                        if (colId === 'quantity') return <span className="text-xs font-semibold text-gray-100 whitespace-nowrap">{product.quantity !== undefined && product.quantity !== null ? parseInt(product.quantity).toLocaleString() : '—'}</span>;
+                        if (colId === 'quantity') {
+                          return (
+                            <AmazonFbaInventoryCell
+                              fbaInventory={product.fbaInventory}
+                              fallbackQuantity={product.quantity}
+                            />
+                          );
+                        }
                         if (colId === 'video') return product.hasVideo ? <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} /> : <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />;
                         if (colId === 'b2b') return product.has_b2b_pricing ? <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} /> : <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />;
                         if (colId === 'reviews') return <span className="text-xs text-gray-400 whitespace-nowrap">{product.numRatings ? parseInt(product.numRatings).toLocaleString() : '0'}</span>;

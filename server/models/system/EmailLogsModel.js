@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { LOG_RETENTION, expireAfterSeconds } = require("../../config/logRetention.js");
 
 // Define the email logs schema
 const EmailLogsSchema = new mongoose.Schema(
@@ -113,6 +114,13 @@ EmailLogsSchema.index({ receiverId: 1, emailType: 1 });
 EmailLogsSchema.index({ status: 1, createdAt: -1 });
 EmailLogsSchema.index({ emailType: 1, createdAt: -1 });
 EmailLogsSchema.index({ sentDate: -1 });
+
+// TTL index: auto-delete email logs older than the configured retention
+// window (default 90 days). See server/config/logRetention.js to change it.
+EmailLogsSchema.index(
+    { createdAt: 1 },
+    { expireAfterSeconds: expireAfterSeconds('emailLogs'), name: LOG_RETENTION.emailLogs.indexName }
+);
 
 // Pre-save middleware to set sentDate and sentTime when status changes to SENT
 EmailLogsSchema.pre('save', function(next) {

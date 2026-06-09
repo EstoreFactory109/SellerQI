@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { LOG_RETENTION, expireAfterSeconds } = require('../../config/logRetention.js');
 
 /**
  * FinanceSyncLogModel
@@ -82,6 +83,22 @@ const FinanceSyncLogSchema = new mongoose.Schema(
 
     // Error message if status is 'failed'
     error: { type: String, default: '' },
+
+    // ★ Provisional = this day was fetched but its sales are NOT yet trustworthy
+    //   (the Sales Report returned 0 rows for it, or it contained Pending orders
+    //   whose item-price is still empty). A provisional day is re-fetched by the
+    //   daily incremental flow until it settles, then flipped to provisional:false.
+    //   Backward-compatible: pre-existing rows have `provisional` undefined, which
+    //   is treated as settled everywhere via `{ $ne: true }`.
+    provisional: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    // Count of Pending-status order rows seen for this day (diagnostic — explains
+    // why a day is provisional and how much sales may still be unconfirmed).
+    pendingOrderCount: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
@@ -93,6 +110,13 @@ FinanceSyncLogSchema.index({ User: 1, country: 1, region: 1, date: -1 });
 FinanceSyncLogSchema.index(
   { User: 1, country: 1, region: 1, date: 1 },
   { unique: true }
+);
+
+// TTL index: auto-delete sync logs older than the configured retention
+// window (default 30 days). See server/config/logRetention.js to change it.
+FinanceSyncLogSchema.index(
+  { fetchedAt: 1 },
+  { expireAfterSeconds: expireAfterSeconds('financeSyncLogs'), name: LOG_RETENTION.financeSyncLogs.indexName }
 );
 
 module.exports = mongoose.model('FinanceSyncLog', FinanceSyncLogSchema);

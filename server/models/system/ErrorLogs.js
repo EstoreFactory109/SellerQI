@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { LOG_RETENTION, expireAfterSeconds } = require('../../config/logRetention.js');
 
 // Define schema for individual log entries
 const LogEntrySchema = new mongoose.Schema({
@@ -249,6 +250,13 @@ UserAccountLogsSchema.index({ sessionStatus: 1, sessionStartTime: -1 });
 UserAccountLogsSchema.index({ 'logs.functionName': 1, 'logs.logType': 1 });
 UserAccountLogsSchema.index({ 'logs.timestamp': -1 });
 UserAccountLogsSchema.index({ 'logs.status': 1, 'logs.functionName': 1 });
+
+// TTL index: MongoDB auto-deletes sessions older than the configured retention
+// window (default 30 days). See server/config/logRetention.js to change it.
+UserAccountLogsSchema.index(
+    { sessionStartTime: 1 },
+    { expireAfterSeconds: expireAfterSeconds('userAccountLogs'), name: LOG_RETENTION.userAccountLogs.indexName }
+);
 
 // Virtual for session duration in human readable format
 UserAccountLogsSchema.virtual('sessionDurationFormatted').get(function() {

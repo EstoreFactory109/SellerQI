@@ -234,6 +234,12 @@ async function processScheduledPhase(job) {
             case scheduledPhases.PHASES.ADS_CATCHUP:
                 raw = await ScheduledIntegration.executeAdsCatchupPhase(userId, region, country, phaseData || {});
                 break;
+            // One-shot finance catch-up enqueued by the reconciliation sweeper for
+            // missing/provisional/zero finance days. NOT in PHASE_ORDER, so the
+            // worker does not chain to another phase after this completes.
+            case scheduledPhases.PHASES.FINANCE_CATCHUP:
+                raw = await ScheduledIntegration.executeFinanceCatchupPhase(userId, region, country, phaseData || {});
+                break;
             case scheduledPhases.PHASES.CALC_REVIEW:
                 raw = await ScheduledIntegration.executeScheduledCalcReviewPhase(userId, region, country, phaseData || {});
                 break;

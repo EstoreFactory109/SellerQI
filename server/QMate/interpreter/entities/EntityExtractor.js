@@ -153,6 +153,53 @@ function extractAsins(prompt) {
   return [...new Set(matches.map((m) => m.toUpperCase()))];
 }
 
+/**
+ * Campaign-level entity extraction (QMate Ads Category C, #24-34).
+ * Recognizes a campaign ID, a quoted campaign name, or an auto/manual type
+ * filter. Returns `{ campaign?, campaignType? }` to merge into entities.
+ */
+function extractCampaign(prompt) {
+  const p = String(prompt || "");
+  const result = {};
+
+  // Campaign ID pattern (10+ digit number after "campaign" keyword).
+  const campaignIdMatch = p.match(/campaign\s*(?:id[:\s]*)?\s*(\d{10,})/i);
+  if (campaignIdMatch) {
+    result.campaign = { type: "id", campaignId: campaignIdMatch[1] };
+  }
+
+  // Quoted campaign name — either order: `campaign "Name"` or `"Name" campaign`.
+  const quotedCampaignMatch =
+    p.match(/(?:campaign|camp)\s+['"]([^'"]+)['"]/i) ||
+    p.match(/['"]([^'"]+)['"]\s+campaign\b/i);
+  if (!result.campaign && quotedCampaignMatch) {
+    result.campaign = { type: "name", campaignName: quotedCampaignMatch[1] };
+  }
+
+  // Campaign type filter (auto / manual).
+  const campaignTypeMatch = p.match(/\b(auto|manual)\s+campaigns?/i);
+  if (!result.campaign && campaignTypeMatch) {
+    result.campaignType = campaignTypeMatch[1].toLowerCase();
+  }
+
+  return result;
+}
+
+/**
+ * Keyword-level entity extraction (QMate Ads Category E, #44/#45). Captures a
+ * quoted keyword in a keyword/match-type context. The "keyword …", "match type
+ * … 'X'", and "works best for 'X'" cues keep this from grabbing quoted campaign
+ * names (which carry their own "campaign" cue).
+ */
+function extractKeywordText(prompt) {
+  const p = String(prompt || "");
+  const m =
+    p.match(/keyword\s+['"]([^'"]+)['"]/i) ||
+    p.match(/match\s*type\b[^'"]*['"]([^'"]+)['"]/i) ||
+    p.match(/works?\s+best\s+for\s+['"]([^'"]+)['"]/i);
+  return m ? m[1] : undefined;
+}
+
 const WORD_NUMBERS = {
   one: 1, two: 2, three: 3, four: 4, five: 5,
   six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
@@ -252,6 +299,8 @@ function extract(prompt, classification) {
   const dimensions = extractDimensions(prompt);
   const filters = extractFilters(prompt);
   const asins = extractAsins(prompt);
+  const { campaign, campaignType } = extractCampaign(prompt);
+  const keywordText = extractKeywordText(prompt);
   const productQuery = extractProductQuery(prompt);
   const queryShape = extractQueryShape(prompt, productQuery);
 
@@ -259,6 +308,9 @@ function extract(prompt, classification) {
     metrics,
     dimensions,
     asins: asins.length ? asins : undefined,
+    campaign: campaign || undefined,
+    campaignType: campaignType || undefined,
+    keywordText: keywordText || undefined,
     productQuery: productQuery || undefined,
     queryShape,
     filters: Object.keys(filters).length ? filters : undefined,

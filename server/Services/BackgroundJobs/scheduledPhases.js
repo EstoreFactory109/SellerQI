@@ -43,7 +43,12 @@ const PHASES = {
     // returns null for it — a catch-up job never chains into BATCH_4 / CALC /
     // FINALIZE. It fetches the requested catchupDate's ads data via the
     // existing service functions and exits.
-    ADS_CATCHUP: 'sched_ads_catchup'
+    ADS_CATCHUP: 'sched_ads_catchup',
+    // One-shot finance-only catch-up enqueued by the reconciliation sweeper for
+    // accounts with missing / provisional / zero finance days. Like ADS_CATCHUP
+    // it is NOT in PHASE_ORDER — it runs syncFinanceData with forceDates for the
+    // requested day(s) and exits, never chaining to another phase.
+    FINANCE_CATCHUP: 'sched_finance_catchup'
 };
 
 const PHASE_ORDER = [
@@ -140,7 +145,8 @@ function getAllPhaseJobIds(parentJobId) {
 function isValidPhase(phase) {
     return PHASE_ORDER.includes(phase)
         || phase === PHASES.BATCH_3_4_LEGACY
-        || phase === PHASES.ADS_CATCHUP;
+        || phase === PHASES.ADS_CATCHUP
+        || phase === PHASES.FINANCE_CATCHUP;
 }
 
 function getPhaseDescription(phase) {
@@ -154,7 +160,8 @@ function getPhaseDescription(phase) {
         [PHASES.CALC_REVIEW]: 'Running calculations and processing reviews',
         [PHASES.FINALIZE]: 'Finalizing - analysis, cache update, and completion',
         [PHASES.BATCH_3_4_LEGACY]: '[legacy] Combined batch 3+4 - drains to calc_review',
-        [PHASES.ADS_CATCHUP]: '[catchup] Fetching ads data for a single missing past date'
+        [PHASES.ADS_CATCHUP]: '[catchup] Fetching ads data for a single missing past date',
+        [PHASES.FINANCE_CATCHUP]: '[catchup] Re-fetching finance data for missing/provisional past date(s)'
     };
     return descriptions[phase] || 'Unknown phase';
 }

@@ -177,4 +177,297 @@ function generateFinanceFollowUps(queryType, entities) {
   }));
 }
 
-module.exports = { generateFollowUps, generateFinanceFollowUps, FINANCE_FOLLOW_UP_TEMPLATES };
+/**
+ * Ads-engine follow-up templates, keyed by AdsEngine queryType.
+ * Same { label, prompt } shape; {timeRange}/{asin}/{keyword} are resolved by
+ * generateAdsFollowUps.
+ */
+const ADS_FOLLOW_UP_TEMPLATES = {
+  ads_summary: [
+    { label: 'Show wasted ad spend', prompt: 'Show me keywords wasting money' },
+    { label: 'Compare to previous period', prompt: 'Compare my PPC performance to the previous period' },
+    { label: 'Break down by ad type', prompt: 'Compare my SP vs SB vs SD performance' },
+  ],
+  wasted_spend: [
+    { label: 'Pause worst keywords', prompt: 'Pause my worst performing keywords' },
+    { label: 'How much could I save?', prompt: 'How much money could I save by optimizing ads?' },
+    { label: 'Show top performers', prompt: 'Show my top performing keywords' },
+  ],
+  campaign_performance: [
+    { label: 'Compare to other campaigns', prompt: 'Which campaign has the best ROAS?' },
+    { label: 'Check budget utilization', prompt: 'Am I running out of budget on any campaigns?' },
+    { label: 'Show campaign ACOS ranking', prompt: 'Rank my campaigns by ACOS' },
+  ],
+  ads_comparison: [
+    { label: 'Why did it change?', prompt: 'Why did my PPC performance change?' },
+    { label: 'Show trend over time', prompt: 'Show me my ACOS trend over time' },
+    { label: 'Which campaigns changed?', prompt: 'Which campaigns changed the most?' },
+  ],
+  ads_why_analysis: [
+    { label: 'Show wasted keywords', prompt: 'Show me keywords wasting money' },
+    { label: 'How to fix this', prompt: 'How can I improve my PPC performance?' },
+    { label: 'Show campaign breakdown', prompt: 'Which campaigns need the most attention?' },
+  ],
+  campaign_type_breakdown: [
+    { label: 'Which ad type is best?', prompt: 'Which ad type has the best ROAS?' },
+    { label: 'Show wasted ad spend', prompt: 'Show me keywords wasting money' },
+    { label: 'Compare to previous period', prompt: 'Compare my PPC performance to the previous period' },
+  ],
+  budget_analysis: [
+    { label: 'Which campaigns are limited?', prompt: 'Which campaigns are budget-limited?' },
+    { label: 'Should I increase budgets?', prompt: 'Should I increase my campaign budgets?' },
+    { label: 'Show campaign performance', prompt: 'How are my campaigns performing?' },
+  ],
+  organic_vs_paid: [
+    { label: 'Am I too dependent on PPC?', prompt: 'Am I too dependent on PPC?' },
+    { label: 'Show my ad spend trend', prompt: 'Show me my ad spend trend over time' },
+    { label: 'How can I grow organic sales?', prompt: 'How can I improve my organic sales?' },
+  ],
+  search_term_analysis: [
+    { label: 'What should I add as keywords?', prompt: 'What search terms should I add as exact match keywords?' },
+    { label: 'What should I negative?', prompt: 'What search terms should I add as negative keywords?' },
+    { label: 'Show wasted ad spend', prompt: 'Show me keywords wasting money' },
+  ],
+  top_performers: [
+    { label: 'Show wasted keywords', prompt: 'Show me keywords wasting money' },
+    { label: 'Compare to previous period', prompt: 'Compare my PPC performance to the previous period' },
+    { label: 'Break down by ad type', prompt: 'Compare my SP vs SB vs SD performance' },
+  ],
+  ads_time_series: [
+    { label: 'Why did it change?', prompt: 'Why did my PPC performance change?' },
+    { label: 'Compare to previous period', prompt: 'Compare my PPC performance to the previous period' },
+    { label: 'Show wasted ad spend', prompt: 'Show me keywords wasting money' },
+  ],
+  asin_ads: [
+    { label: 'Which keywords drive sales?', prompt: 'Which keywords are driving sales for {asin}?' },
+    { label: 'Which keywords waste money?', prompt: 'Which keywords are wasting money on {asin}?' },
+    { label: 'Should I keep advertising it?', prompt: 'Should I keep running ads for {asin}?' },
+  ],
+  keyword_deep_dive: [
+    { label: 'Show top performing keywords', prompt: 'Show my top performing keywords' },
+    { label: 'Show wasted keywords', prompt: 'Show me keywords wasting money' },
+    { label: 'Break down by ad type', prompt: 'Compare my SP vs SB vs SD performance' },
+  ],
+};
+
+/**
+ * Generate ads-specific follow-ups for an AdsEngine queryType.
+ * Falls back to the ads_summary set for unmapped types.
+ *
+ * @param {string} queryType - AdsEngine queryType
+ * @param {Object} entities - interpretation.entities (for {timeRange}/{asin}/{keyword})
+ * @returns {Array<{label:string, prompt:string}>} up to 3 follow-ups
+ */
+function generateAdsFollowUps(queryType, entities) {
+  const templates = ADS_FOLLOW_UP_TEMPLATES[queryType] || ADS_FOLLOW_UP_TEMPLATES.ads_summary;
+  const timeRange = entities?.timeRange?.value || 'the last 30 days';
+  const asin = (entities?.asins && entities.asins[0]) || '';
+  const keyword = entities?.keywordText || '';
+
+  return templates.slice(0, 3).map((t) => ({
+    label: t.label,
+    prompt: t.prompt
+      .replace('{timeRange}', timeRange)
+      .replace('{asin}', asin)
+      .replace('{keyword}', keyword),
+  }));
+}
+
+/**
+ * GeneralStrategyEngine follow-up templates, keyed by strategyType. Same
+ * { label, prompt } shape as the finance/ads templates. Cross-domain prompts
+ * deliberately route to the OTHER engines/strategy types (e.g. a why_declining
+ * answer offers "show wasted ad spend" → AdsEngine) to chain the investigation.
+ */
+const STRATEGY_FOLLOW_UP_TEMPLATES = {
+  why_declining: [
+    { label: 'Show expense breakdown', prompt: 'Break down my expenses in detail' },
+    { label: 'Show wasted ad spend', prompt: 'Show me keywords wasting money' },
+    { label: 'Which products are losing money?', prompt: 'Which products are losing money?' },
+  ],
+  how_to_improve: [
+    { label: 'Fix wasted ad spend', prompt: 'Show me wasted keywords I should pause' },
+    { label: 'Show loss-making products', prompt: 'Which products have negative profit?' },
+    { label: 'Optimize my PPC', prompt: 'How can I reduce my ACOS?' },
+  ],
+  what_mistakes: [
+    { label: 'How to fix these issues', prompt: 'What should I focus on first?' },
+    { label: 'Show the details', prompt: 'Give me a complete business summary' },
+    { label: 'Fix ads waste', prompt: 'Pause my worst performing keywords' },
+  ],
+  what_to_focus: [
+    { label: 'Start with #1 priority', prompt: 'Tell me more about the top priority' },
+    { label: 'Show full summary', prompt: 'Give me a complete business summary' },
+  ],
+  complete_summary: [
+    { label: 'How to improve?', prompt: 'How can I increase my profit?' },
+    { label: 'What to fix first?', prompt: 'What should I focus on first?' },
+    { label: 'Show wasted spend', prompt: 'Where am I wasting money?' },
+  ],
+  is_it_worth: [
+    { label: 'Optimize my ads', prompt: 'How can I improve my PPC performance?' },
+    { label: 'Show organic vs paid', prompt: 'What percentage of sales come from ads?' },
+    { label: 'Reduce ad waste', prompt: 'Show me wasted keywords' },
+  ],
+  where_losing: [
+    { label: 'Fix the biggest loss', prompt: 'What should I focus on first?' },
+    { label: 'Show product profitability', prompt: 'Which products should I discontinue?' },
+    { label: 'Fix ad waste', prompt: 'Pause keywords wasting money' },
+  ],
+  general_health: [
+    { label: 'How to improve my grade?', prompt: 'How can I improve my business performance?' },
+    { label: 'Show detailed breakdown', prompt: 'Give me a complete business summary' },
+  ],
+};
+
+/**
+ * Generate strategy-specific follow-ups for a GeneralStrategyEngine strategyType.
+ * Falls back to the complete_summary set for unmapped types. (These templates
+ * carry no {timeRange}/{asin} variables, so no interpolation is needed.)
+ *
+ * @param {string} strategyType
+ * @returns {Array<{label:string, prompt:string}>} up to 3 follow-ups
+ */
+function generateStrategyFollowUps(strategyType) {
+  const templates = STRATEGY_FOLLOW_UP_TEMPLATES[strategyType] || STRATEGY_FOLLOW_UP_TEMPLATES.complete_summary;
+  return templates.slice(0, 3);
+}
+
+/**
+ * SellerOps follow-up templates, keyed by SellerOps queryType. {asin} resolved
+ * by generateSellerOpsFollowUps.
+ */
+const SELLER_OPS_FOLLOW_UP_TEMPLATES = {
+  listing_issues_summary: [
+    { label: 'Which products are worst?', prompt: 'Show me my most problematic listings' },
+    { label: 'How do I fix a suppressed listing?', prompt: 'How do I fix a suppressed listing?' },
+    { label: 'Urgent issues only', prompt: 'Are there any urgent listing issues?' },
+  ],
+  listing_issues_asin: [
+    { label: 'How do I fix these?', prompt: 'How do I fix the missing image issue?' },
+    { label: 'All my listing issues', prompt: 'What issues do my listings have?' },
+    { label: "This product's profitability", prompt: 'Show me the profitability for {asin}' },
+  ],
+  listing_issue_fix: [
+    { label: 'Show all my listing issues', prompt: 'What issues do my listings have?' },
+    { label: 'Which products are worst?', prompt: 'Show me my most problematic listings' },
+  ],
+  inventory_summary: [
+    { label: 'What should I restock?', prompt: 'What should I restock?' },
+    { label: 'Running low on stock?', prompt: 'Which products are running low on stock?' },
+    { label: 'Any overstock?', prompt: 'Which products are overstocked?' },
+  ],
+  inventory_asin: [
+    { label: 'What should I restock?', prompt: 'What should I restock?' },
+    { label: 'Full inventory summary', prompt: 'Show me my FBA inventory breakdown' },
+  ],
+  low_stock: [
+    { label: 'What should I restock?', prompt: 'What should I restock?' },
+    { label: 'Full inventory summary', prompt: 'Show me my FBA inventory breakdown' },
+  ],
+  overstock: [
+    { label: 'What should I restock instead?', prompt: 'What should I restock?' },
+    { label: 'Full inventory summary', prompt: 'Show me my FBA inventory breakdown' },
+  ],
+  restock_advice: [
+    { label: "What's running low?", prompt: 'Which products are running low on stock?' },
+    { label: 'Full inventory summary', prompt: 'Show me my FBA inventory breakdown' },
+  ],
+  account_health: [
+    { label: 'How do I improve it?', prompt: 'How do I improve my account health?' },
+    { label: 'What metrics are at risk?', prompt: 'What metrics are in the danger zone?' },
+  ],
+  account_health_action: [
+    { label: "What's my overall health?", prompt: 'What is my account health?' },
+    { label: 'How do I reduce my defect rate?', prompt: 'How do I reduce my defect rate?' },
+  ],
+  reimbursement_summary: [
+    { label: 'Any unclaimed reimbursements?', prompt: 'How much am I owed in reimbursements?' },
+    { label: 'Show opportunities', prompt: 'Show me FBA reimbursement opportunities' },
+  ],
+  reimbursement_opportunities: [
+    { label: "What I've already received", prompt: 'How much have I been reimbursed this month?' },
+    { label: 'Lost or damaged inventory', prompt: 'Which products have lost or damaged inventory?' },
+  ],
+  product_summary: [
+    { label: 'Which products lose money?', prompt: 'Which products are losing money?' },
+    { label: 'My listing issues', prompt: 'What issues do my listings have?' },
+  ],
+  product_details: [
+    { label: 'Issues for this product', prompt: "What's wrong with {asin}'s listing?" },
+    { label: 'Should I keep it?', prompt: 'Should I discontinue {asin}?' },
+  ],
+  bsr_analysis: [
+    { label: 'My product catalog', prompt: 'How many products do I have?' },
+    { label: 'My top sellers', prompt: 'Which products sell fastest?' },
+  ],
+};
+
+/**
+ * Advisory follow-up templates, keyed by Advisory queryType. {asin} resolved by
+ * generateAdvisoryFollowUps.
+ */
+const ADVISORY_FOLLOW_UP_TEMPLATES = {
+  pricing_advice: [
+    { label: 'Is a coupon worth it?', prompt: 'Is it worth running a coupon on {asin}?' },
+    { label: 'Should I keep this product?', prompt: 'Should I discontinue {asin}?' },
+    { label: "This product's profit", prompt: 'Show me the profitability for {asin}' },
+  ],
+  promotional_advice: [
+    { label: 'Best discount percentage?', prompt: "What's the best discount percentage for {asin}?" },
+    { label: 'Should I change the price instead?', prompt: 'Should I lower the price on {asin}?' },
+  ],
+  operational_advice: [
+    { label: 'Show my listing issues', prompt: 'What issues do my listings have?' },
+    { label: 'How do I get more reviews?', prompt: 'How do I get more reviews?' },
+    { label: 'How do I improve a listing?', prompt: 'How do I improve my listing?' },
+  ],
+  product_decision: [
+    { label: "This product's pricing", prompt: 'Should I lower the price on {asin}?' },
+    { label: 'Its listing issues', prompt: "What's wrong with {asin}'s listing?" },
+    { label: 'Its ad performance', prompt: "What's the ACOS for {asin}?" },
+  ],
+  capabilities: [
+    { label: 'Show my profit', prompt: 'What is my profit?' },
+    { label: 'Check my ads', prompt: 'What is my ACOS?' },
+    { label: 'Find money I can recover', prompt: 'How much am I owed in reimbursements?' },
+  ],
+};
+
+/**
+ * Generate SellerOps follow-ups for a queryType. Falls back to inventory_summary.
+ * @param {string} queryType
+ * @param {Object} [entities] - for {asin}
+ * @returns {Array<{label:string, prompt:string}>}
+ */
+function generateSellerOpsFollowUps(queryType, entities) {
+  const templates = SELLER_OPS_FOLLOW_UP_TEMPLATES[queryType] || SELLER_OPS_FOLLOW_UP_TEMPLATES.inventory_summary;
+  const asin = (entities && entities.asins && entities.asins[0]) || '';
+  return templates.slice(0, 3).map((t) => ({ label: t.label, prompt: t.prompt.replace('{asin}', asin) }));
+}
+
+/**
+ * Generate Advisory follow-ups for a queryType. Falls back to capabilities.
+ * @param {string} queryType
+ * @param {Object} [entities] - for {asin}
+ * @returns {Array<{label:string, prompt:string}>}
+ */
+function generateAdvisoryFollowUps(queryType, entities) {
+  const templates = ADVISORY_FOLLOW_UP_TEMPLATES[queryType] || ADVISORY_FOLLOW_UP_TEMPLATES.capabilities;
+  const asin = (entities && entities.asins && entities.asins[0]) || '';
+  return templates.slice(0, 3).map((t) => ({ label: t.label, prompt: t.prompt.replace('{asin}', asin) }));
+}
+
+module.exports = {
+  generateFollowUps,
+  generateFinanceFollowUps,
+  FINANCE_FOLLOW_UP_TEMPLATES,
+  generateAdsFollowUps,
+  ADS_FOLLOW_UP_TEMPLATES,
+  generateStrategyFollowUps,
+  STRATEGY_FOLLOW_UP_TEMPLATES,
+  generateSellerOpsFollowUps,
+  SELLER_OPS_FOLLOW_UP_TEMPLATES,
+  generateAdvisoryFollowUps,
+  ADVISORY_FOLLOW_UP_TEMPLATES,
+};

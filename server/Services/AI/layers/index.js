@@ -8,7 +8,11 @@ const { handlePostOperationIntent } = require('./services/PostOperationService.j
 const { handleAsinDeepDive } = require('./services/AsinDeepDiveService.js');
 const { shouldAskClarification, buildDiscreteClarificationPrompt, buildDiscreteClarificationOptions } = require('./ClarificationPolicy.js');
 const { isFinanceQuery, handleFinanceQuery, narrateFinanceResult } = require('./services/FinanceEngine.js');
-const { generateFinanceFollowUps } = require('./helpers/FollowUpGenerator.js');
+const { isAdsQuery, handleAdsQuery, narrateAdsResult } = require('./services/AdsEngine.js');
+const { isGeneralStrategyQuery, handleStrategyQuery, narrateStrategyResult } = require('./services/GeneralStrategyEngine.js');
+const { isSellerOpsQuery, handleSellerOpsQuery, narrateSellerOpsResult } = require('./services/SellerOpsEngine.js');
+const { isAdvisoryQuery, handleAdvisoryQuery, narrateAdvisoryResult } = require('./services/AdvisoryEngine.js');
+const { generateFinanceFollowUps, generateAdsFollowUps, generateStrategyFollowUps, generateSellerOpsFollowUps, generateAdvisoryFollowUps } = require('./helpers/FollowUpGenerator.js');
 const logger = require('../../../utils/Logger.js');
 
 async function runLayeredQMatePipeline({
@@ -126,12 +130,69 @@ async function runLayeredQMatePipeline({
         };
     }
 
-    // --- Finance Engine intercept ---
-    // Finance questions are answered deterministically (numbers match the
-    // dashboard) and only narrated by the LLM. Placed AFTER clarification and
-    // BEFORE the legacy ServiceRouter/intent routing. If the engine errors or
-    // returns nothing, we fall through to the existing pipeline (degraded but
-    // not broken).
+    // --- Ads Engine intercept — FIRST ---
+    // Ads (PPC) questions are answered deterministically (numbers match the
+    // Campaign Audit Dashboard) and only narrated by the LLM. Placed BEFORE the
+    // FinanceEngine intercept: ANY ads context (ppc/acos/roas/campaign/keyword/
+    // ad spend/sponsored/…) is owned by the AdsEngine, so an ads query is never
+    // captured by the FinanceEngine just because it also contains "sales" or
+    // "spend". classifyAdsQueryType returns 'not_ads_engine' for non-ads queries
+    // (and for post-action pause/negative intents), so those naturally fall
+    // through to the FinanceEngine below. On error/empty, fall through too.
+    if (isAdsQuery(interpretation)) {
+        try {
+            const adsResult = await handleAdsQuery(
+                interpretation,
+                { userId: userContext.userId, country: userContext.country, region: userContext.region },
+                {
+                    startDate: runtimeContext.startDate,
+                    endDate: runtimeContext.endDate,
+                    calendarMode: runtimeContext.calendarMode,
+                }
+            );
+
+            if (adsResult && adsResult.type !== 'error') {
+                const narratedContent = await narrateAdsResult(adsResult, rawQuestion, modelTools);
+
+                logger.info(`[QMate][AdsEngine] Answered with type=${adsResult.type}, responseSource=ads_engine_deterministic`);
+
+                // Map to this codebase's response contract: the controller reads
+                // `answer_markdown` (→ content) and `chart_suggestions` (→ charts).
+                return {
+                    status: 200,
+                    answer_markdown: narratedContent,
+                    content: narratedContent,
+                    chart_suggestions: adsResult.charts || [],
+                    charts: adsResult.charts || [],
+                    follow_up_questions: generateAdsFollowUps(adsResult.type, interpretation.entities),
+                    needs_clarification: false,
+                    clarifying_questions: [],
+                    intent_interpretation: interpretedContract,
+                    responseSource: 'ads_engine_deterministic',
+                    dataConfidence: 'high',
+                    dataSources: ['PPCCampaignAnalysisService', 'PPCMetrics'],
+                    // Ads-specific extras for the frontend interactive table.
+                    wasted_keywords: adsResult.wasted_keywords || [],
+                    wasted_keywords_total: adsResult.wasted_keywords_total || 0,
+                    load_more_available: adsResult.load_more_available || false,
+                    adsResult, // raw data for frontend if needed
+                };
+            }
+            // adsResult is error or null → fall through to existing pipeline.
+            logger.warn('[QMate][AdsEngine] Ads query returned error/null, falling through to existing pipeline');
+        } catch (err) {
+            logger.error('[QMate][AdsEngine] Error in ads engine, falling through:', err.message);
+            // Fall through to existing pipeline as a safety net.
+        }
+    }
+    // --- End Ads Engine intercept ---
+
+    // --- Finance Engine intercept — SECOND ---
+    // Pure finance questions (no ads context) are answered deterministically
+    // (numbers match the dashboard) and only narrated by the LLM. Runs AFTER the
+    // AdsEngine intercept above and BEFORE the legacy ServiceRouter/intent
+    // routing. If the engine errors or returns nothing, we fall through to the
+    // existing pipeline (degraded but not broken).
     if (isFinanceQuery(interpretation)) {
         try {
             const financeResult = await handleFinanceQuery(
@@ -177,6 +238,128 @@ async function runLayeredQMatePipeline({
         }
     }
     // --- End Finance Engine intercept ---
+
+    // --- General Strategy Engine intercept — THIRD ---
+    // Cross-domain questions ("why is my profit dropping?", "what should I fix
+    // first?", "complete summary") combine finance + ads. They contain finance/
+    // ads words, so AdsEngine.isAdsQuery and FinanceEngine.isFinanceQuery DEFER
+    // them (both return false when isGeneralStrategyQuery is true) — which is why
+    // execution reaches here. Runs AFTER both domain engines, BEFORE the general
+    // pipeline. On error/empty, falls through to the existing pipeline.
+    if (isGeneralStrategyQuery(interpretation)) {
+        try {
+            const strategyResult = await handleStrategyQuery(
+                interpretation,
+                { userId: userContext.userId, country: userContext.country, region: userContext.region },
+                { startDate: runtimeContext.startDate, endDate: runtimeContext.endDate }
+            );
+
+            if (strategyResult && strategyResult.type !== 'error') {
+                const narratedContent = await narrateStrategyResult(strategyResult, rawQuestion, modelTools);
+
+                logger.info(`[QMate][StrategyEngine] Answered with strategyType=${strategyResult.strategyType}, responseSource=general_strategy_engine`);
+
+                return {
+                    status: 200,
+                    answer_markdown: narratedContent,
+                    content: narratedContent,
+                    chart_suggestions: strategyResult.charts || [],
+                    charts: strategyResult.charts || [],
+                    follow_up_questions: generateStrategyFollowUps(strategyResult.strategyType),
+                    needs_clarification: false,
+                    clarifying_questions: [],
+                    intent_interpretation: interpretedContract,
+                    responseSource: 'general_strategy_engine',
+                    dataConfidence: 'high',
+                    dataSources: ['FinanceDashboardReadService', 'PPCCampaignAnalysisService'],
+                    strategyResult, // raw cross-domain data for the frontend
+                };
+            }
+            logger.warn('[QMate][StrategyEngine] Strategy query returned error/null, falling through to existing pipeline');
+        } catch (err) {
+            logger.error('[QMate][StrategyEngine] Error in strategy engine, falling through:', err.message);
+        }
+    }
+    // --- End General Strategy Engine intercept ---
+
+    // --- SellerOps Engine intercept — FOURTH ---
+    // Operational data-lookup domains: listing issues, inventory, account health,
+    // reimbursements, products. Runs after the three analytics engines (which
+    // defer to it) and before Advisory. On error/empty, falls through.
+    if (isSellerOpsQuery(interpretation)) {
+        try {
+            const opsResult = await handleSellerOpsQuery(
+                interpretation,
+                { userId: userContext.userId, country: userContext.country, region: userContext.region },
+                { startDate: runtimeContext.startDate, endDate: runtimeContext.endDate }
+            );
+
+            if (opsResult && opsResult.type !== 'error' && opsResult.type !== 'not_implemented') {
+                const narratedContent = await narrateSellerOpsResult(opsResult, rawQuestion, modelTools);
+
+                logger.info(`[QMate][SellerOpsEngine] Answered with type=${opsResult.type}, responseSource=seller_ops_engine`);
+
+                return {
+                    status: 200,
+                    answer_markdown: narratedContent,
+                    content: narratedContent,
+                    chart_suggestions: [],
+                    charts: [],
+                    follow_up_questions: generateSellerOpsFollowUps(opsResult.type, interpretation.entities),
+                    needs_clarification: false,
+                    clarifying_questions: [],
+                    intent_interpretation: interpretedContract,
+                    responseSource: 'seller_ops_engine',
+                    dataConfidence: opsResult.available === false ? 'low' : 'high',
+                    dataSources: ['SellerOpsEngine'],
+                    sellerOpsResult: opsResult,
+                };
+            }
+            logger.warn('[QMate][SellerOpsEngine] Returned error/null/not_implemented, falling through to existing pipeline');
+        } catch (err) {
+            logger.error('[QMate][SellerOpsEngine] Error in seller-ops engine, falling through:', err.message);
+        }
+    }
+    // --- End SellerOps Engine intercept ---
+
+    // --- Advisory Engine intercept — FIFTH ---
+    // Pricing, promotions, operational how-to, product decisions, and platform
+    // capabilities. Runs after SellerOps and before the general pipeline.
+    if (isAdvisoryQuery(interpretation)) {
+        try {
+            const advResult = await handleAdvisoryQuery(
+                interpretation,
+                { userId: userContext.userId, country: userContext.country, region: userContext.region },
+                { startDate: runtimeContext.startDate, endDate: runtimeContext.endDate }
+            );
+
+            if (advResult && advResult.type !== 'error' && advResult.type !== 'not_advisory') {
+                const narratedContent = await narrateAdvisoryResult(advResult, rawQuestion, modelTools);
+
+                logger.info(`[QMate][AdvisoryEngine] Answered with type=${advResult.type}, responseSource=advisory_engine`);
+
+                return {
+                    status: 200,
+                    answer_markdown: narratedContent,
+                    content: narratedContent,
+                    chart_suggestions: [],
+                    charts: [],
+                    follow_up_questions: generateAdvisoryFollowUps(advResult.type, interpretation.entities),
+                    needs_clarification: false,
+                    clarifying_questions: [],
+                    intent_interpretation: interpretedContract,
+                    responseSource: 'advisory_engine',
+                    dataConfidence: advResult.type === 'operational_advice' || advResult.type === 'capabilities' ? 'high' : 'medium',
+                    dataSources: ['AdvisoryEngine', 'FinanceEngine', 'AdsEngine'],
+                    advisoryResult: advResult,
+                };
+            }
+            logger.warn('[QMate][AdvisoryEngine] Returned error/null/not_advisory, falling through to existing pipeline');
+        } catch (err) {
+            logger.error('[QMate][AdvisoryEngine] Error in advisory engine, falling through:', err.message);
+        }
+    }
+    // --- End Advisory Engine intercept ---
 
     const executionPlan = buildExecutionPlan(interpretedContract);
     const unifiedData = await fetchUnifiedData({

@@ -24,6 +24,13 @@ const DataFetchTracking = require('../../../../models/system/DataFetchTrackingMo
 const Cogs = require('../../../../models/finance/CogsModel.js');
 const PPCMetrics = require('../../../../models/amazon-ads/PPCMetricsModel.js');
 const { getDefaultReportDateRange } = require('../../../../utils/reportDateRange.js');
+// Standalone detector (no engine imports) — lets isFinanceQuery defer
+// cross-domain strategy questions without a circular dependency.
+const { isGeneralStrategyQuery } = require('./helpers/StrategyQueryDetector.js');
+// SellerOps/Advisory run LATER in the pipeline, so Finance must defer their
+// queries (pure detectors → no circular dependency).
+const { isSellerOpsQuery } = require('./helpers/SellerOpsQueryDetector.js');
+const { isAdvisoryQuery } = require('./helpers/AdvisoryQueryDetector.js');
 
 /**
  * Resolve ad spend the SAME way the Profitability dashboard does: prefer the
@@ -313,6 +320,45 @@ async function fetchCogsForUser(userContext) {
   }
 }
 
+/**
+ * Build the canonical finance summary from dashboard data + COGS + resolved ad
+ * spend, using the SAME formulas/inputs as the dashboard. Pure & synchronous —
+ * the caller resolves `adSpend` (PPCMetrics parity) beforehand. Extracted from
+ * handleFinanceQuery so the GeneralStrategyEngine can reuse it for raw data
+ * without going through the narrated response path.
+ *
+ * @param {Object} dashboardData - FinanceDashboardReadService.getDashboard() result
+ * @param {Object} cogs - fetchCogsForUser() result { hasCOGS, entries, cogsMap }
+ * @param {number} adSpend - dashboard-parity ad spend (from resolvePpcAdSpend)
+ * @param {Object} [dateRange] - attached to the summary for downstream builders
+ * @returns {Object} canonical financeSummary
+ */
+function computeFinanceSummary(dashboardData, cogs, adSpend, dateRange) {
+  const totals = (dashboardData && dashboardData.totals) || {};
+  const totalSales = totals.productSales || 0;
+  const spend = Number(adSpend || 0);
+  const displayTotalExpenses = computeDisplayTotalExpenses(totals, dashboardData && dashboardData.overhead, spend);
+  const totalCogs = computeTotalCogsFromAsinWise(dashboardData && dashboardData.asinWise, cogs);
+  const displayProfit = computeDisplayProfit(totalSales, displayTotalExpenses, totalCogs);
+  const profitMargin = totalSales > 0 ? (displayProfit / totalSales) * 100 : 0;
+
+  return {
+    dateRange,
+    totalSales,
+    totalUnits: totals.units || 0,
+    totalOrders: totals.orderCount || 0,
+    displayTotalExpenses,
+    adSpend: spend,
+    totalCogs,
+    displayProfit,
+    profitMargin,
+    overheadTotal: (dashboardData && dashboardData.overheadTotal) || 0,
+    reimbursements: Math.abs(totals.fbaInventoryReimbursement || 0),
+    // Refund cost (positive) — used by the comparison/why-analysis refund delta.
+    refunds: Math.abs(totals.refundedAmount || 0),
+  };
+}
+
 // ── Query classifier (stubbed for now; expanded in a later phase) ──
 
 /**
@@ -379,6 +425,16 @@ function classifyFinanceQueryType(interpretation) {
       return 'not_finance';
     }
 
+    // 0.7 ASIN TIME SERIES — an ASIN plus a datewise/trend cue. Checked BEFORE
+    //     single_asin so "datewise sales of B0…" / "B0… sales per day" returns a
+    //     per-day breakdown for that product, not a single total.
+    if (
+      hasAsin &&
+      /trend|trending|over time|graph|chart|\bdaily\b|\bweekly\b|day.?by.?day|date.?wise|day.?wise|per day|each day|by date|by day|over the (last|past)|what day|which day/.test(prompt)
+    ) {
+      return 'asin_time_series';
+    }
+
     // 1. SINGLE ASIN — an ASIN plus any financial angle (incl. units/orders).
     if (
       hasAsin &&
@@ -416,9 +472,12 @@ function classifyFinanceQueryType(interpretation) {
     }
 
     // 6. TIME SERIES / TREND. Before comparison so "daily ... vs sales" and
-    //    "what day had the highest sales" route to the trend handler.
+    //    "what day had the highest sales" route to the trend handler. Includes
+    //    "datewise"/"date wise"/"per day"/"by date"/"day by day" — explicit
+    //    requests for a per-day breakdown must return the datewise chart, not a
+    //    single total. (Average/per-unit queries are already claimed by rule 3.)
     if (
-      /trend|trending|over time|graph|chart|\bdaily\b|\bweekly\b|day.?by.?day|show me.*over|increasing|rising|going up|what day|which day|best day|highest.*(sales|profit).*day|day.*highest/.test(prompt)
+      /trend|trending|over time|graph|chart|\bdaily\b|\bweekly\b|day.?by.?day|date.?wise|day.?wise|per day|each day|by date|by day|show me.*over|increasing|rising|going up|what day|which day|best day|highest.*(sales|profit).*day|day.*highest/.test(prompt)
     ) {
       return 'time_series';
     }
@@ -483,6 +542,26 @@ function classifyFinanceQueryType(interpretation) {
  * @returns {boolean}
  */
 function isFinanceQuery(interpretation) {
+  // Post-action (pause/negative/disable) → PostOperationService, never the
+  // read-only finance engine. Guard on both intent and the extracted action
+  // queryShape (mirrors AdsEngine.isAdsQuery), so e.g. "pause my worst keywords"
+  // — which classifyFinanceQueryType would otherwise read as top_bottom_products
+  // on the word "worst" — is not captured here.
+  if (interpretation?.intent === 'post_action' || interpretation?.intent === 'implementation_request') {
+    return false;
+  }
+  if (interpretation?.entities?.queryShape === 'action') {
+    return false;
+  }
+  // Defer to the downstream engines that own these queries, even though they may
+  // contain finance words ("which products …", "reimbursements", "stock"):
+  //   - GeneralStrategyEngine (cross-domain), and
+  //   - SellerOps/Advisory (operational + advisory) which run AFTER Finance in
+  //     the pipeline, so Finance must yield or it would grab them first.
+  // All three detectors are standalone helpers (no engine imports → no cycle).
+  if (isGeneralStrategyQuery(interpretation) || isSellerOpsQuery(interpretation) || isAdvisoryQuery(interpretation)) {
+    return false;
+  }
   return classifyFinanceQueryType(interpretation) !== 'not_finance';
 }
 
@@ -541,32 +620,12 @@ async function handleFinanceQuery(interpretation, userContext, requestDateRange)
     // c) Fetch COGS.
     const cogs = await fetchCogsForUser(userContext);
 
-    // d) Compute derived values using the SAME formulas + inputs as the frontend.
-    const totals = dashboardData.totals || {};
-    const totalSales = totals.productSales || 0;
-    // Ad spend: PPCMetrics (dashboard's source), fall back to finance adsSpend.
-    const adSpend = await resolvePpcAdSpend(userContext, dateRange.startDate, dateRange.endDate, totals.adsSpend);
-    const displayTotalExpenses = computeDisplayTotalExpenses(totals, dashboardData.overhead, adSpend);
-    const totalCogs = computeTotalCogsFromAsinWise(dashboardData.asinWise, cogs);
-    const displayProfit = computeDisplayProfit(totalSales, displayTotalExpenses, totalCogs);
-    const profitMargin = totalSales > 0 ? (displayProfit / totalSales) * 100 : 0;
+    // d) Ad spend: PPCMetrics (dashboard's source), fall back to finance adsSpend.
+    const adSpend = await resolvePpcAdSpend(userContext, dateRange.startDate, dateRange.endDate, (dashboardData.totals || {}).adsSpend);
 
-    // e) Canonical finance summary.
-    const financeSummary = {
-      dateRange,
-      totalSales,
-      totalUnits: totals.units || 0,
-      totalOrders: totals.orderCount || 0,
-      displayTotalExpenses,
-      adSpend,
-      totalCogs,
-      displayProfit,
-      profitMargin,
-      overheadTotal: dashboardData.overheadTotal || 0,
-      reimbursements: Math.abs(totals.fbaInventoryReimbursement || 0),
-      // Refund cost (positive) — used by the comparison/why-analysis refund delta.
-      refunds: Math.abs(totals.refundedAmount || 0),
-    };
+    // e) Canonical finance summary (shared, pure computation).
+    const financeSummary = computeFinanceSummary(dashboardData, cogs, adSpend, dateRange);
+    const { totalSales, displayTotalExpenses, totalCogs, displayProfit, profitMargin } = financeSummary;
 
     // Per-component breakdown — compare each line to the dashboard's expense
     // breakdown dropdown to pinpoint any QMate-vs-dashboard discrepancy. The
@@ -621,7 +680,12 @@ async function handleFinanceQuery(interpretation, userContext, requestDateRange)
       case 'why_analysis':
         return await buildWhyAnalysisResponse(financeSummary, userContext, dateRange, dashboardData);
       case 'time_series':
-        return buildTimeSeriesResponse(dashboardData, cogs, dateRange);
+        return buildTimeSeriesResponse(dashboardData, cogs, dateRange, interpretation);
+      case 'asin_time_series': {
+        const asin = (interpretation?.entities?.asins || [])[0];
+        if (!asin) return buildTimeSeriesResponse(dashboardData, cogs, dateRange, interpretation);
+        return await buildAsinTimeSeriesResponse(asin, userContext, dateRange, interpretation);
+      }
       case 'cogs_query':
         return buildCogsResponse(cogs, dashboardData.asinWise, financeSummary);
       case 'overhead_query':
@@ -1124,14 +1188,28 @@ function buildTopBottomResponse(dashboardData, cogs, interpretation, dateRange) 
 
   const products = entries.slice(0, count).map(({ entry }) => entry);
 
+  // Honesty metadata for profit/margin "top" rankings: a request for "top 5 by
+  // profit" should not present break-even or loss-making products as if they
+  // were top performers. Surface how many of the returned products are ACTUALLY
+  // profitable (grossProfit > 0) so the narrator can lead with that fact rather
+  // than implying all `count` are winners.
+  const isProfitRanked = (sortField === 'profit' || sortField === 'margin') && direction === 'top';
+  const profitableCount = products.filter((p) => (p.grossProfit || 0) > 0).length;
+  const profitableInListShortfall = isProfitRanked && profitableCount < products.length;
+
   return {
     type: 'top_bottom_products',
     dateRange,
     sortedBy: sortField,
     direction,
     count: products.length,
+    requestedCount: count,
     products,
     totalProductCount: rows.length,
+    // Profitability honesty fields (meaningful when isProfitRanked is true):
+    isProfitRanked,
+    profitableCount,
+    profitableInListShortfall,
   };
 }
 
@@ -1483,17 +1561,42 @@ async function buildWhyAnalysisResponse(currentSummary, userContext, dateRange, 
   };
 }
 
+// Per-day finance fields available from dashboardData.dateWise, with chart
+// labels. The handler picks which to plot from the prompt.
+const FINANCE_TS_FIELDS = {
+  totalSales: { label: 'Sales', match: /\bsales\b|revenue/ },
+  grossProfit: { label: 'Gross Profit', match: /\bprofit\b|\bmargin\b|earnings?/ },
+  totalExpenses: { label: 'Expenses', match: /\bexpenses?\b|\bfees?\b|\bcosts?\b/ },
+  units: { label: 'Units', match: /\bunits?\b|\bsold\b|quantity|volume/ },
+  orderCount: { label: 'Orders', match: /\borders?\b/ },
+};
+
+/**
+ * Pick which finance daily fields to plot from the prompt. Falls back to the
+ * canonical Sales-vs-Profit pair when no specific metric is named.
+ */
+function selectFinanceTimeSeriesFields(interpretation) {
+  const prompt = extractPromptText(interpretation);
+  const order = ['totalSales', 'grossProfit', 'totalExpenses', 'units', 'orderCount'];
+  const picked = order.filter((k) => FINANCE_TS_FIELDS[k].match.test(prompt));
+  return picked.length ? picked : ['totalSales', 'grossProfit'];
+}
+
 /**
  * HANDLER 3 — Date-wise time series.
- * For "Show me sales trend", "Graph my expenses".
+ * For "Show me sales trend", "Graph my expenses", "units sold datewise".
+ *
+ * METRIC-AWARE: plots whichever finance daily fields the user named (sales,
+ * profit, expenses, units, orders), defaulting to Sales vs Profit. Trend /
+ * peak / lowest are computed on the first selected field.
  *
  * Limitation: dateWise has no per-day PPC or per-day COGS, so daily grossProfit
  * = productSales - |totalExpenses| only (no ad spend / COGS subtracted). This is
  * surfaced in `limitations`.
  *
- * @returns {Object} { type:'time_series', dateRange, dataPoints, trend, peakDay, lowestDay, charts, limitations }
+ * @returns {Object} { type:'time_series', dateRange, metric, metrics, dataPoints, trend, peakDay, lowestDay, charts, limitations }
  */
-function buildTimeSeriesResponse(dashboardData, cogs, dateRange) {
+function buildTimeSeriesResponse(dashboardData, cogs, dateRange, interpretation) {
   const rows = Array.isArray(dashboardData.dateWise) ? dashboardData.dateWise : [];
 
   const dataPoints = rows.map((r) => {
@@ -1509,34 +1612,41 @@ function buildTimeSeriesResponse(dashboardData, cogs, dateRange) {
     };
   });
 
-  // Trend: first-half avg vs second-half avg of totalSales.
+  const fields = selectFinanceTimeSeriesFields(interpretation);
+  const metric = fields[0]; // trend/peak computed on the primary requested field
+
+  // Trend: first-half avg vs second-half avg of the primary metric.
   const n = dataPoints.length;
-  let trend = { direction: 'flat', metric: 'totalSales', firstHalfAvg: 0, secondHalfAvg: 0, changePct: 0 };
+  let trend = { direction: 'flat', metric, firstHalfAvg: 0, secondHalfAvg: 0, changePct: 0 };
   if (n >= 2) {
     const mid = Math.floor(n / 2);
-    const firstHalf = dataPoints.slice(0, mid);
-    const secondHalf = dataPoints.slice(mid);
-    const avg = (arr) => (arr.length ? arr.reduce((s, p) => s + p.totalSales, 0) / arr.length : 0);
-    const firstHalfAvg = avg(firstHalf);
-    const secondHalfAvg = avg(secondHalf);
+    const avg = (arr) => (arr.length ? arr.reduce((s, p) => s + (p[metric] || 0), 0) / arr.length : 0);
+    const firstHalfAvg = avg(dataPoints.slice(0, mid));
+    const secondHalfAvg = avg(dataPoints.slice(mid));
     const changePct = pctChange(secondHalfAvg, firstHalfAvg);
     let direction = 'flat';
     if (changePct > 2) direction = 'up';
     else if (changePct < -2) direction = 'down';
-    trend = { direction, metric: 'totalSales', firstHalfAvg, secondHalfAvg, changePct };
+    trend = { direction, metric, firstHalfAvg, secondHalfAvg, changePct };
   }
 
-  // Peak / lowest day by totalSales.
+  // Peak / lowest day by the primary metric.
   let peakDay = null;
   let lowestDay = null;
   for (const p of dataPoints) {
-    if (!peakDay || p.totalSales > peakDay.value) peakDay = { date: p.date, value: p.totalSales, metric: 'totalSales' };
-    if (!lowestDay || p.totalSales < lowestDay.value) lowestDay = { date: p.date, value: p.totalSales, metric: 'totalSales' };
+    const v = p[metric] || 0;
+    if (!peakDay || v > peakDay.value) peakDay = { date: p.date, value: v, metric };
+    if (!lowestDay || v < lowestDay.value) lowestDay = { date: p.date, value: v, metric };
   }
+
+  const yFields = fields.map((k) => ({ field: k, label: FINANCE_TS_FIELDS[k].label }));
+  const title = `${yFields.map((y) => y.label).join(' vs ')} Over Time`;
 
   return {
     type: 'time_series',
     dateRange,
+    metric,
+    metrics: fields,
     dataPoints,
     trend,
     peakDay,
@@ -1545,15 +1655,116 @@ function buildTimeSeriesResponse(dashboardData, cogs, dateRange) {
     charts: [
       {
         type: 'line',
-        title: 'Sales vs Profit Over Time',
+        title,
         data: dataPoints,
         xField: 'date',
-        yFields: [
-          { field: 'totalSales', label: 'Sales' },
-          { field: 'grossProfit', label: 'Gross Profit' },
-        ],
+        yFields,
       },
     ],
+    limitations: 'Daily gross profit excludes per-day PPC and COGS (not available at day granularity); it is productSales minus Amazon/overhead expenses only.',
+  };
+}
+
+/**
+ * HANDLER — Per-ASIN date-wise time series.
+ * For "datewise sales of B0… for last 7 days", "B0… units per day", etc.
+ *
+ * Pulls one row per calendar day for a SINGLE product from DailySkuFinance
+ * (FinanceDashboardReadService.getAsinDateWise) and is METRIC-AWARE: plots the
+ * field(s) the user named (sales, profit, expenses, units, orders), defaulting
+ * to Sales vs Profit. Same daily-profit caveat as the account-wide series
+ * (no per-day PPC/COGS), surfaced in `limitations`.
+ *
+ * @param {string} asin
+ * @param {{ userId, country, region }} userContext
+ * @param {{ startDate, endDate }} dateRange
+ * @param {Object} interpretation
+ * @returns {Promise<Object>} { type:'asin_time_series', asin, productName, metric, metrics, dataPoints, trend, peakDay, lowestDay, charts, limitations }
+ */
+async function buildAsinTimeSeriesResponse(asin, userContext, dateRange, interpretation) {
+  const normalizedAsin = String(asin || '').trim().toUpperCase();
+  const rows = await FinanceDashboardReadService.getAsinDateWise({
+    userId: userContext.userId,
+    country: userContext.country,
+    region: userContext.region,
+    startDate: dateRange.startDate,
+    endDate: dateRange.endDate,
+    asin: normalizedAsin,
+  });
+
+  const productName = (rows.find((r) => r.productName)?.productName) || normalizedAsin;
+
+  const dataPoints = (rows || []).map((r) => {
+    const totalSales = Number(r.productSales || 0);
+    const totalExpenses = Math.abs(Number(r.totalExpenses || 0));
+    return {
+      date: String(r.date || '').slice(0, 10),
+      totalSales,
+      totalExpenses,
+      grossProfit: totalSales - totalExpenses,
+      units: Number(r.units || 0),
+      orderCount: Number(r.orderCount || 0),
+    };
+  });
+
+  if (dataPoints.length === 0) {
+    return {
+      type: 'asin_time_series',
+      dateRange,
+      asin: normalizedAsin,
+      productName: normalizedAsin,
+      notFound: true,
+      metric: 'totalSales',
+      metrics: ['totalSales'],
+      dataPoints: [],
+      trend: { direction: 'flat', metric: 'totalSales', firstHalfAvg: 0, secondHalfAvg: 0, changePct: 0 },
+      peakDay: null,
+      lowestDay: null,
+      charts: [],
+    };
+  }
+
+  // Metric-aware: reuse the same finance daily-field selector.
+  const fields = selectFinanceTimeSeriesFields(interpretation);
+  const metric = fields[0];
+
+  const n = dataPoints.length;
+  let trend = { direction: 'flat', metric, firstHalfAvg: 0, secondHalfAvg: 0, changePct: 0 };
+  if (n >= 2) {
+    const mid = Math.floor(n / 2);
+    const avg = (arr) => (arr.length ? arr.reduce((s, p) => s + (p[metric] || 0), 0) / arr.length : 0);
+    const firstHalfAvg = avg(dataPoints.slice(0, mid));
+    const secondHalfAvg = avg(dataPoints.slice(mid));
+    const changePct = pctChange(secondHalfAvg, firstHalfAvg);
+    let direction = 'flat';
+    if (changePct > 2) direction = 'up';
+    else if (changePct < -2) direction = 'down';
+    trend = { direction, metric, firstHalfAvg, secondHalfAvg, changePct };
+  }
+
+  let peakDay = null;
+  let lowestDay = null;
+  for (const p of dataPoints) {
+    const v = p[metric] || 0;
+    if (!peakDay || v > peakDay.value) peakDay = { date: p.date, value: v, metric };
+    if (!lowestDay || v < lowestDay.value) lowestDay = { date: p.date, value: v, metric };
+  }
+
+  const yFields = fields.map((k) => ({ field: k, label: FINANCE_TS_FIELDS[k].label }));
+  const title = `${productName} — ${yFields.map((y) => y.label).join(' vs ')} Over Time`;
+
+  return {
+    type: 'asin_time_series',
+    dateRange,
+    asin: normalizedAsin,
+    productName,
+    metric,
+    metrics: fields,
+    dataPoints,
+    trend,
+    peakDay,
+    lowestDay,
+    charts: [{ type: 'line', title, data: dataPoints, xField: 'date', yFields }],
     limitations: 'Daily gross profit excludes per-day PPC and COGS (not available at day granularity); it is productSales minus Amazon/overhead expenses only.',
   };
 }
@@ -1691,7 +1902,8 @@ ABSOLUTE RULES:
 8. When presenting expense breakdowns, list from largest to smallest.
 9. Do NOT add caveats like 'please note' or 'keep in mind' unless the result includes a specific warning.
 10. If the result type is 'why_analysis', structure your answer as: 1) State what changed, 2) List drivers by impact, 3) List specific products contributing, 4) Actionable next steps from the actionableItems field.
-11. When the result has chart data, mention that a chart is displayed but do NOT describe the chart data points in text — the chart speaks for itself.`;
+11. When the result has chart data, mention that a chart is displayed but do NOT describe the chart data points in text — the chart speaks for itself.
+12. For result type 'top_bottom_products' when 'profitableInListShortfall' is true: the user asked for the top N by profit, but only 'profitableCount' products are actually profitable. LEAD with that fact (e.g. "Only 2 of your products were profitable in this period"), then list the products. Clearly flag any listed product with zero or negative profit as break-even or loss-making — do NOT present a product with $0.00 or negative profit as a "top" performer.`;
 
 /** Currency formatter: $1,234.56 */
 function fmtMoney(n) {
@@ -1756,7 +1968,16 @@ function buildFallbackNarration(result) {
     }
     case 'top_bottom_products': {
       const n = (result.products || []).length;
-      return `Here are the ${n} ${result.direction === 'bottom' ? 'lowest' : 'top'} products by ${result.sortedBy} for ${dr}.`;
+      const base = `Here are the ${n} ${result.direction === 'bottom' ? 'lowest' : 'top'} products by ${result.sortedBy} for ${dr}.`;
+      if (result.profitableInListShortfall) {
+        const pc = result.profitableCount;
+        const lead =
+          pc === 0
+            ? `None of your products were profitable in ${dr}.`
+            : `Only ${pc} of your product${pc === 1 ? ' was' : 's were'} actually profitable in ${dr} — fewer than the ${result.requestedCount} requested.`;
+        return `${lead} ${base} The remaining ${n - pc} are at break-even or a loss.`;
+      }
+      return base;
     }
     case 'asin_profitability': {
       const s = result.summary || {};
@@ -1769,6 +1990,13 @@ function buildFallbackNarration(result) {
     }
     case 'time_series':
       return `Here is your ${result.trend?.metric || 'sales'} trend for ${dr} (${result.trend?.direction || 'flat'}). A chart is displayed.`;
+    case 'asin_time_series': {
+      if (result.notFound) return `I found no daily data for ${result.asin} in ${dr}.`;
+      const total = (result.dataPoints || []).reduce((s, p) => s + (p[result.metric] || 0), 0);
+      const isMoney = result.metric === 'totalSales' || result.metric === 'grossProfit' || result.metric === 'totalExpenses';
+      const totalStr = isMoney ? fmtMoney(total) : Math.round(total).toLocaleString('en-US');
+      return `Here is the day-by-day ${result.metric} for ${result.productName || result.asin} over ${dr} (${result.dataPoints.length} days, ${result.trend?.direction || 'flat'}; total ${totalStr}). A chart is displayed.`;
+    }
     default:
       return 'Here are your finance results.';
   }
@@ -1934,6 +2162,9 @@ async function buildFinanceSuggestionContext(interpretation, userContext, reques
 module.exports = {
   resolveFinanceDateRange,
   fetchCogsForUser,
+  computeFinanceSummary,
+  computeAsinRowEntry,
+  resolvePpcAdSpend,
   classifyFinanceQueryType,
   isFinanceQuery,
   extractPromptText,
@@ -1948,6 +2179,7 @@ module.exports = {
   buildComparisonResponse,
   buildWhyAnalysisResponse,
   buildTimeSeriesResponse,
+  buildAsinTimeSeriesResponse,
   buildCogsResponse,
   buildOverheadResponse,
   narrateFinanceResult,

@@ -3010,6 +3010,24 @@ class Integration {
                         startDate: financeSyncResult?.startDate,
                         endDate: financeSyncResult?.endDate,
                     });
+                    // ★ Visibility (#6a): a "completed" backfill that wrote ZERO
+                    //   sales/SKU docs is the silent failure that leaves a newly
+                    //   connected account with no history (and the daily flow then
+                    //   only seeds 1 day forward). Surface it loudly so it's
+                    //   detectable instead of looking like a clean run. The
+                    //   finance reconciliation sweeper will also pick up the
+                    //   missing days, but this log makes the root cause obvious.
+                    {
+                        const s1 = financeSyncResult?.step1 || {};
+                        const wroteNothing = financeSyncResult?.status === 'completed' &&
+                            (Number(s1.skuDocs || 0) === 0) && (Number(s1.salesOrders || 0) === 0);
+                        if (wroteNothing) {
+                            logger.warn('[Integration:Batch3And4Phase] ⚠️ Finance backfill completed but wrote 0 sales/SKU docs — account has NO finance history. Likely upstream (report lag / permission / all-pending). Reconciliation sweeper will retry; verify the account if this persists.', {
+                                userId, region: Region, country: Country,
+                                startDate: financeSyncResult?.startDate, endDate: financeSyncResult?.endDate,
+                            });
+                        }
+                    }
                     if (sessionId) {
                         try {
                             await LoggingHelper.addLogToSession(sessionId, {

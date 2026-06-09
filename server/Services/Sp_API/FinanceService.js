@@ -115,6 +115,12 @@ const SETTLEMENT_LAG = {
 // Max age for pending orders — stop trying after this many days
 const MAX_PENDING_AGE_DAYS = 45;
 
+// After this many days a day is treated as settled even if it still shows
+// Pending-status orders, so a permanently-stuck Pending order can never freeze
+// the incremental cursor. Orders almost always leave Pending within 2-3 days;
+// 14 is a generous safety ceiling.
+const PROVISIONAL_SETTLE_DAYS = 14;
+
 // Country → Sales Channel mapping for filtering the Sales Report.
 // The NA region report includes ALL NA marketplaces (US, CA, MX, BR) in one file,
 // each in their local currency. We must filter to the correct marketplace
@@ -686,6 +692,21 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
   const reportRows = await fetchSalesReport(tokenManager, baseUrl, marketplaceId, salesStartISO, salesEndISO);
   const salesOrderMap = parseSalesReportRows(reportRows, country);
 
+  // ── Per-day "unsettled sales" signal (for provisional sync-log marking) ──
+  // Amazon withholds buyer/price data for orders in 'Pending' status, so those
+  // rows arrive with an empty item-price and are summed as $0. A day that
+  // contains such rows is NOT yet trustworthy and must be re-fetched later.
+  // ('Unshipped' orders are confirmed and DO carry prices — not counted here;
+  //  only statuses beginning with 'pending' have the empty-price problem.)
+  const pendingCountByDate = new Map();
+  for (const row of reportRows) {
+    const status = (row['order-status'] || '').toLowerCase();
+    if (!status.startsWith('pending')) continue;
+    const d = toPacificDateStr(row['purchase-date']);
+    if (!d) continue;
+    pendingCountByDate.set(d, (pendingCountByDate.get(d) || 0) + 1);
+  }
+
   // DEBUG — remove after testing
   let debugTotal = 0, debugUnits = 0, debugOrders = 0;
   for (const [, skuMap] of salesOrderMap) {
@@ -1084,9 +1105,27 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
   const allDates = new Set();
   for (const b of skuBuckets.values()) allDates.add(b.date);
   for (const b of overheadBuckets.values()) allDates.add(b.date);
-  const d = new Date(`${startDate}T00:00:00.000Z`);
+
+  // ★ GUARDED DELETE: normally we clear every date in the requested range so a
+  //   day that legitimately dropped to zero (e.g. all orders cancelled) is
+  //   overwritten correctly. But if the Sales Report came back COMPLETELY EMPTY
+  //   (0 rows — almost always Amazon report lag / a transient empty document,
+  //   not a real zero-sales stretch), adding the full range to datesToClear
+  //   would DELETE previously-correct days and replace them with nothing —
+  //   freezing them at $0. So when the report is empty we only clear the dates
+  //   we actually have new buckets for, never the bare range. This never
+  //   changes behaviour when the report has data (legitimate zeroing still
+  //   works); it only refuses to wipe good data with an empty result.
+  const salesReportEmpty = (reportRows.length === 0);
+  // `endD` is declared at function scope (not inside the `if`) because the
+  // sync-log loop further below reuses it to enumerate the range.
   const endD = new Date(`${endDate}T00:00:00.000Z`);
-  while (d <= endD) { allDates.add(formatDateUTC(d)); d.setUTCDate(d.getUTCDate() + 1); }
+  if (!salesReportEmpty) {
+    const d = new Date(`${startDate}T00:00:00.000Z`);
+    while (d <= endD) { allDates.add(formatDateUTC(d)); d.setUTCDate(d.getUTCDate() + 1); }
+  } else {
+    logger.warn(`[Step1] ⚠️ Sales Report returned 0 rows for ${startDate}→${endDate}. Skipping range-clear to avoid wiping previously-stored days; only ${allDates.size} bucket date(s) (if any) will be refreshed. These days will be retried on subsequent runs.`);
+  }
 
   const saved = await persistDailyBuckets({ userId, country: country.toUpperCase(), regionModel, marketplaceId, skuBuckets, overheadBuckets, datesToClear: [...allDates] });
 
@@ -1131,10 +1170,20 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
   const dateList = [];
   const dd = new Date(`${startDate}T00:00:00.000Z`);
   while (dd <= endD) { dateList.push(formatDateUTC(dd)); dd.setUTCDate(dd.getUTCDate() + 1); }
+  const todayPacificStr = new Date(Date.now() - PACIFIC_OFFSET_HOURS * 3600000).toISOString().substring(0, 10);
   for (const dateStr of dateList) {
+    // A day is PROVISIONAL (re-fetch later) when its sales aren't trustworthy yet:
+    //   - the Sales Report came back completely empty (report lag), OR
+    //   - the day still contains Pending-status orders (empty item-price).
+    // …unless the day is already older than PROVISIONAL_SETTLE_DAYS, in which
+    // case we settle it regardless so a stuck Pending order can't freeze the
+    // incremental cursor forever.
+    const pendingForDay = pendingCountByDate.get(dateStr) || 0;
+    const ageDays = Math.round((new Date(`${todayPacificStr}T00:00:00.000Z`) - new Date(`${dateStr}T00:00:00.000Z`)) / 86400000);
+    const isProvisional = (salesReportEmpty || pendingForDay > 0) && ageDays <= PROVISIONAL_SETTLE_DAYS;
     await FinanceSyncLog.findOneAndUpdate(
       { User: userObjectId, country: country.toUpperCase(), region: regionModel, date: dateStr },
-      { User: userObjectId, country: country.toUpperCase(), region: regionModel, marketplaceId, date: dateStr, fetchedAt: new Date(), status: 'success', expenseRowCount: expenseRows.length, revenueRowCount: revenueRows.length, skuCount: skuBuckets.size, error: '' },
+      { User: userObjectId, country: country.toUpperCase(), region: regionModel, marketplaceId, date: dateStr, fetchedAt: new Date(), status: 'success', provisional: isProvisional, pendingOrderCount: pendingForDay, expenseRowCount: expenseRows.length, revenueRowCount: revenueRows.length, skuCount: skuBuckets.size, error: '' },
       { upsert: true, new: true }
     );
   }
@@ -1332,7 +1381,12 @@ async function syncFinanceData({ userId, country, regionModel, refreshToken, acc
     [startDate, endDate] = forceDates;
     logger.info(`[Sync] Force: ${startDate} → ${endDate}`);
   } else {
-    const latestSync = await FinanceSyncLog.findOne({ User: userObjectId, country: country.toUpperCase(), region: regionModel, status: 'success' }).sort({ date: -1 }).lean();
+    // Cursor = latest SETTLED (non-provisional) success day. Provisional days
+    // (empty report / still-Pending orders) deliberately fall back inside the
+    // incremental window so they get re-fetched until they settle. Pre-existing
+    // rows have `provisional` undefined → `{ $ne: true }` treats them as settled,
+    // so behaviour for already-synced accounts is unchanged on deploy.
+    const latestSync = await FinanceSyncLog.findOne({ User: userObjectId, country: country.toUpperCase(), region: regionModel, status: 'success', provisional: { $ne: true } }).sort({ date: -1 }).lean();
     if (!latestSync) {
       const backfillStart = new Date(yesterdayPacificMs - ((backfillDays - 1) * 24 * 60 * 60 * 1000));
       startDate = backfillStart.toISOString().substring(0, 10);
@@ -1372,16 +1426,29 @@ async function syncFinanceData({ userId, country, regionModel, refreshToken, acc
       }
 
       // Soft cap so a long-broken account can't drag a 60-day fetch into the
-      // daily window. The remaining days will be picked up by the freshness
-      // sweeper (or by subsequent daily runs, advancing one window at a time).
+      // daily window.
+      //
+      // ★ FIX: clamp the END forward from the OLDEST unfilled day, NOT the
+      //   start backward from the newest. The previous version set
+      //   `startDate = endDate - (max-1)`, which fetched only the most recent
+      //   `max` days and SKIPPED the older ones — and because the next run
+      //   picks `latestSync` by the MAX success date, the cursor jumped past
+      //   the skipped days and they were NEVER fetched again (permanent $0).
+      //
+      //   By clamping the end instead (`endDate = startDate + (max-1)`), each
+      //   run consumes the oldest unfilled days first; `latestSync` advances
+      //   by exactly the days we filled, so the next run continues the gap
+      //   from where this one stopped. The gap drains over consecutive runs
+      //   with zero skipped days. Recent days are reached last, but they are
+      //   reached — and the resyncDays window keeps correcting them afterward.
       if (maxIncrementalDays && maxIncrementalDays > 0) {
         const gapDays = Math.round((new Date(`${endDate}T00:00:00.000Z`) - new Date(`${startDate}T00:00:00.000Z`)) / 86400000) + 1;
         if (gapDays > maxIncrementalDays) {
-          const clampedStart = new Date(`${endDate}T00:00:00.000Z`);
-          clampedStart.setUTCDate(clampedStart.getUTCDate() - (maxIncrementalDays - 1));
-          const clampedStartStr = formatDateUTC(clampedStart);
-          logger.warn(`[Sync] Incremental gap ${gapDays}d exceeds maxIncrementalDays=${maxIncrementalDays}; clamping ${startDate} → ${clampedStartStr}. Remaining ${gapDays - maxIncrementalDays}d will sync on later runs.`);
-          startDate = clampedStartStr;
+          const clampedEnd = new Date(`${startDate}T00:00:00.000Z`);
+          clampedEnd.setUTCDate(clampedEnd.getUTCDate() + (maxIncrementalDays - 1));
+          const clampedEndStr = formatDateUTC(clampedEnd);
+          logger.warn(`[Sync] Incremental gap ${gapDays}d exceeds maxIncrementalDays=${maxIncrementalDays}; clamping end ${endDate} → ${clampedEndStr} (oldest-first). Remaining ${gapDays - maxIncrementalDays}d will sync on subsequent runs.`);
+          endDate = clampedEndStr;
         }
       }
       logger.info(`[Sync] Incremental: ${startDate} → ${endDate}`);

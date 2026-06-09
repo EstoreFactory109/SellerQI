@@ -287,12 +287,11 @@ export default function IndiaBilling() {
   };
 
   const formatAmount = (amount, currency = 'INR') => {
-    // Amount is already in rupees (converted from paise on backend)
-    // No need to divide by 100 again
+    // Stripe amounts are stored in smallest unit (paise for INR, cents for USD)
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
       currency: currency.toUpperCase()
-    }).format(amount);
+    }).format(amount / 100);
   };
 
   const getStatusColor = (status) => {

@@ -32,12 +32,23 @@
 
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
+const FinanceSyncLog = require('../../models/finance/FinanceSyncLogModel.js');
+const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
 const { getQueue } = require('./queue.js');
 const scheduledPhases = require('./scheduledPhases.js');
 const logger = require('../../utils/Logger.js');
 
 // How far back to scan for missing days.
 const ADS_LOOKBACK_DAYS = 7;
+
+// Finance reconciliation: how far back to scan for missing/failed/stale days.
+const FINANCE_LOOKBACK_DAYS = 30;
+// Provisional days younger than this are left to the daily incremental flow
+// (it re-fetches them every run). Only OLDER still-provisional days — which the
+// daily cursor has likely moved past — are swept.
+const FINANCE_PROVISIONAL_STALE_DAYS = 6;
+// Cap accounts processed for finance per tick (each enqueues at most one job).
+const FINANCE_MAX_ENQUEUES_PER_TICK = 100;
 
 // Hard cap on enqueues per sweeper tick. Protects BullMQ from flooding when
 // many accounts have many missing days after a long outage.
@@ -257,11 +268,141 @@ async function sweep() {
     return summary;
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// FINANCE RECONCILIATION (backstop for missing/failed/stale-provisional days)
+//
+// The daily incremental flow + provisional cursor already self-heal most gaps.
+// This sweep is the safety net for anything that slips through: days never
+// fetched, days that failed, or provisional days older than the daily cursor's
+// reach. For each affected account it enqueues ONE `sched_finance_catchup` job
+// covering [min … max] of the broken days — re-fetched via the proven
+// `syncFinanceData({ forceDates })` path (the same one the test route uses).
+// ─────────────────────────────────────────────────────────────────────────
+
+function buildFinanceCatchupJobId(userId, country, region, minDate, maxDate) {
+    return `finance-catchup-${userId}-${country}-${region}-${minDate}_${maxDate}`;
+}
+
+/**
+ * Find finance days in the lookback window that need a re-fetch for one account.
+ * Returns a sorted array of YYYY-MM-DD. Excludes yesterday (the daily owns it).
+ */
+async function findBrokenFinanceDatesForAccount(userObjectId, country, region) {
+    const yesterday = pacificYesterdayISO();
+    const startDate = (() => {
+        const d = new Date(`${yesterday}T00:00:00.000Z`);
+        d.setUTCDate(d.getUTCDate() - (FINANCE_LOOKBACK_DAYS - 1));
+        return d.toISOString().substring(0, 10);
+    })();
+
+    // All days in the window.
+    const days = [];
+    {
+        const d = new Date(`${startDate}T00:00:00.000Z`);
+        const end = new Date(`${yesterday}T00:00:00.000Z`);
+        while (d < end) { days.push(d.toISOString().substring(0, 10)); d.setUTCDate(d.getUTCDate() + 1); }
+        // note: `< end` excludes yesterday itself — the daily incremental owns it
+    }
+
+    const logs = await FinanceSyncLog.find(
+        { User: userObjectId, country, region, date: { $gte: startDate, $lte: yesterday } },
+        { date: 1, status: 1, provisional: 1, _id: 0 }
+    ).lean();
+    const logByDate = new Map(logs.map((l) => [l.date, l]));
+
+    const today = new Date(Date.now() - PACIFIC_OFFSET_MS).toISOString().substring(0, 10);
+    const ageDays = (d) => Math.round((new Date(`${today}T00:00:00.000Z`) - new Date(`${d}T00:00:00.000Z`)) / 86400000);
+
+    const broken = [];
+    for (const day of days) {
+        const log = logByDate.get(day);
+        if (!log) { broken.push(day); continue; }                 // never fetched
+        if (log.status === 'failed') { broken.push(day); continue; } // failed
+        if (log.provisional === true && ageDays(day) > FINANCE_PROVISIONAL_STALE_DAYS) {
+            broken.push(day);                                      // stale provisional
+        }
+    }
+    return broken;
+}
+
+/**
+ * Finance reconciliation sweep. One catch-up job per affected account.
+ */
+async function sweepFinance() {
+    const startedAt = Date.now();
+    const queue = getQueue();
+    const summary = { accountsScanned: 0, accountsWithBroken: 0, brokenDays: 0, enqueued: 0, skippedDup: 0, skippedCap: 0, errors: 0, durationMs: 0 };
+
+    const sellers = await Seller.find(
+        { 'sellerAccount.spiRefreshToken': { $exists: true, $ne: null, $ne: '' } },
+        { User: 1, sellerAccount: 1 }
+    ).lean();
+
+    for (const seller of sellers) {
+        if (!Array.isArray(seller.sellerAccount)) continue;
+        for (const acct of seller.sellerAccount) {
+            if (!acct || !acct.country || !acct.region || !acct.spiRefreshToken) continue;
+            const country = acct.country.toUpperCase();
+            const region = acct.region.toUpperCase();
+            summary.accountsScanned++;
+
+            let broken;
+            try {
+                broken = await findBrokenFinanceDatesForAccount(seller.User, country, region);
+            } catch (err) {
+                summary.errors++;
+                logger.warn(`[FinanceSweeper] Scan failed for ${seller.User} ${country}-${region}: ${err.message}`);
+                continue;
+            }
+            if (broken.length === 0) continue;
+            summary.accountsWithBroken++;
+            summary.brokenDays += broken.length;
+
+            if (summary.enqueued >= FINANCE_MAX_ENQUEUES_PER_TICK) { summary.skippedCap++; continue; }
+
+            const minDate = broken[0];
+            const maxDate = broken[broken.length - 1];
+            const jobId = buildFinanceCatchupJobId(seller.User, country, region, minDate, maxDate);
+
+            let skip;
+            try { skip = await shouldSkipEnqueue(queue, jobId); } catch (_) { skip = false; }
+            if (skip) { summary.skippedDup++; continue; }
+
+            const jobData = {
+                userId: seller.User.toString(),
+                country,
+                region,
+                phase: scheduledPhases.PHASES.FINANCE_CATCHUP,
+                parentJobId: jobId,
+                enqueuedAt: new Date().toISOString(),
+                enqueuedBy: 'finance-sweeper',
+                phaseData: { catchupDates: broken }
+            };
+            try {
+                await queue.add('process-user-data', jobData, { jobId, ...CATCHUP_JOB_OPTS });
+                summary.enqueued++;
+                logger.info(`[FinanceSweeper] Enqueued finance catch-up: ${seller.User} ${country}-${region} ${minDate}→${maxDate} (${broken.length} day(s))`);
+            } catch (err) {
+                summary.errors++;
+                logger.warn(`[FinanceSweeper] Enqueue failed for ${jobId}: ${err.message}`);
+            }
+        }
+    }
+
+    summary.durationMs = Date.now() - startedAt;
+    logger.info('[FinanceSweeper] Sweep complete', summary);
+    return summary;
+}
+
 module.exports = {
     sweep,
+    sweepFinance,
     findMissingDatesForAccount,
+    findBrokenFinanceDatesForAccount,
     buildCatchupJobId,
+    buildFinanceCatchupJobId,
     // Exposed for tests / scripts
     ADS_LOOKBACK_DAYS,
-    MAX_ENQUEUES_PER_TICK
+    MAX_ENQUEUES_PER_TICK,
+    FINANCE_LOOKBACK_DAYS,
 };
