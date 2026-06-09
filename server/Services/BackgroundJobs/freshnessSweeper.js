@@ -50,6 +50,15 @@ const FINANCE_PROVISIONAL_STALE_DAYS = 6;
 // Cap accounts processed for finance per tick (each enqueues at most one job).
 const FINANCE_MAX_ENQUEUES_PER_TICK = 100;
 
+// Deep re-sync: how far back to re-fetch good days to catch LATE cancellations /
+// refunds that landed after the daily 14-day re-sync window closed. This is the
+// long-tail safety net — it re-fetches an already-correct day so a cancellation
+// that processed weeks later is reflected (matching Seller Central). It runs at
+// most ONCE PER ACCOUNT PER DAY via a date-stamped jobId (see buildDeepResyncJobId),
+// so even though the sweeper ticks every few hours, the heavy 30-day re-fetch only
+// fires once daily per account.
+const FINANCE_DEEP_RESYNC_DAYS = 30;
+
 // Hard cap on enqueues per sweeper tick. Protects BullMQ from flooding when
 // many accounts have many missing days after a long outage.
 const MAX_ENQUEUES_PER_TICK = 50;
@@ -412,15 +421,101 @@ async function sweepFinance() {
     return summary;
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// DEEP RE-SYNC (long-tail cancellation/refund safety net)
+//
+// The daily flow re-fetches the last 14 days, which catches most cancellations.
+// This closes the long tail: once per account per day, re-fetch a rolling
+// FINANCE_DEEP_RESYNC_DAYS (30) window so a cancellation/refund that landed
+// weeks after the order date is reflected — matching Seller Central — with NO
+// manual intervention. It re-fetches good days too (that's the point), via the
+// same proven `syncFinanceData({ forceDates })` path; the unique index on
+// DailySkuFinance(sku,date) means re-fetching can only overwrite, never duplicate.
+//
+// Throttling: the jobId is stamped with today's Pacific date, so BullMQ dedup +
+// removeOnComplete mean only ONE deep re-sync per account actually runs per day,
+// even though the sweeper ticks every few hours.
+// ─────────────────────────────────────────────────────────────────────────
+
+function buildDeepResyncJobId(userId, country, region, todayStr) {
+    return `finance-deepresync-${userId}-${country}-${region}-${todayStr}`;
+}
+
+async function sweepFinanceDeepResync() {
+    const startedAt = Date.now();
+    const queue = getQueue();
+    const summary = { accountsScanned: 0, enqueued: 0, skippedDup: 0, skippedCap: 0, errors: 0, durationMs: 0 };
+
+    // Build the rolling window [today-(N-1) … yesterday] of Pacific dates to re-fetch.
+    const yesterday = pacificYesterdayISO();
+    const todayStr = new Date(Date.now() - PACIFIC_OFFSET_MS).toISOString().substring(0, 10);
+    const windowDates = [];
+    {
+        const d = new Date(`${yesterday}T00:00:00.000Z`);
+        d.setUTCDate(d.getUTCDate() - (FINANCE_DEEP_RESYNC_DAYS - 1));
+        const end = new Date(`${yesterday}T00:00:00.000Z`);
+        while (d <= end) { windowDates.push(d.toISOString().substring(0, 10)); d.setUTCDate(d.getUTCDate() + 1); }
+    }
+
+    const sellers = await Seller.find(
+        { 'sellerAccount.spiRefreshToken': { $exists: true, $ne: null, $ne: '' } },
+        { User: 1, sellerAccount: 1 }
+    ).lean();
+
+    for (const seller of sellers) {
+        if (!Array.isArray(seller.sellerAccount)) continue;
+        for (const acct of seller.sellerAccount) {
+            if (!acct || !acct.country || !acct.region || !acct.spiRefreshToken) continue;
+            const country = acct.country.toUpperCase();
+            const region = acct.region.toUpperCase();
+            summary.accountsScanned++;
+
+            if (summary.enqueued >= FINANCE_MAX_ENQUEUES_PER_TICK) { summary.skippedCap++; continue; }
+
+            // Date-stamped jobId → at most one deep re-sync per account per day.
+            const jobId = buildDeepResyncJobId(seller.User, country, region, todayStr);
+            let skip;
+            try { skip = await shouldSkipEnqueue(queue, jobId); } catch (_) { skip = false; }
+            if (skip) { summary.skippedDup++; continue; }
+
+            const jobData = {
+                userId: seller.User.toString(),
+                country,
+                region,
+                phase: scheduledPhases.PHASES.FINANCE_CATCHUP,
+                parentJobId: jobId,
+                enqueuedAt: new Date().toISOString(),
+                enqueuedBy: 'finance-deep-resync',
+                phaseData: { catchupDates: windowDates }
+            };
+            try {
+                await queue.add('process-user-data', jobData, { jobId, ...CATCHUP_JOB_OPTS });
+                summary.enqueued++;
+                logger.info(`[FinanceDeepResync] Enqueued ${FINANCE_DEEP_RESYNC_DAYS}-day re-sync: ${seller.User} ${country}-${region} (${windowDates[0]}→${yesterday})`);
+            } catch (err) {
+                summary.errors++;
+                logger.warn(`[FinanceDeepResync] Enqueue failed for ${jobId}: ${err.message}`);
+            }
+        }
+    }
+
+    summary.durationMs = Date.now() - startedAt;
+    logger.info('[FinanceDeepResync] Sweep complete', summary);
+    return summary;
+}
+
 module.exports = {
     sweep,
     sweepFinance,
+    sweepFinanceDeepResync,
     findMissingDatesForAccount,
     findBrokenFinanceDatesForAccount,
     buildCatchupJobId,
     buildFinanceCatchupJobId,
+    buildDeepResyncJobId,
     // Exposed for tests / scripts
     ADS_LOOKBACK_DAYS,
     MAX_ENQUEUES_PER_TICK,
     FINANCE_LOOKBACK_DAYS,
+    FINANCE_DEEP_RESYNC_DAYS,
 };

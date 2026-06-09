@@ -88,7 +88,7 @@ async function releaseSweepLock(lockKey) {
 
 function setupSweeperCron() {
     const cron = require('node-cron');
-    const { sweep, sweepFinance } = require('./freshnessSweeper.js');
+    const { sweep, sweepFinance, sweepFinanceDeepResync } = require('./freshnessSweeper.js');
 
     const job = cron.schedule(SWEEP_INTERVAL_CRON, async () => {
         const lockKey = 'freshness-sweeper-tick';
@@ -108,6 +108,16 @@ function setupSweeperCron() {
                 logger.info('[FreshnessSweeperStandalone] Finance sweep complete', finSummary);
             } catch (finErr) {
                 logger.error('[FreshnessSweeperStandalone] Finance sweep failed', { error: finErr?.message, stack: finErr?.stack });
+            }
+            // Deep re-sync (long-tail cancellations). Self-throttles to once per
+            // account per day via a date-stamped jobId, so running it every tick
+            // is safe — extra ticks are no-ops. Isolated try so it can't block
+            // the other two sweeps.
+            try {
+                const deepSummary = await sweepFinanceDeepResync();
+                logger.info('[FreshnessSweeperStandalone] Finance deep re-sync complete', deepSummary);
+            } catch (deepErr) {
+                logger.error('[FreshnessSweeperStandalone] Finance deep re-sync failed', { error: deepErr?.message, stack: deepErr?.stack });
             }
         } catch (error) {
             logger.error('[FreshnessSweeperStandalone] Sweep tick failed', { error: error?.message, stack: error?.stack });

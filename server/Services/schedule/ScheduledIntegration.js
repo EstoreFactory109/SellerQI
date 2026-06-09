@@ -1281,16 +1281,23 @@ class ScheduledIntegration {
                     // so accounts that already have history are unaffected: they
                     // continue through the incremental/resync path below.
                     //
-                    // `maxIncrementalDays: 7` bounds a single catch-up run for an
-                    // account that already has history but fell >7 days behind.
-                    // The clamp in FinanceService now fills the OLDEST unfilled
-                    // days first (not the newest), so no day is ever orphaned —
-                    // the gap drains over consecutive runs.
+                    // `resyncDays: 14` re-fetches the last 14 days on every run to
+                    // correct orders that were CANCELLED after the original fetch.
+                    // Amazon cancellations/refunds often land several days after the
+                    // order date; the previous 5-day window let a day "freeze" with
+                    // the gross (pre-cancellation) sale while Seller Central showed
+                    // it net — so our totals read HIGH. 14 days catches the vast
+                    // majority. The Sales Report is one API call regardless of span.
                     //
-                    // `resyncDays: 5` re-fetches the last 5 days on every run to
-                    // correct orders that were captured as Pending/Unshipped but
-                    // later got cancelled. The Sales Report is a single API call
-                    // regardless of date range, so 5 days costs the same as 1 day.
+                    // `maxIncrementalDays: 14` MUST be >= resyncDays. It bounds a
+                    // single catch-up run for an account that fell far behind, and
+                    // the clamp fills the OLDEST unfilled days first so nothing is
+                    // orphaned. Keeping it EQUAL to resyncDays means the clamp never
+                    // fires for a normal daily run (gap == 14), so the full 14-day
+                    // re-sync window — including yesterday — is always fetched. If
+                    // these two ever diverge with resyncDays > maxIncrementalDays,
+                    // the clamp would shrink the re-sync window and recent days
+                    // (incl. yesterday) could be skipped — so always move them together.
                     //
                     // Pending-order backfill still runs inside syncFinanceData
                     // regardless of which branch is taken.
@@ -1303,8 +1310,8 @@ class ScheduledIntegration {
                         clientId: process.env.SPAPI_CLIENT_ID,
                         clientSecret: process.env.SPAPI_CLIENT_SECRET,
                         backfillDays: 30,
-                        maxIncrementalDays: 7,
-                        resyncDays: 5,
+                        maxIncrementalDays: 14,
+                        resyncDays: 14,
                     })
                         .then(result => {
                             logger.info('Finance Sync succeeded', {
