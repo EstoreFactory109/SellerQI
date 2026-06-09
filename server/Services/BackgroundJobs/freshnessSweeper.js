@@ -310,13 +310,31 @@ async function findBrokenFinanceDatesForAccount(userObjectId, country, region) {
     ).lean();
     const logByDate = new Map(logs.map((l) => [l.date, l]));
 
+    // TTL-safe "missing" check: a day's FinanceSyncLog row can expire (TTL on
+    // fetchedAt) while its actual DailySkuFinance data still exists (data has no
+    // TTL). So an absent log row does NOT prove the day is missing — we must also
+    // confirm there's no real data. We pull the set of days that DO have data and
+    // only treat a day as "never fetched" when BOTH the log row and the data are
+    // absent. (Failed / stale-provisional days carry a log row and are handled by
+    // the branches below, so the TTL never affects them.)
+    const dataAgg = await DailySkuFinance.aggregate([
+        { $match: { User: userObjectId, country, region, date: { $gte: startDate, $lte: yesterday } } },
+        { $group: { _id: '$date' } },
+    ]);
+    const daysWithData = new Set(dataAgg.map((r) => r._id));
+
     const today = new Date(Date.now() - PACIFIC_OFFSET_MS).toISOString().substring(0, 10);
     const ageDays = (d) => Math.round((new Date(`${today}T00:00:00.000Z`) - new Date(`${d}T00:00:00.000Z`)) / 86400000);
 
     const broken = [];
     for (const day of days) {
         const log = logByDate.get(day);
-        if (!log) { broken.push(day); continue; }                 // never fetched
+        // Truly missing = no log row AND no stored data. With the TTL, an expired
+        // log alone (data still present) is NOT a reason to re-fetch.
+        if (!log) {
+            if (!daysWithData.has(day)) broken.push(day);          // never fetched
+            continue;
+        }
         if (log.status === 'failed') { broken.push(day); continue; } // failed
         if (log.provisional === true && ageDays(day) > FINANCE_PROVISIONAL_STALE_DAYS) {
             broken.push(day);                                      // stale provisional

@@ -1,3 +1,28 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// ⚠️ DEPRECATION NOTICE — DO NOT WIRE UP THE SYNC/FETCH CODE BELOW
+//
+// This controller contains a STALE DUPLICATE copy of the finance sync/fetch
+// pipeline (`syncFinanceData`, `fetchNewSalesAndExpenses`, `parseSalesReportRows`,
+// `backfillPendingExpenses`, `buildOverheadBuckets`, the category maps, etc.).
+//
+// The CANONICAL, maintained implementation lives in:
+//     server/Services/Sp_API/FinanceService.js
+//
+// Only the HTTP READ handlers at the bottom of this file
+// (getFinanceDateRange / getFinanceDashboard / getFinanceAsinDetail /
+//  getFinanceAsinSnapshot / getFinanceSyncStatus) are routed and live; they read
+// via FinanceDashboardReadService and do NOT use the duplicate sync code below.
+//
+// The duplicated sync functions are NOT routed and NOT imported anywhere
+// (verified: routes/financeDashboard.routes.js imports only the 5 read handlers).
+// They are missing every reliability fix made to FinanceService.js (provisional
+// re-fetch, guarded delete, oldest-first gap clamp, 30-day no-history backfill).
+//
+// → If you need to trigger a finance sync, call FinanceService.syncFinanceData.
+// → Do NOT export/route these duplicates. They are kept only to avoid a large
+//   deletion in a live controller; a follow-up cleanup PR should remove them.
+// ═══════════════════════════════════════════════════════════════════════════
+
 const mongoose = require('mongoose');
 const https = require('https');
 const http = require('http');
