@@ -43,6 +43,15 @@ const ENABLED = process.env.FRESHNESS_SWEEPER_DISABLED !== 'true';
 // Run every 3 hours by default. Tunable per environment.
 const SWEEP_INTERVAL_CRON = process.env.FRESHNESS_SWEEPER_CRON || '0 */3 * * *';
 
+// The deep re-sync (30-day cancellation safety net) is HEAVY — it re-fetches a
+// 30-day window for every account. It only needs to run ONCE PER DAY. The sweep
+// cron ticks every 3h, so we gate the deep re-sync to a single UTC hour rather
+// than relying on BullMQ job-existence dedup (which is defeated when completed
+// catch-up jobs are evicted by removeOnComplete before the next tick — that bug
+// caused it to re-run ~8×/day). The ads + finance-reconciliation sweeps still
+// run EVERY tick; only the deep re-sync is gated. Default 0 (the 00:00 UTC tick).
+const DEEP_RESYNC_HOUR = parseInt(process.env.FRESHNESS_DEEP_RESYNC_HOUR || '0', 10);
+
 // Lock TTL — slightly shorter than the cron interval so a missed release
 // auto-expires before the next tick.
 const TICK_TTL_MS = 2 * 60 * 60 * 1000 + 50 * 60 * 1000; // 2h50m
@@ -109,15 +118,22 @@ function setupSweeperCron() {
             } catch (finErr) {
                 logger.error('[FreshnessSweeperStandalone] Finance sweep failed', { error: finErr?.message, stack: finErr?.stack });
             }
-            // Deep re-sync (long-tail cancellations). Self-throttles to once per
-            // account per day via a date-stamped jobId, so running it every tick
-            // is safe — extra ticks are no-ops. Isolated try so it can't block
-            // the other two sweeps.
-            try {
-                const deepSummary = await sweepFinanceDeepResync();
-                logger.info('[FreshnessSweeperStandalone] Finance deep re-sync complete', deepSummary);
-            } catch (deepErr) {
-                logger.error('[FreshnessSweeperStandalone] Finance deep re-sync failed', { error: deepErr?.message, stack: deepErr?.stack });
+            // Deep re-sync (long-tail cancellations) — gated to ONE tick per day
+            // (DEEP_RESYNC_HOUR) because it re-fetches a 30-day window per account
+            // and only needs to run daily. The date-stamped jobId inside the sweep
+            // is kept as a secondary guard, but the hour gate is the deterministic
+            // primary control (independent of BullMQ job retention). Isolated try
+            // so it can't block the other two sweeps.
+            const nowHourUtc = new Date().getUTCHours();
+            if (nowHourUtc === DEEP_RESYNC_HOUR) {
+                try {
+                    const deepSummary = await sweepFinanceDeepResync();
+                    logger.info('[FreshnessSweeperStandalone] Finance deep re-sync complete', deepSummary);
+                } catch (deepErr) {
+                    logger.error('[FreshnessSweeperStandalone] Finance deep re-sync failed', { error: deepErr?.message, stack: deepErr?.stack });
+                }
+            } else {
+                logger.info(`[FreshnessSweeperStandalone] Skipping deep re-sync this tick (runs at ${DEEP_RESYNC_HOUR}:00 UTC; now ${nowHourUtc}:00)`);
             }
         } catch (error) {
             logger.error('[FreshnessSweeperStandalone] Sweep tick failed', { error: error?.message, stack: error?.stack });
