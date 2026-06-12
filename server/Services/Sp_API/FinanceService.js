@@ -28,6 +28,17 @@ const CHUNK_INSERT_SIZE = 500;
 const REPORT_TYPE = 'GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL';
 const POLL_INTERVAL_MS = 15000;
 const MAX_POLL_ATTEMPTS = 40;
+
+// ── Empty-report retry (FIX #1) ──────────────────────────────────────────────
+// Amazon's GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE report intermittently
+// finishes with processingStatus=DONE but an EMPTY document for a window that
+// genuinely has orders (the order-date datastore is eventually-consistent and a
+// report generated at an unlucky moment misses rows that exist). Re-generating
+// the report usually returns the data. We retry a 0-row report a bounded number
+// of times before accepting "no data". This is a fetch-layer safeguard only — it
+// changes nothing about how rows are parsed or how sales/expenses are computed.
+const EMPTY_REPORT_RETRIES = 2;
+const EMPTY_REPORT_RETRY_DELAY_MS = 20000;
 const PACIFIC_OFFSET_HOURS = 7;
 
 // ─────────────────────────────────────────────
@@ -61,6 +72,22 @@ function isAccessTokenExpiredError(err) {
   );
 }
 
+// A genuine SP-API AUTHORIZATION denial (FIX #2) — the seller's grant does not
+// cover the requested resource (Reports API role not authorized, or the
+// authorization was revoked). Unlike an expired access token, this is NOT
+// fixable by refreshing the token; the account must RE-AUTHORIZE. We detect it
+// so callers can stop hammering a doomed fetch (observed: 1600+ wasted retries
+// across ~4 de-authorized accounts) and surface it for reconnection.
+function isAuthorizationDeniedError(err) {
+  if (!err) return false;
+  const msg = (err.message || String(err)).toLowerCase();
+  return (
+    msg.includes('access to requested resource is denied') ||
+    msg.includes('access_denied') ||
+    msg.includes('forbidden')
+  );
+}
+
 function createTokenManager({ accessToken, refreshToken, clientId, clientSecret }) {
   let current = accessToken || null;
   // An inherited token has unknown age. Treat it as having ~5 min of life left
@@ -90,6 +117,9 @@ function createTokenManager({ accessToken, refreshToken, clientId, clientSecret 
     try {
       return await fn(token);
     } catch (err) {
+      // A genuine authorization denial is not fixable by refreshing — don't
+      // waste a token refresh + retry on it (it always fails the same way).
+      if (isAuthorizationDeniedError(err)) throw err;
       if (!isAccessTokenExpiredError(err)) throw err;
       logger.warn(`[FinanceService] SP-API call failed with expired token. Refreshing and retrying once… (${err.message})`);
       const fresh = await refresh();
@@ -298,14 +328,28 @@ function parseTsv(rawData) {
 
 async function fetchSalesReport(tokenManager, baseUrl, marketplaceId, startDate, endDate) {
   logger.info(`[SalesReport] Requesting: ${startDate} → ${endDate}`);
-  const reportId = await createReport(tokenManager, baseUrl, marketplaceId, startDate, endDate);
-  const reportDocumentId = await pollReportStatus(tokenManager, baseUrl, reportId);
-  const docInfo = await getReportDocumentUrl(tokenManager, baseUrl, reportDocumentId);
-  // The report document URL is a pre-signed S3 URL — no access token needed.
-  const rawData = await downloadContent(docInfo.url, docInfo.compressionAlgorithm === 'GZIP');
-  const rows = parseTsv(rawData);
-  logger.info(`[SalesReport] Parsed ${rows.length} rows`);
-  return rows;
+  // Retry-on-empty (FIX #1): a DONE-but-empty report is usually a transient
+  // generation miss — re-generating returns the rows. Bounded retries; if it's
+  // still empty we accept "no data" (the persist layer then preserves whatever
+  // already exists for those days — it never wipes on an empty report).
+  for (let attempt = 0; attempt <= EMPTY_REPORT_RETRIES; attempt++) {
+    const reportId = await createReport(tokenManager, baseUrl, marketplaceId, startDate, endDate);
+    const reportDocumentId = await pollReportStatus(tokenManager, baseUrl, reportId);
+    const docInfo = await getReportDocumentUrl(tokenManager, baseUrl, reportDocumentId);
+    // The report document URL is a pre-signed S3 URL — no access token needed.
+    const rawData = await downloadContent(docInfo.url, docInfo.compressionAlgorithm === 'GZIP');
+    const rows = parseTsv(rawData);
+    if (rows.length > 0 || attempt === EMPTY_REPORT_RETRIES) {
+      if (rows.length === 0 && attempt > 0) {
+        logger.warn(`[SalesReport] Still empty after ${attempt} retry(ies) for ${startDate}→${endDate} — accepting as no data (existing rows are preserved, not wiped).`);
+      }
+      logger.info(`[SalesReport] Parsed ${rows.length} rows`);
+      return rows;
+    }
+    logger.warn(`[SalesReport] Empty report for ${startDate}→${endDate} (attempt ${attempt + 1}/${EMPTY_REPORT_RETRIES + 1}); fresh reports are often transiently empty. Re-generating in ${EMPTY_REPORT_RETRY_DELAY_MS / 1000}s…`);
+    await new Promise((r) => setTimeout(r, EMPTY_REPORT_RETRY_DELAY_MS));
+  }
+  return [];
 }
 
 function parseSalesReportRows(reportRows, country) {
@@ -1102,29 +1146,35 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
   const overheadBuckets = buildOverheadBuckets(overheadExpenses, overheadRevenue, startDate, endDate);
 
   // ── Persist ──
+  // ★ CRITICAL SAFETY (data-loss fix): datesToClear is ONLY the dates for which
+  //   this run actually produced fresh buckets — NEVER the bare requested range.
+  //
+  //   Why: re-fetching an OLD day (via the daily 14-day re-sync, the
+  //   reconciliation sweep, or the deep re-sync) frequently returns an EMPTY or
+  //   partial Sales Report, because Amazon's GET_FLAT_FILE_ALL_ORDERS_DATA_
+  //   BY_ORDER_DATE report stops returning data for older order dates. The old
+  //   logic cleared every day in the requested range and reinserted only what
+  //   the report returned — so an empty/partial re-fetch of a settled day
+  //   DELETED its previously-correct data and left it at $0. (This is what wiped
+  //   May 28 repeatedly.)
+  //
+  //   By clearing only dates we have new data for:
+  //     - A day with fresh orders → cleared + reinserted (corrections, incl.
+  //       partial cancellations, still apply — that day still has a bucket).
+  //     - A day the report returned nothing for → left exactly as it was; its
+  //       existing good data is preserved. A re-fetch can never zero it.
+  //   Trade-off: a day whose orders were ALL cancelled after the fact keeps its
+  //   prior (stale) value instead of dropping to $0. That is rare and FAR less
+  //   harmful than destroying confirmed historical data.
   const allDates = new Set();
   for (const b of skuBuckets.values()) allDates.add(b.date);
   for (const b of overheadBuckets.values()) allDates.add(b.date);
 
-  // ★ GUARDED DELETE: normally we clear every date in the requested range so a
-  //   day that legitimately dropped to zero (e.g. all orders cancelled) is
-  //   overwritten correctly. But if the Sales Report came back COMPLETELY EMPTY
-  //   (0 rows — almost always Amazon report lag / a transient empty document,
-  //   not a real zero-sales stretch), adding the full range to datesToClear
-  //   would DELETE previously-correct days and replace them with nothing —
-  //   freezing them at $0. So when the report is empty we only clear the dates
-  //   we actually have new buckets for, never the bare range. This never
-  //   changes behaviour when the report has data (legitimate zeroing still
-  //   works); it only refuses to wipe good data with an empty result.
-  const salesReportEmpty = (reportRows.length === 0);
-  // `endD` is declared at function scope (not inside the `if`) because the
-  // sync-log loop further below reuses it to enumerate the range.
+  // `endD` is still needed by the sync-log loop below.
   const endD = new Date(`${endDate}T00:00:00.000Z`);
-  if (!salesReportEmpty) {
-    const d = new Date(`${startDate}T00:00:00.000Z`);
-    while (d <= endD) { allDates.add(formatDateUTC(d)); d.setUTCDate(d.getUTCDate() + 1); }
-  } else {
-    logger.warn(`[Step1] ⚠️ Sales Report returned 0 rows for ${startDate}→${endDate}. Skipping range-clear to avoid wiping previously-stored days; only ${allDates.size} bucket date(s) (if any) will be refreshed. These days will be retried on subsequent runs.`);
+  const salesReportEmpty = (reportRows.length === 0);
+  if (salesReportEmpty || allDates.size === 0) {
+    logger.warn(`[Step1] Sales Report produced no buckets for ${startDate}→${endDate} (reportRows=${reportRows.length}). Clearing nothing — existing data for these days is preserved (re-fetch of aged-out days must never zero them).`);
   }
 
   const saved = await persistDailyBuckets({ userId, country: country.toUpperCase(), regionModel, marketplaceId, skuBuckets, overheadBuckets, datesToClear: [...allDates] });
@@ -1172,20 +1222,36 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
   while (dd <= endD) { dateList.push(formatDateUTC(dd)); dd.setUTCDate(dd.getUTCDate() + 1); }
   const todayPacificStr = new Date(Date.now() - PACIFIC_OFFSET_HOURS * 3600000).toISOString().substring(0, 10);
   for (const dateStr of dateList) {
-    // A day is PROVISIONAL (re-fetch later) when its sales aren't trustworthy yet:
-    //   - the Sales Report came back completely empty (report lag), OR
-    //   - the day still contains Pending-status orders (empty item-price).
-    // …unless the day is already older than PROVISIONAL_SETTLE_DAYS, in which
-    // case we settle it regardless so a stuck Pending order can't freeze the
-    // incremental cursor forever.
+    const hasFreshData = allDates.has(dateStr);
     const pendingForDay = pendingCountByDate.get(dateStr) || 0;
     const ageDays = Math.round((new Date(`${todayPacificStr}T00:00:00.000Z`) - new Date(`${dateStr}T00:00:00.000Z`)) / 86400000);
-    const isProvisional = (salesReportEmpty || pendingForDay > 0) && ageDays <= PROVISIONAL_SETTLE_DAYS;
-    await FinanceSyncLog.findOneAndUpdate(
-      { User: userObjectId, country: country.toUpperCase(), region: regionModel, date: dateStr },
-      { User: userObjectId, country: country.toUpperCase(), region: regionModel, marketplaceId, date: dateStr, fetchedAt: new Date(), status: 'success', provisional: isProvisional, pendingOrderCount: pendingForDay, expenseRowCount: expenseRows.length, revenueRowCount: revenueRows.length, skuCount: skuBuckets.size, error: '' },
-      { upsert: true, new: true }
-    );
+
+    if (hasFreshData) {
+      // We fetched real data for this day → write/refresh its sync log.
+      // Provisional only when the day still has Pending-status orders (empty
+      // item-price) and is within the settle window — those re-settle later.
+      const isProvisional = pendingForDay > 0 && ageDays <= PROVISIONAL_SETTLE_DAYS;
+      await FinanceSyncLog.findOneAndUpdate(
+        { User: userObjectId, country: country.toUpperCase(), region: regionModel, date: dateStr },
+        { User: userObjectId, country: country.toUpperCase(), region: regionModel, marketplaceId, date: dateStr, fetchedAt: new Date(), status: 'success', provisional: isProvisional, pendingOrderCount: pendingForDay, expenseRowCount: expenseRows.length, revenueRowCount: revenueRows.length, skuCount: skuBuckets.size, error: '' },
+        { upsert: true, new: true }
+      );
+    } else {
+      // ★ No data returned for this day (empty/partial report — common when
+      //   re-fetching aged-out old days). NEVER overwrite an existing log row:
+      //   downgrading a good 'success' day to 'provisional' is exactly what made
+      //   the reconciliation sweep re-flag (and the persist layer re-wipe) the
+      //   same old day every tick. Use $setOnInsert so we ONLY create a row when
+      //   this day has never been logged (a brand-new day with no data → mark
+      //   provisional so a genuinely-missing RECENT day is still retried, bounded
+      //   by the settle window). If a row already exists, it is left untouched.
+      const provisionalForNew = ageDays <= PROVISIONAL_SETTLE_DAYS;
+      await FinanceSyncLog.updateOne(
+        { User: userObjectId, country: country.toUpperCase(), region: regionModel, date: dateStr },
+        { $setOnInsert: { User: userObjectId, country: country.toUpperCase(), region: regionModel, marketplaceId, date: dateStr, fetchedAt: new Date(), status: 'success', provisional: provisionalForNew, pendingOrderCount: 0, expenseRowCount: 0, revenueRowCount: 0, skuCount: 0, error: '' } },
+        { upsert: true }
+      );
+    }
   }
 
   logger.info(`[Step1] Done. ${saved.skuDocCount} SKU docs. ${pendingOrders.length} pending.`);
@@ -1469,6 +1535,9 @@ async function syncFinanceData({ userId, country, regionModel, refreshToken, acc
     // Write a 'failed' sync log so failures are visible in the database.
     // Only write 'failed' for dates that don't already have a 'success' entry —
     // avoids overwriting good data when a resync attempt fails.
+    if (isAuthorizationDeniedError(err)) {
+      logger.error(`[Sync] SP-API AUTHORIZATION DENIED for ${country}-${regionModel} (user ${userId}) — the account must RE-AUTHORIZE; finance cannot be fetched until it reconnects. Window ${startDate}→${endDate}.`);
+    }
     logger.error(`[Sync] Finance sync failed for ${country}-${regionModel}: ${err.message}`, { userId, startDate, endDate, stack: err.stack });
     try {
       const dateList = [];
@@ -1544,4 +1613,5 @@ module.exports = {
   // Token auto-renewal helpers
   createTokenManager,
   isAccessTokenExpiredError,
+  isAuthorizationDeniedError,
 };

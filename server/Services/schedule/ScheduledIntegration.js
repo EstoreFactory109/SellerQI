@@ -888,6 +888,18 @@ class ScheduledIntegration {
 
         // Process API result helper (same as Integration)
         const processApiResult = (result, serviceName) => {
+            // ★ Defensive guard: result can be `undefined` when the consume-side
+            //   `firstBatchResults[resultIndex++]` runs past the end of the
+            //   Promise.allSettled array — i.e. a service's result is read under a
+            //   condition that didn't push a promise (index drift). Previously this
+            //   threw `Cannot read properties of undefined (reading 'status')`,
+            //   which failed the ENTIRE batch phase and lost every other service's
+            //   data in that batch. Treat a missing result as a per-service failure
+            //   so the rest of the batch still gets processed and stored.
+            if (!result) {
+                logger.error(`${serviceName} failed — no settled result (batch index misalignment)`, { userId });
+                return { success: false, data: null, error: `No settled result for ${serviceName} (index misalignment)` };
+            }
             if (result.status === 'fulfilled') {
                 const value = result.value;
                 
@@ -1435,7 +1447,15 @@ class ScheduledIntegration {
             if (scheduledFunctions['ppcMetricsAggregated'] && AdsAccessToken) {
                 // Special handling for PPC Metrics Aggregated (returns structured result)
                 const result = firstBatchResults[resultIndex++];
-                if (result.status === 'fulfilled') {
+                // ★ Same defensive guard as processApiResult: `result` is undefined
+                //   when this index ran past the settled-results array (the ads
+                //   services are no longer pushed in the batch_1_2 phase — they
+                //   moved to sched_ads — but are still consumed here when an Ads
+                //   token exists, drifting the index). Without this, the inline
+                //   `result.status` read threw and failed the whole batch.
+                if (!result) {
+                    apiData.ppcMetricsAggregated = { success: false, data: null, error: 'No settled result for PPC Metrics Aggregated (index misalignment)' };
+                } else if (result.status === 'fulfilled') {
                     const value = result.value;
                     if (value && typeof value === 'object' && 'success' in value) {
                         apiData.ppcMetricsAggregated = value;
@@ -2774,7 +2794,20 @@ class ScheduledIntegration {
         try {
             const sorted = [...dates].sort();
             const forceStart = sorted[0];
-            const forceEnd = sorted[sorted.length - 1];
+            // ★ Anchor the END of the re-fetch window to YESTERDAY (Pacific), not
+            //   the latest broken day. Amazon's GET_FLAT_FILE_ALL_ORDERS_DATA_BY_
+            //   ORDER_DATE report only returns an OLD order-date when the request
+            //   window extends toward the present — a single-old-day window (e.g.
+            //   2026-05-28 → 2026-05-28) comes back EMPTY, so the catch-up could
+            //   never actually restore an aged-out day. Extending the end to
+            //   yesterday makes the report return the old day's data, so the
+            //   catch-up RESTORES it instead of fetching nothing. (Verified: a
+            //   range fetch returns the day; a single-old-day fetch returns 0.)
+            const PACIFIC_OFFSET_MS = 7 * 60 * 60 * 1000;
+            const yesterdayPac = new Date(Date.now() - PACIFIC_OFFSET_MS - 24 * 60 * 60 * 1000)
+                .toISOString().substring(0, 10);
+            const latestBroken = sorted[sorted.length - 1];
+            const forceEnd = latestBroken > yesterdayPac ? latestBroken : yesterdayPac;
 
             const ctx = await this._prepareForBatchPhase(userId, Region, Country, phaseData);
             if (!ctx.AccessToken || !ctx.RefreshToken) {

@@ -31,6 +31,7 @@
  */
 
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
+const User = require('../../models/user-auth/userModel.js');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
 const FinanceSyncLog = require('../../models/finance/FinanceSyncLogModel.js');
 const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
@@ -58,6 +59,16 @@ const FINANCE_MAX_ENQUEUES_PER_TICK = 100;
 // so even though the sweeper ticks every few hours, the heavy 30-day re-fetch only
 // fires once daily per account.
 const FINANCE_DEEP_RESYNC_DAYS = 30;
+
+// Deep-resync throughput ceiling per tick. As long as the active-account count is
+// at or below this, EVERY active account is re-synced each run. Beyond it, fair
+// rotation engages (least-recently-resynced first), so no account is ever starved
+// — the ceiling becomes a rate limit, not a cutoff. Sized generously above the
+// current active count so rotation only matters at much larger scale.
+const DEEP_RESYNC_MAX_PER_TICK = 300;
+// Freshness SLA: every active account should be deep-resynced within this many
+// days. If rotation can't keep up, we LOG it (instead of silently starving).
+const DEEP_RESYNC_TARGET_CYCLE_DAYS = 3;
 
 // Hard cap on enqueues per sweeper tick. Protects BullMQ from flooding when
 // many accounts have many missing days after a long outage.
@@ -167,6 +178,47 @@ async function shouldSkipEnqueue(queue, jobId) {
     return true;
 }
 
+// ── Active-account filter (Phase 1) ──────────────────────────────────────────
+// The daily pipeline only syncs ACTIVE accounts: isVerified && (Pro || agency-
+// client). The sweeps must match that scope — otherwise they (a) waste SP-API
+// fetches on inactive accounts and (b) let those accounts consume the per-tick
+// budget, starving the real ones (the exact bug that left a paid account never
+// deep-resynced). Mirrors UserSchedulingService.getUsersNeedingDailyUpdate.
+//
+// FAIL-SAFE: returns null on error OR empty result. A null set means "no filter
+// / process all" (the prior behaviour), so a query problem can never silently
+// stop the sweeps from running.
+async function getActiveUserIdSet() {
+    try {
+        const users = await User.find(
+            { isVerified: true, $or: [{ packageType: 'PRO' }, { isAgencyClient: true }] },
+            { _id: 1 }
+        ).lean();
+        if (!users || users.length === 0) {
+            logger.warn('[FreshnessSweeper] Active-user filter matched 0 users — falling back to ALL accounts (fail-safe).');
+            return null;
+        }
+        return new Set(users.map((u) => u._id.toString()));
+    } catch (err) {
+        logger.warn(`[FreshnessSweeper] Active-user filter query failed (${err.message}) — falling back to ALL accounts.`);
+        return null;
+    }
+}
+
+// Stamp the rotation timestamp so a just-handled account moves to the back of the
+// least-recently-resynced queue. Best-effort: a stamp failure only means the
+// account may be re-picked next tick (harmless), never a crash.
+async function stampDeepResyncAt(sellerId, rawCountry, rawRegion) {
+    try {
+        await Seller.updateOne(
+            { _id: sellerId, sellerAccount: { $elemMatch: { country: rawCountry, region: rawRegion } } },
+            { $set: { 'sellerAccount.$.lastDeepResyncAt': new Date() } }
+        );
+    } catch (err) {
+        logger.warn(`[FinanceDeepResync] Failed to stamp lastDeepResyncAt (${rawCountry}-${rawRegion}): ${err.message}`);
+    }
+}
+
 /**
  * Main entry: scan all connected ads accounts, enqueue catch-up jobs for
  * missing past dates, capped by MAX_ENQUEUES_PER_TICK.
@@ -196,12 +248,16 @@ async function sweep() {
         { User: 1, sellerAccount: 1 }
     ).lean();
 
+    // Only sweep ACTIVE accounts (same scope as the daily pipeline).
+    const activeSet = await getActiveUserIdSet();
+
     for (const seller of sellers) {
         if (summary.enqueued >= MAX_ENQUEUES_PER_TICK) {
             // Continue scanning to count remaining candidates, but stop enqueueing.
             // This gives an honest "we hit the cap" signal in the summary.
         }
         if (!Array.isArray(seller.sellerAccount)) continue;
+        if (activeSet && !activeSet.has(seller.User?.toString())) continue;
 
         for (const acct of seller.sellerAccount) {
             if (!acct || !acct.country || !acct.region) continue;
@@ -292,6 +348,32 @@ function buildFinanceCatchupJobId(userId, country, region, minDate, maxDate) {
     return `finance-catchup-${userId}-${country}-${region}-${minDate}_${maxDate}`;
 }
 
+// ── De-authorized account guard (FIX #2) ─────────────────────────────────────
+// A few accounts have SP-API authorizations that no longer cover the Reports API
+// (revoked / insufficient role). EVERY finance fetch for them fails with
+// "Access to requested resource is denied". Without this guard the sweep re-
+// enqueues a catch-up for them every tick — observed as 1600+ wasted failures
+// plus log spam plus quota burn. We detect the condition from their most recent
+// finance sync log and skip enqueuing until they reconnect (a fresh success log
+// clears the skip automatically). Mirrors FinanceService.isAuthorizationDeniedError.
+function isFinanceAuthDeniedError(msg) {
+    const s = (msg || '').toLowerCase();
+    return s.includes('access to requested resource is denied')
+        || s.includes('access_denied')
+        || s.includes('forbidden');
+}
+
+async function isAccountFinanceAuthDenied(userObjectId, country, region) {
+    // The MOST RECENT finance attempt: if it failed with an authorization denial
+    // (and no newer success exists), the account is currently de-authorized.
+    const latest = await FinanceSyncLog.findOne(
+        { User: userObjectId, country, region },
+        { status: 1, error: 1, _id: 0 }
+    ).sort({ fetchedAt: -1 }).lean();
+    if (!latest) return false;
+    return latest.status === 'failed' && isFinanceAuthDeniedError(latest.error);
+}
+
 /**
  * Find finance days in the lookback window that need a re-fetch for one account.
  * Returns a sorted array of YYYY-MM-DD. Excludes yesterday (the daily owns it).
@@ -358,15 +440,19 @@ async function findBrokenFinanceDatesForAccount(userObjectId, country, region) {
 async function sweepFinance() {
     const startedAt = Date.now();
     const queue = getQueue();
-    const summary = { accountsScanned: 0, accountsWithBroken: 0, brokenDays: 0, enqueued: 0, skippedDup: 0, skippedCap: 0, errors: 0, durationMs: 0 };
+    const summary = { accountsScanned: 0, accountsWithBroken: 0, brokenDays: 0, enqueued: 0, skippedDup: 0, skippedCap: 0, skippedAuthDenied: 0, errors: 0, durationMs: 0 };
 
     const sellers = await Seller.find(
         { 'sellerAccount.spiRefreshToken': { $exists: true, $ne: null, $ne: '' } },
         { User: 1, sellerAccount: 1 }
     ).lean();
 
+    // Only sweep ACTIVE accounts (same scope as the daily pipeline).
+    const activeSet = await getActiveUserIdSet();
+
     for (const seller of sellers) {
         if (!Array.isArray(seller.sellerAccount)) continue;
+        if (activeSet && !activeSet.has(seller.User?.toString())) continue;
         for (const acct of seller.sellerAccount) {
             if (!acct || !acct.country || !acct.region || !acct.spiRefreshToken) continue;
             const country = acct.country.toUpperCase();
@@ -384,6 +470,17 @@ async function sweepFinance() {
             if (broken.length === 0) continue;
             summary.accountsWithBroken++;
             summary.brokenDays += broken.length;
+
+            // Skip accounts whose SP-API authorization is denied — re-fetching is
+            // futile until they reconnect, and hammering them wastes quota + spams
+            // logs. A fresh success log (after re-auth) clears this automatically.
+            let authDenied = false;
+            try { authDenied = await isAccountFinanceAuthDenied(seller.User, country, region); } catch (_) { authDenied = false; }
+            if (authDenied) {
+                summary.skippedAuthDenied++;
+                logger.warn(`[FinanceSweeper] Skipping ${seller.User} ${country}-${region}: SP-API authorization denied — account must reconnect. ${broken.length} broken day(s) cannot be fetched until re-auth.`);
+                continue;
+            }
 
             if (summary.enqueued >= FINANCE_MAX_ENQUEUES_PER_TICK) { summary.skippedCap++; continue; }
 
@@ -444,7 +541,7 @@ function buildDeepResyncJobId(userId, country, region, todayStr) {
 async function sweepFinanceDeepResync() {
     const startedAt = Date.now();
     const queue = getQueue();
-    const summary = { accountsScanned: 0, enqueued: 0, skippedDup: 0, skippedCap: 0, errors: 0, durationMs: 0 };
+    const summary = { accountsScanned: 0, eligible: 0, enqueued: 0, skippedDup: 0, skippedCap: 0, errors: 0, rotation: false, cycleDays: 1, durationMs: 0 };
 
     // Build the rolling window [today-(N-1) … yesterday] of Pacific dates to re-fetch.
     const yesterday = pacificYesterdayISO();
@@ -462,40 +559,83 @@ async function sweepFinanceDeepResync() {
         { User: 1, sellerAccount: 1 }
     ).lean();
 
+    // Phase 1: only ACTIVE accounts (match the daily pipeline scope).
+    const activeSet = await getActiveUserIdSet();
+
+    // Phase 2: build the eligible list, then order by LEAST-RECENTLY deep-resynced
+    // (never-resynced = 0 = highest priority). This makes the per-tick cap a fair
+    // ROTATION instead of a positional cutoff — the longest-waiting account is
+    // always next, so no account is ever permanently starved, at any scale.
+    const eligible = [];
     for (const seller of sellers) {
         if (!Array.isArray(seller.sellerAccount)) continue;
+        if (activeSet && !activeSet.has(seller.User?.toString())) continue;
         for (const acct of seller.sellerAccount) {
             if (!acct || !acct.country || !acct.region || !acct.spiRefreshToken) continue;
-            const country = acct.country.toUpperCase();
-            const region = acct.region.toUpperCase();
-            summary.accountsScanned++;
+            eligible.push({
+                sellerId: seller._id,
+                user: seller.User,
+                rawCountry: acct.country,
+                rawRegion: acct.region,
+                country: acct.country.toUpperCase(),
+                region: acct.region.toUpperCase(),
+                lastDeepResyncAt: acct.lastDeepResyncAt ? new Date(acct.lastDeepResyncAt).getTime() : 0,
+            });
+        }
+    }
+    summary.accountsScanned = eligible.length;
+    summary.eligible = eligible.length;
+    eligible.sort((a, b) => a.lastDeepResyncAt - b.lastDeepResyncAt);
 
-            if (summary.enqueued >= FINANCE_MAX_ENQUEUES_PER_TICK) { summary.skippedCap++; continue; }
+    // Auto-sized throughput: process up to the ceiling per tick. At/below the
+    // ceiling, EVERY active account is handled each run (no rotation needed).
+    // Above it, rotation engages and we LOG the implied coverage cycle so a
+    // capacity shortfall is visible instead of silently starving accounts.
+    const perTick = Math.min(eligible.length, DEEP_RESYNC_MAX_PER_TICK);
+    if (eligible.length > DEEP_RESYNC_MAX_PER_TICK) {
+        summary.rotation = true;
+        summary.cycleDays = Math.ceil(eligible.length / DEEP_RESYNC_MAX_PER_TICK); // assumes ~1 effective run/day
+        const over = summary.cycleDays > DEEP_RESYNC_TARGET_CYCLE_DAYS;
+        logger[over ? 'warn' : 'info'](
+            `[FinanceDeepResync] Rotation active: ${eligible.length} active accounts > ${DEEP_RESYNC_MAX_PER_TICK}/tick. ` +
+            `Est. full-coverage cycle ≈ ${summary.cycleDays} day(s)` +
+            (over ? ` — EXCEEDS target ${DEEP_RESYNC_TARGET_CYCLE_DAYS}d; raise DEEP_RESYNC_MAX_PER_TICK or scale workers.` : '.')
+        );
+    }
 
-            // Date-stamped jobId → at most one deep re-sync per account per day.
-            const jobId = buildDeepResyncJobId(seller.User, country, region, todayStr);
-            let skip;
-            try { skip = await shouldSkipEnqueue(queue, jobId); } catch (_) { skip = false; }
-            if (skip) { summary.skippedDup++; continue; }
+    for (let i = 0; i < perTick; i++) {
+        const e = eligible[i];
+        // Date-stamped jobId → at most one deep re-sync per account per day.
+        const jobId = buildDeepResyncJobId(e.user, e.country, e.region, todayStr);
+        let skip;
+        try { skip = await shouldSkipEnqueue(queue, jobId); } catch (_) { skip = false; }
+        if (skip) {
+            summary.skippedDup++;
+            // Already handled today → still advance rotation so it doesn't get
+            // re-picked next tick ahead of accounts that haven't run yet.
+            await stampDeepResyncAt(e.sellerId, e.rawCountry, e.rawRegion);
+            continue;
+        }
 
-            const jobData = {
-                userId: seller.User.toString(),
-                country,
-                region,
-                phase: scheduledPhases.PHASES.FINANCE_CATCHUP,
-                parentJobId: jobId,
-                enqueuedAt: new Date().toISOString(),
-                enqueuedBy: 'finance-deep-resync',
-                phaseData: { catchupDates: windowDates }
-            };
-            try {
-                await queue.add('process-user-data', jobData, { jobId, ...CATCHUP_JOB_OPTS });
-                summary.enqueued++;
-                logger.info(`[FinanceDeepResync] Enqueued ${FINANCE_DEEP_RESYNC_DAYS}-day re-sync: ${seller.User} ${country}-${region} (${windowDates[0]}→${yesterday})`);
-            } catch (err) {
-                summary.errors++;
-                logger.warn(`[FinanceDeepResync] Enqueue failed for ${jobId}: ${err.message}`);
-            }
+        const jobData = {
+            userId: e.user.toString(),
+            country: e.country,
+            region: e.region,
+            phase: scheduledPhases.PHASES.FINANCE_CATCHUP,
+            parentJobId: jobId,
+            enqueuedAt: new Date().toISOString(),
+            enqueuedBy: 'finance-deep-resync',
+            phaseData: { catchupDates: windowDates }
+        };
+        try {
+            await queue.add('process-user-data', jobData, { jobId, ...CATCHUP_JOB_OPTS });
+            summary.enqueued++;
+            await stampDeepResyncAt(e.sellerId, e.rawCountry, e.rawRegion);
+            logger.info(`[FinanceDeepResync] Enqueued ${FINANCE_DEEP_RESYNC_DAYS}-day re-sync: ${e.user} ${e.country}-${e.region} (${windowDates[0]}→${yesterday})`);
+        } catch (err) {
+            // NOT stamped → retried next tick (failure doesn't consume its turn).
+            summary.errors++;
+            logger.warn(`[FinanceDeepResync] Enqueue failed for ${jobId}: ${err.message}`);
         }
     }
 

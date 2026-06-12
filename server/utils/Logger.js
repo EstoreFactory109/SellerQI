@@ -25,15 +25,37 @@ const getTimestamp = () => {
   return now.toISOString().replace('T', ' ').substring(0, 19);
 };
 
+// JSON.stringify replacer that expands Error values (their `message`/`stack`
+// are non-enumerable, so a plain stringify of an Error — or an object holding
+// one — produces `{}` and hides the real cause). This makes nested errors,
+// e.g. `logger.error('x', { error: err })`, serialize with their details.
+const errorReplacer = (key, value) => {
+  if (value instanceof Error) {
+    return { name: value.name, message: value.message, stack: value.stack, ...value };
+  }
+  return value;
+};
+
+// Serialize a single log argument. Critically, a top-level Error is rendered as
+// its stack (which includes "name: message") instead of `{}`.
+const formatArg = (arg) => {
+  if (arg instanceof Error) {
+    return arg.stack || `${arg.name}: ${arg.message}`;
+  }
+  if (typeof arg === 'object' && arg !== null) {
+    try {
+      return JSON.stringify(arg, errorReplacer, 2);
+    } catch (_) {
+      return String(arg);
+    }
+  }
+  return String(arg);
+};
+
 // Helper function to format log message
 const formatLogMessage = (level, ...args) => {
   const timestamp = getTimestamp();
-  const message = args.map(arg => {
-    if (typeof arg === 'object') {
-      return JSON.stringify(arg, null, 2);
-    }
-    return String(arg);
-  }).join(' ');
+  const message = args.map(formatArg).join(' ');
   return `[${timestamp}] [${level}] ${message}\n`;
 };
 
@@ -47,14 +69,10 @@ const writeToFile = (message) => {
   }
 };
 
-// Helper function to colorize arguments
+// Helper function to colorize arguments (uses the same Error-aware formatter
+// so the console shows the real message/stack, not `{}`).
 const colorizeArgs = (colorFn, ...args) => {
-  return args.map(arg => {
-    if (typeof arg === 'object') {
-      return colorFn(JSON.stringify(arg, null, 2));
-    }
-    return colorFn(String(arg));
-  });
+  return args.map(arg => colorFn(formatArg(arg)));
 };
 
 const logger = {

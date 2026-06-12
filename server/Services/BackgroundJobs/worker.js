@@ -278,6 +278,26 @@ async function processScheduledPhase(job) {
                 threw: !!phaseOutcome.threw
             }
         );
+        // Surface the failure on the frontend "user logging page" by recording it
+        // to the user's logging session (opened in sched_init, read by the
+        // /logging/session API). Without this, mid-pipeline phase failures never
+        // appear in the UI — the session just sits at in_progress with no error.
+        const failSessionId = phaseData?.sessionId;
+        if (failSessionId) {
+            try {
+                const LoggingHelper = require('../../utils/LoggingHelper.js');
+                await LoggingHelper.addLogToSession(failSessionId, {
+                    functionName: `phase:${phase}`,
+                    logType: 'error',
+                    status: 'failed',
+                    message: phaseOutcome.error || `Phase ${phase} failed`,
+                    errorDetails: { errorMessage: phaseOutcome.error || null, stackTrace: phaseOutcome.stack || null, phase },
+                    contextData: { userId, country, region, phase, nextPhase },
+                });
+            } catch (logErr) {
+                logger.warn(`[Worker:${WORKER_NAME}] Could not record phase failure to session ${failSessionId}: ${logErr.message}`);
+            }
+        }
     }
 
     if (nextPhase) {
@@ -479,13 +499,40 @@ async function startWorker() {
         });
     });
 
-    worker.on('failed', (job, err) => {
+    worker.on('failed', async (job, err) => {
         logger.error(`[Worker:${WORKER_NAME}] Job ${job?.id || 'unknown'} failed`, {
             userId: job?.data?.userId,
             error: err.message,
             attemptsMade: job?.attemptsMade,
             maxAttempts: job?.opts?.attempts
         });
+        // When BullMQ permanently fails a scheduled-phase job (exhausted retries
+        // or stalled past maxStalledCount — e.g. a phase that hung for hours),
+        // the pipeline never reaches sched_finalize, so the user's logging
+        // session would sit at "in_progress" forever on the frontend. Close it
+        // as failed (with the error) once we're out of attempts, so the UI shows
+        // a real terminal state instead of a perpetual spinner.
+        try {
+            const attemptsMade = job?.attemptsMade || 0;
+            const maxAttempts = job?.opts?.attempts || 1;
+            const sessionId = job?.data?.phaseData?.sessionId;
+            const phase = job?.data?.phase;
+            if (sessionId && attemptsMade >= maxAttempts) {
+                const LoggingHelper = require('../../utils/LoggingHelper.js');
+                await LoggingHelper.addLogToSession(sessionId, {
+                    functionName: `phase:${phase || 'unknown'}`,
+                    logType: 'error',
+                    status: 'failed',
+                    message: `Phase ${phase || 'unknown'} permanently failed/stalled: ${err.message}`,
+                    errorDetails: { errorMessage: err.message, stackTrace: err.stack || null, phase },
+                    contextData: { userId: job?.data?.userId, phase, attemptsMade, maxAttempts },
+                }).catch(() => {});
+                await LoggingHelper.endSessionById(sessionId, 'failed');
+                logger.warn(`[Worker:${WORKER_NAME}] Closed stuck logging session ${sessionId} as failed (phase ${phase} exhausted ${attemptsMade}/${maxAttempts}).`);
+            }
+        } catch (sessErr) {
+            logger.warn(`[Worker:${WORKER_NAME}] Could not close session for failed job ${job?.id}: ${sessErr.message}`);
+        }
     });
 
     worker.on('error', (err) => {

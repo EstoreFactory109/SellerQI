@@ -90,7 +90,13 @@ const sellerCentral=new mongoose.Schema({
     enum: ["NA", "EU", "FE"], // North America, Europe, Far East
   },
   products:[Products],
-  TotatProducts:[TotatProductsBasedOnDate]
+  TotatProducts:[TotatProductsBasedOnDate],
+  // Rotation timestamp for the finance deep-resync sweep (fair scheduling).
+  // Absent/null = never deep-resynced → highest priority. Set by freshnessSweeper.
+  lastDeepResyncAt: {
+    type: Date,
+    required: false,
+  }
 }, {timestamps: true})
 
 
