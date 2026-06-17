@@ -1913,7 +1913,7 @@ function classifyAdsQueryType(interpretation) {
   // unambiguous ads-only terms, so a bare "what is my acos" must classify even
   // when the interpreter didn't populate entities.metrics.
   if (metrics.match(/acos|roas|tacos|ctr|cpc|ad.?spend|ppc.?spend|impression|click/)) return 'ads_summary';
-  if (prompt.match(/\bacos\b|\broas\b|\btacos\b|\bctr\b|\bcpc\b|ad.?spend|ppc.?spend|cost per (order|acquisition|click|conversion)|\bcpa\b/)) return 'ads_summary';
+  if (prompt.match(/\bacos\b|\broas\b|\btacos\b|\bctr\b|\bcpc\b|ad.?spend|ppc.?spend|cost per (order|acquisition|click|conversion)|\bcpa\b|\bimpressions?\b|how many\s+clicks?|total\s+clicks?/i)) return 'ads_summary';
 
   // General ads question.
   if (metrics.match(/ppc|ads?|campaign|keyword|sponsored/) || prompt.match(/ppc|ads?|campaign|keyword|sponsored/)) return 'ads_summary';

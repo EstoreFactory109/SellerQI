@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Shield, AlertTriangle, CheckCircle, XCircle, Download, ChevronDown, Activity, Search, Filter } from 'lucide-react';
 import { useSelector, useDispatch } from 'react-redux';
 import { fetchAccountIssues } from '../../redux/slices/PageDataSlice';
-import DownloadReport from '../DownloadReport/DownloadReport.jsx';
 
 export default function AccountHealthDashboard() {
     const dispatch = useDispatch();
@@ -163,6 +162,22 @@ export default function AccountHealthDashboard() {
         }));
     };
 
+    const handleDownloadCSV = () => {
+        const rows = prepareAccountData();
+        if (!rows.length) return;
+        const headers = Object.keys(rows[0]);
+        const escape = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+        const csv = [headers.join(','), ...rows.map(r => headers.map(h => escape(r[h])).join(','))].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Account_Health_Report_${new Date().toISOString().split('T')[0]}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        setShowExportDropdown(false);
+    };
+
     // If no data is available, show the no data found message
     if (!hasData || !hasHealthData) {
         return (
@@ -296,13 +311,13 @@ export default function AccountHealthDashboard() {
                                         transition={{ duration: 0.2 }}
                                         className="absolute top-full right-0 mt-1 z-50 bg-[#21262d] shadow-xl rounded border border-[#30363d] overflow-hidden min-w-[160px]"
                                     >
-                                        <DownloadReport
-                                            prepareDataFunc={prepareAccountData}
-                                            filename="Account_Health_Report"
-                                            buttonText="Download CSV"
-                                            buttonClass="w-full flex items-center gap-2 px-2 py-1.5 text-gray-300 hover:bg-[#161b22] transition-colors duration-200 text-xs"
-                                            showIcon={true}
-                                        />
+                                        <button
+                                            onClick={handleDownloadCSV}
+                                            className="w-full flex items-center gap-2 px-3 py-2 text-gray-300 hover:bg-[#161b22] transition-colors duration-200 text-xs"
+                                        >
+                                            <Download className="w-3 h-3" />
+                                            Download CSV
+                                        </button>
                                     </motion.div>
                                 )}
                             </AnimatePresence>
