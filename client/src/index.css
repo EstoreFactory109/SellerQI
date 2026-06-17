@@ -15,22 +15,109 @@
   --accent-hover: #58a6ff;
 }
 
-/* Light mode overrides — only when user explicitly selects light */
+/* ─── Light mode — CSS variable tokens ─────────────────────────────────── */
 [data-theme="light"] {
-  --bg-base: #f7f9fc;
-  --bg-surface: #ffffff;
+  --bg-base:     #f7f9fc;
+  --bg-surface:  #ffffff;
   --bg-elevated: #eef4fb;
-  --bg-hover: #e6f0fb;
+  --bg-hover:    #e6f0fb;
   --border-dark: #d6e0ea;
-  --border-muted: #e5edf5;
-  --text-primary: #102033;
-  --text-secondary: #475569;
-  --text-muted: #718096;
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
+  --border-muted:#e5edf5;
+  --text-primary:#102033;
+  --text-secondary:#475569;
+  --text-muted:  #718096;
+  --accent:      #2563eb;
+  --accent-hover:#1d4ed8;
   --accent-soft: #dbeafe;
 }
 
+/* ─── Light mode — override hard-coded dark Tailwind classes ────────────────
+   [data-theme="light"] + class raises specificity above a plain utility class,
+   so !important is only needed where Tailwind's own specificity still wins.
+   Dark mode is 100 % untouched — these rules never fire without the attribute.
+─────────────────────────────────────────────────────────────────────────── */
+
+/* ── Page / surface backgrounds ── */
+[data-theme="light"] .bg-\[#1a1a1a\]  { background-color: #f7f9fc !important; }
+[data-theme="light"] .bg-\[#161b22\]  { background-color: #ffffff !important; }
+[data-theme="light"] .bg-\[#21262d\]  { background-color: #eef4fb !important; }
+[data-theme="light"] .bg-\[#1c2128\]  { background-color: #e6f0fb !important; }
+[data-theme="light"] .bg-\[#30363d\]  { background-color: #e5edf5 !important; }
+[data-theme="light"] .bg-\[#0d0f12\]  { background-color: #f0f4f8 !important; }
+[data-theme="light"] .bg-\[#0d1117\]  { background-color: #f0f6ff !important; }
+[data-theme="light"] .bg-gray-900     { background-color: #f8fafc !important; }
+[data-theme="light"] .bg-gray-800     { background-color: #f1f5f9 !important; }
+
+/* ── Opacity variants of the main dark backgrounds ── */
+[data-theme="light"] .bg-\[#1a1a1a\]\/5  { background-color: rgba(247,249,252,0.05) !important; }
+[data-theme="light"] .bg-\[#1a1a1a\]\/10 { background-color: rgba(247,249,252,0.10) !important; }
+[data-theme="light"] .bg-\[#1a1a1a\]\/20 { background-color: rgba(247,249,252,0.20) !important; }
+[data-theme="light"] .bg-\[#1a1a1a\]\/50 { background-color: rgba(247,249,252,0.50) !important; }
+[data-theme="light"] .bg-\[#1a1a1a\]\/70 { background-color: rgba(247,249,252,0.70) !important; }
+[data-theme="light"] .bg-\[#1a1a1a\]\/80 { background-color: rgba(247,249,252,0.80) !important; }
+[data-theme="light"] .bg-\[#1a1a1a\]\/90 { background-color: rgba(247,249,252,0.90) !important; }
+
+[data-theme="light"] .bg-\[#161b22\]\/5  { background-color: rgba(255,255,255,0.05) !important; }
+[data-theme="light"] .bg-\[#161b22\]\/10 { background-color: rgba(255,255,255,0.10) !important; }
+[data-theme="light"] .bg-\[#161b22\]\/20 { background-color: rgba(255,255,255,0.20) !important; }
+[data-theme="light"] .bg-\[#161b22\]\/50 { background-color: rgba(255,255,255,0.50) !important; }
+[data-theme="light"] .bg-\[#161b22\]\/70 { background-color: rgba(255,255,255,0.70) !important; }
+[data-theme="light"] .bg-\[#161b22\]\/80 { background-color: rgba(255,255,255,0.80) !important; }
+[data-theme="light"] .bg-\[#161b22\]\/90 { background-color: rgba(255,255,255,0.90) !important; }
+
+[data-theme="light"] .bg-\[#21262d\]\/5  { background-color: rgba(238,244,251,0.05) !important; }
+[data-theme="light"] .bg-\[#21262d\]\/10 { background-color: rgba(238,244,251,0.10) !important; }
+[data-theme="light"] .bg-\[#21262d\]\/20 { background-color: rgba(238,244,251,0.20) !important; }
+[data-theme="light"] .bg-\[#21262d\]\/50 { background-color: rgba(238,244,251,0.50) !important; }
+[data-theme="light"] .bg-\[#21262d\]\/80 { background-color: rgba(238,244,251,0.80) !important; }
+
+[data-theme="light"] .bg-\[#30363d\]\/5  { background-color: rgba(229,237,245,0.05) !important; }
+[data-theme="light"] .bg-\[#30363d\]\/10 { background-color: rgba(229,237,245,0.10) !important; }
+[data-theme="light"] .bg-\[#30363d\]\/20 { background-color: rgba(229,237,245,0.20) !important; }
+[data-theme="light"] .bg-\[#30363d\]\/50 { background-color: rgba(229,237,245,0.50) !important; }
+
+/* ── Hover background states ── */
+[data-theme="light"] .hover\:bg-\[#1a1a1a\]:hover  { background-color: #eef4fb !important; }
+[data-theme="light"] .hover\:bg-\[#161b22\]:hover   { background-color: #f0f6ff !important; }
+[data-theme="light"] .hover\:bg-\[#21262d\]:hover   { background-color: #e6f0fb !important; }
+[data-theme="light"] .hover\:bg-\[#1c2128\]:hover   { background-color: #dbeafe !important; }
+[data-theme="light"] .hover\:bg-\[#30363d\]:hover   { background-color: #d6e8f5 !important; }
+
+/* ── Text — only the light-on-dark tones that become unreadable on white ── */
+[data-theme="light"] .text-gray-100  { color: #102033 !important; }
+[data-theme="light"] .text-gray-200  { color: #1e293b !important; }
+[data-theme="light"] .text-gray-300  { color: #334155 !important; }
+/* gray-400 (#9ca3af) and gray-500 (#6b7280) are already readable on light — leave them */
+
+/* ── Borders ── */
+[data-theme="light"] .border-\[#30363d\]  { border-color: #d6e0ea !important; }
+[data-theme="light"] .border-\[#21262d\]  { border-color: #e5edf5 !important; }
+[data-theme="light"] .border-\[#161b22\]  { border-color: #e2e8f0 !important; }
+[data-theme="light"] .border-\[#1a1a1a\]  { border-color: #d6e0ea !important; }
+[data-theme="light"] .border-gray-700     { border-color: #cbd5e1 !important; }
+[data-theme="light"] .border-gray-800     { border-color: #e2e8f0 !important; }
+
+/* Border opacity variants */
+[data-theme="light"] .border-\[#30363d\]\/20 { border-color: rgba(214,224,234,0.20) !important; }
+[data-theme="light"] .border-\[#30363d\]\/30 { border-color: rgba(214,224,234,0.30) !important; }
+[data-theme="light"] .border-\[#30363d\]\/40 { border-color: rgba(214,224,234,0.40) !important; }
+[data-theme="light"] .border-\[#30363d\]\/50 { border-color: rgba(214,224,234,0.50) !important; }
+[data-theme="light"] .border-\[#30363d\]\/60 { border-color: rgba(214,224,234,0.60) !important; }
+[data-theme="light"] .border-\[#21262d\]\/50 { border-color: rgba(229,237,245,0.50) !important; }
+
+/* ── bg-[#0d1117] opacity variants ── */
+[data-theme="light"] .bg-\[#0d1117\]\/80 { background-color: rgba(240,246,255,0.80) !important; }
+[data-theme="light"] .bg-\[#0d1117\]\/50 { background-color: rgba(240,246,255,0.50) !important; }
+
+/* ── Divide lines ── */
+[data-theme="light"] .divide-\[#30363d\] > :not([hidden]) ~ :not([hidden]) { border-color: #d6e0ea !important; }
+[data-theme="light"] .divide-\[#21262d\] > :not([hidden]) ~ :not([hidden]) { border-color: #e5edf5 !important; }
+
+/* ── Outline / ring ── */
+[data-theme="light"] .ring-\[#30363d\]   { --tw-ring-color: #d6e0ea !important; }
+[data-theme="light"] .ring-\[#21262d\]   { --tw-ring-color: #e5edf5 !important; }
+
+/* ── Form controls ── */
 [data-theme="light"] input,
 [data-theme="light"] textarea,
 [data-theme="light"] select {
@@ -38,11 +125,12 @@
   background-color: var(--bg-surface);
   border-color: var(--border-dark);
 }
-
 [data-theme="light"] input::placeholder,
-[data-theme="light"] textarea::placeholder {
-  color: var(--text-muted);
-}
+[data-theme="light"] textarea::placeholder { color: var(--text-muted); }
+
+/* ── Scrollbar track (light version) ── */
+[data-theme="light"] ::-webkit-scrollbar-track { background: #f1f5f9; }
+[data-theme="light"] ::-webkit-scrollbar-thumb { background: #cbd5e1; }
 
 html {
   scroll-behavior: smooth;
