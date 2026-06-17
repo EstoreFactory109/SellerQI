@@ -37,10 +37,6 @@ export default function Dashboard() {
                     : 'Monitor and resolve product issues across your Amazon catalog'}
                 </p>
               </div>
-              <div className='hidden sm:flex items-center gap-1 px-2 py-0.5 bg-orange-500/20 text-orange-400 rounded text-xs font-medium border border-orange-500/30'>
-                <AlertTriangle className='w-3 h-3' />
-                Issues detected
-              </div>
             </div>
           </div>
         </div>
