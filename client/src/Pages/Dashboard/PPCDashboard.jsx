@@ -2300,7 +2300,7 @@ const PPCDashboard = () => {
                     />
                     <Tooltip 
                       contentStyle={{ 
-                        backgroundColor: '#21262d', 
+                        backgroundColor: 'var(--bg-elevated)', 
                         border: '1px solid #30363d',
                         borderRadius: '6px',
                         boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.3)',
@@ -3044,7 +3044,7 @@ const PPCDashboard = () => {
             transition={{ duration: 0.2 }}
             className="fixed top-4 right-4 z-[100] flex items-start gap-3 p-3 rounded-lg shadow-lg max-w-sm border min-w-[280px]"
             style={{
-              backgroundColor: 'var(--bg-card, #161b22)',
+              backgroundColor: 'var(--bg-surface)',
               borderColor: feedbackPopup.type === 'success' ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)',
             }}
           >

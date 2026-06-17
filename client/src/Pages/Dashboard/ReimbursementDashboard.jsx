@@ -452,10 +452,10 @@ const ReimbursementDashboard = () => {
   // Error state
   if (error) {
     return (
-        <div className="min-h-screen flex items-center justify-center" style={{ background: '#1a1a1a' }}>
+        <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg-base)' }}>
           <div className="text-center">
           <AlertCircle className="w-6 h-6 mx-auto mb-2" style={{ color: '#f87171' }} />
-          <p className="font-semibold mb-2 text-sm" style={{ color: '#f3f4f6' }}>Error loading reimbursement data</p>
+          <p className="font-semibold mb-2 text-sm" style={{ color: 'var(--text-primary)' }}>Error loading reimbursement data</p>
           <p className="text-xs" style={{ color: '#9ca3af' }}>{error}</p>
         </div>
       </div>
@@ -463,7 +463,7 @@ const ReimbursementDashboard = () => {
   }
 
   return (
-    <div className="min-h-screen" style={{ background: '#1a1a1a', padding: '10px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+    <div className="min-h-screen" style={{ background: 'var(--bg-base)', padding: '10px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
       <div className="w-full" style={{ maxWidth: '1400px', margin: '0 auto' }}>
         <div>
           {/* Header */}
@@ -472,10 +472,10 @@ const ReimbursementDashboard = () => {
             animate={{ opacity: 1, y: 0 }}
             style={{ marginBottom: '10px' }}
           >
-            <div style={{ background: '#161b22', padding: '10px 15px', borderRadius: '6px', border: '1px solid #30363d', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ background: 'var(--bg-surface)', padding: '10px 15px', borderRadius: '6px', border: '1px solid #30363d', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
               <div className="flex items-center gap-2">
                 <DollarSign className="w-4 h-4" style={{ color: '#60a5fa' }} />
-                <h1 className="text-base font-bold" style={{ color: '#f3f4f6' }}>
+                <h1 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>
                   Reimbursement Dashboard
                 </h1>
               </div>
@@ -484,7 +484,7 @@ const ReimbursementDashboard = () => {
                 <button
                   onClick={() => setShowFilters(!showFilters)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all text-xs font-medium"
-                  style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                  style={{ background: 'var(--bg-base)', border: '1px solid #30363d', color: 'var(--text-primary)' }}
                   onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
                   onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}
                 >
@@ -514,7 +514,7 @@ const ReimbursementDashboard = () => {
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
                   className="mt-2 p-3 rounded-lg"
-                  style={{ background: '#161b22', border: '1px solid #30363d' }}
+                  style={{ background: 'var(--bg-surface)', border: '1px solid #30363d' }}
                 >
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div>
@@ -523,15 +523,15 @@ const ReimbursementDashboard = () => {
                         value={filterStatus}
                         onChange={(e) => setFilterStatus(e.target.value)}
                         className="w-full px-2 py-1.5 rounded-lg text-xs"
-                        style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                        style={{ background: 'var(--bg-base)', border: '1px solid #30363d', color: 'var(--text-primary)' }}
                         onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
                         onBlur={(e) => e.target.style.borderColor = '#30363d'}
                       >
-                        <option value="all" style={{ background: '#21262d' }}>All Statuses</option>
-                        <option value="approved" style={{ background: '#21262d' }}>Approved</option>
-                        <option value="pending" style={{ background: '#21262d' }}>Pending</option>
-                        <option value="potential" style={{ background: '#21262d' }}>Potential</option>
-                        <option value="denied" style={{ background: '#21262d' }}>Denied</option>
+                        <option value="all" style={{ background: 'var(--bg-elevated)' }}>All Statuses</option>
+                        <option value="approved" style={{ background: 'var(--bg-elevated)' }}>Approved</option>
+                        <option value="pending" style={{ background: 'var(--bg-elevated)' }}>Pending</option>
+                        <option value="potential" style={{ background: 'var(--bg-elevated)' }}>Potential</option>
+                        <option value="denied" style={{ background: 'var(--bg-elevated)' }}>Denied</option>
                       </select>
                     </div>
 
@@ -541,16 +541,16 @@ const ReimbursementDashboard = () => {
                         value={filterType}
                         onChange={(e) => setFilterType(e.target.value)}
                         className="w-full px-2 py-1.5 rounded-lg text-xs"
-                        style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                        style={{ background: 'var(--bg-base)', border: '1px solid #30363d', color: 'var(--text-primary)' }}
                         onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
                         onBlur={(e) => e.target.style.borderColor = '#30363d'}
                       >
-                        <option value="all" style={{ background: '#21262d' }}>All Types</option>
-                        <option value="lost" style={{ background: '#21262d' }}>Lost</option>
-                        <option value="damaged" style={{ background: '#21262d' }}>Damaged</option>
-                        <option value="customer_return" style={{ background: '#21262d' }}>Customer Return</option>
-                        <option value="inbound_shipment" style={{ background: '#21262d' }}>Inbound Shipment</option>
-                        <option value="fee_correction" style={{ background: '#21262d' }}>Fee Correction</option>
+                        <option value="all" style={{ background: 'var(--bg-elevated)' }}>All Types</option>
+                        <option value="lost" style={{ background: 'var(--bg-elevated)' }}>Lost</option>
+                        <option value="damaged" style={{ background: 'var(--bg-elevated)' }}>Damaged</option>
+                        <option value="customer_return" style={{ background: 'var(--bg-elevated)' }}>Customer Return</option>
+                        <option value="inbound_shipment" style={{ background: 'var(--bg-elevated)' }}>Inbound Shipment</option>
+                        <option value="fee_correction" style={{ background: 'var(--bg-elevated)' }}>Fee Correction</option>
                       </select>
                     </div>
 
@@ -560,13 +560,13 @@ const ReimbursementDashboard = () => {
                         value={sortBy}
                         onChange={(e) => setSortBy(e.target.value)}
                         className="w-full px-2 py-1.5 rounded-lg text-xs"
-                        style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                        style={{ background: 'var(--bg-base)', border: '1px solid #30363d', color: 'var(--text-primary)' }}
                         onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
                         onBlur={(e) => e.target.style.borderColor = '#30363d'}
                       >
-                        <option value="date" style={{ background: '#21262d' }}>Date (Newest)</option>
-                        <option value="amount" style={{ background: '#21262d' }}>Amount (Highest)</option>
-                        <option value="status" style={{ background: '#21262d' }}>Status</option>
+                        <option value="date" style={{ background: 'var(--bg-elevated)' }}>Date (Newest)</option>
+                        <option value="amount" style={{ background: 'var(--bg-elevated)' }}>Amount (Highest)</option>
+                        <option value="status" style={{ background: 'var(--bg-elevated)' }}>Status</option>
                       </select>
                     </div>
                   </div>
@@ -600,7 +600,7 @@ const ReimbursementDashboard = () => {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.1 }}
                   className="rounded-lg transition-all w-full flex flex-col"
-                  style={{ background: '#161b22', border: '1px solid #30363d', padding: '10px' }}
+                  style={{ background: 'var(--bg-surface)', border: '1px solid #30363d', padding: '10px' }}
                   onMouseEnter={(e) => e.currentTarget.style.borderColor = '#3b82f6'}
                   onMouseLeave={(e) => e.currentTarget.style.borderColor = '#30363d'}
                 >
@@ -626,10 +626,10 @@ const ReimbursementDashboard = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               className="rounded-lg overflow-hidden"
-              style={{ background: '#161b22', border: '1px solid #30363d', marginBottom: '10px' }}
+              style={{ background: 'var(--bg-surface)', border: '1px solid #30363d', marginBottom: '10px' }}
             >
             {/* Tabs Navigation */}
-            <div style={{ borderBottom: '1px solid #30363d', background: '#21262d' }}>
+            <div style={{ borderBottom: '1px solid #30363d', background: 'var(--bg-elevated)' }}>
               <div className="flex overflow-x-auto">
                 <button
                   onClick={() => setActiveTab('shipment')}
@@ -771,7 +771,7 @@ const ReimbursementDashboard = () => {
                           <col style={{ width: '10%' }} />
                           <col style={{ width: '12%' }} />
                         </colgroup>
-                        <thead style={{ background: '#21262d' }}>
+                        <thead style={{ background: 'var(--bg-elevated)' }}>
                           <tr>
                             <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Date</th>
                             <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Shipment ID</th>
@@ -787,15 +787,15 @@ const ReimbursementDashboard = () => {
                         <tbody>
                           {summary.feeProtector.backendShipmentItems.data.map((item, index) => (
                             <tr key={index} className="transition-colors" style={{ borderBottom: '1px solid #30363d' }} onMouseEnter={(e) => e.currentTarget.style.background = '#21262d'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                              <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatDate(item.date)}</td>
-                              <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: '#f3f4f6' }}>{item.shipmentId || 'N/A'}</td>
-                              <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: '#f3f4f6' }}>{item.shipmentName || 'N/A'}</td>
-                              <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: '#f3f4f6' }}>{item.asin || 'N/A'}</td>
-                              <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: '#f3f4f6' }}>{item.sku || 'N/A'}</td>
-                              <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{item.quantityShipped || 0}</td>
-                              <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{item.quantityReceived || 0}</td>
+                              <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{formatDate(item.date)}</td>
+                              <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.shipmentId || 'N/A'}</td>
+                              <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.shipmentName || 'N/A'}</td>
+                              <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.asin || 'N/A'}</td>
+                              <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.sku || 'N/A'}</td>
+                              <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{item.quantityShipped || 0}</td>
+                              <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{item.quantityReceived || 0}</td>
                               <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f87171' }}>{item.discrepancyUnits || 0}</td>
-                              <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.expectedAmount || 0)}</td>
+                              <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: 'var(--text-primary)' }}>{formatCurrency(item.expectedAmount || 0)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -827,7 +827,7 @@ const ReimbursementDashboard = () => {
                         <button
                           onClick={() => setShowUnderpaidOnly(!showUnderpaidOnly)}
                           className="px-2 py-1 text-[10px] font-medium rounded border transition-all"
-                          style={showUnderpaidOnly ? { background: 'rgba(251, 146, 60, 0.2)', borderColor: 'rgba(251, 146, 60, 0.3)', color: '#fb923c' } : { background: '#1a1a1a', borderColor: '#30363d', color: '#f3f4f6' }}
+                          style={showUnderpaidOnly ? { background: 'rgba(251, 146, 60, 0.2)', borderColor: 'rgba(251, 146, 60, 0.3)', color: '#fb923c' } : { background: 'var(--bg-base)', borderColor: '#30363d', color: 'var(--text-primary)' }}
                           onMouseEnter={(e) => !showUnderpaidOnly && (e.target.style.borderColor = '#3b82f6')}
                           onMouseLeave={(e) => !showUnderpaidOnly && (e.target.style.borderColor = '#30363d')}
                         >
@@ -847,7 +847,7 @@ const ReimbursementDashboard = () => {
                           <col style={{ width: '13%' }} />
                           <col style={{ width: '15%' }} />
                         </colgroup>
-                        <thead style={{ background: '#21262d' }}>
+                        <thead style={{ background: 'var(--bg-elevated)' }}>
                           <tr>
                             <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Month</th>
                             <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>ASIN</th>
@@ -865,14 +865,14 @@ const ReimbursementDashboard = () => {
                               .filter(item => !showUnderpaidOnly || item.isUnderpaid)
                               .map((item, index) => (
                               <tr key={index} className="transition-colors" style={{ borderBottom: '1px solid #30363d', background: item.isUnderpaid ? 'rgba(251, 146, 60, 0.1)' : 'transparent' }} onMouseEnter={(e) => e.currentTarget.style.background = item.isUnderpaid ? 'rgba(251, 146, 60, 0.15)' : '#21262d'} onMouseLeave={(e) => e.currentTarget.style.background = item.isUnderpaid ? 'rgba(251, 146, 60, 0.1)' : 'transparent'}>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatMonthName(item.date)}</td>
-                                <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: '#f3f4f6' }}>{item.asin || 'N/A'}</td>
-                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: '#f3f4f6' }}>{item.sku || 'N/A'}</td>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{item.lostUnits || 0}</td>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{item.foundUnits || 0}</td>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{item.reimbursedUnits || 0}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{formatMonthName(item.date)}</td>
+                                <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.asin || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.sku || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{item.lostUnits || 0}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{item.foundUnits || 0}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{item.reimbursedUnits || 0}</td>
                                 <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f87171' }}>{item.discrepancyUnits || 0}</td>
-                                <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f3f4f6' }}>
+                                <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: 'var(--text-primary)' }}>
                                   {item.isUnderpaid && item.underpaidExpectedAmount ? (
                                     <div>
                                       <div>{formatCurrency(item.expectedAmount || 0)}</div>
@@ -930,7 +930,7 @@ const ReimbursementDashboard = () => {
                           <col style={{ width: '11%' }} />
                           <col style={{ width: '11%' }} />
                         </colgroup>
-                        <thead style={{ background: '#21262d' }}>
+                        <thead style={{ background: 'var(--bg-elevated)' }}>
                           <tr>
                             <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Date</th>
                             <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>ASIN</th>
@@ -946,15 +946,15 @@ const ReimbursementDashboard = () => {
                         <tbody>
                             {filteredDamagedInventoryData.map((item, index) => (
                               <tr key={index} className="transition-colors" style={{ borderBottom: '1px solid #30363d' }} onMouseEnter={(e) => e.currentTarget.style.background = '#21262d'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatDate(item.date)}</td>
-                                <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: '#f3f4f6' }}>{item.asin || 'N/A'}</td>
-                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: '#f3f4f6' }}>{item.sku || 'N/A'}</td>
-                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: '#f3f4f6' }}>{item.fnsku || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{formatDate(item.date)}</td>
+                                <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.asin || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.sku || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.fnsku || 'N/A'}</td>
                                 <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f87171' }}>{item.damagedUnits || 0}</td>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.salesPrice || 0)}</td>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.fees || 0)}</td>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.reimbursementPerUnit || 0)}</td>
-                                <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.expectedAmount || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{formatCurrency(item.salesPrice || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{formatCurrency(item.fees || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{formatCurrency(item.reimbursementPerUnit || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: 'var(--text-primary)' }}>{formatCurrency(item.expectedAmount || 0)}</td>
                               </tr>
                             ))}
                         </tbody>
@@ -992,7 +992,7 @@ const ReimbursementDashboard = () => {
                   <col style={{ width: '11%' }} />
                   <col style={{ width: '11%' }} />
                 </colgroup>
-                <thead style={{ background: '#21262d' }}>
+                <thead style={{ background: 'var(--bg-elevated)' }}>
                   <tr>
                               <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Date</th>
                               <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>ASIN</th>
@@ -1008,15 +1008,15 @@ const ReimbursementDashboard = () => {
                 <tbody>
                             {filteredDisposedInventoryData.map((item, index) => (
                       <tr key={index} className="transition-colors" style={{ borderBottom: '1px solid #30363d' }} onMouseEnter={(e) => e.currentTarget.style.background = '#21262d'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatDate(item.date)}</td>
-                                <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: '#f3f4f6' }}>{item.asin || 'N/A'}</td>
-                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: '#f3f4f6' }}>{item.sku || 'N/A'}</td>
-                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: '#f3f4f6' }}>{item.fnsku || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{formatDate(item.date)}</td>
+                                <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.asin || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.sku || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.fnsku || 'N/A'}</td>
                                 <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f87171' }}>{item.disposedUnits || 0}</td>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.salesPrice || 0)}</td>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.fees || 0)}</td>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.reimbursementPerUnit || 0)}</td>
-                                <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.expectedAmount || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{formatCurrency(item.salesPrice || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{formatCurrency(item.fees || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{formatCurrency(item.reimbursementPerUnit || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: 'var(--text-primary)' }}>{formatCurrency(item.expectedAmount || 0)}</td>
                       </tr>
                             ))}
                           </tbody>

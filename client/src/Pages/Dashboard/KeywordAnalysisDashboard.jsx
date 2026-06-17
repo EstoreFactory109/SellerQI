@@ -842,7 +842,7 @@ const KeywordAnalysisDashboard = () => {
                 padding: '6px 10px',
                 border: '1px solid #30363d',
                 borderRadius: '6px',
-                background: '#1a1a1a',
+                background: 'var(--bg-base)',
                 fontSize: '12px',
                 fontWeight: '500',
                 color: selectedAsin ? '#f3f4f6' : '#6b7280',
@@ -922,7 +922,7 @@ const KeywordAnalysisDashboard = () => {
                         outline: 'none',
                         transition: 'border-color 0.2s',
                         backgroundColor: '#1a1a1a',
-                        color: '#f3f4f6'
+                        color: 'var(--text-primary)'
                       }}
                       onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
                       onBlur={(e) => e.target.style.borderColor = '#30363d'}
@@ -1165,7 +1165,7 @@ const KeywordAnalysisDashboard = () => {
               display: 'flex',
               justifyContent: 'center',
               alignItems: 'center',
-              background: '#21262d'
+              background: 'var(--bg-elevated)'
             }}>
               <div style={{ fontSize: '11px', color: '#9ca3af', marginRight: '10px' }}>
                 Showing {sortedKeywords.length} of {pagination.totalItems} keywords
@@ -1215,7 +1215,7 @@ const KeywordAnalysisDashboard = () => {
               display: 'flex',
               justifyContent: 'center',
               alignItems: 'center',
-              background: '#21262d'
+              background: 'var(--bg-elevated)'
             }}>
               <div style={{ fontSize: '11px', color: '#9ca3af' }}>
                 Showing all {pagination.totalItems} keywords

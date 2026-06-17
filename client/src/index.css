@@ -21,6 +21,7 @@
   --bg-surface:  #ffffff;
   --bg-elevated: #eef4fb;
   --bg-hover:    #e6f0fb;
+  --bg-card:     #ffffff;
   --border-dark: #d6e0ea;
   --border-muted:#e5edf5;
   --text-primary:#102033;
@@ -51,6 +52,20 @@
 [data-theme="light"] [class*="bg-[#111827]"] { background-color: #f8fafc !important; }
 [data-theme="light"] [class*="bg-[#1f2937]"] { background-color: #f1f5f9 !important; }
 [data-theme="light"] [class*="bg-[#111]"]    { background-color: #ffffff !important; }
+[data-theme="light"] [class*="bg-[#0f0f0f]"] { background-color: #f8fafc !important; }
+[data-theme="light"] [class*="bg-[#101318]"] { background-color: #f4f7fb !important; }
+[data-theme="light"] [class*="bg-[#0d0d0d]"] { background-color: #f8fafc !important; }
+[data-theme="light"] [class*="bg-[#1a2028]"] { background-color: #e6f0fb !important; }
+[data-theme="light"] [class*="bg-[#23253a]"] { background-color: #eef4fb !important; }
+[data-theme="light"] [class*="bg-[#23253A]"] { background-color: #eef4fb !important; }
+[data-theme="light"] [class*="bg-[#252525]"] { background-color: #f7f9fc !important; }
+[data-theme="light"] [class*="bg-[#2a2d42]"] { background-color: #eef4fb !important; }
+[data-theme="light"] [class*="bg-[#2d3a52]"] { background-color: #e8f0f8 !important; }
+[data-theme="light"] [class*="bg-[#333651]"] { background-color: #dbeafe !important; }
+[data-theme="light"] [class*="bg-[#333]"]    { background-color: #f1f5f9 !important; }
+[data-theme="light"] [class*="bg-[#374151]"] { background-color: #f1f5f9 !important; }
+[data-theme="light"] [class*="bg-[#3B4A6B]"] { background-color: #dbeafe !important; }
+[data-theme="light"] [class*="bg-[#3c4a6b]"] { background-color: #dbeafe !important; }
 [data-theme="light"] .bg-gray-900            { background-color: #f8fafc !important; }
 [data-theme="light"] .bg-gray-800            { background-color: #f1f5f9 !important; }
 
@@ -137,17 +152,35 @@
 [data-theme="light"] [style*="background: #111"],
 [data-theme="light"] [style*="background:#111"]     { background: var(--bg-surface) !important; }
 
-/* background-color property (style={{ backgroundColor: '#...' }}) */
+/* background shorthand with rgb() values (Chrome normalizes hex → rgb in DOM style attr) */
+[data-theme="light"] [style*="background: rgb(26, 26, 26)"]  { background: var(--bg-base) !important; }
+[data-theme="light"] [style*="background: rgb(22, 27, 34)"]  { background: var(--bg-surface) !important; }
+[data-theme="light"] [style*="background: rgb(33, 38, 45)"]  { background: var(--bg-elevated) !important; }
+[data-theme="light"] [style*="background: rgb(28, 33, 40)"]  { background: var(--bg-hover) !important; }
+[data-theme="light"] [style*="background: rgb(48, 54, 61)"]  { background: #e5edf5 !important; }
+[data-theme="light"] [style*="background: rgb(13, 15, 18)"]  { background: #f0f4f8 !important; }
+[data-theme="light"] [style*="background: rgb(13, 17, 23)"]  { background: #f0f6ff !important; }
+[data-theme="light"] [style*="background: rgb(26, 31, 38)"]  { background: #eef4fb !important; }
+[data-theme="light"] [style*="background: rgb(15, 15, 15)"]  { background: #f8fafc !important; }
+[data-theme="light"] [style*="background: rgb(16, 19, 24)"]  { background: #f4f7fb !important; }
+[data-theme="light"] [style*="background: rgb(17, 17, 17)"]  { background: var(--bg-surface) !important; }
+
+/* background-color property (style={{ backgroundColor: '#...' }}) — hex + rgb() forms */
 [data-theme="light"] [style*="background-color: #1a1a1a"],
-[data-theme="light"] [style*="background-color:#1a1a1a"]  { background-color: var(--bg-base) !important; }
+[data-theme="light"] [style*="background-color:#1a1a1a"],
+[data-theme="light"] [style*="background-color: rgb(26, 26, 26)"]   { background-color: var(--bg-base) !important; }
 [data-theme="light"] [style*="background-color: #161b22"],
-[data-theme="light"] [style*="background-color:#161b22"]  { background-color: var(--bg-surface) !important; }
+[data-theme="light"] [style*="background-color:#161b22"],
+[data-theme="light"] [style*="background-color: rgb(22, 27, 34)"]   { background-color: var(--bg-surface) !important; }
 [data-theme="light"] [style*="background-color: #21262d"],
-[data-theme="light"] [style*="background-color:#21262d"]  { background-color: var(--bg-elevated) !important; }
+[data-theme="light"] [style*="background-color:#21262d"],
+[data-theme="light"] [style*="background-color: rgb(33, 38, 45)"]   { background-color: var(--bg-elevated) !important; }
 [data-theme="light"] [style*="background-color: #1c2128"],
-[data-theme="light"] [style*="background-color:#1c2128"]  { background-color: var(--bg-hover) !important; }
+[data-theme="light"] [style*="background-color:#1c2128"],
+[data-theme="light"] [style*="background-color: rgb(28, 33, 40)"]   { background-color: var(--bg-hover) !important; }
 [data-theme="light"] [style*="background-color: #30363d"],
-[data-theme="light"] [style*="background-color:#30363d"]  { background-color: #e5edf5 !important; }
+[data-theme="light"] [style*="background-color:#30363d"],
+[data-theme="light"] [style*="background-color: rgb(48, 54, 61)"]   { background-color: #e5edf5 !important; }
 
 /* border-color property */
 [data-theme="light"] [style*="border-color: #30363d"],
