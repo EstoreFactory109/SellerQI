@@ -779,7 +779,7 @@ export default function DateFilter({ setOpenCalender, setSelectedPeriod, anchorR
                   months={2}
                   direction="horizontal"
                   minDate={minimumDate}
-                  maxDate={new Date()}
+                  maxDate={dashboardInfo?.endDate ? parseLocalDate(dashboardInfo.endDate) : new Date()}
                   showDateDisplay={false}
                   className="modern-calendar"
                   navigatorRenderer={customNavigatorRenderer}
