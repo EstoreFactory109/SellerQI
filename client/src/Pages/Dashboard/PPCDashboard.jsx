@@ -2255,11 +2255,11 @@ const PPCDashboard = () => {
                 <div className="flex items-center gap-3 text-xs">
                   <div className="flex items-center gap-1.5">
                     <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#3b82f6' }}></div>
-                    <span style={{ color: '#9ca3af' }}>PPC Sales</span>
+                    <span style={{ color: 'var(--text-secondary)' }}>PPC Sales</span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#f97316' }}></div>
-                    <span style={{ color: '#9ca3af' }}>PPC Spend</span>
+                    <span style={{ color: 'var(--text-secondary)' }}>PPC Spend</span>
                   </div>
                 </div>
               </div>

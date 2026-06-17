@@ -378,7 +378,7 @@ const KeywordAnalysisDashboard = () => {
       <style>{`
         .dashboard-container {
           min-height: 100vh;
-          background: #1a1a1a;
+          background: var(--bg-base);
           padding: 10px;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
@@ -389,10 +389,10 @@ const KeywordAnalysisDashboard = () => {
         }
         
         .header {
-          background: #161b22;
+          background: var(--bg-surface);
           padding: 10px 15px;
           border-radius: 6px;
-          border: 1px solid #30363d;
+          border: 1px solid var(--border-dark);
           margin-bottom: 10px;
           display: flex;
           justify-content: space-between;
@@ -402,17 +402,17 @@ const KeywordAnalysisDashboard = () => {
         .logo {
           font-size: 16px;
           font-weight: 700;
-          color: #f3f4f6;
+          color: var(--text-primary);
           display: flex;
           align-items: center;
           gap: 8px;
         }
         
         .asin-filter-container {
-          background: #161b22;
+          background: var(--bg-surface);
           padding: 8px 12px;
           border-radius: 6px;
-          border: 1px solid #30363d;
+          border: 1px solid var(--border-dark);
           margin-bottom: 10px;
           display: flex;
           align-items: center;
@@ -422,7 +422,7 @@ const KeywordAnalysisDashboard = () => {
         .asin-filter-label {
           font-size: 12px;
           font-weight: 600;
-          color: #9ca3af;
+          color: var(--text-secondary);
           white-space: nowrap;
         }
         
@@ -430,12 +430,12 @@ const KeywordAnalysisDashboard = () => {
           flex: 1;
           min-width: 0;
           padding: 6px 10px;
-          border: 1px solid #30363d;
+          border: 1px solid var(--border-dark);
           border-radius: 6px;
-          background: #1a1a1a;
+          background: var(--bg-base);
           font-size: 12px;
           font-weight: 500;
-          color: #f3f4f6;
+          color: var(--text-primary);
           cursor: pointer;
           transition: all 0.2s;
           appearance: none;
@@ -448,8 +448,8 @@ const KeywordAnalysisDashboard = () => {
         .asin-filter-select option {
           padding: 6px;
           white-space: normal;
-          background: #21262d;
-          color: #f3f4f6;
+          background: var(--bg-elevated);
+          color: var(--text-primary);
         }
         
         .asin-filter-select:hover:not(:disabled) {
@@ -463,7 +463,7 @@ const KeywordAnalysisDashboard = () => {
         }
         
         .asin-filter-select:disabled {
-          background-color: #21262d;
+          background-color: var(--bg-elevated);
           color: #6b7280;
           cursor: not-allowed;
         }
@@ -476,10 +476,10 @@ const KeywordAnalysisDashboard = () => {
         }
         
         .metric-card {
-          background: #161b22;
+          background: var(--bg-surface);
           padding: 10px;
           border-radius: 6px;
-          border: 1px solid #30363d;
+          border: 1px solid var(--border-dark);
         }
         
         .metric-content {
@@ -488,7 +488,7 @@ const KeywordAnalysisDashboard = () => {
         
         .metric-label {
           font-size: 11px;
-          color: #9ca3af;
+          color: var(--text-secondary);
           margin-bottom: 2px;
           display: flex;
           align-items: center;
@@ -503,7 +503,7 @@ const KeywordAnalysisDashboard = () => {
         .metric-value {
           font-size: 18px;
           font-weight: 700;
-          color: #f3f4f6;
+          color: var(--text-primary);
         }
         
         .icon-blue { color: #60a5fa; }
@@ -512,14 +512,14 @@ const KeywordAnalysisDashboard = () => {
         .icon-purple { color: #c084fc; }
         
         .tabs-container {
-          background: #161b22;
+          background: var(--bg-surface);
           border-radius: 6px 6px 0 0;
           padding: 0 12px;
           display: flex;
           gap: 16px;
-          border-bottom: 1px solid #30363d;
-          border: 1px solid #30363d;
-          border-bottom: 1px solid #30363d;
+          border-bottom: 1px solid var(--border-dark);
+          border: 1px solid var(--border-dark);
+          border-bottom: 1px solid var(--border-dark);
         }
         
         .tab {
@@ -527,13 +527,13 @@ const KeywordAnalysisDashboard = () => {
           border-bottom: 2px solid transparent;
           cursor: pointer;
           font-weight: 500;
-          color: #9ca3af;
+          color: var(--text-secondary);
           transition: all 0.2s;
           font-size: 12px;
         }
         
         .tab:hover {
-          color: #d1d5db;
+          color: var(--text-secondary);
         }
         
         .tab.active {
@@ -542,13 +542,13 @@ const KeywordAnalysisDashboard = () => {
         }
         
         .filters-bar {
-          background: #21262d;
+          background: var(--bg-elevated);
           padding: 8px 12px;
           display: flex;
           justify-content: space-between;
           align-items: center;
-          border-left: 1px solid #30363d;
-          border-right: 1px solid #30363d;
+          border-left: 1px solid var(--border-dark);
+          border-right: 1px solid var(--border-dark);
         }
         
         .filter-group {
@@ -558,20 +558,20 @@ const KeywordAnalysisDashboard = () => {
         
         .filter-select {
           padding: 4px 8px;
-          border: 1px solid #30363d;
+          border: 1px solid var(--border-dark);
           border-radius: 4px;
-          background: #1a1a1a;
+          background: var(--bg-base);
           font-size: 11px;
-          color: #f3f4f6;
+          color: var(--text-primary);
           cursor: pointer;
         }
         
         .table-container {
-          background: #161b22;
+          background: var(--bg-surface);
           border-radius: 0 0 6px 6px;
           overflow-x: hidden;
           overflow-y: visible;
-          border: 1px solid #30363d;
+          border: 1px solid var(--border-dark);
           border-top: none;
         }
         
@@ -582,7 +582,7 @@ const KeywordAnalysisDashboard = () => {
         }
         
         thead {
-          background: #21262d;
+          background: var(--bg-elevated);
           position: relative;
         }
         
@@ -591,7 +591,7 @@ const KeywordAnalysisDashboard = () => {
           text-align: left;
           font-size: 10px;
           font-weight: 600;
-          color: #9ca3af;
+          color: var(--text-secondary);
           text-transform: uppercase;
           letter-spacing: 0.5px;
           cursor: pointer;
@@ -602,27 +602,27 @@ const KeywordAnalysisDashboard = () => {
         }
         
         th:hover {
-          color: #d1d5db;
+          color: var(--text-secondary);
         }
         
         td {
           padding: 8px 10px;
-          border-top: 1px solid #30363d;
+          border-top: 1px solid var(--border-dark);
           font-size: 11px;
           text-align: left;
           word-wrap: break-word;
           overflow-wrap: break-word;
           word-break: break-word;
-          color: #f3f4f6;
+          color: var(--text-primary);
         }
         
         tbody tr {
-          border-bottom: 1px solid #30363d;
+          border-bottom: 1px solid var(--border-dark);
         }
         
         .keyword-cell {
           font-weight: 500;
-          color: #f3f4f6;
+          color: var(--text-primary);
           word-wrap: break-word;
           overflow-wrap: break-word;
           word-break: break-word;
@@ -699,9 +699,9 @@ const KeywordAnalysisDashboard = () => {
           transform: translateY(4px);
           margin-top: 6px;
           padding: 8px 10px;
-          background: #21262d;
-          color: #f3f4f6;
-          border: 1px solid #30363d;
+          background: var(--bg-elevated);
+          color: var(--text-primary);
+          border: 1px solid var(--border-dark);
           border-radius: 6px;
           font-size: 11px;
           font-weight: 400;
@@ -741,7 +741,7 @@ const KeywordAnalysisDashboard = () => {
           left: 16px;
           transform: translateX(0);
           border: 5px solid transparent;
-          border-bottom-color: #21262d;
+          border-bottom-color: var(--bg-elevated);
         }
         
         .tooltip-container.tooltip-last .tooltip-content::before {
@@ -787,7 +787,7 @@ const KeywordAnalysisDashboard = () => {
               <Download size={14} />
               Export CSV
             </button>
-            <div style={{ fontSize: '11px', color: '#9ca3af' }}>
+            <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
               {currentCountry ? `Marketplace: ${currentCountry.toUpperCase()}` : 'Amazon Ads'}
             </div>
           </div>
@@ -845,7 +845,7 @@ const KeywordAnalysisDashboard = () => {
                 background: 'var(--bg-base)',
                 fontSize: '12px',
                 fontWeight: '500',
-                color: selectedAsin ? '#f3f4f6' : '#6b7280',
+                color: selectedAsin ? 'var(--text-primary)' : 'var(--text-muted)',
                 cursor: (loadingAsins || asinsList.length === 0) ? 'not-allowed' : 'pointer',
                 transition: 'all 0.2s',
                 appearance: 'none',
@@ -871,7 +871,7 @@ const KeywordAnalysisDashboard = () => {
                 style={{ 
                   position: 'absolute', 
                   right: '10px', 
-                  color: '#9ca3af',
+                  color: 'var(--text-secondary)',
                   transform: isAsinDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)',
                   transition: 'transform 0.2s'
                 }} 
@@ -885,7 +885,7 @@ const KeywordAnalysisDashboard = () => {
                 left: 0,
                 right: 0,
                 marginTop: '2px',
-                backgroundColor: '#21262d',
+                backgroundColor: 'var(--bg-elevated)',
                 border: '1px solid #30363d',
                 borderRadius: '6px',
                 boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2)',
@@ -904,7 +904,7 @@ const KeywordAnalysisDashboard = () => {
                         left: '8px', 
                         top: '50%', 
                         transform: 'translateY(-50%)', 
-                        color: '#6b7280' 
+                        color: 'var(--text-muted)' 
                       }} 
                     />
                     <input
@@ -921,7 +921,7 @@ const KeywordAnalysisDashboard = () => {
                         fontSize: '11px',
                         outline: 'none',
                         transition: 'border-color 0.2s',
-                        backgroundColor: '#1a1a1a',
+                        backgroundColor: 'var(--bg-base)',
                         color: 'var(--text-primary)'
                       }}
                       onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
@@ -943,7 +943,7 @@ const KeywordAnalysisDashboard = () => {
                     <div style={{ 
                       padding: '10px', 
                       textAlign: 'center', 
-                      color: '#9ca3af', 
+                      color: 'var(--text-secondary)', 
                       fontSize: '11px' 
                     }}>
                       {isSearching ? 'Searching...' : `No ASINs found matching "${asinSearchQuery}"`}
@@ -973,10 +973,10 @@ const KeywordAnalysisDashboard = () => {
                             margin: '2px 0'
                           }}
                           onMouseEnter={(e) => {
-                            if (!isSelected) e.target.style.backgroundColor = '#161b22';
+                            if (!isSelected) e.target.style.backgroundColor = getComputedStyle(document.documentElement).getPropertyValue('--bg-surface').trim() || '#f7f9fc';
                           }}
                           onMouseLeave={(e) => {
-                            if (!isSelected) e.target.style.backgroundColor = '#21262d';
+                            if (!isSelected) e.target.style.backgroundColor = getComputedStyle(document.documentElement).getPropertyValue('--bg-elevated').trim() || '#eef4fb';
                           }}
                         >
                           <div style={{ fontWeight: isSelected ? '600' : '500', marginBottom: '2px', fontSize: '11px' }}>
@@ -1050,7 +1050,7 @@ const KeywordAnalysisDashboard = () => {
           {loadingKeywords ? (
             <div style={{ padding: '40px', textAlign: 'center' }}>
               <div className="loading" style={{ margin: '0 auto' }} />
-              <p style={{ color: '#9ca3af', fontSize: '12px', marginTop: '10px' }}>Loading keywords...</p>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '12px', marginTop: '10px' }}>Loading keywords...</p>
             </div>
           ) : (
           <table>
@@ -1132,7 +1132,7 @@ const KeywordAnalysisDashboard = () => {
                       </td>
                       <td>
                         {keyword.suggestedBid ? (
-                          <span style={{ fontSize: '10px', color: '#9ca3af' }}>
+                          <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
                             ${(keyword.suggestedBid.rangeStart / 100).toFixed(2)} - ${(keyword.suggestedBid.rangeEnd / 100).toFixed(2)}
                             <br />
                             <span style={{ color: '#60a5fa', fontWeight: 600 }}>
@@ -1167,7 +1167,7 @@ const KeywordAnalysisDashboard = () => {
               alignItems: 'center',
               background: 'var(--bg-elevated)'
             }}>
-              <div style={{ fontSize: '11px', color: '#9ca3af', marginRight: '10px' }}>
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginRight: '10px' }}>
                 Showing {sortedKeywords.length} of {pagination.totalItems} keywords
               </div>
               <button
@@ -1217,7 +1217,7 @@ const KeywordAnalysisDashboard = () => {
               alignItems: 'center',
               background: 'var(--bg-elevated)'
             }}>
-              <div style={{ fontSize: '11px', color: '#9ca3af' }}>
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
                 Showing all {pagination.totalItems} keywords
               </div>
             </div>

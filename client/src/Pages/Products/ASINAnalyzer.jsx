@@ -544,7 +544,7 @@ const ASINAnalyzer = () => {
           <div className="flex items-center gap-2">
             <Search className="w-4 h-4" style={{ color: '#60a5fa' }} />
             <div>
-              <h1 className="text-base font-bold" style={{ color: '#f3f4f6' }}>
+              <h1 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>
                 ASIN Analyzer
               </h1>
             </div>
@@ -567,7 +567,7 @@ const ASINAnalyzer = () => {
                 initial={hasAnimated ? false : { opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, delay: hasAnimated ? 0 : 0.5, ease: "easeOut" }}
-                className="text-xs mb-3" style={{ color: '#9ca3af' }}
+                className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}
               >
                 Enter an ASIN to get detailed analysis and optimization recommendations
               </motion.p>
@@ -589,7 +589,7 @@ const ASINAnalyzer = () => {
                 style={{ border: '1px solid #30363d' }}
               >
                 <div className="relative flex-1">
-                  <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5" style={{ color: '#6b7280' }} />
+                  <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5" style={{ color: 'var(--text-muted)' }} />
                   <input
                     type="text"
                     value={asin}
@@ -603,7 +603,7 @@ const ASINAnalyzer = () => {
                     }}
                     placeholder="Enter an Amazon product ASIN  Ex: B08N5WRWNW"
                     className="w-full pl-8 pr-3 py-2 rounded-l-lg text-xs transition-all duration-300"
-                    style={{ background: '#1a1a1a', border: 'none', color: '#f3f4f6' }}
+                    style={{ background: '#1a1a1a', border: 'none', color: 'var(--text-primary)' }}
                     onFocus={(e) => e.target.style.outline = 'none'}
                     onBlur={(e) => e.target.style.outline = 'none'}
                   />
@@ -615,7 +615,7 @@ const ASINAnalyzer = () => {
                     style={{ 
                       background: showMarketDropdown ? '#21262d' : '#1a1a1a',
                       borderColor: '#30363d',
-                      color: '#f3f4f6',
+                      color: 'var(--text-primary)',
                       borderRadius: '0 6px 6px 0'
                     }}
                     onMouseEnter={(e) => !showMarketDropdown && (e.target.style.background = '#161b22')}
@@ -640,7 +640,7 @@ const ASINAnalyzer = () => {
                       </div>
                       
                       {/* Dropdown arrow with animation */}
-                      <ChevronDown className={`w-3.5 h-3.5 transition-all duration-300 ${showMarketDropdown ? 'rotate-180' : ''}`} style={{ color: '#9ca3af' }} />
+                      <ChevronDown className={`w-3.5 h-3.5 transition-all duration-300 ${showMarketDropdown ? 'rotate-180' : ''}`} style={{ color: 'var(--text-secondary)' }} />
                     </button>
                     
                     <AnimatePresence>
@@ -654,7 +654,7 @@ const ASINAnalyzer = () => {
                           style={{ background: '#161b22', border: '1px solid #30363d', borderTop: 'none' }}
                         >
                         {/* Dropdown Header */}
-                        <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide" style={{ background: '#21262d', color: '#9ca3af' }}>
+                        <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide" style={{ background: '#21262d', color: 'var(--text-secondary)' }}>
                           SELECT MARKETPLACE
                         </div>
                         
@@ -882,8 +882,8 @@ const ASINAnalyzer = () => {
           <div className="flex items-center gap-2">
             <Search className="w-4 h-4" style={{ color: '#60a5fa' }} />
             <div>
-              <h1 className="text-base font-bold" style={{ color: '#f3f4f6' }}>Product Analysis Results</h1>
-              <p className="text-xs" style={{ color: '#f3f4f6' }}>ASIN: {asin} | Market: {market}</p>
+              <h1 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>Product Analysis Results</h1>
+              <p className="text-xs" style={{ color: 'var(--text-primary)' }}>ASIN: {asin} | Market: {market}</p>
             </div>
           </div>
           <button
@@ -894,7 +894,7 @@ const ASINAnalyzer = () => {
               handleNewSearch(); 
             }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
-            style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+            style={{ background: '#1a1a1a', border: '1px solid #30363d', color: 'var(--text-primary)' }}
             onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
             onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}
           >
@@ -921,16 +921,16 @@ const ASINAnalyzer = () => {
             <div className="flex-1 flex flex-col gap-2 md:ml-4">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                 <div>
-                  <div className="font-semibold text-sm" style={{ color: '#f3f4f6' }}>{analysisResult?.Title || 'Product Title'}</div>
-                  <div className="text-[10px] mt-1 flex flex-wrap gap-x-3 gap-y-0.5" style={{ color: '#f3f4f6' }}>
+                  <div className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{analysisResult?.Title || 'Product Title'}</div>
+                  <div className="text-[10px] mt-1 flex flex-wrap gap-x-3 gap-y-0.5" style={{ color: 'var(--text-primary)' }}>
                     <span>ASIN: {asin}</span>
                     <span>Category: {analysisResult?.category || 'N/A'}</span>
                   </div>
-                  <div className="text-[10px] mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5" style={{ color: '#f3f4f6' }}>
+                  <div className="text-[10px] mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5" style={{ color: 'var(--text-primary)' }}>
                     <span>Brand: {analysisResult?.Brand || 'N/A'}</span>
                     <span>Price: ${analysisResult?.price || 0}</span>
                   </div>
-                  <div className="text-[10px] mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5" style={{ color: '#f3f4f6' }}>
+                  <div className="text-[10px] mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5" style={{ color: 'var(--text-primary)' }}>
                     <span>Rating: {analysisResult?.starRatting ?? 0}/5</span>
                     <span>Reviews: {analysisResult?.ReviewsCount ?? 0}</span>
                   </div>
@@ -944,7 +944,7 @@ const ASINAnalyzer = () => {
                     downloadCSV(); 
                   }}
                   className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap"
-                  style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                  style={{ background: '#1a1a1a', border: '1px solid #30363d', color: 'var(--text-primary)' }}
                   onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
                   onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}
                 >
@@ -956,8 +956,8 @@ const ASINAnalyzer = () => {
               <div className="mt-2">
                 <div className="inline-block rounded-lg px-3 py-1.5" style={{ background: '#21262d', border: '1px solid #30363d' }}>
                   <div className="flex items-center gap-3">
-                    <span className="text-[10px] uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Health Score</span>
-                    <span className="font-bold text-sm px-2 py-0.5 rounded" style={{ background: '#1a1a1a', color: '#f3f4f6' }}>{Math.round(analysisResult?.score || 0)}/100</span>
+                    <span className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--text-primary)' }}>Health Score</span>
+                    <span className="font-bold text-sm px-2 py-0.5 rounded" style={{ background: '#1a1a1a', color: 'var(--text-primary)' }}>{Math.round(analysisResult?.score || 0)}/100</span>
                   </div>
                   <div className="w-32 h-1.5 rounded mt-1.5" style={{ background: '#21262d' }}>
                     <div className="h-1.5 rounded" style={{ width: `${analysisResult?.score || 0}%`, background: '#22c55e' }}></div>
@@ -968,7 +968,7 @@ const ASINAnalyzer = () => {
           </div>
           {/* Key Metrics */}
           <div className="mt-3">
-            <div className="font-semibold text-xs uppercase tracking-wide mb-2" style={{ color: '#f3f4f6' }}>KEY METRICS</div>
+            <div className="font-semibold text-xs uppercase tracking-wide mb-2" style={{ color: 'var(--text-primary)' }}>KEY METRICS</div>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
               {keyMetrics.map((metric, idx) => (
                 <div
@@ -976,11 +976,11 @@ const ASINAnalyzer = () => {
                   className="rounded-lg p-2 flex flex-col items-center gap-1"
                   style={{ background: '#21262d', border: '1px solid #30363d' }}
                 >
-                  <div className="flex items-center gap-1 text-[10px] mb-0.5" style={{ color: '#f3f4f6' }}>
+                  <div className="flex items-center gap-1 text-[10px] mb-0.5" style={{ color: 'var(--text-primary)' }}>
                     {metric.label}
-                    <Info size={12} style={{ color: '#6b7280' }} />
+                    <Info size={12} style={{ color: 'var(--text-muted)' }} />
                   </div>
-                  <div className="text-base font-bold" style={{ color: '#f3f4f6' }}>
+                  <div className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>
                     {metric.value}
                   </div>
                 </div>
@@ -991,19 +991,19 @@ const ASINAnalyzer = () => {
         
         {/* Product Analysis */}
         <div style={{ marginBottom: '10px' }}>
-          <div className="font-semibold text-xs uppercase tracking-wide mb-2" style={{ color: '#f3f4f6' }}>Product Analysis</div>
+          <div className="font-semibold text-xs uppercase tracking-wide mb-2" style={{ color: 'var(--text-primary)' }}>Product Analysis</div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
             {productAnalysis.map((item, idx) => (
               <div key={idx} className="rounded-lg p-2 flex flex-col gap-1.5" style={{ background: '#161b22', border: '1px solid #30363d' }}>
                 <div className="flex items-center justify-between">
-                  <span className="font-medium text-xs" style={{ color: '#f3f4f6' }}>{item.label}</span>
-                  <span className="text-[10px] font-bold" style={{ color: '#f3f4f6' }}>{item.score}/{item.max}</span>
+                  <span className="font-medium text-xs" style={{ color: 'var(--text-primary)' }}>{item.label}</span>
+                  <span className="text-[10px] font-bold" style={{ color: 'var(--text-primary)' }}>{item.score}/{item.max}</span>
                 </div>
                 <div className="w-full h-1.5 rounded" style={{ background: '#21262d' }}>
                   <div className="h-1.5 rounded" style={{ width: `${item.score}%`, background: '#22c55e' }}></div>
                 </div>
-                <div className="text-[10px]" style={{ color: '#f3f4f6' }}>Current: {item.current}</div>
-                <div className="text-[10px]" style={{ color: '#f3f4f6' }}>Recommended: {item.recommended}</div>
+                <div className="text-[10px]" style={{ color: 'var(--text-primary)' }}>Current: {item.current}</div>
+                <div className="text-[10px]" style={{ color: 'var(--text-primary)' }}>Recommended: {item.recommended}</div>
               </div>
             ))}
           </div>
@@ -1011,11 +1011,11 @@ const ASINAnalyzer = () => {
         
         {/* ISSUES SECTION */}
         <div style={{ marginTop: '10px' }}>
-          <div className="font-semibold text-xs uppercase tracking-wide mb-2" style={{ color: '#f3f4f6' }}>ISSUES</div>
+          <div className="font-semibold text-xs uppercase tracking-wide mb-2" style={{ color: 'var(--text-primary)' }}>ISSUES</div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {/* Donut Chart Card */}
             <div className="rounded-lg p-3 flex flex-col gap-3" style={{ background: '#161b22', border: '1px solid #30363d' }}>
-              <div className="text-xs" style={{ color: '#f3f4f6' }}>{totalErrors} Issues found with the product</div>
+              <div className="text-xs" style={{ color: 'var(--text-primary)' }}>{totalErrors} Issues found with the product</div>
               <div className="flex items-center gap-4">
                 {/* Donut Chart */}
                 <div className="relative w-24 h-24">
@@ -1037,7 +1037,7 @@ const ASINAnalyzer = () => {
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-lg font-bold" style={{ color: '#f3f4f6' }}>{totalErrors.toString().padStart(2, '0')}</span>
+                    <span className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{totalErrors.toString().padStart(2, '0')}</span>
                     <span className="text-[10px] font-semibold mt-0.5" style={{ color: '#f87171' }}>ERRORS</span>
                   </div>
                 </div>
@@ -1046,8 +1046,8 @@ const ASINAnalyzer = () => {
                   {issueData.map((item, idx) => (
                     <div key={item.name} className="flex items-center gap-1.5">
                       <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: item.color }}></span>
-                      <span className="w-16" style={{ color: '#f3f4f6' }}>{item.name}</span>
-                      <span className="font-semibold" style={{ color: '#f3f4f6' }}>{item.value.toString().padStart(2, '0')}</span>
+                      <span className="w-16" style={{ color: 'var(--text-primary)' }}>{item.name}</span>
+                      <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{item.value.toString().padStart(2, '0')}</span>
                     </div>
                   ))}
                 </div>
@@ -1055,30 +1055,30 @@ const ASINAnalyzer = () => {
             </div>
             {/* Ranking and Conversion Scores */}
             <div className="rounded-lg p-3 flex flex-col gap-4" style={{ background: '#161b22', border: '1px solid #30363d' }}>
-              <div className="text-xs font-semibold" style={{ color: '#f3f4f6' }}>Performance Scores</div>
+              <div className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>Performance Scores</div>
               
               {/* Ranking Score */}
               <div className="flex flex-col gap-2">
                 <div className="flex justify-between items-center">
-                  <span className="text-xs" style={{ color: '#f3f4f6' }}>Ranking Score</span>
-                  <span className="text-sm font-bold" style={{ color: '#f3f4f6' }}>{rankingScore.score}/{rankingScore.maxScore}</span>
+                  <span className="text-xs" style={{ color: 'var(--text-primary)' }}>Ranking Score</span>
+                  <span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{rankingScore.score}/{rankingScore.maxScore}</span>
                 </div>
                 <div className="w-full h-2 rounded" style={{ background: '#21262d' }}>
                   <div className="h-2 rounded" style={{ width: `${rankingScore.percentage}%`, background: '#fbbf24' }}></div>
                 </div>
-                <div className="text-[10px]" style={{ color: '#f3f4f6' }}>{rankingScore.percentage}% optimized</div>
+                <div className="text-[10px]" style={{ color: 'var(--text-primary)' }}>{rankingScore.percentage}% optimized</div>
               </div>
               
               {/* Conversion Score */}
               <div className="flex flex-col gap-2">
                 <div className="flex justify-between items-center">
-                  <span className="text-xs" style={{ color: '#f3f4f6' }}>Conversion Score</span>
-                  <span className="text-sm font-bold" style={{ color: '#f3f4f6' }}>{conversionScore.score}/{conversionScore.maxScore}</span>
+                  <span className="text-xs" style={{ color: 'var(--text-primary)' }}>Conversion Score</span>
+                  <span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{conversionScore.score}/{conversionScore.maxScore}</span>
                 </div>
                 <div className="w-full h-2 rounded" style={{ background: '#21262d' }}>
                   <div className="h-2 rounded" style={{ width: `${conversionScore.percentage}%`, background: '#3b82f6' }}></div>
                 </div>
-                <div className="text-[10px]" style={{ color: '#f3f4f6' }}>{conversionScore.percentage}% optimized</div>
+                <div className="text-[10px]" style={{ color: 'var(--text-primary)' }}>{conversionScore.percentage}% optimized</div>
               </div>
             </div>
           </div>
@@ -1090,9 +1090,9 @@ const ASINAnalyzer = () => {
             <div className="rounded-lg p-3" style={{ background: '#161b22', border: '1px solid #30363d' }}>
               {/* Header Row */}
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-2">
-                <div className="flex items-center gap-1.5 text-xs font-medium" style={{ color: '#f3f4f6' }}>
+                <div className="flex items-center gap-1.5 text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
                   TOTAL : {totalErrors} Issues found
-                  <Info size={12} style={{ color: '#6b7280' }} />
+                  <Info size={12} style={{ color: 'var(--text-muted)' }} />
                 </div>
               </div>
               {/* Issue Categories */}
@@ -1100,15 +1100,15 @@ const ASINAnalyzer = () => {
                 {issueCategories.map((cat, idx) => (
                   <div key={cat.title}>
                     {/* Category Header */}
-                    <div className="rounded-t px-2 py-1.5 font-semibold text-xs flex items-center" style={{ background: '#21262d', color: '#f3f4f6' }}>
+                    <div className="rounded-t px-2 py-1.5 font-semibold text-xs flex items-center" style={{ background: '#21262d', color: 'var(--text-primary)' }}>
                       {cat.title}
                     </div>
                     {/* Issue Rows */}
                     <div className="flex flex-col">
                       {cat.issues.map((issue, i) => (
-                        <div key={i} className="border-b last:border-b-0 px-2 py-2 text-xs" style={{ borderColor: '#30363d', background: '#161b22', color: '#f3f4f6' }}>
-                          <div className="font-medium mb-0.5" style={{ color: '#f3f4f6' }}>{issue.label}</div>
-                          <div style={{ color: '#f3f4f6' }}>{issue.message}</div>
+                        <div key={i} className="border-b last:border-b-0 px-2 py-2 text-xs" style={{ borderColor: '#30363d', background: '#161b22', color: 'var(--text-primary)' }}>
+                          <div className="font-medium mb-0.5" style={{ color: 'var(--text-primary)' }}>{issue.label}</div>
+                          <div style={{ color: 'var(--text-primary)' }}>{issue.message}</div>
                         </div>
                       ))}
                     </div>

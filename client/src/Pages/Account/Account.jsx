@@ -49,7 +49,7 @@ const AccountHistoryPanel = () => {
                 </div>
                 <div className="flex items-center gap-1.5">
                   <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#3b82f6' }}></div>
-                  <span className="text-xs" style={{ color: '#9ca3af' }}>Issues Count</span>
+                  <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Issues Count</span>
                 </div>
               </div>
             </div>

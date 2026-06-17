@@ -1186,15 +1186,15 @@ const ProfitabilityDashboard = () => {
                     </div>
                     <div>
                       <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Improve Profit Accuracy</h3>
-                      <p className="text-sm" style={{ color: '#9ca3af' }}>Get precise profitability insights</p>
+                      <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Get precise profitability insights</p>
                     </div>
                   </div>
                   <button
                     onClick={handleCloseCogsPopup}
                     className="transition-colors p-1"
-                    style={{ color: '#9ca3af' }}
-                    onMouseEnter={(e) => e.target.style.color = '#f3f4f6'}
-                    onMouseLeave={(e) => e.target.style.color = '#9ca3af'}
+                    style={{ color: 'var(--text-secondary)' }}
+                    onMouseEnter={(e) => e.target.style.color = 'var(--text-primary)'}
+                    onMouseLeave={(e) => e.target.style.color = 'var(--text-secondary)'}
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -1268,7 +1268,7 @@ const ProfitabilityDashboard = () => {
                   <div className="flex items-center gap-2">
                     <h1 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>Profitability Dashboard</h1>
                     <div className="relative group">
-                      <HelpCircle className="w-4 h-4 cursor-help transition-colors" style={{ color: '#9ca3af' }} onMouseEnter={(e) => e.target.style.color = '#d1d5db'} onMouseLeave={(e) => e.target.style.color = '#9ca3af'} />
+                      <HelpCircle className="w-4 h-4 cursor-help transition-colors" style={{ color: 'var(--text-secondary)' }} onMouseEnter={(e) => e.target.style.color = 'var(--text-primary)'} onMouseLeave={(e) => e.target.style.color = 'var(--text-secondary)'} />
                       <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50">
                         <div className="text-xs rounded-lg py-2 px-3 shadow-lg max-w-xs text-left" style={{ background: 'var(--bg-elevated)', color: 'var(--text-primary)', width: '256px', border: '1px solid #30363d' }}>
                           Advanced profitability analysis dashboard that tracks gross and net profit margins by product. Add COGS (Cost of Goods Sold) values to get accurate net profit calculations and identify underperforming products that need optimization.
@@ -1349,7 +1349,7 @@ const ProfitabilityDashboard = () => {
                             <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: '#60a5fa' }} />
                           )}
                           <div className="relative group">
-                            <HelpCircle className="w-3.5 h-3.5 cursor-help transition-colors" style={{ color: '#9ca3af' }} onMouseEnter={(e) => e.target.style.color = '#d1d5db'} onMouseLeave={(e) => e.target.style.color = '#9ca3af'} />
+                            <HelpCircle className="w-3.5 h-3.5 cursor-help transition-colors" style={{ color: 'var(--text-secondary)' }} onMouseEnter={(e) => e.target.style.color = 'var(--text-primary)'} onMouseLeave={(e) => e.target.style.color = 'var(--text-secondary)'} />
                             <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50">
                               <div className="text-xs rounded-lg py-2 px-3 shadow-lg max-w-xs text-left" style={{ background: 'var(--bg-elevated)', color: 'var(--text-primary)', width: '256px', border: '1px solid #30363d' }}>
                                 Visual comparison of your gross profit (sales minus Amazon fees and ad spend) versus total sales over time. The green area shows your gross profit, while the blue area represents total sales revenue. Use this to identify profitability trends and seasonal patterns.
@@ -1363,11 +1363,11 @@ const ProfitabilityDashboard = () => {
                     <div className="flex items-center gap-3 text-xs">
                       <div className="flex items-center gap-1.5">
                         <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#22c55e' }}></div>
-                        <span style={{ color: '#9ca3af' }}>Gross Profit</span>
+                        <span style={{ color: 'var(--text-secondary)' }}>Gross Profit</span>
                       </div>
                       <div className="flex items-center gap-1.5">
                         <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#3b82f6' }}></div>
-                        <span style={{ color: '#9ca3af' }}>Total Sales</span>
+                        <span style={{ color: 'var(--text-secondary)' }}>Total Sales</span>
                       </div>
                     </div>
                   </div>
@@ -1377,7 +1377,7 @@ const ProfitabilityDashboard = () => {
                     <div className="animate-pulse flex items-center justify-center" style={{ height: 280, background: 'var(--bg-base)', borderRadius: '8px' }}>
                       <div className="text-center">
                         <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" style={{ color: '#60a5fa' }} />
-                        <span style={{ color: '#9ca3af', fontSize: '12px' }}>Loading chart data...</span>
+                        <span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>Loading chart data...</span>
                       </div>
                     </div>
                   ) : (
@@ -1464,7 +1464,7 @@ const ProfitabilityDashboard = () => {
                     onClick={() => setProfitabilityTab('table')}
                     className="flex-1 py-3 px-4 text-sm font-medium transition-colors flex items-center justify-center gap-2"
                     style={{
-                      color: profitabilityTab === 'table' ? '#f3f4f6' : '#9ca3af',
+                      color: profitabilityTab === 'table' ? 'var(--text-primary)' : 'var(--text-secondary)',
                       borderBottom: profitabilityTab === 'table' ? '2px solid #60a5fa' : '2px solid transparent',
                       background: profitabilityTab === 'table' ? 'rgba(96, 165, 250, 0.08)' : 'transparent'
                     }}
@@ -1477,7 +1477,7 @@ const ProfitabilityDashboard = () => {
                     onClick={() => setProfitabilityTab('issues')}
                     className="flex-1 py-3 px-4 text-sm font-medium transition-colors flex items-center justify-center gap-2"
                     style={{
-                      color: profitabilityTab === 'issues' ? '#f3f4f6' : '#9ca3af',
+                      color: profitabilityTab === 'issues' ? 'var(--text-primary)' : 'var(--text-secondary)',
                       borderBottom: profitabilityTab === 'issues' ? '2px solid #60a5fa' : '2px solid transparent',
                       background: profitabilityTab === 'issues' ? 'rgba(96, 165, 250, 0.08)' : 'transparent'
                     }}

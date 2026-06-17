@@ -444,7 +444,7 @@ export default function Tasks() {
       case 'low':
         return { color: '#22c55e', background: 'rgba(34, 197, 94, 0.2)', border: 'rgba(34, 197, 94, 0.3)' };
       default:
-        return { color: '#9ca3af', background: 'rgba(156, 163, 175, 0.2)', border: 'rgba(156, 163, 175, 0.3)' };
+        return { color: 'var(--text-secondary)', background: 'rgba(156, 163, 175, 0.2)', border: 'rgba(156, 163, 175, 0.3)' };
     }
   };
 
@@ -464,7 +464,7 @@ export default function Tasks() {
       case 'sponsored ads':
         return { color: '#c084fc', background: 'rgba(192, 132, 252, 0.2)', border: 'rgba(192, 132, 252, 0.3)' };
       default:
-        return { color: '#9ca3af', background: 'rgba(156, 163, 175, 0.2)', border: 'rgba(156, 163, 175, 0.3)' };
+        return { color: 'var(--text-secondary)', background: 'rgba(156, 163, 175, 0.2)', border: 'rgba(156, 163, 175, 0.3)' };
     }
   };
 
@@ -579,7 +579,7 @@ export default function Tasks() {
           {/* Search */}
           <div className='flex-1 min-w-0'>
             <div className='relative'>
-              <Search className='absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5' style={{ color: '#6b7280' }} />
+              <Search className='absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5' style={{ color: 'var(--text-muted)' }} />
               <input
                 type='text'
                 placeholder='Search tasks...'
@@ -640,7 +640,7 @@ export default function Tasks() {
                   <th 
                     className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide cursor-pointer transition-colors w-[60px]'
                     onClick={() => handleSort('slNo')}
-                    style={{ color: '#9ca3af' }}
+                    style={{ color: 'var(--text-secondary)' }}
                     onMouseEnter={(e) => e.target.style.color = '#d1d5db'}
                     onMouseLeave={(e) => e.target.style.color = '#9ca3af'}
                   >
@@ -656,7 +656,7 @@ export default function Tasks() {
                   <th 
                     className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide cursor-pointer transition-colors min-w-[200px] max-w-[350px]'
                     onClick={() => handleSort('product')}
-                    style={{ color: '#9ca3af' }}
+                    style={{ color: 'var(--text-secondary)' }}
                     onMouseEnter={(e) => e.target.style.color = '#d1d5db'}
                     onMouseLeave={(e) => e.target.style.color = '#9ca3af'}
                   >
@@ -672,7 +672,7 @@ export default function Tasks() {
                   <th 
                     className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide cursor-pointer transition-colors min-w-[130px]'
                     onClick={() => handleSort('asin')}
-                    style={{ color: '#9ca3af' }}
+                    style={{ color: 'var(--text-secondary)' }}
                     onMouseEnter={(e) => e.target.style.color = '#d1d5db'}
                     onMouseLeave={(e) => e.target.style.color = '#9ca3af'}
                   >
@@ -688,7 +688,7 @@ export default function Tasks() {
                   <th 
                     className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide cursor-pointer transition-colors w-[110px]'
                     onClick={() => handleSort('errorCategory')}
-                    style={{ color: '#9ca3af' }}
+                    style={{ color: 'var(--text-secondary)' }}
                     onMouseEnter={(e) => e.target.style.color = '#d1d5db'}
                     onMouseLeave={(e) => e.target.style.color = '#9ca3af'}
                   >
@@ -704,7 +704,7 @@ export default function Tasks() {
                   <th 
                     className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide cursor-pointer transition-colors'
                     onClick={() => handleSort('error')}
-                    style={{ color: '#9ca3af' }}
+                    style={{ color: 'var(--text-secondary)' }}
                     onMouseEnter={(e) => e.target.style.color = '#d1d5db'}
                     onMouseLeave={(e) => e.target.style.color = '#9ca3af'}
                   >
@@ -717,10 +717,10 @@ export default function Tasks() {
                       )}
                     </div>
                   </th>
-                  <th className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide' style={{ color: '#9ca3af' }}>
+                  <th className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide' style={{ color: 'var(--text-secondary)' }}>
                     How To Solve
                   </th>
-                  <th className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide w-[100px]' style={{ color: '#9ca3af' }}>
+                  <th className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide w-[100px]' style={{ color: 'var(--text-secondary)' }}>
                     Status
                   </th>
                 </tr>
@@ -749,13 +749,13 @@ export default function Tasks() {
                       <td className='px-2 py-2 text-[11px] min-w-[130px]' style={{ color: 'var(--text-primary)' }}>
                         <div className='space-y-0.5'>
                           <div className='flex items-center gap-1'>
-                            <span className='text-[10px] font-medium' style={{ color: '#9ca3af' }}>ASIN:</span>
+                            <span className='text-[10px] font-medium' style={{ color: 'var(--text-secondary)' }}>ASIN:</span>
                             <span className='font-mono' style={{ color: 'var(--text-primary)' }}>{item.asin}</span>
                           </div>
                           {item.sku && (
                             <div className='flex items-center gap-1'>
-                              <span className='text-[10px] font-medium' style={{ color: '#9ca3af' }}>SKU:</span>
-                              <span className='font-mono text-[10px]' style={{ color: '#9ca3af' }}>{item.sku}</span>
+                              <span className='text-[10px] font-medium' style={{ color: 'var(--text-secondary)' }}>SKU:</span>
+                              <span className='font-mono text-[10px]' style={{ color: 'var(--text-secondary)' }}>{item.sku}</span>
                             </div>
                           )}
                         </div>
@@ -806,10 +806,10 @@ export default function Tasks() {
                   <tr>
                     <td colSpan="7" className='px-4 py-8 text-center'>
                       <div className='flex flex-col items-center gap-2'>
-                        <AlertTriangle className='w-6 h-6' style={{ color: '#6b7280' }} />
+                        <AlertTriangle className='w-6 h-6' style={{ color: 'var(--text-muted)' }} />
                         <div>
                           <h3 className='text-sm font-medium' style={{ color: 'var(--text-primary)' }}>No tasks found</h3>
-                          <p className='text-xs mt-1' style={{ color: '#9ca3af' }}>
+                          <p className='text-xs mt-1' style={{ color: 'var(--text-secondary)' }}>
                             {searchQuery || filterCategory !== 'all' 
                               ? 'Try adjusting your search or filter criteria' 
                               : 'No issues detected in your account'
@@ -828,7 +828,7 @@ export default function Tasks() {
           {filteredAndSortedData.length > 0 && (
             <div className="flex items-center justify-between px-3 py-2 border-t" style={{ background: 'var(--bg-elevated)', borderTop: '1px solid #30363d' }}>
               <div className="flex items-center gap-2">
-                <span className="text-xs" style={{ color: '#9ca3af' }}>
+                <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
                   Showing {filteredAndSortedData.length > 0 ? indexOfFirstItem + 1 : 0} to {Math.min(indexOfLastItem, filteredAndSortedData.length)} of {filteredAndSortedData.length} tasks
                 </span>
               </div>
@@ -844,7 +844,7 @@ export default function Tasks() {
                       ? 'cursor-not-allowed' 
                       : ''
                   }`}
-                  style={currentPage === 1 ? { background: 'var(--bg-elevated)', color: '#6b7280' } : { background: 'var(--bg-base)', color: 'var(--text-primary)', border: '1px solid #30363d' }}
+                  style={currentPage === 1 ? { background: 'var(--bg-elevated)', color: 'var(--text-muted)' } : { background: 'var(--bg-base)', color: 'var(--text-primary)', border: '1px solid #30363d' }}
                   onMouseEnter={(e) => currentPage !== 1 && (e.target.style.borderColor = '#3b82f6')}
                   onMouseLeave={(e) => currentPage !== 1 && (e.target.style.borderColor = '#30363d')}
                   aria-label="Previous page"
@@ -869,7 +869,7 @@ export default function Tasks() {
                       ? 'cursor-not-allowed' 
                       : ''
                   }`}
-                  style={(currentPage === totalPages || totalPages === 0) ? { background: 'var(--bg-elevated)', color: '#6b7280' } : { background: 'var(--bg-base)', color: 'var(--text-primary)', border: '1px solid #30363d' }}
+                  style={(currentPage === totalPages || totalPages === 0) ? { background: 'var(--bg-elevated)', color: 'var(--text-muted)' } : { background: 'var(--bg-base)', color: 'var(--text-primary)', border: '1px solid #30363d' }}
                   onMouseEnter={(e) => (currentPage !== totalPages && totalPages !== 0) && (e.target.style.borderColor = '#3b82f6')}
                   onMouseLeave={(e) => (currentPage !== totalPages && totalPages !== 0) && (e.target.style.borderColor = '#30363d')}
                   aria-label="Next page"
