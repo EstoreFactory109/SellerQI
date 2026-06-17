@@ -15,6 +15,35 @@
   --accent-hover: #58a6ff;
 }
 
+/* Light mode overrides — only when user explicitly selects light */
+[data-theme="light"] {
+  --bg-base: #f7f9fc;
+  --bg-surface: #ffffff;
+  --bg-elevated: #eef4fb;
+  --bg-hover: #e6f0fb;
+  --border-dark: #d6e0ea;
+  --border-muted: #e5edf5;
+  --text-primary: #102033;
+  --text-secondary: #475569;
+  --text-muted: #718096;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-soft: #dbeafe;
+}
+
+[data-theme="light"] input,
+[data-theme="light"] textarea,
+[data-theme="light"] select {
+  color: var(--text-primary);
+  background-color: var(--bg-surface);
+  border-color: var(--border-dark);
+}
+
+[data-theme="light"] input::placeholder,
+[data-theme="light"] textarea::placeholder {
+  color: var(--text-muted);
+}
+
 html {
   scroll-behavior: smooth;
 }
