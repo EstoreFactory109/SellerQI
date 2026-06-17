@@ -4,11 +4,13 @@ import Chart from "react-apexcharts";
 import { useSelector } from 'react-redux';
 import {useNavigate} from 'react-router-dom'
 import TooltipBox from '../../ToolTipBox/ToolTipBoxBottom.jsx'
+import { useTheme } from '../../../hooks/useTheme.js'
 
 const AccountHealth = () => {
 const info = useSelector(state => state.Dashboard?.DashBoardInfo)
-const [tooltip,setToolTip] = useState(false)  
+const [tooltip,setToolTip] = useState(false)
 const navigatie = useNavigate()
+const { theme } = useTheme()
 
   const healthPercentage = info?.accountHealthPercentage?.Percentage || 0;
   const healthStatus = info?.accountHealthPercentage?.status || 'POOR' ;
@@ -58,7 +60,7 @@ const navigatie = useNavigate()
         startAngle: -135,
         endAngle: 135,
         track: {
-          background: "#21262d",
+          background: theme === 'light' ? '#e2e8f0' : '#21262d',
           strokeWidth: "100%",
         },
         hollow: {
@@ -77,7 +79,7 @@ const navigatie = useNavigate()
     fill: {
       type: "gradient",
       gradient: {
-        shade: "dark",
+        shade: theme === 'light' ? 'light' : 'dark',
         type: "horizontal",
         shadeIntensity: 0.6,
         gradientToColors: ["#2563eb"],

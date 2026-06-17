@@ -132,6 +132,66 @@
 [data-theme="light"] ::-webkit-scrollbar-track { background: #f1f5f9; }
 [data-theme="light"] ::-webkit-scrollbar-thumb { background: #cbd5e1; }
 
+/* ── Semantic Tailwind token overrides (from tailwind.config.js custom colors) ── */
+[data-theme="light"] .bg-surface-elevated  { background-color: #eef4fb !important; }
+[data-theme="light"] .bg-surface-hover     { background-color: #e6f0fb !important; }
+[data-theme="light"] .border-border-dark   { border-color: #d6e0ea !important; }
+[data-theme="light"] .border-border-muted  { border-color: #e5edf5 !important; }
+[data-theme="light"] .text-content-primary   { color: #102033 !important; }
+[data-theme="light"] .text-content-secondary { color: #475569 !important; }
+[data-theme="light"] .text-content-muted     { color: #718096 !important; }
+
+/* ── Inline style catch-all: override `style={{ background: '#hex' }}` ────────
+   React renders camelCase inline styles as their CSS property equivalents.
+   attribute selector + !important overrides inline styles in the cascade.
+─────────────────────────────────────────────────────────────────────────── */
+
+/* background shorthand (style={{ background: '#...' }}) */
+[data-theme="light"] [style*="background: #1a1a1a"],
+[data-theme="light"] [style*="background:#1a1a1a"]  { background: var(--bg-base) !important; }
+[data-theme="light"] [style*="background: #161b22"],
+[data-theme="light"] [style*="background:#161b22"]  { background: var(--bg-surface) !important; }
+[data-theme="light"] [style*="background: #21262d"],
+[data-theme="light"] [style*="background:#21262d"]  { background: var(--bg-elevated) !important; }
+[data-theme="light"] [style*="background: #1c2128"],
+[data-theme="light"] [style*="background:#1c2128"]  { background: var(--bg-hover) !important; }
+[data-theme="light"] [style*="background: #30363d"],
+[data-theme="light"] [style*="background:#30363d"]  { background: #e5edf5 !important; }
+[data-theme="light"] [style*="background: #0d0f12"],
+[data-theme="light"] [style*="background:#0d0f12"]  { background: #f0f4f8 !important; }
+[data-theme="light"] [style*="background: #0d1117"],
+[data-theme="light"] [style*="background:#0d1117"]  { background: #f0f6ff !important; }
+[data-theme="light"] [style*="background: #111"],
+[data-theme="light"] [style*="background:#111"]     { background: var(--bg-surface) !important; }
+
+/* background-color property (style={{ backgroundColor: '#...' }}) */
+[data-theme="light"] [style*="background-color: #1a1a1a"],
+[data-theme="light"] [style*="background-color:#1a1a1a"]  { background-color: var(--bg-base) !important; }
+[data-theme="light"] [style*="background-color: #161b22"],
+[data-theme="light"] [style*="background-color:#161b22"]  { background-color: var(--bg-surface) !important; }
+[data-theme="light"] [style*="background-color: #21262d"],
+[data-theme="light"] [style*="background-color:#21262d"]  { background-color: var(--bg-elevated) !important; }
+[data-theme="light"] [style*="background-color: #1c2128"],
+[data-theme="light"] [style*="background-color:#1c2128"]  { background-color: var(--bg-hover) !important; }
+[data-theme="light"] [style*="background-color: #30363d"],
+[data-theme="light"] [style*="background-color:#30363d"]  { background-color: #e5edf5 !important; }
+
+/* border-color property */
+[data-theme="light"] [style*="border-color: #30363d"],
+[data-theme="light"] [style*="border-color:#30363d"]  { border-color: var(--border-dark) !important; }
+[data-theme="light"] [style*="border-color: #21262d"],
+[data-theme="light"] [style*="border-color:#21262d"]  { border-color: var(--border-muted) !important; }
+[data-theme="light"] [style*="border-color: #161b22"],
+[data-theme="light"] [style*="border-color:#161b22"]  { border-color: #e2e8f0 !important; }
+
+/* color (text) property — only override the near-white tones */
+[data-theme="light"] [style*="color: #e6edf3"],
+[data-theme="light"] [style*="color:#e6edf3"]  { color: var(--text-primary) !important; }
+[data-theme="light"] [style*="color: #8b949e"],
+[data-theme="light"] [style*="color:#8b949e"]  { color: var(--text-secondary) !important; }
+[data-theme="light"] [style*="color: #6e7681"],
+[data-theme="light"] [style*="color:#6e7681"]  { color: var(--text-muted) !important; }
+
 html {
   scroll-behavior: smooth;
 }
