@@ -9,6 +9,9 @@ lerna-debug.log*
 
 node_modules
 
+# Build output (built on CI and copied to the server — never commit)
+dist
+
 *.local
 .env
 
