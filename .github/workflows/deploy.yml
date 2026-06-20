@@ -92,7 +92,13 @@ jobs:
             pm2 kill || true
 
             echo "── Pulling latest changes ──"
-            git pull origin main
+            git fetch origin main
+            # client/dist is built on the CI runner and SCP'd here, so it must NOT
+            # be tracked. If an older checkout still tracks it, untrack it locally
+            # (keeps the SCP'd files) so it can't block the update, then hard-reset
+            # server code to origin. reset --hard leaves the untracked SCP'd dist intact.
+            git rm -r --cached client/dist 2>/dev/null || true
+            git reset --hard origin/main
 
             echo "── Installing server dependencies ──"
             npm install --omit=dev --ignore-scripts
