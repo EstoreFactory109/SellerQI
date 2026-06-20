@@ -36,9 +36,11 @@ const getProfileId=asyncHandler(async(req,res)=>{
     
     const profileId=await getProfileById(accessToken,region ,country,userId);
     
-    // Check if profile data was retrieved successfully
-    if(!profileId || profileId === false) {
-        return res.status(404).json(new ApiResponse(404,"","No profile IDs found. Please ensure your Amazon Ads account has at least one advertising profile."));
+    // Check if profile data was retrieved successfully.
+    // Note: an empty array is truthy in JS, so it must be checked explicitly —
+    // otherwise a "no profiles" response would be returned as a misleading 200.
+    if(!profileId || profileId === false || (Array.isArray(profileId) && profileId.length === 0)) {
+        return res.status(404).json(new ApiResponse(404,"","No advertising profiles found for this Amazon account. Please ensure Amazon Advertising is set up for this marketplace, or reconnect using the account that manages your ads."));
     }
     
     return res.status(200).json(new ApiResponse(200,profileId,'Profile ID fetched successfully'));

@@ -667,7 +667,8 @@ async function handleFinanceQuery(interpretation, userContext, requestDateRange)
           logger.info('[FinanceEngine] single_asin requested without an ASIN; falling back to summary');
           return buildSummaryResponse(financeSummary, dateRange);
         }
-        return await buildSingleAsinResponse(asin, userContext, dateRange, cogs);
+        // Reuse the asinWise rows already fetched above (getDashboard) — no extra query.
+        return await buildSingleAsinResponse(asin, userContext, dateRange, cogs, dashboardData.asinWise);
       }
       case 'asin_comparison':
         return await buildAsinComparisonResponse(interpretation?.entities?.asins, userContext, dateRange, cogs);
@@ -908,28 +909,68 @@ function computeAsinRowEntry(row, cogsMap) {
 }
 
 /**
+ * Build the per-ASIN fee breakdown (absolute line items, sorted desc) from a
+ * getAsinWisePL() row's raw fee fields — same categories the dashboard shows.
+ */
+function buildAsinFeeBreakdown(row) {
+  const breakdown = [];
+  const push = (category, amount) => {
+    const a = Math.round((Number(amount) || 0) * 100) / 100;
+    if (a !== 0) breakdown.push({ category, amount: Math.abs(a) });
+  };
+  push('FBA Fulfillment Fee', row.fbaFulfillmentFee);
+  push('Referral Commission', row.referralCommission);
+  push('Closing Fee', row.closingFee);
+  push('Technology Fee', row.technologyFee);
+  push('Shipping Chargeback', row.shippingChargeback);
+  push('Gift Wrap Chargeback', row.giftWrapChargeback);
+  push('FBA Disposal Fee', row.fbaDisposalFee);
+  push('Compensated Clawback', row.fbaReversedReimbursement);
+  push('Refunded Amount', row.refundedAmount);
+  push('Refund Commission', row.refundCommission);
+  push('Refunded Referral Fee', row.refundedReferralFee);
+  push('Refunded Promotion', row.refundedPromotion);
+  push('Restocking Fee', row.restockingFee);
+  push('FBA Inventory Reimbursement', row.fbaInventoryReimbursement);
+  push('Promotions Discount', row.promotionsDiscount);
+  push('Shipping Discount', row.shippingDiscount);
+  for (const item of (row.otherExpensesBreakdown || [])) push(item.category, item.amount);
+  if (row.adsSpendSP) push('Sponsored Products (SP)', row.adsSpendSP);
+  if (row.adsSpendSD) push('Sponsored Display (SD)', row.adsSpendSD);
+  return breakdown.sort((a, b) => b.amount - a.amount);
+}
+
+/**
  * HANDLER 1 — Single-ASIN P&L.
  * For "Show me profitability for B0XXXXXXXXX" / "FBA fees for B0XXXXXXXXX".
  *
- * getAsinSnapshot returns AGGREGATED expense fields (not individual fee fields),
- * so per the spec we fall back to snapshot.totalExpenses + snapshot.breakdown.
- * snapshot.totalExpenses already includes ad spend and nets reimbursements.
+ * Dashboard parity: uses the ASIN's getAsinWisePL() row + computeAsinRowEntry —
+ * the SAME path the Profitability Dashboard and QMate's other finance handlers
+ * use — so single-ASIN expenses/profit can never drift from the dashboard. (The
+ * earlier getAsinSnapshot path hand-rolled an expense subset that omitted tax
+ * adjustments, the otherExpenses catch-all, and refund credits, overstating
+ * profit. getAsinSnapshot is a SHARED dashboard endpoint and is left untouched.)
  *
+ * @param {Array} [asinWiseRows] - pre-fetched getAsinWisePL() rows (handleFinanceQuery
+ *        already has them via getDashboard); when omitted they are fetched here.
  * @returns {Object} { type:'single_asin', dateRange, asin, productName, metrics, feeBreakdown, healthIndicator }
  */
-async function buildSingleAsinResponse(asin, userContext, dateRange, cogs) {
+async function buildSingleAsinResponse(asin, userContext, dateRange, cogs, asinWiseRows) {
   const normalizedAsin = String(asin || '').trim().toUpperCase();
-  const snapshot = await FinanceDashboardReadService.getAsinSnapshot({
-    userId: userContext.userId,
-    country: userContext.country,
-    region: userContext.region,
-    startDate: dateRange.startDate,
-    endDate: dateRange.endDate,
-    asin: normalizedAsin,
-  });
 
-  if (!snapshot) {
-    logger.info('[FinanceEngine] No snapshot for ASIN; returning empty single_asin', { asin: normalizedAsin });
+  const rows = Array.isArray(asinWiseRows)
+    ? asinWiseRows
+    : await FinanceDashboardReadService.getAsinWisePL({
+        userId: userContext.userId,
+        country: userContext.country,
+        region: userContext.region,
+        startDate: dateRange.startDate,
+        endDate: dateRange.endDate,
+      });
+  const row = (rows || []).find((r) => String(r.asin || '').toUpperCase() === normalizedAsin);
+
+  if (!row) {
+    logger.info('[FinanceEngine] No asinWise row for ASIN; returning empty single_asin', { asin: normalizedAsin });
     return {
       type: 'single_asin',
       dateRange,
@@ -946,65 +987,60 @@ async function buildSingleAsinResponse(asin, userContext, dateRange, cogs) {
     };
   }
 
-  const productSales = snapshot.totalSales || 0;
-  const unitsSold = snapshot.unitsSold || 0;
-  const cogsPerUnit = (cogs?.cogsMap && cogs.cogsMap.get(normalizedAsin)) || 0;
-  const totalCogs = cogsPerUnit * unitsSold;
-
-  // Fallback path: snapshot exposes aggregated totalExpenses (incl. ad spend,
-  // net of reimbursements) rather than individual fee fields.
-  const displayExpenses = snapshot.totalExpenses || 0;
-  const profit = productSales - displayExpenses - totalCogs;
-  const profitMargin = productSales > 0 ? (profit / productSales) * 100 : 0;
+  const cogsMap = cogs && cogs.cogsMap;
+  const entry = computeAsinRowEntry(row, cogsMap); // canonical dashboard-parity P&L
+  const cogsPerUnit = (cogsMap && cogsMap.get(normalizedAsin)) || 0;
+  const profitMargin = entry.profitMargin;
 
   return {
     type: 'single_asin',
     dateRange,
     asin: normalizedAsin,
-    productName: snapshot.productName || normalizedAsin,
+    productName: row.productName || normalizedAsin,
     metrics: {
-      productSales,
-      unitsSold,
-      orderCount: snapshot.orderCount || 0,
-      totalExpenses: displayExpenses,
-      cogs: totalCogs,
+      productSales: entry.productSales,
+      unitsSold: entry.units,
+      orderCount: Number(row.orderCount || 0),
+      totalExpenses: entry.totalExpenses,
+      cogs: entry.cogs,
       cogsPerUnit,
-      grossProfit: profit,
+      grossProfit: entry.grossProfit,
       profitMargin,
-      adSpend: snapshot.adsSpend || 0,
-      reimbursements: Math.abs(snapshot.reimbursements || snapshot.fbaInventoryReimbursement || 0),
+      adSpend: entry.adSpend,
+      reimbursements: Math.abs(row.fbaInventoryReimbursement || 0),
     },
-    feeBreakdown: (snapshot.breakdown || [])
-      .map((item) => ({
-        category: item.category || item.name,
-        amount: Math.abs(item.amount || 0),
-      }))
-      .filter((item) => item.amount > 0)
-      .sort((a, b) => b.amount - a.amount),
+    feeBreakdown: buildAsinFeeBreakdown(row),
     healthIndicator: profitMargin > 15 ? 'PROFITABLE' : profitMargin > 0 ? 'LOW_MARGIN' : 'LOSS_MAKING',
   };
 }
 
 /**
- * Compute one ASIN's P&L from its snapshot (same approach as
- * buildSingleAsinResponse: getAsinSnapshot exposes AGGREGATED expenses, not
- * individual fee fields, so we use snapshot.totalExpenses + COGS). Returns the
- * canonical per-product comparison entry shape.
+ * Compute one ASIN's comparison P&L from its getAsinWisePL() row via the
+ * canonical computeAsinRowEntry kernel — dashboard parity, identical to
+ * buildSingleAsinResponse. (Previously used getAsinSnapshot's hand-rolled
+ * expense subset, which omitted tax adjustments, the otherExpenses catch-all,
+ * and refund credits, overstating profit. getAsinSnapshot is a SHARED dashboard
+ * endpoint and is left untouched.)
  *
+ * @param {Array} [asinWiseRows] - pre-fetched getAsinWisePL() rows (the comparison
+ *        handler fetches once and shares); fetched here if omitted.
  * @returns {Promise<Object>} { asin, productName, productSales, units, totalExpenses, cogs, adSpend, grossProfit, profitMargin, feeBreakdown, notFound? }
  */
-async function computeAsinComparisonEntry(asin, userContext, dateRange, cogs) {
+async function computeAsinComparisonEntry(asin, userContext, dateRange, cogs, asinWiseRows) {
   const normalizedAsin = String(asin || '').trim().toUpperCase();
-  const snapshot = await FinanceDashboardReadService.getAsinSnapshot({
-    userId: userContext.userId,
-    country: userContext.country,
-    region: userContext.region,
-    startDate: dateRange.startDate,
-    endDate: dateRange.endDate,
-    asin: normalizedAsin,
-  });
 
-  if (!snapshot) {
+  const rows = Array.isArray(asinWiseRows)
+    ? asinWiseRows
+    : await FinanceDashboardReadService.getAsinWisePL({
+        userId: userContext.userId,
+        country: userContext.country,
+        region: userContext.region,
+        startDate: dateRange.startDate,
+        endDate: dateRange.endDate,
+      });
+  const row = (rows || []).find((r) => String(r.asin || '').toUpperCase() === normalizedAsin);
+
+  if (!row) {
     return {
       asin: normalizedAsin,
       productName: normalizedAsin,
@@ -1020,28 +1056,18 @@ async function computeAsinComparisonEntry(asin, userContext, dateRange, cogs) {
     };
   }
 
-  const productSales = snapshot.totalSales || 0;
-  const units = snapshot.unitsSold || 0;
-  const cogsPerUnit = (cogs?.cogsMap && cogs.cogsMap.get(normalizedAsin)) || 0;
-  const totalCogs = cogsPerUnit * units;
-  const totalExpenses = snapshot.totalExpenses || 0; // aggregated, incl. ad spend, net reimbursements
-  const grossProfit = productSales - totalExpenses - totalCogs;
-  const profitMargin = productSales > 0 ? (grossProfit / productSales) * 100 : 0;
-
+  const entry = computeAsinRowEntry(row, cogs && cogs.cogsMap); // canonical dashboard-parity P&L
   return {
     asin: normalizedAsin,
-    productName: snapshot.productName || normalizedAsin,
-    productSales,
-    units,
-    totalExpenses,
-    cogs: totalCogs,
-    adSpend: snapshot.adsSpend || 0,
-    grossProfit,
-    profitMargin,
-    feeBreakdown: (snapshot.breakdown || [])
-      .map((item) => ({ category: item.category || item.name, amount: Math.abs(item.amount || 0) }))
-      .filter((item) => item.amount > 0)
-      .sort((a, b) => b.amount - a.amount),
+    productName: row.productName || normalizedAsin,
+    productSales: entry.productSales,
+    units: entry.units,
+    totalExpenses: entry.totalExpenses,
+    cogs: entry.cogs,
+    adSpend: entry.adSpend,
+    grossProfit: entry.grossProfit,
+    profitMargin: entry.profitMargin,
+    feeBreakdown: buildAsinFeeBreakdown(row),
   };
 }
 
@@ -1069,9 +1095,19 @@ async function buildAsinComparisonResponse(asins, userContext, dateRange, cogs) 
     return { type: 'asin_comparison', dateRange, products: [], winner: null, differences: null, note: 'Provide at least two ASINs to compare.' };
   }
 
+  // Fetch the dashboard-parity rows ONCE and share across every ASIN entry —
+  // comparing N products is one query, not N.
+  const asinWiseRows = await FinanceDashboardReadService.getAsinWisePL({
+    userId: userContext.userId,
+    country: userContext.country,
+    region: userContext.region,
+    startDate: dateRange.startDate,
+    endDate: dateRange.endDate,
+  });
+
   const products = [];
   for (const asin of list) {
-    products.push(await computeAsinComparisonEntry(asin, userContext, dateRange, cogs));
+    products.push(await computeAsinComparisonEntry(asin, userContext, dateRange, cogs, asinWiseRows));
   }
 
   // Winner per dimension (highest value wins). Generalizes to 2+ products.

@@ -515,7 +515,7 @@ class ScheduledIntegration {
             }
 
             const RefreshToken = getSellerAccount.spiRefreshToken;
-            const AdsRefreshToken = getSellerAccount.adsRefreshToken;
+            let AdsRefreshToken = getSellerAccount.adsRefreshToken;
 
             if (!RefreshToken && !AdsRefreshToken) {
                 return { success: false, statusCode: 400, error: "Both SP-API and Amazon Ads refresh tokens are missing" };
@@ -536,14 +536,14 @@ class ScheduledIntegration {
                 return { success: false, statusCode: 400, error: "Seller ID not found" };
             }
 
-            // Validate ProfileId if AdsRefreshToken exists (Ads functions require ProfileId)
+            // Ads requires a ProfileId. If it's missing, do NOT abort the whole
+            // integration — SP-API / MCP / Finance are independent of Ads. Null the
+            // Ads refresh token so no Ads access token is generated downstream and
+            // every Ads call site (gated on AdsAccessToken) is skipped cleanly,
+            // while SP-API data fetching proceeds normally.
             if (AdsRefreshToken && !ProfileId) {
                 logger.warn("Amazon Ads ProfileId is missing - Ads functions will be skipped", { userId, Region, Country });
-                return {
-                    success: false,
-                    statusCode: 400,
-                    error: "Amazon Ads ProfileId is missing. Please set up your Amazon Ads profile for this region and country."
-                };
+                AdsRefreshToken = null;
             }
 
             return {

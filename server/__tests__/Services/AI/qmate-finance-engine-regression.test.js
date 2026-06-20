@@ -267,6 +267,9 @@ describe('FinanceEngine — Section 2: Handler return shapes', () => {
     beforeEach(() => {
         jest.spyOn(readSvc, 'getDashboard').mockResolvedValue(MOCK_DASHBOARD);
         jest.spyOn(readSvc, 'getAsinSnapshot').mockResolvedValue(MOCK_SNAPSHOT);
+        // buildSingleAsinResponse now uses getAsinWisePL + computeAsinRowEntry
+        // (dashboard parity) instead of getAsinSnapshot.
+        jest.spyOn(readSvc, 'getAsinWisePL').mockResolvedValue(MOCK_DASHBOARD.asinWise);
         jest.spyOn(Cogs, 'findOne').mockReturnValue({ lean: async () => ({ cogsEntries: MOCK_COGS.entries }) });
         // Ad spend is now sourced from PPCMetrics (dashboard parity); stub it so
         // comparison/why-analysis handlers don't hit the DB.

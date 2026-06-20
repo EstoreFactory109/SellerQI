@@ -305,7 +305,7 @@ async function runLayeredQMatePipeline({
                     content: narratedContent,
                     chart_suggestions: [],
                     charts: [],
-                    follow_up_questions: generateSellerOpsFollowUps(opsResult.type, interpretation.entities),
+                    follow_up_questions: generateSellerOpsFollowUps(opsResult.type, interpretation.entities, opsResult.available === false),
                     needs_clarification: false,
                     clarifying_questions: [],
                     intent_interpretation: interpretedContract,

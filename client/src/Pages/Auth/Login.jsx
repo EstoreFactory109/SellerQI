@@ -7,7 +7,7 @@ import { useDispatch } from 'react-redux';
 import { loginSuccess } from '../../redux/slices/authSlice.js';
 import { clearAuthCache } from '../../utils/authCoordinator.js';
 import googleAuthService from '../../services/googleAuthService.js';
-import { isSpApiConnected, isAdsAccountConnected } from '../../utils/spApiConnectionCheck.js';
+import { isSpApiConnected, isAdsAccountConnected, getAdsAccountWithoutProfileId } from '../../utils/spApiConnectionCheck.js';
 
 export default function Login() {
   const [formData, setFormData] = useState({
@@ -156,9 +156,21 @@ export default function Login() {
           // Super admin → redirect to manage-accounts page
           navigate('/manage-accounts');
         } else if (spApiConnected && adsAccountConnected) {
-          // Both accounts connected → redirect to analyse-account page
-          // Dashboard access will be determined by FirstAnalysisDone status on that page
-          navigate('/analyse-account');
+          // Both accounts connected. If an Ads-connected account hasn't had a
+          // ProfileId selected yet, send the user to the profile-selection page
+          // (carrying that account's country/region) before analyse-account.
+          const accountNeedingProfile = getAdsAccountWithoutProfileId(user);
+          if (accountNeedingProfile) {
+            const params = new URLSearchParams({
+              country: accountNeedingProfile.country || '',
+              region: accountNeedingProfile.region || ''
+            });
+            navigate(`/profile-selection?${params.toString()}`);
+          } else {
+            // ProfileId already selected → redirect to analyse-account page
+            // Dashboard access will be determined by FirstAnalysisDone status on that page
+            navigate('/analyse-account');
+          }
         } else {
           // Accounts not connected → redirect to connect-to-amazon (payment handled later)
           navigate('/connect-to-amazon');
@@ -223,9 +235,21 @@ export default function Login() {
           // Super admin → redirect to manage-accounts page
           navigate('/manage-accounts');
         } else if (spApiConnected && adsAccountConnected) {
-          // Both accounts connected → redirect to analyse-account page
-          // Dashboard access will be determined by FirstAnalysisDone status on that page
-          navigate('/analyse-account');
+          // Both accounts connected. If an Ads-connected account hasn't had a
+          // ProfileId selected yet, send the user to the profile-selection page
+          // (carrying that account's country/region) before analyse-account.
+          const accountNeedingProfile = getAdsAccountWithoutProfileId(user);
+          if (accountNeedingProfile) {
+            const params = new URLSearchParams({
+              country: accountNeedingProfile.country || '',
+              region: accountNeedingProfile.region || ''
+            });
+            navigate(`/profile-selection?${params.toString()}`);
+          } else {
+            // ProfileId already selected → redirect to analyse-account page
+            // Dashboard access will be determined by FirstAnalysisDone status on that page
+            navigate('/analyse-account');
+          }
         } else {
           // Accounts not connected → redirect to connect-to-amazon (payment handled later)
           navigate('/connect-to-amazon');

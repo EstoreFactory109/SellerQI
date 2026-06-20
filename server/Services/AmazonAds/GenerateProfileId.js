@@ -20,7 +20,17 @@ const getProfileById = async (accessToken,region ,country,userId) => {
             'FE': 'https://advertising-api-fe.amazon.com'
         };
 
-        const baseURL = regionEndpoints[region] || regionEndpoints['NA'];
+        // Normalize region casing before lookup. region is expected to be one of
+        // the uppercase enum values (NA/EU/FE); this guards a stray lower/mixed-case
+        // value from silently falling back to the NA endpoint.
+        const normalizedRegion = String(region).trim().toUpperCase();
+        let baseURL = regionEndpoints[normalizedRegion];
+        if (!baseURL) {
+            // Preserve existing behavior (default to NA) but log loudly so a
+            // mis-routed account is observable instead of silent.
+            logger.error(new ApiError(400, `Unrecognized Ads region "${region}"; defaulting to NA profiles endpoint`));
+            baseURL = regionEndpoints['NA'];
+        }
 
         
 

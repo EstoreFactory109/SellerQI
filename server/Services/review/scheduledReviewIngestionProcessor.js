@@ -66,7 +66,9 @@ async function scheduledReviewIngestion(userId, country, region, source) {
       return { success: false, error: "Marketplace ID not found" };
     }
 
-    const spRegion = region || "NA";
+    // Normalize casing so a stray lower/mixed-case region resolves correctly
+    // instead of silently falling back to NA.
+    const spRegion = String(region || "NA").trim().toUpperCase();
     let endpoint = URIs?.[spRegion];
     const awsRegion = spapiRegions[spRegion];
 

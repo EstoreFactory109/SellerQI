@@ -110,15 +110,26 @@ const ProfileIDSelection = () => {
         
         console.error('Error fetching profile data:', error);
         console.error('Error response:', error.response);
-        
-        // Retry on certain errors (might be timing issue after redirect)
+
         const status = error.response?.status;
-        if ((status === 400 || status === 404 || status === 401 || !status) && retryCount < 3) {
+
+        // A 404 from getProfileId is a definitive "no advertising profiles for
+        // this account" response (not a transient failure). Show the empty
+        // state gracefully so the user gets the "Continue without a profile"
+        // option — no retries, no fetch-failure alert.
+        if (status === 404) {
+          setProfileData([]);
+          setDataLoading(false);
+          return;
+        }
+
+        // Retry on other transient errors (might be timing issue after redirect)
+        if ((status === 400 || status === 401 || !status) && retryCount < 3) {
           console.log(`Retrying fetch after error (attempt ${retryCount + 1}/3)...`);
           setTimeout(() => fetchProfileData(retryCount + 1), 1500);
           return;
         }
-        
+
         setProfileData([]);
         setDataLoading(false);
         // Only show alert after all retries are exhausted
@@ -332,14 +343,70 @@ const ProfileIDSelection = () => {
     }
   };
 
+  // Trigger the first-analysis integration job (reusing an in-progress one if
+  // present), wait for it to start, then move the user on to payment /
+  // analyse-account. Shared by both "confirm profile" and "continue without a
+  // profile" so the analysis AND the trial/payment redirect happen the same way
+  // in both cases. Behavior here is unchanged from the original saveProfileId.
+  const startIntegrationAndProceed = async () => {
+    console.log('[ProfileIDSelection] Triggering integration job...');
+    setWaitingForAnalysis(true);
+
+    let jobId = null;
+
+    // First check if there's an active job (waiting/active/delayed - NOT completed)
+    const activeResponse = await axiosInstance.get('/api/integration/active');
+
+    if (activeResponse.status === 200 && activeResponse.data.data.hasActiveJob) {
+      // Job exists - check if it's actually running or just completed
+      jobId = activeResponse.data.data.jobId;
+      const existingStatus = activeResponse.data.data.status?.toLowerCase();
+      console.log('[ProfileIDSelection] Existing job found:', existingStatus);
+
+      // Only skip triggering if job is actively running (not completed)
+      // When user re-saves profile ID, they want a FRESH integration even if previous one completed
+      if (existingStatus === 'active' || existingStatus === 'running' || existingStatus === 'waiting' || existingStatus === 'delayed') {
+        console.log('[ProfileIDSelection] Job is currently in progress, reusing existing job');
+        setAnalysisStarted(true);
+        await navigateToPayment();
+        return;
+      }
+
+      // If status is 'completed' or 'failed', trigger a NEW job
+      // This handles the case where user disconnected and reconnected their accounts
+      console.log('[ProfileIDSelection] Previous job was completed/failed, triggering fresh integration...');
+    }
+
+    // No active job OR previous job completed - trigger new one
+    const triggerResponse = await axiosInstance.post('/api/integration/trigger');
+
+    if (triggerResponse.status === 202 || triggerResponse.status === 200) {
+      jobId = triggerResponse.data.data.jobId;
+      console.log('[ProfileIDSelection] Integration job triggered successfully, jobId:', jobId);
+    } else {
+      throw new Error('Failed to trigger integration job');
+    }
+
+    // Wait for job to start (status becomes 'active')
+    if (jobId) {
+      console.log('[ProfileIDSelection] Waiting for job to start...');
+      await waitForJobToStart(jobId);
+      setAnalysisStarted(true);
+      console.log('[ProfileIDSelection] Job started, navigating to payment...');
+      await navigateToPayment();
+    } else {
+      throw new Error('No job ID received');
+    }
+  };
+
   const saveProfileId = async (profileId,currencyCode) => {
     setLoading(true);
     try {
-      const response = await axios.post(`${import.meta.env.VITE_BASE_URI}/app/profile/saveProfileId`, 
-        {profileId,currencyCode}, 
+      const response = await axios.post(`${import.meta.env.VITE_BASE_URI}/app/profile/saveProfileId`,
+        {profileId,currencyCode},
         {withCredentials: true}
       );
-      
+
       if(response.status === 200){
         alert("Profile ID saved successfully");
         setSelectedProfile(null);
@@ -348,54 +415,7 @@ const ProfileIDSelection = () => {
 
         // Trigger integration job and wait for it to start, then navigate to payment
         try {
-          console.log('[ProfileIDSelection] Triggering integration job...');
-          setWaitingForAnalysis(true);
-          
-          let jobId = null;
-          
-          // First check if there's an active job (waiting/active/delayed - NOT completed)
-          const activeResponse = await axiosInstance.get('/api/integration/active');
-          
-          if (activeResponse.status === 200 && activeResponse.data.data.hasActiveJob) {
-            // Job exists - check if it's actually running or just completed
-            jobId = activeResponse.data.data.jobId;
-            const existingStatus = activeResponse.data.data.status?.toLowerCase();
-            console.log('[ProfileIDSelection] Existing job found:', existingStatus);
-            
-            // Only skip triggering if job is actively running (not completed)
-            // When user re-saves profile ID, they want a FRESH integration even if previous one completed
-            if (existingStatus === 'active' || existingStatus === 'running' || existingStatus === 'waiting' || existingStatus === 'delayed') {
-              console.log('[ProfileIDSelection] Job is currently in progress, reusing existing job');
-              setAnalysisStarted(true);
-              await navigateToPayment();
-              return;
-            }
-            
-            // If status is 'completed' or 'failed', trigger a NEW job
-            // This handles the case where user disconnected and reconnected their accounts
-            console.log('[ProfileIDSelection] Previous job was completed/failed, triggering fresh integration...');
-          }
-          
-          // No active job OR previous job completed - trigger new one
-          const triggerResponse = await axiosInstance.post('/api/integration/trigger');
-          
-          if (triggerResponse.status === 202 || triggerResponse.status === 200) {
-            jobId = triggerResponse.data.data.jobId;
-            console.log('[ProfileIDSelection] Integration job triggered successfully, jobId:', jobId);
-          } else {
-            throw new Error('Failed to trigger integration job');
-          }
-          
-          // Wait for job to start (status becomes 'active')
-          if (jobId) {
-            console.log('[ProfileIDSelection] Waiting for job to start...');
-            await waitForJobToStart(jobId);
-            setAnalysisStarted(true);
-            console.log('[ProfileIDSelection] Job started, navigating to payment...');
-            await navigateToPayment();
-          } else {
-            throw new Error('No job ID received');
-          }
+          await startIntegrationAndProceed();
         } catch (error) {
           console.error('[ProfileIDSelection] Error in integration job flow:', error);
           setWaitingForAnalysis(false);
@@ -406,6 +426,23 @@ const ProfileIDSelection = () => {
     } catch (error) {
       console.error('Error saving profile ID:', error);
       alert('Failed to save profile ID. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // For users with no advertising profile to select (e.g. the account has no
+  // Amazon Ads profile yet). Lets them proceed without a ProfileId: the first
+  // analysis still runs (PPC data simply stays empty) and they continue to the
+  // trial / payment step, mirroring the Skip path on the connect page.
+  const handleContinueWithoutProfile = async () => {
+    setLoading(true);
+    try {
+      await startIntegrationAndProceed();
+    } catch (error) {
+      console.error('[ProfileIDSelection] Error continuing without profile:', error);
+      setWaitingForAnalysis(false);
+      alert('Could not start the analysis. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -649,14 +686,31 @@ const ProfileIDSelection = () => {
                 <User className="w-8 h-8 text-gray-500 mx-auto mb-4" />
                 <h3 className="text-lg font-semibold text-gray-100 mb-2">No Profiles Found</h3>
                 <p className="text-gray-400 mb-4">
-                  No profile data is available. This might be because your account setup is not complete or there was an error fetching data.
+                  We could not find an Amazon Advertising profile for this account. This usually means Amazon Advertising is not set up for this marketplace yet. You can retry, or continue without a profile — your analysis will still run, but advertising (PPC) data will not be available until a profile is connected.
                 </p>
-                <button
-                  onClick={() => window.location.reload()}
-                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors duration-200 font-medium shadow-lg shadow-blue-500/25"
-                >
-                  Retry
-                </button>
+                <div className="flex items-center justify-center gap-3">
+                  <button
+                    onClick={() => window.location.reload()}
+                    disabled={loading || waitingForAnalysis}
+                    className="px-6 py-2 bg-[#21262d] text-gray-300 rounded-lg hover:bg-[#1c2128] transition-colors duration-200 font-medium border border-[#30363d] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Retry
+                  </button>
+                  <button
+                    onClick={handleContinueWithoutProfile}
+                    disabled={loading || waitingForAnalysis}
+                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors duration-200 font-medium shadow-lg shadow-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {(loading || waitingForAnalysis) ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        Starting...
+                      </>
+                    ) : (
+                      'Continue without a profile'
+                    )}
+                  </button>
+                </div>
               </motion.div>
             ) : (
               <>

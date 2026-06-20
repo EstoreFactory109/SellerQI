@@ -435,12 +435,27 @@ const ADVISORY_FOLLOW_UP_TEMPLATES = {
 };
 
 /**
+ * Redirect follow-ups for when a SellerOps domain has no data yet
+ * ({ available:false }). Point the seller at things QMate CAN answer today
+ * (profitability, PPC, listing issues) instead of dead-ending.
+ */
+const SELLER_OPS_UNAVAILABLE_FOLLOW_UPS = [
+  { label: 'Check my profitability', prompt: 'What is my profit?' },
+  { label: 'Check my PPC performance', prompt: 'What is my ACOS?' },
+  { label: 'Review my listing issues', prompt: 'What issues do my listings have?' },
+];
+
+/**
  * Generate SellerOps follow-ups for a queryType. Falls back to inventory_summary.
+ * When `unavailable` is true (the domain returned { available:false }), returns
+ * the redirect set instead — steering the seller to answerable domains.
  * @param {string} queryType
  * @param {Object} [entities] - for {asin}
+ * @param {boolean} [unavailable] - true when the result was { available:false }
  * @returns {Array<{label:string, prompt:string}>}
  */
-function generateSellerOpsFollowUps(queryType, entities) {
+function generateSellerOpsFollowUps(queryType, entities, unavailable) {
+  if (unavailable) return SELLER_OPS_UNAVAILABLE_FOLLOW_UPS.map((t) => ({ ...t }));
   const templates = SELLER_OPS_FOLLOW_UP_TEMPLATES[queryType] || SELLER_OPS_FOLLOW_UP_TEMPLATES.inventory_summary;
   const asin = (entities && entities.asins && entities.asins[0]) || '';
   return templates.slice(0, 3).map((t) => ({ label: t.label, prompt: t.prompt.replace('{asin}', asin) }));
@@ -468,6 +483,7 @@ module.exports = {
   STRATEGY_FOLLOW_UP_TEMPLATES,
   generateSellerOpsFollowUps,
   SELLER_OPS_FOLLOW_UP_TEMPLATES,
+  SELLER_OPS_UNAVAILABLE_FOLLOW_UPS,
   generateAdvisoryFollowUps,
   ADVISORY_FOLLOW_UP_TEMPLATES,
 };

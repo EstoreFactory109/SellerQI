@@ -846,26 +846,58 @@ async function handleSellerOpsQuery(interpretation, userContext, requestDateRang
 // ── Narrator (LLM formats the deterministic result; fallback is template) ──
 
 const SELLEROPS_NARRATOR_MODEL = process.env.QMATE_NARRATOR_MODEL || 'gpt-4o-mini';
-const SELLEROPS_NARRATOR_SYSTEM_PROMPT = `You are QMate, an Amazon seller operations assistant. You receive pre-computed operational data (listing issues, inventory, account health, reimbursements, products). Present it clearly and help the seller act.
+const SELLEROPS_NARRATOR_SYSTEM_PROMPT = `You are QMate, an Amazon seller operations assistant. You receive pre-computed data about listing issues, inventory, account health, reimbursements, or products.
 
 RULES:
-1. EVERY number/fact must come from the result data. Do NOT invent ASINs, counts, or amounts.
-2. Currency: $1,234.56. Percentages: 12.3%.
-3. Be concise and specific; lead with the headline (the count, the urgent items, the recommendation).
-4. For listing issues: lead with the total, then the most-affected products and the urgent issue types.
-5. For inventory: lead with what needs action (low/out of stock), then the summary.
-6. For account health: state the overall status and any at-risk metrics.
-7. For reimbursements: state the dollar amount and the breakdown.
-8. For 'fix'/operational steps: present the numbered steps clearly.
-9. If the result has 'available: false' or 'notFound: true', say the data isn't available yet — do NOT fabricate.
-10. Never say 'approximately'. Numbers are exact.`;
+1. Every number from the result data only. Never estimate.
+2. For listing issues: prioritize by severity. Mention suppressed listings first.
+3. For inventory: flag anything with less than 14 days of supply as urgent.
+4. For account health: always mention the Amazon threshold next to the current value.
+5. For reimbursements: state the potential amount clearly.
+6. For operational advice (knowledge-based steps): present numbered steps clearly.
+7. Keep responses under 300 words.`;
 
 function sFmtMoney(n) { return `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
+
+// ── Unavailable-domain messaging ──
+// When a SellerOps handler returns { available: false } (the backing data isn't
+// connected/synced yet, or — for BSR — isn't tracked at all), we still answer
+// from the SellerOps engine (responseSource stays 'seller_ops_engine' so we can
+// measure demand for each unbuilt domain). Instead of a dead-end "data not
+// available", we tell the seller HOW to get the info today and redirect them to
+// what QMate CAN answer. Keyed by domain rather than per-type so the copy stays
+// consistent across the four inventory types, the two reimbursement types, etc.
+const SELLEROPS_UNAVAILABLE_MESSAGES = {
+  inventory: "Inventory tracking isn't set up yet. You can enable it by connecting your FBA inventory data in Settings.",
+  account_health: "Account health monitoring isn't connected yet. You can view your account health directly in Seller Central under Performance → Account Health.",
+  reimbursement: "Reimbursement tracking isn't connected yet. You can review your FBA reimbursements in Seller Central under Reports → Payments.",
+  product: "Your product catalog isn't synced yet. You can connect it from Settings to see your products here.",
+  bsr: "BSR tracking is coming soon. For now, you can check your BSR in Seller Central or on your product listing page.",
+};
+const SELLEROPS_REDIRECT = 'In the meantime, I can help you with your profitability, PPC performance, or listing issues.';
+
+/** Map a SellerOps result type → unavailable-domain key (or null). */
+function unavailableDomainKey(type) {
+  if (type === 'bsr_analysis') return 'bsr';
+  if (type === 'low_stock' || type === 'overstock' || type === 'restock_advice' || (type || '').startsWith('inventory')) return 'inventory';
+  if ((type || '').startsWith('account_health')) return 'account_health';
+  if ((type || '').startsWith('reimbursement')) return 'reimbursement';
+  if ((type || '').startsWith('product')) return 'product';
+  return null;
+}
+
+/** Helpful message + redirect for an { available:false } result. */
+function buildUnavailableMessage(r) {
+  const key = unavailableDomainKey(r && r.type);
+  const msg = (key && SELLEROPS_UNAVAILABLE_MESSAGES[key]) || (r && r.message) || 'That data is not available yet in SellerQI.';
+  return `${msg} ${SELLEROPS_REDIRECT}`;
+}
 
 /** Deterministic per-type fallback narration. */
 function buildSellerOpsFallback(r) {
   if (!r || typeof r !== 'object') return 'I was unable to format the result.';
-  if (r.available === false || r.notFound) return r.message || 'That data is not available yet in SellerQI.';
+  if (r.available === false) return buildUnavailableMessage(r);
+  if (r.notFound) return r.message || 'That data is not available yet in SellerQI.';
   switch (r.type) {
     case 'listing_issues_summary':
       return `You have ${r.totalIssues} listing issue(s) across ${r.numberOfProductsWithIssues} product(s). Most affected: ${(r.mostAffectedProducts || []).slice(0, 3).map((p) => `${p.asin} (${p.issueCount})`).join(', ') || 'n/a'}. Urgent types: ${(r.urgentIssues || []).slice(0, 3).map((t) => t.issueType).join(', ') || 'none'}.`;
@@ -911,6 +943,12 @@ function buildSellerOpsFallback(r) {
  * @returns {Promise<string>}
  */
 async function narrateSellerOpsResult(result, userQuestion, modelTools) {
+  // Unavailable domains get a deterministic, helpful message (how to get the
+  // info today + a redirect to what QMate can answer). Short-circuit before the
+  // LLM so the copy is exact and we don't spend a call narrating empty data.
+  if (result && result.available === false) {
+    return buildUnavailableMessage(result);
+  }
   const client = modelTools && modelTools.client;
   if (client && client.chat && client.chat.completions && typeof client.chat.completions.create === 'function') {
     try {
@@ -962,4 +1000,9 @@ module.exports = {
   ACCOUNT_HEALTH_KNOWLEDGE,
   parseFixIssueType,
   extractPromptText,
+  // unavailable-domain messaging
+  buildUnavailableMessage,
+  unavailableDomainKey,
+  SELLEROPS_UNAVAILABLE_MESSAGES,
+  SELLEROPS_REDIRECT,
 };

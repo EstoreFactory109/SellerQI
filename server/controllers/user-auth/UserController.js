@@ -612,7 +612,8 @@ const loginUser = asyncHandler(async (req, res) => {
                 region: account.region,
                 selling_partner_id: account.selling_partner_id,
                 spiRefreshToken: account.spiRefreshToken ? 'connected' : null, // Don't expose actual token, just indicate if connected
-                adsRefreshToken: account.adsRefreshToken ? 'connected' : null // Don't expose actual token, just indicate if connected
+                adsRefreshToken: account.adsRefreshToken ? 'connected' : null, // Don't expose actual token, just indicate if connected
+                ProfileId: account.ProfileId || null // Needed so the frontend can route users without a selected profile to profile-selection
             }))
         };
     }
