@@ -117,10 +117,21 @@ function createTokenManager({ accessToken, refreshToken, clientId, clientSecret 
     try {
       return await fn(token);
     } catch (err) {
-      // A genuine authorization denial is not fixable by refreshing — don't
-      // waste a token refresh + retry on it (it always fails the same way).
-      if (isAuthorizationDeniedError(err)) throw err;
-      if (!isAccessTokenExpiredError(err)) throw err;
+      // Amazon returns an EXPIRED access-token error with the SAME generic
+      // "access to requested resource is denied" message as a true authorization
+      // denial — distinguished only by the "...access token...has expired" detail.
+      // Check that specific expiry phrase FIRST so a recoverable expiry is not
+      // misclassified as a permanent denial and skipped over the refresh below.
+      const lowerMsg = (err && (err.message || String(err)) || '').toLowerCase();
+      const tokenDefinitelyExpired =
+        lowerMsg.includes('access token you provided has expired') ||
+        lowerMsg.includes('access token has expired');
+      if (!tokenDefinitelyExpired) {
+        // A genuine authorization denial is not fixable by refreshing — don't
+        // waste a token refresh + retry on it (it always fails the same way).
+        if (isAuthorizationDeniedError(err)) throw err;
+        if (!isAccessTokenExpiredError(err)) throw err;
+      }
       logger.warn(`[FinanceService] SP-API call failed with expired token. Refreshing and retrying once… (${err.message})`);
       const fresh = await refresh();
       return fn(fresh);
