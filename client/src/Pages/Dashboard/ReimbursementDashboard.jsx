@@ -452,18 +452,18 @@ const ReimbursementDashboard = () => {
   // Error state
   if (error) {
     return (
-        <div className="min-h-screen flex items-center justify-center" style={{ background: '#1a1a1a' }}>
+        <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg-base)' }}>
           <div className="text-center">
           <AlertCircle className="w-6 h-6 mx-auto mb-2" style={{ color: '#f87171' }} />
-          <p className="font-semibold mb-2 text-sm" style={{ color: '#f3f4f6' }}>Error loading reimbursement data</p>
-          <p className="text-xs" style={{ color: '#9ca3af' }}>{error}</p>
+          <p className="font-semibold mb-2 text-sm" style={{ color: 'var(--text-primary)' }}>Error loading reimbursement data</p>
+          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{error}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen" style={{ background: '#1a1a1a', padding: '10px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+    <div className="min-h-screen" style={{ background: 'var(--bg-base)', padding: '10px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
       <div className="w-full" style={{ maxWidth: '1400px', margin: '0 auto' }}>
         <div>
           {/* Header */}
@@ -472,10 +472,10 @@ const ReimbursementDashboard = () => {
             animate={{ opacity: 1, y: 0 }}
             style={{ marginBottom: '10px' }}
           >
-            <div style={{ background: '#161b22', padding: '10px 15px', borderRadius: '6px', border: '1px solid #30363d', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ background: 'var(--bg-surface)', padding: '10px 15px', borderRadius: '6px', border: '1px solid #30363d', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
               <div className="flex items-center gap-2">
                 <DollarSign className="w-4 h-4" style={{ color: '#60a5fa' }} />
-                <h1 className="text-base font-bold" style={{ color: '#f3f4f6' }}>
+                <h1 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>
                   Reimbursement Dashboard
                 </h1>
               </div>
@@ -484,7 +484,7 @@ const ReimbursementDashboard = () => {
                 <button
                   onClick={() => setShowFilters(!showFilters)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all text-xs font-medium"
-                  style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                  style={{ background: 'var(--bg-base)', border: '1px solid #30363d', color: 'var(--text-primary)' }}
                   onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
                   onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}
                 >
@@ -514,59 +514,59 @@ const ReimbursementDashboard = () => {
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
                   className="mt-2 p-3 rounded-lg"
-                  style={{ background: '#161b22', border: '1px solid #30363d' }}
+                  style={{ background: 'var(--bg-surface)', border: '1px solid #30363d' }}
                 >
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-xs font-medium mb-1.5" style={{ color: '#9ca3af' }}>Status</label>
+                      <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>Status</label>
                       <select
                         value={filterStatus}
                         onChange={(e) => setFilterStatus(e.target.value)}
                         className="w-full px-2 py-1.5 rounded-lg text-xs"
-                        style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                        style={{ background: 'var(--bg-base)', border: '1px solid #30363d', color: 'var(--text-primary)' }}
                         onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
                         onBlur={(e) => e.target.style.borderColor = '#30363d'}
                       >
-                        <option value="all" style={{ background: '#21262d' }}>All Statuses</option>
-                        <option value="approved" style={{ background: '#21262d' }}>Approved</option>
-                        <option value="pending" style={{ background: '#21262d' }}>Pending</option>
-                        <option value="potential" style={{ background: '#21262d' }}>Potential</option>
-                        <option value="denied" style={{ background: '#21262d' }}>Denied</option>
+                        <option value="all" style={{ background: 'var(--bg-elevated)' }}>All Statuses</option>
+                        <option value="approved" style={{ background: 'var(--bg-elevated)' }}>Approved</option>
+                        <option value="pending" style={{ background: 'var(--bg-elevated)' }}>Pending</option>
+                        <option value="potential" style={{ background: 'var(--bg-elevated)' }}>Potential</option>
+                        <option value="denied" style={{ background: 'var(--bg-elevated)' }}>Denied</option>
                       </select>
                     </div>
 
                     <div>
-                      <label className="block text-xs font-medium mb-1.5" style={{ color: '#9ca3af' }}>Type</label>
+                      <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>Type</label>
                       <select
                         value={filterType}
                         onChange={(e) => setFilterType(e.target.value)}
                         className="w-full px-2 py-1.5 rounded-lg text-xs"
-                        style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                        style={{ background: 'var(--bg-base)', border: '1px solid #30363d', color: 'var(--text-primary)' }}
                         onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
                         onBlur={(e) => e.target.style.borderColor = '#30363d'}
                       >
-                        <option value="all" style={{ background: '#21262d' }}>All Types</option>
-                        <option value="lost" style={{ background: '#21262d' }}>Lost</option>
-                        <option value="damaged" style={{ background: '#21262d' }}>Damaged</option>
-                        <option value="customer_return" style={{ background: '#21262d' }}>Customer Return</option>
-                        <option value="inbound_shipment" style={{ background: '#21262d' }}>Inbound Shipment</option>
-                        <option value="fee_correction" style={{ background: '#21262d' }}>Fee Correction</option>
+                        <option value="all" style={{ background: 'var(--bg-elevated)' }}>All Types</option>
+                        <option value="lost" style={{ background: 'var(--bg-elevated)' }}>Lost</option>
+                        <option value="damaged" style={{ background: 'var(--bg-elevated)' }}>Damaged</option>
+                        <option value="customer_return" style={{ background: 'var(--bg-elevated)' }}>Customer Return</option>
+                        <option value="inbound_shipment" style={{ background: 'var(--bg-elevated)' }}>Inbound Shipment</option>
+                        <option value="fee_correction" style={{ background: 'var(--bg-elevated)' }}>Fee Correction</option>
                       </select>
                     </div>
 
                     <div>
-                      <label className="block text-xs font-medium mb-1.5" style={{ color: '#9ca3af' }}>Sort By</label>
+                      <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>Sort By</label>
                       <select
                         value={sortBy}
                         onChange={(e) => setSortBy(e.target.value)}
                         className="w-full px-2 py-1.5 rounded-lg text-xs"
-                        style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                        style={{ background: 'var(--bg-base)', border: '1px solid #30363d', color: 'var(--text-primary)' }}
                         onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
                         onBlur={(e) => e.target.style.borderColor = '#30363d'}
                       >
-                        <option value="date" style={{ background: '#21262d' }}>Date (Newest)</option>
-                        <option value="amount" style={{ background: '#21262d' }}>Amount (Highest)</option>
-                        <option value="status" style={{ background: '#21262d' }}>Status</option>
+                        <option value="date" style={{ background: 'var(--bg-elevated)' }}>Date (Newest)</option>
+                        <option value="amount" style={{ background: 'var(--bg-elevated)' }}>Amount (Highest)</option>
+                        <option value="status" style={{ background: 'var(--bg-elevated)' }}>Status</option>
                       </select>
                     </div>
                   </div>
@@ -600,21 +600,21 @@ const ReimbursementDashboard = () => {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.1 }}
                   className="rounded-lg transition-all w-full flex flex-col"
-                  style={{ background: '#161b22', border: '1px solid #30363d', padding: '10px' }}
+                  style={{ background: 'var(--bg-surface)', border: '1px solid #30363d', padding: '10px' }}
                   onMouseEnter={(e) => e.currentTarget.style.borderColor = '#3b82f6'}
                   onMouseLeave={(e) => e.currentTarget.style.borderColor = '#30363d'}
                 >
                   <div className="flex items-center gap-2 mb-1">
                     <Icon className="w-4 h-4 flex-shrink-0" style={{ color: '#60a5fa' }} />
-                    <div className="text-[11px] font-medium uppercase tracking-wide" style={{ color: '#ffffff' }}>
+                    <div className="text-[11px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-primary)' }}>
                       {box.label}
                     </div>
                   </div>
-                  <div className="text-[18px] font-bold transition-colors duration-200 truncate" style={{ color: '#ffffff' }}>
+                  <div className="text-[18px] font-bold transition-colors duration-200 truncate" style={{ color: 'var(--text-primary)' }}>
                     {box.value}
                   </div>
                   {box.subtitle && (
-                    <div className="text-[10px] mt-0.5" style={{ color: '#6b7280' }}>{box.subtitle}</div>
+                    <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{box.subtitle}</div>
                   )}
                 </motion.div>
               );
@@ -626,10 +626,10 @@ const ReimbursementDashboard = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               className="rounded-lg overflow-hidden"
-              style={{ background: '#161b22', border: '1px solid #30363d', marginBottom: '10px' }}
+              style={{ background: 'var(--bg-surface)', border: '1px solid #30363d', marginBottom: '10px' }}
             >
             {/* Tabs Navigation */}
-            <div style={{ borderBottom: '1px solid #30363d', background: '#21262d' }}>
+            <div style={{ borderBottom: '1px solid #30363d', background: 'var(--bg-elevated)' }}>
               <div className="flex overflow-x-auto">
                 <button
                   onClick={() => setActiveTab('shipment')}
@@ -638,7 +638,7 @@ const ReimbursementDashboard = () => {
                       ? 'border-blue-500 bg-[#161b22]'
                       : 'border-transparent'
                   }`}
-                  style={activeTab === 'shipment' ? { color: '#60a5fa' } : { color: '#9ca3af' }}
+                  style={activeTab === 'shipment' ? { color: '#60a5fa' } : { color: 'var(--text-secondary)' }}
                   onMouseEnter={(e) => {
                     if (activeTab !== 'shipment') {
                       e.target.style.color = '#d1d5db';
@@ -666,7 +666,7 @@ const ReimbursementDashboard = () => {
                       ? 'border-orange-500 bg-[#161b22]'
                       : 'border-transparent'
                   }`}
-                  style={activeTab === 'lost' ? { color: '#fb923c' } : { color: '#9ca3af' }}
+                  style={activeTab === 'lost' ? { color: '#fb923c' } : { color: 'var(--text-secondary)' }}
                   onMouseEnter={(e) => {
                     if (activeTab !== 'lost') {
                       e.target.style.color = '#d1d5db';
@@ -694,7 +694,7 @@ const ReimbursementDashboard = () => {
                       ? 'border-red-500 bg-[#161b22]'
                       : 'border-transparent'
                   }`}
-                  style={activeTab === 'damaged' ? { color: '#f87171' } : { color: '#9ca3af' }}
+                  style={activeTab === 'damaged' ? { color: '#f87171' } : { color: 'var(--text-secondary)' }}
                   onMouseEnter={(e) => {
                     if (activeTab !== 'damaged') {
                       e.target.style.color = '#d1d5db';
@@ -722,7 +722,7 @@ const ReimbursementDashboard = () => {
                       ? 'border-purple-500 bg-[#161b22]'
                       : 'border-transparent'
                   }`}
-                  style={activeTab === 'disposed' ? { color: '#c084fc' } : { color: '#9ca3af' }}
+                  style={activeTab === 'disposed' ? { color: '#c084fc' } : { color: 'var(--text-secondary)' }}
                   onMouseEnter={(e) => {
                     if (activeTab !== 'disposed') {
                       e.target.style.color = '#d1d5db';
@@ -754,7 +754,7 @@ const ReimbursementDashboard = () => {
                   {summary?.feeProtector?.backendShipmentItems?.data?.length > 0 ? (
                     <>
                       <div className="mb-2">
-                        <p className="text-xs" style={{ color: '#9ca3af' }}>
+                        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
                           {summary.feeProtector.backendShipmentItems.count || summary.feeProtector.backendShipmentItems.data.length} items • {formatCurrency(summary.feeProtector.backendShipmentItems.totalExpectedAmount)} total
                         </p>
                     </div>
@@ -771,31 +771,31 @@ const ReimbursementDashboard = () => {
                           <col style={{ width: '10%' }} />
                           <col style={{ width: '12%' }} />
                         </colgroup>
-                        <thead style={{ background: '#21262d' }}>
+                        <thead style={{ background: 'var(--bg-elevated)' }}>
                           <tr>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Date</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Shipment ID</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Shipment Name</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>ASIN</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>SKU</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Shipped</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Received</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Discrepancy</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Expected Amount</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Date</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Shipment ID</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Shipment Name</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>ASIN</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>SKU</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Shipped</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Received</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Discrepancy</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Expected Amount</th>
                           </tr>
                         </thead>
                         <tbody>
                           {summary.feeProtector.backendShipmentItems.data.map((item, index) => (
                             <tr key={index} className="transition-colors" style={{ borderBottom: '1px solid #30363d' }} onMouseEnter={(e) => e.currentTarget.style.background = '#21262d'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                              <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatDate(item.date)}</td>
-                              <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: '#f3f4f6' }}>{item.shipmentId || 'N/A'}</td>
-                              <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: '#f3f4f6' }}>{item.shipmentName || 'N/A'}</td>
-                              <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: '#f3f4f6' }}>{item.asin || 'N/A'}</td>
-                              <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: '#f3f4f6' }}>{item.sku || 'N/A'}</td>
-                              <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{item.quantityShipped || 0}</td>
-                              <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{item.quantityReceived || 0}</td>
+                              <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{formatDate(item.date)}</td>
+                              <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.shipmentId || 'N/A'}</td>
+                              <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.shipmentName || 'N/A'}</td>
+                              <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.asin || 'N/A'}</td>
+                              <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.sku || 'N/A'}</td>
+                              <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{item.quantityShipped || 0}</td>
+                              <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{item.quantityReceived || 0}</td>
                               <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f87171' }}>{item.discrepancyUnits || 0}</td>
-                              <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.expectedAmount || 0)}</td>
+                              <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: 'var(--text-primary)' }}>{formatCurrency(item.expectedAmount || 0)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -803,7 +803,7 @@ const ReimbursementDashboard = () => {
                     </div>
                     </>
                   ) : (
-                    <div className="text-center py-8" style={{ color: '#9ca3af', fontSize: '12px' }}>
+                    <div className="text-center py-8" style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
                       No shipment discrepancy data found
                     </div>
                   )}
@@ -816,7 +816,7 @@ const ReimbursementDashboard = () => {
                   {filteredLostInventoryData.length > 0 ? (
                     <>
                     <div className="flex items-center justify-between mb-2">
-                        <p className="text-xs" style={{ color: '#9ca3af' }}>
+                        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
                           {filteredLostInventoryData.length} items (last 30 days) • {formatCurrency(lostInventoryTotal)} total
                           {filteredLostInventoryData.filter(item => item.isUnderpaid).length > 0 && (
                             <span className="ml-2 font-medium" style={{ color: '#fb923c' }}>
@@ -827,7 +827,7 @@ const ReimbursementDashboard = () => {
                         <button
                           onClick={() => setShowUnderpaidOnly(!showUnderpaidOnly)}
                           className="px-2 py-1 text-[10px] font-medium rounded border transition-all"
-                          style={showUnderpaidOnly ? { background: 'rgba(251, 146, 60, 0.2)', borderColor: 'rgba(251, 146, 60, 0.3)', color: '#fb923c' } : { background: '#1a1a1a', borderColor: '#30363d', color: '#f3f4f6' }}
+                          style={showUnderpaidOnly ? { background: 'rgba(251, 146, 60, 0.2)', borderColor: 'rgba(251, 146, 60, 0.3)', color: '#fb923c' } : { background: 'var(--bg-base)', borderColor: '#30363d', color: 'var(--text-primary)' }}
                           onMouseEnter={(e) => !showUnderpaidOnly && (e.target.style.borderColor = '#3b82f6')}
                           onMouseLeave={(e) => !showUnderpaidOnly && (e.target.style.borderColor = '#30363d')}
                         >
@@ -847,17 +847,17 @@ const ReimbursementDashboard = () => {
                           <col style={{ width: '13%' }} />
                           <col style={{ width: '15%' }} />
                         </colgroup>
-                        <thead style={{ background: '#21262d' }}>
+                        <thead style={{ background: 'var(--bg-elevated)' }}>
                           <tr>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Month</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>ASIN</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>SKU</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Lost</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Found</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Reimbursed</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Discrepancy</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Expected Amount</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Status</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Month</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>ASIN</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>SKU</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Lost</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Found</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Reimbursed</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Discrepancy</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Expected Amount</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Status</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -865,14 +865,14 @@ const ReimbursementDashboard = () => {
                               .filter(item => !showUnderpaidOnly || item.isUnderpaid)
                               .map((item, index) => (
                               <tr key={index} className="transition-colors" style={{ borderBottom: '1px solid #30363d', background: item.isUnderpaid ? 'rgba(251, 146, 60, 0.1)' : 'transparent' }} onMouseEnter={(e) => e.currentTarget.style.background = item.isUnderpaid ? 'rgba(251, 146, 60, 0.15)' : '#21262d'} onMouseLeave={(e) => e.currentTarget.style.background = item.isUnderpaid ? 'rgba(251, 146, 60, 0.1)' : 'transparent'}>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatMonthName(item.date)}</td>
-                                <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: '#f3f4f6' }}>{item.asin || 'N/A'}</td>
-                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: '#f3f4f6' }}>{item.sku || 'N/A'}</td>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{item.lostUnits || 0}</td>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{item.foundUnits || 0}</td>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{item.reimbursedUnits || 0}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{formatMonthName(item.date)}</td>
+                                <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.asin || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.sku || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{item.lostUnits || 0}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{item.foundUnits || 0}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{item.reimbursedUnits || 0}</td>
                                 <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f87171' }}>{item.discrepancyUnits || 0}</td>
-                                <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f3f4f6' }}>
+                                <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: 'var(--text-primary)' }}>
                                   {item.isUnderpaid && item.underpaidExpectedAmount ? (
                                     <div>
                                       <div>{formatCurrency(item.expectedAmount || 0)}</div>
@@ -888,7 +888,7 @@ const ReimbursementDashboard = () => {
                                       Underpaid
                                     </span>
                                   ) : (
-                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: 'rgba(156, 163, 175, 0.2)', color: '#9ca3af' }}>
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: 'rgba(156, 163, 175, 0.2)', color: 'var(--text-secondary)' }}>
                                       Normal
                                     </span>
                                   )}
@@ -900,7 +900,7 @@ const ReimbursementDashboard = () => {
                       </div>
                     </>
                   ) : (
-                    <div className="text-center py-8" style={{ color: '#9ca3af', fontSize: '12px' }}>
+                    <div className="text-center py-8" style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
                       No lost inventory data found
                     </div>
                   )}
@@ -913,7 +913,7 @@ const ReimbursementDashboard = () => {
                   {filteredDamagedInventoryData.length > 0 ? (
                     <>
                       <div className="mb-2">
-                        <p className="text-xs" style={{ color: '#9ca3af' }}>
+                        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
                           {filteredDamagedInventoryData.length} items (last 30 days) • {formatCurrency(damagedInventoryTotal)} total
                         </p>
                     </div>
@@ -930,31 +930,31 @@ const ReimbursementDashboard = () => {
                           <col style={{ width: '11%' }} />
                           <col style={{ width: '11%' }} />
                         </colgroup>
-                        <thead style={{ background: '#21262d' }}>
+                        <thead style={{ background: 'var(--bg-elevated)' }}>
                           <tr>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Date</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>ASIN</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>SKU</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>FNSKU</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Damaged Units</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Sales Price</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Fees</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Reimbursement/Unit</th>
-                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Expected Amount</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Date</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>ASIN</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>SKU</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>FNSKU</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Damaged Units</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Sales Price</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Fees</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Reimbursement/Unit</th>
+                            <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Expected Amount</th>
                           </tr>
                         </thead>
                         <tbody>
                             {filteredDamagedInventoryData.map((item, index) => (
                               <tr key={index} className="transition-colors" style={{ borderBottom: '1px solid #30363d' }} onMouseEnter={(e) => e.currentTarget.style.background = '#21262d'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatDate(item.date)}</td>
-                                <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: '#f3f4f6' }}>{item.asin || 'N/A'}</td>
-                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: '#f3f4f6' }}>{item.sku || 'N/A'}</td>
-                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: '#f3f4f6' }}>{item.fnsku || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{formatDate(item.date)}</td>
+                                <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.asin || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.sku || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.fnsku || 'N/A'}</td>
                                 <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f87171' }}>{item.damagedUnits || 0}</td>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.salesPrice || 0)}</td>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.fees || 0)}</td>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.reimbursementPerUnit || 0)}</td>
-                                <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.expectedAmount || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{formatCurrency(item.salesPrice || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{formatCurrency(item.fees || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{formatCurrency(item.reimbursementPerUnit || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: 'var(--text-primary)' }}>{formatCurrency(item.expectedAmount || 0)}</td>
                               </tr>
                             ))}
                         </tbody>
@@ -962,7 +962,7 @@ const ReimbursementDashboard = () => {
                       </div>
                     </>
                   ) : (
-                    <div className="text-center py-8" style={{ color: '#9ca3af', fontSize: '12px' }}>
+                    <div className="text-center py-8" style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
                       No damaged inventory data found
                     </div>
                   )}
@@ -975,7 +975,7 @@ const ReimbursementDashboard = () => {
                   {filteredDisposedInventoryData.length > 0 ? (
                     <>
                       <div className="mb-2">
-                        <p className="text-xs" style={{ color: '#9ca3af' }}>
+                        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
                           {filteredDisposedInventoryData.length} items (last 30 days) • {formatCurrency(disposedInventoryTotal)} total
                         </p>
             </div>
@@ -992,31 +992,31 @@ const ReimbursementDashboard = () => {
                   <col style={{ width: '11%' }} />
                   <col style={{ width: '11%' }} />
                 </colgroup>
-                <thead style={{ background: '#21262d' }}>
+                <thead style={{ background: 'var(--bg-elevated)' }}>
                   <tr>
-                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Date</th>
-                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>ASIN</th>
-                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>SKU</th>
-                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>FNSKU</th>
-                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Disposed Units</th>
-                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Sales Price</th>
-                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Fees</th>
-                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Reimbursement/Unit</th>
-                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Expected Amount</th>
+                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Date</th>
+                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>ASIN</th>
+                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>SKU</th>
+                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>FNSKU</th>
+                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Disposed Units</th>
+                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Sales Price</th>
+                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Fees</th>
+                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Reimbursement/Unit</th>
+                              <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Expected Amount</th>
                   </tr>
                 </thead>
                 <tbody>
                             {filteredDisposedInventoryData.map((item, index) => (
                       <tr key={index} className="transition-colors" style={{ borderBottom: '1px solid #30363d' }} onMouseEnter={(e) => e.currentTarget.style.background = '#21262d'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatDate(item.date)}</td>
-                                <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: '#f3f4f6' }}>{item.asin || 'N/A'}</td>
-                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: '#f3f4f6' }}>{item.sku || 'N/A'}</td>
-                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: '#f3f4f6' }}>{item.fnsku || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{formatDate(item.date)}</td>
+                                <td className="px-2 py-2 text-[11px] font-mono break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.asin || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.sku || 'N/A'}</td>
+                                <td className="px-2 py-2 text-[11px] break-words align-top" style={{ color: 'var(--text-primary)' }}>{item.fnsku || 'N/A'}</td>
                                 <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f87171' }}>{item.disposedUnits || 0}</td>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.salesPrice || 0)}</td>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.fees || 0)}</td>
-                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.reimbursementPerUnit || 0)}</td>
-                                <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: '#f3f4f6' }}>{formatCurrency(item.expectedAmount || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{formatCurrency(item.salesPrice || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{formatCurrency(item.fees || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] align-top" style={{ color: 'var(--text-primary)' }}>{formatCurrency(item.reimbursementPerUnit || 0)}</td>
+                                <td className="px-2 py-2 text-[11px] font-semibold align-top" style={{ color: 'var(--text-primary)' }}>{formatCurrency(item.expectedAmount || 0)}</td>
                       </tr>
                             ))}
                           </tbody>
@@ -1024,7 +1024,7 @@ const ReimbursementDashboard = () => {
                       </div>
                     </>
                   ) : (
-                    <div className="text-center py-8" style={{ color: '#9ca3af', fontSize: '12px' }}>
+                    <div className="text-center py-8" style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
                       No disposed inventory data found
                     </div>
                   )}

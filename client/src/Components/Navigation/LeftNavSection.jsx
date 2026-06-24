@@ -629,6 +629,28 @@ const LeftNavSection = () => {
                                             </NavLink>
                                         </motion.div>
 
+                                        {/* Appearance - Available for all users */}
+                                        <motion.div
+                                            initial={{ y: -10, opacity: 0 }}
+                                            animate={{ y: 0, opacity: 1 }}
+                                            exit={{ y: -10, opacity: 0 }}
+                                            transition={{ delay: 0.20, duration: 0.15 }}
+                                        >
+                                            <NavLink
+                                                to="/seller-central-checker/settings?tab=appearance"
+                                                className={() =>
+                                                    `${dropdownItemClass} ${
+                                                        isSettingsPage && currentSettingsTab === 'appearance'
+                                                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
+                                                            : 'text-gray-400 hover:bg-[#21262d] hover:text-blue-400'
+                                                    }`
+                                                }
+                                            >
+                                                <div className="w-1 h-1 sm:w-1.5 sm:h-1.5 bg-current rounded-full opacity-60"></div>
+                                                Appearance
+                                            </NavLink>
+                                        </motion.div>
+
                                         {/* Admin Section - Only for AGENCY users */}
                                         {isAgencyUser && (
                                             <>

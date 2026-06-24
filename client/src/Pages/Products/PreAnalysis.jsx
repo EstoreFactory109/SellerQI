@@ -458,7 +458,7 @@ export default function PreAnalysis() {
           <div className='flex items-center gap-2'>
             <FileText className="w-4 h-4" style={{ color: '#60a5fa' }} />
             <div>
-              <h1 className='text-base font-bold' style={{ color: '#f3f4f6' }}>Listing Analyzer</h1>
+              <h1 className='text-base font-bold' style={{ color: 'var(--text-primary)' }}>Listing Analyzer</h1>
             </div>
           </div>
         </div>
@@ -476,8 +476,8 @@ export default function PreAnalysis() {
             <div className="flex items-start gap-2">
               <Info className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: '#60a5fa' }} />
               <div className="flex-1">
-                <h3 className="font-semibold text-xs mb-1" style={{ color: '#f3f4f6' }}>What is Listing Analyzer?</h3>
-                <p className="text-[11px] leading-relaxed mb-2" style={{ color: '#9ca3af' }}>
+                <h3 className="font-semibold text-xs mb-1" style={{ color: 'var(--text-primary)' }}>What is Listing Analyzer?</h3>
+                <p className="text-[11px] leading-relaxed mb-2" style={{ color: 'var(--text-secondary)' }}>
                   Listing Analyzer helps you identify potential ranking issues before listing your product on Amazon. 
                   Fill in any product details below, and we'll instantly analyze them for common ranking errors and optimization opportunities.
                 </p>
@@ -502,7 +502,7 @@ export default function PreAnalysis() {
         <div className="space-y-2">
           <div className="flex items-center gap-2 mb-2">
             <FileText className="w-4 h-4" style={{ color: '#60a5fa' }} />
-            <h2 className="text-xs font-bold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Product Title</h2>
+            <h2 className="text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--text-primary)' }}>Product Title</h2>
           </div>
           <div className="space-y-1.5">
             <input
@@ -514,7 +514,7 @@ export default function PreAnalysis() {
               style={{ 
                 background: '#1a1a1a', 
                 border: `1px solid ${errors.product_title ? '#60a5fa' : '#30363d'}`, 
-                color: '#f3f4f6',
+                color: 'var(--text-primary)',
                 placeholder: '#6b7280'
               }}
               placeholder="Enter your product title here..."
@@ -522,7 +522,7 @@ export default function PreAnalysis() {
               onBlur={(e) => e.target.style.borderColor = errors.product_title ? '#60a5fa' : '#30363d'}
             />
             <div className="flex items-center justify-between">
-              <p className="text-[10px] font-medium" style={{ color: '#9ca3af' }}>
+              <p className="text-[10px] font-medium" style={{ color: 'var(--text-secondary)' }}>
                 {form.product_title.length} characters
               </p>
               {errors.product_title && (
@@ -539,7 +539,7 @@ export default function PreAnalysis() {
         <div className="space-y-2">
           <div className="flex items-center gap-2 mb-2">
             <Tag className="w-4 h-4" style={{ color: '#60a5fa' }} />
-            <h2 className="text-xs font-bold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Backend Keywords</h2>
+            <h2 className="text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--text-primary)' }}>Backend Keywords</h2>
           </div>
           <div className="space-y-1.5">
             <textarea
@@ -551,14 +551,14 @@ export default function PreAnalysis() {
               style={{ 
                 background: '#1a1a1a', 
                 border: `1px solid ${errors.backendKeywords ? '#60a5fa' : '#30363d'}`, 
-                color: '#f3f4f6'
+                color: 'var(--text-primary)'
               }}
               placeholder="Enter backend keywords/search terms separated by commas or spaces..."
               onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
               onBlur={(e) => e.target.style.borderColor = errors.backendKeywords ? '#60a5fa' : '#30363d'}
             />
             <div className="flex items-center justify-between">
-              <p className="text-[10px] font-medium" style={{ color: '#9ca3af' }}>
+              <p className="text-[10px] font-medium" style={{ color: 'var(--text-secondary)' }}>
                 {form.backendKeywords.length} characters
               </p>
               {errors.backendKeywords && (
@@ -572,8 +572,8 @@ export default function PreAnalysis() {
               <div className="flex items-start gap-1.5">
                 <Info className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: '#60a5fa' }} />
                 <div>
-                  <p className="text-[10px] font-semibold mb-0.5" style={{ color: '#f3f4f6' }}>Pro Tip</p>
-                  <p className="text-[10px] leading-relaxed" style={{ color: '#9ca3af' }}>
+                  <p className="text-[10px] font-semibold mb-0.5" style={{ color: 'var(--text-primary)' }}>Pro Tip</p>
+                  <p className="text-[10px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
                     Include synonyms, alternate terms, and relevant keywords. Each word should be unique (no duplicates) for maximum effectiveness.
                   </p>
                 </div>
@@ -586,13 +586,13 @@ export default function PreAnalysis() {
         <div className="space-y-2">
           <div className="flex items-center gap-2 mb-2">
             <FileText className="w-4 h-4" style={{ color: '#60a5fa' }} />
-            <h2 className="text-xs font-bold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Bullet Points</h2>
+            <h2 className="text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--text-primary)' }}>Bullet Points</h2>
           </div>
           <div className="space-y-2">
             {form.about_product.map((bullet, index) => (
               <div key={index} className="relative group">
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-[11px] font-semibold" style={{ color: '#f3f4f6' }}>
+                  <label className="block text-[11px] font-semibold" style={{ color: 'var(--text-primary)' }}>
                     Bullet Point {index + 1}
                   </label>
                   {form.about_product.length > 1 && (
@@ -616,13 +616,13 @@ export default function PreAnalysis() {
                   style={{ 
                     background: '#1a1a1a', 
                     border: '1px solid #30363d', 
-                    color: '#f3f4f6'
+                    color: 'var(--text-primary)'
                   }}
                   placeholder={`Enter key feature ${index + 1}...`}
                   onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
                   onBlur={(e) => e.target.style.borderColor = '#30363d'}
                 />
-                <p className="text-[10px] font-medium mt-1" style={{ color: '#9ca3af' }}>
+                <p className="text-[10px] font-medium mt-1" style={{ color: 'var(--text-secondary)' }}>
                   {bullet.length} characters
                 </p>
               </div>
@@ -633,7 +633,7 @@ export default function PreAnalysis() {
               className="w-full py-2 px-3 border border-dashed rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-all duration-300"
               style={{ 
                 borderColor: '#30363d', 
-                color: '#9ca3af',
+                color: 'var(--text-secondary)',
                 background: '#1a1a1a'
               }}
               onMouseEnter={(e) => {
@@ -657,7 +657,7 @@ export default function PreAnalysis() {
         <div className="space-y-2">
           <div className="flex items-center gap-2 mb-2">
             <FileText className="w-4 h-4" style={{ color: '#60a5fa' }} />
-            <h2 className="text-xs font-bold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Product Description</h2>
+            <h2 className="text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--text-primary)' }}>Product Description</h2>
           </div>
           <div className="space-y-1.5">
             <textarea
@@ -669,14 +669,14 @@ export default function PreAnalysis() {
               style={{ 
                 background: '#1a1a1a', 
                 border: `1px solid ${errors.product_description ? '#60a5fa' : '#30363d'}`, 
-                color: '#f3f4f6'
+                color: 'var(--text-primary)'
               }}
               placeholder="Enter your product description. Include features, benefits, specifications, and usage instructions..."
               onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
               onBlur={(e) => e.target.style.borderColor = errors.product_description ? '#60a5fa' : '#30363d'}
             />
             <div className="flex items-center justify-between">
-              <p className="text-[10px] font-medium" style={{ color: '#9ca3af' }}>
+              <p className="text-[10px] font-medium" style={{ color: 'var(--text-secondary)' }}>
                 {form.product_description.length} characters
               </p>
               {errors.product_description && (
@@ -746,7 +746,7 @@ export default function PreAnalysis() {
               setAnalysisResults(null);
             }}
             className="px-4 py-2 rounded-lg font-medium text-xs transition-all duration-300"
-            style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+            style={{ background: '#1a1a1a', border: '1px solid #30363d', color: 'var(--text-primary)' }}
             onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
             onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}
           >

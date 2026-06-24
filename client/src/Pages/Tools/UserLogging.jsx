@@ -313,7 +313,7 @@ const UserLogging = () => {
       case 'failed': return { color: '#f87171', background: 'rgba(239, 68, 68, 0.2)', border: 'rgba(239, 68, 68, 0.3)' };
       case 'partial': return { color: '#fbbf24', background: 'rgba(251, 191, 36, 0.2)', border: 'rgba(251, 191, 36, 0.3)' };
       case 'in_progress': return { color: '#60a5fa', background: 'rgba(96, 165, 250, 0.2)', border: 'rgba(96, 165, 250, 0.3)' };
-      default: return { color: '#9ca3af', background: 'rgba(156, 163, 175, 0.2)', border: 'rgba(156, 163, 175, 0.3)' };
+      default: return { color: 'var(--text-secondary)', background: 'rgba(156, 163, 175, 0.2)', border: 'rgba(156, 163, 175, 0.3)' };
     }
   };
 
@@ -363,9 +363,9 @@ const UserLogging = () => {
       >
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-[11px] font-medium" style={{ color: '#9ca3af' }}>{title}</p>
-            <p className="text-[18px] font-bold mt-0.5" style={{ color: '#f3f4f6' }}>{value}</p>
-            {subtitle && <p className="text-[10px] mt-0.5" style={{ color: '#9ca3af' }}>{subtitle}</p>}
+            <p className="text-[11px] font-medium" style={{ color: 'var(--text-secondary)' }}>{title}</p>
+            <p className="text-[18px] font-bold mt-0.5" style={{ color: 'var(--text-primary)' }}>{value}</p>
+            {subtitle && <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>{subtitle}</p>}
           </div>
           <Icon className="w-4 h-4" style={{ color: colors.text }} />
         </div>
@@ -378,7 +378,7 @@ const UserLogging = () => {
       <div className="min-h-screen flex items-center justify-center" style={{ background: '#1a1a1a' }}>
         <div className="text-center">
           <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2" style={{ color: '#3b82f6' }} />
-          <p className="text-xs" style={{ color: '#9ca3af' }}>Loading logging data...</p>
+          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Loading logging data...</p>
         </div>
       </div>
     );
@@ -393,7 +393,7 @@ const UserLogging = () => {
           <div className="flex items-center gap-2">
             <Activity className="w-4 h-4" style={{ color: '#60a5fa' }} />
             <div>
-              <h1 className="text-base font-bold" style={{ color: '#f3f4f6' }}>User Activity Logging</h1>
+              <h1 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>User Activity Logging</h1>
             </div>
           </div>
           
@@ -402,7 +402,7 @@ const UserLogging = () => {
               value={dateFilter}
               onChange={(e) => setDateFilter(e.target.value)}
               className="px-3 py-1.5 rounded-lg text-xs transition-all"
-              style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+              style={{ background: '#1a1a1a', border: '1px solid #30363d', color: 'var(--text-primary)' }}
               onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
               onBlur={(e) => e.target.style.borderColor = '#30363d'}
             >
@@ -552,17 +552,17 @@ const UserLogging = () => {
             {/* Recent Sessions */}
             <div className="rounded-lg" style={{ background: '#161b22', border: '1px solid #30363d' }}>
               <div className="p-3 border-b" style={{ borderColor: '#30363d' }}>
-                <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Recent Sessions</h3>
+                <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-primary)' }}>Recent Sessions</h3>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead style={{ background: '#21262d' }}>
                     <tr>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Session</th>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Status</th>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Duration</th>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Success Rate</th>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Started</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Session</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Status</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Duration</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Success Rate</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Started</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y" style={{ borderColor: '#30363d' }}>
@@ -572,10 +572,10 @@ const UserLogging = () => {
                             onMouseEnter={(e) => e.currentTarget.style.background = '#21262d'}
                             onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
                           <td className="px-2 py-2 whitespace-nowrap">
-                            <div className="text-[11px] font-medium" style={{ color: '#f3f4f6' }}>
+                            <div className="text-[11px] font-medium" style={{ color: 'var(--text-primary)' }}>
                               {session.sessionId?.split('_').slice(-2).join('_') || 'Unknown'}
                             </div>
-                            <div className="text-[10px]" style={{ color: '#9ca3af' }}>
+                            <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
                               {session.region || 'N/A'} • {session.country || 'N/A'}
                             </div>
                           </td>
@@ -589,13 +589,13 @@ const UserLogging = () => {
                               );
                             })()}
                           </td>
-                          <td className="px-2 py-2 whitespace-nowrap text-[11px]" style={{ color: '#f3f4f6' }}>
+                          <td className="px-2 py-2 whitespace-nowrap text-[11px]" style={{ color: 'var(--text-primary)' }}>
                             {formatDuration(session.sessionEndTime ? new Date(session.sessionEndTime) - new Date(session.sessionStartTime) : null)}
                           </td>
-                          <td className="px-2 py-2 whitespace-nowrap text-[11px]" style={{ color: '#f3f4f6' }}>
+                          <td className="px-2 py-2 whitespace-nowrap text-[11px]" style={{ color: 'var(--text-primary)' }}>
                             {calculateSessionSuccessRate(session)}%
                           </td>
-                          <td className="px-2 py-2 whitespace-nowrap text-[11px]" style={{ color: '#9ca3af' }}>
+                          <td className="px-2 py-2 whitespace-nowrap text-[11px]" style={{ color: 'var(--text-secondary)' }}>
                             {formatDate(session.sessionStartTime)}
                           </td>
                         </tr>
@@ -604,9 +604,9 @@ const UserLogging = () => {
                       <tr>
                         <td colSpan="5" className="px-4 py-6 text-center">
                           <div className="flex flex-col items-center">
-                            <Database className="w-6 h-6 mb-2" style={{ color: '#6b7280' }} />
-                            <p className="text-xs" style={{ color: '#9ca3af' }}>No sessions found</p>
-                            <p className="text-[10px]" style={{ color: '#6b7280' }}>Sessions will appear here after users run data analysis</p>
+                            <Database className="w-6 h-6 mb-2" style={{ color: 'var(--text-muted)' }} />
+                            <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>No sessions found</p>
+                            <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Sessions will appear here after users run data analysis</p>
                           </div>
                         </td>
                       </tr>
@@ -619,7 +619,7 @@ const UserLogging = () => {
             {/* Recent Errors */}
             <div className="rounded-lg" style={{ background: '#161b22', border: '1px solid #30363d' }}>
               <div className="p-3 border-b" style={{ borderColor: '#30363d' }}>
-                <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Recent Errors</h3>
+                <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-primary)' }}>Recent Errors</h3>
               </div>
               <div className="divide-y" style={{ borderColor: '#30363d' }}>
                 {errorLogs && errorLogs.length > 0 ? (
@@ -629,11 +629,11 @@ const UserLogging = () => {
                         <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: '#f87171' }} />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
-                            <p className="text-[11px] font-medium" style={{ color: '#f3f4f6' }}>{error.functionName || 'Unknown Function'}</p>
-                            <span className="text-[10px]" style={{ color: '#9ca3af' }}>{formatDate(error.timestamp)}</span>
+                            <p className="text-[11px] font-medium" style={{ color: 'var(--text-primary)' }}>{error.functionName || 'Unknown Function'}</p>
+                            <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>{formatDate(error.timestamp)}</span>
                           </div>
-                          <p className="text-[11px] mb-1.5" style={{ color: '#9ca3af' }}>{error.message || 'No error message'}</p>
-                          <div className="flex items-center gap-3 text-[10px]" style={{ color: '#6b7280' }}>
+                          <p className="text-[11px] mb-1.5" style={{ color: 'var(--text-secondary)' }}>{error.message || 'No error message'}</p>
+                          <div className="flex items-center gap-3 text-[10px]" style={{ color: 'var(--text-muted)' }}>
                             <span>Session: {error.sessionId?.split('_').slice(-2).join('_') || 'Unknown'}</span>
                             <span>Region: {error.contextData?.region || 'N/A'}</span>
                             <span>Country: {error.contextData?.country || 'N/A'}</span>
@@ -645,9 +645,9 @@ const UserLogging = () => {
                 ) : (
                   <div className="p-6 text-center">
                     <div className="flex flex-col items-center">
-                      <AlertCircle className="w-6 h-6 mb-2" style={{ color: '#6b7280' }} />
-                      <p className="text-xs" style={{ color: '#9ca3af' }}>No error logs found</p>
-                      <p className="text-[10px]" style={{ color: '#6b7280' }}>Error logs will appear here when system errors occur</p>
+                      <AlertCircle className="w-6 h-6 mb-2" style={{ color: 'var(--text-muted)' }} />
+                      <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>No error logs found</p>
+                      <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Error logs will appear here when system errors occur</p>
                     </div>
                   </div>
                 )}
@@ -664,14 +664,14 @@ const UserLogging = () => {
               <div className="flex flex-col sm:flex-row gap-2">
                 <div className="flex-1">
                   <div className="relative">
-                    <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5" style={{ color: '#6b7280' }} />
+                    <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5" style={{ color: 'var(--text-muted)' }} />
                     <input
                       type="text"
                       placeholder="Search by session ID, region, or country..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="pl-8 pr-3 py-1.5 w-full rounded-lg text-xs transition-all"
-                      style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                      style={{ background: '#1a1a1a', border: '1px solid #30363d', color: 'var(--text-primary)' }}
                       onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
                       onBlur={(e) => e.target.style.borderColor = '#30363d'}
                     />
@@ -681,7 +681,7 @@ const UserLogging = () => {
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
                   className="px-3 py-1.5 rounded-lg text-xs transition-all"
-                  style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
+                  style={{ background: '#1a1a1a', border: '1px solid #30363d', color: 'var(--text-primary)' }}
                   onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
                   onBlur={(e) => e.target.style.borderColor = '#30363d'}
                 >
@@ -700,11 +700,11 @@ const UserLogging = () => {
                 <table className="w-full">
                   <thead style={{ background: '#21262d' }}>
                     <tr>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Session Details</th>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Status</th>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Performance</th>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Duration</th>
-                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Actions</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Session Details</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Status</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Performance</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Duration</th>
+                      <th className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y" style={{ borderColor: '#30363d' }}>
@@ -714,13 +714,13 @@ const UserLogging = () => {
                           onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
                         <td className="px-2 py-2 whitespace-nowrap">
                           <div>
-                            <div className="text-[11px] font-medium" style={{ color: '#f3f4f6' }}>
+                            <div className="text-[11px] font-medium" style={{ color: 'var(--text-primary)' }}>
                               {session.sessionId.split('_').slice(-2).join('_')}
                             </div>
-                            <div className="text-[10px]" style={{ color: '#9ca3af' }}>
+                            <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
                               {session.region} • {session.country}
                             </div>
-                            <div className="text-[10px] mt-0.5" style={{ color: '#6b7280' }}>
+                            <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
                               {formatDate(session.sessionStartTime)}
                             </div>
                           </div>
@@ -736,14 +736,14 @@ const UserLogging = () => {
                           })()}
                         </td>
                         <td className="px-2 py-2 whitespace-nowrap">
-                          <div className="text-[11px]" style={{ color: '#f3f4f6' }}>
+                          <div className="text-[11px]" style={{ color: 'var(--text-primary)' }}>
                             {calculateSessionSuccessRate(session)}% success
                           </div>
-                          <div className="text-[10px]" style={{ color: '#9ca3af' }}>
+                          <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
                             {session.overallSummary?.successfulFunctions || 0}/{session.overallSummary?.totalFunctions || 0} functions
                           </div>
                         </td>
-                        <td className="px-2 py-2 whitespace-nowrap text-[11px]" style={{ color: '#f3f4f6' }}>
+                        <td className="px-2 py-2 whitespace-nowrap text-[11px]" style={{ color: 'var(--text-primary)' }}>
                           {formatDuration(session.sessionEndTime ? new Date(session.sessionEndTime) - new Date(session.sessionStartTime) : null)}
                         </td>
                         <td className="px-2 py-2 whitespace-nowrap text-[11px] font-medium">
@@ -786,10 +786,10 @@ const UserLogging = () => {
                   >
                     <div className="p-3 border-b" style={{ borderColor: '#30363d' }}>
                       <div className="flex items-center justify-between">
-                        <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Session Details</h3>
+                        <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-primary)' }}>Session Details</h3>
                         <button
                           onClick={() => setSelectedSession(null)}
-                          style={{ color: '#9ca3af' }}
+                          style={{ color: 'var(--text-secondary)' }}
                           onMouseEnter={(e) => e.target.style.color = '#f3f4f6'}
                           onMouseLeave={(e) => e.target.style.color = '#9ca3af'}
                         >
@@ -825,14 +825,14 @@ const UserLogging = () => {
 
                       {/* Logs */}
                       <div className="space-y-2">
-                        <h4 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Function Logs</h4>
+                        <h4 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-primary)' }}>Function Logs</h4>
                         <div className="space-y-1.5 max-h-96 overflow-y-auto">
                           {sessionDetails.logs?.map((log, index) => (
                             <div key={index} className="flex items-start gap-2 p-2 rounded-lg" style={{ background: '#21262d', border: '1px solid #30363d' }}>
                               {getLogTypeIcon(log.logType)}
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 mb-1">
-                                  <span className="text-[11px] font-medium" style={{ color: '#f3f4f6' }}>{log.functionName}</span>
+                                  <span className="text-[11px] font-medium" style={{ color: 'var(--text-primary)' }}>{log.functionName}</span>
                                   {(() => {
                                     const statusStyle = getStatusColor(log.status);
                                     return (
@@ -842,8 +842,8 @@ const UserLogging = () => {
                                     );
                                   })()}
                                 </div>
-                                <p className="text-[11px]" style={{ color: '#9ca3af' }}>{log.message}</p>
-                                <div className="flex items-center gap-3 text-[10px] mt-1" style={{ color: '#6b7280' }}>
+                                <p className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>{log.message}</p>
+                                <div className="flex items-center gap-3 text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
                                   <span>{formatDate(log.timestamp)}</span>
                                   {log.executionTime?.duration && (
                                     <span>Duration: {formatDuration(log.executionTime.duration)}</span>
@@ -867,7 +867,7 @@ const UserLogging = () => {
           <div className="space-y-2">
             <div className="rounded-lg" style={{ background: '#161b22', border: '1px solid #30363d' }}>
               <div className="p-3 border-b" style={{ borderColor: '#30363d' }}>
-                <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Error Logs</h3>
+                <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-primary)' }}>Error Logs</h3>
               </div>
               
               <div className="divide-y" style={{ borderColor: '#30363d' }}>
@@ -878,8 +878,8 @@ const UserLogging = () => {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between mb-1.5">
                           <div className="flex items-center gap-2">
-                            <p className="text-[11px] font-medium" style={{ color: '#f3f4f6' }}>{error.functionName}</p>
-                            <span className="text-[10px]" style={{ color: '#9ca3af' }}>{formatDate(error.timestamp)}</span>
+                            <p className="text-[11px] font-medium" style={{ color: 'var(--text-primary)' }}>{error.functionName}</p>
+                            <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>{formatDate(error.timestamp)}</span>
                           </div>
                           <button
                             onClick={() => toggleErrorExpansion(index)}
@@ -902,9 +902,9 @@ const UserLogging = () => {
                           </button>
                         </div>
                         
-                        <p className="text-[11px] mb-1.5" style={{ color: '#9ca3af' }}>{error.message}</p>
+                        <p className="text-[11px] mb-1.5" style={{ color: 'var(--text-secondary)' }}>{error.message}</p>
                         
-                        <div className="flex items-center gap-3 text-[10px] mb-1.5" style={{ color: '#6b7280' }}>
+                        <div className="flex items-center gap-3 text-[10px] mb-1.5" style={{ color: 'var(--text-muted)' }}>
                           <span>Session: {error.sessionId.split('_').slice(-2).join('_')}</span>
                           <span>Region: {error.contextData?.region}</span>
                           <span>Country: {error.contextData?.country}</span>
@@ -923,22 +923,22 @@ const UserLogging = () => {
                                 <div className="space-y-1.5">
                                   {error.errorDetails.errorMessage && (
                                     <div>
-                                      <span className="text-[10px] font-medium" style={{ color: '#f3f4f6' }}>Error Message:</span>
-                                      <p className="text-[10px] mt-0.5" style={{ color: '#9ca3af' }}>{error.errorDetails.errorMessage}</p>
+                                      <span className="text-[10px] font-medium" style={{ color: 'var(--text-primary)' }}>Error Message:</span>
+                                      <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>{error.errorDetails.errorMessage}</p>
                                     </div>
                                   )}
                                   
                                   {error.errorDetails.httpStatus && (
                                     <div>
-                                      <span className="text-[10px] font-medium" style={{ color: '#f3f4f6' }}>HTTP Status:</span>
-                                      <p className="text-[10px] mt-0.5" style={{ color: '#9ca3af' }}>{error.errorDetails.httpStatus}</p>
+                                      <span className="text-[10px] font-medium" style={{ color: 'var(--text-primary)' }}>HTTP Status:</span>
+                                      <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>{error.errorDetails.httpStatus}</p>
                                     </div>
                                   )}
                                   
                                   {error.errorDetails.stackTrace && (
                                     <div>
-                                      <span className="text-[10px] font-medium" style={{ color: '#f3f4f6' }}>Stack Trace:</span>
-                                      <pre className="text-[10px] mt-0.5 whitespace-pre-wrap p-2 rounded border max-h-32 overflow-y-auto" style={{ background: '#1a1a1a', borderColor: '#30363d', color: '#9ca3af' }}>
+                                      <span className="text-[10px] font-medium" style={{ color: 'var(--text-primary)' }}>Stack Trace:</span>
+                                      <pre className="text-[10px] mt-0.5 whitespace-pre-wrap p-2 rounded border max-h-32 overflow-y-auto" style={{ background: '#1a1a1a', borderColor: '#30363d', color: 'var(--text-secondary)' }}>
                                         {error.errorDetails.stackTrace}
                                       </pre>
                                     </div>
