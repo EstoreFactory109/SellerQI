@@ -666,7 +666,10 @@ async function handleStrategyQuery(interpretation, userContext, requestDateRange
       ...result,
     };
   } catch (err) {
-    logger.error('[GeneralStrategyEngine] Error in handleStrategyQuery:', err.message);
+    logger.error('[GeneralStrategyEngine] Error in handleStrategyQuery', {
+      message: err && err.message,
+      stack: err && err.stack,
+    });
     return { type: 'error', message: err.message };
   }
 }

@@ -401,6 +401,11 @@ const SELLER_OPS_FOLLOW_UP_TEMPLATES = {
     { label: 'My product catalog', prompt: 'How many products do I have?' },
     { label: 'My top sellers', prompt: 'Which products sell fastest?' },
   ],
+  brand_story: [
+    { label: 'My listing issues', prompt: 'What issues do my listings have?' },
+    { label: 'How do I add A+ Content?', prompt: 'How do I add A+ content?' },
+    { label: 'Which products need attention?', prompt: 'Show me my most problematic listings' },
+  ],
 };
 
 /**

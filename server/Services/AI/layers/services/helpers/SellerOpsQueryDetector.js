@@ -31,6 +31,14 @@ function classifySellerOpsQueryType(interpretation) {
   const prompt = extractPromptText(interpretation);
   const hasAsin = (interpretation?.entities?.asins || []).length > 0;
 
+  // Brand Story — its own type: check presence (per-ASIN or account-wide) and,
+  // when missing, return the how-to-add steps. Checked before the generic listing
+  // cues so "brand story issue / how to solve brand story" doesn't fall into the
+  // broad listing-issues summary.
+  if (/brand\s*story/i.test(prompt)) {
+    return 'brand_story';
+  }
+
   // Listing Issues — fix questions first (most specific), then ASIN vs summary.
   if (/how.*(fix|resolve|repair).*(listing|suppress|image|bullet|title|description)/i.test(prompt)) {
     return 'listing_issue_fix';

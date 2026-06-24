@@ -2,6 +2,14 @@
  * Lightweight domain lock: QMate answers Amazon seller analytics only.
  */
 
+// Cross-domain strategy questions ("what mistakes am I making?", "what should I
+// focus on first?", "give me a business summary") are in-scope but often name no
+// Amazon keyword, so the keyword check below would wrongly block them. Reuse the
+// SAME detector the GeneralStrategyEngine routes on (pure regex, zero engine/DB
+// imports — no circular dependency) so the guard allows EXACTLY what the strategy
+// engine will answer, and can't drift from it.
+const { isGeneralStrategyQuery } = require('../services/helpers/StrategyQueryDetector.js');
+
 const AMAZON_KEYWORDS = [
     'sales',
     'orders',
@@ -150,6 +158,11 @@ function looksLikeVagueMetaPrompt(query = '') {
     return /\b(tell me something|what can you do)\b/.test(q);
 }
 
+/** Cross-domain strategy/business questions — in-scope even without a keyword. */
+function looksLikeStrategyQuestion(query = '') {
+    return isGeneralStrategyQuery({ raw: { prompt: String(query || '') } });
+}
+
 function isAmazonQuery(query = '') {
     const q = String(query).toLowerCase();
     if (looksLikeClarificationFollowUp(query)) return true;
@@ -157,6 +170,7 @@ function isAmazonQuery(query = '') {
     if (looksLikeShortGreetingOrHelp(query)) return true;
     if (looksLikeVagueMetaPrompt(query)) return true;
     if (looksLikeSellerTimeRange(query) && /\bmy\b|\bour\b/.test(q)) return true;
+    if (looksLikeStrategyQuestion(query)) return true;
     return AMAZON_KEYWORDS.some((k) => q.includes(k));
 }
 
@@ -186,4 +200,5 @@ module.exports = {
     looksLikeShortGreetingOrHelp,
     looksLikeVagueMetaPrompt,
     looksLikeSellerTimeRange,
+    looksLikeStrategyQuestion,
 };

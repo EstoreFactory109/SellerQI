@@ -512,9 +512,12 @@ function classifyFinanceQueryType(interpretation) {
       return 'expense_breakdown';
     }
 
-    // 10. FEE-SPECIFIC (a single named fee / spend amount / PPC metric).
+    // 10. FEE-SPECIFIC (a single named fee / spend amount / PPC metric). Includes
+    //     refunds/returns — "what about my returns", "what are my refunds" — which
+    //     resolve to the Refund Costs line (abs refundedAmount), same number the
+    //     dashboard's Refund Cost shows.
     if (
-      /how much.*(pay|paying|spend|spending|lose|losing|going|cost|costing)|(what|whats|what's).*(fee|charge)|\bacos\b|\broas\b|\btacos\b|reimbursement|tax (was )?collected|how much tax|\btax\b/.test(prompt)
+      /how much.*(pay|paying|spend|spending|lose|losing|going|cost|costing)|(what|whats|what's).*(fee|charge)|\bacos\b|\broas\b|\btacos\b|reimbursement|tax (was )?collected|how much tax|\btax\b|\brefunds?\b|\breturns?\b/.test(prompt)
     ) {
       return 'fee_specific';
     }
@@ -660,7 +663,7 @@ async function handleFinanceQuery(interpretation, userContext, requestDateRange)
       case 'expense_breakdown':
         return buildExpenseBreakdownResponse(financeSummary, dashboardData, dateRange);
       case 'fee_specific':
-        return buildFeeSpecificResponse(dashboardData, interpretation?.entities?.metrics, dateRange);
+        return buildFeeSpecificResponse(dashboardData, interpretation?.entities?.metrics, dateRange, extractPromptText(interpretation));
       case 'single_asin': {
         const asin = (interpretation?.entities?.asins || [])[0];
         if (!asin) {
@@ -818,7 +821,7 @@ function buildExpenseBreakdownResponse(financeSummary, dashboardData, dateRange)
 const FEE_RESOLVERS = [
   { name: 'FBA Fulfillment Fee', match: ['fba fulfillment', 'fba fee', 'fulfillment fee'], get: (t) => Math.abs(t.fbaFulfillmentFee || 0) },
   { name: 'Referral Fee', match: ['referral'], get: (t) => Math.abs(t.referralCommission || 0) },
-  { name: 'Refund Costs', match: ['refund'], get: (t) => Math.abs(t.refundedAmount || 0) },
+  { name: 'Refund Costs', match: ['refund', 'return'], get: (t) => Math.abs(t.refundedAmount || 0) },
   { name: 'Promotions & Discounts', match: ['promotion', 'discount'], get: (t) => Math.abs(t.promotionsDiscount || 0) },
   { name: 'Shipping Chargeback', match: ['shipping'], get: (t) => Math.abs(t.shippingChargeback || 0) },
   { name: 'Disposal Fee', match: ['disposal'], get: (t) => Math.abs(t.fbaDisposalFee || 0) },
@@ -835,10 +838,14 @@ const FEE_RESOLVERS = [
  * @param {Object} dateRange
  * @returns {Object} { type:'fee_specific', dateRange, fee:{ name, amount, percentOfRevenue, percentOfTotalExpenses } }
  */
-function buildFeeSpecificResponse(dashboardData, requestedMetrics, dateRange) {
+function buildFeeSpecificResponse(dashboardData, requestedMetrics, dateRange, prompt) {
   const totals = dashboardData.totals || {};
   const overhead = dashboardData.overhead || [];
-  const haystack = (Array.isArray(requestedMetrics) ? requestedMetrics.join(' ') : String(requestedMetrics || '')).toLowerCase();
+  // Search BOTH the extracted metrics AND the raw prompt — for phrasings like
+  // "what about my returns" the interpreter often extracts no metric, so the fee
+  // keyword lives only in the prompt.
+  const metricsText = Array.isArray(requestedMetrics) ? requestedMetrics.join(' ') : String(requestedMetrics || '');
+  const haystack = `${metricsText} ${String(prompt || '')}`.toLowerCase();
 
   // Storage fee lives in overhead, not totals — handle it before the totals-based resolvers.
   let resolved = null;

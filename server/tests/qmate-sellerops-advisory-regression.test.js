@@ -391,6 +391,32 @@ describe('Finance/ads ASIN queries are not poached by SellerOps', () => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════
+// 3c. Brand Story — routes to SellerOps `brand_story` (checks presence; suggests
+//     how to add one when missing).
+// ════════════════════════════════════════════════════════════════════════════
+describe('Brand Story', () => {
+  it.each([
+    'Brand Story | Brand Story Issue keise slov kare',
+    'how to solve brand story issue',
+    'do I have a brand story',
+    'how do I add a brand story',
+    'brand story for B0DCK18RX6',
+  ])('routes to SellerOps brand_story: "%s"', (q) => {
+    const i = interp(q);
+    expect(isSellerOpsQuery(i)).toBe(true);
+    expect(classifySellerOpsQueryType(i)).toBe('brand_story');
+  });
+
+  it('has a Brand Story fix knowledge entry with steps', () => {
+    const kb = SellerOpsEngine.LISTING_FIX_KNOWLEDGE.brand_story;
+    expect(kb).toBeDefined();
+    expect(kb.title).toMatch(/brand story/i);
+    expect(Array.isArray(kb.steps)).toBe(true);
+    expect(kb.steps.length).toBeGreaterThan(0);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 // 4. Knowledge bases
 // ════════════════════════════════════════════════════════════════════════════
 describe('Knowledge bases', () => {

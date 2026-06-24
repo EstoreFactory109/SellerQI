@@ -253,6 +253,17 @@ const LISTING_FIX_KNOWLEDGE = {
       'Approval typically takes up to 7 days',
     ],
   },
+  brand_story: {
+    title: 'How to Add a Brand Story',
+    steps: [
+      'Enroll in Amazon Brand Registry first (a Brand Story requires an active registered trademark)',
+      'Go to Seller Central → Advertising → A+ Content Manager → Brand Story',
+      'Create the Brand Story module: add your brand logo, a headline, a background image, and "From the brand" content',
+      'Add brand-story cards (brand focus / Q&A / product showcase) to tell your brand\'s story',
+      'Apply the Brand Story — once approved it appears across all ASINs under that brand',
+      'Submit for review; approval typically takes up to 7 days',
+    ],
+  },
   low_image_count: {
     title: 'How to Add More Product Images',
     steps: [
@@ -676,6 +687,11 @@ async function getReimbursementSummary(userContext, dateRange) {
   const d = received.data;
   return {
     type: 'reimbursement_summary',
+    // Reimbursements are NOT date-filtered — these totals cover every reimbursement
+    // in the latest synced FBA report (all-time), not the dashboard's date range.
+    // Surfaced so the narrator can state the scope and avoid implying a recent window.
+    scope: 'all_time',
+    scopeLabel: 'all-time (every synced reimbursement, not the dashboard date range)',
     totalReimbursed: d.summary?.totalAmount || 0,
     totalUnits: d.summary?.totalUnits || 0,
     totalClaims: d.summary?.totalClaims || 0,
@@ -699,6 +715,9 @@ async function getReimbursementOpportunities(userContext) {
   const cat = (c) => (c ? { count: c.count || 0, totalAmount: c.totalAmount || 0, items: c.items || [] } : { count: 0, totalAmount: 0, items: [] });
   return {
     type: 'reimbursement_opportunities',
+    // Not date-filtered — covers all currently recoverable cases, not a window.
+    scope: 'all_time',
+    scopeLabel: 'all-time (all currently recoverable cases, not the dashboard date range)',
     potentialAmount: d.summary?.totalRecoverable || 0,
     breakdown: {
       shipmentDiscrepancy: cat(d.shipmentDiscrepancy),
@@ -778,6 +797,67 @@ async function getBSRAnalysis(userContext, dateRange) {
   };
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// BRAND STORY — checks whether a Brand Story is present (per-ASIN or account-wide)
+// and, when it's missing, returns the knowledge-based how-to-add steps. Data:
+// QMateProductsService (per-ASIN conversionErrors.brandStoryErrorData; account-wide
+// getListingQualityAnalysis productsWithBrandStory / brandStoryAdoption).
+// ════════════════════════════════════════════════════════════════════════════
+
+/** Brand Story status + fix steps when missing. */
+async function getBrandStoryStatus(userContext, asin) {
+  const fix = LISTING_FIX_KNOWLEDGE.brand_story;
+  const normalizedAsin = String(asin || '').trim().toUpperCase();
+
+  // Per-ASIN: present unless the conversion check flags it as an Error.
+  if (normalizedAsin) {
+    const res = await QMateProductsService.getFullAsinIssues(
+      userContext.userId, userContext.country, userContext.region, normalizedAsin
+    );
+    const d = res && res.success ? res.data : null;
+    if (!d || !d.name) {
+      return { type: 'brand_story', scope: 'asin', asin: normalizedAsin, notFound: true, present: false, title: fix.title, steps: fix.steps };
+    }
+    const bs = d.conversionErrors && d.conversionErrors.brandStoryErrorData;
+    const present = !(bs && bs.status === 'Error');
+    return {
+      type: 'brand_story',
+      scope: 'asin',
+      asin: normalizedAsin,
+      productName: d.name,
+      present,
+      title: fix.title,
+      steps: present ? [] : fix.steps,
+    };
+  }
+
+  // Account-wide: how many products have / lack a Brand Story.
+  const q = await QMateProductsService.getListingQualityAnalysis(
+    userContext.userId, userContext.country, userContext.region
+  );
+  if (!q || !q.success || !q.data) {
+    return { type: 'brand_story', available: false, message: 'Brand story data is not yet available in SellerQI' };
+  }
+  const s = q.data.summary || {};
+  const total = s.totalProducts || 0;
+  const withBrandStory = s.productsWithBrandStory || 0;
+  const without = Math.max(0, total - withBrandStory);
+  const adoptionPercent = q.data.qualityMetrics && q.data.qualityMetrics.brandStoryAdoption != null
+    ? q.data.qualityMetrics.brandStoryAdoption
+    : (total > 0 ? Math.round((withBrandStory / total) * 100) : 0);
+  return {
+    type: 'brand_story',
+    scope: 'account',
+    totalProducts: total,
+    productsWithBrandStory: withBrandStory,
+    productsWithoutBrandStory: without,
+    adoptionPercent,
+    present: total > 0 && without === 0,
+    title: fix.title,
+    steps: without > 0 || total === 0 ? fix.steps : [],
+  };
+}
+
 // ── SECTION 4 — handleSellerOpsQuery (listing issues wired; rest stubbed) ──
 
 /**
@@ -834,6 +914,9 @@ async function handleSellerOpsQuery(interpretation, userContext, requestDateRang
         return await getProductDetails(asin, userContext);
       case 'bsr_analysis':
         return await getBSRAnalysis(userContext, requestDateRange);
+      // Brand Story
+      case 'brand_story':
+        return await getBrandStoryStatus(userContext, asin);
       default:
         return { type: 'not_implemented', queryType };
     }
@@ -853,7 +936,7 @@ RULES:
 2. For listing issues: prioritize by severity. Mention suppressed listings first.
 3. For inventory: flag anything with less than 14 days of supply as urgent.
 4. For account health: always mention the Amazon threshold next to the current value.
-5. For reimbursements: state the potential amount clearly.
+5. For reimbursements: state the amount clearly, and ALWAYS state the scope from the result's scopeLabel (these totals are all-time, NOT the dashboard date range) so the seller isn't misled by recent approval dates.
 6. For operational advice (knowledge-based steps): present numbered steps clearly.
 7. Keep responses under 300 words.`;
 
@@ -921,15 +1004,29 @@ function buildSellerOpsFallback(r) {
     case 'account_health_action':
       return `${r.metric} (threshold ${r.threshold}, status ${r.status}). ${r.consequences}\nSteps:\n${(r.steps || []).map((s, i) => `${i + 1}. ${s}`).join('\n')}`;
     case 'reimbursement_summary':
-      return `You've been reimbursed ${sFmtMoney(r.totalReimbursed)} across ${r.totalClaims || 0} claim(s).`;
+      return `You've been reimbursed ${sFmtMoney(r.totalReimbursed)} across ${r.totalClaims || 0} claim(s) — ${r.scopeLabel || 'in total'}.`;
     case 'reimbursement_opportunities':
-      return `You have an estimated ${sFmtMoney(r.potentialAmount)} in recoverable reimbursements across ${(r.cases || []).length} case(s).`;
+      return `You have an estimated ${sFmtMoney(r.potentialAmount)} in recoverable reimbursements across ${(r.cases || []).length} case(s) — ${r.scopeLabel || 'in total'}.`;
     case 'product_summary':
       return `You have ${r.totalProducts} product(s) (${r.activeCount} active)${r.averageRating != null ? `, average rating ${r.averageRating}` : ''}.`;
     case 'product_details':
       return `${r.name || r.asin}${r.price ? ` — ${sFmtMoney(r.price)}` : ''}. Note: BSR is not tracked in SellerQI.`;
     case 'bsr_analysis':
       return r.message || 'BSR is not currently tracked in SellerQI.';
+    case 'brand_story': {
+      const steps = (r.steps || []).map((s, i) => `${i + 1}. ${s}`).join('\n');
+      if (r.scope === 'asin') {
+        if (r.notFound) return `I couldn't find data for ${r.asin}. To add a Brand Story:\n${steps}`;
+        return r.present
+          ? `${r.productName || r.asin} already has a Brand Story — no action needed.`
+          : `${r.productName || r.asin} is missing a Brand Story. ${r.title}:\n${steps}`;
+      }
+      // account scope
+      if (r.present) {
+        return `All ${r.totalProducts} of your products have a Brand Story (${r.adoptionPercent}% adoption) — no action needed.`;
+      }
+      return `${r.productsWithoutBrandStory} of your ${r.totalProducts} product(s) are missing a Brand Story (${r.adoptionPercent}% adoption). ${r.title}:\n${steps}`;
+    }
     default:
       return 'Here are your results.';
   }
@@ -995,6 +1092,8 @@ module.exports = {
   getProductSummary,
   getProductDetails,
   getBSRAnalysis,
+  // brand story
+  getBrandStoryStatus,
   // exported for later phases / testing
   LISTING_FIX_KNOWLEDGE,
   ACCOUNT_HEALTH_KNOWLEDGE,

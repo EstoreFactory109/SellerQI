@@ -85,12 +85,26 @@ const STRATEGY_MATCHERS = [
   },
   {
     type: 'how_to_improve', // Categories B + I (product strategy)
-    test: (p) =>
-      ((/\bhow\b/.test(p) || /what can i do/.test(p)) &&
-        /(improv|increas|grow|boost|raise|maximiz|optimi[sz]|make more money|more money|more profitab|become.*profitab|scal|reduce.*cost|lower.*cost|cut.*cost|make more)/.test(p)) ||
-      /products?.*(should i (focus|discontinu|keep|drop|cut|add)|worth keeping|most potential|focus on)/.test(p) ||
-      /(discontinu|worth keeping|most potential).*products?/.test(p) ||
-      /(add more products|should i add.*products?|products?.*or optimi|optimi.*existing)/.test(p),
+    test: (p) => {
+      const improveVerb = /(improv|increas|grow|boost|raise|maximiz|optimi[sz]|make more money|more money|more profitab|become.*profitab|scal|reduce.*cost|lower.*cost|cut.*cost|make more)/.test(p);
+      // Explicit improvement framing ("how do I…", "what can I do to…").
+      const explicitHow = /\bhow\b/.test(p) || /what can i do/.test(p);
+      // Advice framing: recommendations / suggestions / tips / "what should I do" /
+      // "what are the best|top…" / "ways to…" (stems, no trailing \b, so plurals
+      // like "recommendations"/"suggestions" match). Gated by !hasStrongDomainSignal
+      // so a single-domain ask ("suggest acos improvements") stays with that engine.
+      const adviceIntent =
+        /\b(recommend|suggest|tip|advice|advis)/.test(p) ||
+        /what (should|can|do) i\b/.test(p) ||
+        /what are (the )?(best|top)\b/.test(p) ||
+        /ways to\b/.test(p);
+      if (improveVerb && (explicitHow || (adviceIntent && !hasStrongDomainSignal(p)))) return true;
+      return (
+        /products?.*(should i (focus|discontinu|keep|drop|cut|add)|worth keeping|most potential|focus on)/.test(p) ||
+        /(discontinu|worth keeping|most potential).*products?/.test(p) ||
+        /(add more products|should i add.*products?|products?.*or optimi|optimi.*existing)/.test(p)
+      );
+    },
   },
   {
     type: 'what_mistakes', // Category C
