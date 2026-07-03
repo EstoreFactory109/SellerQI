@@ -341,7 +341,7 @@ async function fetchOrders(accessToken, baseUrl, marketplaceId, createdAfter, cr
   let page = 1;
 
   do {
-    logger.info(`[Orders] Fetching page ${page}...`);
+    logger.debug(`[Orders] Fetching page ${page}...`);
 
     let path;
     if (nextToken) {
@@ -442,12 +442,12 @@ async function fetchOrderItemsBatch(accessToken, baseUrl, orderIds) {
       const items = await fetchOrderItems(accessToken, baseUrl, orderId);
       results.set(orderId, items);
     } catch (error) {
-      logger.error(`[Orders] Failed to fetch items for ${orderId}: ${error.message}`);
+      logger.debug(`[Orders] Failed to fetch items for ${orderId}: ${error.message}`);
       results.set(orderId, []);
     }
 
     if ((i + 1) % 50 === 0 || i === orderIds.length - 1) {
-      logger.info(`[Orders] Order items progress: ${i + 1}/${orderIds.length}`);
+      logger.debug(`[Orders] Order items progress: ${i + 1}/${orderIds.length}`);
     }
 
     // Rate limit: 0.5 req/s

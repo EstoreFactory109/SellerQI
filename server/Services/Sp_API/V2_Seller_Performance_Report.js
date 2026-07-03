@@ -129,7 +129,7 @@ const getReport = async (accessToken, marketplaceIds,userId,baseuri,country,regi
 
         while (reportDocumentId === null) {
             attemptCount++;
-            logger.info(`Checking report status... (Attempt ${attemptCount})`);
+            logger.debug(`Checking report status... (Attempt ${attemptCount})`);
             await new Promise((resolve) => setTimeout(resolve, 90000)); // Wait 90 seconds before retrying
             reportDocumentId = await checkReportStatus(accessToken, reportId,baseuri);
             

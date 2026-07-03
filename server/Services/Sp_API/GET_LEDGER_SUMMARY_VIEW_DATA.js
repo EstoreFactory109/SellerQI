@@ -177,7 +177,7 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, 
         let retries = 30;
 
         while (!reportDocumentId && retries > 0) {
-            logger.info(`Checking report status... (Retries left: ${retries})`);
+            logger.debug(`Checking report status... (Retries left: ${retries})`);
             await new Promise((resolve) => setTimeout(resolve, 20000));
             reportDocumentId = await checkReportStatus(accessToken, reportId, baseuri);
             if (reportDocumentId === false) {
@@ -270,7 +270,7 @@ async function convertTSVToJson(tsvBuffer) {
 
         // Apply header normalization after parsing
         if (records.length > 0) {
-            logger.info('[GET_LEDGER_SUMMARY_VIEW_DATA] Sample record keys:', Object.keys(records[0]).join(', '));
+            logger.debug('[GET_LEDGER_SUMMARY_VIEW_DATA] Sample record keys:', Object.keys(records[0]).join(', '));
             
             const normalizedRecords = records.map(record => {
                 const normalized = {};

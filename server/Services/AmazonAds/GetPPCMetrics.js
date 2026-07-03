@@ -3,6 +3,7 @@ const zlib = require('zlib');
 const { promisify } = require('util');
 const { generateAdsAccessToken } = require('./GenerateToken');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel');
+const logger = require('../../utils/Logger');
 
 const gunzip = promisify(zlib.gunzip);
 
@@ -209,19 +210,19 @@ async function createReport(accessToken, profileId, region, campaignType, startD
         } catch (error) {
             // Handle 401 Unauthorized - refresh token and retry once
             if (error.response && error.response.status === 401 && !hasRetried && tokenRefreshCallback) {
-                console.log(`⚠️ [GetPPCMetrics] Token expired during createReport for ${campaignType}, refreshing token...`);
+                logger.debug(`⚠️ [GetPPCMetrics] Token expired during createReport for ${campaignType}, refreshing token...`);
                 hasRetried = true;
                 try {
                     const newToken = await tokenRefreshCallback();
                     if (newToken) {
                         currentAccessToken = newToken;
-                        console.log(`✅ [GetPPCMetrics] Token refreshed successfully, retrying createReport...`);
+                        logger.debug(`✅ [GetPPCMetrics] Token refreshed successfully, retrying createReport...`);
                         continue;
                     } else {
                         throw new Error('Token refresh callback returned null/undefined');
                     }
                 } catch (refreshError) {
-                    console.error('❌ [GetPPCMetrics] Failed to refresh token:', refreshError.message);
+                    logger.error('❌ [GetPPCMetrics] Failed to refresh token:', refreshError.message);
                     throw new Error(`Token refresh failed: ${refreshError.message}`);
                 }
             }
@@ -233,20 +234,17 @@ async function createReport(accessToken, profileId, region, campaignType, startD
             if (isAdsThrottleError(error) && throttleRetries < MAX_THROTTLE_RETRIES) {
                 throttleRetries++;
                 const delay = THROTTLE_BASE_DELAY_MS * Math.pow(3, throttleRetries - 1);
-                console.warn(`⏳ [GetPPCMetrics] Throttled creating report for ${campaignType} (retry ${throttleRetries}/${MAX_THROTTLE_RETRIES}). Waiting ${delay}ms…`);
+                logger.debug(`⏳ [GetPPCMetrics] Throttled creating report for ${campaignType} (retry ${throttleRetries}/${MAX_THROTTLE_RETRIES}). Waiting ${delay}ms…`);
                 await sleep(delay);
                 continue;
             }
 
             if (error.response) {
-                console.error(`API Error Response for ${campaignType}:`, {
-                    status: error.response.status,
-                    data: error.response.data
-                });
+                logger.error(`[GetPPCMetrics] API error creating report for ${campaignType}: status ${error.response.status}`);
 
                 // Some campaign types might not be available for this seller
                 if (error.response.status === 400 || error.response.status === 404) {
-                    console.log(`⚠️ [GetPPCMetrics] ${campaignType} not available for this seller, skipping...`);
+                    logger.debug(`⚠️ [GetPPCMetrics] ${campaignType} not available for this seller, skipping...`);
                     return { reportId: null, skipped: true, campaignType };
                 }
 
@@ -292,10 +290,10 @@ async function checkReportStatus(reportId, accessToken, profileId, region, token
                 const { status } = response.data;
                 const location = response.data.url;
 
-                console.log(`📊 [GetPPCMetrics] Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
+                logger.info(`📊 [GetPPCMetrics] Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
 
                 if (status === 'COMPLETED') {
-                    console.log(`✅ [GetPPCMetrics] Report completed after ${attempts + 1} attempts`);
+                    logger.info(`✅ [GetPPCMetrics] Report completed after ${attempts + 1} attempts`);
                     return {
                         status: 'COMPLETED',
                         location: location,
@@ -303,7 +301,7 @@ async function checkReportStatus(reportId, accessToken, profileId, region, token
                         finalAccessToken: currentAccessToken
                     };
                 } else if (status === 'FAILURE') {
-                    console.error(`❌ [GetPPCMetrics] Report generation failed after ${attempts + 1} attempts`);
+                    logger.error(`❌ [GetPPCMetrics] Report generation failed after ${attempts + 1} attempts`);
                     return {
                         status: 'FAILURE',
                         reportId: reportId,
@@ -313,14 +311,14 @@ async function checkReportStatus(reportId, accessToken, profileId, region, token
 
                 if (status === 'PROCESSING' || status === 'PENDING') {
                     if (attempts >= MAX_POLL_ATTEMPTS) {
-                        console.error(`❌ [GetPPCMetrics] Report ${reportId} stuck in ${status} after ${attempts} polls (~${attempts} min); giving up`);
+                        logger.error(`❌ [GetPPCMetrics] Report ${reportId} stuck in ${status} after ${attempts} polls (~${attempts} min); giving up`);
                         return { status: 'FAILURE', reportId, error: `Report timed out after ${attempts} polls while ${status}` };
                     }
                     // Log every 10 attempts (10 minutes) to track progress
                     if (attempts > 0 && attempts % 10 === 0) {
-                        console.log(`⏳ [GetPPCMetrics] Report ${reportId} still ${status} after ${attempts} minutes, continuing to wait...`);
+                        logger.debug(`⏳ [GetPPCMetrics] Report ${reportId} still ${status} after ${attempts} minutes, continuing to wait...`);
                     } else {
-                    console.log(`⏳ [GetPPCMetrics] Report still ${status}, waiting 60 seconds...`);
+                    logger.debug(`⏳ [GetPPCMetrics] Report still ${status}, waiting 60 seconds...`);
                     }
                     await new Promise(resolve => setTimeout(resolve, 60000));
                     attempts++;
@@ -330,12 +328,12 @@ async function checkReportStatus(reportId, accessToken, profileId, region, token
 
             } catch (error) {
                 if (error.response && error.response.status === 401 && tokenRefreshCallback) {
-                    console.log(`⚠️ [GetPPCMetrics] Token expired during polling, refreshing token...`);
+                    logger.debug(`⚠️ [GetPPCMetrics] Token expired during polling, refreshing token...`);
                     try {
                         const newToken = await tokenRefreshCallback();
                         if (newToken) {
                             currentAccessToken = newToken;
-                            console.log(`✅ [GetPPCMetrics] Token refreshed successfully, continuing poll...`);
+                            logger.debug(`✅ [GetPPCMetrics] Token refreshed successfully, continuing poll...`);
                             continue;
                         }
                     } catch (refreshError) {
@@ -344,7 +342,7 @@ async function checkReportStatus(reportId, accessToken, profileId, region, token
                 }
 
                 if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
-                    console.error(`Network error checking report status, retrying... (attempt ${attempts + 1})`);
+                    logger.error(`Network error checking report status, retrying... (attempt ${attempts + 1})`);
                     await new Promise(resolve => setTimeout(resolve, 60000));
                     attempts++;
                     continue;
@@ -356,7 +354,7 @@ async function checkReportStatus(reportId, accessToken, profileId, region, token
                 if (isAdsThrottleError(error) && throttleRetries < MAX_THROTTLE_RETRIES) {
                     throttleRetries++;
                     const delay = THROTTLE_BASE_DELAY_MS * Math.pow(3, throttleRetries - 1);
-                    console.warn(`⏳ [GetPPCMetrics] Throttled polling report ${reportId} (retry ${throttleRetries}/${MAX_THROTTLE_RETRIES}). Waiting ${delay}ms…`);
+                    logger.debug(`⏳ [GetPPCMetrics] Throttled polling report ${reportId} (retry ${throttleRetries}/${MAX_THROTTLE_RETRIES}). Waiting ${delay}ms…`);
                     await sleep(delay);
                     continue;
                 }
@@ -397,13 +395,13 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
 
         } catch (err) {
             if (err.response && err.response.status === 401 && !hasRetried && tokenRefreshCallback) {
-                console.log(`⚠️ [GetPPCMetrics] Token expired during download, refreshing token...`);
+                logger.debug(`⚠️ [GetPPCMetrics] Token expired during download, refreshing token...`);
                 hasRetried = true;
                 try {
                     const newToken = await tokenRefreshCallback();
                     if (newToken) {
                         currentAccessToken = newToken;
-                        console.log(`✅ [GetPPCMetrics] Token refreshed successfully, retrying download...`);
+                        logger.debug(`✅ [GetPPCMetrics] Token refreshed successfully, retrying download...`);
                         continue;
                     }
                 } catch (refreshError) {
@@ -416,7 +414,7 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
             if (isAdsThrottleError(err) && throttleRetries < MAX_THROTTLE_RETRIES) {
                 throttleRetries++;
                 const delay = THROTTLE_BASE_DELAY_MS * Math.pow(3, throttleRetries - 1);
-                console.warn(`⏳ [GetPPCMetrics] Throttled downloading report (retry ${throttleRetries}/${MAX_THROTTLE_RETRIES}). Waiting ${delay}ms…`);
+                logger.debug(`⏳ [GetPPCMetrics] Throttled downloading report (retry ${throttleRetries}/${MAX_THROTTLE_RETRIES}). Waiting ${delay}ms…`);
                 await sleep(delay);
                 continue;
             }
@@ -659,7 +657,7 @@ function combineMetrics(reportResults, startDate, endDate) {
             const reason = authRevoked
                 ? 'auth revoked (Amazon Ads profile permission)'
                 : 'not available for this seller';
-            console.log(`⏭️ Skipping ${campaignType} - ${reason}`);
+            logger.debug(`⏭️ Skipping ${campaignType} - ${reason}`);
             return;
         }
 
@@ -870,7 +868,7 @@ function buildDailyMetricsDocuments(reportResults, profileId) {
  * @param {boolean} saveToDatabase - Whether to save the data to database - defaults to true
  */
 async function getPPCMetrics(accessToken, profileId, userId, country, region, refreshToken = null, startDate = null, endDate = null, saveToDatabase = true) {
-    console.log(`🚀 [GetPPCMetrics] Starting PPC metrics fetch for user: ${userId}, country: ${country}, region: ${region}`);
+    logger.info(`🚀 [GetPPCMetrics] Starting PPC metrics fetch for user: ${userId}, country: ${country}, region: ${region}`);
 
     try {
         // Add a small delay to prevent rapid successive requests
@@ -879,16 +877,16 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
         // Create token refresh callback
         const tokenRefreshCallback = refreshToken ? async () => {
             try {
-                console.log('🔄 [GetPPCMetrics] Refreshing Amazon Ads token...');
+                logger.debug('🔄 [GetPPCMetrics] Refreshing Amazon Ads token...');
                 const newToken = await generateAdsAccessToken(refreshToken);
                 if (newToken) {
-                    console.log('✅ [GetPPCMetrics] Token refreshed successfully');
+                    logger.debug('✅ [GetPPCMetrics] Token refreshed successfully');
                     return newToken;
                 } else {
                     throw new Error('Failed to generate new access token');
                 }
             } catch (error) {
-                console.error('❌ [GetPPCMetrics] Token refresh failed:', error.message);
+                logger.error('❌ [GetPPCMetrics] Token refresh failed:', error.message);
                 throw error;
             }
         } : null;
@@ -913,7 +911,7 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
         startPacific.setUTCDate(startPacific.getUTCDate() - 29);
         const calculatedStartDate = startDate || fmtDate(startPacific);
 
-        console.log(`📅 [GetPPCMetrics] Date range: ${calculatedStartDate} to ${calculatedEndDate}`);
+        logger.info(`📅 [GetPPCMetrics] Date range: ${calculatedStartDate} to ${calculatedEndDate}`);
 
         // Create reports for all campaign types in parallel
         const campaignTypes = Object.keys(CAMPAIGN_TYPES);
@@ -921,7 +919,7 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
             createReport(accessToken, profileId, region, campaignType, calculatedStartDate, calculatedEndDate, tokenRefreshCallback)
                 .then(result => ({ campaignType, ...result }))
                 .catch(error => {
-                    console.error(`❌ Error creating report for ${campaignType}:`, error.message);
+                    logger.error(`❌ Error creating report for ${campaignType}:`, error.message);
                     // Tag auth-revoked errors so the aggregate logic at the end
                     // of this function can surface them as a real failure rather
                     // than silently logging $0 success. Other errors (legit
@@ -939,7 +937,7 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
         );
 
         const reportCreationResults = await Promise.all(createReportPromises);
-        console.log(`📝 [GetPPCMetrics] Created ${reportCreationResults.filter(r => r.reportId).length} reports`);
+        logger.info(`📝 [GetPPCMetrics] Created ${reportCreationResults.filter(r => r.reportId).length} reports`);
 
         // Wait for reports and download data
         const reportResults = [];
@@ -997,10 +995,8 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
                         skipped: false,
                         metrics: metrics
                     });
-
-                    console.log(`✅ [GetPPCMetrics] ${reportResult.campaignType}: Sales=$${metrics.totalSales.toFixed(2)}, Spend=$${metrics.totalSpend.toFixed(2)}`);
                 } else {
-                    console.error(`❌ [GetPPCMetrics] Report failed for ${reportResult.campaignType}`);
+                    logger.error(`❌ [GetPPCMetrics] Report failed for ${reportResult.campaignType}`);
                     reportResults.push({ 
                         campaignType: reportResult.campaignType, 
                         skipped: true,
@@ -1009,7 +1005,7 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
                     });
                 }
             } catch (error) {
-                console.error(`❌ [GetPPCMetrics] Error processing ${reportResult.campaignType}:`, error.message);
+                logger.error(`❌ [GetPPCMetrics] Error processing ${reportResult.campaignType}:`, error.message);
                 reportResults.push({
                     campaignType: reportResult.campaignType,
                     skipped: true,
@@ -1061,8 +1057,6 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
         // Combine all metrics
         const combinedMetrics = combineMetrics(reportResults, calculatedStartDate, calculatedEndDate);
 
-        console.log(`🎉 [GetPPCMetrics] Completed! Total Sales: $${combinedMetrics.totalSales.toFixed(2)}, Total Spend: $${combinedMetrics.totalSpend.toFixed(2)}, ACOS: ${combinedMetrics.overallAcos}%`);
-
         // Save one document per calendar day
         let savedRecord = null;
         let documentsSaved = 0;
@@ -1070,7 +1064,7 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
             try {
                 const dailyDocs = buildDailyMetricsDocuments(reportResults, profileId);
                 const userIdStr = userId?.toString() || userId;
-                console.log(`💾 [GetPPCMetrics] Saving ${dailyDocs.length} per-day metric documents...`);
+                logger.info(`💾 [GetPPCMetrics] Saving ${dailyDocs.length} per-day metric documents...`);
 
                 for (const doc of dailyDocs) {
                     const { metricDate, ...payload } = doc;
@@ -1084,11 +1078,11 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
                     documentsSaved += 1;
                 }
 
-                console.log(
+                logger.info(
                     `✅ [GetPPCMetrics] Saved ${documentsSaved} daily PPC metric document(s). Last ID: ${savedRecord?._id}`
                 );
             } catch (saveError) {
-                console.error(`⚠️ [GetPPCMetrics] Failed to save metrics to database:`, saveError.message);
+                logger.error(`⚠️ [GetPPCMetrics] Failed to save metrics to database:`, saveError.message);
             }
         }
 
@@ -1109,7 +1103,7 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
         };
 
     } catch (error) {
-        console.error('❌ [GetPPCMetrics] Error:', error.message);
+        logger.error('❌ [GetPPCMetrics] Error:', error.message);
         
         if (error.message.includes('425')) {
             throw new Error('Duplicate request detected by Amazon Ads API. Please wait a moment before retrying.');

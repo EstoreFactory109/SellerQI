@@ -7,6 +7,7 @@ const gunzip = promisify(zlib.gunzip);
 const { generateAdsAccessToken } = require('./GenerateToken.js');
 const { toYyyyMmDd } = require('../../utils/metricDateKey.js');
 const { resolveReportDateRange } = require('../../utils/reportDateRange.js');
+const logger = require('../../utils/Logger');
 
 /**
  * Keyword performance report → `adsKeywordsPerformance` (per-day upsert via metricDate).
@@ -140,29 +141,25 @@ async function getKeywordReportId(accessToken, profileId, startDate, endDate, re
         } catch (error) {
             // Handle 401 Unauthorized - refresh token and retry once
             if (error.response && error.response.status === 401 && !hasRetried && tokenRefreshCallback) {
-                console.log(`⚠️ [GetWastedSpendKeywords] Token expired during getKeywordReportId, refreshing token...`);
+                logger.debug(`⚠️ [GetWastedSpendKeywords] Token expired during getKeywordReportId, refreshing token...`);
                 hasRetried = true;
                 try {
                     const newToken = await tokenRefreshCallback();
                     if (newToken) {
                         currentAccessToken = newToken;
-                        console.log(`✅ [GetWastedSpendKeywords] Token refreshed successfully, retrying getKeywordReportId...`);
+                        logger.debug(`✅ [GetWastedSpendKeywords] Token refreshed successfully, retrying getKeywordReportId...`);
                         continue;
                     } else {
                         throw new Error('Token refresh callback returned null/undefined');
                     }
                 } catch (refreshError) {
-                    console.error('❌ [GetWastedSpendKeywords] Failed to refresh token:', refreshError.message);
+                    logger.error('❌ [GetWastedSpendKeywords] Failed to refresh token:', refreshError.message);
                     throw new Error(`Token refresh failed: ${refreshError.message}`);
                 }
             }
 
             if (error.response) {
-                console.error('API Error Response:', {
-                    status: error.response.status,
-                    data: error.response.data,
-                    headers: error.response.headers
-                });
+                logger.error(`[GetWastedSpendKeywords] API error during getKeywordReportId: status ${error.response.status}`);
                 // Preserve the original error structure for TokenManager to detect 401s
                 const enhancedError = new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
                 enhancedError.response = error.response;
@@ -211,11 +208,11 @@ async function checkReportStatus(reportId, accessToken, profileId, region, token
                 return { status: 'FAILURE', reportId, error: 'Report generation failed' };
             } else if (status === 'PENDING' || status === 'PROCESSING') {
                 if (attempts >= MAX_POLL_ATTEMPTS) {
-                    console.error(`❌ [GetWastedSpendKeywords] Report ${reportId} stuck in ${status} after ${attempts} polls (~${attempts} min); giving up`);
+                    logger.error(`❌ [GetWastedSpendKeywords] Report ${reportId} stuck in ${status} after ${attempts} polls (~${attempts} min); giving up`);
                     return { status: 'FAILURE', reportId, error: `Report timed out after ${attempts} polls while ${status}` };
                 }
                 attempts++;
-                console.log(`⏳ [GetWastedSpendKeywords] Report still ${status}, waiting 60 seconds... (attempt ${attempts})`);
+                logger.debug(`⏳ [GetWastedSpendKeywords] Report still ${status}, waiting 60 seconds... (attempt ${attempts})`);
                 await new Promise(res => setTimeout(res, 60000));
             } else {
                 throw new Error(`Unknown report status: ${status}. Expected one of: COMPLETED, FAILED, PENDING, PROCESSING`);
@@ -223,22 +220,22 @@ async function checkReportStatus(reportId, accessToken, profileId, region, token
         } catch (error) {
             // Handle 401 Unauthorized - refresh token and continue polling
             if (error.response && error.response.status === 401) {
-                console.log(`⚠️ Token expired during polling (attempt ${attempts + 1}), refreshing token...`);
-                
+                logger.debug(`⚠️ Token expired during polling (attempt ${attempts + 1}), refreshing token...`);
+
                 if (tokenRefreshCallback) {
                     try {
                         // Get a fresh token using the callback
                         const newToken = await tokenRefreshCallback();
                         if (newToken) {
                             currentAccessToken = newToken;
-                            console.log(`✅ Token refreshed successfully, continuing to poll report ${reportId}`);
+                            logger.debug(`✅ Token refreshed successfully, continuing to poll report ${reportId}`);
                             // Continue the loop with the new token
                             continue;
                         } else {
                             throw new Error('Token refresh callback returned null/undefined');
                         }
                     } catch (refreshError) {
-                        console.error('❌ Failed to refresh token during polling:', refreshError.message);
+                        logger.error('❌ Failed to refresh token during polling:', refreshError.message);
                         throw new Error(`Token refresh failed during polling: ${refreshError.message}`);
                     }
                 } else {
@@ -247,10 +244,10 @@ async function checkReportStatus(reportId, accessToken, profileId, region, token
                 }
             } else if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
                 attempts++;
-                console.warn(`Network error, retrying... (attempt ${attempts})`);
+                logger.warn(`Network error, retrying... (attempt ${attempts})`);
                 await new Promise(res => setTimeout(res, 60000));
             } else if (error.response) {
-                console.error('API Error Response:', error.response);
+                logger.error(`[GetWastedSpendKeywords] API error checking report status: status ${error.response.status}`);
                 // Preserve the original error structure for TokenManager to detect 401s
                 const enhancedError = new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
                 enhancedError.response = error.response;
@@ -288,29 +285,28 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
         } catch (err) {
             // Handle 401 Unauthorized - refresh token and retry once
             if (err.response && err.response.status === 401 && !hasRetried && tokenRefreshCallback) {
-                console.log(`⚠️ [GetWastedSpendKeywords] Token expired during download, refreshing token...`);
+                logger.debug(`⚠️ [GetWastedSpendKeywords] Token expired during download, refreshing token...`);
                 hasRetried = true;
                 try {
                     const newToken = await tokenRefreshCallback();
                     if (newToken) {
                         currentAccessToken = newToken;
-                        console.log(`✅ [GetWastedSpendKeywords] Token refreshed successfully, retrying download...`);
+                        logger.debug(`✅ [GetWastedSpendKeywords] Token refreshed successfully, retrying download...`);
                         continue;
                     } else {
                         throw new Error('Token refresh callback returned null/undefined');
                     }
                 } catch (refreshError) {
-                    console.error('❌ [GetWastedSpendKeywords] Failed to refresh token during download:', refreshError.message);
+                    logger.error('❌ [GetWastedSpendKeywords] Failed to refresh token during download:', refreshError.message);
                     throw new Error(`Token refresh failed during download: ${refreshError.message}`);
                 }
             }
 
             if (err.response) {
-                console.error('Status:', err.response.status);
-                console.error('Body:', err.response.data?.toString?.() ?? err.response.data);
+                logger.error(`[GetWastedSpendKeywords] Download failed: status ${err.response.status}`);
                 throw new Error(`Download failed: ${err.response.status} ${err.response.statusText}`);
             }
-            console.error('Download error:', err);
+            logger.error('[GetWastedSpendKeywords] Download error:', err.message);
             throw err;
         }
     }
@@ -323,7 +319,7 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
 async function getKeywordPerformanceReport(accessToken, profileId, userId, country, region, refreshToken = null, options = {}) {
     const { startDate, endDate, isCustom } = resolveReportDateRange(options);
 
-    console.log('🚀 Starting keyword performance report generation', {
+    logger.info('🚀 Starting keyword performance report generation', {
         profileId,
         userId,
         country,
@@ -338,21 +334,21 @@ async function getKeywordPerformanceReport(accessToken, profileId, userId, count
         // Create token refresh callback
         const tokenRefreshCallback = refreshToken ? async () => {
             try {
-                console.log('🔄 [GetWastedSpendKeywords] Refreshing Amazon Ads token...');
+                logger.debug('🔄 [GetWastedSpendKeywords] Refreshing Amazon Ads token...');
                 const newToken = await generateAdsAccessToken(refreshToken);
                 if (newToken) {
-                    console.log('✅ [GetWastedSpendKeywords] Token refreshed successfully');
+                    logger.debug('✅ [GetWastedSpendKeywords] Token refreshed successfully');
                     return newToken;
                 } else {
                     throw new Error('Failed to generate new access token');
                 }
             } catch (error) {
-                console.error('❌ [GetWastedSpendKeywords] Token refresh failed:', error.message);
+                logger.error('❌ [GetWastedSpendKeywords] Token refresh failed:', error.message);
                 throw error;
             }
         } : null;
 
-        console.log('📝 Step 1: Creating report request...');
+        logger.debug('📝 Step 1: Creating report request...');
         const reportData = await getKeywordReportId(accessToken, profileId, startDate, endDate, region, tokenRefreshCallback);
 
         if (!reportData || !reportData.reportId) {
@@ -362,14 +358,14 @@ async function getKeywordPerformanceReport(accessToken, profileId, userId, count
         // Use the token from getKeywordReportId if it was refreshed
         let currentToken = reportData.currentAccessToken || accessToken;
 
-        console.log(`✅ Report ID received: ${reportData.reportId}`);
+        logger.info(`✅ Report ID received: ${reportData.reportId}`);
 
-        console.log('⏳ Step 2: Polling report status (this may take a few minutes)...');
+        logger.debug('⏳ Step 2: Polling report status (this may take a few minutes)...');
         const reportStatus = await checkReportStatus(reportData.reportId, currentToken, profileId, region, tokenRefreshCallback);
-        console.log(`📊 Report status: ${reportStatus.status}`);
+        logger.info(`📊 Report status: ${reportStatus.status}`);
 
         if (reportStatus.status === 'SUCCESS') {
-            console.log('✅ Report completed successfully, downloading from:', reportStatus.location);
+            logger.info('✅ Report completed successfully, downloading from:', reportStatus.location);
             // Use the latest token if refreshed during polling
             const downloadToken = reportStatus.finalAccessToken || currentToken;
             
@@ -400,11 +396,11 @@ async function getKeywordPerformanceReport(accessToken, profileId, userId, count
 
             // Ensure data is an array
             if (!Array.isArray(data)) {
-                console.warn('⚠️ Report data is not an array, converting...', typeof data);
+                logger.warn('⚠️ Report data is not an array, converting...', typeof data);
                 data = Array.isArray(reportContent) ? reportContent : (data ? [data] : []);
             }
 
-            console.log(`📊 Processing ${data.length} keyword records for storage (per-day upsert)`);
+            logger.debug(`📊 Processing ${data.length} keyword records for storage (per-day upsert)`);
 
             const userIdObj = mongoose.Types.ObjectId.isValid(String(userId))
                 ? new mongoose.Types.ObjectId(String(userId))
@@ -430,7 +426,7 @@ async function getKeywordPerformanceReport(accessToken, profileId, userId, count
             }
 
             const merged = await adsKeywordsPerformanceModel.findMergedKeywordsData(userIdObj, country, region, {});
-            console.log(`✅ Stored keyword performance across ${byDay.size} day(s); merged row count: ${merged.length}`);
+            logger.info(`✅ Stored keyword performance across ${byDay.size} day(s); merged row count: ${merged.length}`);
 
             return {
                 success: true,
@@ -444,7 +440,7 @@ async function getKeywordPerformanceReport(accessToken, profileId, userId, count
                 }
             };
         } else {
-            console.error('❌ Report generation failed:', reportStatus.error);
+            logger.error('❌ Report generation failed:', reportStatus.error);
             return {
                 success: false,
                 reportId: reportStatus.reportId,
@@ -452,7 +448,7 @@ async function getKeywordPerformanceReport(accessToken, profileId, userId, count
             };
         }
     } catch (error) {
-        console.error('Error in getKeywordPerformanceReport:', error.message);
+        logger.error('Error in getKeywordPerformanceReport:', error.message);
         throw error;
     }
 }
