@@ -675,9 +675,12 @@ class Integration {
         try {
             const tokenPromises = [];
             const tokenTypes = [];
+            // Capture the exact LWA failure reason so a revoked/invalid token
+            // surfaces on the logging page instead of a silent skip.
+            const spapiErr = {};
 
             if (RefreshToken) {
-                tokenPromises.push(generateAccessToken(userId, RefreshToken));
+                tokenPromises.push(generateAccessToken(userId, RefreshToken, spapiErr));
                 tokenTypes.push('SP-API');
             }
 
@@ -715,6 +718,28 @@ class Integration {
                         AdsAccessToken = null;
                     }
                 }
+            }
+
+            // Surface auth failures explicitly on the logging page. A refresh
+            // token that was PROVIDED but failed to exchange is a real failure
+            // (revoked / invalid_grant) — log it as an error with the exact Amazon
+            // reason so the page shows "reconnect required" instead of hiding it in
+            // a pile of downstream skips. (A missing refresh token = not connected;
+            // that stays a non-error, handled by the callers' skip paths.)
+            if (loggingHelper && RefreshToken && !AccessToken) {
+                const reason = spapiErr.message
+                    || (tokenResults[0] && tokenResults[0].status === 'rejected' ? String(tokenResults[0].reason?.message || tokenResults[0].reason) : null)
+                    || 'token exchange failed';
+                loggingHelper.logFunctionError('SP-API Authorization',
+                    new Error(`SP-API access token could not be generated — the seller must reconnect SP-API. Amazon: ${reason}`));
+            }
+            if (loggingHelper && AdsRefreshToken && !AdsAccessToken) {
+                const adsIdx = RefreshToken ? 1 : 0;
+                const reason = (tokenResults[adsIdx] && tokenResults[adsIdx].status === 'rejected')
+                    ? String(tokenResults[adsIdx].reason?.message || tokenResults[adsIdx].reason)
+                    : 'token exchange failed';
+                loggingHelper.logFunctionError('Amazon Ads Authorization',
+                    new Error(`Amazon Ads access token could not be generated — the seller must reconnect Amazon Ads. Reason: ${reason}`));
             }
 
             if (!AccessToken && !AdsAccessToken) {

@@ -97,7 +97,7 @@ async function releaseSweepLock(lockKey) {
 
 function setupSweeperCron() {
     const cron = require('node-cron');
-    const { sweep, sweepFinance, sweepFinanceDeepResync } = require('./freshnessSweeper.js');
+    const { sweep, sweepFinance, sweepFinanceDeepResync, sweepStaleSessions } = require('./freshnessSweeper.js');
 
     const job = cron.schedule(SWEEP_INTERVAL_CRON, async () => {
         const lockKey = 'freshness-sweeper-tick';
@@ -117,6 +117,16 @@ function setupSweeperCron() {
                 logger.info('[FreshnessSweeperStandalone] Finance sweep complete', finSummary);
             } catch (finErr) {
                 logger.error('[FreshnessSweeperStandalone] Finance sweep failed', { error: finErr?.message, stack: finErr?.stack });
+            }
+            // Orphaned logging-session sweep — closes 'in_progress' sessions left
+            // behind by crashed/stalled runs so the frontend doesn't show a
+            // perpetual "in progress" spinner. Bounded per tick; isolated try so
+            // it can't block (or be blocked by) the ads/finance sweeps.
+            try {
+                const sessionSummary = await sweepStaleSessions();
+                logger.info('[FreshnessSweeperStandalone] Stale-session sweep complete', sessionSummary);
+            } catch (sessErr) {
+                logger.error('[FreshnessSweeperStandalone] Stale-session sweep failed', { error: sessErr?.message, stack: sessErr?.stack });
             }
             // Deep re-sync (long-tail cancellations) — gated to ONE tick per day
             // (DEEP_RESYNC_HOUR) because it re-fetches a 30-day window per account

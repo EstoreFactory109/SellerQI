@@ -22,7 +22,7 @@ const adsKeywordsPerformanceModel = require('../../models/amazon-ads/adsKeywords
 const SearchTerms = require('../../models/amazon-ads/SearchTermsModel.js');
 const DataFetchTracking = require('../../models/system/DataFetchTrackingModel.js');
 const logger = require('../../utils/Logger.js');
-const { loadLatestSnapshotDoc } = require('../../utils/ppcSnapshotLoader.js');
+const { loadLatestSnapshotDoc, loadKeywordSnapshot } = require('../../utils/ppcSnapshotLoader.js');
 
 const toYyyyMmDd = (value) => {
     if (value == null || value === '') return null;
@@ -272,7 +272,7 @@ async function fetchAsinPPCData(userId, country, region, asin, startStr, endStr)
  */
 async function fetchKeywordsByAdGroups(userId, country, region) {
     try {
-        const doc = await loadLatestSnapshotDoc(Keyword, String(userId), country, region);
+        const doc = await loadKeywordSnapshot(String(userId), country, region);
 
         return doc?.keywordData || [];
     } catch (error) {

@@ -123,6 +123,14 @@ const CAMPAIGN_TYPES = {
 const MAX_THROTTLE_RETRIES = 4;
 const THROTTLE_BASE_DELAY_MS = 5000;
 
+// Hard ceiling on report-status polling. Without a cap a report wedged in
+// PENDING/PROCESSING would poll forever and the phase would never resolve. At
+// the cap we treat the report as FAILURE so the caller records an honest failure
+// and the cron can retry later.
+// Amazon publishes no hard SLA for v3 report generation; large reports can take
+// a few hours. Default ~4h (one poll per 60s); tune via ADS_REPORT_MAX_POLL_ATTEMPTS.
+const MAX_POLL_ATTEMPTS = parseInt(process.env.ADS_REPORT_MAX_POLL_ATTEMPTS || '240', 10);
+
 function isAdsThrottleError(error) {
     if (!error?.response) return false;
     if (error.response.status === 429) return true;
@@ -304,6 +312,10 @@ async function checkReportStatus(reportId, accessToken, profileId, region, token
                 }
 
                 if (status === 'PROCESSING' || status === 'PENDING') {
+                    if (attempts >= MAX_POLL_ATTEMPTS) {
+                        console.error(`❌ [GetPPCMetrics] Report ${reportId} stuck in ${status} after ${attempts} polls (~${attempts} min); giving up`);
+                        return { status: 'FAILURE', reportId, error: `Report timed out after ${attempts} polls while ${status}` };
+                    }
                     // Log every 10 attempts (10 minutes) to track progress
                     if (attempts > 0 && attempts % 10 === 0) {
                         console.log(`⏳ [GetPPCMetrics] Report ${reportId} still ${status} after ${attempts} minutes, continuing to wait...`);

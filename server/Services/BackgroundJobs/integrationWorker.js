@@ -176,6 +176,26 @@ async function processIntegrationPhase(job) {
         }
     } else {
         logger.info(`[IntegrationWorker:${WORKER_NAME}] All phases complete for ${userId} (final succeeded=${phaseSucceeded})`, { duration });
+        // The pipeline is finished — the per-phase row (updated below) is keyed by
+        // this finalize job's id, but the parent/bootstrap row (keyed by
+        // effectiveParentJobId) was deliberately pinned to 'running' to represent
+        // the whole pipeline. It is the row `getAggregatedJobStatus(parentJobId)`
+        // returns to the frontend, so it MUST be flipped to a terminal state here;
+        // otherwise the account shows "in progress" forever even though every phase
+        // (and the logging session) completed. Skip when there's no distinct parent
+        // (effectiveParentJobId === job.id) since line ~182 already finalizes that row.
+        if (effectiveParentJobId !== job.id) {
+            try {
+                await updateJobStatus(effectiveParentJobId, userId, phaseSucceeded ? 'completed' : 'failed', {
+                    [phaseSucceeded ? 'completedAt' : 'failedAt']: new Date().toISOString(),
+                    currentPhase: phase,
+                    error: phaseSucceeded ? undefined : (outcome.error || `Phase ${phase} failed`),
+                    metadata: { country, region, phase, parentJobId: effectiveParentJobId, pipelineFinalized: true, phaseSucceeded }
+                });
+            } catch (parentStatusError) {
+                logger.warn(`[IntegrationWorker:${WORKER_NAME}] Could not finalize parent JobStatus row ${effectiveParentJobId}: ${parentStatusError.message}`);
+            }
+        }
     }
 
     try {
@@ -277,13 +297,41 @@ async function startWorker() {
         });
     });
 
-    worker.on('failed', (job, err) => {
+    worker.on('failed', async (job, err) => {
         logger.error(`[IntegrationWorker:${WORKER_NAME}] Job ${job?.id || 'unknown'} failed: ${err?.message}`, {
             userId: job?.data?.userId,
             phase: job?.data?.phase,
             attemptsMade: job?.attemptsMade,
             maxAttempts: job?.opts?.attempts
         });
+
+        // When a phase job permanently fails (exhausted retries or stalled past
+        // maxStalledCount), the pipeline never reaches finalize — where the
+        // logging session is normally closed — so the session would sit at
+        // 'in_progress' forever and the frontend shows a perpetual spinner.
+        // Close it here once we're out of attempts, mirroring the scheduled
+        // worker (worker.js). sessionId is threaded through phaseData by INIT.
+        try {
+            const attemptsMade = job?.attemptsMade || 0;
+            const maxAttempts = job?.opts?.attempts || 1;
+            const sessionId = job?.data?.phaseData?.sessionId;
+            const phase = job?.data?.phase;
+            if (sessionId && attemptsMade >= maxAttempts) {
+                const LoggingHelper = require('../../utils/LoggingHelper.js');
+                await LoggingHelper.addLogToSession(sessionId, {
+                    functionName: `phase:${phase || 'unknown'}`,
+                    logType: 'error',
+                    status: 'failed',
+                    message: `Integration phase ${phase || 'unknown'} permanently failed/stalled: ${err?.message}`,
+                    errorDetails: { errorMessage: err?.message, stackTrace: err?.stack || null, phase },
+                    contextData: { userId: job?.data?.userId, phase, attemptsMade, maxAttempts },
+                }).catch(() => {});
+                await LoggingHelper.endSessionById(sessionId, 'failed');
+                logger.warn(`[IntegrationWorker:${WORKER_NAME}] Closed stuck logging session ${sessionId} as failed (phase ${phase} exhausted ${attemptsMade}/${maxAttempts}).`);
+            }
+        } catch (sessErr) {
+            logger.warn(`[IntegrationWorker:${WORKER_NAME}] Could not close session for failed job ${job?.id}: ${sessErr.message}`);
+        }
     });
 
     worker.on('error', (err) => {

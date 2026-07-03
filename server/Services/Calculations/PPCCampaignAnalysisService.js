@@ -19,7 +19,7 @@ const ProductWiseSponsoredAdsItem = require('../../models/amazon-ads/ProductWise
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel');
 const logger = require('../../utils/Logger');
-const { loadLatestSnapshotDoc } = require('../../utils/ppcSnapshotLoader');
+const { loadLatestSnapshotDoc, loadKeywordSnapshot } = require('../../utils/ppcSnapshotLoader');
 
 /**
  * Parse YYYY-MM-DD-like input as a local date range.
@@ -954,7 +954,7 @@ const getAutoCampaignInsights = async (userId, country, region, page = 1, limit 
         // here keeps the heavy aggregation purely against SearchTerms.
         const [campaignDoc, keywordDoc] = await Promise.all([
             loadLatestSnapshotDoc(Campaign, userIdStr, country, region),
-            loadLatestSnapshotDoc(Keyword, userIdStr, country, region),
+            loadKeywordSnapshot(userIdStr, country, region),
         ]);
 
         const campaignData = campaignDoc?.campaignData || [];

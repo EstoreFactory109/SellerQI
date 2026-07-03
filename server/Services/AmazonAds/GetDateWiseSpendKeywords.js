@@ -7,6 +7,12 @@ const GetDateWisePPCspendModel = require('../../models/amazon-ads/GetDateWisePPC
 const { resolveReportDateRange } = require('../../utils/reportDateRange.js');
 
 // Base URIs for different regions
+// Hard ceiling on report-status polling so a report wedged in PENDING/PROCESSING
+// can't poll forever and hang the phase. At the cap we return FAILURE.
+// Amazon publishes no hard SLA for v3 report generation; large reports can take
+// a few hours. Default ~4h (one poll per 60s); tune via ADS_REPORT_MAX_POLL_ATTEMPTS.
+const MAX_POLL_ATTEMPTS = parseInt(process.env.ADS_REPORT_MAX_POLL_ATTEMPTS || '240', 10);
+
 const BASE_URIS = {
     'NA': 'https://advertising-api.amazon.com',
     'EU': 'https://advertising-api-eu.amazon.com',
@@ -173,6 +179,10 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
 
                 // If still processing, wait 60 seconds before next check
                 if (status === 'PROCESSING' || status === 'PENDING') {
+                    if (attempts >= MAX_POLL_ATTEMPTS) {
+                        console.error(`❌ [GetDateWiseSpendKeywords] Report ${reportId} stuck in ${status} after ${attempts} polls (~${attempts} min); giving up`);
+                        return { status: 'FAILURE', reportId: reportId, error: `Report timed out after ${attempts} polls while ${status}` };
+                    }
                     console.log(`⏳ [GetDateWiseSpendKeywords] Report still ${status}, waiting 60 seconds...`);
                     await new Promise(resolve => setTimeout(resolve, 60000)); // 60 seconds
                     attempts++;

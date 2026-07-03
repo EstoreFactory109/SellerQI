@@ -39,6 +39,7 @@ const AdsGroup = require('../models/amazon-ads/adsgroupModel.js');
 const Campaign = require('../models/amazon-ads/CampaignModel.js');
 const SearchTerms = require('../models/amazon-ads/SearchTermsModel.js');
 const Keyword = require('../models/amazon-ads/keywordModel.js');
+const KeywordChunk = require('../models/amazon-ads/keywordChunkModel.js');
 const KeywordTracking = require('../models/amazon-ads/KeywordTrackingModel.js');
 const ProductWiseSponsoredAdsData = require('../models/amazon-ads/ProductWiseSponseredAdsModel.js');
 const ProductWiseSponsoredAdsItem = require('../models/amazon-ads/ProductWiseSponsoredAdsItemModel.js');
@@ -194,6 +195,7 @@ const USER_ID_TARGETS = [
   { label: 'Campaign', model: Campaign },
   { label: 'SearchTerms', model: SearchTerms },
   { label: 'Keyword', model: Keyword },
+  { label: 'KeywordChunk', model: KeywordChunk },
   { label: 'KeywordTracking', model: KeywordTracking },
   { label: 'ProductWiseSponsoredAdsData', model: ProductWiseSponsoredAdsData },
   { label: 'ProductWiseSponsoredAdsItem', model: ProductWiseSponsoredAdsItem },

@@ -49,7 +49,7 @@ const GET_FBA_INVENTORY_PLANNING_DATA_Model = require('../../models/inventory/GE
 // Deprecated: FBAFeesModel - replaced by EconomicsMetrics (MCP)
 // const FBAFeesModel = require('../../models/finance/FBAFees.js');
 const adsKeywordsPerformanceModel = require('../../models/amazon-ads/adsKeywordsPerformanceModel.js');
-const { loadLatestSnapshotDoc } = require('../../utils/ppcSnapshotLoader.js');
+const { loadLatestSnapshotDoc, loadKeywordSnapshot } = require('../../utils/ppcSnapshotLoader.js');
 const GetOrderDataModel = require('../../models/products/OrderAndRevenueModel.js');
 const WeeklyFinanceModel = require('../../models/finance/WeekLyFinanceModel.js');
 const userModel = require('../../models/user-auth/userModel.js');
@@ -399,7 +399,7 @@ class AnalyseService {
             // Use service layer for ProductWiseSponsoredAds (handles both old and new formats)
             timedQuery('sponsoredAds', () => getProductWiseSponsoredAdsData(userId, country, region)),
             timedQuery('negativeKeywords', () => loadLatestSnapshotDoc(NegetiveKeywords, userId, country, region)),
-            timedQuery('keywords', () => loadLatestSnapshotDoc(KeywordModel, userId, country, region)),
+            timedQuery('keywords', () => loadKeywordSnapshot(userId, country, region)),
             timedQuery('searchTerms', () =>
                 SearchTerms.findMergedSearchTermData(userId, country, region, {}).then((rows) =>
                     rows?.length ? { userId, country, region, searchTermData: rows } : null

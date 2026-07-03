@@ -68,6 +68,13 @@ function analyzeRawData(data) {
 }
 
 // Region base URIs
+// Hard ceiling on report-status polling so a report wedged in PENDING/PROCESSING
+// can't poll forever and hang the phase. At the cap we return FAILURE.
+// Amazon publishes no hard SLA for v3 report generation; large reports can
+// legitimately take a few hours. Default ceiling ~4h (one poll per 60s); tune
+// via ADS_REPORT_MAX_POLL_ATTEMPTS without a redeploy.
+const MAX_POLL_ATTEMPTS = parseInt(process.env.ADS_REPORT_MAX_POLL_ATTEMPTS || '240', 10);
+
 const BASE_URIS = {
     'NA': 'https://advertising-api.amazon.com',
     'EU': 'https://advertising-api-eu.amazon.com',
@@ -203,6 +210,10 @@ async function checkReportStatus(reportId, accessToken, profileId, region, token
             } else if (status === 'FAILED') {
                 return { status: 'FAILURE', reportId, error: 'Report generation failed' };
             } else if (status === 'PENDING' || status === 'PROCESSING') {
+                if (attempts >= MAX_POLL_ATTEMPTS) {
+                    console.error(`❌ [GetWastedSpendKeywords] Report ${reportId} stuck in ${status} after ${attempts} polls (~${attempts} min); giving up`);
+                    return { status: 'FAILURE', reportId, error: `Report timed out after ${attempts} polls while ${status}` };
+                }
                 attempts++;
                 console.log(`⏳ [GetWastedSpendKeywords] Report still ${status}, waiting 60 seconds... (attempt ${attempts})`);
                 await new Promise(res => setTimeout(res, 60000));

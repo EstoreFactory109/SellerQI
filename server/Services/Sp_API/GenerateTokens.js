@@ -204,10 +204,15 @@ const generateAdsRefreshToken = async (authCode,region) => {
 };
 
 
-const generateAccessToken=async(userId,refreshToken)=>{
-  
+// `errorRef` is an optional out-param: on failure we set `errorRef.message` to
+// the exact Amazon LWA reason (e.g. "invalid_grant : refresh_token …") so callers
+// can surface the real cause to the user instead of a generic "token unavailable".
+// Backward compatible — existing 2-arg callers are unaffected.
+const generateAccessToken=async(userId,refreshToken,errorRef=null)=>{
+
     if(!refreshToken){
         logger.error(new ApiError(400,"Refresh token is missing"), { userId });
+        if(errorRef) errorRef.message = 'Refresh token is missing';
         return false;
     }
 
@@ -274,14 +279,16 @@ const generateAccessToken=async(userId,refreshToken)=>{
                 errorDescription,
                 fullResponse: error.response.data
             });
+            if (errorRef) errorRef.message = errorDescription || errorCode || `Amazon API error ${status}`;
         } else {
             logger.error(`Error generating access token: ${error.message}`, {
                 userId,
                 errorMessage: error.message,
                 errorStack: error.stack
             });
+            if (errorRef) errorRef.message = error.message;
         }
-        return false; 
+        return false;
     }
 
 }

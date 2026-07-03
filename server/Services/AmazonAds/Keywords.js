@@ -1,7 +1,119 @@
 const axios = require('axios');
 const KeywordModel = require('../../models/amazon-ads/keywordModel.js');
+const KeywordChunkModel = require('../../models/amazon-ads/keywordChunkModel.js');
 const logger = require('../../utils/Logger.js');
 const { getYesterdayMetricDateUtc } = require('../../utils/metricDateKey.js');
+
+// A single MongoDB document is capped at 16MB. Keep each physical keyword
+// document well under that so even accounts with very large keyword sets
+// persist reliably. Snapshots at or under this size stay inline in the primary
+// Keyword document (unchanged legacy behaviour); larger ones spill into
+// KeywordChunk documents and are reassembled by `loadKeywordSnapshot`.
+const KEYWORD_CHUNK_SIZE = 10000;
+
+/**
+ * Project the raw Amazon Ads v3 keywords down to the slim, schema-shaped rows
+ * we persist. Built in batches that yield to the event loop so a huge keyword
+ * set (tens of thousands) never blocks it — blocking would starve the BullMQ
+ * lock-renewal heartbeat and stall the whole job.
+ */
+async function buildKeywordRows(rawKeywords) {
+    const rows = new Array(rawKeywords.length);
+    const BUILD_BATCH = 5000;
+    for (let i = 0; i < rawKeywords.length; i++) {
+        const kw = rawKeywords[i] || {};
+        rows[i] = {
+            keywordId: kw.keywordId,
+            adGroupId: kw.adGroupId,
+            campaignId: kw.campaignId,
+            keywordText: kw.keywordText,
+            matchType: kw.matchType,
+            bid: kw.bid,
+            state: kw.state
+        };
+        if ((i + 1) % BUILD_BATCH === 0) {
+            await new Promise(resolve => setImmediate(resolve));
+        }
+    }
+    return rows;
+}
+
+/**
+ * Persist a keyword snapshot for one (account, metricDate), transparently
+ * chunking when the set is too large for a single 16MB document.
+ *
+ * - Small/normal snapshots: written inline to the primary Keyword document,
+ *   byte-for-byte the same shape the legacy code produced.
+ * - Oversized snapshots: the primary Keyword document becomes a flagged header
+ *   (`isChunked: true`, empty keywordData) and the full set is written across
+ *   KeywordChunk documents. Chunk writes are awaited one at a time so the event
+ *   loop (and the lock heartbeat) keeps breathing between batches.
+ *
+ * Stale chunks from a prior, larger sync are always cleared first so a
+ * shrinking account never leaves orphaned higher-index chunks behind.
+ */
+async function persistKeywordSnapshot(userId, country, region, metricDate, keywordRows) {
+    const userIdStr = String(userId);
+
+    await KeywordChunkModel.deleteMany({ userId: userIdStr, country, region, metricDate });
+
+    if (keywordRows.length <= KEYWORD_CHUNK_SIZE) {
+        return KeywordModel.findOneAndUpdate(
+            { userId: userIdStr, country, region, metricDate },
+            {
+                $set: {
+                    userId: userIdStr,
+                    country,
+                    region,
+                    metricDate,
+                    keywordData: keywordRows,
+                    isChunked: false,
+                    totalChunks: 1
+                }
+            },
+            { new: true, upsert: true, runValidators: true }
+        );
+    }
+
+    const totalChunks = Math.ceil(keywordRows.length / KEYWORD_CHUNK_SIZE);
+    for (let c = 0; c < totalChunks; c++) {
+        const slice = keywordRows.slice(c * KEYWORD_CHUNK_SIZE, (c + 1) * KEYWORD_CHUNK_SIZE);
+        await KeywordChunkModel.updateOne(
+            { userId: userIdStr, country, region, metricDate, chunkIndex: c },
+            {
+                $set: {
+                    userId: userIdStr,
+                    country,
+                    region,
+                    metricDate,
+                    chunkIndex: c,
+                    totalChunks,
+                    keywordData: slice
+                }
+            },
+            { upsert: true }
+        );
+    }
+
+    const header = await KeywordModel.findOneAndUpdate(
+        { userId: userIdStr, country, region, metricDate },
+        {
+            $set: {
+                userId: userIdStr,
+                country,
+                region,
+                metricDate,
+                keywordData: [],
+                isChunked: true,
+                totalChunks
+            }
+        },
+        { new: true, upsert: true }
+    );
+
+    console.log(`✅ Keywords stored across ${totalChunks} chunks (${keywordRows.length} keywords) — oversized snapshot`);
+    return header;
+}
 
 /**
  * SP keywords → one snapshot doc per `metricDate` (upsert).
@@ -121,19 +233,9 @@ async function getKeywords(accessToken, profileId, userId, country, region = 'NA
       logger.warn('No keywords found for user', { userId, region, country });
 
       const metricDate = getYesterdayMetricDateUtc();
-      const createdKeywords = await KeywordModel.findOneAndUpdate(
-        { userId: String(userId), country, region, metricDate },
-        {
-          $set: {
-            userId: String(userId),
-            country,
-            region,
-            metricDate,
-            keywordData: []
-          }
-        },
-        { new: true, upsert: true, runValidators: true }
-      );
+      // Clear any chunks left over from a previously larger snapshot, then write
+      // an empty inline snapshot (isChunked:false) for consistency.
+      const createdKeywords = await persistKeywordSnapshot(userId, country, region, metricDate, []);
 
       console.log(`✅ Empty keywords data saved for consistency`);
       return createdKeywords;
@@ -145,52 +247,35 @@ async function getKeywords(accessToken, profileId, userId, country, region = 'NA
       console.log(`📊 Keywords breakdown: ${allKeywords.length} total, ${enabledKeywords.length} enabled`);
     }
 
-    // ===== NORMALIZE v3 RESPONSE FOR BACKWARD COMPATIBILITY =====
-    // v3 uses UPPERCASE: state=ENABLED, matchType=BROAD/EXACT/PHRASE
-    // v2 used lowercase: state=enabled, matchType=broad/exact/phrase
-    const normalizedKeywords = allKeywords.map(kw => ({
-      ...kw,
-      _v3Original: true,
-      stateLower: (kw.state || '').toLowerCase(),
-      matchTypeLower: (kw.matchType || '').toLowerCase()
-    }));
+    // ===== BUILD SLIM SCHEMA ROWS (event-loop friendly) =====
+    // Only the persisted schema fields are kept; built in yielding batches so a
+    // very large keyword set never blocks the event loop / lock heartbeat.
+    const keywordRows = await buildKeywordRows(allKeywords);
 
-    // ===== SAVE TO DATABASE WITH VALIDATION =====
+    // ===== SAVE TO DATABASE (chunk-aware) =====
     let createdKeywords;
     try {
       const metricDate = getYesterdayMetricDateUtc();
-      createdKeywords = await KeywordModel.findOneAndUpdate(
-        { userId: String(userId), country, region, metricDate },
-        {
-          $set: {
-            userId: String(userId),
-            country,
-            region,
-            metricDate,
-            keywordData: normalizedKeywords
-          }
-        },
-        { new: true, upsert: true, runValidators: true }
-      );
+      createdKeywords = await persistKeywordSnapshot(userId, country, region, metricDate, keywordRows);
 
       if (!createdKeywords) {
         logger.warn('Failed to save keywords data to database, but continuing with API data', {
           userId,
           region,
           country,
-          keywordCount: normalizedKeywords.length
+          keywordCount: keywordRows.length
         });
 
         return {
           userId,
           country,
           region,
-          keywordData: normalizedKeywords,
+          keywordData: keywordRows,
           _isTemporary: true
         };
       }
 
-      console.log(`✅ Keywords data saved successfully: ${normalizedKeywords.length} keywords stored`);
+      console.log(`✅ Keywords data saved successfully: ${keywordRows.length} keywords stored`);
       return createdKeywords;
 
     } catch (dbError) {
@@ -199,14 +284,14 @@ async function getKeywords(accessToken, profileId, userId, country, region = 'NA
         userId,
         region,
         country,
-        keywordCount: normalizedKeywords.length
+        keywordCount: keywordRows.length
       });
 
       return {
         userId,
         country,
         region,
-        keywordData: normalizedKeywords,
+        keywordData: keywordRows,
         _isTemporary: true,
         _dbError: dbError.message
       };
@@ -255,5 +340,10 @@ async function getKeywords(accessToken, profileId, userId, country, region = 'NA
 }
 
 module.exports = {
-  getKeywords
+  getKeywords,
+  // Exposed for tests / scripts. persistKeywordSnapshot handles chunked vs
+  // inline storage; buildKeywordRows projects raw v3 keywords to slim rows.
+  persistKeywordSnapshot,
+  buildKeywordRows,
+  KEYWORD_CHUNK_SIZE
 };

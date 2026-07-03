@@ -18,6 +18,21 @@ const keywordSchema = new mongoose.Schema({
         required: false,
         index: true
     },
+    /**
+     * When true, this snapshot was too large for a single 16MB document, so
+     * `keywordData` here is empty and the full set lives in the KeywordChunk
+     * collection (`totalChunks` documents). Readers must use `loadKeywordSnapshot`
+     * to reassemble. Defaults to false → legacy inline behaviour, unchanged.
+     */
+    isChunked: {
+        type: Boolean,
+        default: false
+    },
+    /** Number of KeywordChunk documents for this snapshot (1 when inline). */
+    totalChunks: {
+        type: Number,
+        default: 1
+    },
     keywordData:[
         {
             keywordId:{
