@@ -70,14 +70,14 @@ export default function IndiaPricing({ loading, handleFreeTrial, handleSubscribe
                 <div className="mb-6 pt-2">
                   <div className="text-2xl line-through text-gray-500 mb-2">$99/month</div>
                   <div className="flex items-baseline justify-center gap-1 flex-wrap">
-                    <span className="text-5xl md:text-6xl font-extrabold bg-gradient-to-r from-blue-400 to-blue-300 bg-clip-text text-transparent">$21</span>
+                    <span className="text-5xl md:text-6xl font-extrabold bg-gradient-to-r from-blue-400 to-blue-300 bg-clip-text text-transparent">$10</span>
                     <span className="text-xl text-gray-400">/month</span>
                   </div>
                   <div className="text-sm text-gray-400 mt-2">For Indian registered sellers</div>
                   <div className="flex items-center justify-center gap-3 mt-4 flex-wrap">
                     <span className="inline-flex items-center gap-1.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 px-4 py-2 rounded-xl font-bold text-sm">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                      Save 78%
+                      Save 90%
                     </span>
                     <span className="inline-flex items-center gap-1.5 bg-blue-600/25 text-blue-300 border border-blue-500/50 px-4 py-2 rounded-xl font-semibold text-sm">
                       <Sparkles className="w-4 h-4" />
