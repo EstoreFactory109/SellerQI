@@ -816,6 +816,31 @@ class StripeService {
     }
 
     /**
+     * Check whether a Stripe customer has a card on file
+     * Used by the admin accounts list - kept cheap (single list call, limit 1)
+     * @param {string} stripeCustomerId
+     * @returns {Promise<{connected: boolean, brand: string|null, last4: string|null}>}
+     */
+    async getCardConnectionStatus(stripeCustomerId) {
+        if (!stripeCustomerId) {
+            return { connected: false, brand: null, last4: null };
+        }
+
+        const paymentMethods = await this.stripe.paymentMethods.list({
+            customer: stripeCustomerId,
+            type: 'card',
+            limit: 1
+        });
+
+        const card = paymentMethods.data[0]?.card;
+        return {
+            connected: paymentMethods.data.length > 0,
+            brand: card?.brand || null,
+            last4: card?.last4 || null
+        };
+    }
+
+    /**
      * Reactivate cancelled subscription
      */
     async reactivateSubscription(userId) {
