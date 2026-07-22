@@ -78,7 +78,7 @@ const MetricCard = ({ label, value, icon, breakdown, isExpandable, currency = '$
               left: dropdownPos.left,
               width: dropdownPos.width,
               zIndex: 10050,
-              background: '#21262d',
+              background: 'var(--bg-elevated)',
               border: '1px solid #30363d',
             }}
             onClick={(e) => e.stopPropagation()}
@@ -93,7 +93,7 @@ const MetricCard = ({ label, value, icon, breakdown, isExpandable, currency = '$
                     className="flex items-center justify-between px-2 py-1.5 rounded"
                     style={{ background: idx % 2 === 0 ? 'transparent' : 'rgba(48,54,61,0.3)' }}
                   >
-                    <span className="text-[10px] mr-2" style={{ color: '#d1d5db' }}>{item.label}</span>
+                    <span className="text-[10px] mr-2" style={{ color: 'var(--text-secondary)' }}>{item.label}</span>
                     <span className="text-[10px] font-medium whitespace-nowrap" style={{ color: amtColor }}>
                       {currency}{amt.toFixed(2)}
                     </span>
@@ -112,23 +112,23 @@ const MetricCard = ({ label, value, icon, breakdown, isExpandable, currency = '$
           whileHover={{ y: -2 }}
           transition={{ duration: 0.2 }}
           className="group rounded-lg transition-all duration-300 flex flex-col w-full"
-          style={{ background: '#161b22', border: '1px solid #30363d', padding: '10px', cursor: canExpand ? 'pointer' : 'default' }}
+          style={{ background: 'var(--bg-surface)', border: '1px solid #30363d', padding: '10px', cursor: canExpand ? 'pointer' : 'default' }}
           onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#3b82f6'; }}
           onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#30363d'; }}
           onClick={handleClick}
         >
           <div className="flex items-center gap-2 mb-1">
             <IconComponent className="w-4 h-4" style={{ color: '#60a5fa' }} />
-            <div className="text-[11px] font-medium uppercase tracking-wide flex-1" style={{ color: '#ffffff' }}>
+            <div className="text-[11px] font-medium uppercase tracking-wide flex-1" style={{ color: 'var(--text-primary)' }}>
               {label}
             </div>
             {canExpand && (
               isOpen
-                ? <ChevronUp className="w-3.5 h-3.5" style={{ color: '#9ca3af' }} />
-                : <ChevronDown className="w-3.5 h-3.5" style={{ color: '#9ca3af' }} />
+                ? <ChevronUp className="w-3.5 h-3.5" style={{ color: 'var(--text-secondary)' }} />
+                : <ChevronDown className="w-3.5 h-3.5" style={{ color: 'var(--text-secondary)' }} />
             )}
           </div>
-          <div className="text-[18px] font-bold transition-colors duration-200 truncate" style={{ color: '#ffffff' }}>
+          <div className="text-[18px] font-bold transition-colors duration-200 truncate" style={{ color: 'var(--text-primary)' }}>
             {value}
           </div>
         </motion.div>
