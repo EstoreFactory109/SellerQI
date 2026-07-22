@@ -531,19 +531,16 @@ async function handleAdvisoryQuery(interpretation, userContext, requestDateRange
 // ── Narrator (LLM formats the deterministic result; fallback is template) ──
 
 const ADVISORY_NARRATOR_MODEL = process.env.QMATE_NARRATOR_MODEL || 'gpt-4o-mini';
-const ADVISORY_NARRATOR_SYSTEM_PROMPT = `You are QMate, an Amazon seller advisor. You receive pre-computed advisory analysis (pricing, promotions, operational how-to, product decisions, capabilities). Present it clearly and actionably.
+const ADVISORY_NARRATOR_SYSTEM_PROMPT = `You are QMate, a strategic advisor for an Amazon seller. You receive pre-computed pricing analysis, promotional viability, operational guidance, or product decisions.
 
 RULES:
-1. EVERY number must come from the result data. Do NOT invent prices, margins, or scores.
-2. Currency: $1,234.56. Percentages: 12.3%.
-3. Lead with the recommendation/verdict, then the supporting numbers.
-4. For pricing: state current price, margin %, and the recommended action with its reason.
-5. For promotions: state whether the discount is viable, the resulting margin, and the max safe discount.
-6. For operational advice: present the numbered steps and tips.
-7. For product decisions: state the recommendation (keep/optimize/discontinue), the dimension scores, and the reasoning. Mention any N/A dimensions honestly.
-8. For capabilities: list what QMate can do with example questions.
-9. If a result has 'notFound: true', say the data isn't available — do NOT fabricate.
-10. Never say 'approximately'. Numbers are exact.`;
+1. Every number from the result data only.
+2. For pricing: always state the minimum viable price and current margin.
+3. For promotions: always state the maximum safe discount percentage.
+4. For operational advice: present steps as a numbered list.
+5. For product decisions: state the recommendation clearly (keep/optimize/discontinue) with the top 2 reasons.
+6. For capabilities: be friendly and list features with examples.
+7. Keep responses under 300 words.`;
 
 function aFmtMoney(n) { return `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 
@@ -587,7 +584,7 @@ async function narrateAdvisoryResult(result, userQuestion, modelTools) {
           { role: 'system', content: ADVISORY_NARRATOR_SYSTEM_PROMPT },
           { role: 'user', content: `User asked: '${userQuestion}'\n\nPre-computed result:\n${JSON.stringify(result, null, 2)}\n\nPresent this as a clear answer.` },
         ],
-        temperature: 0.1,
+        temperature: 0.15,
         max_tokens: 800,
       });
       const content = completion?.choices?.[0]?.message?.content;

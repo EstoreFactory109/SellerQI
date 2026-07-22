@@ -74,6 +74,22 @@ const DEEP_RESYNC_TARGET_CYCLE_DAYS = 3;
 // many accounts have many missing days after a long outage.
 const MAX_ENQUEUES_PER_TICK = 50;
 
+// ── Orphaned logging-session sweep ───────────────────────────────────────────
+// A UserAccountLogs session is opened at the start of a run and only closed when
+// the pipeline reaches finalize (or a worker terminal handler that knows the
+// sessionId). Hard crashes (OOM/kill), stalls, or broken phase chains leave it
+// pinned at 'in_progress' forever, so the frontend "user logging" page shows a
+// perpetual spinner. This sweep is the guaranteed safety net that catches ALL
+// leak causes (including crashes a process can't clean up after). Any session
+// with no end older than the max-age is definitively orphaned.
+const STALE_SESSION_SWEEP_ENABLED = process.env.STALE_SESSION_SWEEP_DISABLED !== 'true';
+// Comfortably beyond any real run (worker lock 2h + extensions; longest PPC
+// report path capped ~4h). Anything older with no end is dead.
+const STALE_SESSION_MAX_AGE_HOURS = parseInt(process.env.STALE_SESSION_MAX_AGE_HOURS || '6', 10);
+// Bound per tick so a large backlog drains over several ticks rather than one
+// enormous write. At the default 3h cadence this drains ~16k/day.
+const STALE_SESSION_MAX_PER_TICK = parseInt(process.env.STALE_SESSION_MAX_PER_TICK || '2000', 10);
+
 // Job options for catch-up jobs.
 const CATCHUP_JOB_OPTS = {
     attempts: 3,
@@ -644,10 +660,64 @@ async function sweepFinanceDeepResync() {
     return summary;
 }
 
+/**
+ * Close orphaned 'in_progress' logging sessions (see constants above).
+ * Bounded per tick; a large backlog drains over consecutive ticks.
+ * Marks them 'partial' (honest: run started, may be incomplete, never finalized)
+ * with an audit marker. Idempotent and safe to run repeatedly.
+ */
+async function sweepStaleSessions() {
+    if (!STALE_SESSION_SWEEP_ENABLED) {
+        return { enabled: false, closed: 0, remaining: 0 };
+    }
+
+    const UserAccountLogs = require('../../models/system/ErrorLogs.js');
+    const cutoff = new Date(Date.now() - STALE_SESSION_MAX_AGE_HOURS * 60 * 60 * 1000);
+    const query = {
+        sessionStatus: 'in_progress',
+        sessionStartTime: { $lt: cutoff },
+        $or: [{ sessionEndTime: null }, { sessionEndTime: { $exists: false } }]
+    };
+
+    // Grab a bounded batch of oldest-first ids, then close exactly those.
+    const batch = await UserAccountLogs.find(query)
+        .sort({ sessionStartTime: 1 })
+        .limit(STALE_SESSION_MAX_PER_TICK)
+        .select('_id')
+        .lean();
+
+    if (!batch.length) {
+        return { enabled: true, closed: 0, remaining: 0 };
+    }
+
+    const ids = batch.map((d) => d._id);
+    // Re-assert sessionStatus:'in_progress' so a session that legitimately closes
+    // between the read and the write is never clobbered. overallSummary (a numeric
+    // object) and the per-function log entries are intentionally left untouched.
+    const res = await UserAccountLogs.updateMany(
+        { _id: { $in: ids }, sessionStatus: 'in_progress' },
+        [
+            {
+                $set: {
+                    sessionStatus: 'partial',
+                    sessionEndTime: '$$NOW',
+                    sessionDuration: { $subtract: ['$$NOW', '$sessionStartTime'] },
+                    autoClosedStale: true,
+                    autoClosedAt: '$$NOW'
+                }
+            }
+        ]
+    );
+
+    const remaining = await UserAccountLogs.countDocuments(query);
+    return { enabled: true, closed: res.modifiedCount, remaining };
+}
+
 module.exports = {
     sweep,
     sweepFinance,
     sweepFinanceDeepResync,
+    sweepStaleSessions,
     findMissingDatesForAccount,
     findBrokenFinanceDatesForAccount,
     buildCatchupJobId,

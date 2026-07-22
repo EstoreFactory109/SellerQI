@@ -22,7 +22,7 @@ axiosRetry(axios, {
 });
 
 const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country, Region) => {
-  logger.info("GetListingItemsIssues starting", { sku, asin, Country, Region });
+  logger.debug("GetListingItemsIssues starting", { sku, asin, Country, Region });
   
   const host = baseuri;
 
@@ -64,7 +64,7 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
   let issueLocale = dataToReceive.issueLocale;
   
   // Log all request parameters for debugging
-  logger.info("GetListingItemsIssues request details", {
+  logger.debug("GetListingItemsIssues request details", {
     host,
     encodedSku,
     originalSku: sku,
@@ -94,7 +94,7 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
     region: awsRegion
   });
   
-  logger.info("GetListingItemsIssues full URL", { fullUrl });
+  logger.debug("GetListingItemsIssues full URL", { fullUrl });
 
   try {
     const response = await axios.get(fullUrl, {
@@ -153,7 +153,7 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
       sku: sku
     };
 
-    logger.info("GetListingItemsIssues ended", { has_b2b_pricing: hasB2BPricing });
+    logger.debug("GetListingItemsIssues ended", { has_b2b_pricing: hasB2BPricing });
     return generic_Keyword;
 
   } catch (error) {
@@ -215,7 +215,7 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
  * @returns {Object|false} Object containing sku and issues array, or false on error
  */
 const GetListingItemIssuesForInactive = async (dataToReceive, sku, asin, userId, baseuri, Country, Region) => {
-  logger.info("GetListingItemIssuesForInactive starting", { sku, asin, Country, Region });
+  logger.debug("GetListingItemIssuesForInactive starting", { sku, asin, Country, Region });
   
   const host = baseuri;
 
@@ -254,7 +254,7 @@ const GetListingItemIssuesForInactive = async (dataToReceive, sku, asin, userId,
   const path = `/listings/2021-08-01/items/${dataToReceive.SellerId}/${encodedSku}?${queryParams}`;
   const fullUrl = `https://${host}${path}`;
 
-  logger.info("GetListingItemIssuesForInactive request details", {
+  logger.debug("GetListingItemIssuesForInactive request details", {
     host,
     encodedSku,
     originalSku: sku,
@@ -284,7 +284,7 @@ const GetListingItemIssuesForInactive = async (dataToReceive, sku, asin, userId,
     region: awsRegion
   });
   
-  logger.info("GetListingItemIssuesForInactive full URL", { fullUrl });
+  logger.debug("GetListingItemIssuesForInactive full URL", { fullUrl });
 
   try {
     const response = await axios.get(fullUrl, {
@@ -327,7 +327,7 @@ const GetListingItemIssuesForInactive = async (dataToReceive, sku, asin, userId,
       }
     }
 
-    logger.info("GetListingItemIssuesForInactive ended", { 
+    logger.debug("GetListingItemIssuesForInactive ended", {
       sku, 
       issuesCount: issuesMessages.length,
       has_b2b_pricing: hasB2BPricing

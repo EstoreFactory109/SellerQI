@@ -34,6 +34,7 @@ const Campaign = require('../models/amazon-ads/CampaignModel.js');
 const NegativeKeywords = require('../models/amazon-ads/NegetiveKeywords.js');
 const AdsGroup = require('../models/amazon-ads/adsgroupModel.js');
 const Keyword = require('../models/amazon-ads/keywordModel.js');
+const KeywordChunk = require('../models/amazon-ads/keywordChunkModel.js');
 
 const DB_URI = process.env.DB_URI;
 const DB_NAME = process.env.DB_NAME;
@@ -91,6 +92,7 @@ const TARGETS = [
   { label: 'NegativeKeywords (No-negatives)', model: NegativeKeywords },
   { label: 'AdsGroup (No-negatives)', model: AdsGroup },
   { label: 'Keyword (Auto insights manual set)', model: Keyword },
+  { label: 'KeywordChunk (oversized keyword overflow)', model: KeywordChunk },
 ];
 
 async function main() {

@@ -7,6 +7,7 @@ const userModel = require('../../models/user-auth/userModel.js');
 // Use service layer for saving data (handles 16MB limit with separate collection)
 const { saveProductWiseSponsoredAdsData } = require('../amazon-ads/ProductWiseSponsoredAdsService.js');
 const { resolveReportDateRange } = require('../../utils/reportDateRange.js');
+const logger = require('../../utils/Logger');
 
 /**
  * GetPPCProductWise.js
@@ -41,6 +42,12 @@ const { resolveReportDateRange } = require('../../utils/reportDateRange.js');
  */
 
 // Base URIs for different regions
+// Hard ceiling on report-status polling so a report wedged in PENDING/PROCESSING
+// can't poll forever and hang the phase. At the cap we return FAILURE.
+// Amazon publishes no hard SLA for v3 report generation; large reports can take
+// a few hours. Default ~4h (one poll per 60s); tune via ADS_REPORT_MAX_POLL_ATTEMPTS.
+const MAX_POLL_ATTEMPTS = parseInt(process.env.ADS_REPORT_MAX_POLL_ATTEMPTS || '240', 10);
+
 const BASE_URIS = {
     'NA': 'https://advertising-api.amazon.com',
     'EU': 'https://advertising-api-eu.amazon.com',
@@ -168,16 +175,16 @@ async function createReport(accessToken, profileId, region, config, startDate, e
                 }
             };
 
-            console.log(`📄 [GetPPCProductWise] Creating ${config.adProduct} report for ${startDate} → ${endDate}`);
+            logger.info(`📄 [GetPPCProductWise] Creating ${config.adProduct} report for ${startDate} → ${endDate}`);
             const response = await axios.post(url, body, { headers });
-            console.log(`✅ [GetPPCProductWise] ${config.adProduct} report ID: ${response.data.reportId}`);
+            logger.info(`✅ [GetPPCProductWise] ${config.adProduct} report ID: ${response.data.reportId}`);
 
             return { ...response.data, currentAccessToken };
 
         } catch (error) {
             // Handle 401 — refresh token and retry once
             if (error.response && error.response.status === 401 && !hasRetried && tokenRefreshCallback) {
-                console.log(`⚠️ [GetPPCProductWise] Token expired during ${config.adProduct} createReport, refreshing...`);
+                logger.debug(`⚠️ [GetPPCProductWise] Token expired during ${config.adProduct} createReport, refreshing...`);
                 hasRetried = true;
                 try {
                     const newToken = await tokenRefreshCallback();
@@ -186,15 +193,12 @@ async function createReport(accessToken, profileId, region, config, startDate, e
                         continue;
                     }
                 } catch (refreshError) {
-                    console.error(`❌ [GetPPCProductWise] Token refresh failed:`, refreshError.message);
+                    logger.error(`❌ [GetPPCProductWise] Token refresh failed:`, refreshError.message);
                 }
             }
 
             if (error.response) {
-                console.error(`❌ [GetPPCProductWise] ${config.adProduct} createReport error:`, {
-                    status: error.response.status,
-                    data: error.response.data
-                });
+                logger.error(`[GetPPCProductWise] ${config.adProduct} createReport error: status ${error.response.status}`);
                 const enhancedError = new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
                 enhancedError.response = error.response;
                 enhancedError.status = error.response.status;
@@ -229,10 +233,10 @@ async function pollReportStatus(reportId, accessToken, profileId, region, tokenR
             const { status } = response.data;
             const location = response.data.url;
 
-            console.log(`📊 [GetPPCProductWise] Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
+            logger.info(`📊 [GetPPCProductWise] Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
 
             if (status === 'COMPLETED') {
-                console.log(`✅ [GetPPCProductWise] Report completed after ${attempts + 1} attempts`);
+                logger.info(`✅ [GetPPCProductWise] Report completed after ${attempts + 1} attempts`);
                 return {
                     status: 'COMPLETED',
                     location,
@@ -240,7 +244,7 @@ async function pollReportStatus(reportId, accessToken, profileId, region, tokenR
                     finalAccessToken: currentAccessToken
                 };
             } else if (status === 'FAILURE') {
-                console.error(`❌ [GetPPCProductWise] Report failed after ${attempts + 1} attempts`);
+                logger.error(`❌ [GetPPCProductWise] Report failed after ${attempts + 1} attempts`);
                 return {
                     status: 'FAILURE',
                     reportId,
@@ -249,7 +253,11 @@ async function pollReportStatus(reportId, accessToken, profileId, region, tokenR
             }
 
             if (status === 'PROCESSING' || status === 'PENDING') {
-                console.log(`⏳ [GetPPCProductWise] Report still ${status}, waiting 60 seconds...`);
+                if (attempts >= MAX_POLL_ATTEMPTS) {
+                    logger.error(`❌ [GetPPCProductWise] Report ${reportId} stuck in ${status} after ${attempts} polls (~${attempts} min); giving up`);
+                    return { status: 'FAILURE', reportId, error: `Report timed out after ${attempts} polls while ${status}` };
+                }
+                logger.debug(`⏳ [GetPPCProductWise] Report still ${status}, waiting 60 seconds...`);
                 await new Promise(resolve => setTimeout(resolve, 60000));
                 attempts++;
             } else {
@@ -258,7 +266,7 @@ async function pollReportStatus(reportId, accessToken, profileId, region, tokenR
 
         } catch (error) {
             if (error.response && error.response.status === 401 && tokenRefreshCallback) {
-                console.log(`⚠️ Token expired during polling (attempt ${attempts + 1}), refreshing...`);
+                logger.debug(`⚠️ Token expired during polling (attempt ${attempts + 1}), refreshing...`);
                 try {
                     const newToken = await tokenRefreshCallback();
                     if (newToken) {
@@ -266,12 +274,12 @@ async function pollReportStatus(reportId, accessToken, profileId, region, tokenR
                         continue;
                     }
                 } catch (refreshError) {
-                    console.error('❌ Token refresh failed during polling:', refreshError.message);
+                    logger.error('❌ Token refresh failed during polling:', refreshError.message);
                     throw new Error(`Token refresh failed during polling: ${refreshError.message}`);
                 }
             }
             if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
-                console.error(`Network error checking report status, retrying... (attempt ${attempts + 1})`);
+                logger.error(`Network error checking report status, retrying... (attempt ${attempts + 1})`);
                 await new Promise(resolve => setTimeout(resolve, 60000));
                 attempts++;
                 continue;
@@ -305,7 +313,7 @@ async function downloadReport(location, accessToken, tokenRefreshCallback) {
 
         } catch (err) {
             if (err.response && err.response.status === 401 && !hasRetried && tokenRefreshCallback) {
-                console.log(`⚠️ [GetPPCProductWise] Token expired during download, refreshing...`);
+                logger.debug(`⚠️ [GetPPCProductWise] Token expired during download, refreshing...`);
                 hasRetried = true;
                 try {
                     const newToken = await tokenRefreshCallback();
@@ -335,13 +343,13 @@ async function fetchReportForAdType(adType, accessToken, profileId, region, star
     const config = REPORT_CONFIGS[adType];
 
     try {
-        console.log(`📡 [GetPPCProductWise] Fetching ${adType} report...`);
+        logger.info(`📡 [GetPPCProductWise] Fetching ${adType} report...`);
 
         // 1. Create report request
         const reportData = await createReport(accessToken, profileId, region, config, startDate, endDate, tokenRefreshCallback);
 
         if (!reportData || !reportData.reportId) {
-            console.warn(`⚠️ [GetPPCProductWise] No report ID returned for ${adType}`);
+            logger.warn(`⚠️ [GetPPCProductWise] No report ID returned for ${adType}`);
             return [];
         }
 
@@ -352,7 +360,7 @@ async function fetchReportForAdType(adType, accessToken, profileId, region, star
         const reportStatus = await pollReportStatus(reportData.reportId, currentToken, profileId, region, tokenRefreshCallback);
 
         if (reportStatus.status !== 'COMPLETED') {
-            console.warn(`⚠️ [GetPPCProductWise] ${adType} report did not complete: ${reportStatus.error || reportStatus.status}`);
+            logger.warn(`⚠️ [GetPPCProductWise] ${adType} report did not complete: ${reportStatus.error || reportStatus.status}`);
             return [];
         }
 
@@ -360,7 +368,7 @@ async function fetchReportForAdType(adType, accessToken, profileId, region, star
         const downloadToken = reportStatus.finalAccessToken || currentToken;
         const rawRows = await downloadReport(reportStatus.location, downloadToken, tokenRefreshCallback);
 
-        console.log(`✅ [GetPPCProductWise] ${adType} report: ${rawRows.length} rows`);
+        logger.debug(`✅ [GetPPCProductWise] ${adType} report: ${rawRows.length} rows`);
 
         // 4. Map raw rows through the ad-type-specific mapper, yielding to event loop periodically
         const mappedRows = [];
@@ -379,7 +387,7 @@ async function fetchReportForAdType(adType, accessToken, profileId, region, star
 
     } catch (error) {
         // Don't let one ad type's failure kill the others
-        console.error(`❌ [GetPPCProductWise] ${adType} report failed:`, error.message);
+        logger.error(`❌ [GetPPCProductWise] ${adType} report failed:`, error.message);
         return [];
     }
 }
@@ -398,7 +406,7 @@ async function fetchReportForAdType(adType, accessToken, profileId, region, star
 async function getPPCSpendsBySKU(accessToken, profileId, userId, country, region, refreshToken = null, options = {}) {
     try {
         const { startDate, endDate, isCustom } = resolveReportDateRange(options);
-        console.log(`📡 [GetPPCProductWise] PPC spends by SKU for region: ${region}, country: ${country}, userId: ${userId}, window: ${startDate} → ${endDate}, customDateRange: ${isCustom}`);
+        logger.info(`📡 [GetPPCProductWise] PPC spends by SKU for region: ${region}, country: ${country}, userId: ${userId}, window: ${startDate} → ${endDate}, customDateRange: ${isCustom}`);
 
         // Small delay to prevent rapid successive requests
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -406,16 +414,16 @@ async function getPPCSpendsBySKU(accessToken, profileId, userId, country, region
         // Create token refresh callback
         const tokenRefreshCallback = refreshToken ? async () => {
             try {
-                console.log('🔄 [GetPPCProductWise] Refreshing Amazon Ads token...');
+                logger.debug('🔄 [GetPPCProductWise] Refreshing Amazon Ads token...');
                 const newToken = await generateAdsAccessToken(refreshToken);
                 if (newToken) {
-                    console.log('✅ [GetPPCProductWise] Token refreshed successfully');
+                    logger.debug('✅ [GetPPCProductWise] Token refreshed successfully');
                     return newToken;
                 } else {
                     throw new Error('Failed to generate new access token');
                 }
             } catch (error) {
-                console.error('❌ [GetPPCProductWise] Token refresh failed:', error.message);
+                logger.error('❌ [GetPPCProductWise] Token refresh failed:', error.message);
                 throw error;
             }
         } : null;
@@ -432,10 +440,10 @@ async function getPPCSpendsBySKU(accessToken, profileId, userId, country, region
 
         const allData = [...spData, ...sdData];
 
-        console.log(`📊 [GetPPCProductWise] Total rows: ${allData.length} (SP: ${spData.length}, SD: ${sdData.length})`);
+        logger.debug(`📊 [GetPPCProductWise] Total rows: ${allData.length} (SP: ${spData.length}, SD: ${sdData.length})`);
 
         if (allData.length === 0) {
-            console.warn(`⚠️ [GetPPCProductWise] No data from any ad type for userId: ${userId}`);
+            logger.warn(`⚠️ [GetPPCProductWise] No data from any ad type for userId: ${userId}`);
             return {
                 success: true,
                 message: 'No product-wise sponsored ads data available',
@@ -469,7 +477,7 @@ async function getPPCSpendsBySKU(accessToken, profileId, userId, country, region
         };
 
     } catch (error) {
-        console.error('Error in getPPCSpendsBySKU:', error.message);
+        logger.error('Error in getPPCSpendsBySKU:', error.message);
 
         if (error.message.includes('425')) {
             throw new Error('Duplicate request detected by Amazon Ads API. Please wait a moment before retrying.');

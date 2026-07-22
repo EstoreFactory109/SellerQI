@@ -62,7 +62,7 @@ async function getCampaign(accessToken, profileId, region, userId, country) {
       throw new Error('AMAZON_ADS_CLIENT_ID not found in environment variables');
     }
 
-    console.log(`📡 Getting campaigns (SP v3) for region: ${region}, country: ${country}, userId: ${userId}`);
+    logger.info(`[GetCampaigns] Getting campaigns (SP v3) for region: ${region}, country: ${country}, userId: ${userId}`);
 
     // SP v3 endpoint
     const url = `${baseUri}/sp/campaigns/list`;
@@ -116,11 +116,11 @@ async function getCampaign(accessToken, profileId, region, userId, country) {
       allCampaigns.push(...campaigns);
       nextToken = response.data.nextToken || null;
 
-      console.log(`  ↳ Fetched ${campaigns.length} campaigns (total so far: ${allCampaigns.length})`);
+      logger.debug(`[GetCampaigns] Fetched ${campaigns.length} campaigns (total so far: ${allCampaigns.length})`);
 
     } while (nextToken);
 
-    console.log(`✅ Campaign API response received: ${allCampaigns.length} campaigns total`);
+    logger.info(`[GetCampaigns] Campaigns fetched: ${allCampaigns.length} total`);
 
     // ===== HANDLE EMPTY CAMPAIGNS GRACEFULLY =====
     if (allCampaigns.length === 0) {
@@ -130,7 +130,7 @@ async function getCampaign(accessToken, profileId, region, userId, country) {
       const enabledCampaigns = allCampaigns.filter(campaign =>
         campaign && campaign.state === 'ENABLED'
       );
-      console.log(`📊 Campaign breakdown: ${allCampaigns.length} total, ${enabledCampaigns.length} enabled`);
+      logger.debug(`[GetCampaigns] Campaign breakdown: ${allCampaigns.length} total, ${enabledCampaigns.length} enabled`);
     }
 
     // ===== NORMALIZE v3 RESPONSE TO MATCH EXISTING MODEL =====
@@ -206,7 +206,7 @@ async function getCampaign(accessToken, profileId, region, userId, country) {
         };
       }
 
-      console.log(`✅ Campaign data saved successfully: ${normalizedCampaigns.length} campaigns stored`);
+      logger.info(`[GetCampaigns] Campaign data saved successfully: ${normalizedCampaigns.length} campaigns stored`);
       return createCampaignData;
 
     } catch (dbError) {
@@ -232,10 +232,8 @@ async function getCampaign(accessToken, profileId, region, userId, country) {
   } catch (error) {
     // ===== ENHANCED ERROR HANDLING FOR TOKEN MANAGER =====
     if (error.response) {
-      console.error('❌ Campaign API Error Response:', {
+      logger.error(`[GetCampaigns] Campaign API error: ${error.response.status}`, {
         status: error.response.status,
-        data: error.response.data,
-        headers: error.response.headers,
         userId,
         region,
         country
@@ -252,16 +250,14 @@ async function getCampaign(accessToken, profileId, region, userId, country) {
 
       throw enhancedError;
     } else if (error.request) {
-      console.error('❌ No response received from Campaign API:', {
-        request: error.request,
+      logger.error('[GetCampaigns] No response received from Campaign API', {
         userId,
         region,
         country
       });
       throw new Error('No response received from Amazon Ads API');
     } else {
-      console.error('❌ Campaign API request setup error:', {
-        message: error.message,
+      logger.error(`[GetCampaigns] Campaign API request setup error: ${error.message}`, {
         userId,
         region,
         country

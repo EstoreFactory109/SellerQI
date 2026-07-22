@@ -31,6 +31,14 @@ function classifySellerOpsQueryType(interpretation) {
   const prompt = extractPromptText(interpretation);
   const hasAsin = (interpretation?.entities?.asins || []).length > 0;
 
+  // Brand Story — its own type: check presence (per-ASIN or account-wide) and,
+  // when missing, return the how-to-add steps. Checked before the generic listing
+  // cues so "brand story issue / how to solve brand story" doesn't fall into the
+  // broad listing-issues summary.
+  if (/brand\s*story/i.test(prompt)) {
+    return 'brand_story';
+  }
+
   // Listing Issues — fix questions first (most specific), then ASIN vs summary.
   if (/how.*(fix|resolve|repair).*(listing|suppress|image|bullet|title|description)/i.test(prompt)) {
     return 'listing_issue_fix';
@@ -71,13 +79,30 @@ function classifySellerOpsQueryType(interpretation) {
   }
 
   // Product / BSR.
-  if (hasAsin && /bsr|best\s*seller\s*rank|sales\s*rank|detail|category|what.*about/i.test(prompt)) {
+  //
+  // A finance/ads intent word means an ASIN question belongs to Finance/Ads, NOT
+  // a SellerOps product-info card. Without this guard the bare "show me"/"detail"
+  // cues below claimed queries like "show me profitability for B0XXX": SellerOps
+  // matched product_details, isFinanceQuery deferred to it, and the seller got a
+  // "product not found" from getProductDetails instead of their ASIN P&L.
+  // "sales rank" is excluded from the signal — that's a BSR question (handled
+  // immediately below), not a Finance "sales" question.
+  const financeOrAdsSignal =
+    !/sales\s*rank/i.test(prompt) &&
+    /profit|revenue|\bsales\b|\bexpenses?\b|\bfees?\b|margin|\bcogs\b|p&l|pnl|gross\s*profit|earnings?|\bincome\b|acos|roas|tacos|\bppc\b|ad\s*spend|advertis|\bcampaigns?\b|keywords?|\bcpc\b|\bctr\b|impressions?|\bclicks?\b/i.test(prompt);
+
+  // BSR / rank — always SellerOps (Finance/Ads don't track rank), so checked
+  // before the finance/ads guard.
+  if (hasAsin && /bsr|best\s*seller\s*rank|sales\s*rank/i.test(prompt)) {
     return 'product_details';
   }
   if (/bsr|best\s*seller\s*rank|sales\s*rank|rank.*(trending|improv|up|down)|trending.*rank|trending\s*(up|down)/i.test(prompt)) {
     return 'bsr_analysis';
   }
-  if (hasAsin && /detail|show me|tell me about/i.test(prompt)) return 'product_details';
+  // Generic product-info card — only when this isn't a finance/ads question.
+  if (hasAsin && !financeOrAdsSignal && /detail|category|what.*about|show me|tell me about/i.test(prompt)) {
+    return 'product_details';
+  }
   if (/product\s*(catalog|list|count|detail)|how\s*many\s*products|my (product )?catalog/i.test(prompt)) {
     return hasAsin ? 'product_details' : 'product_summary';
   }

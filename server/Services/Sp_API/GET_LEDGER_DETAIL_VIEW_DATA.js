@@ -191,7 +191,7 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, 
         let retries = 30;
 
         while (!reportDocumentId && retries > 0) {
-            logger.info(`[GET_LEDGER_DETAIL_VIEW_DATA] Checking report status... (Retries left: ${retries})`);
+            logger.debug(`[GET_LEDGER_DETAIL_VIEW_DATA] Checking report status... (Retries left: ${retries})`);
             await new Promise((resolve) => setTimeout(resolve, 20000));
             reportDocumentId = await checkReportStatus(accessToken, reportId, baseuri);
             if (reportDocumentId === false) {

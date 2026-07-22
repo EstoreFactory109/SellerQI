@@ -15,6 +15,7 @@ const zlib = require('zlib');
 const { promisify } = require('util');
 const { generateAdsAccessToken } = require('./GenerateToken');
 const PPCUnitsSold = require('../../models/amazon-ads/PPCUnitsSoldModel');
+const logger = require('../../utils/Logger');
 
 const gunzip = promisify(zlib.gunzip);
 
@@ -132,19 +133,19 @@ async function createUnitsReport(accessToken, profileId, region, reportConfig, s
         } catch (error) {
             // Handle 401 Unauthorized - refresh token and retry once
             if (error.response && error.response.status === 401 && !hasRetried && tokenRefreshCallback) {
-                console.log(`⚠️ [GetPPCUnitsSold] Token expired during createUnitsReport for ${reportConfig.adProduct}, refreshing...`);
+                logger.debug(`⚠️ [GetPPCUnitsSold] Token expired during createUnitsReport for ${reportConfig.adProduct}, refreshing...`);
                 hasRetried = true;
                 try {
                     const newToken = await tokenRefreshCallback();
                     if (newToken) {
                         currentAccessToken = newToken;
-                        console.log(`✅ [GetPPCUnitsSold] Token refreshed, retrying createUnitsReport...`);
+                        logger.debug(`✅ [GetPPCUnitsSold] Token refreshed, retrying createUnitsReport...`);
                         continue;
                     } else {
                         throw new Error('Token refresh callback returned null/undefined');
                     }
                 } catch (refreshError) {
-                    console.error('❌ [GetPPCUnitsSold] Failed to refresh token:', refreshError.message);
+                    logger.error('❌ [GetPPCUnitsSold] Failed to refresh token:', refreshError.message);
                     throw new Error(`Token refresh failed: ${refreshError.message}`);
                 }
             }
@@ -152,7 +153,7 @@ async function createUnitsReport(accessToken, profileId, region, reportConfig, s
             if (error.response) {
                 // Some campaign types might not be available for this seller
                 if (error.response.status === 400 || error.response.status === 404) {
-                    console.log(`⚠️ [GetPPCUnitsSold] ${reportConfig.adProduct} not available for this seller, skipping...`);
+                    logger.debug(`⚠️ [GetPPCUnitsSold] ${reportConfig.adProduct} not available for this seller, skipping...`);
                     return { reportId: null, skipped: true, campaignType: reportConfig.adProduct };
                 }
                 
@@ -192,10 +193,10 @@ async function checkUnitsReportStatus(reportId, accessToken, profileId, region, 
             const { status } = response.data;
             const location = response.data.url;
 
-            console.log(`📊 [GetPPCUnitsSold] Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
+            logger.info(`📊 [GetPPCUnitsSold] Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
 
             if (status === 'COMPLETED') {
-                console.log(`✅ [GetPPCUnitsSold] Report completed after ${attempts + 1} attempts`);
+                logger.info(`✅ [GetPPCUnitsSold] Report completed after ${attempts + 1} attempts`);
                 return {
                     status: 'COMPLETED',
                     location: location,
@@ -203,7 +204,7 @@ async function checkUnitsReportStatus(reportId, accessToken, profileId, region, 
                     finalAccessToken: currentAccessToken
                 };
             } else if (status === 'FAILURE') {
-                console.error(`❌ [GetPPCUnitsSold] Report generation failed after ${attempts + 1} attempts`);
+                logger.error(`❌ [GetPPCUnitsSold] Report generation failed after ${attempts + 1} attempts`);
                 return {
                     status: 'FAILURE',
                     reportId: reportId,
@@ -214,9 +215,9 @@ async function checkUnitsReportStatus(reportId, accessToken, profileId, region, 
             if (status === 'PROCESSING' || status === 'PENDING') {
                 // Log every 10 attempts (10 minutes) to track progress
                 if (attempts > 0 && attempts % 10 === 0) {
-                    console.log(`⏳ [GetPPCUnitsSold] Report ${reportId} still ${status} after ${attempts} minutes, continuing to wait...`);
+                    logger.debug(`⏳ [GetPPCUnitsSold] Report ${reportId} still ${status} after ${attempts} minutes, continuing to wait...`);
                 } else {
-                    console.log(`⏳ [GetPPCUnitsSold] Report still ${status}, waiting 60 seconds...`);
+                    logger.debug(`⏳ [GetPPCUnitsSold] Report still ${status}, waiting 60 seconds...`);
                 }
                 await new Promise(resolve => setTimeout(resolve, 60000));
                 attempts++;
@@ -226,12 +227,12 @@ async function checkUnitsReportStatus(reportId, accessToken, profileId, region, 
 
         } catch (error) {
             if (error.response && error.response.status === 401 && tokenRefreshCallback) {
-                console.log(`⚠️ [GetPPCUnitsSold] Token expired during polling, refreshing...`);
+                logger.debug(`⚠️ [GetPPCUnitsSold] Token expired during polling, refreshing...`);
                 try {
                     const newToken = await tokenRefreshCallback();
                     if (newToken) {
                         currentAccessToken = newToken;
-                        console.log(`✅ [GetPPCUnitsSold] Token refreshed successfully, continuing poll...`);
+                        logger.debug(`✅ [GetPPCUnitsSold] Token refreshed successfully, continuing poll...`);
                         continue;
                     }
                 } catch (refreshError) {
@@ -240,7 +241,7 @@ async function checkUnitsReportStatus(reportId, accessToken, profileId, region, 
             }
 
             if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
-                console.error(`[GetPPCUnitsSold] Network error checking report status, retrying... (attempt ${attempts + 1})`);
+                logger.error(`[GetPPCUnitsSold] Network error checking report status, retrying... (attempt ${attempts + 1})`);
                 await new Promise(resolve => setTimeout(resolve, 60000));
                 attempts++;
                 continue;
@@ -271,7 +272,7 @@ async function downloadUnitsReportData(location, accessToken, tokenRefreshCallba
 
         } catch (err) {
             if (err.response && err.response.status === 401 && !hasRetried && tokenRefreshCallback) {
-                console.log(`⚠️ [GetPPCUnitsSold] Token expired during download, refreshing...`);
+                logger.debug(`⚠️ [GetPPCUnitsSold] Token expired during download, refreshing...`);
                 hasRetried = true;
                 try {
                     const newToken = await tokenRefreshCallback();
@@ -390,7 +391,7 @@ function combineUnitsMetrics(reportResults, startDate, endDate) {
 
     reportResults.forEach(({ campaignType, metrics, skipped }) => {
         if (skipped) {
-            console.log(`⏭️ [GetPPCUnitsSold] Skipping ${campaignType} - not available for this seller`);
+            logger.debug(`⏭️ [GetPPCUnitsSold] Skipping ${campaignType} - not available for this seller`);
             return;
         }
 
@@ -454,7 +455,7 @@ function combineUnitsMetrics(reportResults, startDate, endDate) {
  * @param {boolean} saveToDatabase - Whether to save the data to database - defaults to true
  */
 async function getPPCUnitsSold(accessToken, profileId, userId, country, region, refreshToken = null, startDate = null, endDate = null, saveToDatabase = true) {
-    console.log(`📦 [GetPPCUnitsSold] Starting units sold fetch for user: ${userId}, country: ${country}, region: ${region}`);
+    logger.info(`📦 [GetPPCUnitsSold] Starting units sold fetch for user: ${userId}, country: ${country}, region: ${region}`);
 
     try {
         // Add a small delay to prevent rapid successive requests
@@ -463,16 +464,16 @@ async function getPPCUnitsSold(accessToken, profileId, userId, country, region, 
         // Create token refresh callback
         const tokenRefreshCallback = refreshToken ? async () => {
             try {
-                console.log('🔄 [GetPPCUnitsSold] Refreshing Amazon Ads token...');
+                logger.debug('🔄 [GetPPCUnitsSold] Refreshing Amazon Ads token...');
                 const newToken = await generateAdsAccessToken(refreshToken);
                 if (newToken) {
-                    console.log('✅ [GetPPCUnitsSold] Token refreshed successfully');
+                    logger.debug('✅ [GetPPCUnitsSold] Token refreshed successfully');
                     return newToken;
                 } else {
                     throw new Error('Failed to generate new access token');
                 }
             } catch (error) {
-                console.error('❌ [GetPPCUnitsSold] Token refresh failed:', error.message);
+                logger.error('❌ [GetPPCUnitsSold] Token refresh failed:', error.message);
                 throw error;
             }
         } : null;
@@ -482,7 +483,7 @@ async function getPPCUnitsSold(accessToken, profileId, userId, country, region, 
         const calculatedEndDate = endDate || new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1)).toISOString().split('T')[0];
         const calculatedStartDate = startDate || new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 30)).toISOString().split('T')[0];
 
-        console.log(`📅 [GetPPCUnitsSold] Date range: ${calculatedStartDate} to ${calculatedEndDate}`);
+        logger.info(`📅 [GetPPCUnitsSold] Date range: ${calculatedStartDate} to ${calculatedEndDate}`);
 
         // Create reports for all campaign types in parallel
         const campaignTypes = Object.keys(UNITS_SOLD_REPORT_CONFIGS);
@@ -498,13 +499,13 @@ async function getPPCUnitsSold(accessToken, profileId, userId, country, region, 
             )
                 .then(result => ({ campaignType, ...result }))
                 .catch(error => {
-                    console.error(`❌ [GetPPCUnitsSold] Error creating report for ${campaignType}:`, error.message);
+                    logger.error(`❌ [GetPPCUnitsSold] Error creating report for ${campaignType}:`, error.message);
                     return { campaignType, reportId: null, skipped: true, error: error.message };
                 })
         );
 
         const reportCreationResults = await Promise.all(createReportPromises);
-        console.log(`📝 [GetPPCUnitsSold] Created ${reportCreationResults.filter(r => r.reportId).length} reports`);
+        logger.info(`📝 [GetPPCUnitsSold] Created ${reportCreationResults.filter(r => r.reportId).length} reports`);
 
         // Wait for reports and download data
         const reportResults = [];
@@ -561,10 +562,8 @@ async function getPPCUnitsSold(accessToken, profileId, userId, country, region, 
                         skipped: false,
                         metrics: metrics
                     });
-
-                    console.log(`✅ [GetPPCUnitsSold] ${reportResult.campaignType}: Units7d=${metrics.totalUnits.units7d}, Units14d=${metrics.totalUnits.units14d}`);
                 } else {
-                    console.error(`❌ [GetPPCUnitsSold] Report failed for ${reportResult.campaignType}`);
+                    logger.error(`❌ [GetPPCUnitsSold] Report failed for ${reportResult.campaignType}`);
                     reportResults.push({ 
                         campaignType: reportResult.campaignType, 
                         skipped: true,
@@ -578,7 +577,7 @@ async function getPPCUnitsSold(accessToken, profileId, userId, country, region, 
                     });
                 }
             } catch (error) {
-                console.error(`❌ [GetPPCUnitsSold] Error processing ${reportResult.campaignType}:`, error.message);
+                logger.error(`❌ [GetPPCUnitsSold] Error processing ${reportResult.campaignType}:`, error.message);
                 reportResults.push({ 
                     campaignType: reportResult.campaignType, 
                     skipped: true,
@@ -596,14 +595,11 @@ async function getPPCUnitsSold(accessToken, profileId, userId, country, region, 
         // Combine all metrics
         const combinedMetrics = combineUnitsMetrics(reportResults, calculatedStartDate, calculatedEndDate);
 
-        console.log(`🎉 [GetPPCUnitsSold] Completed! Total Units (7d): ${combinedMetrics.totalUnits.units7d}, New-to-Brand: ${combinedMetrics.totalUnits.newToBrandUnits}`);
-
         // Save to database if requested
         let savedRecord = null;
         if (saveToDatabase) {
             try {
-                console.log(`💾 [GetPPCUnitsSold] Saving units sold data to database...`);
-                console.log(`💾 [GetPPCUnitsSold] Total units: ${combinedMetrics.totalUnits}, DateWise entries: ${combinedMetrics.dateWiseUnits.length}`);
+                logger.info(`💾 [GetPPCUnitsSold] Saving units sold data to database...`);
                 savedRecord = await PPCUnitsSold.upsertUnitsSold(
                     userId,
                     country,
@@ -619,10 +615,10 @@ async function getPPCUnitsSold(accessToken, profileId, userId, country, region, 
                         processedCampaignTypes: combinedMetrics.processedCampaignTypes
                     }
                 );
-                console.log(`✅ [GetPPCUnitsSold] Units sold data saved to database with ID: ${savedRecord._id}`);
+                logger.info(`✅ [GetPPCUnitsSold] Units sold data saved to database with ID: ${savedRecord._id}`);
             } catch (saveError) {
-                console.error(`⚠️ [GetPPCUnitsSold] Failed to save units sold data to database:`, saveError.message);
-                console.error(`⚠️ [GetPPCUnitsSold] Error stack:`, saveError.stack);
+                logger.error(`⚠️ [GetPPCUnitsSold] Failed to save units sold data to database:`, saveError.message);
+                logger.debug(`⚠️ [GetPPCUnitsSold] Error stack:`, saveError.stack);
                 // Don't throw - continue to return the data even if save fails
             }
         }
@@ -643,7 +639,7 @@ async function getPPCUnitsSold(accessToken, profileId, userId, country, region, 
         };
 
     } catch (error) {
-        console.error('❌ [GetPPCUnitsSold] Error:', error.message);
+        logger.error('❌ [GetPPCUnitsSold] Error:', error.message);
         
         if (error.message.includes('425')) {
             throw new Error('Duplicate request detected by Amazon Ads API. Please wait a moment before retrying.');

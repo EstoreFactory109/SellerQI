@@ -185,7 +185,10 @@ function getBaseUrl(region) {
         'EU': 'https://sellingpartnerapi-eu.amazon.com',
         'FE': 'https://sellingpartnerapi-fe.amazon.com'
     };
-    return baseUrls[region] || baseUrls['NA'];
+    // Normalize casing so a stray lower/mixed-case region (e.g. "eu") resolves to
+    // the correct host instead of silently falling back to NA.
+    const normalizedRegion = String(region || '').trim().toUpperCase();
+    return baseUrls[normalizedRegion] || baseUrls['NA'];
 }
 
 /**

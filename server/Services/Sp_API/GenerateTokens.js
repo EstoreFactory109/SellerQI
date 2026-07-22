@@ -37,13 +37,6 @@ const axios=require('axios');
             client_secret: clientSecret
         });
 
-        logger.info(`Request body parameters: ${JSON.stringify({
-            grant_type: 'authorization_code',
-            code: authCode.substring(0, 10) + '...',
-            redirect_uri: redirectUri,
-            client_id: clientId.substring(0, 10) + '...'
-        })}`);
-
         // Note: 'state' is not part of the token exchange request
         // It's only used during the authorization request
 
@@ -63,7 +56,7 @@ const axios=require('axios');
 
         // Validate response
         if (!response.data || !response.data.refresh_token) {
-            logger.error("Invalid token response from Amazon", response.data);
+            logger.error("Invalid token response from Amazon");
             throw new ApiError(500, "Invalid response from Amazon token endpoint");
         }
 
@@ -87,8 +80,7 @@ const axios=require('axios');
             const errorDescription = error.response.data?.error_description;
             
             logger.error(`Amazon API error: ${status} - ${errorCode}: ${errorDescription}`);
-            logger.error(`Full error response:`, error.response.data);
-            
+
             switch (errorCode) {
                 case 'invalid_grant':
                     throw new ApiError(400, "Invalid or expired authorization code. Each code can only be used once.");
@@ -159,7 +151,7 @@ const generateAdsRefreshToken = async (authCode,region) => {
 
         // Validate response
         if (!response.data || !response.data.refresh_token) {
-            logger.error("Invalid token response from Amazon", response.data);
+            logger.error("Invalid token response from Amazon");
             throw new ApiError(500, "Invalid response from Amazon token endpoint");
         }
 
@@ -204,10 +196,15 @@ const generateAdsRefreshToken = async (authCode,region) => {
 };
 
 
-const generateAccessToken=async(userId,refreshToken)=>{
-  
+// `errorRef` is an optional out-param: on failure we set `errorRef.message` to
+// the exact Amazon LWA reason (e.g. "invalid_grant : refresh_token …") so callers
+// can surface the real cause to the user instead of a generic "token unavailable".
+// Backward compatible — existing 2-arg callers are unaffected.
+const generateAccessToken=async(userId,refreshToken,errorRef=null)=>{
+
     if(!refreshToken){
         logger.error(new ApiError(400,"Refresh token is missing"), { userId });
+        if(errorRef) errorRef.message = 'Refresh token is missing';
         return false;
     }
 
@@ -271,17 +268,18 @@ const generateAccessToken=async(userId,refreshToken)=>{
                 userId,
                 status,
                 errorCode,
-                errorDescription,
-                fullResponse: error.response.data
+                errorDescription
             });
+            if (errorRef) errorRef.message = errorDescription || errorCode || `Amazon API error ${status}`;
         } else {
             logger.error(`Error generating access token: ${error.message}`, {
                 userId,
                 errorMessage: error.message,
                 errorStack: error.stack
             });
+            if (errorRef) errorRef.message = error.message;
         }
-        return false; 
+        return false;
     }
 
 }

@@ -176,7 +176,7 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, Country, 
 
         // Log the first item's keys to debug field mapping issues
         if (refinedData.length > 0) {
-            logger.info("FBA Inventory Planning - Available fields in report:", {
+            logger.debug("FBA Inventory Planning - Available fields in report:", {
                 fields: Object.keys(refinedData[0]),
                 sampleItem: refinedData[0],
                 totalRecords: refinedData.length

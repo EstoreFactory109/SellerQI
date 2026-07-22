@@ -92,7 +92,13 @@ jobs:
             pm2 kill || true
 
             echo "── Pulling latest changes ──"
-            git pull origin main
+            git fetch origin main
+            # client/dist is built on the CI runner and SCP'd here, so it must NOT
+            # be tracked. If an older checkout still tracks it, untrack it locally
+            # (keeps the SCP'd files) so it can't block the update, then hard-reset
+            # server code to origin. reset --hard leaves the untracked SCP'd dist intact.
+            git rm -r --cached client/dist 2>/dev/null || true
+            git reset --hard origin/main
 
             echo "── Installing server dependencies ──"
             npm install --omit=dev --ignore-scripts
@@ -100,6 +106,21 @@ jobs:
             echo "── Starting PM2 processes ──"
             pm2 start ecosystem.config.js
             pm2 save
+
+            # Configure PM2 log rotation AFTER the app is up, and never let it
+            # abort the deploy (the script runs under `set -e`). Without rotation
+            # pm2's out/error files grow unbounded and fill the disk overnight
+            # (the worker log alone had reached 650M+). pm2-logrotate caps each
+            # file and keeps a bounded, compressed history. Idempotent — safe to
+            # re-run every deploy. All commands guarded so a logrotate hiccup can
+            # never take the app down.
+            echo "── Configuring PM2 log rotation ──"
+            pm2 install pm2-logrotate || true
+            pm2 set pm2-logrotate:max_size 50M || true
+            pm2 set pm2-logrotate:retain 5 || true
+            pm2 set pm2-logrotate:compress true || true
+            pm2 set pm2-logrotate:rotateInterval '0 0 * * *' || true
+            pm2 set pm2-logrotate:workerInterval 300 || true
 
             echo "── Deploy complete ──"
             pm2 ls

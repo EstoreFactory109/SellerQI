@@ -85,7 +85,7 @@ export default function PlansAndBilling() {
     PRO: {
       name: 'PRO',
       displayName: 'Pro',
-      price: 99,
+      price: 10,
       currency: 'USD',
       icon: Crown,
       color: 'blue',
@@ -661,7 +661,7 @@ export default function PlansAndBilling() {
                         className="w-full py-2.5 px-4 rounded-xl font-bold text-base transition-all duration-300 flex items-center justify-center space-x-2 bg-blue-600 text-white hover:bg-blue-700 hover:shadow-xl transform hover:scale-105 hover:-translate-y-1"
                       >
                         <Mail className="w-4 h-4" />
-                        <span>Contact Us</span>
+                        <span>Let's Talk</span>
                       </button>
                     ) : (
                       /* Regular Upgrade Button for PRO */

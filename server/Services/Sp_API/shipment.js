@@ -224,7 +224,7 @@ const getshipment = async (dataToReceive, UserId, baseuri, country, region) => {
             .filter(shipment => {
                 // Validate required fields
                 if (!shipment.shipmentId || !shipment.shipmentName) {
-                    logger.warn(`Skipping shipment with missing required fields: ${JSON.stringify(shipment)}`);
+                    logger.debug("Skipping shipment with missing required fields (shipmentId/shipmentName)");
                     return false;
                 }
                 // Ensure itemDetails exists and is not empty

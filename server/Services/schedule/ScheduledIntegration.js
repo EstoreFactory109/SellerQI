@@ -515,7 +515,7 @@ class ScheduledIntegration {
             }
 
             const RefreshToken = getSellerAccount.spiRefreshToken;
-            const AdsRefreshToken = getSellerAccount.adsRefreshToken;
+            let AdsRefreshToken = getSellerAccount.adsRefreshToken;
 
             if (!RefreshToken && !AdsRefreshToken) {
                 return { success: false, statusCode: 400, error: "Both SP-API and Amazon Ads refresh tokens are missing" };
@@ -536,14 +536,14 @@ class ScheduledIntegration {
                 return { success: false, statusCode: 400, error: "Seller ID not found" };
             }
 
-            // Validate ProfileId if AdsRefreshToken exists (Ads functions require ProfileId)
+            // Ads requires a ProfileId. If it's missing, do NOT abort the whole
+            // integration — SP-API / MCP / Finance are independent of Ads. Null the
+            // Ads refresh token so no Ads access token is generated downstream and
+            // every Ads call site (gated on AdsAccessToken) is skipped cleanly,
+            // while SP-API data fetching proceeds normally.
             if (AdsRefreshToken && !ProfileId) {
                 logger.warn("Amazon Ads ProfileId is missing - Ads functions will be skipped", { userId, Region, Country });
-                return {
-                    success: false,
-                    statusCode: 400,
-                    error: "Amazon Ads ProfileId is missing. Please set up your Amazon Ads profile for this region and country."
-                };
+                AdsRefreshToken = null;
             }
 
             return {
@@ -616,9 +616,12 @@ class ScheduledIntegration {
         try {
             const tokenPromises = [];
             const tokenTypes = [];
+            // Capture the exact LWA failure reason so a revoked/invalid token
+            // surfaces on the logging page instead of a silent skip.
+            const spapiErr = {};
 
             if (RefreshToken) {
-                tokenPromises.push(generateAccessToken(userId, RefreshToken));
+                tokenPromises.push(generateAccessToken(userId, RefreshToken, spapiErr));
                 tokenTypes.push('SP-API');
             }
 
@@ -657,6 +660,27 @@ class ScheduledIntegration {
                         AdsAccessToken = null;
                     }
                 }
+            }
+
+            // Surface auth failures explicitly on the logging page. A refresh
+            // token that was PROVIDED but failed to exchange is a real failure
+            // (revoked / invalid_grant) — log it as an error with the exact Amazon
+            // reason. A missing refresh token = not connected, which stays a
+            // non-error handled by the callers' skip paths.
+            if (loggingHelper && RefreshToken && !AccessToken) {
+                const reason = spapiErr.message
+                    || (tokenResults[0] && tokenResults[0].status === 'rejected' ? String(tokenResults[0].reason?.message || tokenResults[0].reason) : null)
+                    || 'token exchange failed';
+                loggingHelper.logFunctionError('SP-API Authorization',
+                    new Error(`SP-API access token could not be generated — the seller must reconnect SP-API. Amazon: ${reason}`));
+            }
+            if (loggingHelper && AdsRefreshToken && !AdsAccessToken) {
+                const adsIdx = RefreshToken ? 1 : 0;
+                const reason = (tokenResults[adsIdx] && tokenResults[adsIdx].status === 'rejected')
+                    ? String(tokenResults[adsIdx].reason?.message || tokenResults[adsIdx].reason)
+                    : 'token exchange failed';
+                loggingHelper.logFunctionError('Amazon Ads Authorization',
+                    new Error(`Amazon Ads access token could not be generated — the seller must reconnect Amazon Ads. Reason: ${reason}`));
             }
 
             if (!AccessToken && !AdsAccessToken) {
@@ -2246,6 +2270,46 @@ class ScheduledIntegration {
     // =========================================================================
 
     /**
+     * Append per-service results from a phase's `apiData` to the run's logging
+     * session so the frontend "user logging" page shows the exact error for every
+     * service — same visibility the integration worker gets via
+     * processAndLogBatchResults. The phased pipeline calls fetchScheduledApiData
+     * with `loggingHelper: null`, so its per-service outcomes never reached the
+     * session before; this closes that gap. sessionId is threaded via phaseData
+     * (set in InitPhase, preserved across phases by createNextPhaseJobData).
+     * Non-fatal: logging failures never affect the phase result.
+     */
+    static async _logApiResultsToSession(sessionId, apiData, userId, region, country, phaseName) {
+        if (!sessionId || !apiData || typeof apiData !== 'object') return;
+        const LoggingHelper = require('../../utils/LoggingHelper.js');
+        // contextData.{userId,region,country} are required by the schema.
+        const contextData = { userId, region, country };
+        for (const [key, value] of Object.entries(apiData)) {
+            if (!value || typeof value !== 'object' || Array.isArray(value) || !('success' in value)) continue;
+            try {
+                if (value.success === false) {
+                    await LoggingHelper.addLogToSession(sessionId, {
+                        functionName: key,
+                        logType: 'error',
+                        status: 'failed',
+                        message: `${key} failed: ${value.error || 'unknown error'}`,
+                        errorDetails: { errorMessage: value.error || 'unknown error', phase: phaseName },
+                        contextData
+                    });
+                } else {
+                    await LoggingHelper.addLogToSession(sessionId, {
+                        functionName: key,
+                        logType: 'success',
+                        status: 'completed',
+                        message: `${key} completed successfully`,
+                        contextData
+                    });
+                }
+            } catch (_) { /* non-fatal — never break a phase over logging */ }
+        }
+    }
+
+    /**
      * Phase 1: INIT
      * Validate user, generate tokens, fetch merchant listings, start tracking.
      */
@@ -2564,6 +2628,9 @@ class ScheduledIntegration {
                 }
             }
 
+            // Surface each service's exact outcome (incl. errors) on the logging page.
+            await this._logApiResultsToSession(phaseData.sessionId, apiData, userId, Region, Country, phaseData.phase || 'scheduled');
+
             // DashboardSlice writes (additive, non-fatal): this phase produces the
             // inventory + performance slices. PPC report data moved to sched_ads phase.
             await this._writePhaseSlices(
@@ -2615,6 +2682,9 @@ class ScheduledIntegration {
                     phaseApiResults[key] = { success: value.success, error: value.error || null };
                 }
             }
+
+            // Surface each service's exact outcome (incl. errors) on the logging page.
+            await this._logApiResultsToSession(phaseData.sessionId, apiData, userId, Region, Country, phaseData.phase || 'scheduled');
 
             // DashboardSlice write (additive, non-fatal): "ads" slice summarises PPC report results.
             await this._writePhaseSlices(
@@ -2873,6 +2943,9 @@ class ScheduledIntegration {
                 }
             }
 
+            // Surface each service's exact outcome (incl. errors) on the logging page.
+            await this._logApiResultsToSession(phaseData.sessionId, apiData, userId, Region, Country, phaseData.phase || 'scheduled');
+
             logger.info(`[ScheduledIntegration:Batch3And4Phase][LEGACY] Completed for user ${userId}`, { servicesRun: Object.keys(phaseApiResults).length });
             return {
                 success: true,
@@ -2910,6 +2983,9 @@ class ScheduledIntegration {
                     phaseApiResults[key] = { success: value.success, error: value.error || null };
                 }
             }
+
+            // Surface each service's exact outcome (incl. errors) on the logging page.
+            await this._logApiResultsToSession(phaseData.sessionId, apiData, userId, Region, Country, phaseData.phase || 'scheduled');
 
             // DashboardSlice write (additive, non-fatal): "mcp" slice rolls up shipment,
             // brand, adGroups, MCP SalesOnly and MCP BuyBox into one summary doc.
@@ -2961,6 +3037,9 @@ class ScheduledIntegration {
                     phaseApiResults[key] = { success: value.success, error: value.error || null };
                 }
             }
+
+            // Surface each service's exact outcome (incl. errors) on the logging page.
+            await this._logApiResultsToSession(phaseData.sessionId, apiData, userId, Region, Country, phaseData.phase || 'scheduled');
 
             // DashboardSlice write (additive, non-fatal). The finance slice also records
             // the synced date range so finalize can show data-freshness on the dashboard.
@@ -3048,6 +3127,9 @@ class ScheduledIntegration {
                 }
             }
 
+            // Surface each service's exact outcome (incl. errors) on the logging page.
+            await this._logApiResultsToSession(phaseData.sessionId, apiData, userId, Region, Country, phaseData.phase || 'scheduled');
+
             // DashboardSlice write (additive, non-fatal): "keywords" slice (neg/search/recs).
             await this._writePhaseSlices(
                 'sched_batch_4',
@@ -3102,6 +3184,9 @@ class ScheduledIntegration {
                     phaseApiResults[key] = { success: value.success, error: value.error || null };
                 }
             }
+
+            // Surface each service's exact outcome (incl. errors) on the logging page.
+            await this._logApiResultsToSession(phaseData.sessionId, apiData, userId, Region, Country, phaseData.phase || 'scheduled');
 
             // DashboardSlice write (additive, non-fatal): "issues" slice rolls up the
             // calculator outputs (issue summary, productIssues, issuesData) + review

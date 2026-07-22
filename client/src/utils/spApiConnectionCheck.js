@@ -98,6 +98,27 @@ export const isAdsAccountConnected = (user) => {
 };
 
 /**
+ * Find an Ads-connected seller account that has NOT yet had a ProfileId selected.
+ * Used right after login to decide whether to route the user to the
+ * profile-selection page (carrying that account's country/region) instead of
+ * going straight to /analyse-account.
+ * @param {Object} user - User object from API response
+ * @returns {Object|null} - The seller account needing a ProfileId, or null if none
+ */
+export const getAdsAccountWithoutProfileId = (user) => {
+  const accounts = user?.sellerCentral?.sellerAccount;
+  if (!Array.isArray(accounts) || accounts.length === 0) {
+    return null;
+  }
+
+  return accounts.find(account => {
+    const adsConnected = account.adsRefreshToken && account.adsRefreshToken.toString().trim() !== '';
+    const hasProfileId = account.ProfileId && account.ProfileId.toString().trim() !== '';
+    return adsConnected && !hasProfileId;
+  }) || null;
+};
+
+/**
  * Check if Ads account is connected from AllAccounts Redux state
  * @param {Array} allAccounts - Array of seller accounts from Redux state
  * @param {string} country - Optional country code to check specific account

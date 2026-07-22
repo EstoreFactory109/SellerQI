@@ -279,7 +279,7 @@ export default function PricingPage() {
                   <span className="text-gray-400 text-sm">for 7 days</span>
                 </div>
                 <div className="mt-2 flex items-baseline gap-2">
-                  <span className="text-xl font-bold text-gray-100">$99</span>
+                  <span className="text-xl font-bold text-gray-100">$10</span>
                   <span className="text-gray-400 text-sm">/month after trial</span>
                 </div>
               </div>
@@ -340,7 +340,7 @@ export default function PricingPage() {
 
               <h3 className="text-xl font-bold text-gray-100 mb-1">Pro Plan</h3>
               <div className="mb-4">
-                <span className="text-3xl font-bold text-gray-100">$99</span>
+                <span className="text-3xl font-bold text-gray-100">$10</span>
                 <span className="text-gray-400 text-sm ml-1">/month</span>
               </div>
               <p className="text-gray-400 text-sm mb-5">Everything you need to scale your Amazon business.</p>
@@ -413,11 +413,11 @@ export default function PricingPage() {
                 ))}
               </ul>
               
-              <button 
+              <button
                 onClick={() => handleContactUs('AGENCY')}
                 className="w-full py-3 px-4 rounded-xl font-semibold transition-all duration-300 bg-blue-600 text-white hover:bg-blue-700 shadow-lg"
               >
-                Contact Us
+                Let's Talk
               </button>
             </motion.div>
           </div>

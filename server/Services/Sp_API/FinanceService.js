@@ -117,10 +117,21 @@ function createTokenManager({ accessToken, refreshToken, clientId, clientSecret 
     try {
       return await fn(token);
     } catch (err) {
-      // A genuine authorization denial is not fixable by refreshing — don't
-      // waste a token refresh + retry on it (it always fails the same way).
-      if (isAuthorizationDeniedError(err)) throw err;
-      if (!isAccessTokenExpiredError(err)) throw err;
+      // Amazon returns an EXPIRED access-token error with the SAME generic
+      // "access to requested resource is denied" message as a true authorization
+      // denial — distinguished only by the "...access token...has expired" detail.
+      // Check that specific expiry phrase FIRST so a recoverable expiry is not
+      // misclassified as a permanent denial and skipped over the refresh below.
+      const lowerMsg = (err && (err.message || String(err)) || '').toLowerCase();
+      const tokenDefinitelyExpired =
+        lowerMsg.includes('access token you provided has expired') ||
+        lowerMsg.includes('access token has expired');
+      if (!tokenDefinitelyExpired) {
+        // A genuine authorization denial is not fixable by refreshing — don't
+        // waste a token refresh + retry on it (it always fails the same way).
+        if (isAuthorizationDeniedError(err)) throw err;
+        if (!isAccessTokenExpiredError(err)) throw err;
+      }
       logger.warn(`[FinanceService] SP-API call failed with expired token. Refreshing and retrying once… (${err.message})`);
       const fresh = await refresh();
       return fn(fresh);
@@ -343,7 +354,7 @@ async function fetchSalesReport(tokenManager, baseUrl, marketplaceId, startDate,
       if (rows.length === 0 && attempt > 0) {
         logger.warn(`[SalesReport] Still empty after ${attempt} retry(ies) for ${startDate}→${endDate} — accepting as no data (existing rows are preserved, not wiped).`);
       }
-      logger.info(`[SalesReport] Parsed ${rows.length} rows`);
+      logger.debug(`[SalesReport] Parsed ${rows.length} rows`);
       return rows;
     }
     logger.warn(`[SalesReport] Empty report for ${startDate}→${endDate} (attempt ${attempt + 1}/${EMPTY_REPORT_RETRIES + 1}); fresh reports are often transiently empty. Re-generating in ${EMPTY_REPORT_RETRY_DELAY_MS / 1000}s…`);
@@ -381,7 +392,7 @@ function parseSalesReportRows(reportRows, country) {
     item.totalUnits += parseInt(row['quantity'], 10) || 0;
     if (!item.asin && row['asin']) item.asin = row['asin'];
   }
-  if (skippedChannel > 0) logger.info(`[SalesReport] Skipped ${skippedChannel} rows from other marketplaces (filtering for ${salesChannel})`);
+  if (skippedChannel > 0) logger.debug(`[SalesReport] Skipped ${skippedChannel} rows from other marketplaces (filtering for ${salesChannel})`);
   logger.info(`[SalesReport] Valid orders: ${orderMap.size}, order-items (order×SKU): ${totalItems}`);
   return orderMap;
 }
@@ -506,7 +517,7 @@ function indexFinanceRowsByOrderId(expenseRows, revenueRows) {
   }
 
   if (dedupCount > 0) {
-    logger.info(`[Dedup] Removed ${dedupCount} duplicate Shipment expense rows (duplicate transactions with different transactionId).`);
+    logger.debug(`[Dedup] Removed ${dedupCount} duplicate Shipment expense rows (duplicate transactions with different transactionId).`);
   }
 
   // ── Revenue ──
@@ -563,7 +574,7 @@ function indexFinanceRowsByOrderId(expenseRows, revenueRows) {
   }
 
   if (dedupRevCount > 0) {
-    logger.info(`[Dedup] Removed ${dedupRevCount} duplicate Shipment revenue rows.`);
+    logger.debug(`[Dedup] Removed ${dedupRevCount} duplicate Shipment revenue rows.`);
   }
 
   return {
@@ -760,7 +771,7 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
       debugOrders++;
     }
   }
-  logger.info(`[DEBUG] parseSalesReportRows returned: $${Math.round(debugTotal * 100) / 100} | ${debugUnits} units | ${debugOrders} order-items | country filter: ${country}`);
+  logger.debug(`[DEBUG] parseSalesReportRows returned: $${Math.round(debugTotal * 100) / 100} | ${debugUnits} units | ${debugOrders} order-items | country filter: ${country}`);
 
   // ── Finance API: (startDate - buffer) → TODAY ──
   // We fetch a wider window than the sales report to catch:
@@ -802,7 +813,7 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
     e.category === 'FBA Fulfillment Fee' &&
     e.transactionType === 'Shipment'
   );
-  logger.info(`[RAW-DUMP] Shipment FBA rows for ${debugSku}: ${debugFbaRows.length}, sum=$${debugFbaRows.reduce((s, e) => s + e.amount, 0).toFixed(2)}`);
+  logger.debug(`[RAW-DUMP] Shipment FBA rows for ${debugSku}: ${debugFbaRows.length}, sum=$${debugFbaRows.reduce((s, e) => s + e.amount, 0).toFixed(2)}`);
   // Detect duplicate orderId entries
   const fbaCountByOrder = {};
   for (const e of debugFbaRows) {
@@ -811,8 +822,8 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
   }
   const dupeOrders = Object.entries(fbaCountByOrder).filter(([, c]) => c > 1);
   if (dupeOrders.length > 0) {
-    logger.warn(`[RAW-DUMP] ⚠️ ${dupeOrders.length} orders with MULTIPLE FBA rows:`);
-    dupeOrders.slice(0, 10).forEach(([oid, c]) => logger.warn(`[RAW-DUMP]   ${oid}: ${c} FBA rows`));
+    logger.debug(`[RAW-DUMP] ⚠️ ${dupeOrders.length} orders with MULTIPLE FBA rows:`);
+    dupeOrders.slice(0, 10).forEach(([oid, c]) => logger.debug(`[RAW-DUMP]   ${oid}: ${c} FBA rows`));
   }
   // Per-date FBA total using purchase date
   const fbaByPD = {};
@@ -822,7 +833,7 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
     fbaByPD[pd] += e.amount;
   }
   for (const [d, amt] of Object.entries(fbaByPD).sort()) {
-    logger.info(`[RAW-DUMP] FBA by purchase-date: ${d} = $${amt.toFixed(2)}`);
+    logger.debug(`[RAW-DUMP] FBA by purchase-date: ${d} = $${amt.toFixed(2)}`);
   }
   // ── END DEBUG ──
 
@@ -979,13 +990,13 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
     }
 
     if (estimatedCount > 0) {
-      logger.info(`[Step1] Estimated fees for ${estimatedCount} pending orders (Finance API lag). Rates derived from ${skuRates.size} SKUs.`);
+      logger.debug(`[Step1] Estimated fees for ${estimatedCount} pending orders (Finance API lag). Rates derived from ${skuRates.size} SKUs.`);
       // Log sample rates for debugging
       for (const [sku, rates] of skuRates) {
         if (rates.totalUnits > 0) {
           const avgFba = (rates.totalFba / rates.totalUnits).toFixed(2);
           const refPct = ((rates.totalComm / rates.totalSales) * 100).toFixed(1);
-          logger.info(`[Step1] SKU ${sku}: avgFBA/unit=$${avgFba}, referral=${refPct}% (from ${rates.orderCount} orders)`);
+          logger.debug(`[Step1] SKU ${sku}: avgFBA/unit=$${avgFba}, referral=${refPct}% (from ${rates.orderCount} orders)`);
         }
       }
     }
@@ -999,7 +1010,7 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
     discardedFinanceOnly += expenses.length;
   }
   if (discardedFinanceOnly > 0) {
-    logger.info(`[Step1] Discarded ${discardedFinanceOnly} Shipment expense rows (orders not in Sales Report).`);
+    logger.debug(`[Step1] Discarded ${discardedFinanceOnly} Shipment expense rows (orders not in Sales Report).`);
   }
 
   // ═══════════════════════════════════════════════
@@ -1063,7 +1074,7 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
     }
   }
   if (postedDateExpenseCount > 0) {
-    logger.info(`[Step1] Placed ${postedDateExpenseCount} Refund/Reimbursement/ServiceFee expense rows on posted date (Pacific).`);
+    logger.debug(`[Step1] Placed ${postedDateExpenseCount} Refund/Reimbursement/ServiceFee expense rows on posted date (Pacific).`);
   }
 
   // ★ FIX: Same for posted-date revenue (e.g., negative Product Sales from Refund,
@@ -1098,7 +1109,7 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
         const fieldAfter = bucket.fbaInventoryReimbursement;
         // ★ DEBUG: Log every reimbursement placement
         if (r.category === 'FBA Inventory Reimbursement') {
-          logger.info(`[REIMB-DEBUG] ${pacificDate} ${r.sku}: category='${r.category}' amt=${r.amount} txnType=${r.transactionType} field before=${fieldBefore} after=${fieldAfter}`);
+          logger.debug(`[REIMB-DEBUG] ${pacificDate} ${r.sku}: category='${r.category}' amt=${r.amount} txnType=${r.transactionType} field before=${fieldBefore} after=${fieldAfter}`);
         }
       }
       postedDateRevenueCount++;
@@ -1107,9 +1118,9 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
     }
   }
   if (postedDateRevenueCount > 0) {
-    logger.info(`[Step1] Placed ${postedDateRevenueCount} Refund/Reimbursement revenue rows on posted date (Pacific). Skipped ${postedDateRevenueSkipped} outside range. postedDateRevenue array size: ${postedDateRevenue.length}`);
+    logger.debug(`[Step1] Placed ${postedDateRevenueCount} Refund/Reimbursement revenue rows on posted date (Pacific). Skipped ${postedDateRevenueSkipped} outside range. postedDateRevenue array size: ${postedDateRevenue.length}`);
   } else {
-    logger.info(`[Step1] postedDateRevenue: ${postedDateRevenue.length} rows total, ${postedDateRevenueSkipped} skipped (outside ${startDate}→${endDate}), 0 placed.`);
+    logger.debug(`[Step1] postedDateRevenue: ${postedDateRevenue.length} rows total, ${postedDateRevenueSkipped} skipped (outside ${startDate}→${endDate}), 0 placed.`);
   }
 
   // Compute totals for all buckets
@@ -1118,7 +1129,7 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
   // ★ DEBUG: Log buckets with non-zero fbaInventoryReimbursement
   for (const bucket of skuBuckets.values()) {
     if (bucket.fbaInventoryReimbursement !== 0) {
-      logger.info(`[REIMB-BUCKET] ${bucket.date} ${bucket.sku}: fbaInventoryReimbursement=${bucket.fbaInventoryReimbursement} totalRevenue=${bucket.totalRevenue}`);
+      logger.debug(`[REIMB-BUCKET] ${bucket.date} ${bucket.sku}: fbaInventoryReimbursement=${bucket.fbaInventoryReimbursement} totalRevenue=${bucket.totalRevenue}`);
     }
   }
 
@@ -1134,12 +1145,12 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
     diagCommByDate[bucket.date] += bucket.referralCommission || 0;
     diagRefundByDate[bucket.date] += (bucket.refundedAmount || 0) + (bucket.refundCommission || 0) + (bucket.refundedReferralFee || 0) + (bucket.refundedPromotion || 0);
   }
-  logger.info(`[DIAG] Total FBA Fulfillment across ${skuBuckets.size} SKU buckets: $${Math.round(diagFbaTotal * 100) / 100}`);
-  logger.info(`[DIAG] Finance API returned ${expenseRows.length} expense rows total`);
+  logger.debug(`[DIAG] Total FBA Fulfillment across ${skuBuckets.size} SKU buckets: $${Math.round(diagFbaTotal * 100) / 100}`);
+  logger.debug(`[DIAG] Finance API returned ${expenseRows.length} expense rows total`);
   // Per-date breakdown for verification against Sellerboard
   const diagDates = Object.keys(diagFbaByDate).sort();
   for (const d of diagDates) {
-    logger.info(`[DIAG] ${d}: FBA=${diagFbaByDate[d].toFixed(2)} Comm=${diagCommByDate[d].toFixed(2)} RefundCost=${diagRefundByDate[d].toFixed(2)}`);
+    logger.debug(`[DIAG] ${d}: FBA=${diagFbaByDate[d].toFixed(2)} Comm=${diagCommByDate[d].toFixed(2)} RefundCost=${diagRefundByDate[d].toFixed(2)}`);
   }
 
   // Build overhead

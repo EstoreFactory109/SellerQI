@@ -275,10 +275,51 @@ async function runLayeredQMatePipeline({
                     strategyResult, // raw cross-domain data for the frontend
                 };
             }
-            logger.warn('[QMate][StrategyEngine] Strategy query returned error/null, falling through to existing pipeline');
+            // handleStrategyQuery returned an error marker (it caught something
+            // internally). Log the detail for diagnosis.
+            logger.error('[QMate][StrategyEngine] handleStrategyQuery returned error/null', {
+                detail: (strategyResult && strategyResult.message) || 'null result',
+                prompt: String(rawQuestion || '').slice(0, 120),
+            });
         } catch (err) {
-            logger.error('[QMate][StrategyEngine] Error in strategy engine, falling through:', err.message);
+            // FULL error + stack so the real cause is visible (missing import,
+            // undefined function, data-access error, narrator failure, …).
+            logger.error('[QMate][StrategyEngine] Strategy engine threw', {
+                message: err && err.message,
+                stack: err && err.stack,
+                prompt: String(rawQuestion || '').slice(0, 120),
+            });
         }
+
+        // This IS a strategy question — the strategy engine is its correct handler.
+        // Rather than cascading to the general pipeline (which cannot answer
+        // cross-domain questions and may itself error → an opaque "trouble reaching
+        // the AI service" to the user), return a graceful, deterministic 200 that
+        // points the seller at the per-domain answers QMate can always give.
+        logger.warn('[QMate][StrategyEngine] Returning graceful strategy fallback (no cascade to general pipeline)');
+        return {
+            status: 200,
+            answer_markdown:
+                "I couldn't pull your full cross-domain business analysis just now. " +
+                'You can still ask me about a specific area and I\'ll answer directly:',
+            content:
+                "I couldn't pull your full cross-domain business analysis just now. " +
+                'You can still ask me about a specific area and I\'ll answer directly:',
+            chart_suggestions: [],
+            charts: [],
+            follow_up_questions: [
+                'What is my profit?',
+                'What is my ACOS?',
+                'Where am I wasting money on ads?',
+                'Which products are losing money?',
+            ],
+            needs_clarification: false,
+            clarifying_questions: [],
+            intent_interpretation: interpretedContract,
+            responseSource: 'general_strategy_engine',
+            dataConfidence: 'low',
+            dataSources: [],
+        };
     }
     // --- End General Strategy Engine intercept ---
 
@@ -305,7 +346,7 @@ async function runLayeredQMatePipeline({
                     content: narratedContent,
                     chart_suggestions: [],
                     charts: [],
-                    follow_up_questions: generateSellerOpsFollowUps(opsResult.type, interpretation.entities),
+                    follow_up_questions: generateSellerOpsFollowUps(opsResult.type, interpretation.entities, opsResult.available === false),
                     needs_clarification: false,
                     clarifying_questions: [],
                     intent_interpretation: interpretedContract,

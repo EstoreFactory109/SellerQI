@@ -131,7 +131,7 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
         
         while (true) {
             attempt++;
-            logger.info(`Checking report status... (Attempt ${attempt})`);
+            logger.debug(`Checking report status... (Attempt ${attempt})`);
             reportDocumentId = await checkReportStatus(accessToken, reportId, baseURI);
             
             if (reportDocumentId === false) {
@@ -209,7 +209,7 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
         
         // Log first record headers for debugging localization issues
         if (refinedData.length > 0) {
-            logger.info('[GET_MERCHANT_LISTINGS_ALL_DATA] Sample record headers:', Object.keys(refinedData[0]).join(', '));
+            logger.debug('[GET_MERCHANT_LISTINGS_ALL_DATA] Sample record headers:', Object.keys(refinedData[0]).join(', '));
         }
         
         // Process records in chunks to yield to event loop (prevents blocking lock extension)
@@ -297,7 +297,7 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
                         quantity: quantity,
                     });
                 } else {
-                    logger.warn('[GET_MERCHANT_LISTINGS_ALL_DATA] Skipping product with missing asin or sku:', {
+                    logger.debug('[GET_MERCHANT_LISTINGS_ALL_DATA] Skipping product with missing asin or sku:', {
                         foundAsin: asin,
                         foundSku: sku,
                         availableKeys: Object.keys(data).slice(0, 10).join(', ')

@@ -80,8 +80,8 @@ export default function IndiaBilling() {
     PRO: {
       name: 'PRO',
       displayName: 'Pro',
-      price: 21,
-      displayPrice: '$21',
+      price: 10,
+      displayPrice: '$10',
       currency: 'USD',
       icon: Crown,
       color: 'indigo',
@@ -583,12 +583,12 @@ export default function IndiaBilling() {
                     <div className="mb-3">
                       <div className="text-lg line-through text-gray-500 mb-2">$99/month</div>
                       <div className="text-4xl md:text-5xl font-bold text-blue-400 mb-1">
-                        $21<span className="text-xl font-normal">/month</span>
+                        $10<span className="text-xl font-normal">/month</span>
                       </div>
                       <div className="text-sm text-gray-400 mb-2">For Indian registered sellers</div>
                       <div className="flex items-center justify-center gap-2 mb-2">
                         <span className="inline-block bg-emerald-500 text-white px-3 py-1 rounded-md font-semibold text-xs">
-                          Save 78%
+                          Save 90%
                         </span>
                         <span className="inline-block bg-blue-600/20 text-blue-400 px-3 py-1 rounded-md font-semibold text-xs border border-blue-500/40">
                           7-Day Free Trial
@@ -692,7 +692,7 @@ export default function IndiaBilling() {
                     ) : (
                       <>
                         <Mail className="w-4 h-4" />
-                        <span>Contact Us</span>
+                        <span>Let's Talk</span>
                       </>
                     )}
                   </button>

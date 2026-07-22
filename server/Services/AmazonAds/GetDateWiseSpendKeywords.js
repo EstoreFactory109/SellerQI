@@ -5,8 +5,15 @@ const { generateAdsAccessToken } = require('./GenerateToken');
 const gunzip = promisify(zlib.gunzip);
 const GetDateWisePPCspendModel = require('../../models/amazon-ads/GetDateWisePPCspendModel.js');
 const { resolveReportDateRange } = require('../../utils/reportDateRange.js');
+const logger = require('../../utils/Logger');
 
 // Base URIs for different regions
+// Hard ceiling on report-status polling so a report wedged in PENDING/PROCESSING
+// can't poll forever and hang the phase. At the cap we return FAILURE.
+// Amazon publishes no hard SLA for v3 report generation; large reports can take
+// a few hours. Default ~4h (one poll per 60s); tune via ADS_REPORT_MAX_POLL_ATTEMPTS.
+const MAX_POLL_ATTEMPTS = parseInt(process.env.ADS_REPORT_MAX_POLL_ATTEMPTS || '240', 10);
+
 const BASE_URIS = {
     'NA': 'https://advertising-api.amazon.com',
     'EU': 'https://advertising-api-eu.amazon.com',
@@ -81,40 +88,36 @@ async function getReportId(accessToken, profileId, region, tokenRefreshCallback 
         } catch (error) {
             // Handle 401 Unauthorized - refresh token and retry once
             if (error.response && error.response.status === 401 && !hasRetried && tokenRefreshCallback) {
-                console.log(`⚠️ [GetDateWiseSpendKeywords] Token expired during getReportId, refreshing token...`);
+                logger.debug(`⚠️ [GetDateWiseSpendKeywords] Token expired during getReportId, refreshing token...`);
                 hasRetried = true;
                 try {
                     const newToken = await tokenRefreshCallback();
                     if (newToken) {
                         currentAccessToken = newToken;
-                        console.log(`✅ [GetDateWiseSpendKeywords] Token refreshed successfully, retrying getReportId...`);
+                        logger.debug(`✅ [GetDateWiseSpendKeywords] Token refreshed successfully, retrying getReportId...`);
                         continue;
                     } else {
                         throw new Error('Token refresh callback returned null/undefined');
                     }
                 } catch (refreshError) {
-                    console.error('❌ [GetDateWiseSpendKeywords] Failed to refresh token:', refreshError.message);
+                    logger.error('❌ [GetDateWiseSpendKeywords] Failed to refresh token:', refreshError.message);
                     throw new Error(`Token refresh failed: ${refreshError.message}`);
                 }
             }
 
             // Handle different types of errors
             if (error.response) {
-                console.error('API Error Response:', {
-                    status: error.response.status,
-                    data: error.response.data,
-                    headers: error.response.headers
-                });
+                logger.error(`[GetDateWiseSpendKeywords] API error during getReportId: status ${error.response.status}`);
                 const enhancedError = new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
                 enhancedError.response = error.response;
                 enhancedError.status = error.response.status;
                 enhancedError.statusCode = error.response.status;
                 throw enhancedError;
             } else if (error.request) {
-                console.error('No response received:', error.request);
+                logger.error('[GetDateWiseSpendKeywords] No response received from Amazon Ads API');
                 throw new Error('No response received from Amazon Ads API');
             } else {
-                console.error('Request setup error:', error.message);
+                logger.error('[GetDateWiseSpendKeywords] Request setup error:', error.message);
                 throw error;
             }
         }
@@ -151,11 +154,11 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
                 const { status } = response.data;
                 const location = response.data.url;
 
-                console.log(`📊 [GetDateWiseSpendKeywords] Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
+                logger.info(`📊 [GetDateWiseSpendKeywords] Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
 
                 // Check if report is complete
                 if (status === 'COMPLETED') {
-                    console.log(`✅ [GetDateWiseSpendKeywords] Report completed after ${attempts + 1} attempts`);
+                    logger.info(`✅ [GetDateWiseSpendKeywords] Report completed after ${attempts + 1} attempts`);
                     return {
                         status: 'COMPLETED',
                         location: location,
@@ -163,7 +166,7 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
                         finalAccessToken: currentAccessToken
                     };
                 } else if (status === 'FAILURE') {
-                    console.error(`❌ [GetDateWiseSpendKeywords] Report generation failed after ${attempts + 1} attempts`);
+                    logger.error(`❌ [GetDateWiseSpendKeywords] Report generation failed after ${attempts + 1} attempts`);
                     return {
                         status: 'FAILURE',
                         reportId: reportId,
@@ -173,34 +176,38 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
 
                 // If still processing, wait 60 seconds before next check
                 if (status === 'PROCESSING' || status === 'PENDING') {
-                    console.log(`⏳ [GetDateWiseSpendKeywords] Report still ${status}, waiting 60 seconds...`);
+                    if (attempts >= MAX_POLL_ATTEMPTS) {
+                        logger.error(`❌ [GetDateWiseSpendKeywords] Report ${reportId} stuck in ${status} after ${attempts} polls (~${attempts} min); giving up`);
+                        return { status: 'FAILURE', reportId: reportId, error: `Report timed out after ${attempts} polls while ${status}` };
+                    }
+                    logger.debug(`⏳ [GetDateWiseSpendKeywords] Report still ${status}, waiting 60 seconds...`);
                     await new Promise(resolve => setTimeout(resolve, 60000)); // 60 seconds
                     attempts++;
                 } else {
                     // Unknown status
-                    console.error(`❓ [GetDateWiseSpendKeywords] Unknown report status: ${status}`);
+                    logger.error(`❓ [GetDateWiseSpendKeywords] Unknown report status: ${status}`);
                     throw new Error(`Unknown report status: ${status}`);
                 }
 
             } catch (error) {
                 // Handle 401 Unauthorized - refresh token and continue polling
                 if (error.response && error.response.status === 401) {
-                    console.log(`⚠️ [GetDateWiseSpendKeywords] Token expired during polling (attempt ${attempts + 1}), refreshing token...`);
-                    
+                    logger.debug(`⚠️ [GetDateWiseSpendKeywords] Token expired during polling (attempt ${attempts + 1}), refreshing token...`);
+
                     if (tokenRefreshCallback) {
                         try {
                             // Get a fresh token using the callback
                             const newToken = await tokenRefreshCallback();
                             if (newToken) {
                                 currentAccessToken = newToken;
-                                console.log(`✅ [GetDateWiseSpendKeywords] Token refreshed successfully, continuing to poll report ${reportId}`);
+                                logger.debug(`✅ [GetDateWiseSpendKeywords] Token refreshed successfully, continuing to poll report ${reportId}`);
                                 // Continue the loop with the new token
                                 continue;
                             } else {
                                 throw new Error('Token refresh callback returned null/undefined');
                             }
                         } catch (refreshError) {
-                            console.error('❌ [GetDateWiseSpendKeywords] Failed to refresh token during polling:', refreshError.message);
+                            logger.error('❌ [GetDateWiseSpendKeywords] Failed to refresh token during polling:', refreshError.message);
                             throw new Error(`Token refresh failed during polling: ${refreshError.message}`);
                         }
                     } else {
@@ -210,7 +217,7 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
                 }
                 // If it's a network error, we might want to retry
                 if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
-                    console.error(`Network error checking report status, retrying... (attempt ${attempts + 1})`);
+                    logger.error(`Network error checking report status, retrying... (attempt ${attempts + 1})`);
                     await new Promise(resolve => setTimeout(resolve, 60000));
                     attempts++;
                     continue;
@@ -222,21 +229,17 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
     } catch (error) {
         // Handle different types of errors
         if (error.response) {
-            console.error('API Error Response:', {
-                status: error.response.status,
-                data: error.response.data,
-                headers: error.response.headers
-            });
+            logger.error(`[GetDateWiseSpendKeywords] API error checking report status: status ${error.response.status}`);
             const enhancedError = new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
             enhancedError.response = error.response;
             enhancedError.status = error.response.status;
             enhancedError.statusCode = error.response.status;
             throw enhancedError;
         } else if (error.request) {
-            console.error('No response received:', error.request);
+            logger.error('[GetDateWiseSpendKeywords] No response received from Amazon Ads API');
             throw new Error('No response received from Amazon Ads API');
         } else {
-            console.error('Report status check error:', error.message);
+            logger.error('[GetDateWiseSpendKeywords] Report status check error:', error.message);
             throw error;
         }
     }
@@ -300,30 +303,29 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
         } catch (err) {
             // Handle 401 Unauthorized - refresh token and retry once
             if (err.response && err.response.status === 401 && !hasRetried && tokenRefreshCallback) {
-                console.log(`⚠️ [GetDateWiseSpendKeywords] Token expired during download, refreshing token...`);
+                logger.debug(`⚠️ [GetDateWiseSpendKeywords] Token expired during download, refreshing token...`);
                 hasRetried = true;
                 try {
                     const newToken = await tokenRefreshCallback();
                     if (newToken) {
                         currentAccessToken = newToken;
-                        console.log(`✅ [GetDateWiseSpendKeywords] Token refreshed successfully, retrying download...`);
+                        logger.debug(`✅ [GetDateWiseSpendKeywords] Token refreshed successfully, retrying download...`);
                         continue;
                     } else {
                         throw new Error('Token refresh callback returned null/undefined');
                     }
                 } catch (refreshError) {
-                    console.error('❌ [GetDateWiseSpendKeywords] Failed to refresh token during download:', refreshError.message);
+                    logger.error('❌ [GetDateWiseSpendKeywords] Failed to refresh token during download:', refreshError.message);
                     throw new Error(`Token refresh failed during download: ${refreshError.message}`);
                 }
             }
 
             // Better error logging
             if (err.response) {
-                console.error('Status:', err.response.status);
-                console.error('Body:', err.response.data.toString?.() ?? err.response.data);
+                logger.error(`[GetDateWiseSpendKeywords] Download failed: status ${err.response.status}`);
                 throw new Error(`Download failed: ${err.response.status} ${err.response.statusText}`);
             }
-            console.error('Error downloading report:', err);
+            logger.error('[GetDateWiseSpendKeywords] Error downloading report:', err.message);
             throw err;
         }
     }
@@ -332,10 +334,9 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
 async function getPPCSpendsDateWise(accessToken, profileId, userId, country, region, refreshToken = null, options = {}) {
             // console.log(`Getting PPC spends by ASIN/SKU for region: ${region}`);
 
-            console.log("Profile Id",profileId);
     try {
         const { startDate, endDate, isCustom } = resolveReportDateRange(options);
-        console.log(`📡 [GetDateWiseSpendKeywords] PPC spends date-wise for region: ${region}, country: ${country}, userId: ${userId}, window: ${startDate} → ${endDate}, customDateRange: ${isCustom}`);
+        logger.info(`📡 [GetDateWiseSpendKeywords] PPC spends date-wise for region: ${region}, country: ${country}, userId: ${userId}, window: ${startDate} → ${endDate}, customDateRange: ${isCustom}`);
 
         // Add a small delay to prevent rapid successive requests
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -343,16 +344,16 @@ async function getPPCSpendsDateWise(accessToken, profileId, userId, country, reg
         // Create token refresh callback
         const tokenRefreshCallback = refreshToken ? async () => {
             try {
-                console.log('🔄 [GetDateWiseSpendKeywords] Refreshing Amazon Ads token...');
+                logger.debug('🔄 [GetDateWiseSpendKeywords] Refreshing Amazon Ads token...');
                 const newToken = await generateAdsAccessToken(refreshToken);
                 if (newToken) {
-                    console.log('✅ [GetDateWiseSpendKeywords] Token refreshed successfully');
+                    logger.debug('✅ [GetDateWiseSpendKeywords] Token refreshed successfully');
                     return newToken;
                 } else {
                     throw new Error('Failed to generate new access token');
                 }
             } catch (error) {
-                console.error('❌ [GetDateWiseSpendKeywords] Token refresh failed:', error.message);
+                logger.error('❌ [GetDateWiseSpendKeywords] Token refresh failed:', error.message);
                 throw error;
             }
         } : null;
@@ -397,7 +398,7 @@ async function getPPCSpendsDateWise(accessToken, profileId, userId, country, reg
                 data: createProductWiseSponsoredAdsData
             };
         } else {
-            console.error('Report generation failed:', reportStatus.error);
+            logger.error('[GetDateWiseSpendKeywords] Report generation failed:', reportStatus.error);
             return {
                 success: false,
                 reportId: reportStatus.reportId,
@@ -406,7 +407,7 @@ async function getPPCSpendsDateWise(accessToken, profileId, userId, country, reg
         }
 
     } catch (error) {
-        console.error('Error in getPPCSpendsBySKU:', error.message);
+        logger.error('Error in getPPCSpendsBySKU:', error.message);
         
         // Handle specific 425 errors with more helpful messaging
         if (error.message.includes('425')) {

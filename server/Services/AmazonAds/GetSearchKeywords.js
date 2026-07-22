@@ -6,6 +6,7 @@ const SearchTerms = require('../../models/amazon-ads/SearchTermsModel.js');
 const { generateAdsAccessToken } = require('./GenerateToken.js');
 const { toYyyyMmDd, getYesterdayMetricDateUtc } = require('../../utils/metricDateKey.js');
 const { resolveReportDateRange } = require('../../utils/reportDateRange.js');
+const logger = require('../../utils/Logger');
 
 /** Search-term report → `SearchTerms` per-day upsert; merged reads power zero-sales + auto-campaign insights tabs. */
 
@@ -85,30 +86,26 @@ async function getReportId(accessToken, profileId, region, tokenRefreshCallback 
         } catch (error) {
             // Handle 401 Unauthorized - refresh token and retry once
             if (error.response && error.response.status === 401 && !hasRetried && tokenRefreshCallback) {
-                console.log(`⚠️ [GetSearchKeywords] Token expired during getReportId, refreshing token...`);
+                logger.debug(`⚠️ [GetSearchKeywords] Token expired during getReportId, refreshing token...`);
                 hasRetried = true;
                 try {
                     const newToken = await tokenRefreshCallback();
                     if (newToken) {
                         currentAccessToken = newToken;
-                        console.log(`✅ [GetSearchKeywords] Token refreshed successfully, retrying getReportId...`);
+                        logger.debug(`✅ [GetSearchKeywords] Token refreshed successfully, retrying getReportId...`);
                         continue;
                     } else {
                         throw new Error('Token refresh callback returned null/undefined');
                     }
                 } catch (refreshError) {
-                    console.error('❌ [GetSearchKeywords] Failed to refresh token:', refreshError.message);
+                    logger.error('❌ [GetSearchKeywords] Failed to refresh token:', refreshError.message);
                     throw new Error(`Token refresh failed: ${refreshError.message}`);
                 }
             }
 
             // Handle different types of errors
             if (error.response) {
-                console.error('API Error Response:', {
-                    status: error.response.status,
-                    data: error.response.data,
-                    headers: error.response.headers
-                });
+                logger.error(`[GetSearchKeywords] API error during getReportId: status ${error.response.status}`);
                 // Preserve the original error structure for TokenManager to detect 401s
                 const enhancedError = new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
                 enhancedError.response = error.response;
@@ -120,10 +117,10 @@ async function getReportId(accessToken, profileId, region, tokenRefreshCallback 
                 }
                 throw enhancedError;
             } else if (error.request) {
-                console.error('No response received:', error.request);
+                logger.error('[GetSearchKeywords] No response received from Amazon Ads API');
                 throw new Error('No response received from Amazon Ads API');
             } else {
-                console.error('Request setup error:', error.message);
+                logger.error('[GetSearchKeywords] Request setup error:', error.message);
                 throw error;
             }
         }
@@ -160,7 +157,7 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
                 const { status } = response.data;
                 const location = response.data.url;
 
-                console.log(`Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
+                logger.info(`[GetSearchKeywords] Report ${reportId} status: ${status} (attempt ${attempts + 1})`);
 
                 // Check if report is complete
                 if (status === 'COMPLETED') {
@@ -190,7 +187,7 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
             } catch (error) {
                 // Handle 401 Unauthorized - refresh token and continue polling
                 if (error.response && error.response.status === 401) {
-                    console.log(`⚠️ Token expired during polling (attempt ${attempts + 1}), refreshing token...`);
+                    logger.debug(`⚠️ Token expired during polling (attempt ${attempts + 1}), refreshing token...`);
 
                     if (tokenRefreshCallback) {
                         try {
@@ -198,14 +195,14 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
                             const newToken = await tokenRefreshCallback();
                             if (newToken) {
                                 currentAccessToken = newToken;
-                                console.log(`✅ Token refreshed successfully, continuing to poll report ${reportId}`);
+                                logger.debug(`✅ Token refreshed successfully, continuing to poll report ${reportId}`);
                                 // Continue the loop with the new token
                                 continue;
                             } else {
                                 throw new Error('Token refresh callback returned null/undefined');
                             }
                         } catch (refreshError) {
-                            console.error('❌ Failed to refresh token during polling:', refreshError.message);
+                            logger.error('❌ Failed to refresh token during polling:', refreshError.message);
                             throw new Error(`Token refresh failed during polling: ${refreshError.message}`);
                         }
                     } else {
@@ -216,7 +213,7 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
 
                 // If it's a network error, we might want to retry
                 if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
-                    console.error(`Network error checking report status, retrying... (attempt ${attempts + 1})`);
+                    logger.error(`Network error checking report status, retrying... (attempt ${attempts + 1})`);
                     await new Promise(resolve => setTimeout(resolve, 60000));
                     attempts++;
                     continue;
@@ -228,11 +225,7 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
     } catch (error) {
         // Handle different types of errors
         if (error.response) {
-            console.error('API Error Response:', {
-                status: error.response.status,
-                data: error.response.data,
-                headers: error.response.headers
-            });
+            logger.error(`[GetSearchKeywords] API error checking report status: status ${error.response.status}`);
             // Preserve the original error structure for TokenManager to detect 401s
             const enhancedError = new Error(`Amazon Ads API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
             enhancedError.response = error.response;
@@ -244,10 +237,10 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
             }
             throw enhancedError;
         } else if (error.request) {
-            console.error('No response received:', error.request);
+            logger.error('[GetSearchKeywords] No response received from Amazon Ads API');
             throw new Error('No response received from Amazon Ads API');
         } else {
-            console.error('Report status check error:', error.message);
+            logger.error('[GetSearchKeywords] Report status check error:', error.message);
             throw error;
         }
     }
@@ -279,7 +272,7 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
                 };
             }
 
-            console.log(`Downloaded report with ${Array.isArray(reportJson) ? reportJson.length : 'unknown number of'} items`);
+            logger.debug(`[GetSearchKeywords] Downloaded report with ${Array.isArray(reportJson) ? reportJson.length : 'unknown number of'} items`);
 
             // 4) Format the data to match the model schema
             const sponsoredAdsData = [];
@@ -311,36 +304,35 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
                 }
             }
 
-            console.log(`Formatted ${sponsoredAdsData.length} search terms for database storage`);
+            logger.debug(`[GetSearchKeywords] Formatted ${sponsoredAdsData.length} search terms for database storage`);
             return sponsoredAdsData;
 
         } catch (err) {
             // Handle 401 Unauthorized - refresh token and retry once
             if (err.response && err.response.status === 401 && !hasRetried && tokenRefreshCallback) {
-                console.log(`⚠️ [GetSearchKeywords] Token expired during download, refreshing token...`);
+                logger.debug(`⚠️ [GetSearchKeywords] Token expired during download, refreshing token...`);
                 hasRetried = true;
                 try {
                     const newToken = await tokenRefreshCallback();
                     if (newToken) {
                         currentAccessToken = newToken;
-                        console.log(`✅ [GetSearchKeywords] Token refreshed successfully, retrying download...`);
+                        logger.debug(`✅ [GetSearchKeywords] Token refreshed successfully, retrying download...`);
                         continue;
                     } else {
                         throw new Error('Token refresh callback returned null/undefined');
                     }
                 } catch (refreshError) {
-                    console.error('❌ [GetSearchKeywords] Failed to refresh token during download:', refreshError.message);
+                    logger.error('❌ [GetSearchKeywords] Failed to refresh token during download:', refreshError.message);
                     throw new Error(`Token refresh failed during download: ${refreshError.message}`);
                 }
             }
 
             // Better error logging
             if (err.response) {
-                console.error('Status:', err.response.status);
-                console.error('Body:', err.response.data.toString?.() ?? err.response.data);
+                logger.error(`[GetSearchKeywords] Download failed: status ${err.response.status}`);
                 throw new Error(`Download failed: ${err.response.status} ${err.response.statusText}`);
             }
-            console.error('Error downloading report:', err);
+            logger.error('[GetSearchKeywords] Error downloading report:', err.message);
             throw err;
         }
     }
@@ -379,7 +371,7 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
             throw new Error(`Invalid region: ${region}. Valid regions are: ${Object.keys(BASE_URIS).join(', ')}`);
         }
 
-        console.log(`📡 Getting search keywords for region: ${region}, country: ${country}, userId: ${userId}, startDate: ${startDate}, endDate: ${endDate}, customDateRange: ${isCustom}`);
+        logger.info(`📡 Getting search keywords for region: ${region}, country: ${country}, userId: ${userId}, startDate: ${startDate}, endDate: ${endDate}, customDateRange: ${isCustom}`);
 
         // Add a small delay to prevent rapid successive requests
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -387,16 +379,16 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
         // Create token refresh callback
         const tokenRefreshCallback = refreshToken ? async () => {
             try {
-                console.log('🔄 [GetSearchKeywords] Refreshing Amazon Ads token...');
+                logger.debug('🔄 [GetSearchKeywords] Refreshing Amazon Ads token...');
                 const newToken = await generateAdsAccessToken(refreshToken);
                 if (newToken) {
-                    console.log('✅ [GetSearchKeywords] Token refreshed successfully');
+                    logger.debug('✅ [GetSearchKeywords] Token refreshed successfully');
                     return newToken;
                 } else {
                     throw new Error('Failed to generate new access token');
                 }
             } catch (error) {
-                console.error('❌ [GetSearchKeywords] Token refresh failed:', error.message);
+                logger.error('❌ [GetSearchKeywords] Token refresh failed:', error.message);
                 throw error;
             }
         } : null;
@@ -411,7 +403,7 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
         // Use the token from getReportId if it was refreshed
         let currentToken = reportData.currentAccessToken || accessToken;
 
-        console.log(`✅ Search keywords report ID generated: ${reportData.reportId}`);
+        logger.info(`✅ Search keywords report ID generated: ${reportData.reportId}`);
 
         // Check report status until completion with token refresh support
         const reportStatus = await checkReportStatus(reportData.reportId, currentToken, profileId, region, userId, tokenRefreshCallback);
@@ -424,10 +416,10 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
             const reportContent = await downloadReportData(reportStatus.location, downloadToken, profileId, tokenRefreshCallback);
 
             // Add validation and logging
-            console.log(`✅ Processing ${reportContent.length} search terms for user ${userId}`);
+            logger.debug(`✅ Processing ${reportContent.length} search terms for user ${userId}`);
 
             if (!reportContent || reportContent.length === 0) {
-                console.warn('No search terms data available for the specified period', { userId, region, country });
+                logger.warn('No search terms data available for the specified period', { userId, region, country });
 
                 const snapshotDay = getYesterdayMetricDateUtc();
                 await SearchTerms.upsertSearchTermsForDate(userId, country, region, snapshotDay, []);
@@ -459,7 +451,7 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
                 }
 
                 const merged = await SearchTerms.findMergedSearchTermData(userId, country, region, {});
-                console.log(`✅ Search terms saved per day (${byDay.size} day(s)); merged rows: ${merged.length}`);
+                logger.info(`✅ Search terms saved per day (${byDay.size} day(s)); merged rows: ${merged.length}`);
                 return {
                     success: true,
                     message: "Search terms data fetched and saved successfully",
@@ -472,7 +464,7 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
                 };
 
             } catch (dbError) {
-                console.error('Database error while saving search terms data', {
+                logger.error('Database error while saving search terms data', {
                     error: dbError.message,
                     userId,
                     region,
@@ -494,7 +486,7 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
                 };
             }
         } else {
-            console.error('❌ Search keywords report generation failed:', reportStatus.error);
+            logger.error('❌ Search keywords report generation failed:', reportStatus.error);
             return {
                 success: false,
                 reportId: reportStatus.reportId,
@@ -503,7 +495,7 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
         }
 
     } catch (error) {
-        console.error('❌ Error in getSearchKeywords:', {
+        logger.error('❌ Error in getSearchKeywords:', {
             message: error.message,
             userId,
             region,
