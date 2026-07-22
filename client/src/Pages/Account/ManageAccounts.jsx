@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -123,6 +123,11 @@ const ManageAccounts = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [stats, setStats] = useState(null);
+  const [statusCardFilter, setStatusCardFilter] = useState('all'); // 'all' | 'active' | 'trial' | 'cancelled' - driven by stat cards
+  const [pagination, setPagination] = useState({ currentPage: 1, totalPages: 1, totalCount: 0, limit: ITEMS_PER_PAGE });
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [debouncedBrandQuery, setDebouncedBrandQuery] = useState('');
+  const isFirstFilterRun = useRef(true);
   const [loginLoadingUsers, setLoginLoadingUsers] = useState(new Set());
   const [loginError, setLoginError] = useState('');
   const [deletingUsers, setDeletingUsers] = useState(new Set());
@@ -211,108 +216,44 @@ const ManageAccounts = () => {
       : { connected: false, label: 'Not Connected', color: 'text-red-400', bg: 'bg-red-500/10' };
   };
 
-  // Filter and search users
-  const filteredUsers = useMemo(() => {
-    // Don't filter while loading or if no users
-    if (loading || !users || users.length === 0) {
-      return [];
-    }
-    
-    let filtered = [...users]; // Create a copy to avoid mutations
+  // Debounce free-text search inputs before they trigger a backend request;
+  // reset to page 1 alongside the debounced value so only one fetch fires per change.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+      setCurrentPage(1);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
-    // Apply search filter (name, email, brand)
-    if (searchQuery) {
-      filtered = filtered.filter(user => {
-        const firstName = user.firstName?.toLowerCase() || '';
-        const lastName = user.lastName?.toLowerCase() || '';
-        const email = user.email?.toLowerCase() || '';
-        const brand = (user.brand && String(user.brand).toLowerCase()) || '';
-        const searchLower = searchQuery.toLowerCase();
-        
-        return firstName.includes(searchLower) || 
-               lastName.includes(searchLower) || 
-               email.includes(searchLower) ||
-               brand.includes(searchLower);
-      });
-    }
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedBrandQuery(brandSearchQuery);
+      setCurrentPage(1);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [brandSearchQuery]);
 
-    // Apply brand filter
-    if (brandSearchQuery) {
-      const brandLower = brandSearchQuery.toLowerCase().trim();
-      filtered = filtered.filter(user => {
-        const brand = (user.brand && String(user.brand).toLowerCase()) || '';
-        return brand.includes(brandLower);
-      });
-    }
-
-    // Apply package type filter
-    if (filterType !== 'all') {
-      filtered = filtered.filter(user => user.packageType === filterType);
-    }
-
-    // Apply date range filter
-    if (startDate || endDate) {
-      filtered = filtered.filter(user => {
-        const userDate = new Date(user.createdAt);
-        const start = startDate ? new Date(startDate) : null;
-        const end = endDate ? new Date(endDate) : null;
-        
-        // Set time to start/end of day for proper comparison
-        if (start) {
-          start.setHours(0, 0, 0, 0);
-        }
-        if (end) {
-          end.setHours(23, 59, 59, 999);
-        }
-        
-        if (start && end) {
-          return userDate >= start && userDate <= end;
-        } else if (start) {
-          return userDate >= start;
-        } else if (end) {
-          return userDate <= end;
-        }
-        
-        return true;
-      });
-    }
-
-    // Apply SP-API connection filter
-    if (spApiFilter !== 'all') {
-      filtered = filtered.filter(user => {
-        const spApiStatus = getSpApiConnectionStatus(user);
-        return spApiFilter === 'connected' 
-          ? spApiStatus.connected 
-          : !spApiStatus.connected;
-      });
-    }
-
-    // Apply Ads API connection filter
-    if (adsFilter !== 'all') {
-      filtered = filtered.filter(user => {
-        const adsApiStatus = getAdsApiConnectionStatus(user);
-        return adsFilter === 'connected' 
-          ? adsApiStatus.connected 
-          : !adsApiStatus.connected;
-      });
-    }
-
-    return filtered;
-  }, [users, searchQuery, brandSearchQuery, filterType, startDate, endDate, spApiFilter, adsFilter, loading]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / ITEMS_PER_PAGE));
-
-  const paginatedData = useMemo(() => {
-    const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredUsers.slice(start, start + ITEMS_PER_PAGE);
-  }, [currentPage, filteredUsers]);
-
-  // Fetch accounts data
-  const fetchAccounts = async () => {
+  // Fetch accounts data. `quiet` skips the full-page loading spinner - used for
+  // page/filter changes and post-mutation refreshes so the table stays visible.
+  const fetchAccounts = async ({ quiet = false } = {}) => {
     try {
-      setLoading(true);
+      if (!quiet) setLoading(true);
       setError('');
-      const response = await axiosInstance.get('/app/auth/admin/accounts');
+      const response = await axiosInstance.get('/app/auth/admin/accounts', {
+        params: {
+          page: currentPage,
+          limit: ITEMS_PER_PAGE,
+          search: debouncedSearchQuery || undefined,
+          brand: debouncedBrandQuery || undefined,
+          packageType: filterType !== 'all' ? filterType : undefined,
+          statusFilter: statusCardFilter !== 'all' ? statusCardFilter : undefined,
+          startDate: startDate || undefined,
+          endDate: endDate || undefined,
+          spApiFilter: spApiFilter !== 'all' ? spApiFilter : undefined,
+          adsFilter: adsFilter !== 'all' ? adsFilter : undefined,
+        },
+      });
 
       if(response.data.statusCode === 401){
         localStorage.removeItem('isAdminAuth');
@@ -320,12 +261,19 @@ const ManageAccounts = () => {
         localStorage.removeItem('adminId');
         navigate('/admin-login');
       }
-      
+
       // Check for successful response (statusCode 200)
       if (response.data.statusCode === 200) {
         const accounts = response.data.data.accounts || [];
         setUsers(accounts);
         setStats(response.data.data.stats);
+        const serverPagination = response.data.data.pagination;
+        if (serverPagination) {
+          setPagination(serverPagination);
+          if (serverPagination.totalPages && currentPage > serverPagination.totalPages) {
+            setCurrentPage(serverPagination.totalPages);
+          }
+        }
       } else {
         setError(response.data.message || 'Failed to load accounts data');
       }
@@ -341,19 +289,23 @@ const ManageAccounts = () => {
       }
       setError(error.response?.data?.message || 'Failed to load accounts data');
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   };
 
+  // Initial load - shows the full-page spinner
   useEffect(() => {
     fetchAccounts();
   }, []);
 
+  // Subsequent page/filter changes - quiet refetch, table stays visible
   useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(1);
+    if (isFirstFilterRun.current) {
+      isFirstFilterRun.current = false;
+      return;
     }
-  }, [filteredUsers.length, totalPages, currentPage]);
+    fetchAccounts({ quiet: true });
+  }, [currentPage, debouncedSearchQuery, debouncedBrandQuery, filterType, statusCardFilter, startDate, endDate, spApiFilter, adsFilter]);
 
   // Close dropdown when clicking outside (portal menu or trigger button)
   useEffect(() => {
@@ -522,7 +474,9 @@ const ManageAccounts = () => {
         
         // Show success message
         setDeleteSuccess(`User ${user.firstName} ${user.lastName} (${user.email}) has been deleted successfully.`);
-        
+        // Quietly refresh so stat cards/pagination totals stay accurate
+        fetchAccounts({ quiet: true });
+
         // Clear success message after 5 seconds
         setTimeout(() => {
           setDeleteSuccess('');
@@ -586,7 +540,9 @@ const ManageAccounts = () => {
         // Show success message
         const wasTrialing = response.data.data?.wasTrialing;
         setCancelSuccess(`Subscription for ${user.firstName} ${user.lastName} (${user.email}) has been cancelled successfully${wasTrialing ? ' (was in trial)' : ''}.`);
-        
+        // Quietly refresh so stat cards/pagination totals stay accurate
+        fetchAccounts({ quiet: true });
+
         // Clear success message after 5 seconds
         setTimeout(() => {
           setCancelSuccess('');
@@ -628,6 +584,8 @@ const ManageAccounts = () => {
         setRefundConfirmUser(null);
         const data = response.data.data;
         setRefundSuccess(`Refund of ${data.currency?.toUpperCase()} ${(data.amount / 100).toFixed(2)} issued for ${user.firstName} ${user.lastName} (${user.email}).`);
+        // Quietly refresh so stat cards/pagination totals stay accurate
+        fetchAccounts({ quiet: true });
         setTimeout(() => setRefundSuccess(''), 5000);
       } else {
         setRefundError(response.data.message || 'Failed to refund payment');
@@ -675,6 +633,8 @@ const ManageAccounts = () => {
         setTrialDays(7);
         setTrialUnit('days');
         setTrialSuccess(`Trial for ${user.firstName} ${user.lastName} set to ${days} days (ends ${new Date(data.trialEnd).toLocaleDateString()}).`);
+        // Quietly refresh so stat cards/pagination totals stay accurate
+        fetchAccounts({ quiet: true });
         setTimeout(() => setTrialSuccess(''), 5000);
       } else {
         setTrialError(response.data.message || 'Failed to update trial period');
@@ -710,6 +670,7 @@ const ManageAccounts = () => {
   const getPaginationGroup = () => {
     const group = [];
     const maxButtons = 5;
+    const totalPages = pagination.totalPages;
 
     if (totalPages <= maxButtons) {
       for (let i = 1; i <= totalPages; i++) group.push(i);
@@ -1147,7 +1108,7 @@ const ManageAccounts = () => {
 
           {/* Actions dropdown (portal so it is not clipped by table overflow) */}
           {openDropdownId && dropdownPosition && (() => {
-            const user = paginatedData.find((u) => u._id === openDropdownId);
+            const user = users.find((u) => u._id === openDropdownId);
             if (!user) return null;
             const canCancel = canCancelSubscription(user);
             return createPortal(
@@ -1298,7 +1259,7 @@ const ManageAccounts = () => {
                       <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
                       <select
                         value={filterType}
-                        onChange={(e) => setFilterType(e.target.value)}
+                        onChange={(e) => { setFilterType(e.target.value); setStatusCardFilter('all'); setCurrentPage(1); }}
                         className="w-full pl-9 pr-3 py-2.5 text-sm border border-[#30363d] bg-[#21262d] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500 appearance-none"
                       >
                         <option value="all">All types</option>
@@ -1314,18 +1275,18 @@ const ManageAccounts = () => {
                       <input
                         type="date"
                         value={startDate}
-                        onChange={(e) => setStartDate(e.target.value)}
+                        onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); }}
                         className="py-2 px-3 text-sm border border-[#30363d] bg-[#21262d] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500"
                       />
                       <span className="text-gray-500 text-sm">to</span>
                       <input
                         type="date"
                         value={endDate}
-                        onChange={(e) => setEndDate(e.target.value)}
+                        onChange={(e) => { setEndDate(e.target.value); setCurrentPage(1); }}
                         className="py-2 px-3 text-sm border border-[#30363d] bg-[#21262d] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500"
                       />
                       {(startDate || endDate) && (
-                        <button onClick={clearDateFilters} className="py-2 px-3 text-sm text-gray-400 hover:text-gray-300 rounded-lg border border-[#30363d] hover:bg-[#21262d]">
+                        <button onClick={() => { clearDateFilters(); setCurrentPage(1); }} className="py-2 px-3 text-sm text-gray-400 hover:text-gray-300 rounded-lg border border-[#30363d] hover:bg-[#21262d]">
                           <X className="w-4 h-4 inline mr-1" /> Clear
                         </button>
                       )}
@@ -1333,7 +1294,7 @@ const ManageAccounts = () => {
                     <div className="flex items-center gap-2 flex-wrap">
                       <select
                         value={spApiFilter}
-                        onChange={(e) => setSpApiFilter(e.target.value)}
+                        onChange={(e) => { setSpApiFilter(e.target.value); setCurrentPage(1); }}
                         className="py-2 px-3 text-sm border border-[#30363d] bg-[#21262d] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500"
                       >
                         <option value="all">All SP-API</option>
@@ -1342,7 +1303,7 @@ const ManageAccounts = () => {
                       </select>
                       <select
                         value={adsFilter}
-                        onChange={(e) => setAdsFilter(e.target.value)}
+                        onChange={(e) => { setAdsFilter(e.target.value); setCurrentPage(1); }}
                         className="py-2 px-3 text-sm border border-[#30363d] bg-[#21262d] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500"
                       >
                         <option value="all">All Ads API</option>
@@ -1351,7 +1312,7 @@ const ManageAccounts = () => {
                       </select>
                       {(spApiFilter !== 'all' || adsFilter !== 'all') && (
                         <button
-                          onClick={() => { setSpApiFilter('all'); setAdsFilter('all'); }}
+                          onClick={() => { setSpApiFilter('all'); setAdsFilter('all'); setCurrentPage(1); }}
                           className="py-2 px-3 text-sm text-gray-400 hover:text-gray-300 rounded-lg border border-[#30363d] hover:bg-[#21262d]"
                         >
                           Clear API
@@ -1361,30 +1322,75 @@ const ManageAccounts = () => {
                   </div>
                 </div>
 
-                {/* Stats row */}
-                <div className="mt-4 pt-4 border-t border-[#252525] grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div className="rounded-lg border border-[#252525] bg-[#0d0d0d] px-4 py-3">
-                    <p className="text-xl font-semibold tabular-nums text-gray-100">{filteredUsers.length}</p>
-                    <p className="text-xs text-gray-500">Total</p>
-                  </div>
-                  <div className="rounded-lg border border-[#252525] bg-[#0d0d0d] px-4 py-3">
-                    <p className="text-xl font-semibold tabular-nums text-gray-100">{filteredUsers.filter(u => u.subscriptionStatus === 'active').length}</p>
-                    <p className="text-xs text-gray-500">Active</p>
-                  </div>
-                  <div className="rounded-lg border border-[#252525] bg-[#0d0d0d] px-4 py-3">
-                    <p className="text-xl font-semibold tabular-nums text-gray-100">{filteredUsers.filter(u => u.packageType === 'PRO').length}</p>
-                    <p className="text-xs text-gray-500">Pro</p>
-                  </div>
-                  <div className="rounded-lg border border-[#252525] bg-[#0d0d0d] px-4 py-3">
-                    <p className="text-xl font-semibold tabular-nums text-gray-100">{filteredUsers.filter(u => u.packageType === 'AGENCY').length}</p>
-                    <p className="text-xs text-gray-500">Agency</p>
-                  </div>
+                {/* Stats row - each card is a filter button. Counts are global (unaffected by search/date filters). */}
+                <div className="mt-4 pt-4 border-t border-[#252525] grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+                  {(() => {
+                    const isTotalActive = filterType === 'all' && statusCardFilter === 'all';
+                    const cardClass = (active) =>
+                      `rounded-lg border px-4 py-3 text-left transition-colors ${
+                        active
+                          ? 'border-blue-500 bg-blue-500/10'
+                          : 'border-[#252525] bg-[#0d0d0d] hover:border-[#3a3a3a]'
+                      }`;
+                    return (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => { setFilterType('all'); setStatusCardFilter('all'); setCurrentPage(1); }}
+                          className={cardClass(isTotalActive)}
+                        >
+                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.total ?? 0}</p>
+                          <p className="text-xs text-gray-500">Total</p>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setStatusCardFilter('active'); setFilterType('all'); setCurrentPage(1); }}
+                          className={cardClass(statusCardFilter === 'active')}
+                        >
+                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.activeSubscriptions ?? 0}</p>
+                          <p className="text-xs text-gray-500">Active</p>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setFilterType('PRO'); setStatusCardFilter('all'); setCurrentPage(1); }}
+                          className={cardClass(filterType === 'PRO')}
+                        >
+                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.packageStats?.PRO ?? 0}</p>
+                          <p className="text-xs text-gray-500">Pro</p>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setFilterType('AGENCY'); setStatusCardFilter('all'); setCurrentPage(1); }}
+                          className={cardClass(filterType === 'AGENCY')}
+                        >
+                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.packageStats?.AGENCY ?? 0}</p>
+                          <p className="text-xs text-gray-500">Agency</p>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setStatusCardFilter('trial'); setFilterType('all'); setCurrentPage(1); }}
+                          className={cardClass(statusCardFilter === 'trial')}
+                        >
+                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.trialUsers ?? 0}</p>
+                          <p className="text-xs text-gray-500">Trial</p>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setStatusCardFilter('cancelled'); setFilterType('all'); setCurrentPage(1); }}
+                          className={cardClass(statusCardFilter === 'cancelled')}
+                        >
+                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.cancelledSubscriptions ?? 0}</p>
+                          <p className="text-xs text-gray-500">Cancelled</p>
+                        </button>
+                      </>
+                    );
+                  })()}
                 </div>
-                {filteredUsers.length > 0 && (
+                {pagination.totalCount > 0 && (
                   <div className="mt-3 text-xs text-gray-500">
-                    {searchQuery || brandSearchQuery || filterType !== 'all' || startDate || endDate || spApiFilter !== 'all' || adsFilter !== 'all'
-                      ? `${filteredUsers.length} match filters`
-                      : `Showing all ${filteredUsers.length} users`}
+                    {searchQuery || brandSearchQuery || filterType !== 'all' || statusCardFilter !== 'all' || startDate || endDate || spApiFilter !== 'all' || adsFilter !== 'all'
+                      ? `${pagination.totalCount} match filters`
+                      : `Showing all ${pagination.totalCount} users`}
                   </div>
                 )}
               </div>
@@ -1396,18 +1402,18 @@ const ManageAccounts = () => {
                     <thead>
                       <tr className="border-b border-[#252525] bg-[#0d0d0d]">
                         <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[180px]">User</th>
-                        <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</th>
                         <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
                         <th className="px-2 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Brand</th>
                         <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                         <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">SpAPI</th>
                         <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Ads</th>
-                        <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+                        <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Card</th>
+                        <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Opening Date</th>
                         <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#252525]">
-                      {paginatedData.map((user) => {
+                      {users.map((user) => {
                         const packageInfo = getPackageTypeInfo(user);
                         const statusInfo = getSubscriptionStatus(user);
                         const PackageIcon = packageInfo.icon;
@@ -1429,10 +1435,10 @@ const ManageAccounts = () => {
                                   <p className="text-xs text-gray-500 break-all flex items-center gap-1">
                                     <Mail className="w-3 h-3 shrink-0" />{user.email}
                                   </p>
+                                  <p className="text-xs text-gray-500">{user.phone || '—'}</p>
                                 </div>
                               </div>
                             </td>
-                            <td className="px-2 py-2.5 text-center text-xs text-gray-400">{user.phone || '—'}</td>
                             <td className="px-2 py-2.5 text-center">
                               <span className={`inline-flex items-center justify-center gap-1 text-xs font-medium ${packageInfo.color} max-w-[9rem] mx-auto text-center`}>
                                 <PackageIcon className="w-3 h-3 shrink-0" />{typeColumnLabel(packageInfo.label)}
@@ -1458,7 +1464,21 @@ const ManageAccounts = () => {
                                 <XIcon className="w-4 h-4 text-red-500 inline-block" aria-label="Not connected" />
                               )}
                             </td>
-                            <td className="px-2 py-2.5 text-center text-xs text-gray-500">{formatDate(user.createdAt)}</td>
+                            <td className="px-2 py-2.5 text-center text-xs">
+                              {user.cardConnected === true ? (
+                                <Check className="w-4 h-4 text-green-500 inline-block" aria-label="Card on file" />
+                              ) : user.cardConnected === false ? (
+                                <XIcon className="w-4 h-4 text-red-500 inline-block" aria-label="No card on file" />
+                              ) : (
+                                <span className="text-gray-500">—</span>
+                              )}
+                            </td>
+                            <td className="px-2 py-2.5 text-center text-xs text-gray-500">
+                              <p>{formatDate(user.createdAt)}</p>
+                              {user.renewalDate && (
+                                <p className="text-[10px] text-gray-600 mt-0.5">Renews {formatDate(user.renewalDate)}</p>
+                              )}
+                            </td>
                             <td className="px-2 py-2.5">
                               <div className="flex items-center justify-center">
                                 <button
@@ -1495,10 +1515,10 @@ const ManageAccounts = () => {
                   </table>
                 </div>
 
-                {totalPages > 1 && (
+                {pagination.totalPages > 1 && (
                   <div className="flex flex-col items-center gap-2 px-4 py-3 border-t border-[#252525] bg-[#0d0d0d]">
                     <p className="text-xs text-gray-500">
-                      {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredUsers.length)} of {filteredUsers.length}
+                      {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, pagination.totalCount)} of {pagination.totalCount}
                     </p>
                     <div className="flex items-center gap-1 justify-center">
                       <button
@@ -1520,8 +1540,8 @@ const ManageAccounts = () => {
                         </button>
                       ))}
                       <button
-                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                        disabled={currentPage === totalPages}
+                        onClick={() => setCurrentPage(p => Math.min(pagination.totalPages, p + 1))}
+                        disabled={currentPage === pagination.totalPages}
                         className="p-2 rounded-lg border border-[#30363d] text-gray-400 hover:bg-[#1a1a1a] disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         <ChevronRight className="w-4 h-4" />
@@ -1531,7 +1551,7 @@ const ManageAccounts = () => {
                 )}
               </div>
 
-              {filteredUsers.length === 0 && (
+              {users.length === 0 && (
                 <div className="rounded-lg border border-[#252525] bg-[#161b22] py-16 text-center">
                   <div className="w-12 h-12 rounded-lg bg-[#252525] flex items-center justify-center mx-auto mb-3">
                     <Users className="w-6 h-6 text-gray-500" />

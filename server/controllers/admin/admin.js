@@ -211,8 +211,211 @@ const adminLogout = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Builds the shared sellerCentral + subscription lookup stages and the
+ * pre/post-lookup $match stages for getAllAccounts, from optional query filters.
+ * Kept separate so the pipeline stays readable - each stage below is pushed in
+ * the exact order it needs to run in the aggregation.
+ */
+const buildAccountsPipeline = (filters) => {
+    const { packageType, statusFilter, startDate, endDate, brand, search, spApiFilter, adsFilter } = filters;
+    const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pipeline = [];
+
+    // Stage 1: Project only needed user fields
+    pipeline.push({
+        $project: {
+            firstName: 1,
+            lastName: 1,
+            email: 1,
+            phone: 1,
+            whatsapp: 1,
+            accessType: 1,
+            packageType: 1,
+            isAgencyClient: 1,
+            subscriptionStatus: 1,
+            isInTrialPeriod: 1,
+            trialEndsDate: 1,
+            isVerified: 1,
+            profilePic: 1,
+            createdAt: 1,
+            updatedAt: 1,
+            adminId: 1,
+            sellerCentral: 1
+        }
+    });
+
+    // Stage 2: Pre-lookup filters that only touch fields already on the User doc
+    const preMatch = {};
+    if (packageType && packageType !== 'all') {
+        preMatch.packageType = packageType;
+    }
+    if (statusFilter === 'active') preMatch.subscriptionStatus = 'active';
+    else if (statusFilter === 'trial') preMatch.isInTrialPeriod = true;
+    else if (statusFilter === 'cancelled') preMatch.subscriptionStatus = 'cancelled';
+
+    if (startDate || endDate) {
+        preMatch.createdAt = {};
+        if (startDate) {
+            const start = new Date(startDate);
+            start.setHours(0, 0, 0, 0);
+            preMatch.createdAt.$gte = start;
+        }
+        if (endDate) {
+            const end = new Date(endDate);
+            end.setHours(23, 59, 59, 999);
+            preMatch.createdAt.$lte = end;
+        }
+    }
+    if (Object.keys(preMatch).length > 0) {
+        pipeline.push({ $match: preMatch });
+    }
+
+    // Stage 3: Sort by newest first
+    pipeline.push({ $sort: { createdAt: -1 } });
+
+    // Stage 4: Lookup sellerCentral with projection to exclude large arrays
+    pipeline.push({
+        $lookup: {
+            from: 'sellers', // MongoDB collection name (lowercase, pluralized)
+            let: { sellerCentralId: '$sellerCentral' },
+            pipeline: [
+                { $match: { $expr: { $eq: ['$_id', '$$sellerCentralId'] } } },
+                {
+                    $project: {
+                        brand: 1,
+                        selling_partner_id: 1,
+                        // Only project essential fields from sellerAccount, excluding products and TotatProducts
+                        sellerAccount: {
+                            $map: {
+                                input: '$sellerAccount',
+                                as: 'acc',
+                                in: {
+                                    spiRefreshToken: '$$acc.spiRefreshToken',
+                                    adsRefreshToken: '$$acc.adsRefreshToken',
+                                    country: '$$acc.country',
+                                    region: '$$acc.region',
+                                    ProfileId: '$$acc.ProfileId',
+                                    selling_partner_id: '$$acc.selling_partner_id'
+                                    // products and TotatProducts are NOT included
+                                }
+                            }
+                        }
+                    }
+                }
+            ],
+            as: 'sellerCentralData'
+        }
+    });
+    pipeline.push({ $addFields: { sellerCentral: { $arrayElemAt: ['$sellerCentralData', 0] } } });
+    pipeline.push({ $project: { sellerCentralData: 0 } });
+
+    // Stage 5: Lookup subscription (paymentGateway/stripeCustomerId/renewal dates)
+    pipeline.push({
+        $lookup: {
+            from: 'subscriptions',
+            let: { uid: '$_id' },
+            pipeline: [
+                { $match: { $expr: { $eq: ['$userId', '$$uid'] } } },
+                { $project: { paymentGateway: 1, stripeCustomerId: 1, nextBillingDate: 1, currentPeriodEnd: 1 } }
+            ],
+            as: 'subscriptionData'
+        }
+    });
+    pipeline.push({ $addFields: { subscriptionInfo: { $arrayElemAt: ['$subscriptionData', 0] } } });
+    pipeline.push({ $project: { subscriptionData: 0 } });
+
+    // Stage 6: Post-lookup filters (need sellerCentral to exist first: brand, search, SP-API/Ads connection)
+    const connectionExpr = (tokenField) => ({
+        $gt: [
+            {
+                $size: {
+                    $filter: {
+                        input: { $ifNull: ['$sellerCentral.sellerAccount', []] },
+                        as: 'acc',
+                        cond: {
+                            $and: [
+                                { $ne: [`$$acc.${tokenField}`, null] },
+                                { $ne: [`$$acc.${tokenField}`, ''] }
+                            ]
+                        }
+                    }
+                }
+            },
+            0
+        ]
+    });
+
+    const postMatchAnd = [];
+    if (brand) {
+        postMatchAnd.push({ 'sellerCentral.brand': { $regex: escapeRegex(brand), $options: 'i' } });
+    }
+    if (search) {
+        const re = new RegExp(escapeRegex(search), 'i');
+        postMatchAnd.push({ $or: [{ firstName: re }, { lastName: re }, { email: re }, { 'sellerCentral.brand': re }] });
+    }
+    if (spApiFilter === 'connected') postMatchAnd.push({ $expr: connectionExpr('spiRefreshToken') });
+    else if (spApiFilter === 'not-connected') postMatchAnd.push({ $expr: { $not: connectionExpr('spiRefreshToken') } });
+    if (adsFilter === 'connected') postMatchAnd.push({ $expr: connectionExpr('adsRefreshToken') });
+    else if (adsFilter === 'not-connected') postMatchAnd.push({ $expr: { $not: connectionExpr('adsRefreshToken') } });
+
+    if (postMatchAnd.length > 0) {
+        pipeline.push({ $match: { $and: postMatchAnd } });
+    }
+
+    return pipeline;
+};
+
+/**
+ * Computes global account stats (unaffected by any list filters/pagination) via
+ * a single cheap $group aggregation instead of looping over loaded documents.
+ */
+const getAccountsStats = async () => {
+    const [result] = await UserModel.aggregate([
+        {
+            $group: {
+                _id: null,
+                total: { $sum: 1 },
+                verified: { $sum: { $cond: ['$isVerified', 1, 0] } },
+                unverified: { $sum: { $cond: ['$isVerified', 0, 1] } },
+                activeSubscriptions: { $sum: { $cond: [{ $eq: ['$subscriptionStatus', 'active'] }, 1, 0] } },
+                inactiveSubscriptions: { $sum: { $cond: [{ $eq: ['$subscriptionStatus', 'inactive'] }, 1, 0] } },
+                cancelledSubscriptions: { $sum: { $cond: [{ $eq: ['$subscriptionStatus', 'cancelled'] }, 1, 0] } },
+                trialUsers: { $sum: { $cond: ['$isInTrialPeriod', 1, 0] } },
+                LITE: { $sum: { $cond: [{ $eq: ['$packageType', 'LITE'] }, 1, 0] } },
+                PRO: { $sum: { $cond: [{ $eq: ['$packageType', 'PRO'] }, 1, 0] } },
+                AGENCY: { $sum: { $cond: [{ $eq: ['$packageType', 'AGENCY'] }, 1, 0] } },
+                accessUser: { $sum: { $cond: [{ $eq: ['$accessType', 'user'] }, 1, 0] } },
+                accessSuperAdmin: { $sum: { $cond: [{ $eq: ['$accessType', 'superAdmin'] }, 1, 0] } }
+            }
+        }
+    ]);
+
+    return {
+        total: result?.total || 0,
+        verified: result?.verified || 0,
+        unverified: result?.unverified || 0,
+        activeSubscriptions: result?.activeSubscriptions || 0,
+        inactiveSubscriptions: result?.inactiveSubscriptions || 0,
+        cancelledSubscriptions: result?.cancelledSubscriptions || 0,
+        trialUsers: result?.trialUsers || 0,
+        packageStats: {
+            LITE: result?.LITE || 0,
+            PRO: result?.PRO || 0,
+            AGENCY: result?.AGENCY || 0
+        },
+        accessTypeStats: {
+            user: result?.accessUser || 0,
+            superAdmin: result?.accessSuperAdmin || 0
+        }
+    };
+};
+
+/**
  * Get All Accounts Controller
- * Returns all user accounts for the manage accounts page
+ * Returns user accounts for the manage accounts page.
+ * `page`/`limit`/filters are all optional query params - when `page` is omitted
+ * (e.g. the AdminUserLogs page calling this same endpoint), the full unpaginated,
+ * unfiltered list is returned exactly as before for backward compatibility.
  * Protected route - requires superAdmin access
  */
 const getAllAccounts = asyncHandler(async (req, res) => {
@@ -236,82 +439,47 @@ const getAllAccounts = asyncHandler(async (req, res) => {
     }
 
     try {
-        // PERFORMANCE OPTIMIZATION: Use aggregation pipeline to fetch only needed fields
-        // This avoids loading large arrays (products, TotatProducts) from sellerCentral
-        const accounts = await UserModel.aggregate([
-            // Stage 1: Project only needed user fields
-            {
-                $project: {
-                    firstName: 1,
-                    lastName: 1,
-                    email: 1,
-                    phone: 1,
-                    whatsapp: 1,
-                    accessType: 1,
-                    packageType: 1,
-                    isAgencyClient: 1,
-                    subscriptionStatus: 1,
-                    isInTrialPeriod: 1,
-                    trialEndsDate: 1,
-                    isVerified: 1,
-                    profilePic: 1,
-                    createdAt: 1,
-                    updatedAt: 1,
-                    adminId: 1,
-                    sellerCentral: 1
+        const { page, limit, search, brand, packageType, statusFilter, startDate, endDate, spApiFilter, adsFilter } = req.query;
+        const isPaginated = page !== undefined || limit !== undefined;
+
+        const pipeline = buildAccountsPipeline({ packageType, statusFilter, startDate, endDate, brand, search, spApiFilter, adsFilter });
+
+        let pageNum, limitNum;
+        if (isPaginated) {
+            pageNum = Math.max(1, parseInt(page) || 1);
+            limitNum = Math.min(100, Math.max(1, parseInt(limit) || 10));
+            const skip = (pageNum - 1) * limitNum;
+            pipeline.push({
+                $facet: {
+                    data: [{ $skip: skip }, { $limit: limitNum }],
+                    totalCount: [{ $count: 'count' }]
                 }
-            },
-            // Stage 2: Sort by newest first
-            { $sort: { createdAt: -1 } },
-            // Stage 3: Lookup sellerCentral with projection to exclude large arrays
-            {
-                $lookup: {
-                    from: 'sellers', // MongoDB collection name (lowercase, pluralized)
-                    let: { sellerCentralId: '$sellerCentral' },
-                    pipeline: [
-                        { $match: { $expr: { $eq: ['$_id', '$$sellerCentralId'] } } },
-                        {
-                            $project: {
-                                brand: 1,
-                                selling_partner_id: 1,
-                                // Only project essential fields from sellerAccount, excluding products and TotatProducts
-                                sellerAccount: {
-                                    $map: {
-                                        input: '$sellerAccount',
-                                        as: 'acc',
-                                        in: {
-                                            spiRefreshToken: '$$acc.spiRefreshToken',
-                                            adsRefreshToken: '$$acc.adsRefreshToken',
-                                            country: '$$acc.country',
-                                            region: '$$acc.region',
-                                            ProfileId: '$$acc.ProfileId',
-                                            selling_partner_id: '$$acc.selling_partner_id'
-                                            // products and TotatProducts are NOT included
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    ],
-                    as: 'sellerCentralData'
-                }
-            },
-            // Stage 4: Unwind the lookup result (convert array to single object)
-            {
-                $addFields: {
-                    sellerCentral: { $arrayElemAt: ['$sellerCentralData', 0] }
-                }
-            },
-            // Stage 5: Remove the temporary array field
-            {
-                $project: {
-                    sellerCentralData: 0
-                }
-            }
+            });
+        }
+
+        // PERFORMANCE OPTIMIZATION: fetch the accounts page and the global stats in parallel
+        const [aggregateResult, stats] = await Promise.all([
+            UserModel.aggregate(pipeline),
+            getAccountsStats()
         ]);
 
+        let accounts;
+        let pagination = null;
+        if (isPaginated) {
+            accounts = aggregateResult[0]?.data || [];
+            const totalCount = aggregateResult[0]?.totalCount?.[0]?.count || 0;
+            pagination = {
+                currentPage: pageNum,
+                limit: limitNum,
+                totalCount,
+                totalPages: Math.max(1, Math.ceil(totalCount / limitNum))
+            };
+        } else {
+            accounts = aggregateResult;
+        }
+
         // Transform the data to include additional computed fields
-        // Since we used aggregation, sellerCentral is already trimmed
+        // Since we used aggregation, sellerCentral/subscriptionInfo are already trimmed
         const accountsWithStats = accounts.map(account => ({
             ...account,
             fullName: `${account.firstName} ${account.lastName}`,
@@ -322,56 +490,42 @@ const getAllAccounts = asyncHandler(async (req, res) => {
             // Check if trial is expired
             isTrialExpired: account.isInTrialPeriod && account.trialEndsDate && new Date() > new Date(account.trialEndsDate),
             // Include brand from sellerCentral
-            brand: account.sellerCentral?.brand || null
+            brand: account.sellerCentral?.brand || null,
+            // Renewal date sourced from the Subscription doc, already synced from Stripe via webhooks
+            renewalDate: account.subscriptionInfo?.nextBillingDate || account.subscriptionInfo?.currentPeriodEnd || null
         }));
 
-        // PERFORMANCE OPTIMIZATION: Calculate stats in a single pass instead of multiple filter operations
-        const stats = {
-            total: 0,
-            verified: 0,
-            unverified: 0,
-            activeSubscriptions: 0,
-            inactiveSubscriptions: 0,
-            trialUsers: 0,
-            packageStats: {
-                LITE: 0,
-                PRO: 0,
-                AGENCY: 0
-            },
-            accessTypeStats: {
-                user: 0,
-                superAdmin: 0
-            }
-        };
-
-        // Single pass through accounts to calculate all stats
-        accounts.forEach(acc => {
-            stats.total++;
-            if (acc.isVerified) stats.verified++;
-            else stats.unverified++;
-            
-            if (acc.subscriptionStatus === 'active') stats.activeSubscriptions++;
-            else if (acc.subscriptionStatus === 'inactive') stats.inactiveSubscriptions++;
-            
-            if (acc.isInTrialPeriod) stats.trialUsers++;
-            
-            if (acc.packageType === 'LITE') stats.packageStats.LITE++;
-            else if (acc.packageType === 'PRO') stats.packageStats.PRO++;
-            else if (acc.packageType === 'AGENCY') stats.packageStats.AGENCY++;
-            
-            if (acc.accessType === 'user') stats.accessTypeStats.user++;
-            else if (acc.accessType === 'superAdmin') stats.accessTypeStats.superAdmin++;
-        });
-
-        
+        // Card-connected: bounded live Stripe lookup, only for the current page's rows
+        // (never for the unpaginated legacy path, to avoid firing a Stripe call per user)
+        if (isPaginated) {
+            await Promise.all(accountsWithStats.map(async (account) => {
+                const subInfo = account.subscriptionInfo;
+                if (subInfo?.paymentGateway === 'stripe' && subInfo?.stripeCustomerId) {
+                    try {
+                        const cardStatus = await StripeService.getCardConnectionStatus(subInfo.stripeCustomerId);
+                        account.cardConnected = cardStatus.connected;
+                        account.cardBrand = cardStatus.brand;
+                        account.cardLast4 = cardStatus.last4;
+                    } catch (error) {
+                        logger.error(`Failed to fetch card status for stripeCustomerId ${subInfo.stripeCustomerId}: ${error.message}`);
+                        account.cardConnected = null; // unknown - Stripe call failed
+                    }
+                } else {
+                    account.cardConnected = false;
+                }
+            }));
+        } else {
+            accountsWithStats.forEach(account => { account.cardConnected = false; });
+        }
 
         const responseData = {
             accounts: accountsWithStats,
-            stats: stats,
-            totalCount: accounts.length
+            stats,
+            totalCount: isPaginated ? pagination.totalCount : accountsWithStats.length,
+            ...(isPaginated ? { pagination } : {})
         };
 
-        logger.info(`SuperAdmin ${adminId} retrieved ${accounts.length} accounts`);
+        logger.info(`SuperAdmin ${adminId} retrieved ${accountsWithStats.length} accounts${isPaginated ? ` (page ${pageNum})` : ''}`);
 
         res.status(200).json(new ApiResponse(200, responseData, "Accounts retrieved successfully"));
 
