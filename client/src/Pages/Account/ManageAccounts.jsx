@@ -1430,7 +1430,7 @@ const ManageAccounts = () => {
               <div className="rounded-lg border border-[#252525] bg-[#161b22] p-4 md:p-5 mb-6">
                 <div className="flex flex-col lg:flex-row gap-6">
                 {/* LEFT: search, export, filters, then chips - capped at 50% width */}
-                <div className="flex flex-col gap-2 w-full lg:w-1/2">
+                <div className="flex flex-col gap-2 w-full lg:w-1/2 rounded-lg border border-[#252525] p-3">
                   <div className="flex items-center gap-2">
                     <div className="relative flex-1 min-w-0">
                       <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
@@ -1571,7 +1571,7 @@ const ManageAccounts = () => {
                 </div>
 
                 {/* RIGHT: users-by-country pie chart, sourced from Stripe billing address */}
-                <div className="flex-1 flex flex-col items-center min-w-0">
+                <div className="flex-1 flex flex-col items-center min-w-0 rounded-lg border border-[#252525] p-3">
                   <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2 self-start">Users by Country</p>
                   {countryStatsLoading ? (
                     <div className="flex-1 w-full flex items-center justify-center py-12">
