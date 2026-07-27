@@ -361,7 +361,8 @@ const buildAccountsPipeline = (filters) => {
         preMatchClauses.push({ packageType });
     }
     if (statusFilter === 'paid') {
-        preMatchClauses.push({ subscriptionStatus: 'active' });
+        // Paid: a Pro user who isn't (still) in a trial - matches the "Paid" stat card definition
+        preMatchClauses.push({ packageType: 'PRO', isInTrialPeriod: { $ne: true } });
     } else if (statusFilter === 'trial') {
         preMatchClauses.push(trialActiveClause);
     } else if (statusFilter === 'expired') {
@@ -460,7 +461,15 @@ const getAccountsStats = async () => {
                 total: { $sum: 1 },
                 verified: { $sum: { $cond: ['$isVerified', 1, 0] } },
                 unverified: { $sum: { $cond: ['$isVerified', 0, 1] } },
-                activeSubscriptions: { $sum: { $cond: [{ $eq: ['$subscriptionStatus', 'active'] }, 1, 0] } },
+                // Paid: a Pro user who isn't (still) in a trial - kept in sync with buildAccountsPipeline's 'paid' statusFilter above
+                activeSubscriptions: {
+                    $sum: {
+                        $cond: [
+                            { $and: [{ $eq: ['$packageType', 'PRO'] }, { $ne: ['$isInTrialPeriod', true] }] },
+                            1, 0
+                        ]
+                    }
+                },
                 inactiveSubscriptions: { $sum: { $cond: [{ $eq: ['$subscriptionStatus', 'inactive'] }, 1, 0] } },
                 cancelledSubscriptions: { $sum: { $cond: [{ $eq: ['$subscriptionStatus', 'cancelled'] }, 1, 0] } },
                 // Expired: paid plan lapsed (past_due) OR a trial ended without converting - not a cancellation either way

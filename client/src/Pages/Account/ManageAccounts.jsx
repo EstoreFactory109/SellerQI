@@ -411,27 +411,26 @@ const ManageAccounts = () => {
     }
   };
 
-  // Labels here are kept in sync with the stat card names above (Paid/Trial/Expired/Cancelled)
+  // "User Type" column - simplified to a Seller/"-" signal (Agency owner rows keep the label above instead).
+  // Seller = an agency client, or a Pro user with a card on file (no card => not really Pro yet, same
+  // card-gating as the Status column below). Everything else ("signed up" free users) shows "-".
+  const getUserTypeLabel = (user) => {
+    const isSeller = user.isAgencyClient === true || (user.packageType === 'PRO' && user.cardConnected);
+    return isSeller ? 'Seller' : '-';
+  };
+
+  // Row-level Status column: 3-condition model.
+  // 1. Not on Pro (or Pro without a card on file yet) => Signed Up, regardless of card-connected status
+  // 2. Pro + card connected + still in trial => Trial
+  // 3. Pro + card connected + not in trial (i.e. actually paying) => Paid
   const getSubscriptionStatus = (user) => {
-    // A trial that ended without converting is treated as Expired, same as a lapsed paid plan
-    if (user.isTrialExpired || (user.isInTrialPeriod && user.trialEndsDate && new Date() > new Date(user.trialEndsDate))) {
-      return { color: 'text-gray-400', label: 'Expired' };
+    if (user.packageType !== 'PRO' || !user.cardConnected) {
+      return { color: 'text-gray-500', label: 'Signed Up' };
     }
     if (user.isInTrialPeriod) {
       return { color: 'text-blue-500', label: 'Trial' };
     }
-    switch (user.subscriptionStatus) {
-      case 'active':
-        return { color: 'text-green-500', label: 'Paid' };
-      case 'inactive':
-        return { color: 'text-gray-500', label: 'Inactive' };
-      case 'cancelled':
-        return { color: 'text-red-500', label: 'Cancelled' };
-      case 'past_due':
-        return { color: 'text-gray-400', label: 'Expired' };
-      default:
-        return { color: 'text-gray-500', label: 'Unknown' };
-    }
+    return { color: 'text-green-500', label: 'Paid' };
   };
 
   const formatDate = (dateString) => {
@@ -806,14 +805,20 @@ const ManageAccounts = () => {
           </div>
         </td>
         <td className="px-2 py-2.5 text-center">
-          <span className={`inline-flex items-center justify-center gap-1 text-xs font-medium ${packageInfo.color} max-w-[9rem] mx-auto text-center`}>
-            <PackageIcon className="w-3 h-3 shrink-0" />{typeColumnLabel(packageInfo.label)}
-          </span>
+          {user.packageType === 'AGENCY' ? (
+            <span className={`inline-flex items-center justify-center gap-1 text-xs font-medium ${packageInfo.color} max-w-[9rem] mx-auto text-center`}>
+              <PackageIcon className="w-3 h-3 shrink-0" />{typeColumnLabel(packageInfo.label)}
+            </span>
+          ) : (
+            <span className={`text-xs font-medium ${getUserTypeLabel(user) === 'Seller' ? 'text-yellow-500' : 'text-gray-500'}`}>
+              {getUserTypeLabel(user)}
+            </span>
+          )}
         </td>
         <td className="px-2 py-2.5 text-xs text-gray-400">{user.brand || '—'}</td>
         <td className="px-2 py-2.5 text-center">
           <span className={`text-xs font-medium ${statusInfo.color}`}>
-            {statusInfo.label.split(' ')[0]}
+            {statusInfo.label}
           </span>
         </td>
         <td className="px-2 py-2.5 text-center text-xs">
@@ -1589,7 +1594,7 @@ const ManageAccounts = () => {
                     <thead>
                       <tr className="border-b border-[#252525] bg-[#0d0d0d]">
                         <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[180px]">User</th>
-                        <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                        <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">User Type</th>
                         <th className="px-2 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Brand</th>
                         <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                         <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">SpAPI</th>
