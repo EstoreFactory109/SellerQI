@@ -17,23 +17,22 @@ const validateSignup = [
         .trim()
         .notEmpty().withMessage("Phone number is required")
         .custom((value) => {
-            // Remove country code, spaces, dashes, and parentheses
-            const cleaned = value.replace(/[\s\-\(\)\+]/g, '');
-            // Check if it's numeric and has at least 10 digits
-            if (!/^\d+$/.test(cleaned)) {
+            // Strip spaces, dashes, and parentheses, but keep a leading "+" (country code)
+            const cleaned = value.replace(/[\s\-\(\)]/g, '');
+            const digitsOnly = cleaned.replace(/^\+/, '');
+            if (!/^\d+$/.test(digitsOnly)) {
                 throw new Error('Phone number must contain only numbers');
             }
-            // Extract last 10 digits (in case country code is included)
-            const last10Digits = cleaned.slice(-10);
-            if (last10Digits.length !== 10) {
-                throw new Error('Phone number must contain at least 10 digits');
+            // 10 digits minimum (a bare local number), 15 max (E.164 with country code)
+            if (digitsOnly.length < 10 || digitsOnly.length > 15) {
+                throw new Error('Phone number must be between 10 and 15 digits');
             }
             return true;
         })
         .customSanitizer((value) => {
-            // Extract last 10 digits and store in req.body for controller use
-            const cleaned = value.replace(/[\s\-\(\)\+]/g, '');
-            return cleaned.slice(-10);
+            // Store the full number (country code included, if provided) instead of truncating
+            // to the last 10 digits - needed to know which country a user is actually in.
+            return value.replace(/[\s\-\(\)]/g, '');
         }),
         
     body("whatsapp")

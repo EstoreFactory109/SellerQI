@@ -85,10 +85,16 @@ describe('registerValidate', () => {
       expect(errors.array().find(e => e.path === 'phone')).toBeDefined();
     });
 
-    it('should sanitize phone to last 10 digits', async () => {
+    it('should sanitize phone to strip formatting while keeping the country code', async () => {
       const req = { body: { firstname: 'John', lastname: 'Doe', phone: '+1-123-456-7890', email: 'test@test.com', password: 'Password1!' } };
       await runValidation(req);
-      expect(req.body.phone).toBe('1234567890');
+      expect(req.body.phone).toBe('+11234567890');
+    });
+
+    it('should fail with more than 15 digits', async () => {
+      const req = { body: { firstname: 'John', lastname: 'Doe', phone: '1234567890123456', email: 'test@test.com', password: 'Password1!' } };
+      const errors = await runValidation(req);
+      expect(errors.array().find(e => e.path === 'phone')).toBeDefined();
     });
   });
 

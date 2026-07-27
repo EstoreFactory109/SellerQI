@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { 
-  ChevronLeft, 
-  ChevronRight, 
-  Users, 
+import Chart from 'react-apexcharts';
+import {
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+  Users,
   Search, 
   Filter, 
   LogIn,
@@ -123,11 +125,16 @@ const ManageAccounts = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [stats, setStats] = useState(null);
-  const [statusCardFilter, setStatusCardFilter] = useState('all'); // 'all' | 'active' | 'trial' | 'cancelled' - driven by stat cards
+  const [countryStats, setCountryStats] = useState(null); // { countries: [{country, count}], uncategorized } - fetched once, not filter-driven
+  const [countryStatsLoading, setCountryStatsLoading] = useState(true);
+  const [statusCardFilter, setStatusCardFilter] = useState('all'); // 'all' | 'paid' | 'trial' | 'expired' | 'cancelled' - driven by stat cards
   const [pagination, setPagination] = useState({ currentPage: 1, totalPages: 1, totalCount: 0, limit: ITEMS_PER_PAGE });
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [debouncedBrandQuery, setDebouncedBrandQuery] = useState('');
   const isFirstFilterRun = useRef(true);
+  const [expandedAgencyIds, setExpandedAgencyIds] = useState(new Set());
+  const [agencyClientsCache, setAgencyClientsCache] = useState({}); // { [agencyUserId]: clientRow[] }
+  const [agencyClientsLoading, setAgencyClientsLoading] = useState(new Set());
   const [loginLoadingUsers, setLoginLoadingUsers] = useState(new Set());
   const [loginError, setLoginError] = useState('');
   const [deletingUsers, setDeletingUsers] = useState(new Set());
@@ -298,6 +305,24 @@ const ManageAccounts = () => {
     fetchAccounts();
   }, []);
 
+  // Country stats power the "users by country" pie chart - fetched once on mount only, not tied
+  // to filters/pagination, since it sweeps every Stripe customer live on the backend.
+  useEffect(() => {
+    const fetchCountryStats = async () => {
+      try {
+        const response = await axiosInstance.get('/app/auth/admin/accounts/country-stats');
+        if (response.data.statusCode === 200) {
+          setCountryStats(response.data.data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch country stats:', error);
+      } finally {
+        setCountryStatsLoading(false);
+      }
+    };
+    fetchCountryStats();
+  }, []);
+
   // Subsequent page/filter changes - quiet refetch, table stays visible
   useEffect(() => {
     if (isFirstFilterRun.current) {
@@ -306,6 +331,47 @@ const ManageAccounts = () => {
     }
     fetchAccounts({ quiet: true });
   }, [currentPage, debouncedSearchQuery, debouncedBrandQuery, filterType, statusCardFilter, startDate, endDate, spApiFilter, adsFilter]);
+
+  // Fetch (or re-fetch) the client list for one agency and store it in the cache
+  const fetchAgencyClients = async (agencyId) => {
+    setAgencyClientsLoading(prev => new Set([...prev, agencyId]));
+    try {
+      const response = await axiosInstance.get(`/app/auth/admin/accounts/${agencyId}/clients`);
+      if (response.data.statusCode === 200) {
+        setAgencyClientsCache(prev => ({ ...prev, [agencyId]: response.data.data.clients || [] }));
+      }
+    } catch (error) {
+      console.error('Failed to fetch agency clients:', error);
+    } finally {
+      setAgencyClientsLoading(prev => {
+        const next = new Set(prev);
+        next.delete(agencyId);
+        return next;
+      });
+    }
+  };
+
+  const toggleAgencyExpand = (agencyUser) => {
+    const id = agencyUser._id;
+    if (expandedAgencyIds.has(id)) {
+      setExpandedAgencyIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      return;
+    }
+    setExpandedAgencyIds(prev => new Set([...prev, id]));
+    if (!agencyClientsCache[id]) {
+      fetchAgencyClients(id);
+    }
+  };
+
+  // Keep any already-expanded agency's client list fresh after an action (delete/cancel/refund/trial)
+  // is performed on one of its clients - mirrors the quiet fetchAccounts() refresh used elsewhere.
+  const refreshExpandedAgencyClients = () => {
+    expandedAgencyIds.forEach(id => fetchAgencyClients(id));
+  };
 
   // Close dropdown when clicking outside (portal menu or trigger button)
   useEffect(() => {
@@ -366,25 +432,26 @@ const ManageAccounts = () => {
     }
   };
 
+  // "User Type" column - simplified to a Seller/"-" signal (Agency owner rows keep the label above instead).
+  // Seller = an agency client, or a Pro user with a card on file (no card => not really Pro yet, same
+  // card-gating as the Status column below). Everything else ("signed up" free users) shows "-".
+  const getUserTypeLabel = (user) => {
+    const isSeller = user.isAgencyClient === true || (user.packageType === 'PRO' && user.cardConnected);
+    return isSeller ? 'Seller' : '-';
+  };
+
+  // Row-level Status column: 3-condition model.
+  // 1. Not on Pro (or Pro without a card on file yet) => Signed Up, regardless of card-connected status
+  // 2. Pro + card connected + still in trial => Trial
+  // 3. Pro + card connected + not in trial (i.e. actually paying) => Paid
   const getSubscriptionStatus = (user) => {
-    if (user.isTrialExpired || (user.isInTrialPeriod && user.trialEndsDate && new Date() > new Date(user.trialEndsDate))) {
-      return { color: 'text-blue-500', label: 'Trial Expired' };
+    if (user.packageType !== 'PRO' || !user.cardConnected) {
+      return { color: 'text-gray-500', label: 'Signed Up' };
     }
     if (user.isInTrialPeriod) {
-      return { color: 'text-blue-500', label: 'Trial Active' };
+      return { color: 'text-blue-500', label: 'Trial' };
     }
-    switch (user.subscriptionStatus) {
-      case 'active':
-        return { color: 'text-green-500', label: 'Active' };
-      case 'inactive':
-        return { color: 'text-gray-500', label: 'Inactive' };
-      case 'cancelled':
-        return { color: 'text-red-500', label: 'Cancelled' };
-      case 'past_due':
-        return { color: 'text-gray-400', label: 'Past Due' };
-      default:
-        return { color: 'text-gray-500', label: 'Unknown' };
-    }
+    return { color: 'text-green-500', label: 'Paid' };
   };
 
   const formatDate = (dateString) => {
@@ -476,6 +543,7 @@ const ManageAccounts = () => {
         setDeleteSuccess(`User ${user.firstName} ${user.lastName} (${user.email}) has been deleted successfully.`);
         // Quietly refresh so stat cards/pagination totals stay accurate
         fetchAccounts({ quiet: true });
+        refreshExpandedAgencyClients();
 
         // Clear success message after 5 seconds
         setTimeout(() => {
@@ -542,6 +610,7 @@ const ManageAccounts = () => {
         setCancelSuccess(`Subscription for ${user.firstName} ${user.lastName} (${user.email}) has been cancelled successfully${wasTrialing ? ' (was in trial)' : ''}.`);
         // Quietly refresh so stat cards/pagination totals stay accurate
         fetchAccounts({ quiet: true });
+        refreshExpandedAgencyClients();
 
         // Clear success message after 5 seconds
         setTimeout(() => {
@@ -586,6 +655,7 @@ const ManageAccounts = () => {
         setRefundSuccess(`Refund of ${data.currency?.toUpperCase()} ${(data.amount / 100).toFixed(2)} issued for ${user.firstName} ${user.lastName} (${user.email}).`);
         // Quietly refresh so stat cards/pagination totals stay accurate
         fetchAccounts({ quiet: true });
+        refreshExpandedAgencyClients();
         setTimeout(() => setRefundSuccess(''), 5000);
       } else {
         setRefundError(response.data.message || 'Failed to refund payment');
@@ -635,6 +705,7 @@ const ManageAccounts = () => {
         setTrialSuccess(`Trial for ${user.firstName} ${user.lastName} set to ${days} days (ends ${new Date(data.trialEnd).toLocaleDateString()}).`);
         // Quietly refresh so stat cards/pagination totals stay accurate
         fetchAccounts({ quiet: true });
+        refreshExpandedAgencyClients();
         setTimeout(() => setTrialSuccess(''), 5000);
       } else {
         setTrialError(response.data.message || 'Failed to update trial period');
@@ -692,8 +763,149 @@ const ManageAccounts = () => {
     return group;
   };
 
+  // While any search/filter is active, behave like a normal flat table (agency clients included
+  // directly in results) instead of nesting them under a collapsed agency row - matches the
+  // backend's hideAgencyClients decision in getAllAccounts. The "Agency" type filter is excluded
+  // here on purpose: it's the main way to browse agency owners, so it must keep nesting enabled
+  // (agency clients never have packageType 'AGENCY' themselves, so this filter can't reveal them anyway).
+  const hasActiveFilters = Boolean(
+    searchQuery || brandSearchQuery || (filterType !== 'all' && filterType !== 'AGENCY') || statusCardFilter !== 'all' ||
+    startDate || endDate || spApiFilter !== 'all' || adsFilter !== 'all'
+  );
+
+  // Renders one account row - shared by top-level rows and an agency's nested client rows,
+  // so both look and behave identically (same columns, same actions menu).
+  const renderAccountRow = (user, { isChild = false } = {}) => {
+    const packageInfo = getPackageTypeInfo(user);
+    const statusInfo = getSubscriptionStatus(user);
+    const PackageIcon = packageInfo.icon;
+    const isDropdownOpen = openDropdownId === user._id;
+    // Nesting (chevron + collapsed agency-name display) only applies while browsing with no filters active
+    const isAgencyOwner = !isChild && user.packageType === 'AGENCY' && !hasActiveFilters;
+    const isExpanded = isAgencyOwner && expandedAgencyIds.has(user._id);
+    const isExpandLoading = isAgencyOwner && agencyClientsLoading.has(user._id);
+
+    return (
+      <tr key={user._id} className={`hover:bg-[#1a1a1a] transition-colors ${isChild ? 'bg-[#111318]' : ''}`}>
+        <td className={`px-3 py-2.5 ${isChild ? 'pl-8' : ''}`}>
+          <div className="flex items-center gap-2">
+            {isAgencyOwner && (
+              <button
+                type="button"
+                onClick={() => toggleAgencyExpand(user)}
+                className="p-1 rounded text-gray-400 hover:bg-[#252525] hover:text-gray-300 shrink-0"
+                aria-label={isExpanded ? 'Collapse agency clients' : 'Expand agency clients'}
+                aria-expanded={isExpanded}
+              >
+                {isExpandLoading ? (
+                  <div className="w-3.5 h-3.5 border-2 border-gray-500 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                )}
+              </button>
+            )}
+            <div className="w-8 h-8 rounded-lg bg-[#252525] flex items-center justify-center shrink-0">
+              <span className="text-gray-300 text-xs font-medium">
+                {(user.firstName?.[0] || '') + (user.lastName?.[0] || '')}
+              </span>
+            </div>
+            <div className="min-w-0">
+              {isAgencyOwner ? (
+                <p className="text-sm font-medium text-gray-100 break-words">{user.agencyName || `${user.firstName} ${user.lastName}`}</p>
+              ) : (
+                <p className="text-sm font-medium text-gray-100 break-words">
+                  {user.firstName} {user.lastName}
+                  {user.isInTrialPeriod && <span className="ml-1 text-xs text-gray-500">Trial</span>}
+                </p>
+              )}
+              <p className="text-xs text-gray-500 break-all flex items-center gap-1">
+                <Mail className="w-3 h-3 shrink-0" />{user.email}
+              </p>
+              <p className="text-xs text-gray-500">{user.phone || '—'}</p>
+            </div>
+          </div>
+        </td>
+        <td className="px-2 py-2.5 text-center">
+          {user.packageType === 'AGENCY' ? (
+            <span className={`inline-flex items-center justify-center gap-1 text-xs font-medium ${packageInfo.color} max-w-[9rem] mx-auto text-center`}>
+              <PackageIcon className="w-3 h-3 shrink-0" />{typeColumnLabel(packageInfo.label)}
+            </span>
+          ) : (
+            <span className={`text-xs font-medium ${getUserTypeLabel(user) === 'Seller' ? 'text-yellow-500' : 'text-gray-500'}`}>
+              {getUserTypeLabel(user)}
+            </span>
+          )}
+        </td>
+        <td className="px-2 py-2.5 text-xs text-gray-400">{user.brand || '—'}</td>
+        <td className="px-2 py-2.5 text-center">
+          <span className={`text-xs font-medium ${statusInfo.color}`}>
+            {statusInfo.label}
+          </span>
+        </td>
+        <td className="px-2 py-2.5 text-center text-xs">
+          {getSpApiConnectionStatus(user).connected ? (
+            <Check className="w-4 h-4 text-green-500 inline-block" aria-label="Connected" />
+          ) : (
+            <XIcon className="w-4 h-4 text-red-500 inline-block" aria-label="Not connected" />
+          )}
+        </td>
+        <td className="px-2 py-2.5 text-center text-xs">
+          {getAdsApiConnectionStatus(user).connected ? (
+            <Check className="w-4 h-4 text-green-500 inline-block" aria-label="Connected" />
+          ) : (
+            <XIcon className="w-4 h-4 text-red-500 inline-block" aria-label="Not connected" />
+          )}
+        </td>
+        <td className="px-2 py-2.5 text-center text-xs">
+          {user.cardConnected === true ? (
+            <Check className="w-4 h-4 text-green-500 inline-block" aria-label="Card on file" />
+          ) : user.cardConnected === false ? (
+            <XIcon className="w-4 h-4 text-red-500 inline-block" aria-label="No card on file" />
+          ) : (
+            <span className="text-gray-500">—</span>
+          )}
+        </td>
+        <td className="px-2 py-2.5 text-center text-xs text-gray-500">
+          <p>{formatDate(user.createdAt)}</p>
+          {user.renewalDate && (
+            <p className="text-[10px] text-gray-600 mt-0.5">Renews {formatDate(user.renewalDate)}</p>
+          )}
+        </td>
+        <td className="px-2 py-2.5">
+          <div className="flex items-center justify-center">
+            <button
+              type="button"
+              ref={isDropdownOpen ? openDropdownButtonRef : undefined}
+              onClick={(e) => {
+                if (isDropdownOpen) {
+                  setOpenDropdownId(null);
+                  setDropdownPosition(null);
+                } else {
+                  openDropdownButtonRef.current = e.currentTarget;
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const spaceBelow = window.innerHeight - rect.bottom;
+                  const openAbove = spaceBelow < DROPDOWN_MENU_HEIGHT && rect.top >= spaceBelow;
+                  setDropdownPosition({
+                    left: Math.max(8, rect.right - DROPDOWN_MENU_WIDTH),
+                    top: openAbove ? rect.top - DROPDOWN_MENU_HEIGHT - 4 : rect.bottom + 4,
+                  });
+                  setOpenDropdownId(user._id);
+                }
+              }}
+              className="p-1.5 rounded-lg text-gray-400 hover:bg-[#252525] hover:text-gray-300 disabled:opacity-50"
+              aria-label="Actions"
+              aria-expanded={isDropdownOpen}
+            >
+              <MoreVertical className="w-4 h-4" />
+            </button>
+          </div>
+        </td>
+      </tr>
+    );
+  };
+
   return (
-    <div className="p-4 md:p-6 max-w-[1600px] mx-auto w-full">
+    <div className="p-4 md:p-6 max-w-[1600px] w-full">
           {/* Loading State */}
           {loading && (
             <div className="flex items-center justify-center py-16">
@@ -1108,7 +1320,8 @@ const ManageAccounts = () => {
 
           {/* Actions dropdown (portal so it is not clipped by table overflow) */}
           {openDropdownId && dropdownPosition && (() => {
-            const user = users.find((u) => u._id === openDropdownId);
+            const user = users.find((u) => u._id === openDropdownId)
+              || Object.values(agencyClientsCache).flat().find((u) => u._id === openDropdownId);
             if (!user) return null;
             const canCancel = canCancelSubscription(user);
             return createPortal(
@@ -1215,184 +1428,192 @@ const ManageAccounts = () => {
           {!loading && !error && (
             <>
               <div className="rounded-lg border border-[#252525] bg-[#161b22] p-4 md:p-5 mb-6">
-                <div className="flex flex-col gap-4">
-                  {/* Top row: search + export button */}
-                  <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
-                    <div className="flex-1 relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                <div className="flex flex-col lg:flex-row gap-6">
+                {/* LEFT: search, export, filters, then chips - capped at 50% width */}
+                <div className="flex flex-col gap-2 w-full lg:w-1/2 rounded-lg border border-[#252525] p-3">
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1 min-w-0">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
                       <input
                         type="text"
-                        placeholder="Search by name, email, or brand…"
+                        placeholder="Search name, email, brand…"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full pl-9 pr-3 py-2.5 text-sm border border-[#30363d] bg-[#21262d] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500 placeholder-gray-500"
+                        className="w-full pl-7 pr-2 py-2 text-xs border border-[#30363d] bg-[#21262d] text-gray-100 rounded-md focus:outline-none focus:border-blue-500 placeholder-gray-500"
                       />
                     </div>
-                    <div className="flex-shrink-0 flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={handleExportCsv}
-                        className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors"
-                      >
-                        <Download className="w-4 h-4" />
-                        Export CSV
+                    <button
+                      type="button"
+                      onClick={handleExportCsv}
+                      title="Export CSV"
+                      aria-label="Export CSV"
+                      className="inline-flex items-center justify-center p-2 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-500 transition-colors shrink-0"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <Briefcase className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
+                    <input
+                      type="text"
+                      placeholder="Brand…"
+                      value={brandSearchQuery}
+                      onChange={(e) => setBrandSearchQuery(e.target.value)}
+                      className="w-full pl-7 pr-6 py-2 text-xs border border-[#30363d] bg-[#21262d] text-gray-100 rounded-md focus:outline-none focus:border-blue-500 placeholder-gray-500"
+                    />
+                    {brandSearchQuery && (
+                      <button type="button" onClick={() => setBrandSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-400" aria-label="Clear">
+                        <X className="w-3.5 h-3.5" />
                       </button>
-                    </div>
+                    )}
                   </div>
-                  <div className="flex flex-col lg:flex-row gap-3">
-                    <div className="lg:w-48 relative">
-                      <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                      <input
-                        type="text"
-                        placeholder="Brand…"
-                        value={brandSearchQuery}
-                        onChange={(e) => setBrandSearchQuery(e.target.value)}
-                        className="w-full pl-9 pr-8 py-2.5 text-sm border border-[#30363d] bg-[#21262d] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500 placeholder-gray-500"
-                      />
-                      {brandSearchQuery && (
-                        <button type="button" onClick={() => setBrandSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-400" aria-label="Clear">
-                          <X className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                    <div className="lg:w-44 relative">
-                      <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                      <select
-                        value={filterType}
-                        onChange={(e) => { setFilterType(e.target.value); setStatusCardFilter('all'); setCurrentPage(1); }}
-                        className="w-full pl-9 pr-3 py-2.5 text-sm border border-[#30363d] bg-[#21262d] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500 appearance-none"
-                      >
-                        <option value="all">All types</option>
-                        <option value="LITE">Lite</option>
-                        <option value="PRO">Pro</option>
-                        <option value="AGENCY">Agency</option>
-                      </select>
-                    </div>
+                  <div className="relative">
+                    <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
+                    <select
+                      value={filterType}
+                      onChange={(e) => { setFilterType(e.target.value); setStatusCardFilter('all'); setCurrentPage(1); }}
+                      className="w-full pl-7 pr-2 py-2 text-xs border border-[#30363d] bg-[#21262d] text-gray-100 rounded-md focus:outline-none focus:border-blue-500 appearance-none"
+                    >
+                      <option value="all">All types</option>
+                      <option value="LITE">Lite</option>
+                      <option value="PRO">Pro</option>
+                      <option value="AGENCY">Agency</option>
+                    </select>
                   </div>
-                  <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-end">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <CalendarDays className="w-4 h-4 text-gray-500 shrink-0" />
-                      <input
-                        type="date"
-                        value={startDate}
-                        onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); }}
-                        className="py-2 px-3 text-sm border border-[#30363d] bg-[#21262d] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500"
-                      />
-                      <span className="text-gray-500 text-sm">to</span>
-                      <input
-                        type="date"
-                        value={endDate}
-                        onChange={(e) => { setEndDate(e.target.value); setCurrentPage(1); }}
-                        className="py-2 px-3 text-sm border border-[#30363d] bg-[#21262d] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500"
-                      />
-                      {(startDate || endDate) && (
-                        <button onClick={() => { clearDateFilters(); setCurrentPage(1); }} className="py-2 px-3 text-sm text-gray-400 hover:text-gray-300 rounded-lg border border-[#30363d] hover:bg-[#21262d]">
-                          <X className="w-4 h-4 inline mr-1" /> Clear
-                        </button>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <select
-                        value={spApiFilter}
-                        onChange={(e) => { setSpApiFilter(e.target.value); setCurrentPage(1); }}
-                        className="py-2 px-3 text-sm border border-[#30363d] bg-[#21262d] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500"
-                      >
-                        <option value="all">All SP-API</option>
-                        <option value="connected">SP-API connected</option>
-                        <option value="not-connected">SP-API not connected</option>
-                      </select>
-                      <select
-                        value={adsFilter}
-                        onChange={(e) => { setAdsFilter(e.target.value); setCurrentPage(1); }}
-                        className="py-2 px-3 text-sm border border-[#30363d] bg-[#21262d] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500"
-                      >
-                        <option value="all">All Ads API</option>
-                        <option value="connected">Ads connected</option>
-                        <option value="not-connected">Ads not connected</option>
-                      </select>
-                      {(spApiFilter !== 'all' || adsFilter !== 'all') && (
+                  <div className="flex items-center gap-1.5">
+                    <CalendarDays className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); }}
+                      className="flex-1 min-w-0 py-2 px-1.5 text-[11px] border border-[#30363d] bg-[#21262d] text-gray-100 rounded-md focus:outline-none focus:border-blue-500"
+                    />
+                    <span className="text-gray-500 text-[10px] shrink-0">to</span>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => { setEndDate(e.target.value); setCurrentPage(1); }}
+                      className="flex-1 min-w-0 py-2 px-1.5 text-[11px] border border-[#30363d] bg-[#21262d] text-gray-100 rounded-md focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                  {(startDate || endDate) && (
+                    <button onClick={() => { clearDateFilters(); setCurrentPage(1); }} className="text-[11px] text-gray-400 hover:text-gray-300 rounded-md border border-[#30363d] hover:bg-[#21262d] py-1">
+                      <X className="w-3 h-3 inline mr-1" /> Clear dates
+                    </button>
+                  )}
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={spApiFilter}
+                      onChange={(e) => { setSpApiFilter(e.target.value); setCurrentPage(1); }}
+                      className="flex-1 min-w-0 py-2 px-2 text-xs border border-[#30363d] bg-[#21262d] text-gray-100 rounded-md focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="all">All SP-API</option>
+                      <option value="connected">SP-API connected</option>
+                      <option value="not-connected">SP-API not connected</option>
+                    </select>
+                    <select
+                      value={adsFilter}
+                      onChange={(e) => { setAdsFilter(e.target.value); setCurrentPage(1); }}
+                      className="flex-1 min-w-0 py-2 px-2 text-xs border border-[#30363d] bg-[#21262d] text-gray-100 rounded-md focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="all">All Ads API</option>
+                      <option value="connected">Ads connected</option>
+                      <option value="not-connected">Ads not connected</option>
+                    </select>
+                  </div>
+                  {(spApiFilter !== 'all' || adsFilter !== 'all') && (
+                    <button
+                      onClick={() => { setSpApiFilter('all'); setAdsFilter('all'); setCurrentPage(1); }}
+                      className="text-[11px] text-gray-400 hover:text-gray-300 rounded-md border border-[#30363d] hover:bg-[#21262d] py-1"
+                    >
+                      Clear API
+                    </button>
+                  )}
+
+                  {/* Chips - stacked under the filters, same column */}
+                  <div className="mt-2 pt-3 border-t border-[#252525] flex flex-wrap items-center gap-2">
+                    {(() => {
+                      const isTotalActive = filterType === 'all' && statusCardFilter === 'all';
+                      const chipClass = (active) =>
+                        `inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-colors ${
+                          active
+                            ? 'border-blue-500 bg-blue-500/10 text-blue-300'
+                            : 'border-[#30363d] bg-[#0d0d0d] text-gray-400 hover:border-[#4a4a4a] hover:text-gray-300'
+                        }`;
+                      const chips = [
+                        { label: 'Total', count: stats?.total ?? 0, active: isTotalActive, onClick: () => { setFilterType('all'); setStatusCardFilter('all'); setCurrentPage(1); } },
+                        { label: 'Paid', count: stats?.activeSubscriptions ?? 0, active: statusCardFilter === 'paid', onClick: () => { setStatusCardFilter('paid'); setFilterType('all'); setCurrentPage(1); } },
+                        { label: 'Trial', count: stats?.trialUsers ?? 0, active: statusCardFilter === 'trial', onClick: () => { setStatusCardFilter('trial'); setFilterType('all'); setCurrentPage(1); } },
+                        { label: 'Expired', count: stats?.expiredUsers ?? 0, active: statusCardFilter === 'expired', onClick: () => { setStatusCardFilter('expired'); setFilterType('all'); setCurrentPage(1); } },
+                        { label: 'Cancelled', count: stats?.cancelledSubscriptions ?? 0, active: statusCardFilter === 'cancelled', onClick: () => { setStatusCardFilter('cancelled'); setFilterType('all'); setCurrentPage(1); } },
+                        { label: 'Agency', count: stats?.packageStats?.AGENCY ?? 0, active: filterType === 'AGENCY', onClick: () => { setFilterType('AGENCY'); setStatusCardFilter('all'); setCurrentPage(1); } },
+                      ];
+                      return chips.map((chip) => (
                         <button
-                          onClick={() => { setSpApiFilter('all'); setAdsFilter('all'); setCurrentPage(1); }}
-                          className="py-2 px-3 text-sm text-gray-400 hover:text-gray-300 rounded-lg border border-[#30363d] hover:bg-[#21262d]"
+                          key={chip.label}
+                          type="button"
+                          onClick={chip.onClick}
+                          className={chipClass(chip.active)}
                         >
-                          Clear API
+                          <span>{chip.label}</span>
+                          <span className="tabular-nums font-semibold text-gray-100">{chip.count}</span>
                         </button>
-                      )}
-                    </div>
+                      ));
+                    })()}
                   </div>
+                  {pagination.totalCount > 0 && (
+                    <div className="text-xs text-gray-500">
+                      {searchQuery || brandSearchQuery || filterType !== 'all' || statusCardFilter !== 'all' || startDate || endDate || spApiFilter !== 'all' || adsFilter !== 'all'
+                        ? `${pagination.totalCount} match filters`
+                        : `Showing all ${pagination.totalCount} users`}
+                    </div>
+                  )}
                 </div>
 
-                {/* Stats row - each card is a filter button. Counts are global (unaffected by search/date filters). */}
-                <div className="mt-4 pt-4 border-t border-[#252525] grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
-                  {(() => {
-                    const isTotalActive = filterType === 'all' && statusCardFilter === 'all';
-                    const cardClass = (active) =>
-                      `rounded-lg border px-4 py-3 text-left transition-colors ${
-                        active
-                          ? 'border-blue-500 bg-blue-500/10'
-                          : 'border-[#252525] bg-[#0d0d0d] hover:border-[#3a3a3a]'
-                      }`;
+                {/* RIGHT: users-by-country pie chart, sourced from Stripe billing address */}
+                <div className="flex-1 flex flex-col items-center min-w-0 rounded-lg border border-[#252525] p-3">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2 self-start">Users by Country</p>
+                  {countryStatsLoading ? (
+                    <div className="flex-1 w-full flex items-center justify-center py-12">
+                      <div className="animate-spin rounded-full h-6 w-6 border-2 border-[#333] border-t-blue-500" />
+                    </div>
+                  ) : !countryStats || countryStats.countries.length === 0 ? (
+                    <div className="flex-1 w-full flex items-center justify-center py-12">
+                      <p className="text-xs text-gray-500">No country data available yet</p>
+                    </div>
+                  ) : (() => {
+                    const COUNTRY_PIE_COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#a855f7', '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16', '#ef4444'];
+                    const slices = [...countryStats.countries];
+                    if (countryStats.uncategorized > 0) {
+                      slices.push({ country: 'Unknown', count: countryStats.uncategorized });
+                    }
+                    const chartOptions = {
+                      chart: { type: 'pie', fontFamily: "'Inter', sans-serif" },
+                      labels: slices.map((s) => s.country),
+                      colors: slices.map((s, i) => s.country === 'Unknown' ? '#4b5563' : COUNTRY_PIE_COLORS[i % COUNTRY_PIE_COLORS.length]),
+                      legend: {
+                        position: 'bottom',
+                        labels: { colors: '#9ca3af' },
+                        fontSize: '11px',
+                        markers: { size: 6 },
+                      },
+                      dataLabels: { enabled: false },
+                      stroke: { width: 2, colors: ['#161b22'] },
+                      tooltip: { theme: 'dark' },
+                      responsive: [{ breakpoint: 768, options: { chart: { height: 240, width: 240 } } }],
+                    };
                     return (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => { setFilterType('all'); setStatusCardFilter('all'); setCurrentPage(1); }}
-                          className={cardClass(isTotalActive)}
-                        >
-                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.total ?? 0}</p>
-                          <p className="text-xs text-gray-500">Total</p>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setStatusCardFilter('active'); setFilterType('all'); setCurrentPage(1); }}
-                          className={cardClass(statusCardFilter === 'active')}
-                        >
-                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.activeSubscriptions ?? 0}</p>
-                          <p className="text-xs text-gray-500">Active</p>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setFilterType('PRO'); setStatusCardFilter('all'); setCurrentPage(1); }}
-                          className={cardClass(filterType === 'PRO')}
-                        >
-                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.packageStats?.PRO ?? 0}</p>
-                          <p className="text-xs text-gray-500">Pro</p>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setFilterType('AGENCY'); setStatusCardFilter('all'); setCurrentPage(1); }}
-                          className={cardClass(filterType === 'AGENCY')}
-                        >
-                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.packageStats?.AGENCY ?? 0}</p>
-                          <p className="text-xs text-gray-500">Agency</p>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setStatusCardFilter('trial'); setFilterType('all'); setCurrentPage(1); }}
-                          className={cardClass(statusCardFilter === 'trial')}
-                        >
-                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.trialUsers ?? 0}</p>
-                          <p className="text-xs text-gray-500">Trial</p>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setStatusCardFilter('cancelled'); setFilterType('all'); setCurrentPage(1); }}
-                          className={cardClass(statusCardFilter === 'cancelled')}
-                        >
-                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.cancelledSubscriptions ?? 0}</p>
-                          <p className="text-xs text-gray-500">Cancelled</p>
-                        </button>
-                      </>
+                      <Chart
+                        options={chartOptions}
+                        series={slices.map((s) => s.count)}
+                        type="pie"
+                        width="100%"
+                        height={260}
+                      />
                     );
                   })()}
                 </div>
-                {pagination.totalCount > 0 && (
-                  <div className="mt-3 text-xs text-gray-500">
-                    {searchQuery || brandSearchQuery || filterType !== 'all' || statusCardFilter !== 'all' || startDate || endDate || spApiFilter !== 'all' || adsFilter !== 'all'
-                      ? `${pagination.totalCount} match filters`
-                      : `Showing all ${pagination.totalCount} users`}
-                  </div>
-                )}
+                </div>
               </div>
 
               {/* Table */}
@@ -1402,7 +1623,7 @@ const ManageAccounts = () => {
                     <thead>
                       <tr className="border-b border-[#252525] bg-[#0d0d0d]">
                         <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[180px]">User</th>
-                        <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                        <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">User Type</th>
                         <th className="px-2 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Brand</th>
                         <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                         <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">SpAPI</th>
@@ -1414,101 +1635,24 @@ const ManageAccounts = () => {
                     </thead>
                     <tbody className="divide-y divide-[#252525]">
                       {users.map((user) => {
-                        const packageInfo = getPackageTypeInfo(user);
-                        const statusInfo = getSubscriptionStatus(user);
-                        const PackageIcon = packageInfo.icon;
-                        const isDropdownOpen = openDropdownId === user._id;
+                        const isAgencyOwner = user.packageType === 'AGENCY';
+                        const isExpanded = isAgencyOwner && expandedAgencyIds.has(user._id);
+                        const clients = agencyClientsCache[user._id] || [];
                         return (
-                          <tr key={user._id} className="hover:bg-[#1a1a1a] transition-colors">
-                            <td className="px-3 py-2.5">
-                              <div className="flex items-center gap-2">
-                                <div className="w-8 h-8 rounded-lg bg-[#252525] flex items-center justify-center shrink-0">
-                                  <span className="text-gray-300 text-xs font-medium">
-                                    {(user.firstName?.[0] || '') + (user.lastName?.[0] || '')}
-                                  </span>
-                                </div>
-                                <div className="min-w-0">
-                                  <p className="text-sm font-medium text-gray-100 break-words">
-                                    {user.firstName} {user.lastName}
-                                    {user.isInTrialPeriod && <span className="ml-1 text-xs text-gray-500">Trial</span>}
-                                  </p>
-                                  <p className="text-xs text-gray-500 break-all flex items-center gap-1">
-                                    <Mail className="w-3 h-3 shrink-0" />{user.email}
-                                  </p>
-                                  <p className="text-xs text-gray-500">{user.phone || '—'}</p>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-2 py-2.5 text-center">
-                              <span className={`inline-flex items-center justify-center gap-1 text-xs font-medium ${packageInfo.color} max-w-[9rem] mx-auto text-center`}>
-                                <PackageIcon className="w-3 h-3 shrink-0" />{typeColumnLabel(packageInfo.label)}
-                              </span>
-                            </td>
-                            <td className="px-2 py-2.5 text-xs text-gray-400">{user.brand || '—'}</td>
-                            <td className="px-2 py-2.5 text-center">
-                              <span className={`text-xs font-medium ${statusInfo.color}`}>
-                                {statusInfo.label.split(' ')[0]}
-                              </span>
-                            </td>
-                            <td className="px-2 py-2.5 text-center text-xs">
-                              {getSpApiConnectionStatus(user).connected ? (
-                                <Check className="w-4 h-4 text-green-500 inline-block" aria-label="Connected" />
+                          <React.Fragment key={user._id}>
+                            {renderAccountRow(user)}
+                            {isExpanded && !agencyClientsLoading.has(user._id) && (
+                              clients.length === 0 ? (
+                                <tr>
+                                  <td colSpan={9} className="px-3 py-3 text-center text-xs text-gray-500 bg-[#111318]">
+                                    No clients under this agency
+                                  </td>
+                                </tr>
                               ) : (
-                                <XIcon className="w-4 h-4 text-red-500 inline-block" aria-label="Not connected" />
-                              )}
-                            </td>
-                            <td className="px-2 py-2.5 text-center text-xs">
-                              {getAdsApiConnectionStatus(user).connected ? (
-                                <Check className="w-4 h-4 text-green-500 inline-block" aria-label="Connected" />
-                              ) : (
-                                <XIcon className="w-4 h-4 text-red-500 inline-block" aria-label="Not connected" />
-                              )}
-                            </td>
-                            <td className="px-2 py-2.5 text-center text-xs">
-                              {user.cardConnected === true ? (
-                                <Check className="w-4 h-4 text-green-500 inline-block" aria-label="Card on file" />
-                              ) : user.cardConnected === false ? (
-                                <XIcon className="w-4 h-4 text-red-500 inline-block" aria-label="No card on file" />
-                              ) : (
-                                <span className="text-gray-500">—</span>
-                              )}
-                            </td>
-                            <td className="px-2 py-2.5 text-center text-xs text-gray-500">
-                              <p>{formatDate(user.createdAt)}</p>
-                              {user.renewalDate && (
-                                <p className="text-[10px] text-gray-600 mt-0.5">Renews {formatDate(user.renewalDate)}</p>
-                              )}
-                            </td>
-                            <td className="px-2 py-2.5">
-                              <div className="flex items-center justify-center">
-                                <button
-                                  type="button"
-                                  ref={isDropdownOpen ? openDropdownButtonRef : undefined}
-                                  onClick={(e) => {
-                                    if (isDropdownOpen) {
-                                      setOpenDropdownId(null);
-                                      setDropdownPosition(null);
-                                    } else {
-                                      openDropdownButtonRef.current = e.currentTarget;
-                                      const rect = e.currentTarget.getBoundingClientRect();
-                                      const spaceBelow = window.innerHeight - rect.bottom;
-                                      const openAbove = spaceBelow < DROPDOWN_MENU_HEIGHT && rect.top >= spaceBelow;
-                                      setDropdownPosition({
-                                        left: Math.max(8, rect.right - DROPDOWN_MENU_WIDTH),
-                                        top: openAbove ? rect.top - DROPDOWN_MENU_HEIGHT - 4 : rect.bottom + 4,
-                                      });
-                                      setOpenDropdownId(user._id);
-                                    }
-                                  }}
-                                  className="p-1.5 rounded-lg text-gray-400 hover:bg-[#252525] hover:text-gray-300 disabled:opacity-50"
-                                  aria-label="Actions"
-                                  aria-expanded={isDropdownOpen}
-                                >
-                                  <MoreVertical className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
+                                clients.map((client) => renderAccountRow(client, { isChild: true }))
+                              )
+                            )}
+                          </React.Fragment>
                         );
                       })}
                     </tbody>
