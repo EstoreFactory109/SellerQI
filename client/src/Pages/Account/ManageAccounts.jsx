@@ -884,7 +884,7 @@ const ManageAccounts = () => {
   };
 
   return (
-    <div className="p-4 md:p-6 max-w-[1600px] mx-auto w-full">
+    <div className="p-4 md:p-6 max-w-[1600px] w-full">
           {/* Loading State */}
           {loading && (
             <div className="flex items-center justify-center py-16">
@@ -1407,184 +1407,146 @@ const ManageAccounts = () => {
           {!loading && !error && (
             <>
               <div className="rounded-lg border border-[#252525] bg-[#161b22] p-4 md:p-5 mb-6">
-                <div className="flex flex-col gap-4">
-                  {/* Top row: search + export button */}
-                  <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
-                    <div className="flex-1 relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                {/* Single stacked column: search, export, filters, then chips - capped at 50% width, everything else free */}
+                <div className="flex flex-col gap-2 w-full lg:w-1/2">
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1 min-w-0">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
                       <input
                         type="text"
-                        placeholder="Search by name, email, or brand…"
+                        placeholder="Search name, email, brand…"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full pl-9 pr-3 py-2.5 text-sm border border-[#30363d] bg-[#21262d] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500 placeholder-gray-500"
+                        className="w-full pl-7 pr-2 py-2 text-xs border border-[#30363d] bg-[#21262d] text-gray-100 rounded-md focus:outline-none focus:border-blue-500 placeholder-gray-500"
                       />
                     </div>
-                    <div className="flex-shrink-0 flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={handleExportCsv}
-                        className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors"
-                      >
-                        <Download className="w-4 h-4" />
-                        Export CSV
+                    <button
+                      type="button"
+                      onClick={handleExportCsv}
+                      title="Export CSV"
+                      aria-label="Export CSV"
+                      className="inline-flex items-center justify-center p-2 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-500 transition-colors shrink-0"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <Briefcase className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
+                    <input
+                      type="text"
+                      placeholder="Brand…"
+                      value={brandSearchQuery}
+                      onChange={(e) => setBrandSearchQuery(e.target.value)}
+                      className="w-full pl-7 pr-6 py-2 text-xs border border-[#30363d] bg-[#21262d] text-gray-100 rounded-md focus:outline-none focus:border-blue-500 placeholder-gray-500"
+                    />
+                    {brandSearchQuery && (
+                      <button type="button" onClick={() => setBrandSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-400" aria-label="Clear">
+                        <X className="w-3.5 h-3.5" />
                       </button>
-                    </div>
+                    )}
                   </div>
-                  <div className="flex flex-col lg:flex-row gap-3">
-                    <div className="lg:w-48 relative">
-                      <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                      <input
-                        type="text"
-                        placeholder="Brand…"
-                        value={brandSearchQuery}
-                        onChange={(e) => setBrandSearchQuery(e.target.value)}
-                        className="w-full pl-9 pr-8 py-2.5 text-sm border border-[#30363d] bg-[#21262d] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500 placeholder-gray-500"
-                      />
-                      {brandSearchQuery && (
-                        <button type="button" onClick={() => setBrandSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-400" aria-label="Clear">
-                          <X className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                    <div className="lg:w-44 relative">
-                      <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                      <select
-                        value={filterType}
-                        onChange={(e) => { setFilterType(e.target.value); setStatusCardFilter('all'); setCurrentPage(1); }}
-                        className="w-full pl-9 pr-3 py-2.5 text-sm border border-[#30363d] bg-[#21262d] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500 appearance-none"
-                      >
-                        <option value="all">All types</option>
-                        <option value="LITE">Lite</option>
-                        <option value="PRO">Pro</option>
-                        <option value="AGENCY">Agency</option>
-                      </select>
-                    </div>
+                  <div className="relative">
+                    <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
+                    <select
+                      value={filterType}
+                      onChange={(e) => { setFilterType(e.target.value); setStatusCardFilter('all'); setCurrentPage(1); }}
+                      className="w-full pl-7 pr-2 py-2 text-xs border border-[#30363d] bg-[#21262d] text-gray-100 rounded-md focus:outline-none focus:border-blue-500 appearance-none"
+                    >
+                      <option value="all">All types</option>
+                      <option value="LITE">Lite</option>
+                      <option value="PRO">Pro</option>
+                      <option value="AGENCY">Agency</option>
+                    </select>
                   </div>
-                  <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-end">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <CalendarDays className="w-4 h-4 text-gray-500 shrink-0" />
-                      <input
-                        type="date"
-                        value={startDate}
-                        onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); }}
-                        className="py-2 px-3 text-sm border border-[#30363d] bg-[#21262d] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500"
-                      />
-                      <span className="text-gray-500 text-sm">to</span>
-                      <input
-                        type="date"
-                        value={endDate}
-                        onChange={(e) => { setEndDate(e.target.value); setCurrentPage(1); }}
-                        className="py-2 px-3 text-sm border border-[#30363d] bg-[#21262d] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500"
-                      />
-                      {(startDate || endDate) && (
-                        <button onClick={() => { clearDateFilters(); setCurrentPage(1); }} className="py-2 px-3 text-sm text-gray-400 hover:text-gray-300 rounded-lg border border-[#30363d] hover:bg-[#21262d]">
-                          <X className="w-4 h-4 inline mr-1" /> Clear
-                        </button>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <select
-                        value={spApiFilter}
-                        onChange={(e) => { setSpApiFilter(e.target.value); setCurrentPage(1); }}
-                        className="py-2 px-3 text-sm border border-[#30363d] bg-[#21262d] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500"
-                      >
-                        <option value="all">All SP-API</option>
-                        <option value="connected">SP-API connected</option>
-                        <option value="not-connected">SP-API not connected</option>
-                      </select>
-                      <select
-                        value={adsFilter}
-                        onChange={(e) => { setAdsFilter(e.target.value); setCurrentPage(1); }}
-                        className="py-2 px-3 text-sm border border-[#30363d] bg-[#21262d] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500"
-                      >
-                        <option value="all">All Ads API</option>
-                        <option value="connected">Ads connected</option>
-                        <option value="not-connected">Ads not connected</option>
-                      </select>
-                      {(spApiFilter !== 'all' || adsFilter !== 'all') && (
-                        <button
-                          onClick={() => { setSpApiFilter('all'); setAdsFilter('all'); setCurrentPage(1); }}
-                          className="py-2 px-3 text-sm text-gray-400 hover:text-gray-300 rounded-lg border border-[#30363d] hover:bg-[#21262d]"
-                        >
-                          Clear API
-                        </button>
-                      )}
-                    </div>
+                  <div className="flex items-center gap-1.5">
+                    <CalendarDays className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); }}
+                      className="flex-1 min-w-0 py-2 px-1.5 text-[11px] border border-[#30363d] bg-[#21262d] text-gray-100 rounded-md focus:outline-none focus:border-blue-500"
+                    />
+                    <span className="text-gray-500 text-[10px] shrink-0">to</span>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => { setEndDate(e.target.value); setCurrentPage(1); }}
+                      className="flex-1 min-w-0 py-2 px-1.5 text-[11px] border border-[#30363d] bg-[#21262d] text-gray-100 rounded-md focus:outline-none focus:border-blue-500"
+                    />
                   </div>
-                </div>
+                  {(startDate || endDate) && (
+                    <button onClick={() => { clearDateFilters(); setCurrentPage(1); }} className="text-[11px] text-gray-400 hover:text-gray-300 rounded-md border border-[#30363d] hover:bg-[#21262d] py-1">
+                      <X className="w-3 h-3 inline mr-1" /> Clear dates
+                    </button>
+                  )}
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={spApiFilter}
+                      onChange={(e) => { setSpApiFilter(e.target.value); setCurrentPage(1); }}
+                      className="flex-1 min-w-0 py-2 px-2 text-xs border border-[#30363d] bg-[#21262d] text-gray-100 rounded-md focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="all">All SP-API</option>
+                      <option value="connected">SP-API connected</option>
+                      <option value="not-connected">SP-API not connected</option>
+                    </select>
+                    <select
+                      value={adsFilter}
+                      onChange={(e) => { setAdsFilter(e.target.value); setCurrentPage(1); }}
+                      className="flex-1 min-w-0 py-2 px-2 text-xs border border-[#30363d] bg-[#21262d] text-gray-100 rounded-md focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="all">All Ads API</option>
+                      <option value="connected">Ads connected</option>
+                      <option value="not-connected">Ads not connected</option>
+                    </select>
+                  </div>
+                  {(spApiFilter !== 'all' || adsFilter !== 'all') && (
+                    <button
+                      onClick={() => { setSpApiFilter('all'); setAdsFilter('all'); setCurrentPage(1); }}
+                      className="text-[11px] text-gray-400 hover:text-gray-300 rounded-md border border-[#30363d] hover:bg-[#21262d] py-1"
+                    >
+                      Clear API
+                    </button>
+                  )}
 
-                {/* Stats row - each card is a filter button. Counts are global (unaffected by search/date filters). */}
-                <div className="mt-4 pt-4 border-t border-[#252525] grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
-                  {(() => {
-                    const isTotalActive = filterType === 'all' && statusCardFilter === 'all';
-                    const cardClass = (active) =>
-                      `rounded-lg border px-4 py-3 text-left transition-colors ${
-                        active
-                          ? 'border-blue-500 bg-blue-500/10'
-                          : 'border-[#252525] bg-[#0d0d0d] hover:border-[#3a3a3a]'
-                      }`;
-                    return (
-                      <>
+                  {/* Chips - stacked under the filters, same column */}
+                  <div className="mt-2 pt-3 border-t border-[#252525] flex flex-wrap items-center gap-2">
+                    {(() => {
+                      const isTotalActive = filterType === 'all' && statusCardFilter === 'all';
+                      const chipClass = (active) =>
+                        `inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-colors ${
+                          active
+                            ? 'border-blue-500 bg-blue-500/10 text-blue-300'
+                            : 'border-[#30363d] bg-[#0d0d0d] text-gray-400 hover:border-[#4a4a4a] hover:text-gray-300'
+                        }`;
+                      const chips = [
+                        { label: 'Total', count: stats?.total ?? 0, active: isTotalActive, onClick: () => { setFilterType('all'); setStatusCardFilter('all'); setCurrentPage(1); } },
+                        { label: 'Paid', count: stats?.activeSubscriptions ?? 0, active: statusCardFilter === 'paid', onClick: () => { setStatusCardFilter('paid'); setFilterType('all'); setCurrentPage(1); } },
+                        { label: 'Trial', count: stats?.trialUsers ?? 0, active: statusCardFilter === 'trial', onClick: () => { setStatusCardFilter('trial'); setFilterType('all'); setCurrentPage(1); } },
+                        { label: 'Expired', count: stats?.expiredUsers ?? 0, active: statusCardFilter === 'expired', onClick: () => { setStatusCardFilter('expired'); setFilterType('all'); setCurrentPage(1); } },
+                        { label: 'Cancelled', count: stats?.cancelledSubscriptions ?? 0, active: statusCardFilter === 'cancelled', onClick: () => { setStatusCardFilter('cancelled'); setFilterType('all'); setCurrentPage(1); } },
+                        { label: 'Agency', count: stats?.packageStats?.AGENCY ?? 0, active: filterType === 'AGENCY', onClick: () => { setFilterType('AGENCY'); setStatusCardFilter('all'); setCurrentPage(1); } },
+                      ];
+                      return chips.map((chip) => (
                         <button
+                          key={chip.label}
                           type="button"
-                          onClick={() => { setFilterType('all'); setStatusCardFilter('all'); setCurrentPage(1); }}
-                          className={cardClass(isTotalActive)}
+                          onClick={chip.onClick}
+                          className={chipClass(chip.active)}
                         >
-                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.total ?? 0}</p>
-                          <p className="text-xs text-gray-500">Total</p>
+                          <span>{chip.label}</span>
+                          <span className="tabular-nums font-semibold text-gray-100">{chip.count}</span>
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => { setStatusCardFilter('paid'); setFilterType('all'); setCurrentPage(1); }}
-                          className={cardClass(statusCardFilter === 'paid')}
-                        >
-                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.activeSubscriptions ?? 0}</p>
-                          <p className="text-xs text-gray-500">Paid</p>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setStatusCardFilter('trial'); setFilterType('all'); setCurrentPage(1); }}
-                          className={cardClass(statusCardFilter === 'trial')}
-                        >
-                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.trialUsers ?? 0}</p>
-                          <p className="text-xs text-gray-500">Trial</p>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setStatusCardFilter('expired'); setFilterType('all'); setCurrentPage(1); }}
-                          className={cardClass(statusCardFilter === 'expired')}
-                        >
-                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.expiredUsers ?? 0}</p>
-                          <p className="text-xs text-gray-500">Expired</p>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setStatusCardFilter('cancelled'); setFilterType('all'); setCurrentPage(1); }}
-                          className={cardClass(statusCardFilter === 'cancelled')}
-                        >
-                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.cancelledSubscriptions ?? 0}</p>
-                          <p className="text-xs text-gray-500">Cancelled</p>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setFilterType('AGENCY'); setStatusCardFilter('all'); setCurrentPage(1); }}
-                          className={cardClass(filterType === 'AGENCY')}
-                        >
-                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.packageStats?.AGENCY ?? 0}</p>
-                          <p className="text-xs text-gray-500">Agency</p>
-                        </button>
-                      </>
-                    );
-                  })()}
-                </div>
-                {pagination.totalCount > 0 && (
-                  <div className="mt-3 text-xs text-gray-500">
-                    {searchQuery || brandSearchQuery || filterType !== 'all' || statusCardFilter !== 'all' || startDate || endDate || spApiFilter !== 'all' || adsFilter !== 'all'
-                      ? `${pagination.totalCount} match filters`
-                      : `Showing all ${pagination.totalCount} users`}
+                      ));
+                    })()}
                   </div>
-                )}
+                  {pagination.totalCount > 0 && (
+                    <div className="text-xs text-gray-500">
+                      {searchQuery || brandSearchQuery || filterType !== 'all' || statusCardFilter !== 'all' || startDate || endDate || spApiFilter !== 'all' || adsFilter !== 'all'
+                        ? `${pagination.totalCount} match filters`
+                        : `Showing all ${pagination.totalCount} users`}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Table */}

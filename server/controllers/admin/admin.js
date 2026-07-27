@@ -258,7 +258,7 @@ const buildAccountLookupStages = () => ([
             let: { uid: '$_id' },
             pipeline: [
                 { $match: { $expr: { $eq: ['$userId', '$$uid'] } } },
-                { $project: { paymentGateway: 1, stripeCustomerId: 1, nextBillingDate: 1, currentPeriodEnd: 1 } }
+                { $project: { paymentGateway: 1, stripeCustomerId: 1, nextBillingDate: 1, currentPeriodEnd: 1, paymentStatus: 1 } }
             ],
             as: 'subscriptionData'
         }
@@ -287,14 +287,23 @@ const mapAccountFields = (account) => ({
 });
 
 /**
- * Bounded live Stripe lookup for "card connected", mutating each account in place.
- * Only ever call this on an already-bounded list (a single page, or one agency's clients)
- * to avoid firing a Stripe call per user across the whole table.
+ * Bounded card-connected check, mutating each account in place. Only ever call this on an
+ * already-bounded list (a single page, or one agency's clients) to avoid firing a Stripe
+ * call per user across the whole table.
+ *
+ * Stripe subscriptions get a live paymentMethods lookup. Razorpay has no equivalent
+ * "list saved payment methods" concept in this codebase's integration, so a Razorpay
+ * subscription is treated as card-connected once it has a recorded successful payment
+ * (paymentStatus 'paid') - if Razorpay charged them at least once, a valid instrument
+ * was used. paymentGateway is compared case-insensitively: RazorpayService writes it
+ * inconsistently as both 'razorpay' and 'RAZORPAY' across the codebase.
  */
 const attachCardConnectedStatus = async (accounts) => {
     await Promise.all(accounts.map(async (account) => {
         const subInfo = account.subscriptionInfo;
-        if (subInfo?.paymentGateway === 'stripe' && subInfo?.stripeCustomerId) {
+        const gateway = subInfo?.paymentGateway?.toLowerCase();
+
+        if (gateway === 'stripe' && subInfo?.stripeCustomerId) {
             try {
                 const cardStatus = await StripeService.getCardConnectionStatus(subInfo.stripeCustomerId);
                 account.cardConnected = cardStatus.connected;
@@ -304,6 +313,8 @@ const attachCardConnectedStatus = async (accounts) => {
                 logger.error(`Failed to fetch card status for stripeCustomerId ${subInfo.stripeCustomerId}: ${error.message}`);
                 account.cardConnected = null; // unknown - Stripe call failed
             }
+        } else if (gateway === 'razorpay') {
+            account.cardConnected = subInfo.paymentStatus === 'paid';
         } else {
             account.cardConnected = false;
         }
@@ -438,71 +449,106 @@ const buildAccountsPipeline = (filters) => {
 };
 
 /**
+ * Resolves live card-connected status for every Pro-plan user, keyed by userId. "Paid" and
+ * "Trial" both require a card on file to truly qualify (see getSubscriptionStatus's 3-condition
+ * model on the frontend) - a live Stripe/Razorpay-derived fact Mongo can't query directly.
+ * Computed once per request and shared between the stat card counts (getAccountsStats) and the
+ * actual Paid/Trial filtered rows (getAllAccounts), so the same customer's card is never checked
+ * twice - and so the card's number can never disagree with what clicking it actually returns.
+ */
+const getProCardConnectedMap = async () => {
+    const proUsers = await UserModel.aggregate([
+        { $match: { packageType: 'PRO' } },
+        { $project: { isInTrialPeriod: 1 } },
+        {
+            $lookup: {
+                from: 'subscriptions',
+                let: { uid: '$_id' },
+                pipeline: [
+                    { $match: { $expr: { $eq: ['$userId', '$$uid'] } } },
+                    { $project: { paymentGateway: 1, stripeCustomerId: 1, paymentStatus: 1 } }
+                ],
+                as: 'subscriptionData'
+            }
+        },
+        { $addFields: { subscriptionInfo: { $arrayElemAt: ['$subscriptionData', 0] } } },
+        { $project: { subscriptionData: 0 } }
+    ]);
+
+    await attachCardConnectedStatus(proUsers);
+
+    const map = new Map();
+    proUsers.forEach(user => {
+        map.set(String(user._id), { cardConnected: user.cardConnected === true, isInTrialPeriod: user.isInTrialPeriod === true });
+    });
+    return map;
+};
+
+/**
  * Computes global account stats (unaffected by any list filters/pagination) via
  * a single cheap $group aggregation instead of looping over loaded documents.
+ * @param {Promise<Map>} proCardMapPromise - shared result of getProCardConnectedMap()
  */
-const getAccountsStats = async () => {
+const getAccountsStats = async (proCardMapPromise) => {
     const now = new Date();
     // Kept in sync with buildAccountsPipeline's trialExpiredClause/trialActiveClause above
     const isTrialExpiredExpr = {
         $and: [{ $eq: ['$isInTrialPeriod', true] }, { $ne: ['$trialEndsDate', null] }, { $lt: ['$trialEndsDate', now] }]
     };
-    const isTrialActiveExpr = {
-        $and: [
-            { $eq: ['$isInTrialPeriod', true] },
-            { $or: [{ $eq: ['$trialEndsDate', null] }, { $gte: ['$trialEndsDate', now] }] }
-        ]
-    };
 
-    const [result] = await UserModel.aggregate([
-        {
-            $group: {
-                _id: null,
-                total: { $sum: 1 },
-                verified: { $sum: { $cond: ['$isVerified', 1, 0] } },
-                unverified: { $sum: { $cond: ['$isVerified', 0, 1] } },
-                // Paid: a Pro user who isn't (still) in a trial - kept in sync with buildAccountsPipeline's 'paid' statusFilter above
-                activeSubscriptions: {
-                    $sum: {
-                        $cond: [
-                            { $and: [{ $eq: ['$packageType', 'PRO'] }, { $ne: ['$isInTrialPeriod', true] }] },
-                            1, 0
-                        ]
-                    }
-                },
-                inactiveSubscriptions: { $sum: { $cond: [{ $eq: ['$subscriptionStatus', 'inactive'] }, 1, 0] } },
-                cancelledSubscriptions: { $sum: { $cond: [{ $eq: ['$subscriptionStatus', 'cancelled'] }, 1, 0] } },
-                // Expired: paid plan lapsed (past_due) OR a trial ended without converting - not a cancellation either way
-                expiredUsers: {
-                    $sum: { $cond: [{ $or: [{ $eq: ['$subscriptionStatus', 'past_due'] }, isTrialExpiredExpr] }, 1, 0] }
-                },
-                trialUsers: { $sum: { $cond: [isTrialActiveExpr, 1, 0] } },
-                LITE: { $sum: { $cond: [{ $eq: ['$packageType', 'LITE'] }, 1, 0] } },
-                PRO: { $sum: { $cond: [{ $eq: ['$packageType', 'PRO'] }, 1, 0] } },
-                AGENCY: { $sum: { $cond: [{ $eq: ['$packageType', 'AGENCY'] }, 1, 0] } },
-                accessUser: { $sum: { $cond: [{ $eq: ['$accessType', 'user'] }, 1, 0] } },
-                accessSuperAdmin: { $sum: { $cond: [{ $eq: ['$accessType', 'superAdmin'] }, 1, 0] } }
+    const [result, proCardMap] = await Promise.all([
+        UserModel.aggregate([
+            {
+                $group: {
+                    _id: null,
+                    total: { $sum: 1 },
+                    verified: { $sum: { $cond: ['$isVerified', 1, 0] } },
+                    unverified: { $sum: { $cond: ['$isVerified', 0, 1] } },
+                    inactiveSubscriptions: { $sum: { $cond: [{ $eq: ['$subscriptionStatus', 'inactive'] }, 1, 0] } },
+                    cancelledSubscriptions: { $sum: { $cond: [{ $eq: ['$subscriptionStatus', 'cancelled'] }, 1, 0] } },
+                    // Expired: paid plan lapsed (past_due) OR a trial ended without converting - not a cancellation either way
+                    expiredUsers: {
+                        $sum: { $cond: [{ $or: [{ $eq: ['$subscriptionStatus', 'past_due'] }, isTrialExpiredExpr] }, 1, 0] }
+                    },
+                    LITE: { $sum: { $cond: [{ $eq: ['$packageType', 'LITE'] }, 1, 0] } },
+                    PRO: { $sum: { $cond: [{ $eq: ['$packageType', 'PRO'] }, 1, 0] } },
+                    AGENCY: { $sum: { $cond: [{ $eq: ['$packageType', 'AGENCY'] }, 1, 0] } },
+                    accessUser: { $sum: { $cond: [{ $eq: ['$accessType', 'user'] }, 1, 0] } },
+                    accessSuperAdmin: { $sum: { $cond: [{ $eq: ['$accessType', 'superAdmin'] }, 1, 0] } }
+                }
             }
-        }
+        ]),
+        proCardMapPromise
     ]);
+    const stats = result[0];
+
+    // Paid/Trial: derived from the live-checked map, not a plain Mongo count - a Pro user only
+    // counts once they actually have a card on file (see getProCardConnectedMap above)
+    let activeSubscriptions = 0;
+    let trialUsers = 0;
+    for (const { cardConnected, isInTrialPeriod } of proCardMap.values()) {
+        if (!cardConnected) continue;
+        if (isInTrialPeriod) trialUsers++;
+        else activeSubscriptions++;
+    }
 
     return {
-        total: result?.total || 0,
-        verified: result?.verified || 0,
-        unverified: result?.unverified || 0,
-        activeSubscriptions: result?.activeSubscriptions || 0,
-        inactiveSubscriptions: result?.inactiveSubscriptions || 0,
-        cancelledSubscriptions: result?.cancelledSubscriptions || 0,
-        expiredUsers: result?.expiredUsers || 0,
-        trialUsers: result?.trialUsers || 0,
+        total: stats?.total || 0,
+        verified: stats?.verified || 0,
+        unverified: stats?.unverified || 0,
+        activeSubscriptions,
+        inactiveSubscriptions: stats?.inactiveSubscriptions || 0,
+        cancelledSubscriptions: stats?.cancelledSubscriptions || 0,
+        expiredUsers: stats?.expiredUsers || 0,
+        trialUsers,
         packageStats: {
-            LITE: result?.LITE || 0,
-            PRO: result?.PRO || 0,
-            AGENCY: result?.AGENCY || 0
+            LITE: stats?.LITE || 0,
+            PRO: stats?.PRO || 0,
+            AGENCY: stats?.AGENCY || 0
         },
         accessTypeStats: {
-            user: result?.accessUser || 0,
-            superAdmin: result?.accessSuperAdmin || 0
+            user: stats?.accessUser || 0,
+            superAdmin: stats?.accessSuperAdmin || 0
         }
     };
 };
@@ -552,50 +598,90 @@ const getAllAccounts = asyncHandler(async (req, res) => {
         // This exclusion also never applies to the legacy unpaginated callers (e.g. AdminUserLogs).
         const pipeline = buildAccountsPipeline({ packageType, statusFilter, startDate, endDate, brand, search, spApiFilter, adsFilter, hideAgencyClients: isPaginated && !hasActiveFilters });
 
-        let pageNum, limitNum;
-        if (isPaginated) {
-            pageNum = Math.max(1, parseInt(page) || 1);
-            limitNum = Math.min(100, Math.max(1, parseInt(limit) || 10));
-            const skip = (pageNum - 1) * limitNum;
-            pipeline.push({
-                $facet: {
-                    data: [{ $skip: skip }, { $limit: limitNum }],
-                    totalCount: [{ $count: 'count' }]
-                }
-            });
-        }
+        const pageNum = isPaginated ? Math.max(1, parseInt(page) || 1) : null;
+        const limitNum = isPaginated ? Math.min(100, Math.max(1, parseInt(limit) || 10)) : null;
+
+        // "Paid" and "Trial" both require the row to actually have a card on file to qualify (see the
+        // frontend's 3-condition Status model) - that's a live Stripe/Razorpay-derived signal, not
+        // something Mongo can filter on directly. So for those two, fetch every already-matched
+        // candidate, resolve card status for each, keep only the ones that truly qualify, and
+        // paginate in-memory - otherwise the card's count/filtered rows can disagree with what the
+        // Status column actually displays (e.g. a Pro/not-trialing row with no card would match the
+        // DB-level query but should NOT count as "Paid"). Every other filter keeps the cheap
+        // DB-level $facet skip/limit pagination, since it doesn't depend on live card status.
+        const needsCardConnectedFilter = isPaginated && (statusFilter === 'paid' || statusFilter === 'trial');
+
+        // Shared, computed once per request: live card-connected status for every Pro user, reused
+        // by both the Paid/Trial stat card counts (getAccountsStats) and the filtered rows below,
+        // so the same customer's card is never checked twice and the two can never disagree.
+        const proCardMapPromise = getProCardConnectedMap();
+
+        const fetchPage = async () => {
+            if (needsCardConnectedFilter) {
+                const [candidates, proCardMap] = await Promise.all([
+                    UserModel.aggregate(pipeline),
+                    proCardMapPromise
+                ]);
+                const candidatesWithFields = candidates.map(mapAccountFields).map(account => {
+                    account.cardConnected = proCardMap.get(String(account._id))?.cardConnected ?? false;
+                    return account;
+                });
+                const qualifying = candidatesWithFields.filter(account => account.cardConnected === true);
+
+                const skip = (pageNum - 1) * limitNum;
+                return {
+                    accounts: qualifying.slice(skip, skip + limitNum),
+                    pagination: {
+                        currentPage: pageNum,
+                        limit: limitNum,
+                        totalCount: qualifying.length,
+                        totalPages: Math.max(1, Math.ceil(qualifying.length / limitNum))
+                    },
+                    alreadyProcessed: true
+                };
+            }
+
+            if (isPaginated) {
+                const skip = (pageNum - 1) * limitNum;
+                const facetPipeline = [
+                    ...pipeline,
+                    { $facet: { data: [{ $skip: skip }, { $limit: limitNum }], totalCount: [{ $count: 'count' }] } }
+                ];
+                const [result] = await UserModel.aggregate(facetPipeline);
+                const totalCount = result?.totalCount?.[0]?.count || 0;
+                return {
+                    accounts: result?.data || [],
+                    pagination: {
+                        currentPage: pageNum,
+                        limit: limitNum,
+                        totalCount,
+                        totalPages: Math.max(1, Math.ceil(totalCount / limitNum))
+                    },
+                    alreadyProcessed: false
+                };
+            }
+
+            return { accounts: await UserModel.aggregate(pipeline), pagination: null, alreadyProcessed: false };
+        };
 
         // PERFORMANCE OPTIMIZATION: fetch the accounts page and the global stats in parallel
-        const [aggregateResult, stats] = await Promise.all([
-            UserModel.aggregate(pipeline),
-            getAccountsStats()
+        const [{ accounts, pagination, alreadyProcessed }, stats] = await Promise.all([
+            fetchPage(),
+            getAccountsStats(proCardMapPromise)
         ]);
 
-        let accounts;
-        let pagination = null;
-        if (isPaginated) {
-            accounts = aggregateResult[0]?.data || [];
-            const totalCount = aggregateResult[0]?.totalCount?.[0]?.count || 0;
-            pagination = {
-                currentPage: pageNum,
-                limit: limitNum,
-                totalCount,
-                totalPages: Math.max(1, Math.ceil(totalCount / limitNum))
-            };
-        } else {
-            accounts = aggregateResult;
-        }
+        // Transform the data to include additional computed fields (already done above for the
+        // card-connected-filtered path, to avoid re-running the live card check a second time here)
+        const accountsWithStats = alreadyProcessed ? accounts : accounts.map(mapAccountFields);
 
-        // Transform the data to include additional computed fields
-        // Since we used aggregation, sellerCentral/subscriptionInfo are already trimmed
-        const accountsWithStats = accounts.map(mapAccountFields);
-
-        // Card-connected: bounded live Stripe lookup, only for the current page's rows
-        // (never for the unpaginated legacy path, to avoid firing a Stripe call per user)
-        if (isPaginated) {
-            await attachCardConnectedStatus(accountsWithStats);
-        } else {
-            accountsWithStats.forEach(account => { account.cardConnected = false; });
+        if (!alreadyProcessed) {
+            // Card-connected: bounded live Stripe/Razorpay lookup, only for the current page's rows
+            // (never for the unpaginated legacy path, to avoid firing a check call per user)
+            if (isPaginated) {
+                await attachCardConnectedStatus(accountsWithStats);
+            } else {
+                accountsWithStats.forEach(account => { account.cardConnected = false; });
+            }
         }
 
         const responseData = {
