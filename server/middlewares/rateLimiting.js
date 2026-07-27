@@ -27,7 +27,33 @@ function createRedisStore(windowMs) {
     // Cache for Redis client (lazy initialization)
     let redisClientCache = null;
     let redisUnavailable = false;
-    
+
+    // In-memory fallback used whenever Redis is unavailable/erroring, so increment() below
+    // NEVER returns undefined. express-rate-limit does NOT fall back to its own memory store
+    // if a custom store returns undefined - it unconditionally does `incrementResult.totalHits`,
+    // which throws "Cannot read properties of undefined (reading 'totalHits')" and crashes the
+    // request (this is exactly what was happening on /admin-login whenever Redis was down).
+    const memoryHits = new Map(); // key -> { count, resetTime }
+    const sweepInterval = setInterval(() => {
+        const now = Date.now();
+        for (const [key, value] of memoryHits) {
+            if (value.resetTime.getTime() <= now) memoryHits.delete(key);
+        }
+    }, windowMs);
+    sweepInterval.unref?.();
+
+    function incrementMemory(key) {
+        const now = Date.now();
+        const existing = memoryHits.get(key);
+        if (!existing || existing.resetTime.getTime() <= now) {
+            const resetTime = new Date(now + windowMs);
+            memoryHits.set(key, { count: 1, resetTime });
+            return { totalHits: 1, resetTime };
+        }
+        existing.count += 1;
+        return { totalHits: existing.count, resetTime: existing.resetTime };
+    }
+
     /**
      * Get Redis client lazily (only when needed)
      * This allows Redis to be connected after middleware initialization
@@ -64,14 +90,12 @@ function createRedisStore(windowMs) {
     return {
         async increment(key) {
             const redisClient = getRedisClientLazy();
-            
-            // If Redis is not available, return undefined to let express-rate-limit use memory store
+
+            // Redis not available yet - use the in-memory fallback so rate limiting still applies
             if (!redisClient) {
-                // Return undefined to signal that this store can't handle the request
-                // express-rate-limit will fall back to its default memory store
-                return undefined;
+                return incrementMemory(key);
             }
-            
+
             try {
                 const count = await redisClient.incr(key);
                 if (count === 1) {
@@ -82,21 +106,25 @@ function createRedisStore(windowMs) {
                 // Get TTL to calculate reset time
                 const ttl = await redisClient.ttl(key);
                 const resetTime = new Date(Date.now() + (ttl > 0 ? ttl * 1000 : windowMs));
-                
+
                 return {
                     totalHits: count,
                     resetTime: resetTime
                 };
             } catch (error) {
                 logger.error('Redis rate limit store error:', error);
-                // If Redis fails during operation, return undefined to fall back to memory store
-                return undefined;
+                // Redis call failed - fall back to memory so the request is still rate-limited
+                return incrementMemory(key);
             }
         },
         async decrement(key) {
             const redisClient = getRedisClientLazy();
-            if (!redisClient) return;
-            
+            if (!redisClient) {
+                const existing = memoryHits.get(key);
+                if (existing && existing.count > 0) existing.count -= 1;
+                return;
+            }
+
             try {
                 await redisClient.decr(key);
             } catch (error) {
@@ -104,9 +132,10 @@ function createRedisStore(windowMs) {
             }
         },
         async resetKey(key) {
+            memoryHits.delete(key);
             const redisClient = getRedisClientLazy();
             if (!redisClient) return;
-            
+
             try {
                 await redisClient.del(key);
             } catch (error) {
@@ -117,6 +146,8 @@ function createRedisStore(windowMs) {
             // Optional cleanup
             redisClientCache = null;
             redisUnavailable = false;
+            clearInterval(sweepInterval);
+            memoryHits.clear();
         }
     };
 }

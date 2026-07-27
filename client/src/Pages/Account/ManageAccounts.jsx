@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { 
-  ChevronLeft, 
-  ChevronRight, 
-  Users, 
+import {
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+  Users,
   Search, 
   Filter, 
   LogIn,
@@ -123,11 +124,14 @@ const ManageAccounts = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [stats, setStats] = useState(null);
-  const [statusCardFilter, setStatusCardFilter] = useState('all'); // 'all' | 'active' | 'trial' | 'cancelled' - driven by stat cards
+  const [statusCardFilter, setStatusCardFilter] = useState('all'); // 'all' | 'paid' | 'trial' | 'expired' | 'cancelled' - driven by stat cards
   const [pagination, setPagination] = useState({ currentPage: 1, totalPages: 1, totalCount: 0, limit: ITEMS_PER_PAGE });
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [debouncedBrandQuery, setDebouncedBrandQuery] = useState('');
   const isFirstFilterRun = useRef(true);
+  const [expandedAgencyIds, setExpandedAgencyIds] = useState(new Set());
+  const [agencyClientsCache, setAgencyClientsCache] = useState({}); // { [agencyUserId]: clientRow[] }
+  const [agencyClientsLoading, setAgencyClientsLoading] = useState(new Set());
   const [loginLoadingUsers, setLoginLoadingUsers] = useState(new Set());
   const [loginError, setLoginError] = useState('');
   const [deletingUsers, setDeletingUsers] = useState(new Set());
@@ -307,6 +311,47 @@ const ManageAccounts = () => {
     fetchAccounts({ quiet: true });
   }, [currentPage, debouncedSearchQuery, debouncedBrandQuery, filterType, statusCardFilter, startDate, endDate, spApiFilter, adsFilter]);
 
+  // Fetch (or re-fetch) the client list for one agency and store it in the cache
+  const fetchAgencyClients = async (agencyId) => {
+    setAgencyClientsLoading(prev => new Set([...prev, agencyId]));
+    try {
+      const response = await axiosInstance.get(`/app/auth/admin/accounts/${agencyId}/clients`);
+      if (response.data.statusCode === 200) {
+        setAgencyClientsCache(prev => ({ ...prev, [agencyId]: response.data.data.clients || [] }));
+      }
+    } catch (error) {
+      console.error('Failed to fetch agency clients:', error);
+    } finally {
+      setAgencyClientsLoading(prev => {
+        const next = new Set(prev);
+        next.delete(agencyId);
+        return next;
+      });
+    }
+  };
+
+  const toggleAgencyExpand = (agencyUser) => {
+    const id = agencyUser._id;
+    if (expandedAgencyIds.has(id)) {
+      setExpandedAgencyIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      return;
+    }
+    setExpandedAgencyIds(prev => new Set([...prev, id]));
+    if (!agencyClientsCache[id]) {
+      fetchAgencyClients(id);
+    }
+  };
+
+  // Keep any already-expanded agency's client list fresh after an action (delete/cancel/refund/trial)
+  // is performed on one of its clients - mirrors the quiet fetchAccounts() refresh used elsewhere.
+  const refreshExpandedAgencyClients = () => {
+    expandedAgencyIds.forEach(id => fetchAgencyClients(id));
+  };
+
   // Close dropdown when clicking outside (portal menu or trigger button)
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -366,22 +411,24 @@ const ManageAccounts = () => {
     }
   };
 
+  // Labels here are kept in sync with the stat card names above (Paid/Trial/Expired/Cancelled)
   const getSubscriptionStatus = (user) => {
+    // A trial that ended without converting is treated as Expired, same as a lapsed paid plan
     if (user.isTrialExpired || (user.isInTrialPeriod && user.trialEndsDate && new Date() > new Date(user.trialEndsDate))) {
-      return { color: 'text-blue-500', label: 'Trial Expired' };
+      return { color: 'text-gray-400', label: 'Expired' };
     }
     if (user.isInTrialPeriod) {
-      return { color: 'text-blue-500', label: 'Trial Active' };
+      return { color: 'text-blue-500', label: 'Trial' };
     }
     switch (user.subscriptionStatus) {
       case 'active':
-        return { color: 'text-green-500', label: 'Active' };
+        return { color: 'text-green-500', label: 'Paid' };
       case 'inactive':
         return { color: 'text-gray-500', label: 'Inactive' };
       case 'cancelled':
         return { color: 'text-red-500', label: 'Cancelled' };
       case 'past_due':
-        return { color: 'text-gray-400', label: 'Past Due' };
+        return { color: 'text-gray-400', label: 'Expired' };
       default:
         return { color: 'text-gray-500', label: 'Unknown' };
     }
@@ -476,6 +523,7 @@ const ManageAccounts = () => {
         setDeleteSuccess(`User ${user.firstName} ${user.lastName} (${user.email}) has been deleted successfully.`);
         // Quietly refresh so stat cards/pagination totals stay accurate
         fetchAccounts({ quiet: true });
+        refreshExpandedAgencyClients();
 
         // Clear success message after 5 seconds
         setTimeout(() => {
@@ -542,6 +590,7 @@ const ManageAccounts = () => {
         setCancelSuccess(`Subscription for ${user.firstName} ${user.lastName} (${user.email}) has been cancelled successfully${wasTrialing ? ' (was in trial)' : ''}.`);
         // Quietly refresh so stat cards/pagination totals stay accurate
         fetchAccounts({ quiet: true });
+        refreshExpandedAgencyClients();
 
         // Clear success message after 5 seconds
         setTimeout(() => {
@@ -586,6 +635,7 @@ const ManageAccounts = () => {
         setRefundSuccess(`Refund of ${data.currency?.toUpperCase()} ${(data.amount / 100).toFixed(2)} issued for ${user.firstName} ${user.lastName} (${user.email}).`);
         // Quietly refresh so stat cards/pagination totals stay accurate
         fetchAccounts({ quiet: true });
+        refreshExpandedAgencyClients();
         setTimeout(() => setRefundSuccess(''), 5000);
       } else {
         setRefundError(response.data.message || 'Failed to refund payment');
@@ -635,6 +685,7 @@ const ManageAccounts = () => {
         setTrialSuccess(`Trial for ${user.firstName} ${user.lastName} set to ${days} days (ends ${new Date(data.trialEnd).toLocaleDateString()}).`);
         // Quietly refresh so stat cards/pagination totals stay accurate
         fetchAccounts({ quiet: true });
+        refreshExpandedAgencyClients();
         setTimeout(() => setTrialSuccess(''), 5000);
       } else {
         setTrialError(response.data.message || 'Failed to update trial period');
@@ -690,6 +741,141 @@ const ManageAccounts = () => {
     }
 
     return group;
+  };
+
+  // While any search/filter is active, behave like a normal flat table (agency clients included
+  // directly in results) instead of nesting them under a collapsed agency row - matches the
+  // backend's hideAgencyClients decision in getAllAccounts. The "Agency" type filter is excluded
+  // here on purpose: it's the main way to browse agency owners, so it must keep nesting enabled
+  // (agency clients never have packageType 'AGENCY' themselves, so this filter can't reveal them anyway).
+  const hasActiveFilters = Boolean(
+    searchQuery || brandSearchQuery || (filterType !== 'all' && filterType !== 'AGENCY') || statusCardFilter !== 'all' ||
+    startDate || endDate || spApiFilter !== 'all' || adsFilter !== 'all'
+  );
+
+  // Renders one account row - shared by top-level rows and an agency's nested client rows,
+  // so both look and behave identically (same columns, same actions menu).
+  const renderAccountRow = (user, { isChild = false } = {}) => {
+    const packageInfo = getPackageTypeInfo(user);
+    const statusInfo = getSubscriptionStatus(user);
+    const PackageIcon = packageInfo.icon;
+    const isDropdownOpen = openDropdownId === user._id;
+    // Nesting (chevron + collapsed agency-name display) only applies while browsing with no filters active
+    const isAgencyOwner = !isChild && user.packageType === 'AGENCY' && !hasActiveFilters;
+    const isExpanded = isAgencyOwner && expandedAgencyIds.has(user._id);
+    const isExpandLoading = isAgencyOwner && agencyClientsLoading.has(user._id);
+
+    return (
+      <tr key={user._id} className={`hover:bg-[#1a1a1a] transition-colors ${isChild ? 'bg-[#111318]' : ''}`}>
+        <td className={`px-3 py-2.5 ${isChild ? 'pl-8' : ''}`}>
+          <div className="flex items-center gap-2">
+            {isAgencyOwner && (
+              <button
+                type="button"
+                onClick={() => toggleAgencyExpand(user)}
+                className="p-1 rounded text-gray-400 hover:bg-[#252525] hover:text-gray-300 shrink-0"
+                aria-label={isExpanded ? 'Collapse agency clients' : 'Expand agency clients'}
+                aria-expanded={isExpanded}
+              >
+                {isExpandLoading ? (
+                  <div className="w-3.5 h-3.5 border-2 border-gray-500 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                )}
+              </button>
+            )}
+            <div className="w-8 h-8 rounded-lg bg-[#252525] flex items-center justify-center shrink-0">
+              <span className="text-gray-300 text-xs font-medium">
+                {(user.firstName?.[0] || '') + (user.lastName?.[0] || '')}
+              </span>
+            </div>
+            <div className="min-w-0">
+              {isAgencyOwner ? (
+                <p className="text-sm font-medium text-gray-100 break-words">{user.agencyName || `${user.firstName} ${user.lastName}`}</p>
+              ) : (
+                <p className="text-sm font-medium text-gray-100 break-words">
+                  {user.firstName} {user.lastName}
+                  {user.isInTrialPeriod && <span className="ml-1 text-xs text-gray-500">Trial</span>}
+                </p>
+              )}
+              <p className="text-xs text-gray-500 break-all flex items-center gap-1">
+                <Mail className="w-3 h-3 shrink-0" />{user.email}
+              </p>
+              <p className="text-xs text-gray-500">{user.phone || '—'}</p>
+            </div>
+          </div>
+        </td>
+        <td className="px-2 py-2.5 text-center">
+          <span className={`inline-flex items-center justify-center gap-1 text-xs font-medium ${packageInfo.color} max-w-[9rem] mx-auto text-center`}>
+            <PackageIcon className="w-3 h-3 shrink-0" />{typeColumnLabel(packageInfo.label)}
+          </span>
+        </td>
+        <td className="px-2 py-2.5 text-xs text-gray-400">{user.brand || '—'}</td>
+        <td className="px-2 py-2.5 text-center">
+          <span className={`text-xs font-medium ${statusInfo.color}`}>
+            {statusInfo.label.split(' ')[0]}
+          </span>
+        </td>
+        <td className="px-2 py-2.5 text-center text-xs">
+          {getSpApiConnectionStatus(user).connected ? (
+            <Check className="w-4 h-4 text-green-500 inline-block" aria-label="Connected" />
+          ) : (
+            <XIcon className="w-4 h-4 text-red-500 inline-block" aria-label="Not connected" />
+          )}
+        </td>
+        <td className="px-2 py-2.5 text-center text-xs">
+          {getAdsApiConnectionStatus(user).connected ? (
+            <Check className="w-4 h-4 text-green-500 inline-block" aria-label="Connected" />
+          ) : (
+            <XIcon className="w-4 h-4 text-red-500 inline-block" aria-label="Not connected" />
+          )}
+        </td>
+        <td className="px-2 py-2.5 text-center text-xs">
+          {user.cardConnected === true ? (
+            <Check className="w-4 h-4 text-green-500 inline-block" aria-label="Card on file" />
+          ) : user.cardConnected === false ? (
+            <XIcon className="w-4 h-4 text-red-500 inline-block" aria-label="No card on file" />
+          ) : (
+            <span className="text-gray-500">—</span>
+          )}
+        </td>
+        <td className="px-2 py-2.5 text-center text-xs text-gray-500">
+          <p>{formatDate(user.createdAt)}</p>
+          {user.renewalDate && (
+            <p className="text-[10px] text-gray-600 mt-0.5">Renews {formatDate(user.renewalDate)}</p>
+          )}
+        </td>
+        <td className="px-2 py-2.5">
+          <div className="flex items-center justify-center">
+            <button
+              type="button"
+              ref={isDropdownOpen ? openDropdownButtonRef : undefined}
+              onClick={(e) => {
+                if (isDropdownOpen) {
+                  setOpenDropdownId(null);
+                  setDropdownPosition(null);
+                } else {
+                  openDropdownButtonRef.current = e.currentTarget;
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const spaceBelow = window.innerHeight - rect.bottom;
+                  const openAbove = spaceBelow < DROPDOWN_MENU_HEIGHT && rect.top >= spaceBelow;
+                  setDropdownPosition({
+                    left: Math.max(8, rect.right - DROPDOWN_MENU_WIDTH),
+                    top: openAbove ? rect.top - DROPDOWN_MENU_HEIGHT - 4 : rect.bottom + 4,
+                  });
+                  setOpenDropdownId(user._id);
+                }
+              }}
+              className="p-1.5 rounded-lg text-gray-400 hover:bg-[#252525] hover:text-gray-300 disabled:opacity-50"
+              aria-label="Actions"
+              aria-expanded={isDropdownOpen}
+            >
+              <MoreVertical className="w-4 h-4" />
+            </button>
+          </div>
+        </td>
+      </tr>
+    );
   };
 
   return (
@@ -1108,7 +1294,8 @@ const ManageAccounts = () => {
 
           {/* Actions dropdown (portal so it is not clipped by table overflow) */}
           {openDropdownId && dropdownPosition && (() => {
-            const user = users.find((u) => u._id === openDropdownId);
+            const user = users.find((u) => u._id === openDropdownId)
+              || Object.values(agencyClientsCache).flat().find((u) => u._id === openDropdownId);
             if (!user) return null;
             const canCancel = canCancelSubscription(user);
             return createPortal(
@@ -1344,27 +1531,11 @@ const ManageAccounts = () => {
                         </button>
                         <button
                           type="button"
-                          onClick={() => { setStatusCardFilter('active'); setFilterType('all'); setCurrentPage(1); }}
-                          className={cardClass(statusCardFilter === 'active')}
+                          onClick={() => { setStatusCardFilter('paid'); setFilterType('all'); setCurrentPage(1); }}
+                          className={cardClass(statusCardFilter === 'paid')}
                         >
                           <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.activeSubscriptions ?? 0}</p>
-                          <p className="text-xs text-gray-500">Active</p>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setFilterType('PRO'); setStatusCardFilter('all'); setCurrentPage(1); }}
-                          className={cardClass(filterType === 'PRO')}
-                        >
-                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.packageStats?.PRO ?? 0}</p>
-                          <p className="text-xs text-gray-500">Pro</p>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setFilterType('AGENCY'); setStatusCardFilter('all'); setCurrentPage(1); }}
-                          className={cardClass(filterType === 'AGENCY')}
-                        >
-                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.packageStats?.AGENCY ?? 0}</p>
-                          <p className="text-xs text-gray-500">Agency</p>
+                          <p className="text-xs text-gray-500">Paid</p>
                         </button>
                         <button
                           type="button"
@@ -1376,11 +1547,27 @@ const ManageAccounts = () => {
                         </button>
                         <button
                           type="button"
+                          onClick={() => { setStatusCardFilter('expired'); setFilterType('all'); setCurrentPage(1); }}
+                          className={cardClass(statusCardFilter === 'expired')}
+                        >
+                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.expiredUsers ?? 0}</p>
+                          <p className="text-xs text-gray-500">Expired</p>
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => { setStatusCardFilter('cancelled'); setFilterType('all'); setCurrentPage(1); }}
                           className={cardClass(statusCardFilter === 'cancelled')}
                         >
                           <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.cancelledSubscriptions ?? 0}</p>
                           <p className="text-xs text-gray-500">Cancelled</p>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setFilterType('AGENCY'); setStatusCardFilter('all'); setCurrentPage(1); }}
+                          className={cardClass(filterType === 'AGENCY')}
+                        >
+                          <p className="text-xl font-semibold tabular-nums text-gray-100">{stats?.packageStats?.AGENCY ?? 0}</p>
+                          <p className="text-xs text-gray-500">Agency</p>
                         </button>
                       </>
                     );
@@ -1414,101 +1601,24 @@ const ManageAccounts = () => {
                     </thead>
                     <tbody className="divide-y divide-[#252525]">
                       {users.map((user) => {
-                        const packageInfo = getPackageTypeInfo(user);
-                        const statusInfo = getSubscriptionStatus(user);
-                        const PackageIcon = packageInfo.icon;
-                        const isDropdownOpen = openDropdownId === user._id;
+                        const isAgencyOwner = user.packageType === 'AGENCY';
+                        const isExpanded = isAgencyOwner && expandedAgencyIds.has(user._id);
+                        const clients = agencyClientsCache[user._id] || [];
                         return (
-                          <tr key={user._id} className="hover:bg-[#1a1a1a] transition-colors">
-                            <td className="px-3 py-2.5">
-                              <div className="flex items-center gap-2">
-                                <div className="w-8 h-8 rounded-lg bg-[#252525] flex items-center justify-center shrink-0">
-                                  <span className="text-gray-300 text-xs font-medium">
-                                    {(user.firstName?.[0] || '') + (user.lastName?.[0] || '')}
-                                  </span>
-                                </div>
-                                <div className="min-w-0">
-                                  <p className="text-sm font-medium text-gray-100 break-words">
-                                    {user.firstName} {user.lastName}
-                                    {user.isInTrialPeriod && <span className="ml-1 text-xs text-gray-500">Trial</span>}
-                                  </p>
-                                  <p className="text-xs text-gray-500 break-all flex items-center gap-1">
-                                    <Mail className="w-3 h-3 shrink-0" />{user.email}
-                                  </p>
-                                  <p className="text-xs text-gray-500">{user.phone || '—'}</p>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-2 py-2.5 text-center">
-                              <span className={`inline-flex items-center justify-center gap-1 text-xs font-medium ${packageInfo.color} max-w-[9rem] mx-auto text-center`}>
-                                <PackageIcon className="w-3 h-3 shrink-0" />{typeColumnLabel(packageInfo.label)}
-                              </span>
-                            </td>
-                            <td className="px-2 py-2.5 text-xs text-gray-400">{user.brand || '—'}</td>
-                            <td className="px-2 py-2.5 text-center">
-                              <span className={`text-xs font-medium ${statusInfo.color}`}>
-                                {statusInfo.label.split(' ')[0]}
-                              </span>
-                            </td>
-                            <td className="px-2 py-2.5 text-center text-xs">
-                              {getSpApiConnectionStatus(user).connected ? (
-                                <Check className="w-4 h-4 text-green-500 inline-block" aria-label="Connected" />
+                          <React.Fragment key={user._id}>
+                            {renderAccountRow(user)}
+                            {isExpanded && !agencyClientsLoading.has(user._id) && (
+                              clients.length === 0 ? (
+                                <tr>
+                                  <td colSpan={9} className="px-3 py-3 text-center text-xs text-gray-500 bg-[#111318]">
+                                    No clients under this agency
+                                  </td>
+                                </tr>
                               ) : (
-                                <XIcon className="w-4 h-4 text-red-500 inline-block" aria-label="Not connected" />
-                              )}
-                            </td>
-                            <td className="px-2 py-2.5 text-center text-xs">
-                              {getAdsApiConnectionStatus(user).connected ? (
-                                <Check className="w-4 h-4 text-green-500 inline-block" aria-label="Connected" />
-                              ) : (
-                                <XIcon className="w-4 h-4 text-red-500 inline-block" aria-label="Not connected" />
-                              )}
-                            </td>
-                            <td className="px-2 py-2.5 text-center text-xs">
-                              {user.cardConnected === true ? (
-                                <Check className="w-4 h-4 text-green-500 inline-block" aria-label="Card on file" />
-                              ) : user.cardConnected === false ? (
-                                <XIcon className="w-4 h-4 text-red-500 inline-block" aria-label="No card on file" />
-                              ) : (
-                                <span className="text-gray-500">—</span>
-                              )}
-                            </td>
-                            <td className="px-2 py-2.5 text-center text-xs text-gray-500">
-                              <p>{formatDate(user.createdAt)}</p>
-                              {user.renewalDate && (
-                                <p className="text-[10px] text-gray-600 mt-0.5">Renews {formatDate(user.renewalDate)}</p>
-                              )}
-                            </td>
-                            <td className="px-2 py-2.5">
-                              <div className="flex items-center justify-center">
-                                <button
-                                  type="button"
-                                  ref={isDropdownOpen ? openDropdownButtonRef : undefined}
-                                  onClick={(e) => {
-                                    if (isDropdownOpen) {
-                                      setOpenDropdownId(null);
-                                      setDropdownPosition(null);
-                                    } else {
-                                      openDropdownButtonRef.current = e.currentTarget;
-                                      const rect = e.currentTarget.getBoundingClientRect();
-                                      const spaceBelow = window.innerHeight - rect.bottom;
-                                      const openAbove = spaceBelow < DROPDOWN_MENU_HEIGHT && rect.top >= spaceBelow;
-                                      setDropdownPosition({
-                                        left: Math.max(8, rect.right - DROPDOWN_MENU_WIDTH),
-                                        top: openAbove ? rect.top - DROPDOWN_MENU_HEIGHT - 4 : rect.bottom + 4,
-                                      });
-                                      setOpenDropdownId(user._id);
-                                    }
-                                  }}
-                                  className="p-1.5 rounded-lg text-gray-400 hover:bg-[#252525] hover:text-gray-300 disabled:opacity-50"
-                                  aria-label="Actions"
-                                  aria-expanded={isDropdownOpen}
-                                >
-                                  <MoreVertical className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
+                                clients.map((client) => renderAccountRow(client, { isChild: true }))
+                              )
+                            )}
+                          </React.Fragment>
                         );
                       })}
                     </tbody>

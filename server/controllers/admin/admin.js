@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const { getUserByEmail } = require('../../Services/User/userServices.js');
 const { deleteUserById } = require('../../Services/User/deleteUserService.js');
 const { enqueueFullUserDataPurge } = require('../../Services/BackgroundJobs/deleteUserQueue.js');
@@ -211,70 +212,12 @@ const adminLogout = asyncHandler(async (req, res) => {
 });
 
 /**
- * Builds the shared sellerCentral + subscription lookup stages and the
- * pre/post-lookup $match stages for getAllAccounts, from optional query filters.
- * Kept separate so the pipeline stays readable - each stage below is pushed in
- * the exact order it needs to run in the aggregation.
+ * Shared sellerCentral + subscription $lookup stages, reused by both the main
+ * accounts list and the agency-clients endpoint so both return identical row shapes.
  */
-const buildAccountsPipeline = (filters) => {
-    const { packageType, statusFilter, startDate, endDate, brand, search, spApiFilter, adsFilter } = filters;
-    const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pipeline = [];
-
-    // Stage 1: Project only needed user fields
-    pipeline.push({
-        $project: {
-            firstName: 1,
-            lastName: 1,
-            email: 1,
-            phone: 1,
-            whatsapp: 1,
-            accessType: 1,
-            packageType: 1,
-            isAgencyClient: 1,
-            subscriptionStatus: 1,
-            isInTrialPeriod: 1,
-            trialEndsDate: 1,
-            isVerified: 1,
-            profilePic: 1,
-            createdAt: 1,
-            updatedAt: 1,
-            adminId: 1,
-            sellerCentral: 1
-        }
-    });
-
-    // Stage 2: Pre-lookup filters that only touch fields already on the User doc
-    const preMatch = {};
-    if (packageType && packageType !== 'all') {
-        preMatch.packageType = packageType;
-    }
-    if (statusFilter === 'active') preMatch.subscriptionStatus = 'active';
-    else if (statusFilter === 'trial') preMatch.isInTrialPeriod = true;
-    else if (statusFilter === 'cancelled') preMatch.subscriptionStatus = 'cancelled';
-
-    if (startDate || endDate) {
-        preMatch.createdAt = {};
-        if (startDate) {
-            const start = new Date(startDate);
-            start.setHours(0, 0, 0, 0);
-            preMatch.createdAt.$gte = start;
-        }
-        if (endDate) {
-            const end = new Date(endDate);
-            end.setHours(23, 59, 59, 999);
-            preMatch.createdAt.$lte = end;
-        }
-    }
-    if (Object.keys(preMatch).length > 0) {
-        pipeline.push({ $match: preMatch });
-    }
-
-    // Stage 3: Sort by newest first
-    pipeline.push({ $sort: { createdAt: -1 } });
-
-    // Stage 4: Lookup sellerCentral with projection to exclude large arrays
-    pipeline.push({
+const buildAccountLookupStages = () => ([
+    // Lookup sellerCentral with projection to exclude large arrays
+    {
         $lookup: {
             from: 'sellers', // MongoDB collection name (lowercase, pluralized)
             let: { sellerCentralId: '$sellerCentral' },
@@ -305,12 +248,11 @@ const buildAccountsPipeline = (filters) => {
             ],
             as: 'sellerCentralData'
         }
-    });
-    pipeline.push({ $addFields: { sellerCentral: { $arrayElemAt: ['$sellerCentralData', 0] } } });
-    pipeline.push({ $project: { sellerCentralData: 0 } });
-
-    // Stage 5: Lookup subscription (paymentGateway/stripeCustomerId/renewal dates)
-    pipeline.push({
+    },
+    { $addFields: { sellerCentral: { $arrayElemAt: ['$sellerCentralData', 0] } } },
+    { $project: { sellerCentralData: 0 } },
+    // Lookup subscription (paymentGateway/stripeCustomerId/renewal dates)
+    {
         $lookup: {
             from: 'subscriptions',
             let: { uid: '$_id' },
@@ -320,11 +262,140 @@ const buildAccountsPipeline = (filters) => {
             ],
             as: 'subscriptionData'
         }
-    });
-    pipeline.push({ $addFields: { subscriptionInfo: { $arrayElemAt: ['$subscriptionData', 0] } } });
-    pipeline.push({ $project: { subscriptionData: 0 } });
+    },
+    { $addFields: { subscriptionInfo: { $arrayElemAt: ['$subscriptionData', 0] } } },
+    { $project: { subscriptionData: 0 } }
+]);
 
-    // Stage 6: Post-lookup filters (need sellerCentral to exist first: brand, search, SP-API/Ads connection)
+/**
+ * Adds the computed display fields (fullName, brand, renewalDate, etc.) shared by
+ * the main accounts list and the agency-clients endpoint.
+ */
+const mapAccountFields = (account) => ({
+    ...account,
+    fullName: `${account.firstName} ${account.lastName}`,
+    joinedDate: account.createdAt,
+    lastUpdated: account.updatedAt,
+    isAdmin: account.accessType === 'superAdmin',
+    hasValidSubscription: account.subscriptionStatus === 'active',
+    // Check if trial is expired
+    isTrialExpired: account.isInTrialPeriod && account.trialEndsDate && new Date() > new Date(account.trialEndsDate),
+    // Include brand from sellerCentral
+    brand: account.sellerCentral?.brand || null,
+    // Renewal date sourced from the Subscription doc, already synced from Stripe via webhooks
+    renewalDate: account.subscriptionInfo?.nextBillingDate || account.subscriptionInfo?.currentPeriodEnd || null
+});
+
+/**
+ * Bounded live Stripe lookup for "card connected", mutating each account in place.
+ * Only ever call this on an already-bounded list (a single page, or one agency's clients)
+ * to avoid firing a Stripe call per user across the whole table.
+ */
+const attachCardConnectedStatus = async (accounts) => {
+    await Promise.all(accounts.map(async (account) => {
+        const subInfo = account.subscriptionInfo;
+        if (subInfo?.paymentGateway === 'stripe' && subInfo?.stripeCustomerId) {
+            try {
+                const cardStatus = await StripeService.getCardConnectionStatus(subInfo.stripeCustomerId);
+                account.cardConnected = cardStatus.connected;
+                account.cardBrand = cardStatus.brand;
+                account.cardLast4 = cardStatus.last4;
+            } catch (error) {
+                logger.error(`Failed to fetch card status for stripeCustomerId ${subInfo.stripeCustomerId}: ${error.message}`);
+                account.cardConnected = null; // unknown - Stripe call failed
+            }
+        } else {
+            account.cardConnected = false;
+        }
+    }));
+};
+
+/**
+ * Builds the pre/post-lookup $match stages for getAllAccounts, from optional query filters.
+ * Kept separate so the pipeline stays readable - each stage below is pushed in
+ * the exact order it needs to run in the aggregation.
+ */
+const buildAccountsPipeline = (filters) => {
+    const { packageType, statusFilter, startDate, endDate, brand, search, spApiFilter, adsFilter, hideAgencyClients } = filters;
+    const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pipeline = [];
+
+    // Stage 1: Project only needed user fields
+    pipeline.push({
+        $project: {
+            firstName: 1,
+            lastName: 1,
+            email: 1,
+            phone: 1,
+            whatsapp: 1,
+            accessType: 1,
+            packageType: 1,
+            isAgencyClient: 1,
+            agencyName: 1,
+            subscriptionStatus: 1,
+            isInTrialPeriod: 1,
+            trialEndsDate: 1,
+            isVerified: 1,
+            profilePic: 1,
+            createdAt: 1,
+            updatedAt: 1,
+            adminId: 1,
+            sellerCentral: 1
+        }
+    });
+
+    // Stage 2: Pre-lookup filters that only touch fields already on the User doc
+    const now = new Date();
+    // A trial counts as expired once trialEndsDate has passed (missing/null trialEndsDate means "not expired",
+    // matching the isTrialExpired computed field used elsewhere) - kept in one place so filter/stats/row-label agree.
+    const trialExpiredClause = { isInTrialPeriod: true, trialEndsDate: { $ne: null, $lt: now } };
+    const trialActiveClause = { isInTrialPeriod: true, $or: [{ trialEndsDate: null }, { trialEndsDate: { $gte: now } }] };
+
+    const preMatchClauses = [];
+    // Agency clients are shown nested under their agency's expandable row instead of as
+    // top-level rows - only applied in the paginated (ManageAccounts) path, see getAllAccounts.
+    if (hideAgencyClients) {
+        preMatchClauses.push({ isAgencyClient: { $ne: true } });
+    }
+    if (packageType && packageType !== 'all') {
+        preMatchClauses.push({ packageType });
+    }
+    if (statusFilter === 'paid') {
+        preMatchClauses.push({ subscriptionStatus: 'active' });
+    } else if (statusFilter === 'trial') {
+        preMatchClauses.push(trialActiveClause);
+    } else if (statusFilter === 'expired') {
+        // Expired: paid plan lapsed (past_due) OR a trial ended without converting - not a cancellation either way
+        preMatchClauses.push({ $or: [{ subscriptionStatus: 'past_due' }, trialExpiredClause] });
+    } else if (statusFilter === 'cancelled') {
+        preMatchClauses.push({ subscriptionStatus: 'cancelled' });
+    }
+
+    if (startDate || endDate) {
+        const createdAtMatch = {};
+        if (startDate) {
+            const start = new Date(startDate);
+            start.setHours(0, 0, 0, 0);
+            createdAtMatch.$gte = start;
+        }
+        if (endDate) {
+            const end = new Date(endDate);
+            end.setHours(23, 59, 59, 999);
+            createdAtMatch.$lte = end;
+        }
+        preMatchClauses.push({ createdAt: createdAtMatch });
+    }
+    if (preMatchClauses.length > 0) {
+        pipeline.push({ $match: preMatchClauses.length === 1 ? preMatchClauses[0] : { $and: preMatchClauses } });
+    }
+
+    // Stage 3: Sort by newest first
+    pipeline.push({ $sort: { createdAt: -1 } });
+
+    // Stage 4: sellerCentral + subscription lookups (shared with the agency-clients endpoint)
+    pipeline.push(...buildAccountLookupStages());
+
+    // Stage 5: Post-lookup filters (need sellerCentral to exist first: brand, search, SP-API/Ads connection)
     const connectionExpr = (tokenField) => ({
         $gt: [
             {
@@ -370,6 +441,18 @@ const buildAccountsPipeline = (filters) => {
  * a single cheap $group aggregation instead of looping over loaded documents.
  */
 const getAccountsStats = async () => {
+    const now = new Date();
+    // Kept in sync with buildAccountsPipeline's trialExpiredClause/trialActiveClause above
+    const isTrialExpiredExpr = {
+        $and: [{ $eq: ['$isInTrialPeriod', true] }, { $ne: ['$trialEndsDate', null] }, { $lt: ['$trialEndsDate', now] }]
+    };
+    const isTrialActiveExpr = {
+        $and: [
+            { $eq: ['$isInTrialPeriod', true] },
+            { $or: [{ $eq: ['$trialEndsDate', null] }, { $gte: ['$trialEndsDate', now] }] }
+        ]
+    };
+
     const [result] = await UserModel.aggregate([
         {
             $group: {
@@ -380,7 +463,11 @@ const getAccountsStats = async () => {
                 activeSubscriptions: { $sum: { $cond: [{ $eq: ['$subscriptionStatus', 'active'] }, 1, 0] } },
                 inactiveSubscriptions: { $sum: { $cond: [{ $eq: ['$subscriptionStatus', 'inactive'] }, 1, 0] } },
                 cancelledSubscriptions: { $sum: { $cond: [{ $eq: ['$subscriptionStatus', 'cancelled'] }, 1, 0] } },
-                trialUsers: { $sum: { $cond: ['$isInTrialPeriod', 1, 0] } },
+                // Expired: paid plan lapsed (past_due) OR a trial ended without converting - not a cancellation either way
+                expiredUsers: {
+                    $sum: { $cond: [{ $or: [{ $eq: ['$subscriptionStatus', 'past_due'] }, isTrialExpiredExpr] }, 1, 0] }
+                },
+                trialUsers: { $sum: { $cond: [isTrialActiveExpr, 1, 0] } },
                 LITE: { $sum: { $cond: [{ $eq: ['$packageType', 'LITE'] }, 1, 0] } },
                 PRO: { $sum: { $cond: [{ $eq: ['$packageType', 'PRO'] }, 1, 0] } },
                 AGENCY: { $sum: { $cond: [{ $eq: ['$packageType', 'AGENCY'] }, 1, 0] } },
@@ -397,6 +484,7 @@ const getAccountsStats = async () => {
         activeSubscriptions: result?.activeSubscriptions || 0,
         inactiveSubscriptions: result?.inactiveSubscriptions || 0,
         cancelledSubscriptions: result?.cancelledSubscriptions || 0,
+        expiredUsers: result?.expiredUsers || 0,
         trialUsers: result?.trialUsers || 0,
         packageStats: {
             LITE: result?.LITE || 0,
@@ -441,8 +529,19 @@ const getAllAccounts = asyncHandler(async (req, res) => {
     try {
         const { page, limit, search, brand, packageType, statusFilter, startDate, endDate, spApiFilter, adsFilter } = req.query;
         const isPaginated = page !== undefined || limit !== undefined;
+        // The 'AGENCY' packageType filter is excluded on purpose: it's the main way to browse agency
+        // owners, so it must keep nesting enabled (agency clients never have packageType 'AGENCY'
+        // themselves, so this filter can't reveal them anyway). Mirrors the frontend's hasActiveFilters.
+        const hasActiveFilters = Boolean(
+            search || brand || (packageType && packageType !== 'all' && packageType !== 'AGENCY') || (statusFilter && statusFilter !== 'all') ||
+            startDate || endDate || (spApiFilter && spApiFilter !== 'all') || (adsFilter && adsFilter !== 'all')
+        );
 
-        const pipeline = buildAccountsPipeline({ packageType, statusFilter, startDate, endDate, brand, search, spApiFilter, adsFilter });
+        // Agency clients are shown nested under their agency's expandable row (see getAgencyClients)
+        // instead of as their own top-level rows - but only while browsing with no search/filter active.
+        // The moment any filter is on, behave like a normal flat table so search/filter can find clients too.
+        // This exclusion also never applies to the legacy unpaginated callers (e.g. AdminUserLogs).
+        const pipeline = buildAccountsPipeline({ packageType, statusFilter, startDate, endDate, brand, search, spApiFilter, adsFilter, hideAgencyClients: isPaginated && !hasActiveFilters });
 
         let pageNum, limitNum;
         if (isPaginated) {
@@ -480,40 +579,12 @@ const getAllAccounts = asyncHandler(async (req, res) => {
 
         // Transform the data to include additional computed fields
         // Since we used aggregation, sellerCentral/subscriptionInfo are already trimmed
-        const accountsWithStats = accounts.map(account => ({
-            ...account,
-            fullName: `${account.firstName} ${account.lastName}`,
-            joinedDate: account.createdAt,
-            lastUpdated: account.updatedAt,
-            isAdmin: account.accessType === 'superAdmin',
-            hasValidSubscription: account.subscriptionStatus === 'active',
-            // Check if trial is expired
-            isTrialExpired: account.isInTrialPeriod && account.trialEndsDate && new Date() > new Date(account.trialEndsDate),
-            // Include brand from sellerCentral
-            brand: account.sellerCentral?.brand || null,
-            // Renewal date sourced from the Subscription doc, already synced from Stripe via webhooks
-            renewalDate: account.subscriptionInfo?.nextBillingDate || account.subscriptionInfo?.currentPeriodEnd || null
-        }));
+        const accountsWithStats = accounts.map(mapAccountFields);
 
         // Card-connected: bounded live Stripe lookup, only for the current page's rows
         // (never for the unpaginated legacy path, to avoid firing a Stripe call per user)
         if (isPaginated) {
-            await Promise.all(accountsWithStats.map(async (account) => {
-                const subInfo = account.subscriptionInfo;
-                if (subInfo?.paymentGateway === 'stripe' && subInfo?.stripeCustomerId) {
-                    try {
-                        const cardStatus = await StripeService.getCardConnectionStatus(subInfo.stripeCustomerId);
-                        account.cardConnected = cardStatus.connected;
-                        account.cardBrand = cardStatus.brand;
-                        account.cardLast4 = cardStatus.last4;
-                    } catch (error) {
-                        logger.error(`Failed to fetch card status for stripeCustomerId ${subInfo.stripeCustomerId}: ${error.message}`);
-                        account.cardConnected = null; // unknown - Stripe call failed
-                    }
-                } else {
-                    account.cardConnected = false;
-                }
-            }));
+            await attachCardConnectedStatus(accountsWithStats);
         } else {
             accountsWithStats.forEach(account => { account.cardConnected = false; });
         }
@@ -532,6 +603,84 @@ const getAllAccounts = asyncHandler(async (req, res) => {
     } catch (error) {
         logger.error(new ApiError(500, `Error retrieving accounts: ${error.message}`));
         return res.status(500).json(new ApiResponse(500, "", "Failed to retrieve accounts"));
+    }
+});
+
+/**
+ * Get Agency Clients Controller
+ * Returns the client users under a given agency owner, for the manage-accounts
+ * page's expandable agency rows. Matches on either agencyId or the legacy adminId
+ * reference, same as AgencyAdminService.getAdminProfile.
+ * Protected route - requires superAdmin access
+ */
+const getAgencyClients = asyncHandler(async (req, res) => {
+    const adminId = req.SuperAdminId;
+
+    if (!adminId) {
+        logger.error(new ApiError(401, "Admin token required"));
+        return res.status(401).json(new ApiResponse(401, "", "Admin token required"));
+    }
+
+    const admin = await UserModel.findById(adminId);
+    if (!admin) {
+        logger.error(new ApiError(404, "Admin user not found"));
+        return res.status(404).json(new ApiResponse(404, "", "Admin user not found"));
+    }
+
+    if (admin.accessType !== 'superAdmin') {
+        logger.error(new ApiError(403, "SuperAdmin access required"));
+        return res.status(403).json(new ApiResponse(403, "", "SuperAdmin access required"));
+    }
+
+    const { agencyId } = req.params;
+    if (!agencyId || !mongoose.Types.ObjectId.isValid(agencyId)) {
+        return res.status(400).json(new ApiResponse(400, "", "Valid agencyId is required"));
+    }
+
+    try {
+        const agencyObjectId = new mongoose.Types.ObjectId(agencyId);
+        const CLIENTS_CAP = 500; // defensive cap - no agency is expected to have more clients than this today
+
+        const pipeline = [
+            { $match: { $or: [{ agencyId: agencyObjectId }, { adminId: agencyObjectId }] } },
+            {
+                $project: {
+                    firstName: 1,
+                    lastName: 1,
+                    email: 1,
+                    phone: 1,
+                    whatsapp: 1,
+                    accessType: 1,
+                    packageType: 1,
+                    isAgencyClient: 1,
+                    agencyName: 1,
+                    subscriptionStatus: 1,
+                    isInTrialPeriod: 1,
+                    trialEndsDate: 1,
+                    isVerified: 1,
+                    profilePic: 1,
+                    createdAt: 1,
+                    updatedAt: 1,
+                    adminId: 1,
+                    sellerCentral: 1
+                }
+            },
+            { $sort: { createdAt: -1 } },
+            { $limit: CLIENTS_CAP },
+            ...buildAccountLookupStages()
+        ];
+
+        const clients = await UserModel.aggregate(pipeline);
+        const clientsWithFields = clients.map(mapAccountFields);
+        await attachCardConnectedStatus(clientsWithFields);
+
+        logger.info(`SuperAdmin ${adminId} retrieved ${clientsWithFields.length} clients for agency ${agencyId}`);
+
+        res.status(200).json(new ApiResponse(200, { clients: clientsWithFields }, "Agency clients retrieved successfully"));
+
+    } catch (error) {
+        logger.error(new ApiError(500, `Error retrieving agency clients: ${error.message}`));
+        return res.status(500).json(new ApiResponse(500, "", "Failed to retrieve agency clients"));
     }
 });
 
@@ -1235,6 +1384,7 @@ module.exports = {
     adminLogin,
     adminLogout,
     getAllAccounts,
+    getAgencyClients,
     loginSelectedUser,
     deleteUser,
     getPaymentLogs,
