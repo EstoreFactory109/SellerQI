@@ -816,14 +816,20 @@ class StripeService {
     }
 
     /**
-     * Check whether a Stripe customer has a card on file
-     * Used by the admin accounts list - kept cheap (single list call, limit 1)
+     * Check whether a Stripe customer has a card on file, and where that card was issued.
+     * `country` is the card's issuing-bank country (ISO 3166-1 alpha-2, e.g. "US", "IN") from
+     * the card network/BIN data - populated automatically by Stripe regardless of whether a
+     * billing address was ever collected, unlike customer.address.country (confirmed via a live
+     * check that only ~1% of customers have a billing address on file, vs ~67% having a
+     * card-issuer country). Used by both the admin accounts list (card-connected column) and the
+     * "users by country" pie chart.
+     * Kept cheap (single list call, limit 1).
      * @param {string} stripeCustomerId
-     * @returns {Promise<{connected: boolean, brand: string|null, last4: string|null}>}
+     * @returns {Promise<{connected: boolean, brand: string|null, last4: string|null, country: string|null}>}
      */
     async getCardConnectionStatus(stripeCustomerId) {
         if (!stripeCustomerId) {
-            return { connected: false, brand: null, last4: null };
+            return { connected: false, brand: null, last4: null, country: null };
         }
 
         const paymentMethods = await this.stripe.paymentMethods.list({
@@ -836,7 +842,8 @@ class StripeService {
         return {
             connected: paymentMethods.data.length > 0,
             brand: card?.brand || null,
-            last4: card?.last4 || null
+            last4: card?.last4 || null,
+            country: card?.country || null
         };
     }
 

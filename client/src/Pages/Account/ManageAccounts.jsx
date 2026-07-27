@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
+import Chart from 'react-apexcharts';
 import {
   ChevronLeft,
   ChevronRight,
@@ -124,6 +125,8 @@ const ManageAccounts = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [stats, setStats] = useState(null);
+  const [countryStats, setCountryStats] = useState(null); // { countries: [{country, count}], uncategorized } - fetched once, not filter-driven
+  const [countryStatsLoading, setCountryStatsLoading] = useState(true);
   const [statusCardFilter, setStatusCardFilter] = useState('all'); // 'all' | 'paid' | 'trial' | 'expired' | 'cancelled' - driven by stat cards
   const [pagination, setPagination] = useState({ currentPage: 1, totalPages: 1, totalCount: 0, limit: ITEMS_PER_PAGE });
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
@@ -300,6 +303,24 @@ const ManageAccounts = () => {
   // Initial load - shows the full-page spinner
   useEffect(() => {
     fetchAccounts();
+  }, []);
+
+  // Country stats power the "users by country" pie chart - fetched once on mount only, not tied
+  // to filters/pagination, since it sweeps every Stripe customer live on the backend.
+  useEffect(() => {
+    const fetchCountryStats = async () => {
+      try {
+        const response = await axiosInstance.get('/app/auth/admin/accounts/country-stats');
+        if (response.data.statusCode === 200) {
+          setCountryStats(response.data.data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch country stats:', error);
+      } finally {
+        setCountryStatsLoading(false);
+      }
+    };
+    fetchCountryStats();
   }, []);
 
   // Subsequent page/filter changes - quiet refetch, table stays visible
@@ -1407,7 +1428,8 @@ const ManageAccounts = () => {
           {!loading && !error && (
             <>
               <div className="rounded-lg border border-[#252525] bg-[#161b22] p-4 md:p-5 mb-6">
-                {/* Single stacked column: search, export, filters, then chips - capped at 50% width, everything else free */}
+                <div className="flex flex-col lg:flex-row gap-6">
+                {/* LEFT: search, export, filters, then chips - capped at 50% width */}
                 <div className="flex flex-col gap-2 w-full lg:w-1/2">
                   <div className="flex items-center gap-2">
                     <div className="relative flex-1 min-w-0">
@@ -1546,6 +1568,51 @@ const ManageAccounts = () => {
                         : `Showing all ${pagination.totalCount} users`}
                     </div>
                   )}
+                </div>
+
+                {/* RIGHT: users-by-country pie chart, sourced from Stripe billing address */}
+                <div className="flex-1 flex flex-col items-center min-w-0">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2 self-start">Users by Country</p>
+                  {countryStatsLoading ? (
+                    <div className="flex-1 w-full flex items-center justify-center py-12">
+                      <div className="animate-spin rounded-full h-6 w-6 border-2 border-[#333] border-t-blue-500" />
+                    </div>
+                  ) : !countryStats || countryStats.countries.length === 0 ? (
+                    <div className="flex-1 w-full flex items-center justify-center py-12">
+                      <p className="text-xs text-gray-500">No country data available yet</p>
+                    </div>
+                  ) : (() => {
+                    const COUNTRY_PIE_COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#a855f7', '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16', '#ef4444'];
+                    const slices = [...countryStats.countries];
+                    if (countryStats.uncategorized > 0) {
+                      slices.push({ country: 'Unknown', count: countryStats.uncategorized });
+                    }
+                    const chartOptions = {
+                      chart: { type: 'pie', fontFamily: "'Inter', sans-serif" },
+                      labels: slices.map((s) => s.country),
+                      colors: slices.map((s, i) => s.country === 'Unknown' ? '#4b5563' : COUNTRY_PIE_COLORS[i % COUNTRY_PIE_COLORS.length]),
+                      legend: {
+                        position: 'bottom',
+                        labels: { colors: '#9ca3af' },
+                        fontSize: '11px',
+                        markers: { size: 6 },
+                      },
+                      dataLabels: { enabled: false },
+                      stroke: { width: 2, colors: ['#161b22'] },
+                      tooltip: { theme: 'dark' },
+                      responsive: [{ breakpoint: 768, options: { chart: { height: 240, width: 240 } } }],
+                    };
+                    return (
+                      <Chart
+                        options={chartOptions}
+                        series={slices.map((s) => s.count)}
+                        type="pie"
+                        width="100%"
+                        height={260}
+                      />
+                    );
+                  })()}
+                </div>
                 </div>
               </div>
 

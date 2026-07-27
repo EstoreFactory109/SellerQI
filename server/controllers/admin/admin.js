@@ -780,6 +780,118 @@ const getAgencyClients = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Get Country Stats Controller
+ * Returns user counts grouped by country, for the manage-accounts "users by country" pie chart.
+ * Combines three sources, in priority order (confirmed against live data before choosing this):
+ *   1. Stripe card-issuer country (live paymentMethods lookup) - the card's BIN/network country,
+ *      populated automatically regardless of billing address (billing address itself covers only
+ *      ~1% of customers; card-issuer country covers ~67% of Stripe customers with a card on file).
+ *   2. Razorpay - the gateway only serves Indian merchants/customers, so any Razorpay subscriber
+ *      is safely counted as India with no live lookup needed (paymentGateway is written
+ *      inconsistently as both 'razorpay' and 'RAZORPAY' across the codebase, hence the regex).
+ *   3. sellerAccount.country (the Amazon marketplace connected via Seller Central) - a plain,
+ *      already-stored DB field, used as a fallback for anyone not resolved by 1 or 2.
+ * Anyone left with no country from any source is folded into "uncategorized".
+ * Protected route - requires superAdmin access
+ */
+const getCountryStats = asyncHandler(async (req, res) => {
+    const adminId = req.SuperAdminId;
+
+    if (!adminId) {
+        logger.error(new ApiError(401, "Admin token required"));
+        return res.status(401).json(new ApiResponse(401, "", "Admin token required"));
+    }
+
+    const admin = await UserModel.findById(adminId);
+    if (!admin) {
+        logger.error(new ApiError(404, "Admin user not found"));
+        return res.status(404).json(new ApiResponse(404, "", "Admin user not found"));
+    }
+
+    if (admin.accessType !== 'superAdmin') {
+        logger.error(new ApiError(403, "SuperAdmin access required"));
+        return res.status(403).json(new ApiResponse(403, "", "SuperAdmin access required"));
+    }
+
+    try {
+        const [allUsers, paymentSubs] = await Promise.all([
+            UserModel.aggregate([
+                {
+                    $lookup: {
+                        from: 'sellers',
+                        let: { sellerCentralId: '$sellerCentral' },
+                        pipeline: [
+                            { $match: { $expr: { $eq: ['$_id', '$$sellerCentralId'] } } },
+                            { $project: { 'sellerAccount.country': 1 } }
+                        ],
+                        as: 'sellerCentralData'
+                    }
+                },
+                {
+                    $project: {
+                        sellerCountry: {
+                            $arrayElemAt: [
+                                { $arrayElemAt: ['$sellerCentralData.sellerAccount.country', 0] },
+                                0
+                            ]
+                        }
+                    }
+                }
+            ]),
+            Subscription.find({
+                $or: [
+                    { paymentGateway: 'stripe', stripeCustomerId: { $ne: null } },
+                    { paymentGateway: { $regex: /^razorpay$/i } }
+                ]
+            }).select('userId paymentGateway stripeCustomerId').lean()
+        ]);
+
+        // Resolve Stripe card-issuer country (live) and Razorpay (assumed India) per user
+        const paymentCountryByUserId = new Map();
+        await Promise.all(paymentSubs.map(async (sub) => {
+            const gateway = sub.paymentGateway?.toLowerCase();
+            if (gateway === 'razorpay') {
+                paymentCountryByUserId.set(String(sub.userId), 'IN');
+                return;
+            }
+            if (gateway === 'stripe' && sub.stripeCustomerId) {
+                try {
+                    const cardStatus = await StripeService.getCardConnectionStatus(sub.stripeCustomerId);
+                    if (cardStatus.country) {
+                        paymentCountryByUserId.set(String(sub.userId), cardStatus.country);
+                    }
+                } catch (error) {
+                    logger.error(`Failed to fetch card country for stripeCustomerId ${sub.stripeCustomerId}: ${error.message}`);
+                }
+            }
+        }));
+
+        const countryCounts = {};
+        let uncategorized = 0;
+        allUsers.forEach((user) => {
+            const country = paymentCountryByUserId.get(String(user._id)) || user.sellerCountry || null;
+            if (country) {
+                countryCounts[country] = (countryCounts[country] || 0) + 1;
+            } else {
+                uncategorized++;
+            }
+        });
+
+        const countries = Object.entries(countryCounts)
+            .map(([country, count]) => ({ country, count }))
+            .sort((a, b) => b.count - a.count);
+
+        logger.info(`SuperAdmin ${adminId} retrieved country stats: ${countries.length} countries, ${uncategorized} uncategorized`);
+
+        res.status(200).json(new ApiResponse(200, { countries, uncategorized }, "Country stats retrieved successfully"));
+
+    } catch (error) {
+        logger.error(new ApiError(500, `Error retrieving country stats: ${error.message}`));
+        return res.status(500).json(new ApiResponse(500, "", "Failed to retrieve country stats"));
+    }
+});
+
+/**
  * Login Selected User Controller
  * Allows admin to login as a selected user by user ID
  * Creates IBEX tokens and sets them in cookies
@@ -1480,6 +1592,7 @@ module.exports = {
     adminLogout,
     getAllAccounts,
     getAgencyClients,
+    getCountryStats,
     loginSelectedUser,
     deleteUser,
     getPaymentLogs,
