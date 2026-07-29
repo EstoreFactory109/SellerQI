@@ -106,25 +106,42 @@ module.exports = {
         },
         {
             // SellerQI v2 Phase 1 production target (~500 users / ~750 accounts):
-            //   5 worker instances × 15 concurrency = 75 phase-job slots
+            //   3 worker instances × 25 concurrency = 75 phase-job slots (unchanged)
             //   ≈ 7 phases × 750 accts / 24h ≈ ~220 phase-jobs/h demand vs
             //   75 slots × (60min / 5min/phase) = 900 phase-jobs/h capacity
             //   → ~25% utilisation, comfortable headroom for hot buckets.
+            // The work is I/O-bound (report create→poll→download), so throughput is
+            // governed by concurrency + Amazon rate limits, not CPU cores. Consolidated
+            // 5×15 → 3×25 (same 75 slots) to drop ~2 V8 heaps of baseline RAM. Kept ≥3
+            // processes so a FINALIZE CPU spike (legacy Analyse path) can't stall the loop.
             // Override per environment via WORKER_INSTANCES / WORKER_CONCURRENCY.
             name: 'worker',
             script: './server/Services/BackgroundJobs/worker.js',
-            instances: parseInt(process.env.WORKER_INSTANCES || '5', 10), // Default: 5 workers (was 2)
+            instances: parseInt(process.env.WORKER_INSTANCES || '3', 10), // Default: 3 workers (was 5)
             exec_mode: 'cluster', // Run multiple instances
             env: {
                 NODE_ENV: 'production',
-                WORKER_CONCURRENCY: process.env.WORKER_CONCURRENCY || '15', // Jobs per worker (was 3)
+                WORKER_CONCURRENCY: process.env.WORKER_CONCURRENCY || '25', // Jobs per worker (was 15)
                 WORKER_SHUTDOWN_GRACE_MS: process.env.WORKER_SHUTDOWN_GRACE_MS || '120000',
                 // WORKER_NAME is not set here - worker.js will use `worker-${process.pid}` as fallback
                 // This ensures each worker instance has a unique identifier in merged logs
                 // Slice assembler flag (default off — finalize uses legacy Analyse path).
                 // Flip to 'true' once slice payloads have been verified to match
                 // the React dashboard's expected shape. See ScheduledIntegration.js.
-                USE_SLICE_ASSEMBLER: process.env.USE_SLICE_ASSEMBLER || 'false'
+                USE_SLICE_ASSEMBLER: process.env.USE_SLICE_ASSEMBLER || 'false',
+                // Review-order ingestion path (default off — uses the legacy buffered path).
+                //
+                // 'true' switches to the streaming path: orders are persisted page-by-page,
+                // the window is walked as resumable date slices, and per-item detail becomes a
+                // capped best-effort backfill over the 5-30 day solicitation window. Required
+                // for high-volume accounts whose 15-day window holds more orders than can be
+                // walked inside the ~60 min SP-API credential lifetime.
+                //
+                // Rollout: ship 'false', enable per-account, verify slices complete across two
+                // runs, then widen. Rollback is just flipping this back to 'false' — the legacy
+                // path is retained verbatim and is also the automatic fallback if streaming
+                // throws. See Services/review/reviewIngestionService.js.
+                REVIEW_INGEST_STREAMING: process.env.REVIEW_INGEST_STREAMING || 'false'
             },
             // Logging
             error_file: './logs/pm2-worker-error.log',
@@ -168,6 +185,11 @@ module.exports = {
                 INTEGRATION_WORKER_CONCURRENCY: process.env.INTEGRATION_WORKER_CONCURRENCY || '2', // Jobs per worker
                 INTEGRATION_WORKER_SHUTDOWN_GRACE_MS:
                     process.env.INTEGRATION_WORKER_SHUTDOWN_GRACE_MS || '120000',
+                // Needed here too: Services/main/Integration.js calls ingestReviewOrders on the
+                // first-time onboarding path, so this worker must see the same flag value as
+                // the scheduled worker or the two paths would diverge. See the note on the
+                // 'worker' app above.
+                REVIEW_INGEST_STREAMING: process.env.REVIEW_INGEST_STREAMING || 'false',
             },
             // Logging - separate log files
             error_file: './logs/pm2-integration-worker-error.log',
