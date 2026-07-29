@@ -1,6 +1,7 @@
 const axios = require('axios');
 const logger = require('../../utils/Logger.js');
 const { ApiError } = require('../../utils/ApiError.js');
+const authCache = require('../../utils/authCache.js');
 
 const generateAdsAccessToken=async(refreshToken)=>{
     if(!refreshToken){
@@ -56,6 +57,11 @@ const generateAdsAccessToken=async(refreshToken)=>{
                 logger.error(error, { responseData: response.data });
                 throw error;
             }
+
+            // Write-through cache: repopulate on every fresh generation (incl. 401-driven
+            // refresh callbacks) so the scheduled pipeline reuses this token across phases
+            // and a refreshed token always overwrites any stale cached entry. Non-fatal.
+            authCache.setToken('ads', refreshToken, accessToken);
 
             return accessToken;
     } catch (error) {

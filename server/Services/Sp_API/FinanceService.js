@@ -1,13 +1,14 @@
 const mongoose = require('mongoose');
 const https = require('https');
-const http = require('http');
-const zlib = require('zlib');
+// `http` and `zlib` were only needed by the local downloadContent, now replaced by
+// utils/spApiReportDownload.js.
 const logger = require('../../utils/Logger.js');
 
 const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
 const DailyOverheadFinance = require('../../models/finance/DailyOverheadFinanceModel.js');
 const FinanceSyncLog = require('../../models/finance/FinanceSyncLogModel.js');
 const PendingExpenseOrder = require('../../models/finance/PendingExpenseOrderModel.js');
+const { downloadReportContent, isUnusableReportPayload } = require('../../utils/spApiReportDownload.js');
 
 // ★ VERSION — check this in logs to confirm deployment
 const FINANCE_SERVICE_VERSION = 'v3.1-sellerboard-match-20260506';
@@ -26,8 +27,38 @@ const {
 // ─────────────────────────────────────────────
 const CHUNK_INSERT_SIZE = 500;
 const REPORT_TYPE = 'GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL';
+
+function financeEnvInt(name, fallback) {
+  const parsed = parseInt(process.env[name], 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    if (process.env[name] !== undefined) {
+      logger.warn(`[Finance] ignoring invalid ${name}="${process.env[name]}", using ${fallback}`);
+    }
+    return fallback;
+  }
+  return parsed;
+}
+
 const POLL_INTERVAL_MS = 15000;
-const MAX_POLL_ATTEMPTS = 40;
+// Now env-overridable, mirroring ADS_REPORT_MAX_POLL_ATTEMPTS (AmazonAds/GetPPCMetrics.js:132).
+// The default stays 40 (= 600s) deliberately: chunking keeps each report small, so raising it
+// would change nothing for the accounts that already sync fine. The knob exists so an
+// unusually slow marketplace can be accommodated without a code change.
+const MAX_POLL_ATTEMPTS = financeEnvInt('FINANCE_REPORT_MAX_POLL_ATTEMPTS', 40);
+
+// ── Report chunking ──────────────────────────────────────────────────────────
+// Max days per Amazon report. A high-volume seller (~8k orders/day) cannot generate a 30-day
+// GET_FLAT_FILE_ALL_ORDERS_DATA report inside the poll cap, so the previous single-report
+// approach threw before downloading anything, recorded every date as failed, and left the
+// cursor unmoved — requesting the identical 30 days on every subsequent run, forever.
+//
+// 3 days ≈ 24-45k rows for such an account, which both generates in time and keeps peak parse
+// memory well under the worker's max_memory_restart (2G, with 3 instances x 25 concurrency).
+// Set to 0 to restore the old single-report behaviour (rollback).
+const FINANCE_REPORT_CHUNK_DAYS = financeEnvInt('FINANCE_REPORT_CHUNK_DAYS', 3);
+// Wall-clock ceiling for one run's chunk loop. Checked between chunks, so a long backlog spreads
+// over several runs instead of monopolising a worker slot.
+const FINANCE_SYNC_RUN_BUDGET_MS = financeEnvInt('FINANCE_SYNC_RUN_BUDGET_MS', 40 * 60 * 1000);
 
 // ── Empty-report retry (FIX #1) ──────────────────────────────────────────────
 // Amazon's GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE report intermittently
@@ -86,6 +117,31 @@ function isAuthorizationDeniedError(err) {
     msg.includes('access_denied') ||
     msg.includes('forbidden')
   );
+}
+
+/**
+ * Bucket a sync failure so `FinanceSyncLog.errorKind` can distinguish causes that need
+ * completely different responses. Previously every failure was stored as an opaque message, so
+ * an account whose grant had been revoked looked identical to one whose report was merely too
+ * big — and only the second is fixable by us.
+ *
+ * @returns {'auth_denied'|'timeout'|'other'}
+ */
+function classifySyncFailure(err) {
+  if (!err) return 'other';
+  if (isAuthorizationDeniedError(err)) return 'auth_denied';
+  const msg = (err.message || String(err)).toLowerCase();
+  if (
+    msg.includes('did not complete within') ||
+    msg.includes('download exceeded') ||
+    msg.includes('download stalled') ||
+    msg.includes('no response within') ||
+    msg.includes('etimedout') ||
+    msg.includes('timeout')
+  ) {
+    return 'timeout';
+  }
+  return 'other';
 }
 
 function createTokenManager({ accessToken, refreshToken, clientId, clientSecret }) {
@@ -233,6 +289,233 @@ function formatDateUTC(date) {
   return `${y}-${m}-${d}`;
 }
 
+// Shift a 'YYYY-MM-DD' string by whole days, staying in UTC.
+function addDaysStr(dateStr, days) {
+  const d = new Date(`${dateStr}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return formatDateUTC(d);
+}
+
+function daysBetweenInclusive(startStr, endStr) {
+  const ms = new Date(`${endStr}T00:00:00.000Z`) - new Date(`${startStr}T00:00:00.000Z`);
+  return Math.round(ms / 86400000) + 1;
+}
+
+/**
+ * Decide which date window this sync should fetch — extracted as a PURE function.
+ *
+ * Why extracted: this is the logic that produced a permanent deadlock for high-volume
+ * accounts (the no-history branch requested 30 days unclamped, which never finished inside the
+ * report poll cap, so no success row was ever written and the cursor never advanced). It is also
+ * unreachable from every existing script — all `forceDates` callers bypass it — so the only
+ * practical way to verify it is a unit test. Behaviour is intentionally identical to the inline
+ * version it replaces.
+ *
+ * @param {object} args
+ * @param {string} args.yesterdayStr        'YYYY-MM-DD' in Pacific terms — the window's ceiling
+ * @param {string|null} args.latestSyncDate cursor: latest settled success day, or null
+ * @param {number} args.backfillDays        window size when there is no history at all
+ * @param {number|null} args.maxIncrementalDays soft cap on an incremental catch-up window
+ * @param {number} args.resyncDays          re-fetch recent days to catch cancellations
+ * @param {Array|null} args.forceDates      [start, end] — bypasses the cursor entirely
+ * @returns {{mode: string, startDate: string|null, endDate: string|null, note: string}}
+ *   mode: 'forced' | 'backfill' | 'resync' | 'incremental' | 'up_to_date'
+ */
+function resolveSyncWindow({
+  yesterdayStr,
+  latestSyncDate = null,
+  backfillDays = 30,
+  maxIncrementalDays = null,
+  resyncDays = 0,
+  forceDates = null,
+}) {
+  if (forceDates && forceDates.length === 2) {
+    return {
+      mode: 'forced',
+      startDate: forceDates[0],
+      endDate: forceDates[1],
+      note: `Force: ${forceDates[0]} → ${forceDates[1]}`,
+    };
+  }
+
+  if (!latestSyncDate) {
+    const startDate = addDaysStr(yesterdayStr, -(backfillDays - 1));
+    return {
+      mode: 'backfill',
+      startDate,
+      endDate: yesterdayStr,
+      note: `Backfill ${backfillDays} days: ${startDate} → ${yesterdayStr}`,
+    };
+  }
+
+  if (latestSyncDate >= yesterdayStr) {
+    if (resyncDays > 0) {
+      const startDate = addDaysStr(yesterdayStr, -(resyncDays - 1));
+      return {
+        mode: 'resync',
+        startDate,
+        endDate: yesterdayStr,
+        note: `Up to date but re-syncing last ${resyncDays} days to capture order cancellations: ${startDate} → ${yesterdayStr}`,
+      };
+    }
+    return {
+      mode: 'up_to_date',
+      startDate: null,
+      endDate: null,
+      note: `Up to date (latest: ${latestSyncDate}). Running backfill only.`,
+    };
+  }
+
+  let startDate = addDaysStr(latestSyncDate, 1);
+  const endDate = yesterdayStr;
+  let note = '';
+
+  // Extend backward by resyncDays to re-fetch recent days where orders may have been
+  // cancelled after the original sync captured them.
+  if (resyncDays > 0) {
+    const resyncStartStr = addDaysStr(endDate, -(resyncDays - 1));
+    if (resyncStartStr < startDate) {
+      note += `Extending start from ${startDate} to ${resyncStartStr} for ${resyncDays}-day cancellation correction window. `;
+      startDate = resyncStartStr;
+    }
+  }
+
+  // Soft cap so a long-broken account can't drag a 60-day fetch into the daily window.
+  //
+  // Clamp the END forward from the OLDEST unfilled day, NOT the start backward from the
+  // newest. Clamping the start would fetch only the most recent `max` days and skip the older
+  // ones — and since the cursor is the MAX success date, it would jump past the skipped days
+  // and they would never be fetched again (permanent $0). Clamping the end means each run
+  // consumes the oldest unfilled days first and the cursor advances by exactly what was
+  // filled, so the gap drains over consecutive runs with zero skipped days.
+  let clampedEnd = endDate;
+  if (maxIncrementalDays && maxIncrementalDays > 0) {
+    const gapDays = daysBetweenInclusive(startDate, endDate);
+    if (gapDays > maxIncrementalDays) {
+      clampedEnd = addDaysStr(startDate, maxIncrementalDays - 1);
+      note += `Incremental gap ${gapDays}d exceeds maxIncrementalDays=${maxIncrementalDays}; clamping end ${endDate} → ${clampedEnd} (oldest-first). Remaining ${gapDays - maxIncrementalDays}d will sync on subsequent runs. `;
+    }
+  }
+
+  return {
+    mode: 'incremental',
+    startDate,
+    endDate: clampedEnd,
+    note: `${note}Incremental: ${startDate} → ${clampedEnd}`,
+  };
+}
+
+/**
+ * Drive `fetchChunk` over a list of chunks, oldest first, within a wall-clock budget.
+ *
+ * Extracted from syncFinanceData so the loop's semantics — ordering, aggregation, budget
+ * handling, and which chunk failed — are testable without standing up the whole SP-API stack.
+ *
+ * On failure the chunk that failed is attached to the error as `err.failedChunk`, so the caller
+ * can scope its bookkeeping to exactly those dates instead of the whole window.
+ *
+ * @param {object} args
+ * @param {Array<{startDate:string,endDate:string}>} args.chunks
+ * @param {number} args.budgetMs
+ * @param {Function} args.fetchChunk async (chunk, index) => {salesOrders, skuDocs, overheadDocs, pendingOrders}
+ * @returns {Promise<{chunksCompleted:number, stopReason:string|null, aggregate:object}>}
+ */
+async function runChunkedFetch({ chunks, budgetMs, fetchChunk }) {
+  const deadlineAt = Date.now() + budgetMs;
+  const aggregate = { salesOrders: 0, skuDocs: 0, overheadDocs: 0, pendingOrders: 0 };
+  let chunksCompleted = 0;
+  let stopReason = null;
+
+  for (let i = 0; i < chunks.length; i++) {
+    // Checked BETWEEN chunks only, and never before the first one. Interrupting mid-chunk would
+    // leave its dates half-written; refusing to run any chunk would stall the backlog forever.
+    if (chunksCompleted > 0 && Date.now() >= deadlineAt) {
+      stopReason = 'budget';
+      break;
+    }
+
+    try {
+      const res = await fetchChunk(chunks[i], i);
+      aggregate.salesOrders += (res && res.salesOrders) || 0;
+      aggregate.skuDocs += (res && res.skuDocs) || 0;
+      aggregate.overheadDocs += (res && res.overheadDocs) || 0;
+      aggregate.pendingOrders += (res && res.pendingOrders) || 0;
+      chunksCompleted++;
+    } catch (err) {
+      // Stop here rather than skipping ahead: the cursor is the MAX success date, so continuing
+      // past a failed chunk could advance it beyond days that were never fetched.
+      err.failedChunk = chunks[i];
+      err.chunksCompletedBeforeFailure = chunksCompleted;
+      throw err;
+    }
+  }
+
+  return { chunksCompleted, stopReason, aggregate };
+}
+
+/**
+ * Record a sync failure as one FinanceSyncLog row per date in [from, to].
+ *
+ * Extracted for testability and to keep the scoping decision explicit: `from`/`to` are the
+ * FAILING CHUNK's bounds, not the whole requested window, so days that were never attempted are
+ * not misreported as failures.
+ *
+ * The `status: { $ne: 'success' }` filter is load-bearing — it prevents a late failure from
+ * overwriting rows an earlier chunk (or an earlier run) legitimately succeeded at.
+ */
+async function recordSyncFailure({ FinanceSyncLogModel, userObjectId, country, region, from, to, err, errorKind }) {
+  const dateList = [];
+  const d = new Date(`${from}T00:00:00.000Z`);
+  const endD = new Date(`${to}T00:00:00.000Z`);
+  while (d <= endD) { dateList.push(formatDateUTC(d)); d.setUTCDate(d.getUTCDate() + 1); }
+
+  for (const dateStr of dateList) {
+    await FinanceSyncLogModel.findOneAndUpdate(
+      { User: userObjectId, country: country.toUpperCase(), region, date: dateStr, status: { $ne: 'success' } },
+      {
+        User: userObjectId,
+        country: country.toUpperCase(),
+        region,
+        date: dateStr,
+        fetchedAt: new Date(),
+        status: 'failed',
+        error: err.message.substring(0, 500),
+        errorKind,
+      },
+      { upsert: true, new: true }
+    );
+  }
+  return dateList;
+}
+
+/**
+ * Split a window into contiguous sub-ranges of at most `chunkDays`, OLDEST FIRST.
+ *
+ * Each sub-range becomes its own Amazon report. That is the fix for the deadlock: a 30-day
+ * report for a seller doing ~8k orders/day never finishes inside the poll cap, whereas 3-day
+ * reports do, and each completed chunk writes success rows so the cursor advances and the next
+ * run resumes rather than restarting.
+ *
+ * Oldest-first is required, not cosmetic: an aged-out day that comes back empty is recorded as a
+ * *settled* cursor point, so a mid-loop failure must leave the cursor behind, never ahead.
+ *
+ * `chunkDays <= 0` returns a single chunk — the rollback path (FINANCE_REPORT_CHUNK_DAYS=0).
+ */
+function enumerateDateChunks(startDate, endDate, chunkDays) {
+  if (!startDate || !endDate || startDate > endDate) return [];
+  if (!chunkDays || chunkDays <= 0) return [{ startDate, endDate }];
+
+  const chunks = [];
+  let cursor = startDate;
+  while (cursor <= endDate) {
+    const tentativeEnd = addDaysStr(cursor, chunkDays - 1);
+    const chunkEnd = tentativeEnd > endDate ? endDate : tentativeEnd;
+    chunks.push({ startDate: cursor, endDate: chunkEnd });
+    cursor = addDaysStr(chunkEnd, 1);
+  }
+  return chunks;
+}
+
 function toPacificDateStr(dateInput) {
   if (!dateInput) return null;
   const d = dateInput instanceof Date ? dateInput : new Date(dateInput);
@@ -268,18 +551,11 @@ function httpsRequest(options, postData = null) {
   });
 }
 
-function downloadContent(url, isGzip) {
-  return new Promise((resolve, reject) => {
-    const protocol = url.startsWith('https') ? https : http;
-    protocol.get(url, (res) => {
-      const chunks = [];
-      const stream = isGzip ? res.pipe(zlib.createGunzip()) : res;
-      stream.on('data', (chunk) => chunks.push(chunk));
-      stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
-      stream.on('error', reject);
-    }).on('error', reject);
-  });
-}
+// NOTE: the local `downloadContent` was replaced by utils/spApiReportDownload.js. The old copy
+// had no timeout (a stalled S3 socket could hold the 2h BullMQ job lock) and no completeness
+// check (a short body resolved as if complete, which the persist layer would then record as a
+// settled $0 for real revenue days). It also returned only text, so callers could not tell
+// "Amazon sent an empty report" from "we downloaded 40MB and parsed nothing".
 
 // ═══════════════════════════════════════════════
 // SALES REPORT API
@@ -344,17 +620,45 @@ async function fetchSalesReport(tokenManager, baseUrl, marketplaceId, startDate,
   // still empty we accept "no data" (the persist layer then preserves whatever
   // already exists for those days — it never wipes on an empty report).
   for (let attempt = 0; attempt <= EMPTY_REPORT_RETRIES; attempt++) {
+    const startedAt = Date.now();
     const reportId = await createReport(tokenManager, baseUrl, marketplaceId, startDate, endDate);
     const reportDocumentId = await pollReportStatus(tokenManager, baseUrl, reportId);
     const docInfo = await getReportDocumentUrl(tokenManager, baseUrl, reportDocumentId);
     // The report document URL is a pre-signed S3 URL — no access token needed.
-    const rawData = await downloadContent(docInfo.url, docInfo.compressionAlgorithm === 'GZIP');
-    const rows = parseTsv(rawData);
+    const download = await downloadReportContent(docInfo.url, {
+      isGzip: docInfo.compressionAlgorithm === 'GZIP',
+      label: `SalesReport ${startDate}→${endDate}`,
+    });
+    const rows = parseTsv(download.text);
+
+    // Instrumentation. There was previously none, which is why the safe report size had to be
+    // estimated from column counts rather than measured. Keep this at info level — it is one
+    // line per report and it is what tells us whether the chunk size is right for an account.
+    logger.info(
+      `[SalesReport] ${startDate}→${endDate}: ${rows.length} rows, ` +
+      `${download.compressedBytes}B compressed / ${download.decompressedBytes}B raw, ` +
+      `download ${download.durationMs}ms, total ${Date.now() - startedAt}ms, ` +
+      `heapUsed ${Math.round(process.memoryUsage().heapUsed / 1048576)}MB`
+    );
+
+    // A payload that delivered bytes but is not a usable report is a real error, not "no data".
+    // Accepting it would let the persist layer settle those days at $0 — and any day older than
+    // PROVISIONAL_SETTLE_DAYS is then marked non-provisional, i.e. never retried. For an account
+    // doing six figures a day that is silent, permanent revenue loss.
+    //
+    // A header-only body is NOT this case: it is how Amazon reports a window with no orders, and
+    // it must fall through to the empty-report retry below.
+    if (rows.length === 0 && isUnusableReportPayload(download.text, download.decompressedBytes)) {
+      throw new Error(
+        `[SalesReport] ${startDate}→${endDate}: downloaded ${download.decompressedBytes} bytes ` +
+        `but found no usable TSV rows — refusing to treat this as "no data".`
+      );
+    }
+
     if (rows.length > 0 || attempt === EMPTY_REPORT_RETRIES) {
       if (rows.length === 0 && attempt > 0) {
         logger.warn(`[SalesReport] Still empty after ${attempt} retry(ies) for ${startDate}→${endDate} — accepting as no data (existing rows are preserved, not wiped).`);
       }
-      logger.debug(`[SalesReport] Parsed ${rows.length} rows`);
       return rows;
     }
     logger.warn(`[SalesReport] Empty report for ${startDate}→${endDate} (attempt ${attempt + 1}/${EMPTY_REPORT_RETRIES + 1}); fresh reports are often transiently empty. Re-generating in ${EMPTY_REPORT_RETRY_DELAY_MS / 1000}s…`);
@@ -655,6 +959,20 @@ function buildOverheadBuckets(overheadExpenses, overheadRevenue, rangeStart, ran
   for (const r of overheadRevenue) {
     if (!OVERHEAD_CATEGORIES.has(r.category)) continue;
     const date = toPacificDateStr(r.postedDate) || r.postedDateStr || 'Unknown';
+    // ★ Range-filter revenue exactly as the expense loop above does. Omitting this let an
+    //   out-of-window date into `overheadBuckets` and therefore into `datesToClear`, whose
+    //   deleteMany covers DailySkuFinance too — so a bucket for a date outside the requested
+    //   window would DELETE that day's SKU sales rows without reinserting them.
+    //
+    //   The Finance API window per fetch starts several days before the sales window (the
+    //   settlement-lag buffer), and events like Reserve Release / Disbursement post daily, so
+    //   such dates are routine. Once the sync fetches in chunks this collides within a single
+    //   run: a later chunk would wipe sales an earlier chunk had just written and already
+    //   stamped `success`, leaving a settled $0 for a day with real revenue.
+    //
+    //   Each date's own chunk covers it in range and records these events there, so nothing is
+    //   lost by skipping them here.
+    if (rangeStart && rangeEnd && (date < rangeStart || date > rangeEnd)) continue;
     const key = `${r.category}||${date}`;
     if (!overheadBuckets.has(key)) overheadBuckets.set(key, { category: r.category, date, amount: 0, count: 0, isRevenue: true });
     overheadBuckets.get(key).amount += r.amount;
@@ -1452,88 +1770,78 @@ async function syncFinanceData({ userId, country, regionModel, refreshToken, acc
   const yesterdayPacificMs = now.getTime() - (PACIFIC_OFFSET_HOURS * 60 * 60 * 1000) - (24 * 60 * 60 * 1000);
   const yesterdayStr = new Date(yesterdayPacificMs).toISOString().substring(0, 10);
 
-  let startDate, endDate;
-
-  if (forceDates && forceDates.length === 2) {
-    [startDate, endDate] = forceDates;
-    logger.info(`[Sync] Force: ${startDate} → ${endDate}`);
-  } else {
-    // Cursor = latest SETTLED (non-provisional) success day. Provisional days
-    // (empty report / still-Pending orders) deliberately fall back inside the
-    // incremental window so they get re-fetched until they settle. Pre-existing
-    // rows have `provisional` undefined → `{ $ne: true }` treats them as settled,
-    // so behaviour for already-synced accounts is unchanged on deploy.
+  // Cursor = latest SETTLED (non-provisional) success day. Provisional days
+  // (empty report / still-Pending orders) deliberately fall back inside the
+  // incremental window so they get re-fetched until they settle. Pre-existing
+  // rows have `provisional` undefined → `{ $ne: true }` treats them as settled,
+  // so behaviour for already-synced accounts is unchanged on deploy.
+  let latestSyncDate = null;
+  if (!(forceDates && forceDates.length === 2)) {
     const latestSync = await FinanceSyncLog.findOne({ User: userObjectId, country: country.toUpperCase(), region: regionModel, status: 'success', provisional: { $ne: true } }).sort({ date: -1 }).lean();
-    if (!latestSync) {
-      const backfillStart = new Date(yesterdayPacificMs - ((backfillDays - 1) * 24 * 60 * 60 * 1000));
-      startDate = backfillStart.toISOString().substring(0, 10);
-      endDate = yesterdayStr;
-      logger.info(`[Sync] Backfill ${backfillDays} days: ${startDate} → ${endDate}`);
-    } else if (latestSync.date >= yesterdayStr) {
-      // Already up to date. If resyncDays is set, re-fetch recent days to
-      // correct orders that were cancelled after the original daily fetch.
-      if (resyncDays > 0) {
-        const resyncStart = new Date(`${yesterdayStr}T00:00:00.000Z`);
-        resyncStart.setUTCDate(resyncStart.getUTCDate() - (resyncDays - 1));
-        startDate = formatDateUTC(resyncStart);
-        endDate = yesterdayStr;
-        logger.info(`[Sync] Up to date but re-syncing last ${resyncDays} days to capture order cancellations: ${startDate} → ${endDate}`);
-      } else {
-        logger.info(`[Sync] Up to date (latest: ${latestSync.date}). Running backfill only.`);
-        const step2 = await backfillPendingExpenses({ userId, country, regionModel, accessToken, refreshToken, clientId, clientSecret, tokenManager });
-        await syncRelationshipsIfNeeded({ userId, country, regionModel, startDate: latestSync.date, endDate: latestSync.date, accessToken: tokenManager.token, refreshToken, clientId, clientSecret });
-        return { status: 'up_to_date', latestDate: latestSync.date, backfill: step2 };
-      }
-    } else {
-      const nextDay = new Date(latestSync.date + 'T00:00:00.000Z');
-      nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-      startDate = formatDateUTC(nextDay);
-      endDate = yesterdayStr;
-
-      // Extend backward by resyncDays to re-fetch recent days where orders
-      // may have been cancelled after the original sync captured them.
-      if (resyncDays > 0) {
-        const resyncStart = new Date(`${endDate}T00:00:00.000Z`);
-        resyncStart.setUTCDate(resyncStart.getUTCDate() - (resyncDays - 1));
-        const resyncStartStr = formatDateUTC(resyncStart);
-        if (resyncStartStr < startDate) {
-          logger.info(`[Sync] Extending start from ${startDate} to ${resyncStartStr} for ${resyncDays}-day cancellation correction window.`);
-          startDate = resyncStartStr;
-        }
-      }
-
-      // Soft cap so a long-broken account can't drag a 60-day fetch into the
-      // daily window.
-      //
-      // ★ FIX: clamp the END forward from the OLDEST unfilled day, NOT the
-      //   start backward from the newest. The previous version set
-      //   `startDate = endDate - (max-1)`, which fetched only the most recent
-      //   `max` days and SKIPPED the older ones — and because the next run
-      //   picks `latestSync` by the MAX success date, the cursor jumped past
-      //   the skipped days and they were NEVER fetched again (permanent $0).
-      //
-      //   By clamping the end instead (`endDate = startDate + (max-1)`), each
-      //   run consumes the oldest unfilled days first; `latestSync` advances
-      //   by exactly the days we filled, so the next run continues the gap
-      //   from where this one stopped. The gap drains over consecutive runs
-      //   with zero skipped days. Recent days are reached last, but they are
-      //   reached — and the resyncDays window keeps correcting them afterward.
-      if (maxIncrementalDays && maxIncrementalDays > 0) {
-        const gapDays = Math.round((new Date(`${endDate}T00:00:00.000Z`) - new Date(`${startDate}T00:00:00.000Z`)) / 86400000) + 1;
-        if (gapDays > maxIncrementalDays) {
-          const clampedEnd = new Date(`${startDate}T00:00:00.000Z`);
-          clampedEnd.setUTCDate(clampedEnd.getUTCDate() + (maxIncrementalDays - 1));
-          const clampedEndStr = formatDateUTC(clampedEnd);
-          logger.warn(`[Sync] Incremental gap ${gapDays}d exceeds maxIncrementalDays=${maxIncrementalDays}; clamping end ${endDate} → ${clampedEndStr} (oldest-first). Remaining ${gapDays - maxIncrementalDays}d will sync on subsequent runs.`);
-          endDate = clampedEndStr;
-        }
-      }
-      logger.info(`[Sync] Incremental: ${startDate} → ${endDate}`);
-    }
+    latestSyncDate = latestSync ? latestSync.date : null;
   }
 
+  const window = resolveSyncWindow({
+    yesterdayStr,
+    latestSyncDate,
+    backfillDays,
+    maxIncrementalDays,
+    resyncDays,
+    forceDates,
+  });
+
+  if (window.mode === 'up_to_date') {
+    logger.info(`[Sync] ${window.note}`);
+    const step2 = await backfillPendingExpenses({ userId, country, regionModel, accessToken, refreshToken, clientId, clientSecret, tokenManager });
+    await syncRelationshipsIfNeeded({ userId, country, regionModel, startDate: latestSyncDate, endDate: latestSyncDate, accessToken: tokenManager.token, refreshToken, clientId, clientSecret });
+    return { status: 'up_to_date', latestDate: latestSyncDate, backfill: step2 };
+  }
+
+  const { startDate, endDate } = window;
+  logger.info(`[Sync] ${window.note}`);
+
+  // ─── Chunked fetch ────────────────────────────────────────────────────────────
+  // One Amazon report per chunk instead of one for the whole window. A 30-day report for a
+  // high-volume seller never completes inside the poll cap, so the old single-report path
+  // threw before downloading anything, wrote `failed` for every date, and left the cursor
+  // unmoved — the same 30 days were requested forever. Chunks complete, so the cursor advances
+  // and progress is durable across runs.
+  //
+  // For a healthy account synced yesterday the window is 1 day → exactly one chunk → identical
+  // behaviour to before. Chunking only engages on a backlog (or the resyncDays window).
+  const chunks = enumerateDateChunks(startDate, endDate, FINANCE_REPORT_CHUNK_DAYS);
+  // An inverted or malformed range yields no chunks. Fail loudly instead of returning
+  // `status: 'completed'` having fetched nothing — a silent success here would look identical to a
+  // healthy sync while writing no data and no FinanceSyncLog rows at all.
+  if (chunks.length === 0) {
+    throw new Error(`[Sync] Refusing to sync an invalid window: ${startDate} → ${endDate}`);
+  }
+
+  let chunksCompleted = 0;
+  let stopReason = null;
+
   try {
-    const step1 = await fetchNewSalesAndExpenses({ userId, country, regionModel, startDate, endDate, accessToken, refreshToken, clientId, clientSecret, tokenManager });
+    const loop = await runChunkedFetch({
+      chunks,
+      budgetMs: FINANCE_SYNC_RUN_BUDGET_MS,
+      fetchChunk: (chunk, index) => {
+        if (chunks.length > 1) {
+          logger.info(`[Sync] Chunk ${index + 1}/${chunks.length}: ${chunk.startDate} → ${chunk.endDate}`);
+        }
+        return fetchNewSalesAndExpenses({ userId, country, regionModel, startDate: chunk.startDate, endDate: chunk.endDate, accessToken, refreshToken, clientId, clientSecret, tokenManager });
+      },
+    });
+
+    chunksCompleted = loop.chunksCompleted;
+    stopReason = loop.stopReason;
+    if (stopReason === 'budget') {
+      logger.warn(
+        `[Sync] Run budget exhausted after ${chunksCompleted}/${chunks.length} chunks; ` +
+        `remaining days resume next run (cursor has advanced).`
+      );
+    }
+
+    const step1 = loop.aggregate;
     const step2 = await backfillPendingExpenses({ userId, country, regionModel, accessToken: tokenManager.token, refreshToken, clientId, clientSecret, tokenManager });
     await syncRelationshipsIfNeeded({ userId, country, regionModel, startDate, endDate, accessToken: tokenManager.token, refreshToken, clientId, clientSecret });
 
@@ -1541,27 +1849,47 @@ async function syncFinanceData({ userId, country, regionModel, refreshToken, acc
       status: 'completed', startDate, endDate,
       step1: { salesOrders: step1.salesOrders, skuDocs: step1.skuDocs, overheadDocs: step1.overheadDocs, pendingOrders: step1.pendingOrders },
       step2: { resolved: step2.resolved, stillPending: step2.stillPending, expired: step2.expired },
+      // Additive detail — callers that only read status/step1/step2 are unaffected.
+      chunksTotal: chunks.length,
+      chunksCompleted,
+      stopReason,
     };
   } catch (err) {
     // Write a 'failed' sync log so failures are visible in the database.
     // Only write 'failed' for dates that don't already have a 'success' entry —
     // avoids overwriting good data when a resync attempt fails.
-    if (isAuthorizationDeniedError(err)) {
-      logger.error(`[Sync] SP-API AUTHORIZATION DENIED for ${country}-${regionModel} (user ${userId}) — the account must RE-AUTHORIZE; finance cannot be fetched until it reconnects. Window ${startDate}→${endDate}.`);
+    //
+    // Scope the failure to the chunk that actually failed. Marking the whole window would
+    // stamp `failed` on days that were never attempted (and, once chunking is on, on days an
+    // EARLIER chunk had just succeeded at — the `$ne: 'success'` filter protects those rows,
+    // but the un-attempted ones would still be misreported).
+    const failedChunk = err.failedChunk || null;
+    const failedFrom = failedChunk ? failedChunk.startDate : startDate;
+    const failedTo = failedChunk ? failedChunk.endDate : endDate;
+    if (typeof err.chunksCompletedBeforeFailure === 'number') {
+      chunksCompleted = err.chunksCompletedBeforeFailure;
     }
-    logger.error(`[Sync] Finance sync failed for ${country}-${regionModel}: ${err.message}`, { userId, startDate, endDate, stack: err.stack });
+
+    const errorKind = classifySyncFailure(err);
+    if (errorKind === 'auth_denied') {
+      logger.error(`[Sync] SP-API AUTHORIZATION DENIED for ${country}-${regionModel} (user ${userId}) — the account must RE-AUTHORIZE; finance cannot be fetched until it reconnects. Window ${failedFrom}→${failedTo}.`);
+    }
+    logger.error(
+      `[Sync] Finance sync failed for ${country}-${regionModel} (kind=${errorKind}) on ` +
+      `${failedFrom}→${failedTo} after ${chunksCompleted}/${chunks.length} chunk(s): ${err.message}`,
+      { userId, startDate, endDate, failedFrom, failedTo, errorKind, stack: err.stack }
+    );
     try {
-      const dateList = [];
-      const d = new Date(`${startDate}T00:00:00.000Z`);
-      const endD = new Date(`${endDate}T00:00:00.000Z`);
-      while (d <= endD) { dateList.push(formatDateUTC(d)); d.setUTCDate(d.getUTCDate() + 1); }
-      for (const dateStr of dateList) {
-        await FinanceSyncLog.findOneAndUpdate(
-          { User: userObjectId, country: country.toUpperCase(), region: regionModel, date: dateStr, status: { $ne: 'success' } },
-          { User: userObjectId, country: country.toUpperCase(), region: regionModel, date: dateStr, fetchedAt: new Date(), status: 'failed', error: err.message.substring(0, 500) },
-          { upsert: true, new: true }
-        );
-      }
+      await recordSyncFailure({
+        FinanceSyncLogModel: FinanceSyncLog,
+        userObjectId,
+        country,
+        region: regionModel,
+        from: failedFrom,
+        to: failedTo,
+        err,
+        errorKind,
+      });
     } catch (logErr) {
       logger.error(`[Sync] Failed to write error sync log: ${logErr.message}`);
     }
@@ -1625,4 +1953,13 @@ module.exports = {
   createTokenManager,
   isAccessTokenExpiredError,
   isAuthorizationDeniedError,
+  // Window/chunk selection — pure, and the only practical way to verify the branch that
+  // produced the deadlock (every existing caller passes forceDates and bypasses it).
+  resolveSyncWindow,
+  enumerateDateChunks,
+  runChunkedFetch,
+  recordSyncFailure,
+  classifySyncFailure,
+  addDaysStr,
+  daysBetweenInclusive,
 };

@@ -156,6 +156,26 @@ class UserSchedulingService {
                 0, 0, 0, 0
             ));
 
+            // Eligibility filter for the DAILY pipeline, pushed to the DB (was a
+            // post-.populate JS filter that pulled the whole joined user set into
+            // memory every hourly tick). Selects:
+            //   - PRO and PRO-trial users (packageType === 'PRO', incl. isInTrialPeriod)
+            //   - Agency clients (managed by an agency under a single billing entity)
+            // Verified only. Index-covered by { isVerified:1, packageType:1 }.
+            //
+            // Excluded: LITE, AGENCY-owner accounts without a Pro entitlement,
+            // expired/cancelled users still in the schedule table.
+            //
+            // NOTE: applies ONLY to the daily scheduled pipeline. Integration worker
+            // (first-time onboarding) uses a separate path and is NOT affected — new
+            // sign-ups still get their initial 30-day fetch regardless of plan.
+            const eligibleUsers = await User.find(
+                { isVerified: true, $or: [{ packageType: 'PRO' }, { isAgencyClient: true }] },
+                { _id: 1 }
+            ).lean();
+            if (!eligibleUsers.length) return [];
+            const eligibleIds = eligibleUsers.map(u => u._id);
+
             // dailyUpdateHour is the user's assigned slot for the FIRST attempt of
             // the day (load-spreading). We use $lte so that if the first attempt
             // fails (e.g. transient 429 / token blip / partial phase failure),
@@ -163,33 +183,19 @@ class UserSchedulingService {
             // up again — bounded by MAX_DAILY_ATTEMPTS per account in
             // shouldAttemptAccountUpdate(). Healthy users still run only once;
             // the per-account "done" gate skips them on every later tick.
+            //
+            // .lean() + no .populate(): callers only need schedule.userId (the
+            // ObjectId); the eligibility check is already done above via $in.
             const users = await UserUpdateSchedule.find({
+                userId: { $in: eligibleIds },
                 dailyUpdateHour: { $lte: currentHour },
                 $or: [
                     { lastDailyUpdate: null },
                     { lastDailyUpdate: { $lt: startOfToday } } // Not updated today
                 ]
-            }).populate('userId');
+            }).lean();
 
-            // Eligibility filter for the DAILY pipeline only:
-            //   - PRO and PRO-trial users (packageType === 'PRO', including those
-            //     whose isInTrialPeriod is true)
-            //   - Agency clients (managed by an agency under a single billing entity)
-            //
-            // Excluded by this filter: LITE, AGENCY-owner accounts without a Pro
-            // entitlement, expired/cancelled users still in the schedule table.
-            //
-            // NOTE: This filter applies ONLY to the daily scheduled pipeline.
-            // Integration worker (first-time onboarding) uses a separate path
-            // (`Integration.executeBatch3And4Phase` via integrationWorker.js)
-            // and is NOT affected — new sign-ups still get their initial 30-day
-            // fetch regardless of plan.
-            return users.filter(user => {
-                if (!user.userId || !user.userId.isVerified) return false;
-                const isPro = user.userId.packageType === 'PRO'; // covers both active Pro and Pro-trial
-                const isAgencyClient = user.userId.isAgencyClient === true;
-                return isPro || isAgencyClient;
-            });
+            return users;
         } catch (error) {
             logger.error('Error getting users needing daily update:', error);
             return [];

@@ -274,8 +274,10 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
             });
 
             const inflatedBuffer = await gunzip(response.data);
+            response.data = null; // free the compressed buffer ASAP
             const payloadText = inflatedBuffer.toString('utf8');
             const reportJson = JSON.parse(payloadText);
+            // payloadText no longer needed — let GC reclaim it before returning
 
             // console.log('Successfully downloaded report:', {
             //     totalRows: reportJson.metadata?.totalRows ?? reportJson.length

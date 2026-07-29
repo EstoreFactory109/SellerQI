@@ -96,6 +96,21 @@ const sellerCentral=new mongoose.Schema({
   lastDeepResyncAt: {
     type: Date,
     required: false,
+  },
+  // SP-API Orders authorization denial, recorded when Amazon returns a 403 that a credential
+  // refresh cannot fix (the Orders restricted-data role was never granted, or the grant was
+  // revoked). Written by the review processors and CLEARED on the next successful run.
+  //
+  // Deliberately separate from User.reviewRequestAuthStatus, which is the PRO/trial PLAN gate
+  // (see Services/review/scheduledReviewRequestProcessor.js) — writing that field here would
+  // permanently disable review requests for a paying customer over a reconnectable auth issue.
+  spiOrdersAuthDeniedAt: {
+    type: Date,
+    required: false,
+  },
+  spiOrdersAuthDeniedReason: {
+    type: String,
+    required: false,
   }
 }, {timestamps: true})
 

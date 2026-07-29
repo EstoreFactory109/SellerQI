@@ -103,7 +103,7 @@ const getOrderItems = async (req, res) => {
       amazonOrderId,
     };
 
-    const [items, total] = await Promise.all([
+    const [items, total, order] = await Promise.all([
       ReviewOrderItem.find(filter)
         .sort({ createdAt: -1 })
         .skip(skip)
@@ -118,6 +118,9 @@ const getOrderItems = async (req, res) => {
         })
         .lean(),
       ReviewOrderItem.countDocuments(filter),
+      ReviewOrder.findOne({ User: userId, amazonOrderId })
+        .select({ itemsFetchedAt: 1 })
+        .lean(),
     ]);
 
     const totalPages = Math.ceil(total / limit) || 1;
@@ -131,6 +134,11 @@ const getOrderItems = async (req, res) => {
       totalPages,
       hasMore: page < totalPages,
       items,
+      // Lets the UI distinguish "this order genuinely has no items" from "item detail has not
+      // been pulled for this order yet". Item enrichment is a capped best-effort backfill
+      // prioritising the 5-30 day solicitation window, so an empty list is expected for
+      // orders outside it. Without this flag an empty list looks like a data bug.
+      itemsFetched: !!order?.itemsFetchedAt,
     });
   } catch (error) {
     console.error("❌ Error in getOrderItems:", error.message);

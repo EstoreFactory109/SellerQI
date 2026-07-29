@@ -110,4 +110,36 @@ const createDemoAccessToken = async (userId) => {
     return token;
 };
 
-module.exports={createAccessToken, createRefreshToken,verifyAccessToken,refreshAccess,createLocationToken,verifyLocationToken,createDemoAccessToken};
+// Short-lived, single-purpose token used to link a WhatsApp number to a user.
+// Minted inside an authenticated web session and carried through a wa.me deep
+// link. The `purpose` claim prevents this token from being accepted anywhere a
+// normal access token is expected (and vice-versa).
+const createLinkToken = async (userId) => {
+    if (!userId) {
+        logger.error(new ApiError(400, "User ID is missing"));
+        return false;
+    }
+    const ttl = process.env.WHATSAPP_LINK_TOKEN_TTL || '10m';
+    const token = jwt.sign({ id: userId, purpose: 'wa_link' }, process.env.JWT_SECRET, { expiresIn: ttl });
+    return token;
+};
+
+const verifyLinkToken = async (token) => {
+    if (!token) {
+        logger.error(new ApiError(400, "Token is missing"));
+        return false;
+    }
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        if (!decoded || decoded.purpose !== 'wa_link' || !decoded.id) {
+            logger.error(new ApiError(400, "Invalid link token"));
+            return false;
+        }
+        return { userId: decoded.id, isvalid: true };
+    } catch (error) {
+        // Expired or tampered token — treat as invalid, let caller re-prompt.
+        return false;
+    }
+};
+
+module.exports={createAccessToken, createRefreshToken,verifyAccessToken,refreshAccess,createLocationToken,verifyLocationToken,createDemoAccessToken,createLinkToken,verifyLinkToken};

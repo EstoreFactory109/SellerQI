@@ -208,8 +208,10 @@ class DataUpdateService {
                 const batch = usersNeedingUpdate.slice(i, i + batchSize);
                 
                 await Promise.all(batch.map(async (userSchedule) => {
-                    const userId = userSchedule.userId._id;
-                    
+                    // getUsersNeedingDailyUpdate now returns lean docs (no populate),
+                    // so userSchedule.userId is the raw ObjectId.
+                    const userId = userSchedule.userId;
+
                     // Get user's seller accounts
                     const seller = await Seller.findOne({ User: userId });
                     if (!seller || !seller.sellerAccount) {

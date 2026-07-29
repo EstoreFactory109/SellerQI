@@ -261,7 +261,16 @@ async function sweep() {
     // accounts) this is fine. If it grows, paginate this.
     const sellers = await Seller.find(
         { 'sellerAccount.adsRefreshToken': { $exists: true, $ne: null, $ne: '' } },
-        { User: 1, sellerAccount: 1 }
+        // Project only the sub-fields this sweep reads — excludes the large embedded
+        // products[]/TotatProducts[] arrays that were previously loaded but never used.
+        {
+            User: 1,
+            'sellerAccount.country': 1,
+            'sellerAccount.region': 1,
+            'sellerAccount.spiRefreshToken': 1,
+            'sellerAccount.adsRefreshToken': 1,
+            'sellerAccount.lastDeepResyncAt': 1
+        }
     ).lean();
 
     // Only sweep ACTIVE accounts (same scope as the daily pipeline).
@@ -384,10 +393,17 @@ async function isAccountFinanceAuthDenied(userObjectId, country, region) {
     // (and no newer success exists), the account is currently de-authorized.
     const latest = await FinanceSyncLog.findOne(
         { User: userObjectId, country, region },
-        { status: 1, error: 1, _id: 0 }
+        { status: 1, error: 1, errorKind: 1, _id: 0 }
     ).sort({ fetchedAt: -1 }).lean();
     if (!latest) return false;
-    return latest.status === 'failed' && isFinanceAuthDeniedError(latest.error);
+    if (latest.status !== 'failed') return false;
+
+    // Prefer the explicit classification written by FinanceService. The string match below is
+    // the fallback for rows written before `errorKind` existed — note it must NOT be consulted
+    // when errorKind IS set, or a message that merely mentions "forbidden" inside a timeout
+    // would be misread as a permanent denial and the account skipped for good.
+    if (latest.errorKind) return latest.errorKind === 'auth_denied';
+    return isFinanceAuthDeniedError(latest.error);
 }
 
 /**
@@ -460,7 +476,16 @@ async function sweepFinance() {
 
     const sellers = await Seller.find(
         { 'sellerAccount.spiRefreshToken': { $exists: true, $ne: null, $ne: '' } },
-        { User: 1, sellerAccount: 1 }
+        // Project only the sub-fields this sweep reads — excludes the large embedded
+        // products[]/TotatProducts[] arrays that were previously loaded but never used.
+        {
+            User: 1,
+            'sellerAccount.country': 1,
+            'sellerAccount.region': 1,
+            'sellerAccount.spiRefreshToken': 1,
+            'sellerAccount.adsRefreshToken': 1,
+            'sellerAccount.lastDeepResyncAt': 1
+        }
     ).lean();
 
     // Only sweep ACTIVE accounts (same scope as the daily pipeline).
@@ -572,7 +597,17 @@ async function sweepFinanceDeepResync() {
 
     const sellers = await Seller.find(
         { 'sellerAccount.spiRefreshToken': { $exists: true, $ne: null, $ne: '' } },
-        { User: 1, sellerAccount: 1 }
+        // Project only the sub-fields this sweep reads — excludes the large embedded
+        // products[]/TotatProducts[] arrays that were previously loaded but never used.
+        // (_id is returned by default and is required below for stampDeepResyncAt.)
+        {
+            User: 1,
+            'sellerAccount.country': 1,
+            'sellerAccount.region': 1,
+            'sellerAccount.spiRefreshToken': 1,
+            'sellerAccount.adsRefreshToken': 1,
+            'sellerAccount.lastDeepResyncAt': 1
+        }
     ).lean();
 
     // Phase 1: only ACTIVE accounts (match the daily pipeline scope).

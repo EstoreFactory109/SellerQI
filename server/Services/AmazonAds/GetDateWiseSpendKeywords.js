@@ -259,11 +259,12 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
 
             // 2) Inflate the GZIP buffer
             const inflatedBuffer = await gunzip(response.data);
+            response.data = null; // free the compressed buffer ASAP
             const payloadText = inflatedBuffer.toString('utf8');
 
             // 3) Parse JSON
-            const reportJson = JSON.parse(payloadText);
-            
+            let reportJson = JSON.parse(payloadText);
+
             if(!reportJson){
                 return {
                     success: false,
@@ -297,7 +298,8 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
                     await new Promise(resolve => setImmediate(resolve));
                 }
             }
-            
+            reportJson = null; // free the raw report once aggregated
+
             return sponsoredAdsData;
 
         } catch (err) {

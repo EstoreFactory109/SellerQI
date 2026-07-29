@@ -99,10 +99,11 @@ const getReportLink=async(accessToken, reportDocumentId,baseuri)=> {
         );
 
         const documentUrl = response.data.url;
-        const reportResponse = await axios.get(documentUrl, { responseType: "arraybuffer" });
-        //console.log(reportResponse)
-
-        return reportResponse.config.url;
+        // Return the pre-signed document URL directly. Previously this downloaded the
+        // entire (gzipped) report body just to read back its own request URL and then
+        // discarded it — the real download happens once in getReport(). Avoids a full
+        // duplicate download per run. Value is identical (config.url === documentUrl).
+        return documentUrl;
     } catch (error) {
         logger.error("Error downloading report:", error.response ? error.response.data : error.message);
         throw new Error("Failed to download report");
@@ -155,8 +156,10 @@ const getReport = async (accessToken, marketplaceIds,userId,baseuri,country,regi
         }
 
        const decompressedBuffer = await gunzip(fullReport.data);
+       fullReport.data = null; // free the compressed buffer ASAP
        const ReportData = decompressedBuffer.toString("utf8");
        const refinedData=JSON.parse(ReportData);
+       // ReportData (raw JSON string) no longer needed — let GC reclaim it
 
        const User=userId;
        const ahrScore=refinedData.performanceMetrics[0].accountHealthRating.ahrScore;

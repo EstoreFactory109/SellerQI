@@ -6,8 +6,9 @@ const { URIs, marketplaceConfig: sharedMarketplaceConfig } = require("../../cont
 // ─────────────────────────────────────────────
 
 const https = require("https");
-const http = require("http");
-const zlib = require("zlib");
+// `http` and `zlib` were only needed by the local downloadContent, now shared via
+// utils/spApiReportDownload.js.
+const { downloadReportContent, isUnusableReportPayload } = require("../../utils/spApiReportDownload.js");
 
 const COUNTRY_TO_INTERNAL_REGION = {
   US: "na", CA: "na", MX: "na", BR: "na",
@@ -164,20 +165,10 @@ function deriveNextDelayFromRateLimitHeader(headers) {
   return Math.ceil((1000 / rate) * 1.25);
 }
 
-function downloadContent(url, isGzip = false) {
-  return new Promise((resolve, reject) => {
-    const parsedUrl = new URL(url);
-    const protocol = parsedUrl.protocol === "https:" ? https : http;
-
-    protocol.get(url, (res) => {
-      const chunks = [];
-      const stream = isGzip ? res.pipe(zlib.createGunzip()) : res;
-      stream.on("data", (chunk) => chunks.push(chunk));
-      stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-      stream.on("error", reject);
-    }).on("error", reject);
-  });
-}
+// NOTE: the local `downloadContent` was replaced by utils/spApiReportDownload.js, which is
+// shared with FinanceService. The old copy (identical in both files) had no timeout — a stalled
+// S3 socket could hold the 2h BullMQ job lock — and no completeness check, so a short body
+// resolved as if complete and was parsed as authoritative data.
 
 async function getAccessToken(clientId, clientSecret, refreshToken) {
   const postData = new URLSearchParams({
@@ -214,7 +205,14 @@ async function getAccessToken(clientId, clientSecret, refreshToken) {
 
 const REPORT_TYPE = "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL";
 const POLL_INTERVAL_MS = 15000;
-const MAX_POLL_ATTEMPTS = 40;
+// Env-overridable, mirroring ADS_REPORT_MAX_POLL_ATTEMPTS (AmazonAds/GetPPCMetrics.js:132) and
+// FINANCE_REPORT_MAX_POLL_ATTEMPTS. Default unchanged at 40 (= 600s) so nothing shifts for
+// accounts that already succeed; the knob exists for high-volume sellers whose report for the
+// requested `days` span legitimately takes longer to generate.
+const MAX_POLL_ATTEMPTS = (() => {
+  const parsed = parseInt(process.env.ASINWISE_REPORT_MAX_POLL_ATTEMPTS, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 40;
+})();
 
 async function createReport(accessToken, baseUrl, marketplaceId, startDate, endDate) {
   const postData = JSON.stringify({
@@ -316,10 +314,30 @@ async function fetchOrdersReport(accessToken, baseUrl, marketplaceId, startDate,
   logger.info(`[Report] Downloading report...`);
 
   const isGzip = docInfo.compressionAlgorithm === "GZIP";
-  const rawData = await downloadContent(docInfo.url, isGzip);
+  const download = await downloadReportContent(docInfo.url, {
+    isGzip,
+    label: `AsinWiseSales ${startDate}→${endDate}`,
+  });
 
-  const rows = parseTsv(rawData);
-  logger.info(`[Report] Parsed ${rows.length} order rows`);
+  const rows = parseTsv(download.text);
+  logger.info(
+    `[Report] ${startDate}→${endDate}: ${rows.length} order rows, ` +
+    `${download.compressedBytes}B compressed / ${download.decompressedBytes}B raw, ` +
+    `download ${download.durationMs}ms, ` +
+    `heapUsed ${Math.round(process.memoryUsage().heapUsed / 1048576)}MB`
+  );
+
+  // Bytes arrived but the payload is not a usable report — a fault, not an empty range.
+  // Returning [] would let callers record zero sales for a period that actually had orders.
+  //
+  // A HEADER-ONLY body is explicitly not this case: that is how Amazon represents "no orders in
+  // this window", and treating it as an error would break every genuinely quiet range.
+  if (rows.length === 0 && isUnusableReportPayload(download.text, download.decompressedBytes)) {
+    throw new Error(
+      `[Report] ${startDate}→${endDate}: downloaded ${download.decompressedBytes} bytes but ` +
+      `found no usable TSV rows — refusing to report this as no data.`
+    );
+  }
 
   return rows;
 }

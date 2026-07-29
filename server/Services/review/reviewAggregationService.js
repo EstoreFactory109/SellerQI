@@ -1,6 +1,7 @@
 const { fetchOrders } = require("./orders");
 const { getProductDetailsByOrderId } = require("./ordered_product_details");
 const { checkReviewEligibility } = require("./reviewRequestEligibility");
+const { SpApiAuthDeniedError } = require("../../utils/spApiErrors.js");
 const ReviewOrder = require("../../models/review/ReviewOrderModel");
 const ReviewOrderItem = require("../../models/review/ReviewOrderItemModel");
 
@@ -22,6 +23,9 @@ const ReviewOrderItem = require("../../models/review/ReviewOrderItemModel");
  * @param {string} params.awsConfig.awsSecretAccessKey
  * @param {string} params.awsConfig.awsRegion
  * @param {string} [params.awsConfig.awsSessionToken]
+ * @param {Object} [params.credentialProvider] - optional utils/spApiCredentials.js provider
+ *   that keeps the LWA token and STS credentials fresh across a long run. Omit for the
+ *   previous behaviour.
  *
  * @returns {Promise<{ totalOrders: number, orders: Array }>}
  */
@@ -31,6 +35,7 @@ async function fetchAndStoreReviewOrders({
   region,
   accessToken,
   awsConfig,
+  credentialProvider = null,
 }) {
   const { marketplaceId } = awsConfig;
 
@@ -38,7 +43,7 @@ async function fetchAndStoreReviewOrders({
   const fetchBatchId = new Date().toISOString();
 
   // 1) Fetch orders (last 7 days, shipped) via orders.js
-  const orders = await fetchOrders(accessToken, awsConfig);
+  const orders = await fetchOrders(accessToken, awsConfig, credentialProvider);
 
   const detailedOrders = [];
 
@@ -71,7 +76,8 @@ async function fetchAndStoreReviewOrders({
       const { itemCount, items } = await getProductDetailsByOrderId(
         orderId,
         accessToken,
-        awsConfig
+        awsConfig,
+        credentialProvider
       );
 
       // 2b) Be gentle with rate limits before eligibility call
@@ -200,6 +206,10 @@ async function fetchAndStoreReviewOrders({
         },
       });
     } catch (err) {
+      // A denial applies to every remaining order — abort rather than recording it
+      // per-order thousands of times.
+      if (err instanceof SpApiAuthDeniedError) throw err;
+
       console.error(
         `❌ Failed to process order ${orderId} for review storage:`,
         err.message
