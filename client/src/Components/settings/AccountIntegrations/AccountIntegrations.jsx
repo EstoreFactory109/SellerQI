@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import AmazonConnectPopup from "./AmazonConnectPopup";
 import { Link, Plus, Globe, ShoppingBag, MapPin, Building, CheckCircle, AlertCircle, Zap, Trash2 } from "lucide-react";
 import axiosInstance from "../../../config/axios.config";
+import ConnectWhatsApp from "../WhatsApp/ConnectWhatsApp";
 
 export default function AccountCards() {
 
@@ -335,6 +336,8 @@ export default function AccountCards() {
         )}
       </div>
     </div>
+    {/* Additive: QMate on WhatsApp connection card */}
+    <ConnectWhatsApp />
     </>
   );
 }

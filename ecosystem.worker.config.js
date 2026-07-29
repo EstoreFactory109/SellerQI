@@ -65,7 +65,11 @@ module.exports = {
                 // WORKER_NAME: If set via env var, use it; otherwise worker.js will use `worker-${process.pid}`
                 // This ensures each worker instance has a unique identifier in merged logs
                 // For multi-instance deployments, set WORKER_NAME env var with INSTANCE_ID
-                USE_SLICE_ASSEMBLER: process.env.USE_SLICE_ASSEMBLER || 'false'
+                USE_SLICE_ASSEMBLER: process.env.USE_SLICE_ASSEMBLER || 'false',
+                // Review-order ingestion path — keep in sync with ecosystem.config.js.
+                // 'false' = legacy buffered path; 'true' = streaming + resumable date slices.
+                // See Services/review/reviewIngestionService.js for both modes and rollback.
+                REVIEW_INGEST_STREAMING: process.env.REVIEW_INGEST_STREAMING || 'false'
             },
             // Logging
             error_file: './logs/pm2-worker-error.log',

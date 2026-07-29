@@ -302,8 +302,10 @@ async function downloadReport(location, accessToken, tokenRefreshCallback) {
             });
 
             const inflatedBuffer = await gunzip(response.data);
+            response.data = null; // free the compressed buffer ASAP
             const payloadText = inflatedBuffer.toString('utf8');
             const reportJson = JSON.parse(payloadText);
+            // payloadText no longer needed — let GC reclaim it before returning
 
             if (!reportJson || !Array.isArray(reportJson)) {
                 return [];
@@ -366,7 +368,7 @@ async function fetchReportForAdType(adType, accessToken, profileId, region, star
 
         // 3. Download and parse
         const downloadToken = reportStatus.finalAccessToken || currentToken;
-        const rawRows = await downloadReport(reportStatus.location, downloadToken, tokenRefreshCallback);
+        let rawRows = await downloadReport(reportStatus.location, downloadToken, tokenRefreshCallback);
 
         logger.debug(`✅ [GetPPCProductWise] ${adType} report: ${rawRows.length} rows`);
 
@@ -382,6 +384,7 @@ async function fetchReportForAdType(adType, accessToken, profileId, region, star
                 await new Promise(resolve => setImmediate(resolve));
             }
         }
+        rawRows = null; // free the raw report rows once mapped
 
         return mappedRows;
 

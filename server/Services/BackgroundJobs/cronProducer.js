@@ -50,7 +50,9 @@ async function enqueueUsersForDailyUpdate() {
         let accountsAlreadyDone = 0;
 
         for (const schedule of usersNeedingUpdate) {
-            const userId = schedule.userId?._id?.toString();
+            // getUsersNeedingDailyUpdate now returns lean schedule docs (no populate),
+            // so schedule.userId is the raw ObjectId rather than a populated user doc.
+            const userId = schedule.userId?.toString();
             if (!userId) continue;
 
             try {

@@ -53,6 +53,7 @@ const financeDashboardRoute=require('../routes/financeDashboard.routes.js')
 const integrationRoute=require('../routes/integration.routes.js')
 const alertsRoute=require('../routes/alerts.routes.js')
 const qmateRoute=require('../routes/qmate.routes.js')
+const whatsappRoute=require('../routes/whatsapp.routes.js')
 const reviewRoute=require('../routes/review.routes.js')
 const rankingContentAIRoute=require('../routes/rankingContentAI.routes.js')
 const demoRoute=require('../routes/demo.routes.js')
@@ -137,7 +138,12 @@ app.use(helmet({
 // Stripe webhook route MUST come before express.json() middleware
 // because Stripe requires raw body for signature verification
 app.use('/app/stripe/webhook', express.raw({type: 'application/json'}));
- 
+
+// WhatsApp (Meta Cloud API) webhook needs the raw body for X-Hub-Signature-256
+// verification — must come before express.json(), same as Stripe. The GET
+// verification handshake has no body, so this is a no-op for it.
+app.use('/api/whatsapp/webhook', express.raw({type: 'application/json'}));
+
 // Apply JSON parsing for all other routes
 app.use(express.json({limit:"16kb"}));
 app.use(express.urlencoded({extended:true,limit:"16kb",}))
@@ -199,6 +205,7 @@ app.use('/api/finance-dashboard',financeDashboardRoute)
 app.use('/api/integration',integrationRoute)
 app.use('/api/alerts',alertsRoute)
 app.use('/api/qmate',qmateRoute)
+app.use('/api/whatsapp',whatsappRoute)
 app.use('/api/ai',rankingContentAIRoute)
 app.use('/api/review',reviewRoute)
 

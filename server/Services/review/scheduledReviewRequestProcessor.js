@@ -1,6 +1,8 @@
 const { processReviewRequests } = require("./reviewRequestSenderService");
 const { generateAccessToken } = require("../Sp_API/GenerateTokens");
 const getTemporaryCredentials = require("../../utils/GenerateTemporaryCredentials");
+const { createSpApiCredentialProvider } = require("../../utils/spApiCredentials");
+const { SpApiAuthDeniedError } = require("../../utils/spApiErrors");
 const Seller = require("../../models/user-auth/sellerCentralModel");
 const User = require("../../models/user-auth/userModel");
 const {
@@ -133,6 +135,18 @@ async function scheduledReviewRequestSender(userId, country, region, source) {
       awsSessionToken: tempCreds.SessionToken,
     };
 
+    // The sender sleeps 5s+ per order, so a few hundred orders already outlives the ~60 min
+    // credential window. Same provider treatment as ingestion: adopt what we just minted,
+    // re-mint either half on demand.
+    const credentialProvider = createSpApiCredentialProvider({
+      userId,
+      spiRefreshToken,
+      awsRegion,
+      initialAccessToken: accessToken,
+      initialAwsCreds: tempCreds,
+      logPrefix: "[scheduledReviewRequestSender]",
+    });
+
     // 5) Delegate to the sender service
     const summary = await processReviewRequests({
       userId,
@@ -140,6 +154,7 @@ async function scheduledReviewRequestSender(userId, country, region, source) {
       region,
       accessToken,
       awsConfig,
+      credentialProvider,
     });
 
     logger.info(
@@ -148,6 +163,23 @@ async function scheduledReviewRequestSender(userId, country, region, source) {
 
     return { success: true, data: summary, error: null };
   } catch (error) {
+    // Surface a denial distinctly. Note processReviewRequests rethrows this BEFORE marking
+    // the current order "failed", so an unauthorized account keeps its backlog intact and
+    // simply needs reconnecting.
+    if (error instanceof SpApiAuthDeniedError) {
+      const reason = error.amazonMessage || error.message;
+      logger.error(
+        `[scheduledReviewRequestSender] SP-API authorization DENIED for user ${userId} ` +
+        `(${country}/${region}) — account must re-authorize: ${reason}`
+      );
+      return {
+        success: false,
+        data: null,
+        authDenied: true,
+        error: `SP-API authorization denied for Solicitations — the account must reconnect: ${reason}`,
+      };
+    }
+
     logger.error(
       `[scheduledReviewRequestSender] Error for user ${userId}:`,
       error

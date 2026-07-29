@@ -70,6 +70,19 @@ const ReviewOrderSchema = new mongoose.Schema(
       default: 0,
     },
 
+    // When per-item detail was last pulled into ReviewOrderItem for this order.
+    // null/absent = items not fetched yet.
+    //
+    // Item fetching costs one SP-API call plus a rate-limit sleep PER ORDER, so for a
+    // high-volume account it can never be exhaustive (~120k orders would take days). It is
+    // therefore a capped, best-effort backfill prioritising orders inside the 5-30 day
+    // solicitation window. That is acceptable because ReviewOrderItem has exactly one
+    // consumer: the on-demand drill-down GET /api/review/order-items/:amazonOrderId.
+    itemsFetchedAt: {
+      type: Date,
+      default: null,
+    },
+
     // Raw SP-API order payload (optionally trimmed by caller)
     rawOrder: {
       type: mongoose.Schema.Types.Mixed,
@@ -169,6 +182,15 @@ ReviewOrderSchema.index({
   reviewRequestStatus: 1,
   purchaseDate: -1,
   nextEligibilityCheckAt: 1,
+});
+
+// Items backfill pass: "orders in the solicitation window whose items are not fetched yet",
+// oldest first. purchaseDate ascending because the oldest orders leave the 30-day window
+// first and so are the most urgent to enrich.
+ReviewOrderSchema.index({
+  User: 1,
+  itemsFetchedAt: 1,
+  purchaseDate: 1,
 });
 
 module.exports = mongoose.model("ReviewOrder", ReviewOrderSchema);

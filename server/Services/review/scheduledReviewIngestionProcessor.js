@@ -1,6 +1,8 @@
 const { ingestReviewOrders } = require("./reviewIngestionService");
 const { generateAccessToken } = require("../Sp_API/GenerateTokens");
 const getTemporaryCredentials = require("../../utils/GenerateTemporaryCredentials");
+const { createSpApiCredentialProvider } = require("../../utils/spApiCredentials");
+const { SpApiAuthDeniedError } = require("../../utils/spApiErrors");
 const Seller = require("../../models/user-auth/sellerCentralModel");
 const {
   marketplaceConfig,
@@ -8,6 +10,36 @@ const {
   spapiRegions,
 } = require("../../controllers/config/config");
 const logger = require("../../utils/Logger");
+
+/**
+ * Record (or clear) an SP-API Orders authorization denial on the seller subdocument.
+ * Best-effort — a bookkeeping failure must never mask the real outcome of the run.
+ */
+async function setOrdersAuthDenied(userId, country, region, reason) {
+  try {
+    const update = reason
+      ? {
+          $set: {
+            "sellerAccount.$[acct].spiOrdersAuthDeniedAt": new Date(),
+            "sellerAccount.$[acct].spiOrdersAuthDeniedReason": reason,
+          },
+        }
+      : {
+          $unset: {
+            "sellerAccount.$[acct].spiOrdersAuthDeniedAt": "",
+            "sellerAccount.$[acct].spiOrdersAuthDeniedReason": "",
+          },
+        };
+
+    await Seller.updateOne({ User: userId }, update, {
+      arrayFilters: [{ "acct.country": country, "acct.region": region }],
+    });
+  } catch (err) {
+    logger.warn(
+      `[scheduledReviewIngestion] could not record auth-denied state (non-fatal): ${err.message}`
+    );
+  }
+}
 
 /**
  * Wrapper that matches the ScheduleConfig `isCalculationService` signature:
@@ -110,20 +142,55 @@ async function scheduledReviewIngestion(userId, country, region, source) {
       awsSessionToken: tempCreds.SessionToken,
     };
 
+    // Both credentials above live ~60 min. A high-volume account takes longer than that to
+    // walk, which is what produced `Orders API failed: 403` at exactly 61 minutes. The
+    // provider adopts what we just minted (so the happy path costs no extra LWA/STS call)
+    // and re-mints either half on demand from here on.
+    const credentialProvider = createSpApiCredentialProvider({
+      userId,
+      spiRefreshToken,
+      awsRegion,
+      initialAccessToken: accessToken,
+      initialAwsCreds: tempCreds,
+      logPrefix: "[scheduledReviewIngestion]",
+    });
+
     const result = await ingestReviewOrders({
       userId,
       country,
       region,
       accessToken,
       awsConfig,
+      credentialProvider,
     });
 
     logger.info(
       `[scheduledReviewIngestion] Done for user ${userId}: ingested=${result.ingested}, failed=${result.failed}`
     );
 
+    // A previously-denied account that just succeeded is authorized again.
+    await setOrdersAuthDenied(userId, country, region, null);
+
     return { success: true, data: result, error: null };
   } catch (error) {
+    // A denial is not a transient failure — refreshing cannot fix it and retrying wastes an
+    // hour per run. Surface it distinctly so it is actionable (reconnect the account) rather
+    // than buried among ordinary errors.
+    if (error instanceof SpApiAuthDeniedError) {
+      const reason = error.amazonMessage || error.message;
+      logger.error(
+        `[scheduledReviewIngestion] SP-API authorization DENIED for user ${userId} ` +
+        `(${country}/${region}) — account must re-authorize: ${reason}`
+      );
+      await setOrdersAuthDenied(userId, country, region, reason);
+      return {
+        success: false,
+        data: null,
+        authDenied: true,
+        error: `SP-API authorization denied for Orders — the account must reconnect: ${reason}`,
+      };
+    }
+
     logger.error(
       `[scheduledReviewIngestion] Error for user ${userId}:`,
       error

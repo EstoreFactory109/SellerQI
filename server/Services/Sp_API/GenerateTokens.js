@@ -3,6 +3,7 @@ const logger = require('../../utils/Logger.js');
 const credentials=require('./config.js');
 const { ApiError } = require('../../utils/ApiError');
 const axios=require('axios');
+const authCache = require('../../utils/authCache.js');
 
  const generateRefreshToken = async (authCode,region) => {
     // Validate required parameters
@@ -236,14 +237,21 @@ const generateAccessToken=async(userId,refreshToken,errorRef=null)=>{
                 return false;
             }
             const accessToken = response.data.access_token;
-            
-            // Try to save the access token to user, but don't fail if save fails
+
+            // Write-through cache: repopulate on every fresh generation (incl. 401-driven
+            // refresh callbacks) so the scheduled pipeline reuses this token across phases
+            // and a refreshed token always overwrites any stale cached entry. Non-fatal.
+            authCache.setToken('sp', refreshToken, accessToken);
+
+            // Try to save the access token to user, but don't fail if save fails.
+            // Use a targeted updateOne instead of findById + full-document save() to
+            // avoid reading and re-writing the entire User doc on every token generation.
             try {
-            const getUser=await User.findById(userId);
-                if (getUser) {
-            getUser.spiAccessToken=accessToken;
-            await getUser.save();
-                } else {
+                const updateResult = await User.updateOne(
+                    { _id: userId },
+                    { $set: { spiAccessToken: accessToken } }
+                );
+                if (!updateResult || updateResult.matchedCount === 0) {
                     logger.warn(`User not found when saving access token: ${userId}`);
                 }
             } catch (saveError) {
@@ -263,13 +271,21 @@ const generateAccessToken=async(userId,refreshToken,errorRef=null)=>{
             const status = error.response.status;
             const errorCode = error.response.data?.error;
             const errorDescription = error.response.data?.error_description;
-            
+
             logger.error(`Error generating access token - Amazon API error: ${status} - ${errorCode}: ${errorDescription}`, {
                 userId,
                 status,
                 errorCode,
                 errorDescription
             });
+
+            // The refresh token itself is dead (revoked / reconnected elsewhere), so any
+            // access token cached against it is unusable too. Drop it now rather than letting
+            // another phase serve it for the rest of the 50-min TTL. Non-fatal.
+            if (errorCode === 'invalid_grant') {
+                authCache.invalidateToken('sp', refreshToken).catch(() => {});
+            }
+
             if (errorRef) errorRef.message = errorDescription || errorCode || `Amazon API error ${status}`;
         } else {
             logger.error(`Error generating access token: ${error.message}`, {

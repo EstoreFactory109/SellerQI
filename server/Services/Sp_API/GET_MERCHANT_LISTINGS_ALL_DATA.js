@@ -377,6 +377,7 @@ async function convertTSVToJsonLegacy(tsvBuffer) {
         decompressedData = tsvBuffer;
     }
     const tsv = decompressedData.toString("utf-8");
+    decompressedData = null; // free the decompressed buffer ASAP
     const rows = tsv.split("\n").filter(row => row.trim() !== "");
     if (rows.length === 0) return [];
     const headers = rows[0].split("\t");
