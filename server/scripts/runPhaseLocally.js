@@ -53,6 +53,26 @@ if (!PHASE || !USER_ID || !COUNTRY || !REGION) {
   process.exit(1);
 }
 
+/**
+ * Look up the SP-API refresh token for one seller account. Mirrors the resolution order used by
+ * the scheduled processors and the other finance scripts.
+ */
+async function resolveSpiRefreshToken(userId, country, region) {
+  const Seller = require('../models/user-auth/sellerCentralModel.js');
+  const sellerCentral = await Seller.findOne({ User: userId }).lean();
+  const account = (sellerCentral?.sellerAccount || []).find(
+    (acc) => acc.country === country && acc.region === region
+  );
+  if (!account) {
+    throw new Error(`No seller account for ${country}/${region} on user ${userId}`);
+  }
+  const token = account.spiRefreshToken || account.spRefreshToken || account.refreshToken;
+  if (!token) {
+    throw new Error(`Seller account ${country}/${region} has no SP-API refresh token`);
+  }
+  return token;
+}
+
 async function invoke() {
   const SI = ScheduledIntegration;
   switch (PHASE) {
@@ -73,9 +93,13 @@ async function invoke() {
     case 'sync': {
       if (DATES.length !== 2) throw new Error('sync needs --dates=START,END (two dates)');
       const { syncFinanceData } = require('../Services/Sp_API/FinanceService.js');
+      // Resolve the seller's refresh token, as the other finance scripts do. Passing it as
+      // `undefined` (the previous behaviour) made this phase unusable: createTokenManager needs
+      // a refresh token, so every invocation threw before doing any work.
+      const refreshToken = await resolveSpiRefreshToken(USER_ID, COUNTRY, REGION);
       return syncFinanceData({
         userId: USER_ID, country: COUNTRY, regionModel: REGION,
-        refreshToken: undefined, accessToken: undefined,
+        refreshToken, accessToken: undefined,
         clientId: process.env.SPAPI_CLIENT_ID, clientSecret: process.env.SPAPI_CLIENT_SECRET,
         forceDates: [DATES[0], DATES[1]],
       });

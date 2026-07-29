@@ -84,6 +84,20 @@ const FinanceSyncLogSchema = new mongoose.Schema(
     // Error message if status is 'failed'
     error: { type: String, default: '' },
 
+    // Cause bucket for a failure, so responses that differ can be told apart without
+    // string-matching the message:
+    //   'auth_denied' — the seller's grant does not cover Reports; only reconnecting fixes it
+    //   'timeout'     — report generation or download ran out of time; retrying CAN work
+    //   'memory'      — stopped short of the heap ceiling; a smaller chunk/window will succeed
+    //   'other'       — anything else
+    // Additive and unset on pre-existing rows, so consumers must tolerate `undefined` and fall
+    // back to inspecting `error` (see freshnessSweeper.isAccountFinanceAuthDenied).
+    errorKind: {
+      type: String,
+      enum: ['auth_denied', 'timeout', 'memory', 'other'],
+      required: false,
+    },
+
     // ★ Provisional = this day was fetched but its sales are NOT yet trustworthy
     //   (the Sales Report returned 0 rows for it, or it contained Pending orders
     //   whose item-price is still empty). A provisional day is re-fetched by the

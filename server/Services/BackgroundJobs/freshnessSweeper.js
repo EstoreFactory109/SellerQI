@@ -384,10 +384,17 @@ async function isAccountFinanceAuthDenied(userObjectId, country, region) {
     // (and no newer success exists), the account is currently de-authorized.
     const latest = await FinanceSyncLog.findOne(
         { User: userObjectId, country, region },
-        { status: 1, error: 1, _id: 0 }
+        { status: 1, error: 1, errorKind: 1, _id: 0 }
     ).sort({ fetchedAt: -1 }).lean();
     if (!latest) return false;
-    return latest.status === 'failed' && isFinanceAuthDeniedError(latest.error);
+    if (latest.status !== 'failed') return false;
+
+    // Prefer the explicit classification written by FinanceService. The string match below is
+    // the fallback for rows written before `errorKind` existed — note it must NOT be consulted
+    // when errorKind IS set, or a message that merely mentions "forbidden" inside a timeout
+    // would be misread as a permanent denial and the account skipped for good.
+    if (latest.errorKind) return latest.errorKind === 'auth_denied';
+    return isFinanceAuthDeniedError(latest.error);
 }
 
 /**
