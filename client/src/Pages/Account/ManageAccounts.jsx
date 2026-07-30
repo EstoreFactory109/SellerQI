@@ -732,9 +732,11 @@ const ManageAccounts = () => {
 
   // Check if user has an active subscription that can be cancelled
   const canCancelSubscription = (user) => {
-    // User must have a PRO or AGENCY package, and be in active/trialing status
+    // Trial users can always cancel/downgrade early, regardless of packageType
+    if (user.isInTrialPeriod) return true;
+    // Otherwise: user must have a PRO or AGENCY package, and be in active status
     const hasActivePackage = user.packageType === 'PRO' || user.packageType === 'AGENCY';
-    const hasActiveStatus = ['active', 'trialing', 'authenticated'].includes(user.subscriptionStatus) || user.isInTrialPeriod;
+    const hasActiveStatus = ['active', 'trialing', 'authenticated'].includes(user.subscriptionStatus);
     return hasActivePackage && hasActiveStatus;
   };
 
