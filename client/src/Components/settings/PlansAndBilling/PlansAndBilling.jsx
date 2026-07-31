@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { updatePackageType } from '../../../redux/slices/authSlice';
@@ -45,6 +45,8 @@ export default function PlansAndBilling() {
   const [cancelling, setCancelling] = useState(false);
   const [cancelMessage, setCancelMessage] = useState('');
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [highlightCancelButton, setHighlightCancelButton] = useState(false);
+  const cancelButtonRef = useRef(null);
   const [paymentHistory, setPaymentHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [visiblePayments, setVisiblePayments] = useState(5);
@@ -59,6 +61,27 @@ export default function PlansAndBilling() {
     (user?.servedTrial !== true || subscriptionStatus === 'cancelled');
   const dispatch = useDispatch();
   const navigate = useNavigate();
+
+  // Auto-scroll to and briefly highlight the Cancel Subscription button when arriving via the
+  // side-panel search's "Cancel Subscription" suggestion (?highlight=cancel-subscription).
+  // Waits for country detection to settle first - IN users get swapped to <IndiaBilling />
+  // (which owns the same highlight logic for its own button), so this must not consume the
+  // query param on their behalf before that swap happens.
+  useEffect(() => {
+    if (isDetectingCountry || country === 'IN') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('highlight') !== 'cancel-subscription' || !cancelButtonRef.current) return;
+    cancelButtonRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightCancelButton(true);
+    params.delete('highlight');
+    const newSearch = params.toString();
+    window.history.replaceState(null, '', `${window.location.pathname}${newSearch ? `?${newSearch}` : ''}`);
+    const timer = setTimeout(() => setHighlightCancelButton(false), 2200);
+    return () => clearTimeout(timer);
+    // currentPlan gates whether the Billing Information section (and the button/ref) is even
+    // rendered - it starts as 'LITE' until the subscription fetch resolves, so this must re-run
+    // once that finishes, not just once on mount.
+  }, [isDetectingCountry, country, currentPlan]);
 
   // Plan configurations with enhanced styling
   const plans = {
@@ -673,19 +696,24 @@ export default function PlansAndBilling() {
                 </h3>
                 
                 {/* Cancel Subscription Button */}
-                <div className="relative group">
+                <div
+                  ref={cancelButtonRef}
+                  className={`relative group rounded-2xl transition-shadow duration-300 ${
+                    highlightCancelButton ? 'ring-4 ring-red-400/70 ring-offset-4 ring-offset-[#161b22] animate-pulse' : ''
+                  }`}
+                >
                   <button
                     onClick={() => setShowCancelConfirm(true)}
                     disabled={cancelling}
                     className={`
-                      relative overflow-hidden flex items-center space-x-3 px-8 py-4 
+                      relative overflow-hidden flex items-center space-x-3 px-8 py-4
                       bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700
                       text-white rounded-2xl font-semibold text-sm
                       transition-all duration-300 ease-out transform
                       hover:scale-105 hover:shadow-2xl hover:shadow-red-500/25
                       active:scale-95 active:shadow-lg
                       disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none
-                      before:absolute before:inset-0 before:bg-gradient-to-r before:from-white/20 before:to-transparent 
+                      before:absolute before:inset-0 before:bg-gradient-to-r before:from-white/20 before:to-transparent
                       before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-300
                       focus:outline-none focus:ring-4 focus:ring-red-500/20
                     `}

@@ -18,6 +18,6 @@ export const SEARCHABLE_PAGES = [
     { label: 'Account Integration', path: '/seller-central-checker/settings?tab=account-integration', keywords: ['connect', 'amazon', 'sp-api', 'ads', 'integration'], lockable: false },
     { label: 'Support', path: '/seller-central-checker/settings?tab=support', keywords: ['help', 'contact', 'ticket', 'support'], lockable: false },
     { label: 'Plans & Billing', path: '/seller-central-checker/settings?tab=plans-billing', keywords: ['subscription', 'billing', 'upgrade', 'payment', 'plans'], lockable: false },
-    { label: 'Cancel Subscription', path: '/seller-central-checker/settings?tab=plans-billing', keywords: ['cancel', 'cancel subscription', 'unsubscribe', 'stop subscription', 'end subscription'], lockable: false },
+    { label: 'Cancel Subscription', path: '/seller-central-checker/settings?tab=plans-billing', keywords: ['cancel', 'cancel subscription', 'unsubscribe', 'stop subscription', 'end subscription'], lockable: false, highlight: 'cancel-subscription' },
     { label: 'Book a Call', path: '/seller-central-checker/consultation', keywords: ['demo', 'onboarding', 'consultation', 'book a call'], lockable: false },
 ];

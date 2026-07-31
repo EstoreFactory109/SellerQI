@@ -127,7 +127,14 @@ const NavSearch = ({ variant = 'dark', isPremiumLocked = false, onNavigate }) =>
 
     const goToEntry = (entry) => {
         if (!entry) return;
-        navigate(entry.path);
+        const separator = entry.path.includes('?') ? '&' : '?';
+        // Entries with a specific in-page target (e.g. Cancel Subscription) are handled by that
+        // page's own scroll+highlight effect via `highlight=<key>`. Everything else gets a
+        // generic "you've arrived" flash from MainPagesLayout via `searchArrival=1` - kept on a
+        // separate param so the two mechanisms never both fire for the same navigation.
+        const marker = entry.highlight ? `highlight=${entry.highlight}` : 'searchArrival=1';
+        const destination = `${entry.path}${separator}${marker}`;
+        navigate(destination);
         setQuery('');
         setDebouncedQuery('');
         setIsOpen(false);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { updatePackageType } from '../../../redux/slices/authSlice';
@@ -38,6 +38,8 @@ export default function IndiaBilling() {
   const [cancelling, setCancelling] = useState(false);
   const [cancelMessage, setCancelMessage] = useState('');
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [highlightCancelButton, setHighlightCancelButton] = useState(false);
+  const cancelButtonRef = useRef(null);
   const [paymentHistory, setPaymentHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [visiblePayments, setVisiblePayments] = useState(5);
@@ -54,6 +56,23 @@ export default function IndiaBilling() {
     (user?.servedTrial !== true || subscriptionStatus === 'cancelled');
   const dispatch = useDispatch();
   const navigate = useNavigate();
+
+  // Auto-scroll to and briefly highlight the Cancel Subscription button when arriving via the
+  // side-panel search's "Cancel Subscription" suggestion (?highlight=cancel-subscription).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('highlight') !== 'cancel-subscription' || !cancelButtonRef.current) return;
+    cancelButtonRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightCancelButton(true);
+    params.delete('highlight');
+    const newSearch = params.toString();
+    window.history.replaceState(null, '', `${window.location.pathname}${newSearch ? `?${newSearch}` : ''}`);
+    const timer = setTimeout(() => setHighlightCancelButton(false), 2200);
+    return () => clearTimeout(timer);
+    // The Billing Information section (and the button/ref) only renders once currentPlan/
+    // isTrialPeriod resolve from their initial defaults after the subscription fetch completes,
+    // so this must re-run then, not just once on mount.
+  }, [currentPlan, isTrialPeriod]);
 
   // India-specific plan configurations
   const plans = {
@@ -705,7 +724,12 @@ export default function IndiaBilling() {
               <div className="bg-[#161b22] rounded-xl p-4 shadow-lg border border-[#30363d]">
               <div className="flex items-center justify-end mb-4">
                 {/* Cancel Subscription Button */}
-                <div className="relative group">
+                <div
+                  ref={cancelButtonRef}
+                  className={`relative group rounded-xl transition-shadow duration-300 ${
+                    highlightCancelButton ? 'ring-4 ring-red-400/70 ring-offset-4 ring-offset-[#161b22] animate-pulse' : ''
+                  }`}
+                >
                   <button
                     onClick={() => setShowCancelConfirm(true)}
                     disabled={cancelling}
