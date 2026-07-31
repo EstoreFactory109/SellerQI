@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom';
 import BeatLoader from "react-spinners/BeatLoader";
 import { AnimatePresence, motion } from "framer-motion";
 import sellerQILogo from '../../assets/Logo/sellerQILogo.png';
+import NavSearch from './NavSearch.jsx';
 
 // Set to true to show Recent Orders in the left nav
 const SHOW_RECENT_ORDERS_NAV = true;
@@ -156,6 +157,9 @@ const LeftNavSection = () => {
                             />
                         </div>
                     </div>
+
+                    {/* Search Section */}
+                    <NavSearch variant="dark" isPremiumLocked={isPremiumLocked} />
 
                     {/* Navigation Section */}
                     <div className="flex-1 overflow-y-auto scrollbar-hide min-h-0 flex flex-col">

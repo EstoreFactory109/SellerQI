@@ -9,6 +9,7 @@ import BeatLoader from "react-spinners/BeatLoader";
 import { useSelector,useDispatch } from 'react-redux';
 import {setPosition} from '../../redux/slices/MobileMenuSlice.js'
 import { AnimatePresence, motion } from "framer-motion";
+import NavSearch from './NavSearch.jsx';
 
 const LeftNavSection = () => {
 
@@ -158,6 +159,13 @@ const LeftNavSection = () => {
                     </button>
                 </div>
             </div>
+
+            {/* Search Section */}
+            <NavSearch
+                variant="light"
+                isPremiumLocked={isPremiumLocked}
+                onNavigate={() => dispatch(setPosition("-100%"))}
+            />
 
             {/* Navigation Section */}
             <div className="w-full overflow-y-auto flex-1 scrollbar-hide">
