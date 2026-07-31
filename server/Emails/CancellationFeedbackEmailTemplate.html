@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Subscription Cancelled - {{userName}}</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f6f9;
+            line-height: 1.6;
+        }
+
+        .email-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #dc2626 0%, #7f1d1d 100%);
+            color: white;
+            padding: 30px 20px;
+            text-align: center;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 26px;
+            font-weight: 300;
+        }
+
+        .header .subtitle {
+            margin: 10px 0 0 0;
+            font-size: 15px;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 40px 30px;
+        }
+
+        .info-card {
+            background-color: #f8fafc;
+            border-left: 4px solid #dc2626;
+            padding: 20px;
+            margin-bottom: 25px;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .info-row {
+            display: flex;
+            margin-bottom: 12px;
+            align-items: flex-start;
+        }
+
+        .info-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .info-label {
+            font-weight: 600;
+            color: #4a5568;
+            min-width: 110px;
+            margin-right: 15px;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .info-value {
+            color: #2d3748;
+            flex: 1;
+            font-size: 15px;
+        }
+
+        .reason-badge {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: inline-block;
+        }
+
+        .feedback-section {
+            margin-top: 30px;
+        }
+
+        .section-title {
+            font-size: 17px;
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 12px;
+        }
+
+        .feedback-content {
+            background-color: #ffffff;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 20px;
+            font-size: 15px;
+            line-height: 1.7;
+            color: #4a5568;
+            white-space: pre-wrap;
+        }
+
+        .footer {
+            background-color: #2d3748;
+            color: #a0aec0;
+            padding: 25px 30px;
+            text-align: center;
+            font-size: 14px;
+        }
+
+        .footer .company-name {
+            color: white;
+            font-weight: 600;
+            font-size: 16px;
+            margin-bottom: 8px;
+        }
+
+        @media (max-width: 600px) {
+            .email-container { margin: 10px; border-radius: 8px; }
+            .content { padding: 25px 20px; }
+            .header { padding: 25px 20px; }
+            .info-row { flex-direction: column; }
+            .info-label { margin-bottom: 5px; margin-right: 0; }
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <div class="header">
+            <h1>Subscription Cancelled</h1>
+            <p class="subtitle">A customer has cancelled their subscription</p>
+        </div>
+
+        <div class="content">
+            <div class="info-card">
+                <div class="info-row">
+                    <span class="info-label">Name:</span>
+                    <span class="info-value">{{userName}}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Email:</span>
+                    <span class="info-value">{{userEmail}}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Phone:</span>
+                    <span class="info-value">{{phone}}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Organization:</span>
+                    <span class="info-value">{{organization}}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Plan:</span>
+                    <span class="info-value">{{plan}}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Marketplace:</span>
+                    <span class="info-value">{{marketplace}}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Cancelled At:</span>
+                    <span class="info-value">{{cancelledAt}}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Reason:</span>
+                    <span class="info-value"><span class="reason-badge">{{reason}}</span></span>
+                </div>
+                {{productUpdatesBlock}}
+            </div>
+
+            <div class="feedback-section">
+                <div class="section-title">Written Feedback</div>
+                <div class="feedback-content">{{feedback}}</div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <div class="company-name">SellerQi</div>
+            <p>This is an automated notification from the subscription cancellation flow.</p>
+        </div>
+    </div>
+</body>
+</html>

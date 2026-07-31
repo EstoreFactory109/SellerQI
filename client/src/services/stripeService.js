@@ -82,11 +82,14 @@ class StripeService {
 
     /**
      * Cancel subscription
+     * @param {boolean} cancelAtPeriodEnd
+     * @param {Object} [extra] - Optional cancellation feedback: { reason, feedback, wantsProductUpdates }
      */
-    async cancelSubscription(cancelAtPeriodEnd = true) {
+    async cancelSubscription(cancelAtPeriodEnd = true, extra = {}) {
         try {
             const response = await axiosInstance.post('/app/stripe/cancel-subscription', {
-                cancelAtPeriodEnd
+                cancelAtPeriodEnd,
+                ...extra
             });
             return response.data;
         } catch (error) {

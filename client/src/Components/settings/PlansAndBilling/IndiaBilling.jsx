@@ -27,6 +27,8 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import stripeService from '../../../services/stripeService';
+import axiosInstance from '../../../config/axios.config';
+import CancelSubscriptionModal from './CancelSubscription/CancelSubscriptionModal';
 
 export default function IndiaBilling() {
   const [currentPlan, setCurrentPlan] = useState('LITE');
@@ -211,41 +213,59 @@ export default function IndiaBilling() {
     }
   };
 
-  const handleCancelSubscription = async () => {
+  // Called by CancelSubscriptionModal's "Confirm Cancellation" step (every reason except
+  // "Hard to Use / Couldn't Set Up", which never reaches this - see handleRequestOnboardingHelp).
+  const handleConfirmCancelWithReason = async (reason, feedback, wantsProductUpdates) => {
     setCancelling(true);
     setCancelMessage('');
 
     try {
-      const result = await stripeService.cancelSubscription();
-      
+      // Preserves this page's existing cancelAtPeriodEnd=true default, just passes the
+      // reason/feedback through for the best-effort admin notification email
+      const result = await stripeService.cancelSubscription(true, { reason, feedback, wantsProductUpdates });
+
       if (result.statusCode === 200 || result.data?.success) {
         // Update Redux state immediately
         dispatch(updatePackageType({
           packageType: 'LITE',
           subscriptionStatus: 'cancelled'
         }));
-        
+
         // Update local state immediately
         setCurrentPlan('LITE');
         setSubscriptionStatus('cancelled');
         setUserSubscription(null);
-        
+
         setCancelMessage('Subscription cancelled successfully! You have been downgraded to the LITE plan.');
-        setShowCancelConfirm(false);
-        
+
         setTimeout(() => {
           fetchPaymentHistory();
         }, 1000);
-      } else {
-        setCancelMessage('Failed to cancel subscription. Please try again or contact support.');
+
+        return { success: true };
       }
+
+      return { success: false, message: 'Failed to cancel subscription. Please try again or contact support.' };
     } catch (error) {
       console.error('Error cancelling subscription:', error);
       const errorMessage = error.response?.data?.message || error.message || 'Failed to cancel subscription. Please try again or contact support.';
-      setCancelMessage(errorMessage);
+      return { success: false, message: errorMessage };
     } finally {
       setCancelling(false);
     }
+  };
+
+  // Retention path for "Hard to Use / Couldn't Set Up" - never cancels anything. Reuses the
+  // existing Support ticket endpoint (POST /app/support) instead of a new one.
+  const handleRequestOnboardingHelp = async () => {
+    const marketplace = user?.sellerCentral?.sellerAccount?.[0]?.country;
+    await axiosInstance.post('/app/support', {
+      email: user?.email,
+      name: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'Unknown',
+      subject: 'Onboarding help requested (cancellation flow)',
+      message: `User selected "Hard to Use / Couldn't Set Up" during subscription cancellation and booked an onboarding call.\nPlan: ${currentPlan}\nMarketplace: ${marketplace || 'Not connected'}\nPhone: ${user?.phone || 'Not provided'}\nOrganization: ${user?.agencyName || 'N/A'}`,
+      topic: 'Onboarding',
+    });
   };
 
   const fetchPaymentHistory = async () => {
@@ -383,59 +403,18 @@ export default function IndiaBilling() {
         )}
       </AnimatePresence>
 
-      {/* Cancel Confirmation Modal */}
-      {showCancelConfirm && (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4">
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-[#161b22] rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl border border-[#30363d]"
-          >
-            <div className="text-center">
-              <div className="relative w-16 h-16 mx-auto mb-4">
-                <div className="absolute inset-0 bg-red-500/20 rounded-full animate-pulse"></div>
-                <div className="absolute inset-2 bg-red-500/30 rounded-full animate-ping opacity-30"></div>
-                <div className="absolute inset-0 bg-red-500/10 rounded-full flex items-center justify-center">
-                  <div className="w-10 h-10 bg-red-600 rounded-full flex items-center justify-center shadow-lg">
-                    <X className="w-5 h-5 text-white" />
-                  </div>
-                </div>
-              </div>
-              <h3 className="text-xl font-bold text-gray-100 mb-2">Cancel Subscription</h3>
-              <p className="text-gray-400 mb-4 text-sm">
-                Are you sure you want to cancel your subscription? You will be immediately downgraded to the LITE plan and lose access to all premium features.
-              </p>
-              
-              <div className="flex space-x-3">
-                <button
-                  onClick={() => setShowCancelConfirm(false)}
-                  className="flex-1 py-2.5 px-4 bg-[#21262d] hover:bg-[#30363d] text-gray-200 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 border border-[#30363d]"
-                >
-                  Keep Subscription
-                </button>
-                
-                <button
-                  onClick={handleCancelSubscription}
-                  disabled={cancelling}
-                  className="relative overflow-hidden flex-1 py-2.5 px-4 bg-red-600 hover:bg-red-700 text-white rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
-                >
-                  {cancelling ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                      <span className="text-sm">Cancelling...</span>
-                    </>
-                  ) : (
-                    <>
-                      <X className="w-4 h-4" />
-                      <span className="text-sm">Cancel Now</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        </div>
-      )}
+      {/* Cancellation flow: reason capture -> per-reason sub-flow / retention offer -> success or paused */}
+      <CancelSubscriptionModal
+        isOpen={showCancelConfirm}
+        onClose={() => setShowCancelConfirm(false)}
+        user={user}
+        onConfirmCancel={handleConfirmCancelWithReason}
+        onRequestOnboardingHelp={handleRequestOnboardingHelp}
+        onReturnToDashboard={() => {
+          setShowCancelConfirm(false);
+          navigate('/seller-central-checker/dashboard');
+        }}
+      />
 
       {/* Hero Section - Matching IndiaPricing Style */}
       <section className="bg-blue-600 text-white py-12 px-4">

@@ -5,6 +5,7 @@ const asyncHandler = require('../../utils/AsyncHandler');
 const { ApiResponse } = require('../../utils/ApiResponse');
 const logger = require('../../utils/Logger');
 const { getHttpsCookieOptions } = require('../../utils/cookieConfig.js');
+const { sendCancellationFeedbackEmail } = require('../../Services/Email/SendCancellationFeedbackEmail.js');
 
 /**
  * Sanitize error messages to prevent information disclosure
@@ -213,7 +214,12 @@ const getSubscription = asyncHandler(async (req, res) => {
 const cancelSubscription = asyncHandler(async (req, res) => {
     try {
         const userId = req.userId;
-        const { cancelAtPeriodEnd = true } = req.body;
+        const { cancelAtPeriodEnd = true, reason, feedback, wantsProductUpdates } = req.body;
+
+        // Capture the user's pre-cancellation context (plan, phone, etc.) for the feedback email,
+        // since stripeService.cancelSubscription below downgrades packageType to LITE. Only fetched
+        // when a reason was actually provided, to avoid the extra query on ordinary cancel calls.
+        const userForEmail = reason ? await User.findById(userId) : null;
 
         const result = await stripeService.cancelSubscription(userId, cancelAtPeriodEnd);
 
@@ -228,6 +234,13 @@ const cancelSubscription = asyncHandler(async (req, res) => {
         }
 
         logger.info(`Subscription cancellation completed for user: ${userId}, cancelAtPeriodEnd: ${result.cancelAtPeriodEnd}, wasTrialing: ${result.wasTrialing}`);
+
+        // Best-effort cancellation-feedback email - fired without awaiting so a slow/failed send
+        // can never delay or fail this response; the cancellation above has already completed.
+        if (reason && userForEmail) {
+            sendCancellationFeedbackEmail(userForEmail, { reason, feedback, wantsProductUpdates })
+                .catch((error) => logger.error(`Failed to send cancellation feedback email for user ${userId}: ${error.message}`));
+        }
 
         return res.status(200).json(
             new ApiResponse(200, result, message)
