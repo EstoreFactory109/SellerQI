@@ -1114,8 +1114,129 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
     }
 }
 
+// ============================================================================
+// P8: Non-blocking (async) report adapters for the ADS phase.
+//
+// These split the inline create→poll→download of getPPCMetrics() (above, UNCHANGED
+// and still the fallback) into pieces the asyncReportEngine can drive across BullMQ
+// delayed jobs, so the worker is NOT held during Amazon's report generation:
+//   - buildPpcMetricsSpecs(): one spec per campaign type; each spec's submit() CREATES
+//     a report, checkStatusOnce() does ONE status GET (no loop), finalize() downloads
+//     + processes ONE report and returns its metrics (no save).
+//   - savePpcMetricsFromResults(): merges all campaign types into per-day docs and
+//     upserts them — called once by the phase after every report is terminal.
+//
+// NOTE: the create/download/process internals (createReport, downloadReportData,
+// processReportData, buildDailyMetricsDocuments) are reused verbatim, so the DATA
+// produced is identical to the inline path — only the orchestration/timing differs.
+// These functions are Amazon-facing and must be validated in staging.
+// ============================================================================
+
+const ZERO_METRICS = { totalSales: 0, totalSpend: 0, totalImpressions: 0, totalClicks: 0, totalUnitsSoldClicks1d: 0, dateWiseData: {}, campaigns: [] };
+
+// Default Pacific-time 30-day range (identical logic to getPPCMetrics).
+function _ppcDefaultDateRange() {
+    const PACIFIC_OFFSET_MS = 7 * 60 * 60 * 1000;
+    const nowPacific = new Date(Date.now() - PACIFIC_OFFSET_MS);
+    const fmtDate = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+    const yesterdayPacific = new Date(nowPacific);
+    yesterdayPacific.setUTCDate(yesterdayPacific.getUTCDate() - 1);
+    const startPacific = new Date(yesterdayPacific);
+    startPacific.setUTCDate(startPacific.getUTCDate() - 29);
+    return { startDate: fmtDate(startPacific), endDate: fmtDate(yesterdayPacific) };
+}
+
+// Single-shot status check (no polling loop). Returns:
+//   'PROCESSING' | { ready:true, handle:{location} } | { failed:true, note }
+async function checkPpcReportStatusOnce(reportId, accessToken, profileId, region) {
+    const baseUri = BASE_URIS[region];
+    if (!baseUri) throw new Error(`Invalid region: ${region}`);
+    const url = `${baseUri}/reporting/reports/${reportId}`;
+    const headers = {
+        'Authorization': `Bearer ${accessToken}`,
+        'Amazon-Advertising-API-ClientId': process.env.AMAZON_ADS_CLIENT_ID,
+        'Amazon-Advertising-API-Scope': profileId,
+        'Content-Type': 'application/vnd.createasyncreportrequest.v3+json'
+    };
+    const response = await axios.get(url, { headers });
+    const status = response.data.status;
+    const location = response.data.url;
+    if (status === 'COMPLETED') return { ready: true, handle: { location } };
+    if (status === 'FAILURE') return { failed: true, note: 'report generation failed' };
+    return 'PROCESSING'; // PENDING/PROCESSING → re-checked next tick
+}
+
+// Download + process ONE campaign type's report (no save).
+async function finalizePpcReport(handle, accessToken, profileId, campaignType) {
+    const reportData = await downloadReportData(handle.location, accessToken, profileId, null);
+    const metrics = await processReportData(reportData, campaignType);
+    const empty = !metrics || ((metrics.campaigns || []).length === 0 && Object.keys(metrics.dateWiseData || {}).length === 0);
+    return { empty, result: metrics };
+}
+
+// Build one asyncReportEngine spec per campaign type. Each spec is a closure that
+// binds the fresh per-tick access token (so no in-process token-refresh loop needed).
+function buildPpcMetricsSpecs({ accessToken, profileId, region, marketplaceId = '', startDate = null, endDate = null }) {
+    const range = (startDate && endDate) ? { startDate, endDate } : _ppcDefaultDateRange();
+    return Object.keys(CAMPAIGN_TYPES).map((campaignType) => ({
+        service: 'ppcMetricsAggregated',
+        paramsKey: campaignType,
+        params: { campaignType, startDate: range.startDate, endDate: range.endDate },
+        marketplaceId,
+        submit: async () => {
+            const r = await createReport(accessToken, profileId, region, campaignType, range.startDate, range.endDate, null);
+            return (r && r.reportId) ? r.reportId : null; // null → engine marks NO_DATA (e.g. type not enabled)
+        },
+        checkStatusOnce: (reportId) => checkPpcReportStatusOnce(reportId, accessToken, profileId, region),
+        finalize: (handle) => finalizePpcReport(handle, accessToken, profileId, campaignType),
+    }));
+}
+
+// Combine per-campaign-type results (read back from the AsyncReportRequest rows) into
+// per-day documents and upsert them. `perTypeResults`: [{ campaignType, metrics }].
+async function savePpcMetricsFromResults(userId, country, region, profileId, perTypeResults) {
+    const reportResults = perTypeResults.map((r) => ({
+        campaignType: r.campaignType,
+        skipped: !r.metrics,
+        metrics: r.metrics || ZERO_METRICS,
+    }));
+    const dailyDocs = buildDailyMetricsDocuments(reportResults, profileId);
+    const userIdStr = userId?.toString() || userId;
+    let documentsSaved = 0;
+    for (const doc of dailyDocs) {
+        const { metricDate, ...payload } = doc;
+        await PPCMetrics.upsertMetricsForDate(userIdStr, country, region, metricDate, payload);
+        documentsSaved += 1;
+    }
+    logger.info(`✅ [GetPPCMetrics:async] Saved ${documentsSaved} daily PPC metric document(s)`);
+    return { documentsSaved };
+}
+
+// Uniform adapter contract used by the ADS phase registry (see executeScheduledAdsPhaseAsync).
+// saveFromRows: combine the SUBMITTED→DONE rows for this service and persist once.
+async function savePpcMetricsFromRows(userId, country, region, profileId, rows) {
+    const perTypeResults = rows.map((r) => ({
+        campaignType: r.params?.campaignType,
+        metrics: r.status === 'DONE' ? r.result : null,
+    }));
+    return savePpcMetricsFromResults(userId, country, region, profileId, perTypeResults);
+}
+
 module.exports = {
     getPPCMetrics,
     CAMPAIGN_TYPES,
-    BASE_URIS
+    BASE_URIS,
+    // P8 async adapters (see block above)
+    buildPpcMetricsSpecs,
+    savePpcMetricsFromResults,
+    checkPpcReportStatusOnce,
+    finalizePpcReport,
+    // Uniform registry contract
+    adsAsync: {
+        serviceName: 'ppcMetricsAggregated',
+        // Accepts the full buildArgs incl. optional startDate/endDate (catch-up passes a
+        // single date); buildPpcMetricsSpecs ignores the fields it doesn't need.
+        buildSpecs: buildPpcMetricsSpecs,
+        saveFromRows: savePpcMetricsFromRows,
+    },
 };

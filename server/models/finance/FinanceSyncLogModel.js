@@ -88,13 +88,27 @@ const FinanceSyncLogSchema = new mongoose.Schema(
     // string-matching the message:
     //   'auth_denied' — the seller's grant does not cover Reports; only reconnecting fixes it
     //   'timeout'     — report generation or download ran out of time; retrying CAN work
+    //   'memory'      — stopped short of the heap ceiling; a smaller chunk/window will succeed
     //   'other'       — anything else
     // Additive and unset on pre-existing rows, so consumers must tolerate `undefined` and fall
     // back to inspecting `error` (see freshnessSweeper.isAccountFinanceAuthDenied).
     errorKind: {
       type: String,
-      enum: ['auth_denied', 'timeout', 'other'],
+      enum: ['auth_denied', 'timeout', 'memory', 'other'],
       required: false,
+    },
+
+    // Async path only: the AsyncReportRequest row `_id` that produced this day.
+    //
+    // Idempotency marker. A BullMQ retry can re-invoke a finalize that already completed — and if
+    // that happens AFTER backfillPendingExpenses has converted this day's estimated fees into
+    // actuals, the re-run's delete-then-insert would reinstate the ESTIMATES and lose the actual
+    // fees. Finalize therefore checks whether every date in its chunk already carries its own
+    // syncRunId and skips if so. Unset on the inline path.
+    syncRunId: {
+      type: String,
+      required: false,
+      index: true,
     },
 
     // ★ Provisional = this day was fetched but its sales are NOT yet trustworthy

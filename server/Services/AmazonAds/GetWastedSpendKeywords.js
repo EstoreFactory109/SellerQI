@@ -455,6 +455,81 @@ async function getKeywordPerformanceReport(accessToken, profileId, userId, count
     }
 }
 
+// ============================================================================
+// P8: Non-blocking (async) adapters. Inline getKeywordPerformanceReport() above is the
+// UNCHANGED fallback. Single report → self-contained finalize (download + extract + map
+// + per-day upsert, identical to the inline path lines ~378-431). Amazon-facing → staging.
+// ============================================================================
+
+// Single-shot status. Amazon 'COMPLETED' → ready; 'FAILED' → failed; else PROCESSING.
+async function checkWastedStatusOnce(reportId, accessToken, profileId, region) {
+    const baseUri = BASE_URIS[region];
+    if (!baseUri) throw new Error(`Invalid region: ${region}`);
+    const headers = {
+        'Authorization': `Bearer ${accessToken}`,
+        'Amazon-Advertising-API-Scope': profileId,
+        'Amazon-Advertising-API-ClientId': process.env.AMAZON_ADS_CLIENT_ID,
+        'Content-Type': 'application/json'
+    };
+    const response = await axios.get(`${baseUri}/reporting/reports/${reportId}`, { headers });
+    const status = response.data.status;
+    if (status === 'COMPLETED') return { ready: true, handle: { location: response.data.url } };
+    if (status === 'FAILED') return { failed: true, note: 'report generation failed' };
+    return 'PROCESSING';
+}
+
+function buildWastedSpendSpecs({ userId, country, region, accessToken, profileId, marketplaceId = '', startDate: sd = null, endDate: ed = null }) {
+    const { startDate, endDate } = resolveReportDateRange(sd && ed ? { startDate: sd, endDate: ed } : {});
+    return [{
+        service: 'adsKeywordsPerformanceData',
+        paramsKey: 'default',
+        params: { startDate, endDate },
+        marketplaceId,
+        submit: async () => {
+            const r = await getKeywordReportId(accessToken, profileId, startDate, endDate, region, null);
+            return (r && r.reportId) ? r.reportId : null;
+        },
+        checkStatusOnce: (reportId) => checkWastedStatusOnce(reportId, accessToken, profileId, region),
+        // Self-contained: download + normalize + per-day upsert (same as inline path).
+        finalize: async (handle) => {
+            const reportContent = await downloadReportData(handle.location, accessToken, profileId, null);
+            let data = reportContent;
+            if (reportContent && typeof reportContent === 'object' && !Array.isArray(reportContent)) {
+                if (reportContent.metadata && reportContent.data) data = reportContent.data;
+                else if (reportContent.reportData) data = reportContent.reportData;
+                else if (Array.isArray(reportContent.rows)) data = reportContent.rows;
+                else {
+                    for (const key of ['data', 'rows', 'keywords', 'items', 'results']) {
+                        if (Array.isArray(reportContent[key])) { data = reportContent[key]; break; }
+                    }
+                }
+            }
+            if (!Array.isArray(data)) data = Array.isArray(reportContent) ? reportContent : (data ? [data] : []);
+
+            const userIdObj = mongoose.Types.ObjectId.isValid(String(userId))
+                ? new mongoose.Types.ObjectId(String(userId)) : userId;
+
+            const byDay = new Map();
+            for (const row of data) {
+                const mapped = mapKeywordPerformanceRow(row);
+                const day = mapped.date;
+                if (!day) continue;
+                if (!byDay.has(day)) byDay.set(day, []);
+                byDay.get(day).push(mapped);
+            }
+            for (const [metricDate, keywordsData] of byDay) {
+                await adsKeywordsPerformanceModel.upsertKeywordsForDate(userIdObj, country, region, metricDate, keywordsData);
+            }
+            return { empty: byDay.size === 0 };
+        },
+    }];
+}
+
 module.exports = {
-    getKeywordPerformanceReport
+    getKeywordPerformanceReport,
+    adsAsync: {
+        serviceName: 'adsKeywordsPerformanceData',
+        buildSpecs: buildWastedSpendSpecs,
+        saveFromRows: async () => ({ documentsSaved: 0 }), // finalize already saves per report
+    },
 };

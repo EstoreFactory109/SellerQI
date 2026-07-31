@@ -191,4 +191,44 @@ const getReport = async (accessToken, marketplaceIds,userId,baseuri,country,regi
 
 
 
+// ============================================================================
+// P8: Non-blocking (async) SP-API adapter. The inline getReport() above is the UNCHANGED
+// fallback. TEMPLATE for the other SP-API report services: reuses this file's own
+// generateReport() (create) + model save; the status check + document URL come from the
+// shared spApiReportAdapter. Data is identical — only the polling is moved off the worker.
+// Amazon-facing → validate in staging.
+// ============================================================================
+const { checkSpApiStatusOnce, getSpApiDocumentUrl } = require('./spApiReportAdapter.js');
+
+getReport.spApiAsync = {
+    serviceName: 'v2data',
+    buildSpecs: ({ userId, country, region, accessToken, baseuri, marketplaceIds }) => ([{
+        service: 'v2data',
+        paramsKey: 'default',
+        params: {},
+        marketplaceId: '',
+        submit: async () => await generateReport(accessToken, marketplaceIds, baseuri),
+        checkStatusOnce: (reportId) => checkSpApiStatusOnce(accessToken, reportId, baseuri),
+        // Self-contained finalize: download + parse + save (same as inline path lines ~145-183).
+        finalize: async (handle) => {
+            const url = await getSpApiDocumentUrl(accessToken, handle.reportDocumentId, baseuri);
+            const fullReport = await axios({ method: 'GET', url, responseType: 'arraybuffer' });
+            const decompressedBuffer = await gunzip(fullReport.data);
+            fullReport.data = null;
+            const refinedData = JSON.parse(decompressedBuffer.toString('utf8'));
+            const User = userId;
+            const ahrScore = refinedData.performanceMetrics[0].accountHealthRating.ahrScore;
+            const accountStatuses = refinedData.accountStatuses[0].status;
+            const listingPolicyViolations = refinedData.performanceMetrics[0].listingPolicyViolations.status;
+            const validTrackingRateStatus = refinedData.performanceMetrics[0].validTrackingRate.status;
+            const orderWithDefectsStatus = refinedData.performanceMetrics[0].orderDefectRate.afn.orderWithDefects.status;
+            const lateShipmentRateStatus = refinedData.performanceMetrics[0].lateShipmentRate.status;
+            const CancellationRate = refinedData.performanceMetrics[0].preFulfillmentCancellationRate.status;
+            await GET_V2_SELLER_PERFORMANCE_REPORT.create({ User, region, country, ahrScore, accountStatuses, listingPolicyViolations, validTrackingRateStatus, orderWithDefectsStatus, lateShipmentRateStatus, CancellationRate });
+            return { empty: false };
+        },
+    }]),
+    saveFromRows: async () => ({ documentsSaved: 0 }), // finalize saves per report
+};
+
 module.exports = getReport;

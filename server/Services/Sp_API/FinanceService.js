@@ -9,6 +9,7 @@ const DailyOverheadFinance = require('../../models/finance/DailyOverheadFinanceM
 const FinanceSyncLog = require('../../models/finance/FinanceSyncLogModel.js');
 const PendingExpenseOrder = require('../../models/finance/PendingExpenseOrderModel.js');
 const { downloadReportContent, isUnusableReportPayload } = require('../../utils/spApiReportDownload.js');
+const { checkSpApiStatusOnce } = require('./spApiReportAdapter.js');
 
 // ★ VERSION — check this in logs to confirm deployment
 const FINANCE_SERVICE_VERSION = 'v3.1-sellerboard-match-20260506';
@@ -59,6 +60,25 @@ const FINANCE_REPORT_CHUNK_DAYS = financeEnvInt('FINANCE_REPORT_CHUNK_DAYS', 3);
 // Wall-clock ceiling for one run's chunk loop. Checked between chunks, so a long backlog spreads
 // over several runs instead of monopolising a worker slot.
 const FINANCE_SYNC_RUN_BUDGET_MS = financeEnvInt('FINANCE_SYNC_RUN_BUDGET_MS', 40 * 60 * 1000);
+
+// Forward reach of the Finance API window past a chunk's end date. Unset (null) means "use the
+// region's own SETTLEMENT_LAG", which is the same lag already applied backward — see the long note
+// at the window computation for why only Shipment fees need forward coverage at all.
+const FINANCE_FORWARD_BUFFER_DAYS = process.env.FINANCE_FORWARD_BUFFER_DAYS !== undefined
+  // Floored at 1: finEnd is UTC end-of-day while placement filters are Pacific, so a 0-day buffer
+  // would silently drop rows posted after ~16:00 Pacific on the final day of the window.
+  ? Math.max(1, financeEnvInt('FINANCE_FORWARD_BUFFER_DAYS', 5))
+  : null;
+
+// Heap ceiling checked BETWEEN chunks. Production workers run under PM2 `max_memory_restart: '2G'`,
+// and a real OOM there is invisible: the process dies before any catch runs, so nothing is written
+// — PM2 restarts and BullMQ retries, looking like nothing happened. Stopping deliberately below the
+// limit instead keeps the completed chunks and reports `stopReason: 'memory'` in the run summary
+// (which reaches apiData via ScheduledIntegration) and in the logs. Note it does NOT write a
+// FinanceSyncLog failure row: the remaining dates were never attempted, so marking them failed
+// would misreport them. Same treatment as a budget stop.
+const FINANCE_HEAP_LIMIT_MB = financeEnvInt('FINANCE_HEAP_LIMIT_MB', 1200);
+
 
 // ── Empty-report retry (FIX #1) ──────────────────────────────────────────────
 // Amazon's GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE report intermittently
@@ -131,6 +151,7 @@ function classifySyncFailure(err) {
   if (!err) return 'other';
   if (isAuthorizationDeniedError(err)) return 'auth_denied';
   const msg = (err.message || String(err)).toLowerCase();
+  if (msg.includes('heap already at') || msg.includes('out of memory')) return 'memory';
   if (
     msg.includes('did not complete within') ||
     msg.includes('download exceeded') ||
@@ -199,6 +220,11 @@ function createTokenManager({ accessToken, refreshToken, clientId, clientSecret 
     getValidToken,
     refresh,
     withRetry,
+    // The long-lived credentials behind this manager. The Finance API leg needs them to build its
+    // own paginated requests, and reading them here rather than threading three more parameters
+    // through every caller keeps one source of truth — and stops an extracted helper from silently
+    // closing over a `refreshToken` that is no longer in its scope.
+    credentials: { refreshToken, clientId, clientSecret },
   };
 }
 
@@ -420,7 +446,7 @@ function resolveSyncWindow({
  * @param {Function} args.fetchChunk async (chunk, index) => {salesOrders, skuDocs, overheadDocs, pendingOrders}
  * @returns {Promise<{chunksCompleted:number, stopReason:string|null, aggregate:object}>}
  */
-async function runChunkedFetch({ chunks, budgetMs, fetchChunk }) {
+async function runChunkedFetch({ chunks, budgetMs, fetchChunk, heapLimitBytes = 0 }) {
   const deadlineAt = Date.now() + budgetMs;
   const aggregate = { salesOrders: 0, skuDocs: 0, overheadDocs: 0, pendingOrders: 0 };
   let chunksCompleted = 0;
@@ -431,6 +457,18 @@ async function runChunkedFetch({ chunks, budgetMs, fetchChunk }) {
     // leave its dates half-written; refusing to run any chunk would stall the backlog forever.
     if (chunksCompleted > 0 && Date.now() >= deadlineAt) {
       stopReason = 'budget';
+      break;
+    }
+
+    // Bail out ahead of a hard OOM. A real heap exhaustion kills the process before any catch runs,
+    // so nothing is recorded and the job simply appears to vanish (PM2 restarts, BullMQ retries).
+    // Stopping here keeps the completed chunks, records why, and lets the next run resume.
+    //
+    // Same placement rule as the budget check above — BETWEEN chunks, never before the first. A run
+    // must always attempt at least one chunk, otherwise an account on a already-warm worker could
+    // make zero progress indefinitely, which is the failure mode this whole effort exists to remove.
+    if (heapLimitBytes > 0 && chunksCompleted > 0 && process.memoryUsage().heapUsed >= heapLimitBytes) {
+      stopReason = 'memory';
       break;
     }
 
@@ -613,55 +651,93 @@ function parseTsv(rawData) {
   return rows;
 }
 
+// ─────────────────────────────────────────────
+// SALES REPORT — split into submit / download+parse so the INLINE path and the non-blocking
+// ASYNC path run the SAME code.
+//
+// This is the "extraction technique" from ASYNC_REPORTS_AND_STREAMING_HANDOFF.md: the async
+// adapter must never hold its own copy of the download/parse logic, or the two paths drift and
+// silently produce different data. Both call the two functions below.
+// ─────────────────────────────────────────────
+
+/**
+ * Ask Amazon to build the report. Returns the `reportId` and nothing else — deliberately does NOT
+ * poll, so the async path can persist the id and release the worker instead of sleeping.
+ */
+async function submitSalesReport(tokenManager, baseUrl, marketplaceId, startDate, endDate) {
+  logger.info(`[SalesReport] Submitting: ${startDate} → ${endDate}`);
+  return createReport(tokenManager, baseUrl, marketplaceId, startDate, endDate);
+}
+
+/**
+ * Given a READY report's document id, fetch and parse it.
+ *
+ * The document URL is fetched here rather than passed in, because it is a short-lived pre-signed
+ * S3 URL — in the async path minutes or hours can pass between the status check and this call, by
+ * which time a carried URL would be expired.
+ *
+ * @returns {Promise<{rows: Array, download: object}>}
+ */
+async function downloadSalesReportRows(tokenManager, baseUrl, reportDocumentId, label = 'SalesReport') {
+  const startedAt = Date.now();
+  const docInfo = await getReportDocumentUrl(tokenManager, baseUrl, reportDocumentId);
+  // The report document URL is a pre-signed S3 URL — no access token needed.
+  const download = await downloadReportContent(docInfo.url, {
+    isGzip: docInfo.compressionAlgorithm === 'GZIP',
+    label: `SalesReport ${label}`,
+  });
+  const rows = parseTsv(download.text);
+
+  // Instrumentation. There was previously none, which is why the safe report size had to be
+  // estimated from column counts rather than measured. Keep this at info level — it is one
+  // line per report and it is what tells us whether the chunk size is right for an account.
+  logger.info(
+    `[SalesReport] ${label}: ${rows.length} rows, ` +
+    `${download.compressedBytes}B compressed / ${download.decompressedBytes}B raw, ` +
+    `download ${download.durationMs}ms, total ${Date.now() - startedAt}ms, ` +
+    `heapUsed ${Math.round(process.memoryUsage().heapUsed / 1048576)}MB`
+  );
+
+  // A payload that delivered bytes but is not a usable report is a real error, not "no data".
+  // Accepting it would let the persist layer settle those days at $0 — and any day older than
+  // PROVISIONAL_SETTLE_DAYS is then marked non-provisional, i.e. never retried. For an account
+  // doing six figures a day that is silent, permanent revenue loss.
+  //
+  // A header-only body is NOT this case: it is how Amazon reports a window with no orders. The
+  // CALLER decides whether to re-request (inline retries up to EMPTY_REPORT_RETRIES; the async
+  // phase allows exactly one, because re-submitting is what congests the report queue).
+  if (rows.length === 0 && isUnusableReportPayload(download.text, download.decompressedBytes)) {
+    throw new Error(
+      `[SalesReport] ${label}: downloaded ${download.decompressedBytes} bytes ` +
+      `but found no usable TSV rows — refusing to treat this as "no data".`
+    );
+  }
+
+  return { rows, download };
+}
+
+/**
+ * INLINE path: submit → poll → download → parse, with the transient-empty retry.
+ * Behaviour is unchanged; it is now expressed in terms of the two shared functions above.
+ */
 async function fetchSalesReport(tokenManager, baseUrl, marketplaceId, startDate, endDate) {
-  logger.info(`[SalesReport] Requesting: ${startDate} → ${endDate}`);
+  const label = `${startDate}→${endDate}`;
   // Retry-on-empty (FIX #1): a DONE-but-empty report is usually a transient
   // generation miss — re-generating returns the rows. Bounded retries; if it's
   // still empty we accept "no data" (the persist layer then preserves whatever
   // already exists for those days — it never wipes on an empty report).
   for (let attempt = 0; attempt <= EMPTY_REPORT_RETRIES; attempt++) {
-    const startedAt = Date.now();
-    const reportId = await createReport(tokenManager, baseUrl, marketplaceId, startDate, endDate);
+    const reportId = await submitSalesReport(tokenManager, baseUrl, marketplaceId, startDate, endDate);
     const reportDocumentId = await pollReportStatus(tokenManager, baseUrl, reportId);
-    const docInfo = await getReportDocumentUrl(tokenManager, baseUrl, reportDocumentId);
-    // The report document URL is a pre-signed S3 URL — no access token needed.
-    const download = await downloadReportContent(docInfo.url, {
-      isGzip: docInfo.compressionAlgorithm === 'GZIP',
-      label: `SalesReport ${startDate}→${endDate}`,
-    });
-    const rows = parseTsv(download.text);
-
-    // Instrumentation. There was previously none, which is why the safe report size had to be
-    // estimated from column counts rather than measured. Keep this at info level — it is one
-    // line per report and it is what tells us whether the chunk size is right for an account.
-    logger.info(
-      `[SalesReport] ${startDate}→${endDate}: ${rows.length} rows, ` +
-      `${download.compressedBytes}B compressed / ${download.decompressedBytes}B raw, ` +
-      `download ${download.durationMs}ms, total ${Date.now() - startedAt}ms, ` +
-      `heapUsed ${Math.round(process.memoryUsage().heapUsed / 1048576)}MB`
-    );
-
-    // A payload that delivered bytes but is not a usable report is a real error, not "no data".
-    // Accepting it would let the persist layer settle those days at $0 — and any day older than
-    // PROVISIONAL_SETTLE_DAYS is then marked non-provisional, i.e. never retried. For an account
-    // doing six figures a day that is silent, permanent revenue loss.
-    //
-    // A header-only body is NOT this case: it is how Amazon reports a window with no orders, and
-    // it must fall through to the empty-report retry below.
-    if (rows.length === 0 && isUnusableReportPayload(download.text, download.decompressedBytes)) {
-      throw new Error(
-        `[SalesReport] ${startDate}→${endDate}: downloaded ${download.decompressedBytes} bytes ` +
-        `but found no usable TSV rows — refusing to treat this as "no data".`
-      );
-    }
+    const { rows } = await downloadSalesReportRows(tokenManager, baseUrl, reportDocumentId, label);
 
     if (rows.length > 0 || attempt === EMPTY_REPORT_RETRIES) {
       if (rows.length === 0 && attempt > 0) {
-        logger.warn(`[SalesReport] Still empty after ${attempt} retry(ies) for ${startDate}→${endDate} — accepting as no data (existing rows are preserved, not wiped).`);
+        logger.warn(`[SalesReport] Still empty after ${attempt} retry(ies) for ${label} — accepting as no data (existing rows are preserved, not wiped).`);
       }
       return rows;
     }
-    logger.warn(`[SalesReport] Empty report for ${startDate}→${endDate} (attempt ${attempt + 1}/${EMPTY_REPORT_RETRIES + 1}); fresh reports are often transiently empty. Re-generating in ${EMPTY_REPORT_RETRY_DELAY_MS / 1000}s…`);
+    logger.warn(`[SalesReport] Empty report for ${label} (attempt ${attempt + 1}/${EMPTY_REPORT_RETRIES + 1}); fresh reports are often transiently empty. Re-generating in ${EMPTY_REPORT_RETRY_DELAY_MS / 1000}s…`);
     await new Promise((r) => setTimeout(r, EMPTY_REPORT_RETRY_DELAY_MS));
   }
   return [];
@@ -757,22 +833,85 @@ const OVERHEAD_CATEGORIES = new Set([
 //   multiple items with identical fee amounts) while removing duplicate
 //   transactions (different transactionId, identical fee structure).
 // ═══════════════════════════════════════════════
-function indexFinanceRowsByOrderId(expenseRows, revenueRows) {
-  // ── Expenses that should be placed on PURCHASE DATE (via orderId join) ──
-  const expensesByOrderSku = new Map();        // "orderId||sku" → expense[]
-  const unattributedExpensesByOrder = new Map(); // orderId → expense[] (sku=N/A)
+/**
+ * Empty finance index — the accumulator for the fold below.
+ *
+ * Split out of indexFinanceRowsByOrderId so rows can be folded in one API page at a time and the
+ * raw page discarded immediately. Retaining every page's transaction graph for a multi-week window
+ * is what exhausted a 2GB heap on a high-volume account.
+ *
+ * The dedup maps live HERE rather than as loop-locals precisely so that page-by-page folding sees
+ * the same "first transactionId per orderId+SKU wins" state a single pass would.
+ *
+ * @param {object} [opts]
+ * @param {Set<string>|null} [opts.orderIdFilter] When supplied, ONLY rows whose `orderId` is in the
+ *   set are retained; everything else is discarded as it arrives.
+ *
+ *   This is for `backfillPendingExpenses` (Step 2), which is looking for the fees of a known list of
+ *   pending orders and reads ONLY the four order-keyed lookups below. It must still search a window
+ *   running to *now* (fees post late, and shortening that window starves pending orders), but a
+ *   measured run showed ~88k expense rows PER DAY for a large seller — a 49-day window is ~4.3M
+ *   rows, of which a few thousand match. Filtering as we fold makes memory a function of the
+ *   pending-order count instead of the window length.
+ *
+ *   Rows with no `orderId` (overhead, per-ASIN) are dropped too, since Step 2 never reads
+ *   `overheadExpenses` / `postedDateExpenses`. Filtering is by ORDER only — never by SKU — so every
+ *   row of a kept order is still seen in arrival order and the dedup result is unchanged.
+ *
+ *   Omit it (the default) and the index behaves exactly as before, which is what keeps Step 1 and
+ *   the one-shot `indexFinanceRowsByOrderId` untouched.
+ */
+function createFinanceIndex({ orderIdFilter = null } = {}) {
+  return {
+    // Non-null only for the Step 2 use above; `null` means "retain everything".
+    _orderIdFilter: orderIdFilter,
+    // Observability: how many rows were discarded by the filter.
+    filteredOutCount: 0,
+    // ── Expenses that should be placed on PURCHASE DATE (via orderId join) ──
+    expensesByOrderSku: new Map(),        // "orderId||sku" → expense[]
+    unattributedExpensesByOrder: new Map(), // orderId → expense[] (sku=N/A)
+    // ── Expenses that should be placed on POSTED DATE (Pacific) ──
+    postedDateExpenses: [],               // Refunds, Reimbursements, ServiceFees
+    // ── Overhead (no orderId) ──
+    overheadExpenses: [],
 
-  // ── Transaction-level dedup: track first transactionId per orderId+SKU ──
-  const firstTxnByOrderSku = new Map();        // "orderId||sku" → transactionId
-  let dedupCount = 0;
+    revenueByOrderSku: new Map(),
+    unattributedRevenueByOrder: new Map(),
+    overheadRevenue: [],
+    postedDateRevenue: [],
 
-  // ── Expenses that should be placed on POSTED DATE (Pacific) ──
-  const postedDateExpenses = [];               // Refunds, Reimbursements, ServiceFees
+    // ── Fold state: first transactionId seen per orderId+SKU, and dedup tallies ──
+    _firstTxnByOrderSku: new Map(),
+    _firstTxnRevByOrderSku: new Map(),
+    dedupCount: 0,
+    dedupRevCount: 0,
+  };
+}
 
-  // ── Overhead (no orderId) ──
-  const overheadExpenses = [];
+/**
+ * Fold one batch of rows into an existing index.
+ *
+ * ORDER MATTERS: the dedup keeps the FIRST transactionId per orderId+SKU, so calling this
+ * sequentially over pages reproduces a single pass over their concatenation exactly. Never call it
+ * concurrently or out of order.
+ */
+function addFinanceRowsToIndex(index, expenseRows = [], revenueRows = []) {
+  const {
+    expensesByOrderSku,
+    unattributedExpensesByOrder,
+    postedDateExpenses,
+    overheadExpenses,
+    _firstTxnByOrderSku: firstTxnByOrderSku,
+    _orderIdFilter: orderIdFilter,
+  } = index;
+
+  // Applied BEFORE any routing or dedup, so a kept row is handled identically to the unfiltered
+  // case. Filtering by order (never by SKU) means every row of a kept order is still seen, in
+  // arrival order, so the "first transactionId wins" outcome is untouched.
+  const keep = (row) => !orderIdFilter || (row.orderId && orderIdFilter.has(row.orderId));
 
   for (const e of expenseRows) {
+    if (!keep(e)) { index.filteredOutCount++; continue; }
     if (!e.orderId) {
       // ★ FIX: If no orderId but HAS a SKU, it's a per-ASIN transaction
       // (e.g., COMPENSATED_CLAWBACK). Route to postedDateExpenses
@@ -801,7 +940,7 @@ function indexFinanceRowsByOrderId(expenseRows, revenueRows) {
         firstTxnByOrderSku.set(orderSkuKey, txnId);
       } else if (txnId && firstTxn && txnId !== firstTxn) {
         // Different transactionId → duplicate transaction → skip
-        dedupCount++;
+        index.dedupCount++;
         continue;
       }
       // Same transactionId → same transaction → allow (multi-unit items)
@@ -820,21 +959,18 @@ function indexFinanceRowsByOrderId(expenseRows, revenueRows) {
     }
   }
 
-  if (dedupCount > 0) {
-    logger.debug(`[Dedup] Removed ${dedupCount} duplicate Shipment expense rows (duplicate transactions with different transactionId).`);
-  }
-
   // ── Revenue ──
-  const revenueByOrderSku = new Map();
-  const unattributedRevenueByOrder = new Map();
-  const overheadRevenue = [];
-  const postedDateRevenue = [];
-
-  // ★ Same transaction-level dedup for Shipment revenue
-  const firstTxnRevByOrderSku = new Map();
-  let dedupRevCount = 0;
+  const {
+    revenueByOrderSku,
+    unattributedRevenueByOrder,
+    overheadRevenue,
+    postedDateRevenue,
+    // ★ Same transaction-level dedup for Shipment revenue
+    _firstTxnRevByOrderSku: firstTxnRevByOrderSku,
+  } = index;
 
   for (const r of revenueRows) {
+    if (!keep(r)) { index.filteredOutCount++; continue; }
     // Skip Product Sales from Shipment — those come from the Sales Report.
     // But KEEP Product Sales from Refund — that's the refunded amount (negative).
     if (r.category === 'Product Sales' && PURCHASE_DATE_TXN_TYPES.has(r.transactionType)) continue;
@@ -860,7 +996,7 @@ function indexFinanceRowsByOrderId(expenseRows, revenueRows) {
       if (firstTxn === undefined) {
         firstTxnRevByOrderSku.set(orderSkuKey, txnId);
       } else if (txnId && firstTxn && txnId !== firstTxn) {
-        dedupRevCount++;
+        index.dedupRevCount++;
         continue;
       }
 
@@ -877,17 +1013,29 @@ function indexFinanceRowsByOrderId(expenseRows, revenueRows) {
     }
   }
 
-  if (dedupRevCount > 0) {
-    logger.debug(`[Dedup] Removed ${dedupRevCount} duplicate Shipment revenue rows.`);
-  }
+  return index;
+}
 
-  return {
-    expensesByOrderSku, unattributedExpensesByOrder,
-    revenueByOrderSku, unattributedRevenueByOrder,
-    overheadExpenses, overheadRevenue,
-    postedDateExpenses,
-    postedDateRevenue,
-  };
+/** Log the dedup tallies once, after all pages have been folded. */
+function logFinanceIndexDedup(index) {
+  if (index.dedupCount > 0) {
+    logger.debug(`[Dedup] Removed ${index.dedupCount} duplicate Shipment expense rows (duplicate transactions with different transactionId).`);
+  }
+  if (index.dedupRevCount > 0) {
+    logger.debug(`[Dedup] Removed ${index.dedupRevCount} duplicate Shipment revenue rows.`);
+  }
+}
+
+/**
+ * One-shot index build — create + fold + log. Retained so existing callers and the buffered
+ * (non-streaming) path are unchanged, and so the streaming fold can be tested for equivalence
+ * against it.
+ */
+function indexFinanceRowsByOrderId(expenseRows, revenueRows) {
+  const index = createFinanceIndex();
+  addFinanceRowsToIndex(index, expenseRows, revenueRows);
+  logFinanceIndexDedup(index);
+  return index;
 }
 
 // ═══════════════════════════════════════════════
@@ -988,11 +1136,6 @@ function buildOverheadBuckets(overheadExpenses, overheadRevenue, rangeStart, ran
 async function persistDailyBuckets({ userId, country, regionModel, marketplaceId, skuBuckets, overheadBuckets, datesToClear }) {
   const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
 
-  if (datesToClear && datesToClear.length > 0) {
-    await DailySkuFinance.deleteMany({ User: userObjectId, country, region: regionModel, date: { $in: datesToClear } });
-    await DailyOverheadFinance.deleteMany({ User: userObjectId, country, region: regionModel, date: { $in: datesToClear } });
-  }
-
   const skuDocs = [];
   for (const bucket of skuBuckets.values()) {
     const otherBreakdown = Object.entries(bucket.otherExpensesMap || {}).map(([category, amount]) => ({ category, amount: Math.round(amount * 100) / 100 }));
@@ -1014,15 +1157,45 @@ async function persistDailyBuckets({ userId, country, regionModel, marketplaceId
       isEstimated: bucket.isEstimated || false, estimatedOrderCount: bucket.estimatedOrderCount || 0, estimatedFba: bucket.estimatedFba || 0, estimatedCommission: bucket.estimatedCommission || 0,
     });
   }
-  for (const chunk of chunkArray(skuDocs, CHUNK_INSERT_SIZE)) { if (chunk.length === 0) continue; await DailySkuFinance.insertMany(chunk, { ordered: false }); }
-
   const overheadDocs = [];
   for (const oh of overheadBuckets.values()) {
     overheadDocs.push({ User: userObjectId, country, region: regionModel, marketplaceId, date: oh.date, category: oh.category, amount: Math.round(oh.amount * 100) / 100, count: oh.count, isRevenue: oh.isRevenue });
   }
-  for (const chunk of chunkArray(overheadDocs, CHUNK_INSERT_SIZE)) { if (chunk.length === 0) continue; await DailyOverheadFinance.insertMany(chunk, { ordered: false }); }
 
-  logger.info(`[FinanceService] Saved ${skuDocs.length} SKU docs, ${overheadDocs.length} overhead docs.`);
+  // ── Replace ONE DATE AT A TIME ────────────────────────────────────────────────
+  // This was previously a single deleteMany over every date in the chunk followed by a single
+  // insertMany. A crash in between — OOM, worker kill, a lost async job — left EVERY day in the
+  // chunk at $0 with no sync-log row, invisible until someone went looking. Doing it per date
+  // bounds that blast radius to one day, which matters more now that a finalize can be retried.
+  //
+  // Same final data: the docs are grouped by date and each date's delete is immediately followed
+  // by its own insert. Prove with dataParitySnapshot.
+  const skuByDate = new Map();
+  for (const doc of skuDocs) {
+    if (!skuByDate.has(doc.date)) skuByDate.set(doc.date, []);
+    skuByDate.get(doc.date).push(doc);
+  }
+  const overheadByDate = new Map();
+  for (const doc of overheadDocs) {
+    if (!overheadByDate.has(doc.date)) overheadByDate.set(doc.date, []);
+    overheadByDate.get(doc.date).push(doc);
+  }
+
+  for (const dateStr of (datesToClear || [])) {
+    await DailySkuFinance.deleteMany({ User: userObjectId, country, region: regionModel, date: dateStr });
+    for (const chunk of chunkArray(skuByDate.get(dateStr) || [], CHUNK_INSERT_SIZE)) {
+      if (chunk.length === 0) continue;
+      await DailySkuFinance.insertMany(chunk, { ordered: false });
+    }
+
+    await DailyOverheadFinance.deleteMany({ User: userObjectId, country, region: regionModel, date: dateStr });
+    for (const chunk of chunkArray(overheadByDate.get(dateStr) || [], CHUNK_INSERT_SIZE)) {
+      if (chunk.length === 0) continue;
+      await DailyOverheadFinance.insertMany(chunk, { ordered: false });
+    }
+  }
+
+  logger.info(`[FinanceService] Saved ${skuDocs.length} SKU docs, ${overheadDocs.length} overhead docs across ${(datesToClear || []).length} date(s).`);
   return { skuDocCount: skuDocs.length, overheadDocCount: overheadDocs.length };
 }
 
@@ -1045,8 +1218,24 @@ async function persistDailyBuckets({ userId, country, regionModel, marketplaceId
 // actual per-day numbers (10/10 days exact match for FBA fees,
 // Commission, Refund cost, and Reimbursements).
 // ═══════════════════════════════════════════════
+/**
+ * Pacific-day boundaries for the Sales Report, as the ISO instants Amazon expects.
+ * Extracted so the inline path and the async adapter request a byte-identical window.
+ */
+function salesReportWindowISO(startDate, endDate) {
+  const salesStartISO = `${startDate}T${String(PACIFIC_OFFSET_HOURS).padStart(2, '0')}:00:00.000Z`;
+  const endDateObj = new Date(`${endDate}T00:00:00.000Z`);
+  endDateObj.setUTCDate(endDateObj.getUTCDate() + 1);
+  const salesEndISO = `${formatDateUTC(endDateObj)}T${String(PACIFIC_OFFSET_HOURS - 1).padStart(2, '0')}:59:59.999Z`;
+  return { salesStartISO, salesEndISO };
+}
+
+/**
+ * INLINE path: fetch the Sales Report (create → poll → download), then process it.
+ * Behaviour is unchanged — the processing half now lives in `processSalesReportRows` so the async
+ * path can share it.
+ */
 async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDate, endDate, accessToken, refreshToken, clientId, clientSecret, tokenManager: inheritedTokenManager }) {
-  const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
   const regionInternal = internalRegionFromModel(regionModel);
   const { baseUrl, marketplaceId } = resolveMarketplaceAndRegion(country.toUpperCase(), regionInternal);
 
@@ -1056,13 +1245,30 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
   const tokenManager = inheritedTokenManager || createTokenManager({ accessToken, refreshToken, clientId, clientSecret });
 
   // ── Sales Report (Pacific Time boundaries) ──
-  const salesStartISO = `${startDate}T${String(PACIFIC_OFFSET_HOURS).padStart(2, '0')}:00:00.000Z`;
-  const endDateObj = new Date(`${endDate}T00:00:00.000Z`);
-  endDateObj.setUTCDate(endDateObj.getUTCDate() + 1);
-  const salesEndISO = `${formatDateUTC(endDateObj)}T${String(PACIFIC_OFFSET_HOURS - 1).padStart(2, '0')}:59:59.999Z`;
+  const { salesStartISO, salesEndISO } = salesReportWindowISO(startDate, endDate);
 
   logger.info(`[Step1] Sales Report: ${startDate} → ${endDate} (Pacific)`);
   const reportRows = await fetchSalesReport(tokenManager, baseUrl, marketplaceId, salesStartISO, salesEndISO);
+
+  return processSalesReportRows({ userId, country, regionModel, startDate, endDate, reportRows, tokenManager });
+}
+
+/**
+ * Everything from "the Sales Report rows are in hand" onwards: parse → Finance API streaming fold
+ * → join → bucket build → persist → PendingExpenseOrder → FinanceSyncLog success rows.
+ *
+ * THIS IS THE SHARED BODY. The inline path above and the async adapter's `finalize()` both call
+ * it, so the two paths write identical data by construction rather than by inspection. Every
+ * side effect — including the FinanceSyncLog writes that ADVANCE THE CURSOR — happens here.
+ *
+ * @param {string|null} [syncRunId] Async path only. Stamped onto the FinanceSyncLog rows so a
+ *   repeated finalize (BullMQ retry) can detect that it already ran and skip. Without this a
+ *   re-run after Step 2 had converted estimated fees into actuals would reinstate the estimates.
+ */
+async function processSalesReportRows({ userId, country, regionModel, startDate, endDate, reportRows, tokenManager, syncRunId = null }) {
+  const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+  const regionInternal = internalRegionFromModel(regionModel);
+  const { baseUrl, marketplaceId } = resolveMarketplaceAndRegion(country.toUpperCase(), regionInternal);
   const salesOrderMap = parseSalesReportRows(reportRows, country);
 
   // ── Per-day "unsettled sales" signal (for provisional sync-log marking) ──
@@ -1091,79 +1297,91 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
   }
   logger.debug(`[DEBUG] parseSalesReportRows returned: $${Math.round(debugTotal * 100) / 100} | ${debugUnits} units | ${debugOrders} order-items | country filter: ${country}`);
 
-  // ── Finance API: (startDate - buffer) → TODAY ──
-  // We fetch a wider window than the sales report to catch:
-  //   - Shipment fees posted slightly after order date
-  //   - Refunds for orders within our sales range (posted later)
-  //   - Reimbursements that fall within our display range
+  // ── Finance API window: (startDate - buffer) → (endDate + buffer), capped at now ──
+  // We fetch wider than the sales report to catch Shipment fees posted slightly after the order
+  // date. It used to run all the way to TODAY, which was both ruinous and pointless:
+  //
+  //   * Ruinous — for a chunk in mid-June that meant ~49 days of transactions, and since the sync
+  //     now fetches per chunk it did so once per chunk. `fetchTransactions` retained every page, so
+  //     a high-volume account exhausted a 2GB heap before writing anything.
+  //   * Pointless — only `Shipment` attributes to the order's purchase date
+  //     (PURCHASE_DATE_TXN_TYPES). Every other type attributes to its POSTED date and is then
+  //     hard-filtered to [startDate, endDate] further down, i.e. fetched, parsed and discarded. The
+  //     day such a row belongs to is covered by its own chunk/run.
+  //
+  // So the forward reach only needs to cover Shipment settlement lag — the same lag already applied
+  // backward. Anything later falls to PendingExpenseOrder + Step 2 (chases up to
+  // MAX_PENDING_AGE_DAYS), and `resyncDays` re-fetches the trailing days on every daily run.
   const buffer = SETTLEMENT_LAG[regionModel] || SETTLEMENT_LAG.NA;
+  const forwardDays = FINANCE_FORWARD_BUFFER_DAYS !== null ? FINANCE_FORWARD_BUFFER_DAYS : buffer.beforeDays;
   const finStart = new Date(`${startDate}T00:00:00.000Z`);
   finStart.setUTCDate(finStart.getUTCDate() - buffer.beforeDays);
-  const finEnd = new Date(Date.now() - 3 * 60 * 1000);
+  const nowCeiling = Date.now() - 3 * 60 * 1000; // API requires postedBefore > 2 min in the past
+  const endDateMs = Date.parse(`${endDate}T23:59:59.999Z`);
+  // Guard the parse: callers can pass forceDates, and a non 'YYYY-MM-DD' value would otherwise
+  // yield NaN → an Invalid Date → a RangeError on the log line below.
+  const forwardCeiling = Number.isFinite(endDateMs)
+    ? endDateMs + forwardDays * 86400000
+    : nowCeiling;
+  const finEnd = new Date(Math.min(nowCeiling, forwardCeiling));
+  const finSpanDays = Math.max(1, Math.round((finEnd - finStart) / 86400000));
 
-  logger.info(`[Step1] Finance API: ${finStart.toISOString()} → ${finEnd.toISOString()}`);
+  logger.info(`[Step1] Finance API: ${finStart.toISOString()} → ${finEnd.toISOString()} (${finSpanDays}d, forward buffer ${forwardDays}d)`);
+
+  // ── Stream the transactions straight into the index ──
+  // Each page is converted to rows, folded, and dropped; the raw transaction graph is never
+  // retained. That is the difference between peak memory scaling with the window and with a page.
+  const financeStartedAt = Date.now();
+  let financeIndex = null;
+  let expenseRowCount = 0;
+  let revenueRowCount = 0;
+
   // `tokenRefresher` lets fetchTransactions refresh mid-pagination without
   // restarting from page 1. Outer withRetry covers the rare case where the
   // token dies before pagination begins.
-  const fetchResult = await tokenManager.withRetry((token) => fetchNewFinanceData({
-    refreshToken, accessToken: token, clientId, clientSecret,
-    country: country.toUpperCase(), region: regionInternal,
-    postedAfter: finStart.toISOString(), postedBefore: finEnd.toISOString(),
-    tokenRefresher: () => tokenManager.refresh(),
-  }));
+  await tokenManager.withRetry(async (token) => {
+    // Fresh index per attempt: withRetry re-invokes this whole function, and folding into a shared
+    // index would double-count every row already ingested by the failed attempt.
+    financeIndex = createFinanceIndex();
+    expenseRowCount = 0;
+    revenueRowCount = 0;
 
-  const expenseRows = fetchResult.expenseRows || [];
-  const revenueRows = fetchResult.revenueRows || [];
+    // From the token manager, NOT from an enclosing scope. This block used to live inside
+    // fetchNewSalesAndExpenses, where refreshToken/clientId/clientSecret were parameters; they are
+    // not parameters of processSalesReportRows, so reading them as free variables here threw a
+    // ReferenceError on every sync — inline and async alike.
+    const { refreshToken, clientId, clientSecret } = tokenManager.credentials || {};
+    return fetchNewFinanceData({
+      refreshToken, accessToken: token, clientId, clientSecret,
+      country: country.toUpperCase(), region: regionInternal,
+      postedAfter: finStart.toISOString(), postedBefore: finEnd.toISOString(),
+      tokenRefresher: () => tokenManager.refresh(),
+      onRows: (pageExpenses, pageRevenue) => {
+        expenseRowCount += pageExpenses.length;
+        revenueRowCount += pageRevenue.length;
+        // Sequential by construction — the dedup keeps the first transactionId per orderId+SKU,
+        // so page order must be preserved. Never parallelise this.
+        addFinanceRowsToIndex(financeIndex, pageExpenses, pageRevenue);
+      },
+    });
+  });
+  logFinanceIndexDedup(financeIndex);
 
-  // ── ★ DEBUG: Raw expense data dump (remove after verifying) ──
-  // Build a purchase-date lookup from salesOrderMap for debugging
-  const purchase_dates_debug = new Map();
-  for (const [orderId, skuItemMap] of salesOrderMap) {
-    for (const [, item] of skuItemMap) {
-      purchase_dates_debug.set(orderId, item.pacificDate);
-      break; // just need one date per order
-    }
-  }
-  // Count Shipment FBA rows per orderId for our debug SKU
-  const debugSku = '198168045893';
-  const debugFbaRows = expenseRows.filter(e =>
-    e.sku === debugSku &&
-    e.category === 'FBA Fulfillment Fee' &&
-    e.transactionType === 'Shipment'
+  logger.info(
+    `[Step1] Finance API done: ${expenseRowCount} expense / ${revenueRowCount} revenue rows over ` +
+    `${finSpanDays}d in ${Date.now() - financeStartedAt}ms, ` +
+    `heapUsed ${Math.round(process.memoryUsage().heapUsed / 1048576)}MB`
   );
-  logger.debug(`[RAW-DUMP] Shipment FBA rows for ${debugSku}: ${debugFbaRows.length}, sum=$${debugFbaRows.reduce((s, e) => s + e.amount, 0).toFixed(2)}`);
-  // Detect duplicate orderId entries
-  const fbaCountByOrder = {};
-  for (const e of debugFbaRows) {
-    if (!fbaCountByOrder[e.orderId]) fbaCountByOrder[e.orderId] = 0;
-    fbaCountByOrder[e.orderId]++;
-  }
-  const dupeOrders = Object.entries(fbaCountByOrder).filter(([, c]) => c > 1);
-  if (dupeOrders.length > 0) {
-    logger.debug(`[RAW-DUMP] ⚠️ ${dupeOrders.length} orders with MULTIPLE FBA rows:`);
-    dupeOrders.slice(0, 10).forEach(([oid, c]) => logger.debug(`[RAW-DUMP]   ${oid}: ${c} FBA rows`));
-  }
-  // Per-date FBA total using purchase date
-  const fbaByPD = {};
-  for (const e of debugFbaRows) {
-    const pd = purchase_dates_debug.get(e.orderId) || 'UNMATCHED';
-    if (!fbaByPD[pd]) fbaByPD[pd] = 0;
-    fbaByPD[pd] += e.amount;
-  }
-  for (const [d, amt] of Object.entries(fbaByPD).sort()) {
-    logger.debug(`[RAW-DUMP] FBA by purchase-date: ${d} = $${amt.toFixed(2)}`);
-  }
-  // ── END DEBUG ──
 
   // ── Index Finance API rows ──
-  // ★ FIX: Now returns separate postedDateExpenses/Revenue for non-Shipment types
+  // ★ Now returns separate postedDateExpenses/Revenue for non-Shipment types
   const {
     expensesByOrderSku, unattributedExpensesByOrder,
     revenueByOrderSku, unattributedRevenueByOrder,
     overheadExpenses, overheadRevenue,
     postedDateExpenses,     // ★ Refund, Reimbursement, ServiceFee, Adjustment expenses
     postedDateRevenue,      // ★ Refund revenue (negative product sales from refund)
-  } = indexFinanceRowsByOrderId(expenseRows, revenueRows);
+  } = financeIndex;
 
   const consumedOrderSkuKeys = new Set();
   const consumedOrderIds = new Set();
@@ -1464,7 +1682,7 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
     diagRefundByDate[bucket.date] += (bucket.refundedAmount || 0) + (bucket.refundCommission || 0) + (bucket.refundedReferralFee || 0) + (bucket.refundedPromotion || 0);
   }
   logger.debug(`[DIAG] Total FBA Fulfillment across ${skuBuckets.size} SKU buckets: $${Math.round(diagFbaTotal * 100) / 100}`);
-  logger.debug(`[DIAG] Finance API returned ${expenseRows.length} expense rows total`);
+  logger.debug(`[DIAG] Finance API returned ${expenseRowCount} expense rows total`);
   // Per-date breakdown for verification against Sellerboard
   const diagDates = Object.keys(diagFbaByDate).sort();
   for (const d of diagDates) {
@@ -1562,7 +1780,7 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
       const isProvisional = pendingForDay > 0 && ageDays <= PROVISIONAL_SETTLE_DAYS;
       await FinanceSyncLog.findOneAndUpdate(
         { User: userObjectId, country: country.toUpperCase(), region: regionModel, date: dateStr },
-        { User: userObjectId, country: country.toUpperCase(), region: regionModel, marketplaceId, date: dateStr, fetchedAt: new Date(), status: 'success', provisional: isProvisional, pendingOrderCount: pendingForDay, expenseRowCount: expenseRows.length, revenueRowCount: revenueRows.length, skuCount: skuBuckets.size, error: '' },
+        { User: userObjectId, country: country.toUpperCase(), region: regionModel, marketplaceId, date: dateStr, fetchedAt: new Date(), status: 'success', provisional: isProvisional, pendingOrderCount: pendingForDay, expenseRowCount, revenueRowCount, skuCount: skuBuckets.size, error: '', ...(syncRunId ? { syncRunId } : {}) },
         { upsert: true, new: true }
       );
     } else {
@@ -1577,7 +1795,7 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
       const provisionalForNew = ageDays <= PROVISIONAL_SETTLE_DAYS;
       await FinanceSyncLog.updateOne(
         { User: userObjectId, country: country.toUpperCase(), region: regionModel, date: dateStr },
-        { $setOnInsert: { User: userObjectId, country: country.toUpperCase(), region: regionModel, marketplaceId, date: dateStr, fetchedAt: new Date(), status: 'success', provisional: provisionalForNew, pendingOrderCount: 0, expenseRowCount: 0, revenueRowCount: 0, skuCount: 0, error: '' } },
+        { $setOnInsert: { User: userObjectId, country: country.toUpperCase(), region: regionModel, marketplaceId, date: dateStr, fetchedAt: new Date(), status: 'success', provisional: provisionalForNew, pendingOrderCount: 0, expenseRowCount: 0, revenueRowCount: 0, skuCount: 0, error: '', ...(syncRunId ? { syncRunId } : {}) } },
         { upsert: true }
       );
     }
@@ -1615,23 +1833,68 @@ async function backfillPendingExpenses({ userId, country, regionModel, accessTok
   const buffer = SETTLEMENT_LAG[regionModel] || SETTLEMENT_LAG.NA;
   const finStart = new Date(`${earliestPurchase}T00:00:00.000Z`);
   finStart.setUTCDate(finStart.getUTCDate() - buffer.beforeDays);
-  const finEnd = new Date(Date.now() - 3 * 60 * 1000);
+
+  // Runs to NOW deliberately, and is NOT length-capped.
+  //
+  // Step 2 exists to find Shipment fees that posted LATER than the sync window that created the
+  // pending row, so its forward reach cannot be shortened without defeating its purpose. An earlier
+  // draft of this fix capped the span at N days from the oldest pending purchase date; that was
+  // wrong and actively harmful — `finStart` is derived from `min(purchasePacificDate)` over the
+  // REMAINING rows with no cursor, so a single stuck order (the codebase explicitly expects these:
+  // see PROVISIONAL_SETTLE_DAYS / MAX_PENDING_AGE_DAYS) pins the window at its own date for up to 45
+  // days. Every newer pending row then sits permanently outside the window, is never actually
+  // searched for, and expires with its estimated fee never replaced by the actual — silent, and
+  // reported as `resolved: 0` rather than as an error.
+  //
+  // Memory here is instead bounded by the streaming fold below: the raw transaction graph (by far
+  // the largest tier, and what exhausted the heap) is no longer retained at all.
+  const finEnd = new Date(Date.now() - 3 * 60 * 1000); // API requires postedBefore > 2 min in the past
+  const finSpanDays = Math.max(1, Math.round((finEnd - finStart) / 86400000));
 
   const tokenManager = inheritedTokenManager || createTokenManager({ accessToken, refreshToken, clientId, clientSecret });
 
-  logger.info(`[Step2] Finance API: ${finStart.toISOString()} → ${finEnd.toISOString()}`);
-  const fetchResult = await tokenManager.withRetry((token) => fetchNewFinanceData({
-    refreshToken, accessToken: token, clientId, clientSecret,
-    country: country.toUpperCase(), region: regionInternal,
-    postedAfter: finStart.toISOString(), postedBefore: finEnd.toISOString(),
-    tokenRefresher: () => tokenManager.refresh(),
-  }));
+  logger.info(`[Step2] Finance API: ${finStart.toISOString()} → ${finEnd.toISOString()} (${finSpanDays}d, ${pendingOrders.length} pending orders)`);
 
-  const expenseRows = fetchResult.expenseRows || [];
-  const revenueRows = fetchResult.revenueRows || [];
+  // Stream and fold, same as Step 1 — nothing raw is retained.
+  const step2StartedAt = Date.now();
+  let financeIndex = null;
+  let expenseRowCount = 0;
+  let revenueRowCount = 0;
 
-  // ★ FIX: Use updated indexer that separates by transaction type
-  const { expensesByOrderSku, unattributedExpensesByOrder, revenueByOrderSku, unattributedRevenueByOrder } = indexFinanceRowsByOrderId(expenseRows, revenueRows);
+  // Only these orders' rows are of any use here — Step 2 reads nothing but the four order-keyed
+  // lookups below. Discarding the rest as it arrives is what keeps memory proportional to the
+  // pending-order count rather than to the (necessarily wide) window.
+  const pendingOrderIds = new Set(pendingOrders.map((p) => p.orderId).filter(Boolean));
+
+  await tokenManager.withRetry(async (token) => {
+    // Fresh per attempt: withRetry re-runs this whole function, so a shared index would double-fold.
+    financeIndex = createFinanceIndex({ orderIdFilter: pendingOrderIds });
+    expenseRowCount = 0;
+    revenueRowCount = 0;
+
+    return fetchNewFinanceData({
+      refreshToken, accessToken: token, clientId, clientSecret,
+      country: country.toUpperCase(), region: regionInternal,
+      postedAfter: finStart.toISOString(), postedBefore: finEnd.toISOString(),
+      tokenRefresher: () => tokenManager.refresh(),
+      onRows: (pageExpenses, pageRevenue) => {
+        expenseRowCount += pageExpenses.length;
+        revenueRowCount += pageRevenue.length;
+        addFinanceRowsToIndex(financeIndex, pageExpenses, pageRevenue);
+      },
+    });
+  });
+  logFinanceIndexDedup(financeIndex);
+
+  logger.info(
+    `[Step2] Finance API done: ${expenseRowCount} expense / ${revenueRowCount} revenue rows seen over ` +
+    `${finSpanDays}d, ${financeIndex.filteredOutCount} discarded as unrelated to the ` +
+    `${pendingOrderIds.size} pending orders, in ${Date.now() - step2StartedAt}ms, ` +
+    `heapUsed ${Math.round(process.memoryUsage().heapUsed / 1048576)}MB`
+  );
+
+  // ★ Index separates by transaction type; built incrementally by the fold above.
+  const { expensesByOrderSku, unattributedExpensesByOrder, revenueByOrderSku, unattributedRevenueByOrder } = financeIndex;
 
   let resolved = 0, stillPending = 0, expired = 0;
   const resolvedOrderIds = [];
@@ -1824,6 +2087,7 @@ async function syncFinanceData({ userId, country, regionModel, refreshToken, acc
     const loop = await runChunkedFetch({
       chunks,
       budgetMs: FINANCE_SYNC_RUN_BUDGET_MS,
+      heapLimitBytes: FINANCE_HEAP_LIMIT_MB * 1024 * 1024,
       fetchChunk: (chunk, index) => {
         if (chunks.length > 1) {
           logger.info(`[Sync] Chunk ${index + 1}/${chunks.length}: ${chunk.startDate} → ${chunk.endDate}`);
@@ -1838,6 +2102,12 @@ async function syncFinanceData({ userId, country, regionModel, refreshToken, acc
       logger.warn(
         `[Sync] Run budget exhausted after ${chunksCompleted}/${chunks.length} chunks; ` +
         `remaining days resume next run (cursor has advanced).`
+      );
+    } else if (stopReason === 'memory') {
+      logger.warn(
+        `[Sync] Stopped on the heap guard after ${chunksCompleted}/${chunks.length} chunks ` +
+        `(heapUsed ${Math.round(process.memoryUsage().heapUsed / 1048576)}MB, limit ` +
+        `${FINANCE_HEAP_LIMIT_MB}MB); remaining days resume next run (cursor has advanced).`
       );
     }
 
@@ -1937,6 +2207,171 @@ async function getSyncStatus({ userId, country, regionModel }) {
 // ─────────────────────────────────────────────
 // EXPORTS
 // ─────────────────────────────────────────────
+// ═══════════════════════════════════════════════
+// ASYNC ADAPTER — the same Sales Report, fetched without holding a worker
+//
+// The inline path polls Amazon in a loop and gives up after FINANCE_REPORT_MAX_POLL_ATTEMPTS.
+// When Amazon parks a report at IN_QUEUE for 30+ minutes (which is what blocked 28 July for
+// account 6a57b823571ceb9266953c30) that loop abandons the report and the next run submits a
+// NEW one — piling onto the same per-seller queue and making the next attempt worse.
+//
+// This adapter plugs the same report into asyncReportEngine: submit, persist the reportId,
+// release the worker, re-check on a delayed job. A report that sits queued for hours becomes a
+// non-event instead of a failure, and is never abandoned or duplicated.
+//
+// It deliberately owns NO fetch/parse/persist logic — submit, download and process are the very
+// functions the inline path calls, so the two paths write identical data by construction.
+// ═══════════════════════════════════════════════
+
+/** Every YYYY-MM-DD from `from` to `to`, inclusive. */
+function enumerateDatesInclusive(from, to) {
+  const out = [];
+  const d = new Date(`${from}T00:00:00.000Z`);
+  const end = new Date(`${to}T00:00:00.000Z`);
+  while (d <= end) { out.push(formatDateUTC(d)); d.setUTCDate(d.getUTCDate() + 1); }
+  return out;
+}
+
+/**
+ * The cursor read + window resolution + chunk enumeration that `syncFinanceData` does inline,
+ * as one callable step.
+ *
+ * The async phase calls this EXACTLY ONCE, on its first tick, and freezes the result in
+ * phaseData. It must never be re-run on a poll tick: `yesterdayStr` is derived from `now`, so a
+ * tick that crosses Pacific midnight would shift the window, `enumerateDateChunks` would
+ * re-anchor, the chunk's `paramsKey` would change, and the persisted engine row would no longer
+ * match any spec — the engine skips unmatched rows, so the phase would reschedule forever.
+ * A concurrent catch-up run moving the cursor has the same effect.
+ *
+ * @returns {{window: object, chunks: Array, latestSyncDate: string|null, yesterdayStr: string}}
+ */
+async function planFinanceSync({
+  userId, country, regionModel,
+  backfillDays = 30, forceDates = null, maxIncrementalDays = null, resyncDays = 0,
+  chunkDays = FINANCE_REPORT_CHUNK_DAYS,
+}) {
+  const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+  const yesterdayStr = new Date(Date.now() - (PACIFIC_OFFSET_HOURS * 3600000) - 86400000)
+    .toISOString().substring(0, 10);
+
+  let latestSyncDate = null;
+  if (!(forceDates && forceDates.length === 2)) {
+    const latestSync = await FinanceSyncLog.findOne({
+      User: userObjectId, country: country.toUpperCase(), region: regionModel,
+      status: 'success', provisional: { $ne: true },
+    }).sort({ date: -1 }).lean();
+    latestSyncDate = latestSync ? latestSync.date : null;
+  }
+
+  const window = resolveSyncWindow({ yesterdayStr, latestSyncDate, backfillDays, maxIncrementalDays, resyncDays, forceDates });
+  const chunks = window.mode === 'up_to_date'
+    ? []
+    : enumerateDateChunks(window.startDate, window.endDate, chunkDays);
+  return { window, chunks, latestSyncDate, yesterdayStr };
+}
+
+/**
+ * The once-per-sync tail: Step 2 (convert estimated fees to actuals) then ASIN relationships.
+ *
+ * Extracted so the async phase runs the SAME tail as `syncFinanceData`, on its last tick only.
+ * Running it per chunk would re-walk every pending order each time for no benefit.
+ */
+async function runFinanceSyncTail({ userId, country, regionModel, startDate, endDate, refreshToken, clientId, clientSecret, tokenManager }) {
+  const step2 = await backfillPendingExpenses({ userId, country, regionModel, accessToken: tokenManager.token, refreshToken, clientId, clientSecret, tokenManager });
+  await syncRelationshipsIfNeeded({ userId, country, regionModel, startDate, endDate, accessToken: tokenManager.token, refreshToken, clientId, clientSecret });
+  return step2;
+}
+
+const financeSalesReportAsync = {
+  serviceName: 'financeSalesReport',
+
+  /**
+   * ONE spec, for ONE chunk. The phase walks chunks oldest-first with a single chunk in flight,
+   * because the cursor is `max(FinanceSyncLog.date …)` — if a later chunk landed before an
+   * earlier one failed, the cursor would jump the gap and strand those days at $0 forever.
+   *
+   * `chunk` MUST come from a window frozen at submit time. Recomputing it on a poll tick that
+   * crosses Pacific midnight would shift the dates, change `paramsKey`, leave the persisted row
+   * with no matching spec, and make the engine skip it — rescheduling forever.
+   */
+  buildSpecs({ userId, country, regionModel, tokenManager, chunk }) {
+    const regionInternal = internalRegionFromModel(regionModel);
+    const { baseUrl, marketplaceId } = resolveMarketplaceAndRegion(country.toUpperCase(), regionInternal);
+    const { salesStartISO, salesEndISO } = salesReportWindowISO(chunk.startDate, chunk.endDate);
+    const paramsKey = `${chunk.startDate}_${chunk.endDate}`;
+    const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+
+    return [{
+      service: 'financeSalesReport',
+      paramsKey,
+      // Persisted so a later tick can reconstruct the window without recomputing it. Tokens are
+      // NEVER stored here — `tokenManager` is captured in the closure, which lives only for
+      // this tick.
+      params: { startDate: chunk.startDate, endDate: chunk.endDate },
+      marketplaceId,
+
+      submit: () => submitSalesReport(tokenManager, baseUrl, marketplaceId, salesStartISO, salesEndISO),
+
+      checkStatusOnce: async (reportId) =>
+        checkSpApiStatusOnce(await tokenManager.getValidToken(), reportId, baseUrl),
+
+      finalize: async (handle, row) => {
+        const syncRunId = String(row._id);
+        const dates = enumerateDatesInclusive(chunk.startDate, chunk.endDate);
+
+        // ── Idempotency guard — must run BEFORE any write ──
+        // The engine will not re-enter finalize, but a BullMQ retry of the whole job can, if the
+        // worker died between the writes below and the row's status:'DONE'. Re-running after
+        // backfillPendingExpenses has converted this chunk's ESTIMATED fees into actuals would
+        // delete-and-reinsert the estimates and silently lose the actual fees. If every date in
+        // the chunk already carries this run's id, the work is done.
+        const alreadyWritten = await FinanceSyncLog.countDocuments({
+          User: userObjectId, country: country.toUpperCase(), region: regionModel,
+          date: { $in: dates }, syncRunId,
+        });
+        if (alreadyWritten >= dates.length) {
+          logger.warn(`[FinanceAsync] finalize re-entered for ${paramsKey}; already written by run ${syncRunId} — skipping`);
+          return { empty: false, result: { skipped: true } };
+        }
+
+        // DONE_NO_DATA carries no document id — Amazon's way of saying "this window has no
+        // orders". There is nothing to download, but we still process, because the empty-rows
+        // path is what writes the sync-log rows that ADVANCE THE CURSOR. Skipping it would
+        // leave the chunk unlogged and retried forever.
+        const reportRows = handle && handle.reportDocumentId
+          ? (await downloadSalesReportRows(tokenManager, baseUrl, handle.reportDocumentId, paramsKey)).rows
+          : [];
+
+        const stats = await processSalesReportRows({
+          userId, country, regionModel,
+          startDate: chunk.startDate, endDate: chunk.endDate,
+          reportRows, tokenManager, syncRunId,
+        });
+
+        // `empty` marks the row NO_DATA so the phase can allow exactly one re-submit. The data
+        // has still been processed above either way.
+        //
+        // Copy fields explicitly: `stats` carries `token` and a live `tokenManager`, and this
+        // object is persisted to Mongo.
+        return {
+          empty: reportRows.length === 0,
+          result: {
+            salesOrders: stats.salesOrders,
+            skuDocs: stats.skuDocs,
+            overheadDocs: stats.overheadDocs,
+            pendingOrders: stats.pendingOrders,
+            reportRows: reportRows.length,
+          },
+        };
+      },
+    }];
+  },
+
+  // finalize() already persisted everything. Mirrors GET_LEDGER_SUMMARY_VIEW_DATA, whose adapter
+  // is likewise finalize-saves / saveFromRows-noop.
+  saveFromRows: async () => ({ documentsSaved: 0 }),
+};
+
 module.exports = {
   syncFinanceData,
   fetchNewSalesAndExpenses,
@@ -1962,4 +2397,20 @@ module.exports = {
   classifySyncFailure,
   addDaysStr,
   daysBetweenInclusive,
+  // Incremental finance index — exported so the page-by-page fold can be proven equivalent to the
+  // one-shot indexFinanceRowsByOrderId above.
+  createFinanceIndex,
+  addFinanceRowsToIndex,
+  logFinanceIndexDedup,
+  // Async path: the shared halves of the inline fetch, plus the engine adapter that reuses them.
+  submitSalesReport,
+  downloadSalesReportRows,
+  processSalesReportRows,
+  salesReportWindowISO,
+  enumerateDatesInclusive,
+  financeSalesReportAsync,
+  planFinanceSync,
+  runFinanceSyncTail,
+  PROVISIONAL_SETTLE_DAYS,
+  FINANCE_REPORT_CHUNK_DAYS,
 };

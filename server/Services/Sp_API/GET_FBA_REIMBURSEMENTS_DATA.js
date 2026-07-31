@@ -212,6 +212,16 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, 
             };
         }
 
+        return await _processReimbursementsDocument(accessToken, reportDocumentId, baseuri, userId, country, region);
+
+    } catch (error) {
+        logger.error("[GET_FBA_REIMBURSEMENTS_DATA] Error in getReport:", error.message);
+        throw new ApiError(500, error.message);
+    }
+};
+
+// Extracted post-poll step (download → parse TSV → save). Shared by inline + P8 async.
+async function _processReimbursementsDocument(accessToken, reportDocumentId, baseuri, userId, country, region) {
         const reportUrl = await getReportLink(accessToken, reportDocumentId, baseuri);
 
         const fullReport = await axios({
@@ -227,7 +237,7 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, 
         // Convert TSV to JSON
         logger.info("[GET_FBA_REIMBURSEMENTS_DATA] Converting TSV to JSON...");
         logger.info(`[GET_FBA_REIMBURSEMENTS_DATA] Raw data size: ${fullReport.data.length} bytes`);
-        
+
         const refinedData = await convertTSVToJson(fullReport.data);
         
         // Map field names to match schema (replace spaces/hyphens with underscores)
@@ -270,12 +280,7 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, 
             }
             throw new ApiError(500, `Database error: ${dbError.message}`);
         }
-
-    } catch (error) {
-        logger.error("[GET_FBA_REIMBURSEMENTS_DATA] Error in getReport:", error.message);
-        throw new ApiError(500, error.message);
-    }
-};
+}
 
 /**
  * Convert TSV buffer to JSON using async streaming parser.
@@ -344,6 +349,25 @@ async function convertTSVToJsonLegacy(tsvBuffer) {
         return obj;
     });
 }
+
+// P8: Non-blocking async adapter — reuses _processReimbursementsDocument (same code as inline).
+const { checkSpApiStatusOnce } = require('./spApiReportAdapter.js');
+getReport.spApiAsync = {
+    serviceName: 'fbaReimbursementsData',
+    buildSpecs: ({ userId, country, region, accessToken, baseuri, marketplaceIds }) => ([{
+        service: 'fbaReimbursementsData',
+        paramsKey: 'default',
+        params: {},
+        marketplaceId: '',
+        submit: async () => await generateReport(accessToken, marketplaceIds, baseuri),
+        checkStatusOnce: (reportId) => checkSpApiStatusOnce(accessToken, reportId, baseuri),
+        finalize: async (handle) => {
+            await _processReimbursementsDocument(accessToken, handle.reportDocumentId, baseuri, userId, country, region);
+            return { empty: false };
+        },
+    }]),
+    saveFromRows: async () => ({ documentsSaved: 0 }),
+};
 
 module.exports = getReport;
 

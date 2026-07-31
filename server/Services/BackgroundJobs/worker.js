@@ -300,6 +300,51 @@ async function processScheduledPhase(job) {
         }
     }
 
+    // P8: non-blocking poll (BidBison-style). A phase may report that it is not done
+    // yet and should be re-run after a delay instead of advancing — e.g. the ADS phase
+    // that submitted Amazon reports and is waiting for them to finish generating. We
+    // re-enqueue the SAME phase with a delay + a distinct (poll-suffixed) jobId,
+    // carrying phaseData forward, and RETURN — releasing this worker slot instead of
+    // sleeping in-process. The phase advances to nextPhase only once it stops asking
+    // to be rescheduled (all reports terminal).
+    if (phaseSucceeded && phaseOutcome.reschedule && phaseOutcome.reschedule.delayMs > 0) {
+        const pollAttempt = phaseOutcome.reschedule.pollAttempt || 1;
+        try {
+            const selfJobData = scheduledPhases.createNextPhaseJobData(phase, job.data, phaseOutcome);
+            const selfJobId = `${scheduledPhases.generatePhaseJobId(effectiveParentJobId, phase)}-poll${pollAttempt}`;
+            const queue = getQueue();
+            await queue.add('process-user-data', selfJobData, {
+                jobId: selfJobId,
+                delay: phaseOutcome.reschedule.delayMs,
+                attempts: 3,
+                backoff: { type: 'exponential', delay: 60000 },
+                timeout: 2 * 60 * 60 * 1000
+            });
+            logger.info(
+                `[Worker:${WORKER_NAME}] Scheduled phase ${phase} not done — rescheduled poll ${pollAttempt} in ${phaseOutcome.reschedule.delayMs}ms`,
+                { userId, selfJobId, duration }
+            );
+        } catch (enqueueError) {
+            logger.error(
+                `[Worker:${WORKER_NAME}] Failed to reschedule phase ${phase} for user ${userId}:`,
+                enqueueError
+            );
+            // Non-fatal: the reconciliation sweep re-checks stuck SUBMITTED reports.
+        }
+        try {
+            await updateJobStatus(job.id, userId, 'completed', {
+                completedAt: new Date().toISOString(),
+                duration,
+                attemptNumber: job.attemptsMade + 1,
+                maxAttempts: job.opts.attempts,
+                metadata: { country, region, phase, rescheduled: true, pollAttempt, parentJobId: effectiveParentJobId }
+            });
+        } catch (statusError) {
+            logger.warn(`[Worker:${WORKER_NAME}] Could not update job status for rescheduled phase ${phase}: ${statusError.message}`);
+        }
+        return { success: true, phase, rescheduled: true, pollAttempt };
+    }
+
     if (nextPhase) {
         try {
             // Always pass the phase outcome (even on failure) so the next phase
