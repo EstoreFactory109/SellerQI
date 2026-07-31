@@ -161,20 +161,24 @@ const getshipment = async (dataToReceive, UserId, baseuri, country, region) => {
             return pageResponse.data?.payload || null;
         };
 
-        // Fetch all shipments with pagination
-        let allShipments = [];
+        // Fetch all shipments with pagination. Keep only the two fields used downstream
+        // (ShipmentId, ShipmentName) per page and drop the rest of each raw ShipmentData
+        // object, so we don't hold full raw shipment records for the whole window.
+        const allShipments = [];
         let nextToken = null;
         let pageCount = 0;
 
         do {
             pageCount++;
             const payload = await fetchShipmentsPage(nextToken);
-            
+
             if (!payload || !payload.ShipmentData) {
                 break;
             }
 
-            allShipments = allShipments.concat(payload.ShipmentData);
+            for (const sd of payload.ShipmentData) {
+                allShipments.push({ ShipmentId: sd.ShipmentId, ShipmentName: sd.ShipmentName });
+            }
             nextToken = payload.NextToken || null;
 
             if (nextToken) {

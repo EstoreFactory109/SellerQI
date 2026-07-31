@@ -183,8 +183,12 @@ async function getKeywords(accessToken, profileId, userId, country, region = 'NA
       'Content-Type': SP_V3_CONTENT_TYPE
     };
 
-    // ===== PAGINATED FETCH =====
-    let allKeywords = [];
+    // ===== PAGINATED FETCH (streamed) =====
+    // Memory-safe: instead of holding every RAW keyword object for the whole account and
+    // then building a second full array, each page is mapped to its slim persisted shape
+    // immediately (via buildKeywordRows) and the raw page is dropped. Peak memory is one
+    // page of raw + the (much smaller) slim rows — not the full raw set + rows.
+    const keywordRows = [];
     let nextToken = null;
 
     do {
@@ -219,17 +223,19 @@ async function getKeywords(accessToken, profileId, userId, country, region = 'NA
         break;
       }
 
-      allKeywords.push(...keywords);
+      // Transform this page to slim rows and drop the raw page.
+      const pageRows = await buildKeywordRows(keywords);
+      keywordRows.push(...pageRows);
       nextToken = response.data.nextToken || null;
 
-      console.log(`  ↳ Fetched ${keywords.length} keywords (total so far: ${allKeywords.length})`);
+      console.log(`  ↳ Fetched ${keywords.length} keywords (total so far: ${keywordRows.length})`);
 
     } while (nextToken);
 
-    console.log(`✅ Keywords API response received: ${allKeywords.length} keywords total`);
+    console.log(`✅ Keywords API response received: ${keywordRows.length} keywords total`);
 
     // ===== HANDLE EMPTY KEYWORDS GRACEFULLY =====
-    if (allKeywords.length === 0) {
+    if (keywordRows.length === 0) {
       logger.warn('No keywords found for user', { userId, region, country });
 
       const metricDate = getYesterdayMetricDateUtc();
@@ -239,18 +245,9 @@ async function getKeywords(accessToken, profileId, userId, country, region = 'NA
 
       console.log(`✅ Empty keywords data saved for consistency`);
       return createdKeywords;
-    } else {
-      // Log some stats
-      const enabledKeywords = allKeywords.filter(keyword =>
-        keyword && keyword.state === 'ENABLED'
-      );
-      console.log(`📊 Keywords breakdown: ${allKeywords.length} total, ${enabledKeywords.length} enabled`);
     }
-
-    // ===== BUILD SLIM SCHEMA ROWS (event-loop friendly) =====
-    // Only the persisted schema fields are kept; built in yielding batches so a
-    // very large keyword set never blocks the event loop / lock heartbeat.
-    const keywordRows = await buildKeywordRows(allKeywords);
+    // The API already filters stateFilter.include=['ENABLED'], so every returned row is enabled.
+    console.log(`📊 Keywords breakdown: ${keywordRows.length} total`);
 
     // ===== SAVE TO DATABASE (chunk-aware) =====
     let createdKeywords;
