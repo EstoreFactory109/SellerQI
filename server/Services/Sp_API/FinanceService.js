@@ -2375,6 +2375,11 @@ const financeSalesReportAsync = {
 module.exports = {
   syncFinanceData,
   fetchNewSalesAndExpenses,
+  // The Sales Report type createReport actually requests. Exported so anything that needs to
+  // recognise or query for this report (e.g. scripts/inspectReportQueue.js) reads it from here
+  // instead of duplicating the literal — a duplicated copy previously drifted (missing the
+  // _GENERAL suffix) and made that script query Amazon for the wrong report type entirely.
+  REPORT_TYPE,
   backfillPendingExpenses,
   getSyncStatus,
   // Helpers for testing

@@ -57,15 +57,17 @@ const {
   getAccessToken: getSpApiAccessToken,
   resolveMarketplaceAndRegion,
 } = require('../Services/Sp_API/Expences.js');
+// Imported rather than hardcoded — a previous copy of this literal was wrong (missing the
+// _GENERAL suffix), which made every call here query Amazon for a report type this script never
+// actually needed, returning a 403 that looked exactly like an authorization problem but wasn't
+// one. FinanceService.js's REPORT_TYPE is the one createReport actually requests, so importing
+// it means this can never drift out of sync with production again.
+const { REPORT_TYPE: FINANCE_REPORT_TYPE } = require('../Services/Sp_API/FinanceService.js');
 
 const MONGODB_URI =
   dbConsts.dbUri && dbConsts.dbName
     ? `${dbConsts.dbUri}/${dbConsts.dbName}`
     : process.env.MONGODB_URI || process.env.MONGO_URI;
-
-// The report type the finance Sales Report uses — called out separately in the summary because it
-// is the one whose duplicates cause the jam.
-const FINANCE_REPORT_TYPE = 'GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE';
 
 function parseArgs(argv) {
   const out = {};
