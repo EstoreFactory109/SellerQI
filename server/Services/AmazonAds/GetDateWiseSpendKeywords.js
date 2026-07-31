@@ -420,6 +420,55 @@ async function getPPCSpendsDateWise(accessToken, profileId, userId, country, reg
     }
 }
 
+// ============================================================================
+// P8: Non-blocking (async) adapters. Inline getPPCSpendsDateWise() above is the UNCHANGED
+// fallback. Single report → self-contained finalize (download + GetDateWisePPCspendModel.create,
+// identical to the inline path lines ~383-390). Amazon-facing → validate in staging.
+// ============================================================================
+
+// Single-shot status. 'COMPLETED' → ready; 'FAILURE' → failed; else PROCESSING.
+async function checkDateWiseStatusOnce(reportId, accessToken, profileId, region) {
+    const baseUri = BASE_URIS[region];
+    if (!baseUri) throw new Error(`Invalid region: ${region}`);
+    const headers = {
+        'Authorization': `Bearer ${accessToken}`,
+        'Amazon-Advertising-API-ClientId': process.env.AMAZON_ADS_CLIENT_ID,
+        'Amazon-Advertising-API-Scope': profileId,
+        'Content-Type': 'application/vnd.createasyncreportrequest.v3+json'
+    };
+    const response = await axios.get(`${baseUri}/reporting/reports/${reportId}`, { headers });
+    const status = response.data.status;
+    if (status === 'COMPLETED') return { ready: true, handle: { location: response.data.url } };
+    if (status === 'FAILURE') return { failed: true, note: 'report generation failed' };
+    return 'PROCESSING';
+}
+
+function buildDateWiseSpecs({ userId, country, region, accessToken, profileId, marketplaceId = '', startDate: sd = null, endDate: ed = null }) {
+    const { startDate, endDate } = resolveReportDateRange(sd && ed ? { startDate: sd, endDate: ed } : {});
+    return [{
+        service: 'ppcSpendsDateWise',
+        paramsKey: 'default',
+        params: { startDate, endDate },
+        marketplaceId,
+        submit: async () => {
+            const r = await getReportId(accessToken, profileId, region, null, startDate, endDate);
+            return (r && r.reportId) ? r.reportId : null;
+        },
+        checkStatusOnce: (reportId) => checkDateWiseStatusOnce(reportId, accessToken, profileId, region),
+        // Self-contained: download + create the date-wise doc (same as inline path).
+        finalize: async (handle) => {
+            const reportContent = await downloadReportData(handle.location, accessToken, profileId, null);
+            await GetDateWisePPCspendModel.create({ userId, country, region, dateWisePPCSpends: reportContent });
+            return { empty: !reportContent };
+        },
+    }];
+}
+
 module.exports = {
-    getPPCSpendsDateWise
+    getPPCSpendsDateWise,
+    adsAsync: {
+        serviceName: 'ppcSpendsDateWise',
+        buildSpecs: buildDateWiseSpecs,
+        saveFromRows: async () => ({ documentsSaved: 0 }), // finalize already saves per report
+    },
 };

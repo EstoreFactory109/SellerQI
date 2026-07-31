@@ -148,6 +148,17 @@ const getReport = async (accessToken, marketplaceIds, userId,baseuri,country,reg
             };
         }
 
+        return await _processRestockDocument(accessToken, reportDocumentId, baseuri, userId, country, region);
+
+    } catch (error) {
+        logger.error("Error in getReport:", error.message);
+        throw new ApiError(500, error.message);
+    }
+};
+
+// Extracted post-poll step (download → parse TSV → save). Shared by the inline path
+// (above) and the P8 async adapter (below) — one source, identical data.
+async function _processRestockDocument(accessToken, reportDocumentId, baseuri, userId, country, region) {
         const reportUrl = await getReportLink(accessToken, reportDocumentId,baseuri);
 
         const fullReport = await axios({
@@ -161,7 +172,7 @@ const getReport = async (accessToken, marketplaceIds, userId,baseuri,country,reg
         }
 
         const refinedData = await convertTSVToJson(fullReport.data);
-        
+
         if (refinedData.length === 0) {
             logger.error(new ApiError(408, "Report did not complete within 5 minutes"));
             return {
@@ -244,12 +255,7 @@ const getReport = async (accessToken, marketplaceIds, userId,baseuri,country,reg
         logger.info("Data saved successfully");
         logger.info("GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT ended");
         return createReport;
-
-    } catch (error) {
-        logger.error("Error in getReport:", error.message);
-        throw new ApiError(500, error.message);
-    }
-};
+}
 
 /**
  * Convert TSV buffer to JSON using async streaming parser.
@@ -295,5 +301,24 @@ function convertTSVToJsonLegacy(tsvBuffer) {
         }, {});
     });
 }
+
+// P8: Non-blocking async adapter — reuses _processRestockDocument (same code as inline).
+const { checkSpApiStatusOnce } = require('./spApiReportAdapter.js');
+getReport.spApiAsync = {
+    serviceName: 'RestockinventoryData',
+    buildSpecs: ({ userId, country, region, accessToken, baseuri, marketplaceIds }) => ([{
+        service: 'RestockinventoryData',
+        paramsKey: 'default',
+        params: {},
+        marketplaceId: '',
+        submit: async () => await generateReport(accessToken, marketplaceIds, baseuri),
+        checkStatusOnce: (reportId) => checkSpApiStatusOnce(accessToken, reportId, baseuri),
+        finalize: async (handle) => {
+            await _processRestockDocument(accessToken, handle.reportDocumentId, baseuri, userId, country, region);
+            return { empty: false };
+        },
+    }]),
+    saveFromRows: async () => ({ documentsSaved: 0 }),
+};
 
 module.exports = getReport;

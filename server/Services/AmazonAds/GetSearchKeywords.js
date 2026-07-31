@@ -507,6 +507,71 @@ async function getSearchKeywords(accessToken, profileId, userId, country, region
     }
 }
 
+// ============================================================================
+// P8: Non-blocking (async) adapter. Inline getSearchKeywords() above is the UNCHANGED
+// fallback (its inline poll loop was UNCAPPED — the async path bounds it via the engine's
+// maxPollAttempts). Single report → self-contained finalize (download + per-day upsert,
+// identical to the inline path lines ~413-466, incl. the empty→snapshot-day behaviour).
+// Runs in the sched_batch_4 phase group. Amazon-facing → validate in staging.
+// ============================================================================
+
+// Single-shot status. 'COMPLETED' → ready; 'FAILURE' → failed; else PROCESSING.
+async function checkSearchStatusOnce(reportId, accessToken, profileId, region) {
+    const baseUri = BASE_URIS[region];
+    if (!baseUri) throw new Error(`Invalid region: ${region}`);
+    const headers = {
+        'Authorization': `Bearer ${accessToken}`,
+        'Amazon-Advertising-API-ClientId': process.env.AMAZON_ADS_CLIENT_ID,
+        'Amazon-Advertising-API-Scope': profileId,
+        'Content-Type': 'application/vnd.createasyncreportrequest.v3+json'
+    };
+    const response = await axios.get(`${baseUri}/reporting/reports/${reportId}`, { headers });
+    const status = response.data.status;
+    if (status === 'COMPLETED') return { ready: true, handle: { location: response.data.url } };
+    if (status === 'FAILURE') return { failed: true, note: 'report generation failed' };
+    return 'PROCESSING';
+}
+
+function buildSearchKeywordsSpecs({ userId, country, region, accessToken, profileId, marketplaceId = '', startDate: sd = null, endDate: ed = null }) {
+    const { startDate, endDate } = resolveReportDateRange(sd && ed ? { startDate: sd, endDate: ed } : {});
+    return [{
+        service: 'searchKeywords',
+        paramsKey: 'default',
+        params: { startDate, endDate },
+        marketplaceId,
+        submit: async () => {
+            const r = await getReportId(accessToken, profileId, region, null, startDate, endDate);
+            return (r && r.reportId) ? r.reportId : null;
+        },
+        checkStatusOnce: (reportId) => checkSearchStatusOnce(reportId, accessToken, profileId, region),
+        // Self-contained: download + per-day upsert (same as inline path, incl. empty case).
+        finalize: async (handle) => {
+            const reportContent = await downloadReportData(handle.location, accessToken, profileId, null);
+            if (!reportContent || reportContent.length === 0) {
+                const snapshotDay = getYesterdayMetricDateUtc();
+                await SearchTerms.upsertSearchTermsForDate(userId, country, region, snapshotDay, []);
+                return { empty: true };
+            }
+            const byDay = new Map();
+            for (const row of reportContent) {
+                const day = toYyyyMmDd(row.date) || (row.date ? String(row.date).substring(0, 10) : null);
+                if (!day) continue;
+                if (!byDay.has(day)) byDay.set(day, []);
+                byDay.get(day).push(row);
+            }
+            for (const [metricDate, rows] of byDay) {
+                await SearchTerms.upsertSearchTermsForDate(userId, country, region, metricDate, rows);
+            }
+            return { empty: byDay.size === 0 };
+        },
+    }];
+}
+
 module.exports = {
-    getSearchKeywords
+    getSearchKeywords,
+    adsAsync: {
+        serviceName: 'searchKeywords',
+        buildSpecs: buildSearchKeywordsSpecs,
+        saveFromRows: async () => ({ documentsSaved: 0 }), // finalize already saves per report
+    },
 };

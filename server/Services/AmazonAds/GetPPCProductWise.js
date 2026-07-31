@@ -490,6 +490,69 @@ async function getPPCSpendsBySKU(accessToken, profileId, userId, country, region
     }
 }
 
+// ============================================================================
+// P8: Non-blocking (async) adapters. The inline getPPCSpendsBySKU() above is the
+// fallback and is UNCHANGED. These split create/status/download so the worker is not
+// held during report generation. Data is identical — reuses createReport / downloadReport
+// / config.mapRow / saveProductWiseSponsoredAdsData verbatim. Amazon-facing → validate in staging.
+// Fetches SP + SD (SB excluded, matching the inline path) and merges into one save.
+// ============================================================================
+
+// Single-shot status (no poll loop). Returns 'PROCESSING' | {ready,handle:{location}} | {failed,note}.
+async function checkProductWiseStatusOnce(reportId, accessToken, profileId, region) {
+    const baseUri = BASE_URIS[region];
+    if (!baseUri) throw new Error(`Invalid region: ${region}`);
+    const headers = {
+        'Authorization': `Bearer ${accessToken}`,
+        'Amazon-Advertising-API-ClientId': process.env.AMAZON_ADS_CLIENT_ID,
+        'Amazon-Advertising-API-Scope': profileId,
+        'Content-Type': 'application/vnd.createasyncreportrequest.v3+json'
+    };
+    const response = await axios.get(`${baseUri}/reporting/reports/${reportId}`, { headers });
+    const status = response.data.status;
+    if (status === 'COMPLETED') return { ready: true, handle: { location: response.data.url } };
+    if (status === 'FAILURE') return { failed: true, note: 'report generation failed' };
+    return 'PROCESSING';
+}
+
+function buildProductWiseSpecs({ accessToken, profileId, region, marketplaceId = '', startDate: sd = null, endDate: ed = null }) {
+    const { startDate, endDate } = resolveReportDateRange(sd && ed ? { startDate: sd, endDate: ed } : {});
+    return ['SP', 'SD'].map((adType) => {
+        const config = REPORT_CONFIGS[adType];
+        return {
+            service: 'ppcSpendsBySKU',
+            paramsKey: adType,
+            params: { adType, startDate, endDate },
+            marketplaceId,
+            submit: async () => {
+                const r = await createReport(accessToken, profileId, region, config, startDate, endDate, null);
+                return (r && r.reportId) ? r.reportId : null;
+            },
+            checkStatusOnce: (reportId) => checkProductWiseStatusOnce(reportId, accessToken, profileId, region),
+            finalize: async (handle) => {
+                const rawRows = await downloadReport(handle.location, accessToken, null);
+                const mapped = Array.isArray(rawRows) ? rawRows.map(config.mapRow) : [];
+                return { empty: mapped.length === 0, result: mapped };
+            },
+        };
+    });
+}
+
+// Merge all campaign types' mapped rows (read back from DONE rows) and save once.
+async function saveProductWiseFromRows(userId, country, region, profileId, rows) {
+    const allData = rows
+        .filter((r) => r.status === 'DONE' && Array.isArray(r.result))
+        .flatMap((r) => r.result);
+    if (allData.length === 0) return { documentsSaved: 0 };
+    const saveResult = await saveProductWiseSponsoredAdsData(userId, country, region, allData);
+    return { documentsSaved: saveResult?.itemCount || 0 };
+}
+
 module.exports = {
     getPPCSpendsBySKU,
+    adsAsync: {
+        serviceName: 'ppcSpendsBySKU',
+        buildSpecs: buildProductWiseSpecs,
+        saveFromRows: saveProductWiseFromRows,
+    },
 };

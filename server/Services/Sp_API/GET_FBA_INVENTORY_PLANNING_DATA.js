@@ -152,6 +152,16 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, Country, 
             };
         }
 
+        return await _processFbaPlanningDocument(accessToken, reportDocumentId, baseuri, userId, Country, Region);
+
+    } catch (error) {
+        logger.error("Error in getReport:", error.message);
+        throw new ApiError(500, error.message);
+    }
+};
+
+// Extracted post-poll step (download → parse TSV → save). Shared by inline + P8 async.
+async function _processFbaPlanningDocument(accessToken, reportDocumentId, baseuri, userId, Country, Region) {
         const reportUrl = await getReportLink(accessToken, reportDocumentId, baseuri);
 
         const fullReport = await axios({
@@ -275,12 +285,7 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, Country, 
         logger.info("Data saved successfully");
         logger.info("GET_FBA_INVENTORY_PLANNING_DATA ended");
         return createReport;
-
-    } catch (error) {
-        logger.error("Error in getReport:", error.message);
-        throw new ApiError(500, error.message);
-    }
-};
+}
 
 /**
  * Convert TSV buffer to JSON using async streaming parser.
@@ -346,5 +351,24 @@ function convertTSVToJsonLegacy(tsvBuffer) {
 
     return jsonData;
 }
+
+// P8: Non-blocking async adapter — reuses _processFbaPlanningDocument (same code as inline).
+const { checkSpApiStatusOnce } = require('./spApiReportAdapter.js');
+getReport.spApiAsync = {
+    serviceName: 'fbaInventoryPlanningData',
+    buildSpecs: ({ userId, country, region, accessToken, baseuri, marketplaceIds }) => ([{
+        service: 'fbaInventoryPlanningData',
+        paramsKey: 'default',
+        params: {},
+        marketplaceId: '',
+        submit: async () => await generateReport(accessToken, marketplaceIds, baseuri),
+        checkStatusOnce: (reportId) => checkSpApiStatusOnce(accessToken, reportId, baseuri),
+        finalize: async (handle) => {
+            await _processFbaPlanningDocument(accessToken, handle.reportDocumentId, baseuri, userId, country, region);
+            return { empty: false };
+        },
+    }]),
+    saveFromRows: async () => ({ documentsSaved: 0 }),
+};
 
 module.exports = getReport;

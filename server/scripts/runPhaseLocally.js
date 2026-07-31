@@ -24,6 +24,15 @@
  * Valid --phase values:
  *   init | batch_1_2 | ads | batch_3 | finance | batch_4 | calc_review | finalize
  *   ads_catchup | finance_catchup | sync
+ *
+ * Async phases (FINANCE_ASYNC_ENABLED / ADS_ASYNC_ENABLED on) return after SUBMIT and ask to be
+ * rescheduled; normally the worker does that. Add --drive-async to loop here instead:
+ *   FINANCE_ASYNC_ENABLED=true node server/scripts/runPhaseLocally.js --phase=finance \
+ *     --user-id=<id> --country=US --region=NA --drive-async --poll-every-ms=30000
+ *   --poll-every-ms  wait between ticks, overriding production's delay (default 30000)
+ *   --max-ticks      safety stop (default 200)
+ * Without --drive-async an async phase submits one report and exits — the chunk walk never
+ * advances, which looks like a hang but is just the missing worker.
  */
 
 const path = require('path');
@@ -46,6 +55,12 @@ const USER_ID = getArg('user-id');
 const COUNTRY = (getArg('country') || '').toUpperCase();
 const REGION = (getArg('region') || '').toUpperCase();
 const DATES = (getArg('dates') || '').split(',').map((d) => d.trim()).filter(Boolean);
+
+// --drive-async: loop the phase through its reschedules instead of returning after the first tick.
+// Required to exercise any async phase locally — see driveAsync() below.
+const DRIVE_ASYNC = process.argv.slice(2).includes('--drive-async');
+const POLL_EVERY_MS = parseInt(getArg('poll-every-ms') || '30000', 10);
+const MAX_TICKS = parseInt(getArg('max-ticks') || '200', 10);
 
 if (!PHASE || !USER_ID || !COUNTRY || !REGION) {
   console.error('Missing args. Example:');
@@ -73,23 +88,23 @@ async function resolveSpiRefreshToken(userId, country, region) {
   return token;
 }
 
-async function invoke() {
+async function invoke(phaseData = {}) {
   const SI = ScheduledIntegration;
   switch (PHASE) {
     case 'init':         return SI.executeScheduledInitPhase(USER_ID, REGION, COUNTRY);
-    case 'batch_1_2':    return SI.executeScheduledBatch1And2Phase(USER_ID, REGION, COUNTRY, {});
-    case 'ads':          return SI.executeScheduledAdsPhase(USER_ID, REGION, COUNTRY, {});
-    case 'batch_3':      return SI.executeScheduledBatch3Phase(USER_ID, REGION, COUNTRY, {});
-    case 'finance':      return SI.executeScheduledFinancePhase(USER_ID, REGION, COUNTRY, {});
-    case 'batch_4':      return SI.executeScheduledBatch4Phase(USER_ID, REGION, COUNTRY, {});
-    case 'calc_review':  return SI.executeScheduledCalcReviewPhase(USER_ID, REGION, COUNTRY, {});
-    case 'finalize':     return SI.executeScheduledFinalizePhase(USER_ID, REGION, COUNTRY, {});
+    case 'batch_1_2':    return SI.executeScheduledBatch1And2Phase(USER_ID, REGION, COUNTRY, phaseData);
+    case 'ads':          return SI.executeScheduledAdsPhase(USER_ID, REGION, COUNTRY, phaseData);
+    case 'batch_3':      return SI.executeScheduledBatch3Phase(USER_ID, REGION, COUNTRY, phaseData);
+    case 'finance':      return SI.executeScheduledFinancePhase(USER_ID, REGION, COUNTRY, phaseData);
+    case 'batch_4':      return SI.executeScheduledBatch4Phase(USER_ID, REGION, COUNTRY, phaseData);
+    case 'calc_review':  return SI.executeScheduledCalcReviewPhase(USER_ID, REGION, COUNTRY, phaseData);
+    case 'finalize':     return SI.executeScheduledFinalizePhase(USER_ID, REGION, COUNTRY, phaseData);
     case 'ads_catchup':
       if (!DATES.length) throw new Error('ads_catchup needs --dates=YYYY-MM-DD');
-      return SI.executeAdsCatchupPhase(USER_ID, REGION, COUNTRY, { catchupDate: DATES[0] });
+      return SI.executeAdsCatchupPhase(USER_ID, REGION, COUNTRY, { ...phaseData, catchupDate: DATES[0] });
     case 'finance_catchup':
       if (!DATES.length) throw new Error('finance_catchup needs --dates=YYYY-MM-DD[,YYYY-MM-DD]');
-      return SI.executeFinanceCatchupPhase(USER_ID, REGION, COUNTRY, { catchupDates: DATES });
+      return SI.executeFinanceCatchupPhase(USER_ID, REGION, COUNTRY, { ...phaseData, catchupDates: DATES });
     case 'sync': {
       if (DATES.length !== 2) throw new Error('sync needs --dates=START,END (two dates)');
       const { syncFinanceData } = require('../Services/Sp_API/FinanceService.js');
@@ -109,6 +124,48 @@ async function invoke() {
   }
 }
 
+/**
+ * Drive an async phase to completion locally.
+ *
+ * In production a phase that isn't finished returns `{ reschedule: { delayMs, pollAttempt } }` and
+ * the WORKER re-enqueues it as a delayed BullMQ job (worker.js:310-345). This script has no worker,
+ * so without this loop an async phase would submit its first report, return, and exit — the chunk
+ * walk would never advance and you could not test the async path locally at all.
+ *
+ * This reproduces just the worker's re-entry contract: feed `dataForNextPhase` back in as the next
+ * `phaseData`, and repeat until the phase stops asking to be rescheduled. Real delays are replaced
+ * by --poll-every-ms so a 5-minute production cadence doesn't make a local test take hours; Amazon
+ * still needs real time to build a report, so keep it at tens of seconds, not zero.
+ */
+async function driveAsync() {
+  let phaseData = {};
+  let result = null;
+
+  for (let tick = 1; tick <= MAX_TICKS; tick++) {
+    result = await invoke(phaseData);
+
+    if (!result || !result.reschedule) {
+      console.log(`[runPhase] async complete after ${tick} tick(s)`);
+      return result;
+    }
+
+    // Mirror scheduledPhases.createNextPhaseJobData: merge, don't replace.
+    phaseData = { ...phaseData, ...(result.dataForNextPhase || {}) };
+
+    const realDelay = result.reschedule.delayMs;
+    console.log(
+      `[runPhase] tick ${tick}: not done (pollAttempt=${result.reschedule.pollAttempt}, ` +
+      `chunk=${phaseData.financeChunkIndex ?? '-'}/${(phaseData.financeChunks || []).length || '-'}); ` +
+      `prod would wait ${Math.round(realDelay / 1000)}s, waiting ${Math.round(POLL_EVERY_MS / 1000)}s`
+    );
+    await new Promise((r) => setTimeout(r, POLL_EVERY_MS));
+  }
+
+  console.warn(`[runPhase] hit --max-ticks=${MAX_TICKS} without finishing. Last result below; ` +
+    `re-run to continue (state is in AsyncReportRequest, so the same reports are re-checked, not re-created).`);
+  return result;
+}
+
 async function main() {
   await dbConnect();
   console.log('[runPhase] MongoDB connected');
@@ -121,7 +178,7 @@ async function main() {
 
   let result;
   try {
-    result = await invoke();
+    result = DRIVE_ASYNC ? await driveAsync() : await invoke();
   } catch (err) {
     // This is the real, previously-hidden error.
     console.error('\n========== THROWN ERROR (the real cause) ==========');

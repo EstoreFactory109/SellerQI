@@ -27,8 +27,16 @@
  *   - The pipeline upserts by natural keys, so re-running the same day is idempotent —
  *     that is what makes before/after comparable.
  *   - Use --days=N to restrict date-scoped collections (ads/finance) to the last N days
- *     (default: all). Keep it the same for before and after.
+ *     (default: all). Keep it the same for before and after. --days is WALL-CLOCK relative, so
+ *     take both snapshots on the same UTC day — straddling UTC midnight shifts the window and
+ *     reports a mismatch that isn't real.
  *   - This script is READ-ONLY against the DB.
+ *   - Coverage: ads (PPCMetrics, ProductWiseSponsoredAdsItem), DashboardSlice, and the finance
+ *     collections (AsinWiseSalesDateItem, DailySkuFinance, DailyOverheadFinance, FinanceSyncLog,
+ *     PendingExpenseOrder). The four finance-dashboard collections were added later — before that
+ *     this script could report parity while being blind to every collection a finance change
+ *     writes. `server/__tests__/scripts/dataParitySnapshot.test.js` locks the registry so that
+ *     blind spot cannot come back.
  */
 
 const path = require('path');
@@ -52,13 +60,19 @@ const VOLATILE_FIELDS = new Set([
     'syncedAt', 'lastSyncedAt', 'processedAt', 'fetchedAt', 'expiresAt',
 ]);
 
-function stripVolatile(obj) {
-    if (Array.isArray(obj)) return obj.map(stripVolatile);
+/**
+ * @param {Set<string>} [extra] Per-collection volatile fields, on top of VOLATILE_FIELDS. Needed
+ *   for working queues like PendingExpenseOrder whose bookkeeping columns (`attempts`) legitimately
+ *   change on a re-run — without this they read as a data mismatch when nothing is actually wrong.
+ */
+function stripVolatile(obj, extra = null) {
+    if (Array.isArray(obj)) return obj.map((v) => stripVolatile(v, extra));
     if (obj && typeof obj === 'object' && !(obj instanceof Date)) {
         const out = {};
         for (const k of Object.keys(obj).sort()) {
             if (VOLATILE_FIELDS.has(k)) continue;
-            out[k] = stripVolatile(obj[k]);
+            if (extra && extra.has(k)) continue;
+            out[k] = stripVolatile(obj[k], extra);
         }
         return out;
     }
@@ -106,6 +120,51 @@ function buildCollections() {
             filter: (uid, c, r) => ({ User: uid, country: c, region: r }),
             dateField: 'date',
             keyOf: (d) => `${d.date}|${d.asin || d.sku || ''}`,
+        },
+
+        // ── Finance dashboard collections ────────────────────────────────────────────────────
+        // These are the collections the finance sync actually writes, and they were MISSING here.
+        // Without them this script reported "✅ Data parity confirmed" while saying nothing at all
+        // about the data a finance change touches — a false pass, which is worse than no check.
+        //
+        // They filter on `User` (ObjectId) rather than `userId` (String), and FinanceService stores
+        // `country` upper-cased, so normalise it here — a `--country=us` would otherwise match zero
+        // documents and hash two empty sets to "identical".
+        {
+            name: 'DailySkuFinance',
+            modelPath: '../models/finance/DailySkuFinanceModel.js',
+            filter: (uid, c, r) => ({ User: uid, country: String(c).toUpperCase(), region: r }),
+            dateField: 'date',
+            keyOf: (d) => `${d.date}|${d.sku || ''}|${d.asin || ''}`,
+        },
+        {
+            name: 'DailyOverheadFinance',
+            modelPath: '../models/finance/DailyOverheadFinanceModel.js',
+            filter: (uid, c, r) => ({ User: uid, country: String(c).toUpperCase(), region: r }),
+            dateField: 'date',
+            keyOf: (d) => `${d.date}|${d.category || ''}`,
+        },
+        {
+            name: 'FinanceSyncLog',
+            modelPath: '../models/finance/FinanceSyncLogModel.js',
+            filter: (uid, c, r) => ({ User: uid, country: String(c).toUpperCase(), region: r }),
+            dateField: 'date',
+            keyOf: (d) => `${d.date}`,
+            // `syncRunId` identifies WHICH run wrote a day (the async idempotency marker). It is
+            // expected to change between two runs of the same window and says nothing about whether
+            // the DATA matches, so it must not count as a diff.
+            ignoreFields: ['syncRunId'],
+        },
+        {
+            name: 'PendingExpenseOrder',
+            modelPath: '../models/finance/PendingExpenseOrderModel.js',
+            filter: (uid, c, r) => ({ User: uid, country: String(c).toUpperCase(), region: r }),
+            dateField: 'purchasePacificDate',
+            // Unique on (User, country, region, orderId, sku) — multi-SKU orders have several rows.
+            keyOf: (d) => `${d.orderId}|${d.sku || ''}`,
+            // A work queue, not output: `attempts` increments every time Step 2 tries to resolve an
+            // order, and `firstSeenAt` is a timestamp. Both differ on a legitimate re-run.
+            ignoreFields: ['attempts', 'firstSeenAt'],
         },
     ];
 
@@ -160,8 +219,9 @@ async function snapshot() {
         const query = c.filter(userId, country, region);
         if (sinceStr && c.dateField) query[c.dateField] = { $gte: sinceStr };
         let docs = await c.model.find(query).lean();
+        const extraVolatile = c.ignoreFields ? new Set(c.ignoreFields) : null;
         const normalized = docs
-            .map(stripVolatile)
+            .map((d) => stripVolatile(d, extraVolatile))
             .sort((a, b) => (c.keyOf(a) < c.keyOf(b) ? -1 : c.keyOf(a) > c.keyOf(b) ? 1 : 0));
         const hash = crypto.createHash('sha256').update(stableStringify(normalized)).digest('hex');
         result.collections[c.name] = {
@@ -229,12 +289,18 @@ function diff() {
     console.log('RESULT: ✅ Data parity confirmed — all collections identical.');
 }
 
-(async () => {
-    try {
-        if (DIFF_MODE) diff();
-        else await snapshot();
-    } catch (err) {
-        console.error('[parity] fatal:', err);
-        process.exit(1);
-    }
-})();
+// Only run when invoked directly. Without this guard the script would execute (and try to connect
+// to Mongo) on `require`, which is what a unit test asserting the collection registry has to do.
+if (require.main === module) {
+    (async () => {
+        try {
+            if (DIFF_MODE) diff();
+            else await snapshot();
+        } catch (err) {
+            console.error('[parity] fatal:', err);
+            process.exit(1);
+        }
+    })();
+}
+
+module.exports = { buildCollections, stripVolatile, stableStringify };

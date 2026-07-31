@@ -296,6 +296,79 @@ async function checkFinanceFreshness() {
   }
 }
 
+/**
+ * The async report engine's state lives in AsyncReportRequest, and nothing could read it — so
+ * "is the async finance path actually working?" had no answer short of a raw mongo shell.
+ *
+ * This is the section that tells you: one row per (chunk, phase) with the Amazon reportId, how many
+ * times we've polled it, and why it stopped if it did. Two things to look for:
+ *   - MORE THAN ONE row per paramsKey => we are duplicating reports, i.e. the bug this engine
+ *     exists to prevent has come back.
+ *   - SUBMITTED with pollAttempts near maxPollAttempts => Amazon is sitting on the report and the
+ *     chunk is about to be marked FAILED.
+ *
+ * Note the collection has a 30-day TTL on createdAt, so older runs simply won't be here.
+ */
+async function checkAsyncReportRequests() {
+  section('6. ASYNC REPORT ENGINE (AsyncReportRequest)');
+
+  let AsyncReportRequest;
+  try {
+    AsyncReportRequest = require('../models/amazon-ads/AsyncReportRequestModel.js');
+  } catch (err) {
+    console.log(`Model not loadable (${err.message}) — async engine not deployed here.`);
+    return;
+  }
+
+  const q = FILTER_USER_ID ? { userId: String(FILTER_USER_ID) } : {};
+  const rows = await AsyncReportRequest.find(q).sort({ updatedAt: -1 }).limit(200).lean();
+
+  if (rows.length === 0) {
+    console.log('No rows. Either the async path has never run here, or its flags are off');
+    console.log('  (finance: FINANCE_ASYNC_ENABLED [+ FINANCE_ASYNC_USER_IDS]; ads/SP-API: ADS_ASYNC_ENABLED).');
+    return;
+  }
+
+  const byStatus = {};
+  for (const r of rows) byStatus[r.status] = (byStatus[r.status] || 0) + 1;
+  console.log(`${rows.length} row(s) (newest 200). By status: ` +
+    Object.entries(byStatus).map(([k, v]) => `${k}=${v}`).join('  '));
+
+  console.log('\n  UPDATED (UTC)        PHASE    STATUS      POLLS    SERVICE / paramsKey');
+  console.log('  ' + '-'.repeat(100));
+  for (const r of rows.slice(0, 40)) {
+    const polls = `${r.pollAttempts || 0}/${r.maxPollAttempts || '?'}`;
+    console.log(
+      `  ${String(r.updatedAt?.toISOString?.() || '').substring(0, 19).padEnd(20)} ` +
+      `${String(r.phase || '?').padEnd(8)} ${String(r.status || '?').padEnd(11)} ${polls.padEnd(8)} ` +
+      `${r.service}/${r.paramsKey || '-'}${r.reportId ? `  report=${r.reportId}` : ''}`
+    );
+    if (r.note) console.log(`  ${' '.repeat(20)} note: ${String(r.note).slice(0, 120)}`);
+  }
+
+  // Duplicate detection — the regression that would mean we are jamming the seller's queue again.
+  const seen = new Map();
+  for (const r of rows) {
+    const k = `${r.userId}|${r.country}|${r.region}|${r.group}|${r.service}|${r.paramsKey}|${r.runDate}`;
+    seen.set(k, (seen.get(k) || 0) + 1);
+  }
+  const dupes = [...seen.entries()].filter(([, n]) => n > 1);
+  if (dupes.length) {
+    console.log(`\n! ${dupes.length} duplicate (account, group, service, paramsKey, runDate) key(s) — ` +
+      `the engine should hold exactly one row per chunk.`);
+    findings.push(`AsyncReportRequest has ${dupes.length} duplicated chunk key(s) — duplicate Amazon reports are being created.`);
+  }
+
+  const nearCap = rows.filter(r => r.status === 'SUBMITTED' && (r.pollAttempts || 0) >= (r.maxPollAttempts || 240) * 0.8);
+  if (nearCap.length) {
+    console.log(`\n! ${nearCap.length} SUBMITTED row(s) past 80% of their poll cap — Amazon is slow to build these; they will be marked FAILED at the cap.`);
+  }
+  const failed = rows.filter(r => r.status === 'FAILED');
+  if (failed.length) {
+    findings.push(`AsyncReportRequest has ${failed.length} FAILED row(s) (newest 200) — see notes above for the cause.`);
+  }
+}
+
 async function main() {
   await mongoose.connect(MONGODB_URI);
   console.log(`[diag] Connected to ${dbConsts.dbName || MONGODB_URI}`);
@@ -306,6 +379,7 @@ async function main() {
   await checkQueue();
   await checkJobStatus();
   await checkFinanceFreshness();
+  await checkAsyncReportRequests();
 
   section('ROOT-CAUSE SUMMARY');
   if (findings.length === 0) {

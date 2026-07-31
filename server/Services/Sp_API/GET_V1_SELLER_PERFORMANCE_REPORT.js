@@ -138,97 +138,103 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri,country,re
             }
         }
 
-        const reportUrl = await getReportLink(accessToken, reportDocumentId, baseuri);
-        const fullReport = await axios({
-            method: "GET",
-            url: reportUrl,
-            responseType: "text",
-        });
-
-        if (!fullReport || !fullReport.data) {
-            throw new ApiError(500, "Internal server error in generating the report");
-        }
-
-        const xmlData = fullReport.data;
-        const jsonData = await convertXMLToJson(xmlData);
-
-        let negativeFeedbacks=null;
-        let lateShipmentCount=null
-        let preFulfillmentCancellationCount=null
-        let refundsCount=null
-        let a_z_claims=null
-        
-        const sortedorderDefectMetricsMetrics= jsonData.sellerPerformanceReports.sellerPerformanceReport.orderDefects.orderDefectMetrics.sort((a, b) => new Date(a.timeFrame.end) - new Date(b.timeFrame.end));
-
-        const negetiveFeedbackData={
-            startDate:sortedorderDefectMetricsMetrics[0].timeFrame.start,
-            endDate:sortedorderDefectMetricsMetrics[0].timeFrame.end,
-            count:sortedorderDefectMetricsMetrics[0].negativeFeedbacks.count
-        }
-        negativeFeedbacks=negetiveFeedbackData
-
-        const a_z_claims_data={
-            startDate:sortedorderDefectMetricsMetrics[0].timeFrame.start,
-            endDate:sortedorderDefectMetricsMetrics[0].timeFrame.end,
-            count:sortedorderDefectMetricsMetrics[0].a_z_claims.count
-        }
-        a_z_claims=a_z_claims_data
-
-        
-        const sortedcustomerExperienceMetrics= jsonData.sellerPerformanceReports.sellerPerformanceReport.customerExperience.customerExperienceMetrics.sort((a, b) => new Date(a.timeFrame.end) - new Date(b.timeFrame.end));
-
-        const lateShipmentCount_data={
-            startDate:sortedcustomerExperienceMetrics[0].timeFrame.start,
-            endDate:sortedcustomerExperienceMetrics[0].timeFrame.end,
-            count:sortedcustomerExperienceMetrics[0].lateShipment.count
-        }
-        lateShipmentCount=lateShipmentCount_data
-
-        const preFulfillmentCancellationCount_data={
-            startDate:sortedcustomerExperienceMetrics[0].timeFrame.start,
-            endDate:sortedcustomerExperienceMetrics[0].timeFrame.end,
-            count:sortedcustomerExperienceMetrics[0].preFulfillmentCancellation.count
-        }
-        preFulfillmentCancellationCount=preFulfillmentCancellationCount_data
-
-        const refundsCount_data={
-            startDate:sortedcustomerExperienceMetrics[0].timeFrame.start,
-            endDate:sortedcustomerExperienceMetrics[0].timeFrame.end,
-            count:sortedcustomerExperienceMetrics[0].refunds.count
-        }
-        refundsCount=refundsCount_data
-
-        let responseUnder24HoursCount=jsonData.sellerPerformanceReports.sellerPerformanceReport.buyerSellerContactResponseTimeMetrics.responseTimeMetrics.responseUnder24Hours;
-
-        const User=userId
-
-        const createReportData=await GET_V1_SELLER_PERFORMANCE_REPORT.create({
-            User,
-            region,
-            country,
-            negativeFeedbacks,
-            lateShipmentCount,
-            preFulfillmentCancellationCount,
-            refundsCount,
-            a_z_claims,
-            responseUnder24HoursCount
-        })
-
-        if(!createReportData){
-            logger.error("Failed to store report data");
-            logger.error(new ApiError(500, "Internal server error in generating the report"));
-            return false;
-        }
-
-        logger.info("Data saved successfully");
-        logger.info("V1_Seller_Performance_Report ended");
-        return createReportData;
+        return await _processV1Document(accessToken, reportDocumentId, baseuri, userId, country, region);
 
     } catch (error) {
         logger.error(`V1_Seller_Performance_Report Error: ${error.message}`);
         throw new ApiError(500, error.message);
     }
 };
+
+// Extracted post-poll step (download → parse XML → save). Shared by the inline path
+// (above) and the P8 async adapter (below) so both produce identical data — one source.
+async function _processV1Document(accessToken, reportDocumentId, baseuri, userId, country, region) {
+    const reportUrl = await getReportLink(accessToken, reportDocumentId, baseuri);
+    const fullReport = await axios({
+        method: "GET",
+        url: reportUrl,
+        responseType: "text",
+    });
+
+    if (!fullReport || !fullReport.data) {
+        throw new ApiError(500, "Internal server error in generating the report");
+    }
+
+    const xmlData = fullReport.data;
+    const jsonData = await convertXMLToJson(xmlData);
+
+    let negativeFeedbacks=null;
+    let lateShipmentCount=null
+    let preFulfillmentCancellationCount=null
+    let refundsCount=null
+    let a_z_claims=null
+
+    const sortedorderDefectMetricsMetrics= jsonData.sellerPerformanceReports.sellerPerformanceReport.orderDefects.orderDefectMetrics.sort((a, b) => new Date(a.timeFrame.end) - new Date(b.timeFrame.end));
+
+    const negetiveFeedbackData={
+        startDate:sortedorderDefectMetricsMetrics[0].timeFrame.start,
+        endDate:sortedorderDefectMetricsMetrics[0].timeFrame.end,
+        count:sortedorderDefectMetricsMetrics[0].negativeFeedbacks.count
+    }
+    negativeFeedbacks=negetiveFeedbackData
+
+    const a_z_claims_data={
+        startDate:sortedorderDefectMetricsMetrics[0].timeFrame.start,
+        endDate:sortedorderDefectMetricsMetrics[0].timeFrame.end,
+        count:sortedorderDefectMetricsMetrics[0].a_z_claims.count
+    }
+    a_z_claims=a_z_claims_data
+
+
+    const sortedcustomerExperienceMetrics= jsonData.sellerPerformanceReports.sellerPerformanceReport.customerExperience.customerExperienceMetrics.sort((a, b) => new Date(a.timeFrame.end) - new Date(b.timeFrame.end));
+
+    const lateShipmentCount_data={
+        startDate:sortedcustomerExperienceMetrics[0].timeFrame.start,
+        endDate:sortedcustomerExperienceMetrics[0].timeFrame.end,
+        count:sortedcustomerExperienceMetrics[0].lateShipment.count
+    }
+    lateShipmentCount=lateShipmentCount_data
+
+    const preFulfillmentCancellationCount_data={
+        startDate:sortedcustomerExperienceMetrics[0].timeFrame.start,
+        endDate:sortedcustomerExperienceMetrics[0].timeFrame.end,
+        count:sortedcustomerExperienceMetrics[0].preFulfillmentCancellation.count
+    }
+    preFulfillmentCancellationCount=preFulfillmentCancellationCount_data
+
+    const refundsCount_data={
+        startDate:sortedcustomerExperienceMetrics[0].timeFrame.start,
+        endDate:sortedcustomerExperienceMetrics[0].timeFrame.end,
+        count:sortedcustomerExperienceMetrics[0].refunds.count
+    }
+    refundsCount=refundsCount_data
+
+    let responseUnder24HoursCount=jsonData.sellerPerformanceReports.sellerPerformanceReport.buyerSellerContactResponseTimeMetrics.responseTimeMetrics.responseUnder24Hours;
+
+    const User=userId
+
+    const createReportData=await GET_V1_SELLER_PERFORMANCE_REPORT.create({
+        User,
+        region,
+        country,
+        negativeFeedbacks,
+        lateShipmentCount,
+        preFulfillmentCancellationCount,
+        refundsCount,
+        a_z_claims,
+        responseUnder24HoursCount
+    })
+
+    if(!createReportData){
+        logger.error("Failed to store report data");
+        logger.error(new ApiError(500, "Internal server error in generating the report"));
+        return false;
+    }
+
+    logger.info("Data saved successfully");
+    logger.info("V1_Seller_Performance_Report ended");
+    return createReportData;
+}
 
 async function convertXMLToJson(xmlData) {
     try {
@@ -240,5 +246,25 @@ async function convertXMLToJson(xmlData) {
         throw new Error("Failed to parse XML data");
     }
 }
+
+// P8: Non-blocking async adapter — reuses _processV1Document (the SAME code the inline
+// path runs) so data is identical by construction. Status check via shared helper.
+const { checkSpApiStatusOnce } = require('./spApiReportAdapter.js');
+getReport.spApiAsync = {
+    serviceName: 'v1data',
+    buildSpecs: ({ userId, country, region, accessToken, baseuri, marketplaceIds }) => ([{
+        service: 'v1data',
+        paramsKey: 'default',
+        params: {},
+        marketplaceId: '',
+        submit: async () => await generateReport(accessToken, marketplaceIds, baseuri),
+        checkStatusOnce: (reportId) => checkSpApiStatusOnce(accessToken, reportId, baseuri),
+        finalize: async (handle) => {
+            await _processV1Document(accessToken, handle.reportDocumentId, baseuri, userId, country, region);
+            return { empty: false };
+        },
+    }]),
+    saveFromRows: async () => ({ documentsSaved: 0 }),
+};
 
 module.exports = getReport;

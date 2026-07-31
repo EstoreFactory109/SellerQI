@@ -151,6 +151,17 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri,country, r
             };
         }
 
+        return await _processInboundDocument(accessToken, reportDocumentId, baseuri, userId, country, region);
+
+    } catch (error) {
+        logger.error("Error in getReport:", error.message);
+        throw new ApiError(500, error.message);
+    }
+};
+
+// Extracted post-poll step (download → parse TSV → save). Shared by inline + P8 async.
+// Returns null when there are no in-window issues (nothing saved).
+async function _processInboundDocument(accessToken, reportDocumentId, baseuri, userId, country, region) {
         const reportUrl = await getReportLink(accessToken, reportDocumentId,baseuri);
 
         const fullReport = await axios({
@@ -206,12 +217,7 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri,country, r
         logger.info("Data saved successfully");
         logger.info("GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA ended");
         return createData;
-
-    } catch (error) {
-        logger.error("Error in getReport:", error.message);
-        throw new ApiError(500, error.message);
-    }
-};
+}
 
 /**
  * Convert TSV buffer to JSON using async streaming parser.
@@ -257,5 +263,24 @@ function convertTSVToJsonLegacy(tsvBuffer) {
         }, {});
     });
 }
+
+// P8: Non-blocking async adapter — reuses _processInboundDocument (same code as inline).
+const { checkSpApiStatusOnce } = require('./spApiReportAdapter.js');
+getReport.spApiAsync = {
+    serviceName: 'inboundNonComplianceData',
+    buildSpecs: ({ userId, country, region, accessToken, baseuri, marketplaceIds }) => ([{
+        service: 'inboundNonComplianceData',
+        paramsKey: 'default',
+        params: {},
+        marketplaceId: '',
+        submit: async () => await generateReport(accessToken, marketplaceIds, baseuri),
+        checkStatusOnce: (reportId) => checkSpApiStatusOnce(accessToken, reportId, baseuri),
+        finalize: async (handle) => {
+            const r = await _processInboundDocument(accessToken, handle.reportDocumentId, baseuri, userId, country, region);
+            return { empty: r === null };
+        },
+    }]),
+    saveFromRows: async () => ({ documentsSaved: 0 }),
+};
 
 module.exports = getReport;

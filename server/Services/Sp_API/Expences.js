@@ -168,10 +168,41 @@ function isExpiredTokenResponse(res) {
   });
 }
 
-async function fetchTransactions(accessToken, baseUrl, postedAfter, postedBefore, marketplaceId, tokenRefresher = null) {
+/**
+ * Read the rate Amazon reports for this endpoint and derive a per-page pacing delay.
+ * Mirrors deriveNextDelayFromRateLimitHeader in Sp_API/asinwiseSales.js:160, which this path
+ * previously lacked — it used a fixed backoff and ignored `res.headers` entirely. Pacing matters
+ * more now that bounded windows mean more, smaller requests against a 0.5 req/sec endpoint.
+ */
+function deriveFinanceDelayFromHeaders(headers) {
+  if (!headers) return 0;
+  const raw = headers["x-amzn-ratelimit-limit"] || headers["x-amzn-RateLimit-Limit"];
+  if (!raw) return 0;
+  const rate = parseFloat(raw);
+  if (!Number.isFinite(rate) || rate <= 0) return 0;
+  return Math.ceil((1000 / rate) * 1.25); // 25% safety margin
+}
+
+/**
+ * Paginate the Finance API transactions endpoint.
+ *
+ * @param {object} [opts]
+ * @param {Function} [opts.onPage] async (transactions, {page}) => void
+ *
+ * With `onPage`, each page is handed to the callback and then DROPPED — nothing accumulates and the
+ * returned array is empty. That is what keeps memory a function of page size rather than window
+ * length: retaining every transaction's object graph for a multi-week window is what OOM'd a
+ * high-volume account at 2GB (the parsed graph alone is far larger than the rows derived from it).
+ *
+ * WITHOUT `onPage` the behaviour and return value are exactly as before, because
+ * `fetchFinancialEvents` (this same function, re-exported) is used by scripts/dumpFinanceApiRaw.js
+ * and scripts/exportFinanceApiResponse.js, which genuinely want the raw array.
+ */
+async function fetchTransactions(accessToken, baseUrl, postedAfter, postedBefore, marketplaceId, tokenRefresher = null, { onPage = null } = {}) {
   const allTransactions = [];
   let nextToken = null;
   let pageCount = 0;
+  let transactionCount = 0;
   let currentToken = accessToken;
   const MAX_RETRIES = 5;
   const MAX_AUTH_REFRESHES_PER_PAGE = 2;
@@ -216,7 +247,10 @@ async function fetchTransactions(accessToken, baseUrl, postedAfter, postedBefore
         (Array.isArray(res.body.errors) && res.body.errors.some((e) => e.code === "QuotaExceeded"));
 
       if (isThrottled && attempt < MAX_RETRIES) {
-        const delayMs = Math.min(10000 * Math.pow(2, attempt), 60000);
+        // Honour Amazon's own reported rate as a floor when it gives us one, instead of relying
+        // purely on the fixed exponential schedule.
+        const headerDelay = deriveFinanceDelayFromHeaders(res.headers);
+        const delayMs = Math.max(Math.min(10000 * Math.pow(2, attempt), 60000), headerDelay);
         logger.warn(
           `[Finance API v2024-06-19] Throttled on page ${pageCount + 1}, attempt ${attempt + 1}/${MAX_RETRIES}. Retrying in ${delayMs / 1000}s...`
         );
@@ -232,16 +266,34 @@ async function fetchTransactions(accessToken, baseUrl, postedAfter, postedBefore
 
     const payload = res.body.payload || {};
     const transactions = payload.transactions || [];
-    allTransactions.push(...transactions);
+    transactionCount += transactions.length;
 
     nextToken = payload.nextToken || null;
     pageCount++;
+
+    if (onPage) {
+      // Hand off and drop. Awaited before the pacing delay below so the caller's fold happens
+      // inside the gap we already owe the rate limiter, at no extra wall-clock cost.
+      await onPage(transactions, { page: pageCount });
+    } else {
+      allTransactions.push(...transactions);
+    }
+
     logger.info(
       `[Finance API v2024-06-19] Page ${pageCount}: fetched ${transactions.length} transactions. nextToken: ${nextToken ? "yes" : "no"}`
     );
+
+    // NOTE: deliberately NO pre-emptive inter-page delay. Amazon's documented 0.5 req/sec would
+    // imply ~2.5s per page, and a large window can run to hundreds of pages — that alone would
+    // exceed the caller's whole run budget, which is only checked between chunks. We rely on the
+    // burst allowance plus the 429 handling above (which now honours the reported rate as its
+    // floor), and on the window being bounded so page counts stay modest.
   } while (nextToken);
 
-  logger.info(`[Finance API v2024-06-19] Total transactions: ${allTransactions.length}`);
+  logger.info(
+    `[Finance API v2024-06-19] Total transactions: ${transactionCount} across ${pageCount} page(s)` +
+    (onPage ? ' (streamed — not retained)' : '')
+  );
   return allTransactions;
 }
 
@@ -1019,6 +1071,10 @@ async function fetchNewFinanceData(config) {
     //   Unauthorized/expired. Without it, callers fall back to the old
     //   behaviour (throw on first token failure).
     tokenRefresher,
+    // ★ Streaming mode: async (expenseRows, revenueRows) => void, invoked once per API page.
+    //   When supplied, pages are folded and dropped instead of accumulated — see the block below.
+    //   Omit it and this function behaves exactly as before.
+    onRows,
   } = config;
 
   const countryUpper = country.toUpperCase();
@@ -1068,6 +1124,50 @@ async function fetchNewFinanceData(config) {
     logger.info(`[Finance Fetch v2024-06-19] Explicit window: ${formatDateDDMMYYYY(startDate)} → ${formatDateDDMMYYYY(endDate)}`);
   }
 
+  // ─── STREAMING MODE ──────────────────────────────────────────────────────────
+  // With `onRows`, each page is converted to expense/revenue rows and handed straight to the
+  // caller, then the raw page is dropped. Nothing large survives this call: the return value
+  // deliberately omits `expenseRows`, `revenueRows` AND `transactions`.
+  //
+  // This exists because the retained tiers, not any single page, are what exhausted a 2GB heap for
+  // a high-volume account: the raw parsed transaction graph is several times larger than the rows
+  // derived from it, and it was additionally returned as `transactions` (nothing ever read it) and
+  // held by the caller for the remainder of the sync.
+  //
+  // Page order is preserved, which matters: the caller's dedup keeps the FIRST transactionId seen
+  // per orderId+SKU, so folding page-by-page yields exactly the same result as one pass over the
+  // concatenation. Do not parallelise this.
+  if (typeof onRows === 'function') {
+    let expenseRowCount = 0;
+    let revenueRowCount = 0;
+
+    await fetchTransactions(accessToken, baseUrl, postedAfter, postedBefore, marketplaceId, tokenRefresher, {
+      onPage: async (pageTransactions) => {
+        const pageExpenses = parseTransactionsV2024(pageTransactions);
+        const pageRevenue = extractRevenueFromTransactions(pageTransactions);
+        expenseRowCount += pageExpenses.length;
+        revenueRowCount += pageRevenue.length;
+        await onRows(pageExpenses, pageRevenue);
+      },
+    });
+
+    logger.info(
+      `[Finance Fetch v2024-06-19] Streamed ${expenseRowCount} expense rows, ${revenueRowCount} revenue rows ` +
+      `(raw transactions not retained).`
+    );
+
+    return {
+      hasNewData: expenseRowCount > 0 || revenueRowCount > 0,
+      expenseRowCount,
+      revenueRowCount,
+      postedAfter,
+      postedBefore,
+      marketplaceId,
+      streamed: true,
+    };
+  }
+
+  // ─── BUFFERED MODE (unchanged) ───────────────────────────────────────────────
   // ★ Pass marketplaceId to filter at the API level — solves multi-marketplace mixing.
   // ★ Pass tokenRefresher (when provided) so mid-pagination expiry is recoverable
   //   without restarting from page 1.

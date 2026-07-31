@@ -16,7 +16,7 @@ const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const { URIs, marketplaceConfig, spapiRegions } = require('../../controllers/config/config.js');
 const tokenManager = require('../../utils/TokenManager.js');
 const LoggingHelper = require('../../utils/LoggingHelper.js');
-const { getFunctionsForDay } = require('./ScheduleConfig.js');
+const { getFunctionsForDay, shouldRunFunction } = require('./ScheduleConfig.js');
 // Use service layers for models that can hit 16MB limit
 const { saveListingItemsData } = require('../products/ListingItemsService.js');
 const { getProductWiseSponsoredAdsData } = require('../amazon-ads/ProductWiseSponsoredAdsService.js');
@@ -26,6 +26,7 @@ const DataFetchTrackingService = require('../system/DataFetchTrackingService.js'
 const { runFbaInventorySyncForMarketplace } = require('../Sp_API/FbaInventoryStorageService.js');
 // Incremental dashboard slice writes — additive, non-fatal (see DashboardSliceService).
 const dashboardSliceService = require('../dashboard/DashboardSliceService.js');
+const { financeAsyncEnabledFor } = require('../../utils/asyncFinanceGate.js');
 const { SLICE_KEYS } = dashboardSliceService;
 
 class ScheduledIntegration {
@@ -923,9 +924,13 @@ class ScheduledIntegration {
             AccessToken, AdsAccessToken, marketplaceIds, userId, Base_URI,
             Country, Region, ProfileId, RefreshToken, AdsRefreshToken,
             productData, dataToSend, loggingHelper, dayOfWeek,
-            _batchFilter
+            _batchFilter, _excludeFunctions
         } = params;
         const runBatch = (n) => !_batchFilter || _batchFilter.includes(n);
+        // P8: allow a phase to run a batch inline while EXCLUDING specific services that
+        // are handled elsewhere (e.g. sched_batch_4 runs negative/recommendations inline
+        // but hands searchKeywords to the async engine).
+        const excludeSet = new Set(_excludeFunctions || []);
 
         const apiData = {};
 
@@ -1172,6 +1177,10 @@ class ScheduledIntegration {
             // Skip functions whose batch is filtered out (phased execution)
             const batchNum = getBatchNumber(functionKey);
             if (!runBatch(batchNum)) {
+                continue;
+            }
+            // Skip explicitly excluded services (handled by the async engine elsewhere).
+            if (excludeSet.has(functionKey)) {
                 continue;
             }
 
@@ -2654,6 +2663,13 @@ class ScheduledIntegration {
      */
     static async executeScheduledBatch1And2Phase(userId, Region, Country, phaseData = {}) {
         logger.info(`[ScheduledIntegration:Batch1And2Phase] Starting for user ${userId}, ${Country}-${Region}`);
+        // P8: when enabled, run the SP-API REPORT services (V2/V1 perf, restock, FBA planning,
+        // stranded) through the async engine so the worker isn't held during report generation.
+        // The remaining batch 1/2 services (non-report + any not-yet-converted report services)
+        // run inline on the first tick via _excludeFunctions. Inline path is the fallback.
+        if (process.env.ADS_ASYNC_ENABLED === 'true') {
+            return this.executeScheduledBatch1And2PhaseAsync(userId, Region, Country, phaseData);
+        }
         try {
             const ctx = await this._prepareForBatchPhase(userId, Region, Country, phaseData);
             const dayOfWeek = phaseData.dayOfWeek !== undefined ? phaseData.dayOfWeek : new Date().getDay();
@@ -2695,6 +2711,70 @@ class ScheduledIntegration {
     }
 
     /**
+     * Phase: BATCH_1_2 (non-blocking variant — P8). Runs the SP-API REPORT services through
+     * the async engine (submit → release worker → re-check), while the non-report services
+     * (and any not-yet-converted report services, e.g. the Saturday-only ledger/reimbursement
+     * reports) run inline once on the first tick. Data identical — the async adapters reuse
+     * each service's own download+parse+save code.
+     */
+    static async executeScheduledBatch1And2PhaseAsync(userId, Region, Country, phaseData = {}) {
+        const dow = phaseData.dayOfWeek !== undefined ? phaseData.dayOfWeek : new Date().getDay();
+        // All convertible SP-API report services in batch 1/2. Daily ones (perf/inventory)
+        // always run; the weekly ones (ledger/reimbursements — Saturday) are gated by the
+        // schedule so they only go async on the day they're actually scheduled. Any not
+        // scheduled today are simply not submitted (and not excluded → they don't run inline
+        // either, matching the schedule).
+        const convertible = [
+            require('../Sp_API/V2_Seller_Performance_Report.js').spApiAsync,
+            require('../Sp_API/GET_V1_SELLER_PERFORMANCE_REPORT.js').spApiAsync,
+            require('../Sp_API/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT.js').spApiAsync,
+            require('../Sp_API/GET_FBA_INVENTORY_PLANNING_DATA.js').spApiAsync,
+            require('../Sp_API/GET_STRANDED_INVENTORY_UI_DATA.js').spApiAsync,
+            require('../Sp_API/GET_FBA_REIMBURSEMENTS_DATA.js').spApiAsync,
+            require('../Sp_API/GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA.js').spApiAsync,
+            require('../Sp_API/GET_LEDGER_SUMMARY_VIEW_DATA.js').spApiAsync,
+            require('../Sp_API/GET_LEDGER_DETAIL_VIEW_DATA.js').spApiAsync,
+        ];
+        const services = convertible.filter(s => shouldRunFunction(s.serviceName, dow));
+        const excludeKeys = services.map(s => s.serviceName);
+        const inlineOnFirstTick = async (ctx) => {
+            const dow = phaseData.dayOfWeek !== undefined ? phaseData.dayOfWeek : new Date().getDay();
+            const apiData = await this.fetchScheduledApiData({
+                ...ctx, marketplaceIds: ctx.marketplaceIds, userId, Country, Region,
+                productData: { asinArray: ctx.productArrays.asinArray, skuArray: ctx.productArrays.skuArray, ProductDetails: [] },
+                dataToSend: ctx.dataToSend, loggingHelper: null, dayOfWeek: dow,
+                _batchFilter: [1, 2], _excludeFunctions: excludeKeys
+            });
+            const out = {};
+            for (const [key, value] of Object.entries(apiData)) {
+                if (value && typeof value === 'object' && !Array.isArray(value) && 'success' in value) {
+                    out[key] = { success: value.success, error: value.error || null };
+                }
+            }
+            return out;
+        };
+        return this._runAsyncAdsPhase({
+            userId, Region, Country, phaseData, group: 'sched_batch_1_2', services,
+            inlineOnFirstTick, sliceKeys: [SLICE_KEYS.INVENTORY, SLICE_KEYS.PERFORMANCE],
+            // SP-API reports: wait ~15 min before the first check, then re-check every ~15 min.
+            pollConfig: {
+                initialDelayMs: parseInt(process.env.SPAPI_INITIAL_POLL_DELAY_MS || '900000', 10), // 15 min
+                pollDelayMs: parseInt(process.env.SPAPI_POLL_DELAY_MS || '900000', 10),            // 15 min
+                maxPollAttempts: parseInt(process.env.SPAPI_MAX_POLL_ATTEMPTS || '16', 10),        // 16 × 15min = 4h
+            },
+            // Skip only if the account has NO tokens at all; otherwise proceed and let each
+            // spec / inline service self-gate on its required token.
+            tokenGuard: (ctx) => (!ctx.AccessToken && !ctx.AdsAccessToken) ? 'No tokens available' : null,
+            buildArgsFrom: (ctx) => ({
+                userId, country: Country, region: Region,
+                accessToken: ctx.AccessToken,
+                baseuri: (ctx.Base_URI || '').replace(/^https?:\/\//, ''),
+                marketplaceIds: ctx.marketplaceIds,
+            }),
+        });
+    }
+
+    /**
      * Phase: ADS (new, post-split from batch_1_2)
      *
      * All PPC async report services: PPCMetrics, PPCProductWise, PPCUnitsSold,
@@ -2709,6 +2789,13 @@ class ScheduledIntegration {
      */
     static async executeScheduledAdsPhase(userId, Region, Country, phaseData = {}) {
         logger.info(`[ScheduledIntegration:AdsPhase] Starting for user ${userId}, ${Country}-${Region}`);
+        // P8: when ADS_ASYNC_ENABLED is set, use the non-blocking path (submit reports,
+        // release the worker, re-check on a BullMQ delayed job) so a worker slot is not
+        // pinned for the ~minutes-to-hours Amazon takes to generate reports. The inline
+        // path below is the DEFAULT and the fallback if the flag is off.
+        if (process.env.ADS_ASYNC_ENABLED === 'true') {
+            return this.executeScheduledAdsPhaseAsync(userId, Region, Country, phaseData);
+        }
         try {
             const ctx = await this._prepareForBatchPhase(userId, Region, Country, phaseData);
             const dayOfWeek = phaseData.dayOfWeek !== undefined ? phaseData.dayOfWeek : new Date().getDay();
@@ -2774,6 +2861,432 @@ class ScheduledIntegration {
     }
 
     /**
+     * Phase: ADS (non-blocking variant — P8). BidBison-style "submit → release → re-check".
+     *
+     * All four ADS-phase services are driven through the async engine: on the first tick
+     * every report is CREATED (SUBMITTED rows) and the worker is released; each later
+     * (delayed) tick polls, downloading reports as they finish; once all are terminal the
+     * phase does any per-service combine+save and advances to sched_batch_3. A worker slot
+     * is therefore never held while Amazon is generating reports.
+     *
+     * Each service module exposes a uniform `adsAsync = { serviceName, buildSpecs, saveFromRows }`
+     * adapter (see the service files). buildSpecs() reuses that service's existing
+     * create/download/process internals verbatim, so the DATA is identical to the inline path.
+     *
+     * State (carried in phaseData): `adsAsyncStarted` (SUBMIT done) + `adsPollAttempt`.
+     */
+    static async executeScheduledAdsPhaseAsync(userId, Region, Country, phaseData = {}) {
+        const services = [
+            require('../AmazonAds/GetPPCMetrics.js').adsAsync,
+            require('../AmazonAds/GetPPCProductWise.js').adsAsync,
+            require('../AmazonAds/GetWastedSpendKeywords.js').adsAsync,
+            require('../AmazonAds/GetDateWiseSpendKeywords.js').adsAsync,
+        ];
+        return this._runAsyncAdsPhase({ userId, Region, Country, phaseData, group: 'sched_ads', services, sliceKeys: [SLICE_KEYS.ADS] });
+    }
+
+    /**
+     * Generic engine-driven runner shared by the ADS-report phases (sched_ads,
+     * sched_ads_catchup, and searchKeywords in sched_batch_4). SUBMIT on first entry
+     * (create every report, release worker), POLL on delayed re-entries, then per-service
+     * combine+save once all reports are terminal. Scoped by `group` so phases sharing a
+     * runDate don't collide. `dateRange` restricts to a single day (catch-up).
+     * `inlineOnFirstTick(ctx)` runs any non-polling sibling services once (BATCH_4).
+     */
+    static async _runAsyncAdsPhase({ userId, Region, Country, phaseData, group, services, dateRange = null, inlineOnFirstTick = null, sliceKeys = [], buildArgsFrom = null, tokenGuard = null, pollConfig = null }) {
+        const { runAsyncAdsReports } = require('../AmazonAds/asyncReportEngine.js');
+        const AsyncReportRequest = require('../../models/amazon-ads/AsyncReportRequestModel.js');
+        // Poll timing. Ads reports take ~40min–4h, so the default waits ~1h before the FIRST
+        // check (95% are done by then), then re-checks every ~15min. Each phase can override
+        // via pollConfig (SP-API passes its own). All env-overridable.
+        const INITIAL_DELAY_MS = pollConfig?.initialDelayMs ?? parseInt(process.env.ADS_INITIAL_POLL_DELAY_MS || '3600000', 10); // 1 hour
+        const POLL_DELAY_MS = pollConfig?.pollDelayMs ?? parseInt(process.env.ADS_POLL_DELAY_MS || '900000', 10);               // 15 min
+        const MAX_POLL = pollConfig?.maxPollAttempts ?? parseInt(process.env.ADS_MAX_POLL_ATTEMPTS || '16', 10);                // 16 × 15min ≈ 4h of checks
+
+        // Defaults produce ADS context (ads token + profileId). SP-API phases pass their own
+        // tokenGuard + buildArgsFrom (SP access token + baseuri + marketplaceIds).
+        const guard = tokenGuard || ((ctx) => (!ctx.AdsAccessToken || !ctx.ProfileId) ? 'Ads token/profile unavailable' : null);
+        const makeArgs = buildArgsFrom || ((ctx) => ({ userId, country: Country, region: Region, accessToken: ctx.AdsAccessToken, profileId: ctx.ProfileId, marketplaceId: '', ...(dateRange || {}) }));
+
+        logger.info(`[AsyncPhase:${group}] Starting (stage=${phaseData.adsAsyncStarted ? 'POLL' : 'SUBMIT'}) for user ${userId}, ${Country}-${Region}`);
+        try {
+            const ctx = await this._prepareForBatchPhase(userId, Region, Country, phaseData);
+            const guardErr = guard(ctx);
+            if (guardErr) {
+                logger.warn(`[AsyncPhase:${group}] ${guardErr} — skipping`, { userId, Country, Region });
+                return { success: false, error: guardErr, dataForNextPhase: { apiResults: { ...(phaseData.apiResults || {}) } } };
+            }
+
+            const buildArgs = makeArgs(ctx);
+            const specs = services.flatMap(s => s.buildSpecs(buildArgs));
+            const runDate = (dateRange && dateRange.endDate) || specs.find(sp => sp.params && sp.params.endDate)?.params.endDate;
+
+            // Non-polling sibling services (e.g. BATCH_4 negative/recommendations) run once
+            // on the first tick — they don't hold the worker meaningfully (no report poll).
+            let inlineResults = phaseData.adsInlineResults || {};
+            if (!phaseData.adsAsyncStarted && typeof inlineOnFirstTick === 'function') {
+                inlineResults = await inlineOnFirstTick(ctx);
+            }
+
+            const engineRes = await runAsyncAdsReports({
+                userId, country: Country, region: Region, runDate, group, specs,
+                initialDelayMs: INITIAL_DELAY_MS, pollDelayMs: POLL_DELAY_MS, maxPollAttempts: MAX_POLL,
+                pollAttempt: phaseData.adsPollAttempt || 0,
+            });
+
+            if (!engineRes.done) {
+                return {
+                    success: true,
+                    reschedule: engineRes.reschedule,
+                    dataForNextPhase: {
+                        adsAsyncStarted: true,
+                        adsPollAttempt: engineRes.reschedule.pollAttempt,
+                        adsInlineResults: inlineResults,
+                        apiResults: { ...(phaseData.apiResults || {}), ...inlineResults },
+                    },
+                };
+            }
+
+            // ---- All reports terminal: per-service combine+save + success flags. -------
+            const allRows = await AsyncReportRequest.find({
+                userId: String(userId), country: Country, region: Region, runDate, group
+            }).lean();
+            const apiResults = { ...(phaseData.apiResults || {}), ...inlineResults };
+            for (const svc of services) {
+                const rows = allRows.filter(r => r.service === svc.serviceName);
+                try {
+                    // BUGFIX: this was a bare `ProfileId`, which is not defined in this scope —
+                    // class bodies are strict mode, so every call threw a ReferenceError that the
+                    // catch below swallowed and logged as a generic failure. Services with a real
+                    // saveFromRows (the merged ads reports, e.g. ppcMetrics) therefore never saved.
+                    await svc.saveFromRows(userId, Country, Region, ctx.ProfileId, rows);
+                } catch (saveErr) {
+                    logger.error(`[AdsAsync:${group}] saveFromRows(${svc.serviceName}) failed for user ${userId}: ${saveErr.message}`);
+                }
+                // Parity with the inline path: "succeeded" if at least one report reached a
+                // completed terminal state (DONE or NO_DATA — no data is not a failure);
+                // fails only when every report errored (FAILED).
+                const ok = rows.length > 0 && rows.some(r => r.status === 'DONE' || r.status === 'NO_DATA');
+                apiResults[svc.serviceName] = { success: ok, error: ok ? null : 'all ads reports failed' };
+            }
+
+            await this._logApiResultsToSession(phaseData.sessionId, apiResults, userId, Region, Country, phaseData.phase || 'scheduled');
+            if (sliceKeys.length) {
+                await this._writePhaseSlices(group, sliceKeys, { userId, country: Country, region: Region, apiData: apiResults });
+            }
+
+            const anySucceeded = Object.values(apiResults).some(r => r && r.success === true);
+            return {
+                success: anySucceeded || Object.keys(apiResults).length === 0,
+                error: anySucceeded ? null : 'No ads services returned data',
+                dataForNextPhase: { apiResults },
+            };
+        } catch (error) {
+            logger.error(`[AdsAsync:${group}] Failed for user ${userId}:`, error);
+            return { success: false, error: error.message, statusCode: 500 };
+        }
+    }
+
+    /**
+     * Non-blocking finance sync — the Sales Report half of `syncFinanceData` driven by the async
+     * engine instead of an inline poll loop.
+     *
+     * Why this is not `_runAsyncAdsPhase`: that runner submits every spec at once and finishes in
+     * one terminal pass. Finance cannot. The cursor is `max(FinanceSyncLog.date where
+     * status:'success' and provisional !== true)`, and the ONLY thing that moves it is a chunk
+     * succeeding. Submit chunks 1–5 together and let 5 finish before 2 fails, and the cursor jumps
+     * over chunk 2's days — they are never re-requested and sit at $0 permanently. Submitting many
+     * reports at once is also precisely the queue-jamming this change exists to stop.
+     *
+     * So: ONE chunk in flight, oldest-first, and the walk STOPS at the first failure.
+     *
+     * State carried across reschedules in phaseData:
+     *   financeAsyncStarted  — false on the first tick (plan + submit), true on every re-check
+     *   financeWindow        — the FROZEN window; see planFinanceSync for why it is never recomputed
+     *   financeChunks        — the FROZEN chunk list
+     *   financeChunkIndex    — which chunk is in flight
+     *   financeTick          — monotonic re-entry counter; see the comment at its declaration
+     *   financeEmptyRetries  — { paramsKey: count } — at most ONE re-submit per chunk
+     *   financeAggregate     — running step1 totals, reported on the final tick
+     */
+    static async _runAsyncFinancePhase({
+        userId, Region, Country, phaseData,
+        group = 'sched_finance',
+        forceDates = null, backfillDays = 30, maxIncrementalDays = null, resyncDays = 0,
+        pollConfig = null, sliceKeys = [],
+    }) {
+        const { runAsyncAdsReports } = require('../AmazonAds/asyncReportEngine.js');
+        const AsyncReportRequest = require('../../models/amazon-ads/AsyncReportRequestModel.js');
+        const {
+            createTokenManager, financeSalesReportAsync, planFinanceSync, runFinanceSyncTail,
+            recordSyncFailure, classifySyncFailure, PROVISIONAL_SETTLE_DAYS,
+        } = require('../Sp_API/FinanceService.js');
+        const FinanceSyncLog = require('../../models/finance/FinanceSyncLogModel.js');
+        const mongoose = require('mongoose');
+
+        // Deliberately SHORTER intervals than the other two async families, same ~4h ceiling:
+        //
+        //   ads (sched_ads)          1h    initial / 15min / 16  = ~4h  (reports really take 40min-4h)
+        //   SP-API (sched_batch_1_2) 15min  initial / 15min / 16  = ~4h
+        //   finance (here)           90s    initial /  5min / 48  = ~4h
+        //
+        // Finance is an SP-API report, so 15/15/16 would be the house style. It deviates because
+        // finance walks its chunks SEQUENTIALLY — chunk N+1 is not submitted until chunk N lands —
+        // so the initial delay is paid once PER CHUNK. At 15min a 10-chunk backfill has a 150-min
+        // floor before Amazon has done any work; at 5min it is 50. batch_1_2 submits its reports
+        // once per run and has no equivalent cost, which is why it can afford the longer wait.
+        //
+        // The 4h ceiling is the part that matters for the bug this exists to fix (Amazon parking a
+        // report IN_QUEUE for hours), and it matches both siblings.
+        //
+        // The FIRST check is deliberately much shorter than the repeat interval, which is the
+        // opposite of the ads path. Most finance reports are ready in 1-2 min, and because chunks
+        // are walked sequentially the initial delay is paid ONCE PER CHUNK — at 5min a 10-chunk
+        // backfill idles 50min before Amazon has done anything, at 90s it idles 15. The repeat
+        // interval stays long because by then the report is genuinely slow and polling is waste.
+        const INITIAL_DELAY_MS = pollConfig?.initialDelayMs ?? parseInt(process.env.FINANCE_INITIAL_POLL_DELAY_MS || '90000', 10);
+        const POLL_DELAY_MS = pollConfig?.pollDelayMs ?? parseInt(process.env.FINANCE_POLL_DELAY_MS || '300000', 10);
+        const MAX_POLL = pollConfig?.maxPollAttempts ?? parseInt(process.env.FINANCE_MAX_POLL_ATTEMPTS || '48', 10);
+        // Delay between finishing chunk N and submitting chunk N+1 — short, it is just a worker
+        // hand-off, not a wait on Amazon.
+        const CHUNK_HANDOFF_MS = parseInt(process.env.FINANCE_CHUNK_HANDOFF_MS || '5000', 10);
+        // A 60-day backlog must not be walked by a single phase invocation holding a pipeline open.
+        // The cursor advances per chunk, so whatever is left resumes on the next daily run.
+        const MAX_CHUNKS_PER_RUN = parseInt(process.env.FINANCE_MAX_CHUNKS_PER_RUN || '10', 10);
+
+        const stage = phaseData.financeAsyncStarted ? 'POLL' : 'SUBMIT';
+        logger.info(`[AsyncFinance:${group}] Starting (stage=${stage}) for user ${userId}, ${Country}-${Region}`);
+
+        try {
+            const ctx = await this._prepareForBatchPhase(userId, Region, Country, phaseData);
+            if (!ctx.AccessToken || !ctx.RefreshToken) {
+                logger.warn(`[AsyncFinance:${group}] SP-API tokens unavailable — skipping`, { userId, Country, Region });
+                return { success: false, error: 'SP-API tokens unavailable', dataForNextPhase: { apiResults: { ...(phaseData.apiResults || {}) } } };
+            }
+
+            const clientId = process.env.SPAPI_CLIENT_ID;
+            const clientSecret = process.env.SPAPI_CLIENT_SECRET;
+            const tokenManager = createTokenManager({
+                accessToken: ctx.AccessToken, refreshToken: ctx.RefreshToken, clientId, clientSecret,
+            });
+
+            // ── Plan ONCE, then freeze. Recomputing on a poll tick is the infinite-reschedule bug. ──
+            let window = phaseData.financeWindow || null;
+            let chunks = phaseData.financeChunks || null;
+            let latestSyncDate = phaseData.financeLatestSyncDate || null;
+            if (!phaseData.financeAsyncStarted || !window || !chunks) {
+                const plan = await planFinanceSync({
+                    userId, country: Country, regionModel: Region,
+                    backfillDays, forceDates, maxIncrementalDays, resyncDays,
+                });
+                window = plan.window;
+                chunks = plan.chunks;
+                latestSyncDate = plan.latestSyncDate;
+                logger.info(`[AsyncFinance:${group}] ${window.note} → ${chunks.length} chunk(s)`);
+            }
+
+            // In 'up_to_date' mode the window has no start/end — the inline path scopes the
+            // relationship sync to the cursor day instead, so match that.
+            const plannedLatest = window.endDate || latestSyncDate;
+
+            const finishRun = async (extra = {}) => {
+                // Tail runs ONCE, on the last tick: Step 2 needs every chunk's pending orders in
+                // place, and re-walking them per chunk would be pure waste.
+                const tailStart = window.startDate || plannedLatest;
+                const tailEnd = window.endDate || plannedLatest;
+                let step2 = null;
+                try {
+                    step2 = await runFinanceSyncTail({
+                        userId, country: Country, regionModel: Region,
+                        startDate: tailStart, endDate: tailEnd,
+                        refreshToken: ctx.RefreshToken, clientId, clientSecret, tokenManager,
+                    });
+                } catch (tailErr) {
+                    // The tail refines data that is already written; failing it must not un-succeed
+                    // chunks that landed.
+                    logger.error(`[AsyncFinance:${group}] tail failed for user ${userId}: ${tailErr.message}`);
+                }
+                return { step2, ...extra };
+            };
+
+            // Nothing to fetch — still run the tail, exactly as syncFinanceData's up_to_date branch does.
+            if (window.mode === 'up_to_date' || chunks.length === 0) {
+                const { step2 } = await finishRun();
+                const apiResults = { ...(phaseData.apiResults || {}), financeSync: { success: true, error: null } };
+                await this._writeFinanceSlice({ userId, Country, Region, group, sliceKeys, summary: { status: 'up_to_date', startDate: null, endDate: null }, apiResults, phaseData });
+                logger.info(`[AsyncFinance:${group}] up_to_date for user ${userId}; backfill resolved=${step2?.resolved ?? 0}`);
+                return { success: true, error: null, dataForNextPhase: { apiResults } };
+            }
+
+            // ── One MONOTONIC tick counter for the whole phase chain. ──
+            // The worker builds the re-enqueue jobId as `…-poll${reschedule.pollAttempt || 1}`, and
+            // BullMQ silently DROPS an add whose jobId already exists. Resetting this to 0 per chunk
+            // (the natural thing to do, since each chunk polls from scratch) makes the chunk N→N+1
+            // hand-off collide with chunk N+1's first poll — the enqueue vanishes and the finance
+            // chain stalls forever with no error. It must only ever increase.
+            // The engine's own poll cap is `pollAttempts` on the per-chunk row, so it is unaffected
+            // by this counter never resetting.
+            const tick = (phaseData.financeTick || 0) + 1;
+            const chunkIndex = phaseData.financeChunkIndex || 0;
+            const chunk = chunks[chunkIndex];
+            const paramsKey = `${chunk.startDate}_${chunk.endDate}`;
+            const runDate = chunk.endDate;   // per-chunk row scope → chunk N+1 starts with zero rows
+
+            const specs = financeSalesReportAsync.buildSpecs({
+                userId, country: Country, regionModel: Region, tokenManager, chunk,
+            });
+
+            const engineRes = await runAsyncAdsReports({
+                userId, country: Country, region: Region, runDate, group, specs,
+                phase: 'finance',
+                initialDelayMs: INITIAL_DELAY_MS, pollDelayMs: POLL_DELAY_MS, maxPollAttempts: MAX_POLL,
+                pollAttempt: tick,
+            });
+
+            const carry = {
+                financeAsyncStarted: true,
+                financeTick: tick,
+                financeWindow: window,
+                financeChunks: chunks,
+                financeLatestSyncDate: latestSyncDate,
+                financeChunkIndex: chunkIndex,
+                financeEmptyRetries: phaseData.financeEmptyRetries || {},
+                financeAggregate: phaseData.financeAggregate || { salesOrders: 0, skuDocs: 0, overheadDocs: 0, pendingOrders: 0 },
+                apiResults: { ...(phaseData.apiResults || {}) },
+            };
+
+            // ── Still generating: release the worker, re-check later. This is the whole point. ──
+            if (!engineRes.done) {
+                return {
+                    success: true,
+                    reschedule: { ...engineRes.reschedule, pollAttempt: tick },
+                    dataForNextPhase: { ...carry },
+                };
+            }
+
+            const rows = await AsyncReportRequest.find({
+                userId: String(userId), country: Country, region: Region, runDate, group, phase: 'finance', paramsKey,
+            }).lean();
+            const row = rows[0] || null;
+
+            // ── FAILED: stop the walk here. ──
+            // The cursor has NOT moved past this chunk, so tomorrow's run retries this same oldest
+            // chunk — the same stall semantics as the inline path, deliberately not an in-run retry
+            // loop (that is what jams the report queue).
+            if (!row || row.status === 'FAILED') {
+                const note = row ? (row.note || 'report failed') : 'no engine row for chunk';
+                const err = new Error(note);
+                const errorKind = classifySyncFailure(err);
+                logger.error(`[AsyncFinance:${group}] chunk ${chunkIndex + 1}/${chunks.length} (${paramsKey}) FAILED for user ${userId}: ${note}`);
+                try {
+                    await recordSyncFailure({
+                        FinanceSyncLogModel: FinanceSyncLog,
+                        userObjectId: new mongoose.Types.ObjectId(String(userId)),
+                        country: Country, region: Region,
+                        from: chunk.startDate, to: chunk.endDate,
+                        err, errorKind,
+                    });
+                } catch (logErr) {
+                    logger.error(`[AsyncFinance:${group}] recordSyncFailure failed: ${logErr.message}`);
+                }
+
+                const { step2 } = await finishRun();
+                const apiResults = { ...(phaseData.apiResults || {}), financeSync: { success: false, error: note } };
+                await this._writeFinanceSlice({ userId, Country, Region, group, sliceKeys, summary: { status: 'failed', startDate: window.startDate, endDate: window.endDate }, apiResults, phaseData });
+                logger.warn(`[AsyncFinance:${group}] stopped at chunk ${chunkIndex + 1}/${chunks.length}; ${chunkIndex} chunk(s) completed, backfill resolved=${step2?.resolved ?? 0}`);
+                return { success: false, error: note, dataForNextPhase: { apiResults } };
+            }
+
+            // ── Empty report: allow exactly ONE re-submit, and only for a chunk recent enough
+            //    that "no data" is more likely a slow report than a genuinely empty window.
+            //    Old windows legitimately come back empty; re-requesting them forever is what
+            //    congests the seller's report queue.
+            const emptyRetries = { ...(phaseData.financeEmptyRetries || {}) };
+            if (row.status === 'NO_DATA' && (emptyRetries[paramsKey] || 0) < 1) {
+                const todayPac = new Date(Date.now() - 7 * 3600000).toISOString().substring(0, 10);
+                const ageDays = Math.round((new Date(`${todayPac}T00:00:00.000Z`) - new Date(`${chunk.startDate}T00:00:00.000Z`)) / 86400000);
+                if (ageDays <= PROVISIONAL_SETTLE_DAYS) {
+                    emptyRetries[paramsKey] = (emptyRetries[paramsKey] || 0) + 1;
+                    // Deleting the row makes the engine see zero rows next tick and SUBMIT afresh.
+                    await AsyncReportRequest.deleteOne({ _id: row._id });
+                    logger.info(`[AsyncFinance:${group}] chunk ${paramsKey} returned no data (age ${ageDays}d) — re-submitting once`);
+                    return {
+                        success: true,
+                        reschedule: { delayMs: CHUNK_HANDOFF_MS, pollAttempt: tick },
+                        dataForNextPhase: { ...carry, financeEmptyRetries: emptyRetries },
+                    };
+                }
+            }
+
+            // ── Chunk done. Accumulate and advance. ──
+            const res = row.result || {};
+            const aggregate = {
+                salesOrders: (carry.financeAggregate.salesOrders || 0) + (res.salesOrders || 0),
+                skuDocs: (carry.financeAggregate.skuDocs || 0) + (res.skuDocs || 0),
+                overheadDocs: (carry.financeAggregate.overheadDocs || 0) + (res.overheadDocs || 0),
+                pendingOrders: (carry.financeAggregate.pendingOrders || 0) + (res.pendingOrders || 0),
+            };
+            const nextIndex = chunkIndex + 1;
+            logger.info(`[AsyncFinance:${group}] chunk ${chunkIndex + 1}/${chunks.length} (${paramsKey}) ${row.status}; skuDocs=${res.skuDocs ?? 0}`);
+
+            if (nextIndex < chunks.length && nextIndex < MAX_CHUNKS_PER_RUN) {
+                return {
+                    success: true,
+                    reschedule: { delayMs: CHUNK_HANDOFF_MS, pollAttempt: tick },
+                    dataForNextPhase: { ...carry, financeChunkIndex: nextIndex, financeEmptyRetries: emptyRetries, financeAggregate: aggregate },
+                };
+            }
+
+            // ── Last chunk (or the per-run cap): tail, slice, done. ──
+            if (nextIndex < chunks.length) {
+                logger.warn(`[AsyncFinance:${group}] hit FINANCE_MAX_CHUNKS_PER_RUN=${MAX_CHUNKS_PER_RUN} after ${nextIndex}/${chunks.length} chunks; the remaining ${chunks.length - nextIndex} resume next run (cursor has advanced).`);
+            }
+            const { step2 } = await finishRun();
+            const summary = { status: 'completed', startDate: window.startDate, endDate: chunks[nextIndex - 1].endDate };
+            const apiResults = { ...(phaseData.apiResults || {}), financeSync: { success: true, error: null } };
+            await this._writeFinanceSlice({ userId, Country, Region, group, sliceKeys, summary, apiResults, phaseData });
+            logger.info(`[AsyncFinance:${group}] Completed for user ${userId}`, {
+                chunksCompleted: nextIndex, chunksTotal: chunks.length,
+                skuDocs: aggregate.skuDocs, resolved: step2?.resolved ?? 0,
+            });
+            return { success: true, error: null, dataForNextPhase: { apiResults } };
+        } catch (error) {
+            logger.error(`[AsyncFinance:${group}] Failed for user ${userId}:`, error);
+            return { success: false, error: error.message, statusCode: 500 };
+        }
+    }
+
+    /**
+     * Finance slice write, matching what the inline finance phase produces so the dashboard sees
+     * the same shape from either path. Non-fatal: a slice failure must not fail a sync whose data
+     * is already persisted.
+     */
+    static async _writeFinanceSlice({ userId, Country, Region, group, sliceKeys, summary, apiResults, phaseData }) {
+        try {
+            await this._logApiResultsToSession(phaseData.sessionId, apiResults, userId, Region, Country, phaseData.phase || 'scheduled');
+            if (sliceKeys && sliceKeys.length) {
+                await this._writePhaseSlices(group, sliceKeys, { userId, country: Country, region: Region, apiData: apiResults });
+            }
+            if (summary && summary.status !== 'failed') {
+                await dashboardSliceService.writeSlice({
+                    userId, country: Country, region: Region,
+                    sliceKey: SLICE_KEYS.FINANCE,
+                    producedByPhase: group,
+                    data: {
+                        services: { financeSync: { success: true, error: null } },
+                        counts: { ran: 1, succeeded: 1, failed: 0 },
+                        errors: [],
+                        sync: summary,
+                        producedAt: new Date().toISOString(),
+                    },
+                });
+            }
+        } catch (err) {
+            logger.error(`[AsyncFinance:${group}] slice write failed for user ${userId}: ${err.message}`);
+        }
+    }
+
+    /**
      * Phase: ADS_CATCHUP (one-shot, NOT chained)
      *
      * Enqueued by `freshnessSweeper` for accounts with missing past PPC days.
@@ -2804,6 +3317,22 @@ class ScheduledIntegration {
             const err = `Invalid catchupDate: ${catchupDate}. Expected YYYY-MM-DD.`;
             logger.error(`[ScheduledIntegration:AdsCatchupPhase] ${err}`);
             return { success: false, error: err };
+        }
+
+        // P8: non-blocking catch-up — same 4 ads services via the async engine, scoped to
+        // the catch-up group + the single catchupDate. Re-runs itself via a delayed job and
+        // does NOT chain (getNextPhase(sched_ads_catchup) === null). Inline path is fallback.
+        if (process.env.ADS_ASYNC_ENABLED === 'true') {
+            const services = [
+                require('../AmazonAds/GetPPCMetrics.js').adsAsync,
+                require('../AmazonAds/GetPPCProductWise.js').adsAsync,
+                require('../AmazonAds/GetWastedSpendKeywords.js').adsAsync,
+                require('../AmazonAds/GetDateWiseSpendKeywords.js').adsAsync,
+            ];
+            return this._runAsyncAdsPhase({
+                userId, Region, Country, phaseData, group: 'sched_ads_catchup', services,
+                dateRange: { startDate: catchupDate, endDate: catchupDate },
+            });
         }
 
         try {
@@ -2922,6 +3451,19 @@ class ScheduledIntegration {
                 .toISOString().substring(0, 10);
             const latestBroken = sorted[sorted.length - 1];
             const forceEnd = latestBroken > yesterdayPac ? latestBroken : yesterdayPac;
+
+            // P8: same non-blocking path as the daily finance phase, same per-account gate. The
+            // frozen window is simply the forced range, so the catch-up chunks and walks
+            // identically. A DISTINCT group keeps its engine rows from colliding with sched_finance
+            // on a shared runDate.
+            if (financeAsyncEnabledFor(userId)) {
+                const res = await this._runAsyncFinancePhase({
+                    userId, Region, Country, phaseData,
+                    group: 'sched_finance_catchup',
+                    forceDates: [forceStart, forceEnd],
+                });
+                return { ...res, forceStart, forceEnd };
+            }
 
             const ctx = await this._prepareForBatchPhase(userId, Region, Country, phaseData);
             if (!ctx.AccessToken || !ctx.RefreshToken) {
@@ -3063,6 +3605,23 @@ class ScheduledIntegration {
      * (worker.js never fails the pipeline on a single phase failure).
      */
     static async executeScheduledFinancePhase(userId, Region, Country, phaseData = {}) {
+        // P8: non-blocking finance. The inline path below polls Amazon in a loop and abandons the
+        // report at the cap — which for accounts whose reports sit IN_QUEUE for 30+ min means the
+        // day is never fetched AND a duplicate report is queued on the next attempt. The async
+        // path submits once, releases the worker, and re-checks on a delayed job.
+        //
+        // Gated by FINANCE_ASYNC_ENABLED (+ optional FINANCE_ASYNC_USER_IDS allowlist), NOT by
+        // ADS_ASYNC_ENABLED: that one switch also flips batch_1_2, ads, batch_4 and ads_catchup for
+        // every account, so it cannot be used to soak-test finance on a single account.
+        // Inline remains the fallback; unset the flag to roll back.
+        if (financeAsyncEnabledFor(userId)) {
+            return this._runAsyncFinancePhase({
+                userId, Region, Country, phaseData,
+                group: 'sched_finance',
+                sliceKeys: [SLICE_KEYS.FINANCE],
+            });
+        }
+
         logger.info(`[ScheduledIntegration:FinancePhase] Starting for user ${userId}, ${Country}-${Region}`);
         try {
             const ctx = await this._prepareForBatchPhase(userId, Region, Country, phaseData);
@@ -3153,6 +3712,33 @@ class ScheduledIntegration {
      */
     static async executeScheduledBatch4Phase(userId, Region, Country, phaseData = {}) {
         logger.info(`[ScheduledIntegration:Batch4Phase] Starting for user ${userId}, ${Country}-${Region}`);
+        // P8: when enabled, run the only worker-holding poller in this phase (searchKeywords —
+        // its inline poll loop is UNCAPPED) through the async engine, so the worker is released
+        // during report generation and the poll is bounded. negativeKeywords + keyword
+        // recommendations are quick non-polling calls, so they run inline on the first tick.
+        if (process.env.ADS_ASYNC_ENABLED === 'true') {
+            const services = [require('../AmazonAds/GetSearchKeywords.js').adsAsync];
+            const inlineOnFirstTick = async (ctx) => {
+                const dow = phaseData.dayOfWeek !== undefined ? phaseData.dayOfWeek : new Date().getDay();
+                const apiData = await this.fetchScheduledApiData({
+                    ...ctx, marketplaceIds: ctx.marketplaceIds, userId, Country, Region,
+                    productData: { asinArray: ctx.productArrays.asinArray, skuArray: ctx.productArrays.skuArray, ProductDetails: [] },
+                    dataToSend: ctx.dataToSend, loggingHelper: null, dayOfWeek: dow,
+                    _batchFilter: [4], _excludeFunctions: ['searchKeywords']
+                });
+                const out = {};
+                for (const [key, value] of Object.entries(apiData)) {
+                    if (value && typeof value === 'object' && !Array.isArray(value) && 'success' in value) {
+                        out[key] = { success: value.success, error: value.error || null };
+                    }
+                }
+                return out;
+            };
+            return this._runAsyncAdsPhase({
+                userId, Region, Country, phaseData, group: 'sched_batch_4', services,
+                inlineOnFirstTick, sliceKeys: [SLICE_KEYS.KEYWORDS],
+            });
+        }
         try {
             const ctx = await this._prepareForBatchPhase(userId, Region, Country, phaseData);
             const dayOfWeek = phaseData.dayOfWeek !== undefined ? phaseData.dayOfWeek : new Date().getDay();

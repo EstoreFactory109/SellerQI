@@ -126,6 +126,9 @@ function generatePhaseJobId(parentJobId, phase) {
 }
 
 function parseParentJobId(phaseJobId) {
+    // P8: non-blocking poll re-enqueues use a `-poll{n}` suffix on the phase jobId
+    // (e.g. `${parent}-sched_ads-poll3`). Strip it before matching the phase suffix.
+    phaseJobId = String(phaseJobId).replace(/-poll\d+$/, '');
     const knownPhases = [...PHASE_ORDER, PHASES.BATCH_3_4_LEGACY];
     for (const phase of knownPhases) {
         if (phaseJobId.endsWith(`-${phase}`)) {
