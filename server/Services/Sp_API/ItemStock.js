@@ -36,7 +36,10 @@ function httpsRequest(options, postData = null) {
  * @param {string[]} [sellerSkus] - Optional array of SKUs to filter
  * @returns {Object[]} Array of inventory summary objects
  */
-async function fetchInventorySummaries(accessToken, baseUrl, marketplaceId, sellerSkus = []) {
+// With `onPage`, each page's summaries are handed to the callback and then DROPPED —
+// nothing accumulates, so memory is a function of one page rather than the whole catalog.
+// Without `onPage`, behaviour is unchanged (returns the full array).
+async function fetchInventorySummaries(accessToken, baseUrl, marketplaceId, sellerSkus = [], { onPage = null } = {}) {
   const allSummaries = [];
   let nextToken = null;
   let pageCount = 0;
@@ -97,7 +100,11 @@ async function fetchInventorySummaries(accessToken, baseUrl, marketplaceId, sell
 
     const payload = res.body.payload || {};
     const summaries = payload.inventorySummaries || [];
-    allSummaries.push(...summaries);
+    if (onPage) {
+      await onPage(summaries);       // stream: caller parses the page, raw dropped
+    } else {
+      allSummaries.push(...summaries);
+    }
 
     nextToken = res.body.pagination?.nextToken || null;
     pageCount++;
@@ -282,12 +289,19 @@ async function fetchInventoryStock(config) {
     logger.info("[Inventory Fetch] Access token obtained.");
   }
 
-  // Fetch all inventory summaries with pagination
-  const inventorySummaries = await fetchInventorySummaries(accessToken, baseUrl, marketplaceId, sellerSkus);
+  // Fetch with pagination, parsing each page into normalized stock rows and dropping the
+  // raw summaries — we never hold the full raw catalog AND the parsed rows at the same time.
+  const stockRows = [];
+  await fetchInventorySummaries(accessToken, baseUrl, marketplaceId, sellerSkus, {
+    onPage: (summaries) => {
+      const parsed = parseInventorySummaries(summaries);
+      for (let i = 0; i < parsed.length; i++) stockRows.push(parsed[i]);
+    },
+  });
 
-  logger.info(`[Inventory Fetch] Fetched ${inventorySummaries.length} inventory items.`);
+  logger.info(`[Inventory Fetch] Fetched ${stockRows.length} inventory items.`);
 
-  if (inventorySummaries.length === 0) {
+  if (stockRows.length === 0) {
     return {
       hasData: false,
       stockRows: [],
@@ -296,10 +310,7 @@ async function fetchInventoryStock(config) {
     };
   }
 
-  // Parse into normalized stock rows
-  const stockRows = parseInventorySummaries(inventorySummaries);
-
-  // Analyze
+  // Analyze (sorts + sublists run once on the full parsed list — unchanged)
   const analysis = analyzeInventory(stockRows);
 
   logger.info(

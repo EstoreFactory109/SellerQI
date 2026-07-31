@@ -41,8 +41,11 @@ const SP_V3_CAMP_NEG_KW_CONTENT_TYPE = 'application/vnd.spCampaignNegativeKeywor
  * Paginated fetch helper for SP v3 list endpoints.
  * Returns all items across all pages.
  */
-async function fetchAllPages(url, requestBody, headers, responseKey) {
-  let allItems = [];
+// With `onPage`, each page's items are handed to the callback and then DROPPED — nothing
+// accumulates, so memory is a function of one page rather than the whole result set.
+// Without `onPage`, behaviour is unchanged (returns the full array).
+async function fetchAllPages(url, requestBody, headers, responseKey, { onPage = null } = {}) {
+  const allItems = [];
   let nextToken = null;
 
   do {
@@ -63,7 +66,11 @@ async function fetchAllPages(url, requestBody, headers, responseKey) {
       break;
     }
 
-    allItems.push(...items);
+    if (onPage) {
+      await onPage(items);          // stream: caller consumes the page, raw dropped
+    } else {
+      allItems.push(...items);      // legacy: accumulate + return
+    }
     nextToken = response.data.nextToken || null;
 
   } while (nextToken);
@@ -167,15 +174,29 @@ async function getNegativeKeywords(accessToken, profileId, userId, country, regi
       adGroupNegBody.adGroupIdFilter = { include: validAdGroupIds };
     }
 
-    let adGroupNegativeKeywords = [];
+    // Streamed: normalize each page into the accumulator; raw pages are dropped.
+    const normalizedAdGroupNeg = [];
     try {
-      adGroupNegativeKeywords = await fetchAllPages(
+      await fetchAllPages(
         `${baseUrl}/sp/negativeKeywords/list`,
         adGroupNegBody,
         adGroupNegHeaders,
-        'negativeKeywords'
+        'negativeKeywords',
+        { onPage: (items) => {
+            for (const item of items) normalizedAdGroupNeg.push({
+              campaignId: item.campaignId || '',
+              adGroupId: item.adGroupId || '',
+              keywordId: item.keywordId || '',
+              keywordText: item.keywordText || '',
+              matchType: item.matchType || '',
+              state: item.state || 'ENABLED',
+              stateLower: (item.state || '').toLowerCase(),
+              _level: 'adGroup',
+              _v3Original: true
+            });
+          } }
       );
-      console.log(`  ↳ Ad-group-level negative keywords: ${adGroupNegativeKeywords.length}`);
+      console.log(`  ↳ Ad-group-level negative keywords: ${normalizedAdGroupNeg.length}`);
     } catch (err) {
       logger.warn('Failed to fetch ad-group-level negative keywords, continuing with campaign-level', {
         error: err.message,
@@ -200,15 +221,29 @@ async function getNegativeKeywords(accessToken, profileId, userId, country, regi
       campNegBody.campaignIdFilter = { include: validCampaignIds };
     }
 
-    let campaignNegativeKeywords = [];
+    // Streamed: normalize each page into the accumulator; raw pages are dropped.
+    const normalizedCampNeg = [];
     try {
-      campaignNegativeKeywords = await fetchAllPages(
+      await fetchAllPages(
         `${baseUrl}/sp/campaignNegativeKeywords/list`,
         campNegBody,
         campNegHeaders,
-        'campaignNegativeKeywords'
+        'campaignNegativeKeywords',
+        { onPage: (items) => {
+            for (const item of items) normalizedCampNeg.push({
+              campaignId: item.campaignId || '',
+              adGroupId: '',  // Campaign-level negatives don't have adGroupId
+              keywordId: item.keywordId || '',
+              keywordText: item.keywordText || '',
+              matchType: item.matchType || '',
+              state: item.state || 'ENABLED',
+              stateLower: (item.state || '').toLowerCase(),
+              _level: 'campaign',
+              _v3Original: true
+            });
+          } }
       );
-      console.log(`  ↳ Campaign-level negative keywords: ${campaignNegativeKeywords.length}`);
+      console.log(`  ↳ Campaign-level negative keywords: ${normalizedCampNeg.length}`);
     } catch (err) {
       logger.warn('Failed to fetch campaign-level negative keywords, continuing with ad-group-level only', {
         error: err.message,
@@ -216,32 +251,7 @@ async function getNegativeKeywords(accessToken, profileId, userId, country, regi
       });
     }
 
-    // ===== MERGE AND NORMALIZE =====
-    // Normalize both types into a consistent shape matching the old v2 output
-    const normalizedAdGroupNeg = adGroupNegativeKeywords.map(item => ({
-      campaignId: item.campaignId || '',
-      adGroupId: item.adGroupId || '',
-      keywordId: item.keywordId || '',
-      keywordText: item.keywordText || '',
-      matchType: item.matchType || '',
-      state: item.state || 'ENABLED',
-      stateLower: (item.state || '').toLowerCase(),
-      _level: 'adGroup',
-      _v3Original: true
-    }));
-
-    const normalizedCampNeg = campaignNegativeKeywords.map(item => ({
-      campaignId: item.campaignId || '',
-      adGroupId: '',  // Campaign-level negatives don't have adGroupId
-      keywordId: item.keywordId || '',
-      keywordText: item.keywordText || '',
-      matchType: item.matchType || '',
-      state: item.state || 'ENABLED',
-      stateLower: (item.state || '').toLowerCase(),
-      _level: 'campaign',
-      _v3Original: true
-    }));
-
+    // ===== MERGE =====
     const allNegativeKeywordsData = [...normalizedAdGroupNeg, ...normalizedCampNeg];
 
     // Remove duplicates based on keywordId (if any)

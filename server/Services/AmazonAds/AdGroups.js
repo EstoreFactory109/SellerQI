@@ -112,7 +112,9 @@ async function getAdGroups(accessToken, profileId, region, userId, country, camp
     // ===== PAGINATED FETCH =====
     // SP v3 supports campaignIdFilter in body; we can pass all IDs at once
     // (v2 had URL length limits forcing chunking — v3 body has no such limit)
-    let allAdGroups = [];
+    // Streamed: normalize each page immediately and drop the raw page, so we never hold the
+    // full raw ad-group set AND a second normalized array at the same time.
+    const normalizedAdGroups = [];
     let nextToken = null;
 
     // Convert campaign IDs to strings (v3 expects string array)
@@ -150,21 +152,18 @@ async function getAdGroups(accessToken, profileId, region, userId, country, camp
         break;
       }
 
-      allAdGroups.push(...adGroups);
+      // Normalize this page for backward compatibility and drop the raw page.
+      for (let i = 0; i < adGroups.length; i++) {
+        const ag = adGroups[i];
+        normalizedAdGroups.push({ ...ag, _v3Original: true, stateLower: (ag.state || '').toLowerCase() });
+      }
       nextToken = response.data.nextToken || null;
 
-      console.log(`  ↳ Fetched ${adGroups.length} ad groups (total so far: ${allAdGroups.length})`);
+      console.log(`  ↳ Fetched ${adGroups.length} ad groups (total so far: ${normalizedAdGroups.length})`);
 
     } while (nextToken);
 
-    console.log(`✅ Ad Groups data fetched: ${allAdGroups.length} ad groups total`);
-
-    // ===== NORMALIZE v3 RESPONSE FOR BACKWARD COMPATIBILITY =====
-    const normalizedAdGroups = allAdGroups.map(ag => ({
-      ...ag,
-      _v3Original: true,
-      stateLower: (ag.state || '').toLowerCase()
-    }));
+    console.log(`✅ Ad Groups data fetched: ${normalizedAdGroups.length} ad groups total`);
 
     // ===== SAVE TO DATABASE =====
     const metricDate = getYesterdayMetricDateUtc();

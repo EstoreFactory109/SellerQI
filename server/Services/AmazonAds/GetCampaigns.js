@@ -76,8 +76,34 @@ async function getCampaign(accessToken, profileId, region, userId, country) {
       'Content-Type': SP_V3_CONTENT_TYPE
     };
 
-    // ===== PAGINATED FETCH =====
-    let allCampaigns = [];
+    // ===== NORMALIZE v3 RESPONSE TO MATCH EXISTING MODEL (per-item) =====
+    // v3 uses different field names; project them onto the v2-shaped schema so
+    // downstream readers (audit calculations, frontend tables, schema validation)
+    // keep working with a single shape. Applied per page during the streamed fetch.
+    const normalizeCampaign = (c) => {
+      const dailyBudgetRaw = c?.budget?.budget;
+      const dailyBudget = (typeof dailyBudgetRaw === 'number' && Number.isFinite(dailyBudgetRaw))
+        ? dailyBudgetRaw
+        : (dailyBudgetRaw != null && !Number.isNaN(Number(dailyBudgetRaw)) ? Number(dailyBudgetRaw) : undefined);
+      const premiumBidAdjustment = c?.dynamicBidding?.strategy != null
+        ? String(c.dynamicBidding.strategy)
+        : undefined;
+      return {
+        ...c,
+        // This endpoint is `/sp/campaigns/list`, so the type is always SP.
+        campaignType: c.campaignType || 'sponsoredProducts',
+        dailyBudget,
+        premiumBidAdjustment,
+        _v3Original: true,
+        stateLower: (c.state || '').toLowerCase(),
+        targetingTypeLower: (c.targetingType || '').toLowerCase(),
+      };
+    };
+
+    // ===== PAGINATED FETCH (streamed) =====
+    // Normalize each page immediately and drop the raw page, so we never hold the full raw
+    // campaign set AND a second normalized array at the same time.
+    const normalizedCampaigns = [];
     let nextToken = null;
 
     do {
@@ -113,61 +139,21 @@ async function getCampaign(accessToken, profileId, region, userId, country) {
         break;
       }
 
-      allCampaigns.push(...campaigns);
+      for (let i = 0; i < campaigns.length; i++) normalizedCampaigns.push(normalizeCampaign(campaigns[i]));
       nextToken = response.data.nextToken || null;
 
-      logger.debug(`[GetCampaigns] Fetched ${campaigns.length} campaigns (total so far: ${allCampaigns.length})`);
+      logger.debug(`[GetCampaigns] Fetched ${campaigns.length} campaigns (total so far: ${normalizedCampaigns.length})`);
 
     } while (nextToken);
 
-    logger.info(`[GetCampaigns] Campaigns fetched: ${allCampaigns.length} total`);
+    logger.info(`[GetCampaigns] Campaigns fetched: ${normalizedCampaigns.length} total`);
 
     // ===== HANDLE EMPTY CAMPAIGNS GRACEFULLY =====
-    if (allCampaigns.length === 0) {
+    if (normalizedCampaigns.length === 0) {
       logger.warn('No campaigns found for user', { userId, region, country });
     } else {
-      // Log some stats about the campaigns
-      const enabledCampaigns = allCampaigns.filter(campaign =>
-        campaign && campaign.state === 'ENABLED'
-      );
-      logger.debug(`[GetCampaigns] Campaign breakdown: ${allCampaigns.length} total, ${enabledCampaigns.length} enabled`);
+      logger.debug(`[GetCampaigns] Campaign breakdown: ${normalizedCampaigns.length} total (all ENABLED)`);
     }
-
-    // ===== NORMALIZE v3 RESPONSE TO MATCH EXISTING MODEL =====
-    // v3 uses different field names; project them onto the v2-shaped schema so
-    // downstream readers (audit calculations, frontend tables, schema validation)
-    // keep working with a single shape.
-    //
-    // v3 fields: campaignId, name, state (ENABLED/PAUSED/ARCHIVED),
-    //   targetingType (AUTO/MANUAL), dynamicBidding, budget { budget, budgetType, … },
-    //   startDate, endDate
-    // v2 fields (what the schema still uses): campaignId, name, state,
-    //   targetingType, premiumBidAdjustment, dailyBudget, startDate
-    const normalizedCampaigns = allCampaigns.map(c => {
-      // Best-effort projection of v3 → v2 field names. Anything we can't map
-      // is left undefined; the schema no longer requires those fields.
-      const dailyBudgetRaw = c?.budget?.budget;
-      const dailyBudget = (typeof dailyBudgetRaw === 'number' && Number.isFinite(dailyBudgetRaw))
-        ? dailyBudgetRaw
-        : (dailyBudgetRaw != null && !Number.isNaN(Number(dailyBudgetRaw)) ? Number(dailyBudgetRaw) : undefined);
-
-      // v3 doesn't expose a single premiumBidAdjustment scalar; preserve the
-      // strategy label if available so downstream code has *something* to read.
-      const premiumBidAdjustment = c?.dynamicBidding?.strategy != null
-        ? String(c.dynamicBidding.strategy)
-        : undefined;
-
-      return {
-        ...c,
-        // This endpoint is `/sp/campaigns/list`, so the type is always SP.
-        campaignType: c.campaignType || 'sponsoredProducts',
-        dailyBudget,
-        premiumBidAdjustment,
-        _v3Original: true,
-        stateLower: (c.state || '').toLowerCase(),
-        targetingTypeLower: (c.targetingType || '').toLowerCase(),
-      };
-    });
 
     // ===== SAVE TO DATABASE WITH VALIDATION =====
     let createCampaignData;
