@@ -440,11 +440,26 @@ const ManageAccounts = () => {
     return isSeller ? 'Seller' : '-';
   };
 
-  // Row-level Status column: 3-condition model.
-  // 1. Not on Pro (or Pro without a card on file yet) => Signed Up, regardless of card-connected status
-  // 2. Pro + card connected + still in trial => Trial
-  // 3. Pro + card connected + not in trial (i.e. actually paying) => Paid
+  // Row-level Status column. The status itself is resolved server-side (server/utils/accountStatus.js)
+  // and arrives as user.accountStatus, so this row label, the stat card counts and the rows a card
+  // filters to are all the same computation - they used to be three separate ones that disagreed
+  // (a cancelled customer counted under the Cancelled card while their row read "Signed Up").
+  const ACCOUNT_STATUS_DISPLAY = {
+    signed_up: { color: 'text-gray-500', label: 'Signed Up' },
+    trial: { color: 'text-blue-500', label: 'Trial' },
+    paid: { color: 'text-green-500', label: 'Paid' },
+    cancelled: { color: 'text-red-500', label: 'Cancelled' },
+    refunded: { color: 'text-orange-400', label: 'Refunded' },
+    expired: { color: 'text-gray-400', label: 'Expired' },
+  };
+
   const getSubscriptionStatus = (user) => {
+    const fromServer = ACCOUNT_STATUS_DISPLAY[user.accountStatus];
+    if (fromServer) return fromServer;
+
+    // Fallback for responses without accountStatus (the unpaginated /accounts path deliberately
+    // omits it, since it can't resolve a real card status). Degrades to the old plan-based guess
+    // rather than showing nothing.
     if (user.packageType !== 'PRO' || !user.cardConnected) {
       return { color: 'text-gray-500', label: 'Signed Up' };
     }
@@ -1548,6 +1563,7 @@ const ManageAccounts = () => {
                         { label: 'Trial', count: stats?.trialUsers ?? 0, active: statusCardFilter === 'trial', onClick: () => { setStatusCardFilter('trial'); setFilterType('all'); setCurrentPage(1); } },
                         { label: 'Expired', count: stats?.expiredUsers ?? 0, active: statusCardFilter === 'expired', onClick: () => { setStatusCardFilter('expired'); setFilterType('all'); setCurrentPage(1); } },
                         { label: 'Cancelled', count: stats?.cancelledSubscriptions ?? 0, active: statusCardFilter === 'cancelled', onClick: () => { setStatusCardFilter('cancelled'); setFilterType('all'); setCurrentPage(1); } },
+                        { label: 'Refunded', count: stats?.refundedUsers ?? 0, active: statusCardFilter === 'refunded', onClick: () => { setStatusCardFilter('refunded'); setFilterType('all'); setCurrentPage(1); } },
                         { label: 'Agency', count: stats?.packageStats?.AGENCY ?? 0, active: filterType === 'AGENCY', onClick: () => { setFilterType('AGENCY'); setStatusCardFilter('all'); setCurrentPage(1); } },
                       ];
                       return chips.map((chip) => (

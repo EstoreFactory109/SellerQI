@@ -12,6 +12,12 @@ const UserModel = require('../../models/user-auth/userModel.js');
 const PaymentLogs = require('../../models/system/PaymentLogsModel.js');
 const Subscription = require('../../models/user-auth/SubscriptionModel.js');
 const { getHttpsCookieOptions } = require('../../utils/cookieConfig.js');
+const {
+    PAID_CAPABLE_PLANS,
+    resolveAccountStatus,
+    refundedMatchClause,
+    subscriptionRefundQuery
+} = require('../../utils/accountStatus.js');
 const RazorpayService = require('../../Services/Razorpay/RazorpayService.js');
 const StripeService = require('../../Services/Stripe/StripeService.js');
 
@@ -258,7 +264,18 @@ const buildAccountLookupStages = () => ([
             let: { uid: '$_id' },
             pipeline: [
                 { $match: { $expr: { $eq: ['$userId', '$$uid'] } } },
-                { $project: { paymentGateway: 1, stripeCustomerId: 1, nextBillingDate: 1, currentPeriodEnd: 1, paymentStatus: 1 } }
+                {
+                    $project: {
+                        paymentGateway: 1,
+                        stripeCustomerId: 1,
+                        nextBillingDate: 1,
+                        currentPeriodEnd: 1,
+                        paymentStatus: 1,
+                        // Collapsed to a boolean here rather than projecting the whole paymentHistory
+                        // array across the join - resolveAccountStatus only needs "was there a refund".
+                        hasRefundedPayment: { $in: ['refunded', { $ifNull: ['$paymentHistory.status', []] }] }
+                    }
+                }
             ],
             as: 'subscriptionData'
         }
@@ -379,7 +396,9 @@ const buildAccountsPipeline = (filters) => {
     } else if (statusFilter === 'expired') {
         // Expired: paid plan lapsed (past_due) OR a trial ended without converting - not a cancellation either way
         preMatchClauses.push({ $or: [{ subscriptionStatus: 'past_due' }, trialExpiredClause] });
-    } else if (statusFilter === 'cancelled') {
+    } else if (statusFilter === 'cancelled' || statusFilter === 'refunded') {
+        // Both start from a cancellation - they're split apart by the refund signal in the
+        // post-lookup stage below, which needs the joined subscriptionInfo to exist first.
         preMatchClauses.push({ subscriptionStatus: 'cancelled' });
     }
 
@@ -436,6 +455,10 @@ const buildAccountsPipeline = (filters) => {
         const re = new RegExp(escapeRegex(search), 'i');
         postMatchAnd.push({ $or: [{ firstName: re }, { lastName: re }, { email: re }, { 'sellerCentral.brand': re }] });
     }
+    // Cancelled vs Refunded: mutually exclusive, so the two cards always sum to every cancellation.
+    // Mirrors resolveAccountStatus's precedence (a refund outranks a plain cancellation).
+    if (statusFilter === 'cancelled') postMatchAnd.push({ $nor: [refundedMatchClause()] });
+    else if (statusFilter === 'refunded') postMatchAnd.push(refundedMatchClause());
     if (spApiFilter === 'connected') postMatchAnd.push({ $expr: connectionExpr('spiRefreshToken') });
     else if (spApiFilter === 'not-connected') postMatchAnd.push({ $expr: { $not: connectionExpr('spiRefreshToken') } });
     if (adsFilter === 'connected') postMatchAnd.push({ $expr: connectionExpr('adsRefreshToken') });
@@ -449,7 +472,7 @@ const buildAccountsPipeline = (filters) => {
 };
 
 /**
- * Resolves live card-connected status for every Pro-plan user, keyed by userId. "Paid" and
+ * Resolves live card-connected status for every paid-capable (Pro/Agency) user, keyed by userId. "Paid" and
  * "Trial" both require a card on file to truly qualify (see getSubscriptionStatus's 3-condition
  * model on the frontend) - a live Stripe/Razorpay-derived fact Mongo can't query directly.
  * Computed once per request and shared between the stat card counts (getAccountsStats) and the
@@ -458,7 +481,7 @@ const buildAccountsPipeline = (filters) => {
  */
 const getProCardConnectedMap = async () => {
     const proUsers = await UserModel.aggregate([
-        { $match: { packageType: 'PRO' } },
+        { $match: { packageType: { $in: PAID_CAPABLE_PLANS } } },
         { $project: { isInTrialPeriod: 1 } },
         {
             $lookup: {
@@ -496,7 +519,16 @@ const getAccountsStats = async (proCardMapPromise) => {
         $and: [{ $eq: ['$isInTrialPeriod', true] }, { $ne: ['$trialEndsDate', null] }, { $lt: ['$trialEndsDate', now] }]
     };
 
-    const [result, proCardMap] = await Promise.all([
+    // Refunded users, counted without joining subscriptions onto every user: refunds are rare, so
+    // the id set is small. Same signal as resolveAccountStatus, and gated on a cancellation so the
+    // Refunded card matches the row label (a refund on a still-active subscription stays "Paid").
+    const countRefundedUsers = async () => {
+        const refundedUserIds = await Subscription.find(subscriptionRefundQuery()).distinct('userId');
+        if (!refundedUserIds.length) return 0;
+        return UserModel.countDocuments({ _id: { $in: refundedUserIds }, subscriptionStatus: 'cancelled' });
+    };
+
+    const [result, proCardMap, refundedUsers] = await Promise.all([
         UserModel.aggregate([
             {
                 $group: {
@@ -518,7 +550,8 @@ const getAccountsStats = async (proCardMapPromise) => {
                 }
             }
         ]),
-        proCardMapPromise
+        proCardMapPromise,
+        countRefundedUsers()
     ]);
     const stats = result[0];
 
@@ -538,7 +571,10 @@ const getAccountsStats = async (proCardMapPromise) => {
         unverified: stats?.unverified || 0,
         activeSubscriptions,
         inactiveSubscriptions: stats?.inactiveSubscriptions || 0,
-        cancelledSubscriptions: stats?.cancelledSubscriptions || 0,
+        // Cancelled excludes the refunded ones so the two cards stay mutually exclusive and still
+        // sum to every cancellation - matching resolveAccountStatus, where a refund outranks a cancellation.
+        cancelledSubscriptions: Math.max(0, (stats?.cancelledSubscriptions || 0) - refundedUsers),
+        refundedUsers,
         expiredUsers: stats?.expiredUsers || 0,
         trialUsers,
         packageStats: {
@@ -684,6 +720,14 @@ const getAllAccounts = asyncHandler(async (req, res) => {
             }
         }
 
+        // Single authoritative Status per row (see utils/accountStatus.js), so the label, the stat
+        // card count and the card's filtered rows can't disagree. Only set where cardConnected is a
+        // real answer - the unpaginated path forces it to false, and labelling every paying customer
+        // "Signed Up" there would be worse than sending nothing (the client falls back on its own).
+        if (isPaginated || alreadyProcessed) {
+            accountsWithStats.forEach(account => { account.accountStatus = resolveAccountStatus(account); });
+        }
+
         const responseData = {
             accounts: accountsWithStats,
             stats,
@@ -768,6 +812,8 @@ const getAgencyClients = asyncHandler(async (req, res) => {
         const clients = await UserModel.aggregate(pipeline);
         const clientsWithFields = clients.map(mapAccountFields);
         await attachCardConnectedStatus(clientsWithFields);
+        // Same authoritative Status as the top-level rows - this list is bounded, so cardConnected is real.
+        clientsWithFields.forEach(client => { client.accountStatus = resolveAccountStatus(client); });
 
         logger.info(`SuperAdmin ${adminId} retrieved ${clientsWithFields.length} clients for agency ${agencyId}`);
 

@@ -117,7 +117,11 @@ const subscriptionSchema = new mongoose.Schema(
     },
     paymentStatus: {
       type: String,
-      enum: ["paid", "unpaid", "no_payment_required", "pending"],
+      // 'refunded' is written by StripeWebhookService.handleChargeRefunded on full refunds. It was
+      // missing here and only survived because findOneAndUpdate skips validators by default - the
+      // sibling updateSubscription() helper passes runValidators: true, so that write would have
+      // thrown if it were ever routed through it.
+      enum: ["paid", "unpaid", "no_payment_required", "pending", "refunded"],
       default: "no_payment_required", // For LITE plan
     },
     amount: {
