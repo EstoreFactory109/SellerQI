@@ -54,6 +54,19 @@ module.exports = {
         {
             name: 'worker',
             script: './server/Services/BackgroundJobs/worker.js',
+            // Cap V8's heap BELOW max_memory_restart (4G). Without this V8 sizes old-space from
+            // total system RAM, so the heap ceiling exceeds the PM2 cap meant to contain it — and
+            // PM2's cap is a poll-based RSS check, so a fast allocation burst reaches the kernel
+            // OOM-killer before PM2 ever acts.
+            node_args: '--max-old-space-size=3072',
+            //
+            // ⚠ DIVERGENCE FROM ecosystem.config.js — this file has NOT been through the memory
+            // consolidation that the single-box config got in b6c4266 (5×15 → 3×25, same 75 slots,
+            // ~2 V8 heaps less baseline RAM). Here it is still 5 × 4G = 20 GB of worker budget.
+            // That may be correct for a DEDICATED worker EC2 with the RAM to back it, which is what
+            // this file is for — so the numbers are left alone rather than guessed at. Before using
+            // this file, check the target host's RAM against that 20 GB and align it deliberately.
+            //
             // SellerQI v2 Phase 1 default: 5 workers × 15 concurrency = 75 slots.
             // Override via WORKER_INSTANCES env var on the EC2 host.
             instances: parseInt(process.env.WORKER_INSTANCES || '5', 10),

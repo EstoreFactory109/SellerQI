@@ -35,6 +35,11 @@ module.exports = {
         {
             name: 'api-server',
             script: './server/index.js',
+            // Cap V8's heap BELOW max_memory_restart (1G). Without this V8 sizes
+            // old-space from total system RAM, so the heap ceiling exceeds the PM2 cap
+            // meant to contain it — and PM2's cap is a poll-based RSS check, so a fast
+            // allocation burst reaches the kernel OOM-killer before PM2 ever acts.
+            node_args: '--max-old-space-size=768',
             instances: 1, // Single instance for API server
             exec_mode: 'fork',
             env: {
@@ -85,6 +90,11 @@ module.exports = {
             // api-server env above — that tells the API to skip in-process crons.
             name: 'cron-producer',
             script: './server/Services/BackgroundJobs/cronProducerStandalone.js',
+            // Cap V8's heap BELOW max_memory_restart (512M). Without this V8 sizes
+            // old-space from total system RAM, so the heap ceiling exceeds the PM2 cap
+            // meant to contain it — and PM2's cap is a poll-based RSS check, so a fast
+            // allocation burst reaches the kernel OOM-killer before PM2 ever acts.
+            node_args: '--max-old-space-size=384',
             instances: 1,
             exec_mode: 'fork',
             env: {
@@ -117,6 +127,11 @@ module.exports = {
             // Override per environment via WORKER_INSTANCES / WORKER_CONCURRENCY.
             name: 'worker',
             script: './server/Services/BackgroundJobs/worker.js',
+            // Cap V8's heap BELOW max_memory_restart (2G). Without this V8 sizes
+            // old-space from total system RAM, so the heap ceiling exceeds the PM2 cap
+            // meant to contain it — and PM2's cap is a poll-based RSS check, so a fast
+            // allocation burst reaches the kernel OOM-killer before PM2 ever acts.
+            node_args: '--max-old-space-size=1536',
             instances: parseInt(process.env.WORKER_INSTANCES || '3', 10), // Default: 3 workers (was 5)
             exec_mode: 'cluster', // Run multiple instances
             env: {
@@ -178,6 +193,11 @@ module.exports = {
             // (integration jobs are 3GB-capped, see max_memory_restart).
             name: 'integration-worker',
             script: './server/Services/BackgroundJobs/integrationWorker.js',
+            // Cap V8's heap BELOW max_memory_restart (3G). Without this V8 sizes
+            // old-space from total system RAM, so the heap ceiling exceeds the PM2 cap
+            // meant to contain it — and PM2's cap is a poll-based RSS check, so a fast
+            // allocation burst reaches the kernel OOM-killer before PM2 ever acts.
+            node_args: '--max-old-space-size=2304',
             instances: parseInt(process.env.INTEGRATION_WORKER_INSTANCES || '1', 10), // Default: 1 worker
             exec_mode: 'cluster', // Run multiple instances if needed
             env: {
@@ -219,6 +239,11 @@ module.exports = {
             // Runs every Sunday at 11:59 PM UTC to record weekly account history snapshots
             name: 'weekly-history-worker',
             script: './server/Services/BackgroundJobs/weeklyHistoryWorker.js',
+            // Cap V8's heap BELOW max_memory_restart (2G). Without this V8 sizes
+            // old-space from total system RAM, so the heap ceiling exceeds the PM2 cap
+            // meant to contain it — and PM2's cap is a poll-based RSS check, so a fast
+            // allocation burst reaches the kernel OOM-killer before PM2 ever acts.
+            node_args: '--max-old-space-size=1536',
             instances: 1, // Single instance (cron-based, doesn't need clustering)
             exec_mode: 'fork',
             env: {
@@ -252,6 +277,11 @@ module.exports = {
             // Runs all alert services and sends a single summary email per subscribed user
             name: 'alerts-worker',
             script: './server/Services/BackgroundJobs/alertsWorker.js',
+            // Cap V8's heap BELOW max_memory_restart (768M). Without this V8 sizes
+            // old-space from total system RAM, so the heap ceiling exceeds the PM2 cap
+            // meant to contain it — and PM2's cap is a poll-based RSS check, so a fast
+            // allocation burst reaches the kernel OOM-killer before PM2 ever acts.
+            node_args: '--max-old-space-size=512',
             instances: 1,
             exec_mode: 'fork',
             env: {
@@ -296,6 +326,11 @@ module.exports = {
             // Nothing else in the system depends on it.
             name: 'freshness-sweeper',
             script: './server/Services/BackgroundJobs/freshnessSweeperStandalone.js',
+            // Cap V8's heap BELOW max_memory_restart (512M). Without this V8 sizes
+            // old-space from total system RAM, so the heap ceiling exceeds the PM2 cap
+            // meant to contain it — and PM2's cap is a poll-based RSS check, so a fast
+            // allocation burst reaches the kernel OOM-killer before PM2 ever acts.
+            node_args: '--max-old-space-size=384',
             instances: 1,
             exec_mode: 'fork',
             env: {
@@ -321,6 +356,11 @@ module.exports = {
             // Purges all remaining user data after User + Seller are deleted (hybrid delete flow)
             name: 'delete-user-worker',
             script: './server/Services/BackgroundJobs/deleteUserWorker.js',
+            // Cap V8's heap BELOW max_memory_restart (512M). Without this V8 sizes
+            // old-space from total system RAM, so the heap ceiling exceeds the PM2 cap
+            // meant to contain it — and PM2's cap is a poll-based RSS check, so a fast
+            // allocation burst reaches the kernel OOM-killer before PM2 ever acts.
+            node_args: '--max-old-space-size=384',
             instances: 1,
             exec_mode: 'fork',
             env: {
