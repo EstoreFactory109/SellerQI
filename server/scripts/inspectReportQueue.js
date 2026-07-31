@@ -32,7 +32,11 @@
  *
  *   Optional:
  *     --statuses=IN_QUEUE,IN_PROGRESS   which processingStatuses to list (default these two)
- *     --types=GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE   filter to specific reportTypes
+ *     --types=TYPE1,TYPE2               reportTypes to check (default: the finance report type
+ *                                        this script exists to diagnose). Amazon REQUIRES at
+ *                                        least one reportType on a first-page call — there is no
+ *                                        "all types" wildcard, so to check a different report
+ *                                        queue (e.g. an ads report), pass its type explicitly.
  *     --all                             include DONE/FATAL/CANCELLED too (fuller picture)
  *     --days=7                          how far back createdSince goes (default 30)
  *     --json                            emit raw JSON instead of the table
@@ -132,12 +136,17 @@ async function fetchAllReports({ baseUrl, accessToken, statuses, types, createdS
       // if the original filters are repeated alongside it.
       pathname = `/reports/2021-06-30/reports?nextToken=${encodeURIComponent(nextToken)}`;
     } else {
+      if (!types.length) {
+        // Defence in depth: reportTypes is mandatory on a first-page call. Failing loudly here
+        // beats sending a request Amazon will reject with a 400 anyway.
+        throw new Error('reportTypes is required for a first-page getReports call and none were resolved.');
+      }
       const qs = [
         `processingStatuses=${statuses.map(encodeURIComponent).join(',')}`,
+        `reportTypes=${types.map(encodeURIComponent).join(',')}`,
         `createdSince=${encodeURIComponent(createdSince)}`,
         'pageSize=100',
       ];
-      if (types.length) qs.push(`reportTypes=${types.map(encodeURIComponent).join(',')}`);
       pathname = `/reports/2021-06-30/reports?${qs.join('&')}`;
     }
 
@@ -197,7 +206,13 @@ async function main() {
   const statuses = args.all
     ? ['IN_QUEUE', 'IN_PROGRESS', 'DONE', 'FATAL', 'CANCELLED']
     : String(args.statuses || 'IN_QUEUE,IN_PROGRESS').split(',').map((s) => s.trim()).filter(Boolean);
-  const types = args.types ? String(args.types).split(',').map((s) => s.trim()).filter(Boolean) : [];
+  // Amazon's getReports REQUIRES reportTypes on a first-page call — it's only optional once
+  // paginating with nextToken. There is no wildcard for "all types", so default to the one report
+  // type this script actually exists to diagnose rather than omitting the parameter (which Amazon
+  // rejects with HTTP 400 "reportTypes;" missing).
+  const types = args.types
+    ? String(args.types).split(',').map((s) => s.trim()).filter(Boolean)
+    : [FINANCE_REPORT_TYPE];
   const days = parseInt(args.days || '30', 10);
   const createdSince = new Date(Date.now() - days * 86400000).toISOString();
 
