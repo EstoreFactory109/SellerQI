@@ -122,5 +122,29 @@ jobs:
             pm2 set pm2-logrotate:rotateInterval '0 0 * * *' || true
             pm2 set pm2-logrotate:workerInterval 300 || true
 
+            # VERIFY it actually took. Every command above is `|| true`, so a failed
+            # `pm2 install` previously left production with NO rotation while the deploy
+            # still reported success — and unrotated logs are one of the ways the PM2 God
+            # daemon ends up buffering gigabytes (it owns every process's stdout/stderr,
+            # and a write to a full disk or an unlinked fd backs up in its heap).
+            # Still non-fatal — a rotation problem must not fail a deploy that is otherwise
+            # fine — but it is now LOUD instead of silent.
+            echo "── Verifying log rotation ──"
+            if pm2 conf pm2-logrotate 2>/dev/null | grep -q 'max_size'; then
+              pm2 conf pm2-logrotate 2>/dev/null | grep -E 'max_size|retain|compress|rotateInterval' || true
+            else
+              echo "::warning title=PM2 log rotation not configured::pm2-logrotate is NOT active on this host. PM2 logs will grow unbounded and can fill the disk (previously caused 502s) and inflate the God daemon's memory. Fix with: pm2 install pm2-logrotate"
+            fi
+
             echo "── Deploy complete ──"
             pm2 ls
+            # Baseline memory snapshot, so a growing God daemon / worker set is visible in
+            # deploy logs over time rather than only discovered when the OOM-killer fires.
+            pm2 jlist 2>/dev/null | node -e '
+              let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+                try{
+                  const a=JSON.parse(s);
+                  console.log("── Memory after start ──");
+                  for(const p of a) console.log(`  ${String(p.name).padEnd(24)} rss=${Math.round((p.monit?.memory||0)/1048576)}MB restarts=${p.pm2_env?.restart_time??0}`);
+                }catch(e){}
+              })' || true
