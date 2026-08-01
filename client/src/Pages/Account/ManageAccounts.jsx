@@ -14,7 +14,6 @@ import {
   Shield, 
   Briefcase,
   Mail,
-  CalendarDays,
   X,
   Trash2,
   MoreVertical,
@@ -115,7 +114,6 @@ const ManageAccounts = () => {
   const navigate = useNavigate();
   const [currentPage, setCurrentPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState('');
-  const [brandSearchQuery, setBrandSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -130,7 +128,6 @@ const ManageAccounts = () => {
   const [statusCardFilter, setStatusCardFilter] = useState('all'); // 'all' | 'paid' | 'trial' | 'expired' | 'cancelled' - driven by stat cards
   const [pagination, setPagination] = useState({ currentPage: 1, totalPages: 1, totalCount: 0, limit: ITEMS_PER_PAGE });
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
-  const [debouncedBrandQuery, setDebouncedBrandQuery] = useState('');
   const isFirstFilterRun = useRef(true);
   const [expandedAgencyIds, setExpandedAgencyIds] = useState(new Set());
   const [agencyClientsCache, setAgencyClientsCache] = useState({}); // { [agencyUserId]: clientRow[] }
@@ -233,13 +230,6 @@ const ManageAccounts = () => {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedBrandQuery(brandSearchQuery);
-      setCurrentPage(1);
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [brandSearchQuery]);
 
   // Fetch accounts data. `quiet` skips the full-page loading spinner - used for
   // page/filter changes and post-mutation refreshes so the table stays visible.
@@ -252,7 +242,6 @@ const ManageAccounts = () => {
           page: currentPage,
           limit: ITEMS_PER_PAGE,
           search: debouncedSearchQuery || undefined,
-          brand: debouncedBrandQuery || undefined,
           packageType: filterType !== 'all' ? filterType : undefined,
           statusFilter: statusCardFilter !== 'all' ? statusCardFilter : undefined,
           startDate: startDate || undefined,
@@ -330,7 +319,7 @@ const ManageAccounts = () => {
       return;
     }
     fetchAccounts({ quiet: true });
-  }, [currentPage, debouncedSearchQuery, debouncedBrandQuery, filterType, statusCardFilter, startDate, endDate, spApiFilter, adsFilter]);
+  }, [currentPage, debouncedSearchQuery, filterType, statusCardFilter, startDate, endDate, spApiFilter, adsFilter]);
 
   // Fetch (or re-fetch) the client list for one agency and store it in the cache
   const fetchAgencyClients = async (agencyId) => {
@@ -786,7 +775,7 @@ const ManageAccounts = () => {
   // here on purpose: it's the main way to browse agency owners, so it must keep nesting enabled
   // (agency clients never have packageType 'AGENCY' themselves, so this filter can't reveal them anyway).
   const hasActiveFilters = Boolean(
-    searchQuery || brandSearchQuery || (filterType !== 'all' && filterType !== 'AGENCY') || statusCardFilter !== 'all' ||
+    searchQuery || (filterType !== 'all' && filterType !== 'AGENCY') || statusCardFilter !== 'all' ||
     startDate || endDate || spApiFilter !== 'all' || adsFilter !== 'all'
   );
 
@@ -803,14 +792,14 @@ const ManageAccounts = () => {
     const isExpandLoading = isAgencyOwner && agencyClientsLoading.has(user._id);
 
     return (
-      <tr key={user._id} className={`hover:bg-[#1a1a1a] transition-colors ${isChild ? 'bg-[#111318]' : ''}`}>
+      <tr key={user._id} className={`group transition-colors hover:bg-white/[0.035] ${isChild ? 'bg-blue-500/[0.035]' : 'bg-transparent'}`}>
         <td className={`px-3 py-2.5 ${isChild ? 'pl-8' : ''}`}>
           <div className="flex items-center gap-2">
             {isAgencyOwner && (
               <button
                 type="button"
                 onClick={() => toggleAgencyExpand(user)}
-                className="p-1 rounded text-gray-400 hover:bg-[#252525] hover:text-gray-300 shrink-0"
+                className="p-1 rounded-md text-gray-400 hover:bg-white/[0.06] hover:text-gray-200 shrink-0"
                 aria-label={isExpanded ? 'Collapse agency clients' : 'Expand agency clients'}
                 aria-expanded={isExpanded}
               >
@@ -821,8 +810,14 @@ const ManageAccounts = () => {
                 )}
               </button>
             )}
-            <div className="w-8 h-8 rounded-lg bg-[#252525] flex items-center justify-center shrink-0">
-              <span className="text-gray-300 text-xs font-medium">
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-sm border ${
+              user.packageType === 'AGENCY'
+                ? 'bg-violet-500/15 border-violet-400/20'
+                : user.packageType === 'PRO'
+                ? 'bg-amber-500/15 border-amber-400/20'
+                : 'bg-sky-500/10 border-sky-400/20'
+            }`}>
+              <span className="text-gray-100 text-xs font-semibold">
                 {(user.firstName?.[0] || '') + (user.lastName?.[0] || '')}
               </span>
             </div>
@@ -835,7 +830,7 @@ const ManageAccounts = () => {
                   {user.isInTrialPeriod && <span className="ml-1 text-xs text-gray-500">Trial</span>}
                 </p>
               )}
-              <p className="text-xs text-gray-500 break-all flex items-center gap-1">
+              <p className="text-xs text-gray-500 break-all flex items-center gap-1 mt-0.5">
                 <Mail className="w-3 h-3 shrink-0" />{user.email}
               </p>
               <p className="text-xs text-gray-500">{user.phone || '—'}</p>
@@ -844,40 +839,58 @@ const ManageAccounts = () => {
         </td>
         <td className="px-2 py-2.5 text-center">
           {user.packageType === 'AGENCY' ? (
-            <span className={`inline-flex items-center justify-center gap-1 text-xs font-medium ${packageInfo.color} max-w-[9rem] mx-auto text-center`}>
+            <span className={`inline-flex items-center justify-center gap-1 rounded-full border border-white/10 bg-white/[0.035] px-2 py-1 text-xs font-medium ${packageInfo.color} max-w-[9rem] mx-auto text-center`}>
               <PackageIcon className="w-3 h-3 shrink-0" />{typeColumnLabel(packageInfo.label)}
             </span>
           ) : (
-            <span className={`text-xs font-medium ${getUserTypeLabel(user) === 'Seller' ? 'text-yellow-500' : 'text-gray-500'}`}>
+            <span className={`inline-flex items-center justify-center rounded-full border px-2 py-1 text-xs font-medium ${
+              getUserTypeLabel(user) === 'Seller'
+                ? 'border-yellow-500/20 bg-yellow-500/10 text-yellow-400'
+                : 'border-white/10 bg-white/[0.025] text-gray-500'
+            }`}>
               {getUserTypeLabel(user)}
             </span>
           )}
         </td>
-        <td className="px-2 py-2.5 text-xs text-gray-400">{user.brand || '—'}</td>
+        <td className="px-2 py-2.5 text-xs text-gray-400">
+          <span className="line-clamp-2">{user.brand || '—'}</span>
+        </td>
         <td className="px-2 py-2.5 text-center">
-          <span className={`text-xs font-medium ${statusInfo.color}`}>
+          <span className={`inline-flex items-center justify-center rounded-full border border-white/10 bg-white/[0.035] px-2 py-1 text-xs font-medium ${statusInfo.color}`}>
             {statusInfo.label}
           </span>
         </td>
         <td className="px-2 py-2.5 text-center text-xs">
           {getSpApiConnectionStatus(user).connected ? (
-            <Check className="w-4 h-4 text-green-500 inline-block" aria-label="Connected" />
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-green-500/10 border border-green-500/20">
+              <Check className="w-4 h-4 text-green-400" aria-label="Connected" />
+            </span>
           ) : (
-            <XIcon className="w-4 h-4 text-red-500 inline-block" aria-label="Not connected" />
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-red-500/10 border border-red-500/20">
+              <XIcon className="w-4 h-4 text-red-400" aria-label="Not connected" />
+            </span>
           )}
         </td>
         <td className="px-2 py-2.5 text-center text-xs">
           {getAdsApiConnectionStatus(user).connected ? (
-            <Check className="w-4 h-4 text-green-500 inline-block" aria-label="Connected" />
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-green-500/10 border border-green-500/20">
+              <Check className="w-4 h-4 text-green-400" aria-label="Connected" />
+            </span>
           ) : (
-            <XIcon className="w-4 h-4 text-red-500 inline-block" aria-label="Not connected" />
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-red-500/10 border border-red-500/20">
+              <XIcon className="w-4 h-4 text-red-400" aria-label="Not connected" />
+            </span>
           )}
         </td>
         <td className="px-2 py-2.5 text-center text-xs">
           {user.cardConnected === true ? (
-            <Check className="w-4 h-4 text-green-500 inline-block" aria-label="Card on file" />
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-green-500/10 border border-green-500/20">
+              <Check className="w-4 h-4 text-green-400" aria-label="Card on file" />
+            </span>
           ) : user.cardConnected === false ? (
-            <XIcon className="w-4 h-4 text-red-500 inline-block" aria-label="No card on file" />
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-red-500/10 border border-red-500/20">
+              <XIcon className="w-4 h-4 text-red-400" aria-label="No card on file" />
+            </span>
           ) : (
             <span className="text-gray-500">—</span>
           )}
@@ -909,7 +922,7 @@ const ManageAccounts = () => {
                   setOpenDropdownId(user._id);
                 }
               }}
-              className="p-1.5 rounded-lg text-gray-400 hover:bg-[#252525] hover:text-gray-300 disabled:opacity-50"
+              className="p-1.5 rounded-lg text-gray-400 hover:bg-white/[0.06] hover:text-gray-200 disabled:opacity-50"
               aria-label="Actions"
               aria-expanded={isDropdownOpen}
             >
@@ -922,18 +935,20 @@ const ManageAccounts = () => {
   };
 
   return (
-    <div className="p-4 md:p-6 max-w-[1600px] w-full">
+    <div className="relative min-h-full w-full overflow-hidden bg-[#0b0f17] p-4 md:p-6">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.18),transparent_34%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.12),transparent_30%)]" />
+      <div className="relative max-w-[1600px] w-full">
           {/* Loading State */}
           {loading && (
-            <div className="flex items-center justify-center py-16">
-              <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#333] border-t-blue-500" />
-              <p className="ml-3 text-sm text-gray-500">Loading accounts…</p>
+            <div className="flex items-center justify-center rounded-2xl border border-white/10 bg-[#101722]/80 py-20 shadow-2xl shadow-black/20">
+              <div className="animate-spin rounded-full h-10 w-10 border-2 border-white/10 border-t-blue-500" />
+              <p className="ml-3 text-sm text-gray-400">Loading accounts…</p>
             </div>
           )}
 
           {/* Error State */}
           {error && (
-            <div className="rounded-lg border border-red-500/40 bg-red-500/5 p-4 mb-6">
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 mb-6 shadow-lg shadow-red-950/10">
               <p className="text-sm font-medium text-red-300">Error: {error}</p>
               <button
                 onClick={fetchAccounts}
@@ -951,7 +966,7 @@ const ManageAccounts = () => {
             const displayName = loggingInUser ? `${loggingInUser.firstName} ${loggingInUser.lastName}` : 'user';
             return (
               <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                <div className="bg-[#161b22] rounded-xl border border-[#30363d] shadow-xl px-8 py-6 flex flex-col items-center gap-4 min-w-[240px]">
+                <div className="bg-[#101722] rounded-2xl border border-white/10 shadow-2xl px-8 py-6 flex flex-col items-center gap-4 min-w-[240px]">
                   <div className="w-12 h-12 border-2 border-green-500 border-t-transparent rounded-full animate-spin" />
                   <p className="text-gray-200 font-medium">Logging in as {displayName}…</p>
                   <p className="text-gray-500 text-sm">Please wait</p>
@@ -962,7 +977,7 @@ const ManageAccounts = () => {
 
           {/* Login Error State */}
           {loginError && (
-            <div className="rounded-lg border border-red-500/40 bg-red-500/5 p-4 mb-6">
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 mb-6 shadow-lg shadow-red-950/10">
               <p className="text-sm font-medium text-red-300">Login Error: {loginError}</p>
               <button
                 onClick={() => setLoginError('')}
@@ -975,7 +990,7 @@ const ManageAccounts = () => {
 
           {/* Delete Error State */}
           {deleteError && (
-            <div className="rounded-lg border border-red-500/40 bg-red-500/5 p-4 mb-6">
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 mb-6 shadow-lg shadow-red-950/10">
               <p className="text-sm font-medium text-red-300">Delete Error: {deleteError}</p>
               <button
                 onClick={() => setDeleteError('')}
@@ -988,14 +1003,14 @@ const ManageAccounts = () => {
 
           {/* Delete Success State */}
           {deleteSuccess && (
-            <div className="rounded-lg border border-[#252525] bg-[#161b22] p-4 mb-6">
+            <div className="rounded-xl border border-green-500/20 bg-green-500/10 p-4 mb-6 shadow-lg shadow-green-950/10">
               <p className="text-sm font-medium text-gray-300">✓ {deleteSuccess}</p>
             </div>
           )}
 
           {/* Cancel Subscription Error State */}
           {cancelError && (
-            <div className="rounded-lg border border-red-500/40 bg-red-500/5 p-4 mb-6">
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 mb-6 shadow-lg shadow-red-950/10">
               <p className="text-sm font-medium text-red-300">Cancel Error: {cancelError}</p>
               <button
                 onClick={() => setCancelError('')}
@@ -1008,14 +1023,14 @@ const ManageAccounts = () => {
 
           {/* Cancel Subscription Success State */}
           {cancelSuccess && (
-            <div className="rounded-lg border border-[#252525] bg-[#161b22] p-4 mb-6">
+            <div className="rounded-xl border border-green-500/20 bg-green-500/10 p-4 mb-6 shadow-lg shadow-green-950/10">
               <p className="text-sm font-medium text-gray-300">✓ {cancelSuccess}</p>
             </div>
           )}
 
           {/* Refund Error State */}
           {refundError && (
-            <div className="rounded-lg border border-red-500/40 bg-red-500/5 p-4 mb-6">
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 mb-6 shadow-lg shadow-red-950/10">
               <p className="text-sm font-medium text-red-300">Refund Error: {refundError}</p>
               <button
                 onClick={() => setRefundError('')}
@@ -1028,14 +1043,14 @@ const ManageAccounts = () => {
 
           {/* Refund Success State */}
           {refundSuccess && (
-            <div className="rounded-lg border border-[#252525] bg-[#161b22] p-4 mb-6">
+            <div className="rounded-xl border border-green-500/20 bg-green-500/10 p-4 mb-6 shadow-lg shadow-green-950/10">
               <p className="text-sm font-medium text-gray-300">✓ {refundSuccess}</p>
             </div>
           )}
 
           {/* Trial Error State */}
           {trialError && !trialUser && (
-            <div className="rounded-lg border border-red-500/40 bg-red-500/5 p-4 mb-6">
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 mb-6 shadow-lg shadow-red-950/10">
               <p className="text-sm font-medium text-red-300">Trial Error: {trialError}</p>
               <button
                 onClick={() => setTrialError('')}
@@ -1048,7 +1063,7 @@ const ManageAccounts = () => {
 
           {/* Trial Success State */}
           {trialSuccess && (
-            <div className="rounded-lg border border-[#252525] bg-[#161b22] p-4 mb-6">
+            <div className="rounded-xl border border-green-500/20 bg-green-500/10 p-4 mb-6 shadow-lg shadow-green-950/10">
               <p className="text-sm font-medium text-gray-300">✓ {trialSuccess}</p>
             </div>
           )}
@@ -1444,10 +1459,10 @@ const ManageAccounts = () => {
           {/* Search, Filters, and Actions */}
           {!loading && !error && (
             <>
-              <div className="rounded-lg border border-[#252525] bg-[#161b22] p-4 md:p-5 mb-6">
-                <div className="flex flex-col lg:flex-row gap-6">
-                {/* LEFT: search, export, filters, then chips - capped at 50% width */}
-                <div className="flex flex-col gap-2 w-full lg:w-1/2 rounded-lg border border-[#252525] p-3">
+              <div className="rounded-2xl border border-white/10 bg-[#101722]/90 p-4 md:p-5 mb-6 shadow-2xl shadow-black/20 backdrop-blur">
+                <div className="flex flex-col xl:flex-row gap-5 items-stretch">
+                {/* LEFT: unified search, export, filters, then chips */}
+                <div className="flex flex-col gap-3 w-full xl:w-[52%] 2xl:w-[50%] rounded-xl border border-white/10 bg-[#0b0f17]/70 p-4">
                   <div className="flex items-center gap-2">
                     <div className="relative flex-1 min-w-0">
                       <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
@@ -1456,7 +1471,7 @@ const ManageAccounts = () => {
                         placeholder="Search name, email, brand…"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full pl-7 pr-2 py-2 text-xs border border-[#30363d] bg-[#21262d] text-gray-100 rounded-md focus:outline-none focus:border-blue-500 placeholder-gray-500"
+                        className="w-full pl-8 pr-3 py-2.5 text-sm border border-white/10 bg-white/[0.04] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500/70 focus:ring-2 focus:ring-blue-500/10 placeholder-gray-500 transition"
                       />
                     </div>
                     <button
@@ -1464,32 +1479,17 @@ const ManageAccounts = () => {
                       onClick={handleExportCsv}
                       title="Export CSV"
                       aria-label="Export CSV"
-                      className="inline-flex items-center justify-center p-2 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-500 transition-colors shrink-0"
+                      className="inline-flex items-center justify-center p-2.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors shrink-0 shadow-lg shadow-blue-950/30"
                     >
                       <Download className="w-3.5 h-3.5" />
                     </button>
-                  </div>
-                  <div className="relative">
-                    <Briefcase className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
-                    <input
-                      type="text"
-                      placeholder="Brand…"
-                      value={brandSearchQuery}
-                      onChange={(e) => setBrandSearchQuery(e.target.value)}
-                      className="w-full pl-7 pr-6 py-2 text-xs border border-[#30363d] bg-[#21262d] text-gray-100 rounded-md focus:outline-none focus:border-blue-500 placeholder-gray-500"
-                    />
-                    {brandSearchQuery && (
-                      <button type="button" onClick={() => setBrandSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-400" aria-label="Clear">
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
                   </div>
                   <div className="relative">
                     <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
                     <select
                       value={filterType}
                       onChange={(e) => { setFilterType(e.target.value); setStatusCardFilter('all'); setCurrentPage(1); }}
-                      className="w-full pl-7 pr-2 py-2 text-xs border border-[#30363d] bg-[#21262d] text-gray-100 rounded-md focus:outline-none focus:border-blue-500 appearance-none"
+                      className="w-full pl-8 pr-8 py-2.5 text-sm border border-white/10 bg-white/[0.04] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500/70 focus:ring-2 focus:ring-blue-500/10 appearance-none transition"
                     >
                       <option value="all">All types</option>
                       <option value="LITE">Lite</option>
@@ -1497,32 +1497,31 @@ const ManageAccounts = () => {
                       <option value="AGENCY">Agency</option>
                     </select>
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <CalendarDays className="w-3.5 h-3.5 text-gray-500 shrink-0" />
-                    <input
+                  <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+<input
                       type="date"
                       value={startDate}
                       onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); }}
-                      className="flex-1 min-w-0 py-2 px-1.5 text-[11px] border border-[#30363d] bg-[#21262d] text-gray-100 rounded-md focus:outline-none focus:border-blue-500"
+                      className="min-w-0 py-2.5 px-2 text-xs border border-white/10 bg-white/[0.04] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500/70 focus:ring-2 focus:ring-blue-500/10"
                     />
                     <span className="text-gray-500 text-[10px] shrink-0">to</span>
                     <input
                       type="date"
                       value={endDate}
                       onChange={(e) => { setEndDate(e.target.value); setCurrentPage(1); }}
-                      className="flex-1 min-w-0 py-2 px-1.5 text-[11px] border border-[#30363d] bg-[#21262d] text-gray-100 rounded-md focus:outline-none focus:border-blue-500"
+                      className="min-w-0 py-2.5 px-2 text-xs border border-white/10 bg-white/[0.04] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500/70 focus:ring-2 focus:ring-blue-500/10"
                     />
                   </div>
                   {(startDate || endDate) && (
-                    <button onClick={() => { clearDateFilters(); setCurrentPage(1); }} className="text-[11px] text-gray-400 hover:text-gray-300 rounded-md border border-[#30363d] hover:bg-[#21262d] py-1">
+                    <button onClick={() => { clearDateFilters(); setCurrentPage(1); }} className="text-[11px] text-gray-400 hover:text-gray-200 rounded-lg border border-white/10 hover:bg-white/[0.05] py-1.5 transition">
                       <X className="w-3 h-3 inline mr-1" /> Clear dates
                     </button>
                   )}
-                  <div className="flex items-center gap-1.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <select
                       value={spApiFilter}
                       onChange={(e) => { setSpApiFilter(e.target.value); setCurrentPage(1); }}
-                      className="flex-1 min-w-0 py-2 px-2 text-xs border border-[#30363d] bg-[#21262d] text-gray-100 rounded-md focus:outline-none focus:border-blue-500"
+                      className="min-w-0 py-2.5 px-2 text-xs border border-white/10 bg-white/[0.04] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500/70 focus:ring-2 focus:ring-blue-500/10"
                     >
                       <option value="all">All SP-API</option>
                       <option value="connected">SP-API connected</option>
@@ -1531,7 +1530,7 @@ const ManageAccounts = () => {
                     <select
                       value={adsFilter}
                       onChange={(e) => { setAdsFilter(e.target.value); setCurrentPage(1); }}
-                      className="flex-1 min-w-0 py-2 px-2 text-xs border border-[#30363d] bg-[#21262d] text-gray-100 rounded-md focus:outline-none focus:border-blue-500"
+                      className="min-w-0 py-2.5 px-2 text-xs border border-white/10 bg-white/[0.04] text-gray-100 rounded-lg focus:outline-none focus:border-blue-500/70 focus:ring-2 focus:ring-blue-500/10"
                     >
                       <option value="all">All Ads API</option>
                       <option value="connected">Ads connected</option>
@@ -1541,47 +1540,68 @@ const ManageAccounts = () => {
                   {(spApiFilter !== 'all' || adsFilter !== 'all') && (
                     <button
                       onClick={() => { setSpApiFilter('all'); setAdsFilter('all'); setCurrentPage(1); }}
-                      className="text-[11px] text-gray-400 hover:text-gray-300 rounded-md border border-[#30363d] hover:bg-[#21262d] py-1"
+                      className="text-[11px] text-gray-400 hover:text-gray-200 rounded-lg border border-white/10 hover:bg-white/[0.05] py-1.5 transition"
                     >
                       Clear API
                     </button>
                   )}
 
                   {/* Chips - stacked under the filters, same column */}
-                  <div className="mt-2 pt-3 border-t border-[#252525] flex flex-wrap items-center gap-2">
+                  <div className="mt-1 pt-4 border-t border-white/10 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
                     {(() => {
                       const isTotalActive = filterType === 'all' && statusCardFilter === 'all';
-                      const chipClass = (active) =>
-                        `inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-colors ${
-                          active
-                            ? 'border-blue-500 bg-blue-500/10 text-blue-300'
-                            : 'border-[#30363d] bg-[#0d0d0d] text-gray-400 hover:border-[#4a4a4a] hover:text-gray-300'
-                        }`;
+                      const chipClass = (active, tone = 'slate') => {
+                        const tones = {
+                          slate: active
+                            ? 'border-slate-400/45 bg-slate-400/15 text-slate-100 shadow-lg shadow-black/20'
+                            : 'border-slate-400/15 bg-slate-400/[0.06] text-slate-400 hover:border-slate-400/30 hover:bg-slate-400/10 hover:text-slate-200',
+                          green: active
+                            ? 'border-emerald-400/45 bg-emerald-500/15 text-emerald-200 shadow-lg shadow-emerald-950/20'
+                            : 'border-emerald-500/15 bg-emerald-500/[0.06] text-emerald-400 hover:border-emerald-400/30 hover:bg-emerald-500/10 hover:text-emerald-200',
+                          blue: active
+                            ? 'border-blue-400/45 bg-blue-500/15 text-blue-200 shadow-lg shadow-blue-950/20'
+                            : 'border-blue-500/15 bg-blue-500/[0.06] text-blue-400 hover:border-blue-400/30 hover:bg-blue-500/10 hover:text-blue-200',
+                          amber: active
+                            ? 'border-amber-400/45 bg-amber-500/15 text-amber-200 shadow-lg shadow-amber-950/20'
+                            : 'border-amber-500/15 bg-amber-500/[0.06] text-amber-400 hover:border-amber-400/30 hover:bg-amber-500/10 hover:text-amber-200',
+                          red: active
+                            ? 'border-red-400/45 bg-red-500/15 text-red-200 shadow-lg shadow-red-950/20'
+                            : 'border-red-500/15 bg-red-500/[0.06] text-red-400 hover:border-red-400/30 hover:bg-red-500/10 hover:text-red-200',
+                          orange: active
+                            ? 'border-orange-400/45 bg-orange-500/15 text-orange-200 shadow-lg shadow-orange-950/20'
+                            : 'border-orange-500/15 bg-orange-500/[0.06] text-orange-400 hover:border-orange-400/30 hover:bg-orange-500/10 hover:text-orange-200',
+                          violet: active
+                            ? 'border-violet-400/45 bg-violet-500/15 text-violet-200 shadow-lg shadow-violet-950/20'
+                            : 'border-violet-500/15 bg-violet-500/[0.06] text-violet-400 hover:border-violet-400/30 hover:bg-violet-500/10 hover:text-violet-200',
+                        };
+
+                        return `inline-flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border text-xs font-medium transition-all ${tones[tone] || tones.slate}`;
+                      };
                       const chips = [
-                        { label: 'Total', count: stats?.total ?? 0, active: isTotalActive, onClick: () => { setFilterType('all'); setStatusCardFilter('all'); setCurrentPage(1); } },
-                        { label: 'Paid', count: stats?.activeSubscriptions ?? 0, active: statusCardFilter === 'paid', onClick: () => { setStatusCardFilter('paid'); setFilterType('all'); setCurrentPage(1); } },
-                        { label: 'Trial', count: stats?.trialUsers ?? 0, active: statusCardFilter === 'trial', onClick: () => { setStatusCardFilter('trial'); setFilterType('all'); setCurrentPage(1); } },
-                        { label: 'Expired', count: stats?.expiredUsers ?? 0, active: statusCardFilter === 'expired', onClick: () => { setStatusCardFilter('expired'); setFilterType('all'); setCurrentPage(1); } },
-                        { label: 'Cancelled', count: stats?.cancelledSubscriptions ?? 0, active: statusCardFilter === 'cancelled', onClick: () => { setStatusCardFilter('cancelled'); setFilterType('all'); setCurrentPage(1); } },
-                        { label: 'Refunded', count: stats?.refundedUsers ?? 0, active: statusCardFilter === 'refunded', onClick: () => { setStatusCardFilter('refunded'); setFilterType('all'); setCurrentPage(1); } },
-                        { label: 'Agency', count: stats?.packageStats?.AGENCY ?? 0, active: filterType === 'AGENCY', onClick: () => { setFilterType('AGENCY'); setStatusCardFilter('all'); setCurrentPage(1); } },
+                        { label: 'Total', tone: 'slate', count: stats?.total ?? 0, active: isTotalActive, onClick: () => { setFilterType('all'); setStatusCardFilter('all'); setCurrentPage(1); } },
+                        { label: 'Paid', tone: 'green', count: stats?.activeSubscriptions ?? 0, active: statusCardFilter === 'paid', onClick: () => { setStatusCardFilter('paid'); setFilterType('all'); setCurrentPage(1); } },
+                        { label: 'Trial', tone: 'blue', count: stats?.trialUsers ?? 0, active: statusCardFilter === 'trial', onClick: () => { setStatusCardFilter('trial'); setFilterType('all'); setCurrentPage(1); } },
+                        { label: 'Expired', tone: 'amber', count: stats?.expiredUsers ?? 0, active: statusCardFilter === 'expired', onClick: () => { setStatusCardFilter('expired'); setFilterType('all'); setCurrentPage(1); } },
+                        { label: 'Cancelled', tone: 'red', count: stats?.cancelledSubscriptions ?? 0, active: statusCardFilter === 'cancelled', onClick: () => { setStatusCardFilter('cancelled'); setFilterType('all'); setCurrentPage(1); } },
+                        { label: 'Refunded', tone: 'orange', count: stats?.refundedUsers ?? 0, active: statusCardFilter === 'refunded', onClick: () => { setStatusCardFilter('refunded'); setFilterType('all'); setCurrentPage(1); } },
+                        { label: 'Agency', tone: 'violet', count: stats?.packageStats?.AGENCY ?? 0, active: filterType === 'AGENCY', onClick: () => { setFilterType('AGENCY'); setStatusCardFilter('all'); setCurrentPage(1); } },
                       ];
                       return chips.map((chip) => (
                         <button
                           key={chip.label}
                           type="button"
                           onClick={chip.onClick}
-                          className={chipClass(chip.active)}
+                          className={chipClass(chip.active, chip.tone)}
                         >
                           <span>{chip.label}</span>
-                          <span className="tabular-nums font-semibold text-gray-100">{chip.count}</span>
+                          <span className="tabular-nums font-semibold text-current">{chip.count}</span>
                         </button>
                       ));
                     })()}
                   </div>
                   {pagination.totalCount > 0 && (
                     <div className="text-xs text-gray-500">
-                      {searchQuery || brandSearchQuery || filterType !== 'all' || statusCardFilter !== 'all' || startDate || endDate || spApiFilter !== 'all' || adsFilter !== 'all'
+                      {searchQuery || filterType !== 'all' || statusCardFilter !== 'all' || startDate || endDate || spApiFilter !== 'all' || adsFilter !== 'all'
                         ? `${pagination.totalCount} match filters`
                         : `Showing all ${pagination.totalCount} users`}
                     </div>
@@ -1589,45 +1609,97 @@ const ManageAccounts = () => {
                 </div>
 
                 {/* RIGHT: users-by-country pie chart, sourced from Stripe billing address */}
-                <div className="flex-1 flex flex-col items-center min-w-0 rounded-lg border border-[#252525] p-3">
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2 self-start">Users by Country</p>
+                <div className="w-full xl:flex-1 min-w-0 rounded-xl border border-white/10 bg-[#0b0f17]/70 p-3 sm:p-4 flex flex-col">
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">Users by Country</p>
+                    {countryStats && countryStats.countries.length > 0 && (
+                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-gray-400">
+                        {countryStats.countries.reduce((sum, item) => sum + item.count, 0) + (countryStats.uncategorized || 0)} users
+                      </span>
+                    )}
+                  </div>
                   {countryStatsLoading ? (
-                    <div className="flex-1 w-full flex items-center justify-center py-12">
+                    <div className="w-full flex items-center justify-center py-10">
                       <div className="animate-spin rounded-full h-6 w-6 border-2 border-[#333] border-t-blue-500" />
                     </div>
                   ) : !countryStats || countryStats.countries.length === 0 ? (
-                    <div className="flex-1 w-full flex items-center justify-center py-12">
+                    <div className="w-full flex items-center justify-center py-10">
                       <p className="text-xs text-gray-500">No country data available yet</p>
                     </div>
                   ) : (() => {
-                    const COUNTRY_PIE_COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#a855f7', '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16', '#ef4444'];
+                    const COUNTRY_PIE_COLORS = ['#60a5fa', '#f59e0b', '#34d399', '#c084fc', '#f472b6', '#2dd4bf', '#fb923c', '#818cf8', '#a3e635', '#f87171'];
                     const slices = [...countryStats.countries];
                     if (countryStats.uncategorized > 0) {
                       slices.push({ country: 'Unknown', count: countryStats.uncategorized });
                     }
+                    const totalUsers = slices.reduce((sum, item) => sum + item.count, 0);
                     const chartOptions = {
-                      chart: { type: 'pie', fontFamily: "'Inter', sans-serif" },
+                      chart: {
+                        type: 'donut',
+                        fontFamily: "'Inter', sans-serif",
+                        parentHeightOffset: 0,
+                        toolbar: { show: false },
+                        sparkline: { enabled: false },
+                      },
                       labels: slices.map((s) => s.country),
                       colors: slices.map((s, i) => s.country === 'Unknown' ? '#4b5563' : COUNTRY_PIE_COLORS[i % COUNTRY_PIE_COLORS.length]),
-                      legend: {
-                        position: 'bottom',
-                        labels: { colors: '#9ca3af' },
-                        fontSize: '11px',
-                        markers: { size: 6 },
+                      legend: { show: false },
+                      plotOptions: {
+                        pie: {
+                          customScale: 0.92,
+                          donut: {
+                            size: '64%',
+                            labels: {
+                              show: true,
+                              name: { show: true, color: '#94a3b8', fontSize: '11px', offsetY: 8 },
+                              value: { show: true, color: '#f8fafc', fontSize: '20px', fontWeight: 700, offsetY: -10 },
+                              total: {
+                                show: true,
+                                label: 'Total',
+                                color: '#94a3b8',
+                                fontSize: '11px',
+                                formatter: () => totalUsers,
+                              },
+                            },
+                          },
+                        },
                       },
                       dataLabels: { enabled: false },
-                      stroke: { width: 2, colors: ['#161b22'] },
+                      stroke: { width: 3, colors: ['#0b0f17'] },
                       tooltip: { theme: 'dark' },
-                      responsive: [{ breakpoint: 768, options: { chart: { height: 240, width: 240 } } }],
+                      states: {
+                        hover: { filter: { type: 'lighten', value: 0.08 } },
+                        active: { filter: { type: 'none' } },
+                      },
                     };
                     return (
-                      <Chart
-                        options={chartOptions}
-                        series={slices.map((s) => s.count)}
-                        type="pie"
-                        width="100%"
-                        height={260}
-                      />
+                      <div className="grid grid-cols-1 md:grid-cols-[minmax(280px,1fr)_minmax(180px,0.7fr)] items-center gap-4 flex-1 min-h-[300px]">
+                        <div className="w-full h-[300px] min-w-0 flex items-center justify-center">
+                          <Chart
+                            options={chartOptions}
+                            series={slices.map((s) => s.count)}
+                            type="donut"
+                            width="100%"
+                            height="100%"
+                          />
+                        </div>
+                        <div className="grid grid-cols-1 gap-1.5 max-h-[220px] sm:max-h-[220px] lg:max-h-[230px] 2xl:max-h-[240px] overflow-y-auto pr-1 min-w-0">
+                          {slices.map((slice, index) => {
+                            const color = slice.country === 'Unknown' ? '#4b5563' : COUNTRY_PIE_COLORS[index % COUNTRY_PIE_COLORS.length];
+                            return (
+                              <div key={slice.country} className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.025] px-2.5 py-2">
+                                <span className="flex min-w-0 items-center gap-2 text-xs text-gray-300">
+                                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+                                  <span className="truncate">{slice.country}</span>
+                                </span>
+                                <span className="shrink-0 rounded-md bg-white/[0.05] px-2 py-0.5 text-[11px] font-semibold tabular-nums text-gray-100">
+                                  {slice.count}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
                     );
                   })()}
                 </div>
@@ -1635,23 +1707,23 @@ const ManageAccounts = () => {
               </div>
 
               {/* Table */}
-              <div className="rounded-lg border border-[#252525] bg-[#161b22] overflow-hidden">
+              <div className="rounded-2xl border border-white/10 bg-[#101722]/90 overflow-hidden shadow-2xl shadow-black/20 backdrop-blur">
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[900px]">
                     <thead>
-                      <tr className="border-b border-[#252525] bg-[#0d0d0d]">
-                        <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[180px]">User</th>
-                        <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">User Type</th>
-                        <th className="px-2 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Brand</th>
-                        <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                        <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">SpAPI</th>
-                        <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Ads</th>
-                        <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Card</th>
-                        <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Opening Date</th>
-                        <th className="px-2 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                      <tr className="border-b border-white/10 bg-[#080c12]/90">
+                        <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider min-w-[180px]">User</th>
+                        <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">User Type</th>
+                        <th className="px-2 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Brand</th>
+                        <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Status</th>
+                        <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">SpAPI</th>
+                        <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Ads</th>
+                        <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Card</th>
+                        <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Opening Date</th>
+                        <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#252525]">
+                    <tbody className="divide-y divide-white/10">
                       {users.map((user) => {
                         const isAgencyOwner = user.packageType === 'AGENCY';
                         const isExpanded = isAgencyOwner && expandedAgencyIds.has(user._id);
@@ -1662,7 +1734,7 @@ const ManageAccounts = () => {
                             {isExpanded && !agencyClientsLoading.has(user._id) && (
                               clients.length === 0 ? (
                                 <tr>
-                                  <td colSpan={9} className="px-3 py-3 text-center text-xs text-gray-500 bg-[#111318]">
+                                  <td colSpan={9} className="px-3 py-3 text-center text-xs text-gray-500 bg-blue-500/[0.035]">
                                     No clients under this agency
                                   </td>
                                 </tr>
@@ -1678,7 +1750,7 @@ const ManageAccounts = () => {
                 </div>
 
                 {pagination.totalPages > 1 && (
-                  <div className="flex flex-col items-center gap-2 px-4 py-3 border-t border-[#252525] bg-[#0d0d0d]">
+                  <div className="flex flex-col items-center gap-2 px-4 py-4 border-t border-white/10 bg-[#080c12]/90">
                     <p className="text-xs text-gray-500">
                       {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, pagination.totalCount)} of {pagination.totalCount}
                     </p>
@@ -1686,7 +1758,7 @@ const ManageAccounts = () => {
                       <button
                         onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                         disabled={currentPage === 1}
-                        className="p-2 rounded-lg border border-[#30363d] text-gray-400 hover:bg-[#1a1a1a] disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="p-2 rounded-lg border border-white/10 text-gray-400 hover:bg-white/[0.05] hover:text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition"
                       >
                         <ChevronLeft className="w-4 h-4" />
                       </button>
@@ -1694,8 +1766,8 @@ const ManageAccounts = () => {
                         <button
                           key={page}
                           onClick={() => setCurrentPage(page)}
-                          className={`min-w-[32px] py-2 px-2 rounded-lg text-sm font-medium ${
-                            currentPage === page ? 'bg-blue-600 text-white' : 'border border-[#30363d] text-gray-400 hover:bg-[#1a1a1a]'
+                          className={`min-w-[32px] py-2 px-2 rounded-lg text-sm font-medium transition ${
+                            currentPage === page ? 'bg-blue-600 text-white shadow-lg shadow-blue-950/30' : 'border border-white/10 text-gray-400 hover:bg-white/[0.05] hover:text-gray-200'
                           }`}
                         >
                           {page}
@@ -1704,7 +1776,7 @@ const ManageAccounts = () => {
                       <button
                         onClick={() => setCurrentPage(p => Math.min(pagination.totalPages, p + 1))}
                         disabled={currentPage === pagination.totalPages}
-                        className="p-2 rounded-lg border border-[#30363d] text-gray-400 hover:bg-[#1a1a1a] disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="p-2 rounded-lg border border-white/10 text-gray-400 hover:bg-white/[0.05] hover:text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition"
                       >
                         <ChevronRight className="w-4 h-4" />
                       </button>
@@ -1714,8 +1786,8 @@ const ManageAccounts = () => {
               </div>
 
               {users.length === 0 && (
-                <div className="rounded-lg border border-[#252525] bg-[#161b22] py-16 text-center">
-                  <div className="w-12 h-12 rounded-lg bg-[#252525] flex items-center justify-center mx-auto mb-3">
+                <div className="rounded-2xl border border-white/10 bg-[#101722]/90 py-16 text-center shadow-2xl shadow-black/20">
+                  <div className="w-12 h-12 rounded-xl bg-white/[0.05] border border-white/10 flex items-center justify-center mx-auto mb-3">
                     <Users className="w-6 h-6 text-gray-500" />
                   </div>
                   <h4 className="text-sm font-medium text-gray-300">No users found</h4>
@@ -1724,6 +1796,7 @@ const ManageAccounts = () => {
               )}
             </>
           )}
+      </div>
     </div>
   );
 };

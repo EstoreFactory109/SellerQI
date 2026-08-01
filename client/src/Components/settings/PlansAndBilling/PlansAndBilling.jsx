@@ -258,7 +258,9 @@ export default function PlansAndBilling() {
         // Update Redux state immediately
         dispatch(updatePackageType({
           packageType: 'LITE',
-          subscriptionStatus: 'cancelled'
+          subscriptionStatus: 'cancelled',
+          isInTrialPeriod: false,
+          trialEndsDate: null
         }));
 
         // Update local state immediately
@@ -390,6 +392,9 @@ export default function PlansAndBilling() {
     const planOrder = { LITE: 0, PRO: 1, AGENCY: 2 };
     return planOrder[plan] > planOrder[currentPlan];
   };
+  const isTrialingSubscription = isTrialPeriod || subscriptionStatus === 'trialing' || userSubscription?.status === 'trialing';
+  const hasCancellableSubscription = currentPlan !== 'LITE' || isTrialingSubscription;
+  const billingPlanKey = isTrialingSubscription ? 'PRO' : currentPlan;
 
   // Show loading spinner while detecting country
   if (isDetectingCountry) {
@@ -681,7 +686,7 @@ export default function PlansAndBilling() {
         </motion.div>
 
         {/* Billing Information */}
-        {currentPlan !== 'LITE' && (
+        {hasCancellableSubscription && (
           <motion.div 
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
@@ -754,7 +759,9 @@ export default function PlansAndBilling() {
                       <Calendar className="w-5 h-5 text-blue-400" />
                     </div>
                     <div>
-                      <h4 className="font-semibold text-gray-100 mb-1 text-sm">Next Billing Date</h4>
+                      <h4 className="font-semibold text-gray-100 mb-1 text-sm">
+                        {isTrialingSubscription ? 'Trial Ends' : 'Next Billing Date'}
+                      </h4>
                       <p className="text-gray-400 text-sm">
                         {userSubscription?.nextBillingDate 
                           ? new Date(userSubscription.nextBillingDate).toLocaleDateString('en-US', {
@@ -792,7 +799,7 @@ export default function PlansAndBilling() {
                         <p className={`font-medium text-sm ${
                           userSubscription?.paymentStatus === 'paid' ? 'text-green-400' : 'text-blue-400'
                         }`}>
-                          {userSubscription?.paymentStatus?.toUpperCase() || 'ACTIVE'}
+                          {isTrialingSubscription ? 'TRIALING' : (userSubscription?.paymentStatus?.toUpperCase() || 'ACTIVE')}
                         </p>
                       </div>
                     </div>
@@ -807,10 +814,10 @@ export default function PlansAndBilling() {
                     <div>
                       <h4 className="font-semibold text-gray-100 mb-1 text-sm">Current Plan</h4>
                       <p className="text-gray-300 font-medium text-sm">
-                        {plans[currentPlan].displayName}
+                        {plans[billingPlanKey].displayName}
                       </p>
                       <p className="text-xs text-gray-400">
-                        ${plans[currentPlan].price}/month
+                        ${plans[billingPlanKey].price}/month
                       </p>
                     </div>
                   </div>

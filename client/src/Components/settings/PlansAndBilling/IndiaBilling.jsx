@@ -247,7 +247,9 @@ export default function IndiaBilling() {
         // Update Redux state immediately
         dispatch(updatePackageType({
           packageType: 'LITE',
-          subscriptionStatus: 'cancelled'
+          subscriptionStatus: 'cancelled',
+          isInTrialPeriod: false,
+          trialEndsDate: null
         }));
 
         // Update local state immediately
@@ -353,6 +355,9 @@ export default function IndiaBilling() {
     const planOrder = { LITE: 0, PRO: 1, AGENCY: 2 };
     return planOrder[plan] > planOrder[currentPlan];
   };
+  const isTrialingSubscription = isTrialPeriod || subscriptionStatus === 'trialing' || userSubscription?.status === 'trialing';
+  const hasCancellableSubscription = currentPlan === 'PRO' || isTrialingSubscription;
+  const billingPlanKey = isTrialingSubscription ? 'PRO' : currentPlan;
 
   return (
     <div className="min-h-screen bg-[#1a1a1a]">
@@ -702,8 +707,8 @@ export default function IndiaBilling() {
         </div>
       </section>
 
-      {/* Billing Information Section - Only show for active PRO subscription */}
-      {currentPlan === 'PRO' && !isTrialPeriod && (
+      {/* Billing Information Section - Show for paid PRO and cancellable PRO trials */}
+      {hasCancellableSubscription && (
         <section className="bg-[#1a1a1a] py-12 px-4">
           <div className="max-w-6xl mx-auto">
             <motion.div 
@@ -757,7 +762,9 @@ export default function IndiaBilling() {
                       <Calendar className="w-5 h-5 text-blue-400" />
                     </div>
                     <div>
-                      <h4 className="font-semibold text-gray-100 mb-1 text-sm">Next Billing Date</h4>
+                      <h4 className="font-semibold text-gray-100 mb-1 text-sm">
+                        {isTrialingSubscription ? 'Trial Ends' : 'Next Billing Date'}
+                      </h4>
                       <p className="text-gray-400 text-sm">
                         {userSubscription?.nextBillingDate 
                           ? new Date(userSubscription.nextBillingDate).toLocaleDateString('en-IN', {
@@ -794,7 +801,7 @@ export default function IndiaBilling() {
                         <p className={`font-medium text-sm ${
                           userSubscription?.paymentStatus === 'paid' ? 'text-green-400' : 'text-blue-400'
                         }`}>
-                          {userSubscription?.paymentStatus?.toUpperCase() || 'ACTIVE'}
+                          {isTrialingSubscription ? 'TRIALING' : (userSubscription?.paymentStatus?.toUpperCase() || 'ACTIVE')}
                         </p>
                       </div>
                     </div>
@@ -809,10 +816,10 @@ export default function IndiaBilling() {
                     <div>
                       <h4 className="font-semibold text-gray-100 mb-1 text-sm">Current Plan</h4>
                       <p className="text-gray-300 font-medium text-sm">
-                        {plans[currentPlan]?.displayName}
+                        {plans[billingPlanKey]?.displayName}
                       </p>
                       <p className="text-xs text-gray-400">
-                        {plans[currentPlan]?.displayPrice}/month
+                        {plans[billingPlanKey]?.displayPrice}/month
                       </p>
                     </div>
                   </div>
@@ -1012,4 +1019,3 @@ export default function IndiaBilling() {
     </div>
   );
 }
-
