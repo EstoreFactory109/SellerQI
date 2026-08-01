@@ -895,11 +895,11 @@ const ManageAccounts = () => {
             <span className="text-gray-500">—</span>
           )}
         </td>
-        <td className="px-2 py-2.5 text-center text-xs text-gray-500">
-          <p>{formatDate(user.createdAt)}</p>
-          {user.renewalDate && (
-            <p className="text-[10px] text-gray-600 mt-0.5">Renews {formatDate(user.renewalDate)}</p>
-          )}
+        <td className="px-2 py-2.5 text-center text-xs text-gray-500 whitespace-nowrap">
+          {user.createdAt ? formatDate(user.createdAt) : '—'}
+        </td>
+        <td className="px-2 py-2.5 text-center text-xs text-gray-500 whitespace-nowrap">
+          {user.renewalDate ? formatDate(user.renewalDate) : '—'}
         </td>
         <td className="px-2 py-2.5">
           <div className="flex items-center justify-center">
@@ -1709,17 +1709,18 @@ const ManageAccounts = () => {
               {/* Table */}
               <div className="rounded-2xl border border-white/10 bg-[#101722]/90 overflow-hidden shadow-2xl shadow-black/20 backdrop-blur">
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[900px]">
+                  <table className="w-full min-w-[980px]">
                     <thead>
                       <tr className="border-b border-white/10 bg-[#080c12]/90">
-                        <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider min-w-[180px]">User</th>
+                        <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider min-w-[150px]">User</th>
                         <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">User Type</th>
                         <th className="px-2 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Brand</th>
                         <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Status</th>
                         <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">SpAPI</th>
                         <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Ads</th>
                         <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Card</th>
-                        <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Opening Date</th>
+                        <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap">Joining Date</th>
+                        <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap">Renewal Date</th>
                         <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Actions</th>
                       </tr>
                     </thead>
@@ -1734,7 +1735,7 @@ const ManageAccounts = () => {
                             {isExpanded && !agencyClientsLoading.has(user._id) && (
                               clients.length === 0 ? (
                                 <tr>
-                                  <td colSpan={9} className="px-3 py-3 text-center text-xs text-gray-500 bg-blue-500/[0.035]">
+                                  <td colSpan={10} className="px-3 py-3 text-center text-xs text-gray-500 bg-blue-500/[0.035]">
                                     No clients under this agency
                                   </td>
                                 </tr>
