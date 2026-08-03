@@ -962,6 +962,12 @@ const Dashboard = () => {
         if (titleData?.checkSpecialCharacters?.status === 'Error') {
             pushRow('Title', 'Special Characters', titleData.checkSpecialCharacters.Message, titleData.checkSpecialCharacters.HowTOSolve);
         }
+        if (titleData?.wordRepetition?.status === 'Error') {
+            pushRow('Title', 'Word Repetition', titleData.wordRepetition.Message, titleData.wordRepetition.HowTOSolve);
+        }
+        if (titleData?.capitalization?.status === 'Error') {
+            pushRow('Title', 'Capitalization', titleData.capitalization.Message, titleData.capitalization.HowTOSolve);
+        }
 
         const bulletData = updatedProduct.rankingErrors.data.BulletPoints;
         if (bulletData?.charLim?.status === 'Error') {
@@ -1412,6 +1418,24 @@ const Dashboard = () => {
                 Issue: 'Special Characters',
                 Message: updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.Message,
                 Solution: updatedProduct.rankingErrors?.data?.TitleResult?.checkSpecialCharacters?.HowTOSolve
+            });
+        }
+        if (updatedProduct.rankingErrors?.data?.TitleResult?.wordRepetition?.status === "Error") {
+            exportData.push({
+                Category: 'Ranking Issues',
+                Type: 'Title',
+                Issue: 'Word Repetition',
+                Message: updatedProduct.rankingErrors?.data?.TitleResult?.wordRepetition?.Message,
+                Solution: updatedProduct.rankingErrors?.data?.TitleResult?.wordRepetition?.HowTOSolve
+            });
+        }
+        if (updatedProduct.rankingErrors?.data?.TitleResult?.capitalization?.status === "Error") {
+            exportData.push({
+                Category: 'Ranking Issues',
+                Type: 'Title',
+                Issue: 'Capitalization',
+                Message: updatedProduct.rankingErrors?.data?.TitleResult?.capitalization?.Message,
+                Solution: updatedProduct.rankingErrors?.data?.TitleResult?.capitalization?.HowTOSolve
             });
         }
 

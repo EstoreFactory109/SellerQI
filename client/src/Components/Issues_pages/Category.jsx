@@ -114,7 +114,10 @@ const RankingTableSection = ({ data, pagination, loading, onLoadMore }) => {
     const issueLabels = {
       RestictedWords: 'Restricted Words',
       checkSpecialCharacters: 'Special Characters',
-      charLim: 'Character Limit'
+      charLim: 'Character Limit',
+      // Title-only checks from Amazon's product title requirements
+      wordRepetition: 'Word Repetition',
+      capitalization: 'Capitalization'
     };
 
     const sectionKeyToAttribute = {

@@ -284,7 +284,11 @@ const mkRankingDetails = (asin) => {
       TitleResult: {
         charLim: mkError(charLimMsg, howTo),
         RestictedWords: mkError(restrictedMsg, 'Remove restricted terms and re-check compliance.'),
-        checkSpecialCharacters: mkError(specialCharMsg, 'Remove special characters and validate the final text.')
+        checkSpecialCharacters: mkError(specialCharMsg, 'Remove special characters and validate the final text.'),
+        wordRepetition: mkError(`The same word is repeated more than twice in the title for ${asin}.`, 'Rewrite the title so no word appears more than twice.'),
+        capitalization: idx % 2 === 0
+          ? mkError(`The title for ${asin} is not in title case.`, 'Capitalize the first letter of each word, except prepositions, conjunctions, and articles.')
+          : mkWarning(`Review the capitalization of the title for ${asin}.`, 'Use title case rather than all caps or all lowercase.')
       },
       BulletPoints: {
         charLim: mkWarning('Bullet point length out of bounds for the target marketplace.', howTo),
@@ -348,6 +352,8 @@ const countRankingErrorsForAsin = (asin) => {
   check(d.TitleResult?.charLim);
   check(d.TitleResult?.RestictedWords);
   check(d.TitleResult?.checkSpecialCharacters);
+  check(d.TitleResult?.wordRepetition);
+  check(d.TitleResult?.capitalization);
   // BulletPoints
   check(d.BulletPoints?.charLim);
   check(d.BulletPoints?.RestictedWords);

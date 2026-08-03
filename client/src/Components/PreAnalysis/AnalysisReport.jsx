@@ -24,7 +24,7 @@ export default function AnalysisReport({ analysisResults }) {
   // Helper function to check if a section has errors
   const hasSectionErrors = (sectionData) => {
     if (!sectionData) return false;
-    const checks = ['charLim', 'RestictedWords', 'checkSpecialCharacters', 'dublicateWords'];
+    const checks = ['charLim', 'RestictedWords', 'checkSpecialCharacters', 'dublicateWords', 'wordRepetition', 'capitalization'];
     return checks.some(check => sectionData[check]?.status === 'Error');
   };
 
@@ -113,10 +113,11 @@ export default function AnalysisReport({ analysisResults }) {
               exit={{ opacity: 0, height: 0 }}
               className="mt-2 space-y-2 pl-1"
             >
-              {['charLim', 'RestictedWords', 'checkSpecialCharacters'].map((check) => {
+              {['charLim', 'RestictedWords', 'checkSpecialCharacters', 'wordRepetition', 'capitalization', 'spelledOutNumbers'].map((check) => {
                 const checkResult = analysisResults.ranking.TitleResult[check];
                 if (!checkResult) return null;
-                const isError = checkResult.status === 'Error';
+                // spelledOutNumbers reports a Warning (best practice, not a hard rule)
+                const isError = checkResult.status !== 'Success';
                 return (
                   <motion.div
                     key={check}
@@ -139,6 +140,9 @@ export default function AnalysisReport({ analysisResults }) {
                           {check === 'charLim' && 'Character Limit'}
                           {check === 'RestictedWords' && 'Restricted Words'}
                           {check === 'checkSpecialCharacters' && 'Special Characters'}
+                          {check === 'wordRepetition' && 'Word Repetition'}
+                          {check === 'capitalization' && 'Capitalization'}
+                          {check === 'spelledOutNumbers' && 'Number Formatting'}
                         </h4>
                         <p className="text-[11px] mb-2 leading-relaxed" style={{ color: '#9ca3af' }}>{checkResult.Message}</p>
                         {checkResult.HowTOSolve && (

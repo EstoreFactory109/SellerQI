@@ -249,8 +249,9 @@ async function getRankingIssues(userId, country, region, page = 1, limit = DEFAU
         });
         
         // Flatten ranking errors into individual issue rows (matching frontend logic and summary count)
-        // Each product can have multiple error checks: Title (charLim, RestrictedWords, SpecialChars),
-        // BulletPoints (same 3), Description (same 3), BackendKeywords (charLim)
+        // Each product can have multiple error checks: Title (charLim, RestrictedWords,
+        // SpecialChars, WordRepetition, Capitalization), BulletPoints (first 3),
+        // Description (first 3), BackendKeywords (charLim)
         const flattenedRankingIssues = [];
         
         const sectionConfig = [
@@ -259,10 +260,15 @@ async function getRankingIssues(userId, country, region, page = 1, limit = DEFAU
             { key: 'Description', label: 'Description' }
         ];
         
+        // Title adds the Amazon title-policy checks (word repetition, capitalization,
+        // number formatting) on top of the three checks every section shares.
         const checkConfig = [
             { key: 'charLim', label: 'Character Limit' },
             { key: 'RestictedWords', label: 'Restricted Words' },
-            { key: 'checkSpecialCharacters', label: 'Special Characters' }
+            { key: 'checkSpecialCharacters', label: 'Special Characters' },
+            { key: 'wordRepetition', label: 'Word Repetition' },
+            { key: 'capitalization', label: 'Capitalization' },
+            { key: 'spelledOutNumbers', label: 'Number Formatting' }
         ];
         
         allErrors.forEach(productError => {

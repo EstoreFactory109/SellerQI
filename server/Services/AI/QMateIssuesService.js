@@ -401,6 +401,22 @@ async function getQMateIssuesContext(userId, country, region, options = {}) {
                         howToSolve: titleResult.checkSpecialCharacters.HowTOSolve
                     });
                 }
+                if (titleResult.wordRepetition?.status === 'Error') {
+                    issueDetails.push({
+                        section: 'Title',
+                        type: 'word_repetition',
+                        message: titleResult.wordRepetition.Message,
+                        howToSolve: titleResult.wordRepetition.HowTOSolve
+                    });
+                }
+                if (titleResult.capitalization?.status === 'Error') {
+                    issueDetails.push({
+                        section: 'Title',
+                        type: 'capitalization',
+                        message: titleResult.capitalization.Message,
+                        howToSolve: titleResult.capitalization.HowTOSolve
+                    });
+                }
             }
             
             // Bullet points issues
@@ -612,7 +628,7 @@ function getCategoryFieldName(category) {
 /**
  * Transform ranking issues to include suggestions
  * Handles all ranking error structures:
- * - TitleResult: Title issues (charLim, RestictedWords, checkSpecialCharacters)
+ * - TitleResult: Title issues (charLim, RestictedWords, checkSpecialCharacters, wordRepetition, capitalization)
  * - BulletPoints: Bullet point issues (charLim, RestictedWords, checkSpecialCharacters)
  * - Description/descriptionResult: Description issues
  * - charLim at root level: Backend keywords byte limit (Amazon's 250-byte limit)
@@ -636,8 +652,8 @@ function transformRankingIssues(rankingErrors) {
             issues.push({
                 type: 'title_length',
                 section: 'Title',
-                message: titleResult.charLim.Message || 'Title length is outside optimal range (80-200 characters)',
-                howToSolve: titleResult.charLim.HowTOSolve || 'Adjust title to be between 80-200 characters for optimal visibility',
+                message: titleResult.charLim.Message || 'Title exceeds Amazon\'s 75-character limit',
+                howToSolve: titleResult.charLim.HowTOSolve || 'Trim the title to 75 characters or fewer and move the remaining detail into Item highlights',
                 severity: 'high'
             });
         }
@@ -656,7 +672,25 @@ function transformRankingIssues(rankingErrors) {
                 type: 'title_special_characters',
                 section: 'Title',
                 message: titleResult.checkSpecialCharacters.Message || 'Title contains prohibited special characters',
-                howToSolve: titleResult.checkSpecialCharacters.HowTOSolve || 'Remove special characters: ! $ ? _ { } ^ ¬ ¦ ~ # < > *',
+                howToSolve: titleResult.checkSpecialCharacters.HowTOSolve || 'Remove ! $ ? _ { } ^ ¬ ¦ entirely; ~ # < > * are allowed only as identifiers or measurements',
+                severity: 'medium'
+            });
+        }
+        if (titleResult.wordRepetition?.status === 'Error') {
+            issues.push({
+                type: 'title_word_repetition',
+                section: 'Title',
+                message: titleResult.wordRepetition.Message || 'Title repeats the same word more than twice',
+                howToSolve: titleResult.wordRepetition.HowTOSolve || 'Rewrite so no word appears more than twice; prepositions, articles, and conjunctions are exempt',
+                severity: 'high'
+            });
+        }
+        if (titleResult.capitalization?.status === 'Error') {
+            issues.push({
+                type: 'title_capitalization',
+                section: 'Title',
+                message: titleResult.capitalization.Message || 'Title is in all caps or all lowercase',
+                howToSolve: titleResult.capitalization.HowTOSolve || 'Capitalize the first letter of each word, except prepositions, conjunctions, and articles',
                 severity: 'medium'
             });
         }

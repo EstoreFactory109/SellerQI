@@ -122,6 +122,8 @@ function buildErrorMaps(conversionProductWiseErrors = [], rankingProductWiseErro
                 if (data.TitleResult.charLim?.status === 'Error') errorCount++;
                 if (data.TitleResult.RestictedWords?.status === 'Error') errorCount++;
                 if (data.TitleResult.checkSpecialCharacters?.status === 'Error') errorCount++;
+                if (data.TitleResult.wordRepetition?.status === 'Error') errorCount++;
+                if (data.TitleResult.capitalization?.status === 'Error') errorCount++;
             }
             if (data.BulletPoints) {
                 if (data.BulletPoints.charLim?.status === 'Error') errorCount++;
