@@ -27,10 +27,15 @@
  * See MULTI_INSTANCE_DEPLOYMENT.md for detailed setup instructions.
  */
 
-// Load environment variables from .env file (root folder)
+// Load environment variables from .env file (root folder).
+// NOTE: this runs BEFORE the apps array below is evaluated, so anything in .env (e.g.
+// WORKER_INSTANCES) wins over the `|| 'N'` defaults used further down. That is easy to forget and
+// has silently doubled the worker memory budget before — see the check at the bottom of this file.
 require('dotenv').config({ path: './.env' });
 
-module.exports = {
+const { checkMemoryBudget } = require('./ecosystem.memory-check.js');
+
+const config = {
     apps: [
         {
             name: 'api-server',
@@ -136,7 +141,12 @@ module.exports = {
             exec_mode: 'cluster', // Run multiple instances
             env: {
                 NODE_ENV: 'production',
-                WORKER_CONCURRENCY: process.env.WORKER_CONCURRENCY || '25', // Jobs per worker (was 15)
+                // 20, not 25: on a 16 GB host there are 3 worker heaps instead of the 6 that were
+                // actually running on the 30 GB box, so each heap now carries more concurrent jobs.
+                // Peak measured worker RSS was 991MB at ~15 concurrency; 20 keeps the projected peak
+                // under FINANCE_HEAP_LIMIT_MB (1200) so the finance guard bails gracefully between
+                // chunks rather than V8 hitting its ceiling. 3 x 20 = 60 slots.
+                WORKER_CONCURRENCY: process.env.WORKER_CONCURRENCY || '20',
                 WORKER_SHUTDOWN_GRACE_MS: process.env.WORKER_SHUTDOWN_GRACE_MS || '120000',
                 // WORKER_NAME is not set here - worker.js will use `worker-${process.pid}` as fallback
                 // This ensures each worker instance has a unique identifier in merged logs
@@ -190,14 +200,19 @@ module.exports = {
             // First-time integrations are bursty (new signups) but rare relative
             // to scheduled phases. 2 concurrent integrations is enough to clear
             // a 500-user onboarding rate while keeping memory pressure low
-            // (integration jobs are 3GB-capped, see max_memory_restart).
+            // (integration jobs are 2GB-capped, see max_memory_restart).
             name: 'integration-worker',
             script: './server/Services/BackgroundJobs/integrationWorker.js',
-            // Cap V8's heap BELOW max_memory_restart (3G). Without this V8 sizes
+            // Sized for a 16 GB host. Measured idle RSS was 117MB; the old 3G/2304M was set
+            // speculatively for "integration jobs are heavier". It does the same class of SP-API
+            // work as `worker`, so it now gets the same 2G/1536M rather than 50% more, which
+            // reclaims 1 GB of ceiling. Raise it again if a real first-time onboarding is observed
+            // above ~1.5 GB.
+            // Cap V8's heap BELOW max_memory_restart (2G). Without this V8 sizes
             // old-space from total system RAM, so the heap ceiling exceeds the PM2 cap
             // meant to contain it — and PM2's cap is a poll-based RSS check, so a fast
             // allocation burst reaches the kernel OOM-killer before PM2 ever acts.
-            node_args: '--max-old-space-size=2304',
+            node_args: '--max-old-space-size=1536',
             instances: parseInt(process.env.INTEGRATION_WORKER_INSTANCES || '1', 10), // Default: 1 worker
             exec_mode: 'cluster', // Run multiple instances if needed
             env: {
@@ -220,8 +235,8 @@ module.exports = {
             autorestart: true,
             max_restarts: 10,
             min_uptime: '10s',
-            // Memory limits (integration jobs are heavier)
-            max_memory_restart: '3G',
+            // Memory limits (same class of work as `worker`, so same ceiling)
+            max_memory_restart: '2G',
             // Graceful shutdown timeout - should be slightly above worker grace period
             kill_timeout: parseInt(process.env.INTEGRATION_WORKER_KILL_TIMEOUT_MS || '150000', 10), // default 2.5 minutes
             // Watch mode (disable in production)
@@ -237,13 +252,15 @@ module.exports = {
         {
             // Weekly History Worker
             // Runs every Sunday at 11:59 PM UTC to record weekly account history snapshots
+            // Sized for a 16 GB host: measured idle RSS 103MB, cron-driven (weekly), so it is
+            // idle almost all the time. 1G/768M still leaves ~7x headroom over observed usage.
             name: 'weekly-history-worker',
             script: './server/Services/BackgroundJobs/weeklyHistoryWorker.js',
-            // Cap V8's heap BELOW max_memory_restart (2G). Without this V8 sizes
+            // Cap V8's heap BELOW max_memory_restart (1G). Without this V8 sizes
             // old-space from total system RAM, so the heap ceiling exceeds the PM2 cap
             // meant to contain it — and PM2's cap is a poll-based RSS check, so a fast
             // allocation burst reaches the kernel OOM-killer before PM2 ever acts.
-            node_args: '--max-old-space-size=1536',
+            node_args: '--max-old-space-size=768',
             instances: 1, // Single instance (cron-based, doesn't need clustering)
             exec_mode: 'fork',
             env: {
@@ -259,7 +276,7 @@ module.exports = {
             max_restarts: 10,
             min_uptime: '10s',
             // Memory limits
-            max_memory_restart: '2G',
+            max_memory_restart: '1G',
             // Graceful shutdown timeout (30 seconds for cron-based worker)
             kill_timeout: 30 * 1000,
             // Watch mode (disable in production)
@@ -386,4 +403,10 @@ module.exports = {
         }
     ]
 };
+
+// Print a loud warning if the summed ceilings cannot fit this host. Never throws — see
+// ecosystem.memory-check.js for why that matters.
+checkMemoryBudget(config.apps, 'ecosystem.config.js');
+
+module.exports = config;
 

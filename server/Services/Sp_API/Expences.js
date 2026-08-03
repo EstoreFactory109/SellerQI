@@ -183,6 +183,14 @@ function deriveFinanceDelayFromHeaders(headers) {
   return Math.ceil((1000 / rate) * 1.25); // 25% safety margin
 }
 
+// Log-sampling rates for the pagination loop. These exist because PM2's God daemon buffers every
+// process's stdout in its own heap when it cannot drain to disk — a per-page log line on a 1000-page
+// fetch is what fed it to 12.6 GB and an OOM kill. Env-overridable so verbosity can be raised during
+// an investigation without a deploy; set to 1 to restore per-page logging.
+const FINANCE_PAGE_LOG_EVERY = Math.max(1, parseInt(process.env.FINANCE_PAGE_LOG_EVERY || '50', 10) || 50);
+const FINANCE_PAGE_LOG_FULL_UNTIL = Math.max(1, parseInt(process.env.FINANCE_PAGE_LOG_FULL_UNTIL || '5', 10) || 5);
+const FINANCE_THROTTLE_LOG_EVERY = Math.max(1, parseInt(process.env.FINANCE_THROTTLE_LOG_EVERY || '25', 10) || 25);
+
 /**
  * Paginate the Finance API transactions endpoint.
  *
@@ -204,6 +212,7 @@ async function fetchTransactions(accessToken, baseUrl, postedAfter, postedBefore
   let pageCount = 0;
   let transactionCount = 0;
   let currentToken = accessToken;
+  let throttleWarnCount = 0;
   const MAX_RETRIES = 5;
   const MAX_AUTH_REFRESHES_PER_PAGE = 2;
 
@@ -251,9 +260,22 @@ async function fetchTransactions(accessToken, baseUrl, postedAfter, postedBefore
         // purely on the fixed exponential schedule.
         const headerDelay = deriveFinanceDelayFromHeaders(res.headers);
         const delayMs = Math.max(Math.min(10000 * Math.pow(2, attempt), 60000), headerDelay);
-        logger.warn(
-          `[Finance API v2024-06-19] Throttled on page ${pageCount + 1}, attempt ${attempt + 1}/${MAX_RETRIES}. Retrying in ${delayMs / 1000}s...`
-        );
+        throttleWarnCount++;
+        // Throttling is EXPECTED here, not exceptional: there is deliberately no pre-emptive
+        // inter-page delay (see the note at the end of this loop), so on a long run Amazon pushes
+        // back routinely. At up to 5 retries per page over 1000+ pages that is thousands of `warn`
+        // lines — all of which flow through the PM2 daemon. Log the first one at warn so the
+        // condition is still visible, then sample; the total is reported once when the fetch ends.
+        if (throttleWarnCount === 1 || throttleWarnCount % FINANCE_THROTTLE_LOG_EVERY === 0) {
+          logger.warn(
+            `[Finance API v2024-06-19] Throttled on page ${pageCount + 1}, attempt ${attempt + 1}/${MAX_RETRIES}. ` +
+            `Retrying in ${delayMs / 1000}s... (throttle #${throttleWarnCount} this fetch)`
+          );
+        } else {
+          logger.debug(
+            `[Finance API v2024-06-19] Throttled on page ${pageCount + 1}, attempt ${attempt + 1}/${MAX_RETRIES}. Retrying in ${delayMs / 1000}s...`
+          );
+        }
         await new Promise((r) => setTimeout(r, delayMs));
         continue;
       }
@@ -279,9 +301,31 @@ async function fetchTransactions(accessToken, baseUrl, postedAfter, postedBefore
       allTransactions.push(...transactions);
     }
 
-    logger.info(
-      `[Finance API v2024-06-19] Page ${pageCount}: fetched ${transactions.length} transactions. nextToken: ${nextToken ? "yes" : "no"}`
-    );
+    // ── Sampled, not per-page ─────────────────────────────────────────────────────────────────
+    // This was one `info` line PER PAGE, and a large account runs 1000+ pages — the single biggest
+    // producer of stdout on the box. PM2 pipes every process's stdout through its God daemon, and
+    // when that daemon's write to disk back-pressures (full disk, or a rotated-away fd) the
+    // unwritten lines buffer in the DAEMON's heap. That is how it reached 12.6 GB and got
+    // OOM-killed, taking every process down with it.
+    //
+    // Keep the signal, drop the volume: always log the first and last page (so "did it start" and
+    // "did it finish" stay visible at info), sample the middle, and keep the full per-page trace at
+    // debug for when someone is actually investigating. Same shape as the progress guard in
+    // MCP/EconomicsMetricsService.js:197.
+    // Log the opening pages in full rather than only page 1: the common case is an account with a
+    // handful of pages, whose logs were never the problem, and sampling those would lose detail for
+    // no benefit. Sampling only engages once a fetch is clearly in outlier territory.
+    const isFirstOrLastPage = pageCount <= FINANCE_PAGE_LOG_FULL_UNTIL || !nextToken;
+    if (isFirstOrLastPage || pageCount % FINANCE_PAGE_LOG_EVERY === 0) {
+      logger.info(
+        `[Finance API v2024-06-19] Page ${pageCount}: fetched ${transactions.length} transactions. ` +
+        `nextToken: ${nextToken ? "yes" : "no"}${isFirstOrLastPage ? "" : ` (sampled 1-in-${FINANCE_PAGE_LOG_EVERY})`}`
+      );
+    } else {
+      logger.debug(
+        `[Finance API v2024-06-19] Page ${pageCount}: fetched ${transactions.length} transactions. nextToken: ${nextToken ? "yes" : "no"}`
+      );
+    }
 
     // NOTE: deliberately NO pre-emptive inter-page delay. Amazon's documented 0.5 req/sec would
     // imply ~2.5s per page, and a large window can run to hundreds of pages — that alone would
@@ -290,8 +334,12 @@ async function fetchTransactions(accessToken, baseUrl, postedAfter, postedBefore
     // floor), and on the window being bounded so page counts stay modest.
   } while (nextToken);
 
+  // The per-page and per-throttle lines above are sampled, so this single summary is where the
+  // true totals live — including the throttle count, which is the signal that would otherwise be
+  // lost to sampling and is what tells you a fetch was rate-limited rather than merely slow.
   logger.info(
     `[Finance API v2024-06-19] Total transactions: ${transactionCount} across ${pageCount} page(s)` +
+    (throttleWarnCount > 0 ? `, ${throttleWarnCount} throttle retr${throttleWarnCount === 1 ? 'y' : 'ies'}` : '') +
     (onPage ? ' (streamed — not retained)' : '')
   );
   return allTransactions;

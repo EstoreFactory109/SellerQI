@@ -737,8 +737,19 @@ async function pollReportStatus(tokenManager, baseUrl, reportId) {
       return res.body;
     });
     const status = body.processingStatus;
-    logger.info(`[Report] Poll #${attempt}: status = ${status}`);
-    if (status === 'DONE') return body.reportDocumentId;
+    // Sampled: up to MAX_POLL_ATTEMPTS (40) lines per report, times one report per chunk, times
+    // every account — and it says the same thing each time while a report sits IN_QUEUE. Keep the
+    // first (so "polling started" is visible) and every 10th; the terminal states below are always
+    // logged by their own branches or the throw.
+    if (attempt === 1 || attempt % 10 === 0) {
+      logger.info(`[Report] Poll #${attempt}: status = ${status}`);
+    } else {
+      logger.debug(`[Report] Poll #${attempt}: status = ${status}`);
+    }
+    if (status === 'DONE') {
+      if (attempt !== 1 && attempt % 10 !== 0) logger.info(`[Report] DONE after ${attempt} poll(s).`);
+      return body.reportDocumentId;
+    }
     if (status === 'CANCELLED' || status === 'FATAL') throw new Error(`Report failed: ${status}`);
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
   }
@@ -2070,6 +2081,10 @@ async function backfillPendingExpenses({ userId, country, regionModel, accessTok
   // are stored in estimatedFba/estimatedCommission. We subtract those precise
   // values and add actual fees from the Finance API. No rate recalculation needed.
 
+  // Aggregated instead of logged per row — see the notes at each call site below.
+  const missingDailyRows = [];
+  let reversedEstimateCount = 0;
+
   for (const [dateKey, skuMap] of datesToUpdate) {
     for (const [sku, { expenses, revenues }] of skuMap) {
       const existing = await DailySkuFinance.findOne({
@@ -2078,7 +2093,11 @@ async function backfillPendingExpenses({ userId, country, regionModel, accessTok
       });
 
       if (!existing) {
-        logger.warn(`[Step2] No DailySkuFinance found for ${sku} on ${dateKey}. Skipping.`);
+        // Counted, not logged per row. This fires once per (date, SKU) pair and a large account has
+        // thousands — enough `warn` output to feed the PM2 daemon's buffer, which is what OOM-killed
+        // the box. The aggregate is reported once after the loop, which is more useful anyway: a
+        // count tells you the scale of the mismatch, whereas 3,000 identical lines do not.
+        missingDailyRows.push(`${dateKey}/${sku}`);
         continue;
       }
 
@@ -2092,7 +2111,11 @@ async function backfillPendingExpenses({ userId, country, regionModel, accessTok
         update.estimatedOrderCount = 0;
         update.estimatedFba = 0;
         update.estimatedCommission = 0;
-        logger.info(`[Step2] Reversed estimates for ${sku} on ${dateKey}: FBA=${existing.estimatedFba}, Comm=${existing.estimatedCommission}`);
+        // debug, not info: one line per resolved (date, SKU) pair reaches the thousands on a large
+        // account. The count is reported once after the loop; the per-row detail stays available at
+        // debug for anyone actually reconciling a specific SKU.
+        reversedEstimateCount++;
+        logger.debug(`[Step2] Reversed estimates for ${sku} on ${dateKey}: FBA=${existing.estimatedFba}, Comm=${existing.estimatedCommission}`);
       }
 
       // Add actual fees from Finance API
@@ -2120,6 +2143,19 @@ async function backfillPendingExpenses({ userId, country, regionModel, accessTok
 
       await DailySkuFinance.updateOne({ _id: existing._id }, { $set: update });
     }
+  }
+
+  // ── Aggregated diagnostics, replacing what used to be one line per (date, SKU) ──
+  if (reversedEstimateCount > 0) {
+    logger.info(`[Step2] Reversed estimated fees on ${reversedEstimateCount} SKU-day row(s) (per-row detail at debug).`);
+  }
+  if (missingDailyRows.length > 0) {
+    // A sample rather than the full list: the point is "how many and roughly which", and printing
+    // thousands of identifiers is the behaviour being removed.
+    logger.warn(
+      `[Step2] ${missingDailyRows.length} SKU-day row(s) had no DailySkuFinance record and were skipped. ` +
+      `First few: ${missingDailyRows.slice(0, 5).join(', ')}${missingDailyRows.length > 5 ? ', …' : ''}`
+    );
   }
 
   // ── Remove resolved and expired pending orders ──
