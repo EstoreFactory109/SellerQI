@@ -49,7 +49,9 @@
 // Load environment variables from .env file (root folder)
 require('dotenv').config({ path: './.env' });
 
-module.exports = {
+const { checkMemoryBudget } = require('./ecosystem.memory-check.js');
+
+const config = {
     apps: [
         {
             name: 'worker',
@@ -109,4 +111,12 @@ module.exports = {
         }
     ]
 };
+
+// This file still carries the pre-consolidation 5 × 4G = 20 GB worker budget (see the DIVERGENCE
+// note above). That is potentially fine on the dedicated worker EC2 it is written for, and
+// catastrophic on the shared 16 GB box — so rather than guess at numbers for a host we cannot see,
+// make the total announce itself against whatever host it is actually started on.
+checkMemoryBudget(config.apps, 'ecosystem.worker.config.js');
+
+module.exports = config;
 

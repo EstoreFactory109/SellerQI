@@ -27,10 +27,15 @@
  * See MULTI_INSTANCE_DEPLOYMENT.md for detailed setup instructions.
  */
 
-// Load environment variables from .env file (root folder)
+// Load environment variables from .env file (root folder).
+// NOTE: this runs BEFORE the apps array below is evaluated, so anything in .env (e.g.
+// WORKER_INSTANCES) wins over the `|| 'N'` defaults used further down. That is easy to forget and
+// has silently doubled the worker memory budget before — see the check at the bottom of this file.
 require('dotenv').config({ path: './.env' });
 
-module.exports = {
+const { checkMemoryBudget } = require('./ecosystem.memory-check.js');
+
+const config = {
     apps: [
         {
             name: 'api-server',
@@ -386,4 +391,10 @@ module.exports = {
         }
     ]
 };
+
+// Print a loud warning if the summed ceilings cannot fit this host. Never throws — see
+// ecosystem.memory-check.js for why that matters.
+checkMemoryBudget(config.apps, 'ecosystem.config.js');
+
+module.exports = config;
 
