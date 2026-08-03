@@ -87,3 +87,41 @@ describe('parseUserIdList', () => {
         expect([...parseUserIdList(`${A},${A}`)]).toEqual([A]);
     });
 });
+
+describe('financeStep2SlicingEnabledFor', () => {
+    const { financeStep2SlicingEnabledFor } = require('../../utils/asyncFinanceGate.js');
+
+    test('is INDEPENDENT of the async-report flag', () => {
+        // The two solve different problems (report queueing vs worker occupancy during the
+        // pending-fee search) and must be soakable separately. If they were coupled, enabling one
+        // would silently enable the other.
+        expect(financeStep2SlicingEnabledFor(A, { FINANCE_ASYNC_ENABLED: 'true' })).toBe(false);
+        expect(financeAsyncEnabledFor(A, { FINANCE_STEP2_SLICING_ENABLED: 'true' })).toBe(false);
+    });
+
+    test('flag unset -> unsliced for everyone (the default and the rollback)', () => {
+        expect(financeStep2SlicingEnabledFor(A, {})).toBe(false);
+    });
+
+    test('flag on with no allowlist -> sliced for everyone', () => {
+        expect(financeStep2SlicingEnabledFor(A, { FINANCE_STEP2_SLICING_ENABLED: 'true' })).toBe(true);
+    });
+
+    test('allowlist hit -> sliced; miss -> unsliced', () => {
+        const env = { FINANCE_STEP2_SLICING_ENABLED: 'true', FINANCE_STEP2_USER_IDS: B };
+        expect(financeStep2SlicingEnabledFor(B, env)).toBe(true);
+        expect(financeStep2SlicingEnabledFor(A, env)).toBe(false);
+    });
+
+    test('a malformed allowlist fails CLOSED, same as the async gate', () => {
+        const env = { FINANCE_STEP2_SLICING_ENABLED: 'true', FINANCE_STEP2_USER_IDS: 'typo' };
+        expect(financeStep2SlicingEnabledFor(A, env)).toBe(false);
+        expect(financeStep2SlicingEnabledFor(B, env)).toBe(false);
+    });
+
+    test('only exactly \'true\' enables it', () => {
+        for (const v of ['1', 'yes', 'TRUE', '', 'false']) {
+            expect(financeStep2SlicingEnabledFor(A, { FINANCE_STEP2_SLICING_ENABLED: v })).toBe(false);
+        }
+    });
+});

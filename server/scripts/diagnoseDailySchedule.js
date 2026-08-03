@@ -34,6 +34,7 @@ const UserUpdateSchedule = require('../models/user-auth/UserUpdateScheduleModel.
 const JobStatus = require('../models/system/JobStatusModel.js');
 const OrchestrationCronLock = require('../models/system/OrchestrationCronLockModel.js');
 const FinanceSyncLog = require('../models/finance/FinanceSyncLogModel.js');
+const PendingExpenseOrder = require('../models/finance/PendingExpenseOrderModel.js');
 
 function getArg(name) {
   const m = process.argv.slice(2).find((a) => a.startsWith(`--${name}=`));
@@ -369,6 +370,66 @@ async function checkAsyncReportRequests() {
   }
 }
 
+/**
+ * Step 2 (pending-fee backfill) slice progress.
+ *
+ * Without this, "is the backlog actually draining?" is unanswerable: the sliced walk deliberately
+ * covers only part of the window per run, so a single run's `resolved: 0` says nothing on its own.
+ * What matters is whether `coveredUntil` is marching back toward `windowStart` and whether the
+ * pending count is falling across runs.
+ */
+async function checkStep2Cursors() {
+  section('7. FINANCE STEP 2 BACKFILL CURSOR (FinanceBackfillCursor)');
+
+  let FinanceBackfillCursor;
+  try {
+    FinanceBackfillCursor = require('../models/finance/FinanceBackfillCursorModel.js');
+  } catch {
+    console.log('Model not present in this build — skipping.');
+    return;
+  }
+
+  const match = FILTER_USER_ID ? { User: new mongoose.Types.ObjectId(FILTER_USER_ID) } : {};
+  const cursors = await FinanceBackfillCursor.find(match).sort({ updatedAt: -1 }).limit(50).lean();
+
+  if (cursors.length === 0) {
+    console.log('No cursors. Step 2 slicing has never run for this scope');
+    console.log('(expected unless FINANCE_STEP2_SLICING_ENABLED is set for the account).');
+    return;
+  }
+
+  console.log('\n  UPDATED (UTC)        CC-RGN  WINDOW                    COVERED-TO   SLICE  PASS  RESOLVED  PENDING');
+  console.log('  ' + '-'.repeat(108));
+
+  for (const c of cursors) {
+    const pending = await PendingExpenseOrder.countDocuments({
+      User: c.User, country: c.country, region: c.region,
+    });
+    const complete = c.coveredUntil <= c.windowStart;
+    console.log(
+      `  ${String(c.updatedAt?.toISOString?.() || '').substring(0, 19).padEnd(20)} ` +
+      `${`${c.country}-${c.region}`.padEnd(7)} ` +
+      `${`${c.windowStart}→${c.windowEnd}`.padEnd(25)} ` +
+      `${String(c.coveredUntil).padEnd(12)} ` +
+      `${String(c.slicesDone || 0).padEnd(6)} ` +
+      `${String(c.passesCompleted || 0).padEnd(5)} ` +
+      `${String(c.resolvedThisPass || 0).padEnd(9)} ${pending}` +
+      (complete ? '   [pass complete — next run restarts]' : '')
+    );
+
+    // A cursor that has not moved in over a day means Step 2 is not running for this account at all,
+    // which on a large backlog reads identically to "draining slowly" unless you look here.
+    const ageH = (Date.now() - new Date(c.lastRunAt || c.updatedAt).getTime()) / 3600000;
+    if (ageH > 26 && pending > 0) {
+      console.log(`  ${' '.repeat(20)} ! last run ${ageH.toFixed(1)}h ago with ${pending} still pending — Step 2 may not be running.`);
+      findings.push(`Step 2 cursor for ${c.country}-${c.region} is ${ageH.toFixed(0)}h stale with ${pending} pending orders.`);
+    }
+    if (c.claimedUntil && new Date(c.claimedUntil) > new Date()) {
+      console.log(`  ${' '.repeat(20)} (a run currently holds a claim until ${new Date(c.claimedUntil).toISOString().substring(0, 19)})`);
+    }
+  }
+}
+
 async function main() {
   await mongoose.connect(MONGODB_URI);
   console.log(`[diag] Connected to ${dbConsts.dbName || MONGODB_URI}`);
@@ -380,6 +441,7 @@ async function main() {
   await checkJobStatus();
   await checkFinanceFreshness();
   await checkAsyncReportRequests();
+  await checkStep2Cursors();
 
   section('ROOT-CAUSE SUMMARY');
   if (findings.length === 0) {

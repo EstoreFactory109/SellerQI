@@ -52,12 +52,26 @@ function parseUserIdList(raw) {
  * @returns {boolean}
  */
 function financeAsyncEnabledFor(userId, env = process.env) {
-    if (env.FINANCE_ASYNC_ENABLED !== 'true') return false;
+    return gateFor(userId, env, 'FINANCE_ASYNC_ENABLED', 'FINANCE_ASYNC_USER_IDS');
+}
 
-    const raw = String(env.FINANCE_ASYNC_USER_IDS || '').trim();
+/**
+ * The shared flag+allowlist evaluation. Factored out so every gate gets identical semantics —
+ * particularly the fail-closed branch — by construction rather than by copied code that can drift.
+ *
+ * @param {string|object} userId
+ * @param {object} env
+ * @param {string} flagKey       env var holding the master switch
+ * @param {string} allowlistKey  env var holding the optional comma-separated ObjectId allowlist
+ */
+function gateFor(userId, env, flagKey, allowlistKey) {
+    if (env[flagKey] !== 'true') return false;
 
-    // Nothing configured at all -> no restriction. Note this must mean "everyone", not "nobody",
-    // or widening the rollout would require deleting the variable rather than blanking it.
+    const raw = String(env[allowlistKey] || '').trim();
+
+    // Nothing configured at all -> no restriction. This must mean "everyone", not "nobody", or
+    // widening the rollout would require deleting the variable rather than blanking it — and a blank
+    // value would silently send every account back to the old path.
     if (raw === '') return true;
 
     const allowlist = parseUserIdList(raw);
@@ -68,8 +82,8 @@ function financeAsyncEnabledFor(userId, env = process.env) {
     // radius this gate exists to prevent.
     if (allowlist.size === 0) {
         console.warn(
-            `[asyncFinanceGate] FINANCE_ASYNC_USER_IDS is set ("${raw}") but contains no valid ` +
-            `ObjectId — refusing to enable async finance for anyone. Fix the value or unset it.`
+            `[asyncFinanceGate] ${allowlistKey} is set ("${raw}") but contains no valid ObjectId — ` +
+            `refusing to enable for anyone. Fix the value or unset it.`
         );
         return false;
     }
@@ -77,4 +91,23 @@ function financeAsyncEnabledFor(userId, env = process.env) {
     return allowlist.has(String(userId));
 }
 
-module.exports = { financeAsyncEnabledFor, parseUserIdList };
+/**
+ * Whether finance Step 2 (`backfillPendingExpenses`) should walk its window in date slices instead
+ * of in one uninterrupted run.
+ *
+ *   FINANCE_STEP2_SLICING_ENABLED=true
+ *   FINANCE_STEP2_USER_IDS=6a57b823571ceb9266953c30[,<more>]
+ *
+ * Separate from the async-report flag on purpose: they solve different problems (report queueing vs
+ * worker occupancy during the pending-fee search) and want independent soak windows. Same semantics
+ * and the same fail-closed behaviour on a malformed allowlist.
+ *
+ * @param {string|object} userId
+ * @param {object} [env]
+ * @returns {boolean}
+ */
+function financeStep2SlicingEnabledFor(userId, env = process.env) {
+    return gateFor(userId, env, 'FINANCE_STEP2_SLICING_ENABLED', 'FINANCE_STEP2_USER_IDS');
+}
+
+module.exports = { financeAsyncEnabledFor, financeStep2SlicingEnabledFor, parseUserIdList };

@@ -8,8 +8,10 @@ const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
 const DailyOverheadFinance = require('../../models/finance/DailyOverheadFinanceModel.js');
 const FinanceSyncLog = require('../../models/finance/FinanceSyncLogModel.js');
 const PendingExpenseOrder = require('../../models/finance/PendingExpenseOrderModel.js');
+const FinanceBackfillCursor = require('../../models/finance/FinanceBackfillCursorModel.js');
 const { downloadReportContent, isUnusableReportPayload } = require('../../utils/spApiReportDownload.js');
 const { checkSpApiStatusOnce } = require('./spApiReportAdapter.js');
+const { financeStep2SlicingEnabledFor } = require('../../utils/asyncFinanceGate.js');
 
 // ★ VERSION — check this in logs to confirm deployment
 const FINANCE_SERVICE_VERSION = 'v3.1-sellerboard-match-20260506';
@@ -78,6 +80,11 @@ const FINANCE_FORWARD_BUFFER_DAYS = process.env.FINANCE_FORWARD_BUFFER_DAYS !== 
 // FinanceSyncLog failure row: the remaining dates were never attempted, so marking them failed
 // would misreport them. Same treatment as a budget stop.
 const FINANCE_HEAP_LIMIT_MB = financeEnvInt('FINANCE_HEAP_LIMIT_MB', 1200);
+
+// Step 2 slicing. Days of the pending-fee search window covered per run when slicing is enabled.
+// 7 keeps a run to roughly 5 minutes on the worst account we have measured (7,124 pending orders
+// across 55 days, 1000+ pages, dominated by throttle backoffs) instead of hours.
+const FINANCE_STEP2_SLICE_DAYS = Math.max(1, financeEnvInt('FINANCE_STEP2_SLICE_DAYS', 7));
 
 
 // ── Empty-report retry (FIX #1) ──────────────────────────────────────────────
@@ -1939,7 +1946,59 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
 // Refunds/Reimbursements are already handled in Step 1 via
 // posted-date placement and don't need order-ID-based backfill.
 // ═══════════════════════════════════════════════
-async function backfillPendingExpenses({ userId, country, regionModel, accessToken, refreshToken, clientId, clientSecret, tokenManager: inheritedTokenManager }) {
+/**
+ * Choose the date slice a sliced Step 2 run should search, newest-first.
+ *
+ * Pure and exported for exactly the reason `resolveSyncWindow` is: every real caller reaches it
+ * through a DB read and an Amazon fetch, so a unit test is the only practical way to prove the
+ * boundary arithmetic — and the boundary arithmetic is where the previously-rejected window cap went
+ * wrong. See FinanceBackfillCursorModel for why slicing-with-a-cursor is not that bug.
+ *
+ * @param {object}      args
+ * @param {object|null} args.cursor       persisted cursor, or null on the first ever run
+ * @param {string}      args.windowStart  `min(purchasePacificDate) - settlementLag`, YYYY-MM-DD
+ * @param {string}      args.windowEnd    today's upper bound, YYYY-MM-DD
+ * @param {number}      args.sliceDays
+ * @returns {{sliceStart: string, sliceEnd: string, startingNewPass: boolean, passComplete: boolean}}
+ *   `passComplete` describes the slice being returned: true when it reaches windowStart, i.e. this
+ *   run finishes the pass. Expiry is only permitted on such a run.
+ */
+function resolveStep2Slice({ cursor, windowStart, windowEnd, sliceDays }) {
+  const span = Math.max(1, sliceDays);
+
+  // Start a new pass when there is no cursor, when the previous pass finished, or when the stored
+  // window no longer matches the live one (orders resolved, so `min(purchasePacificDate)` moved —
+  // continuing against a stale boundary could leave a gap unsearched).
+  const startingNewPass =
+    !cursor ||
+    !cursor.coveredUntil ||
+    cursor.windowStart !== windowStart ||
+    cursor.coveredUntil <= cursor.windowStart;
+
+  const sliceEnd = startingNewPass ? windowEnd : cursor.coveredUntil;
+  // Newest-first: walk backwards from the end, never past windowStart.
+  const candidate = addDaysStr(sliceEnd, -span);
+  const sliceStart = candidate < windowStart ? windowStart : candidate;
+
+  return {
+    sliceStart,
+    sliceEnd,
+    startingNewPass,
+    passComplete: sliceStart <= windowStart,
+  };
+}
+
+/**
+ * @param {boolean} [allowExpiry=true] Whether this run may give up on orders older than
+ *   MAX_PENDING_AGE_DAYS. Must be false on a sliced run that has not covered the whole window —
+ *   a run that searched 1/8 of the range cannot conclude a fee does not exist.
+ *
+ * NOTE: `server/controllers/finance/FinanceDashboardController.js:673` holds a stale duplicate of
+ * this function. It is unreachable (its route imports only the five read handlers and nothing else
+ * imports that file), so it is deliberately left alone rather than kept in sync — see the
+ * deprecation notice at the top of that file. It does NOT have the three correctness fixes below.
+ */
+async function backfillPendingExpenses({ userId, country, regionModel, accessToken, refreshToken, clientId, clientSecret, tokenManager: inheritedTokenManager, allowExpiry = true, slicingEnabled = false }) {
   const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
   const regionInternal = internalRegionFromModel(regionModel);
 
@@ -1975,12 +2034,51 @@ async function backfillPendingExpenses({ userId, country, regionModel, accessTok
   //
   // Memory here is instead bounded by the streaming fold below: the raw transaction graph (by far
   // the largest tier, and what exhausted the heap) is no longer retained at all.
-  const finEnd = new Date(Date.now() - 3 * 60 * 1000); // API requires postedBefore > 2 min in the past
+  //
+  // ── SLICING (opt-in) ──
+  // The paragraph above still holds for the DEFAULT path: unsliced, it runs to now, uncapped.
+  // What it rules out is capping the window with NO MEMORY of what was covered. With the
+  // FinanceBackfillCursor the window is not shortened, it is walked in slices newest-first and the
+  // progress is recorded, so every part of it is still reached — just across several runs instead of
+  // one multi-hour one. See FinanceBackfillCursorModel for the full argument.
+  let finEnd = new Date(Date.now() - 3 * 60 * 1000); // API requires postedBefore > 2 min in the past
+  let sliceInfo = null;
+  let cursor = null;
+  // Captured BEFORE finStart is mutated to the slice boundary below — the cursor must record the
+  // whole pass window, not the slice.
+  const windowStart = formatDateUTC(finStart);
+  const windowEnd = formatDateUTC(finEnd);
+
+  if (slicingEnabled) {
+    cursor = await FinanceBackfillCursor.findOne({
+      User: userObjectId, country: country.toUpperCase(), region: regionModel,
+    }).lean();
+
+    sliceInfo = resolveStep2Slice({ cursor, windowStart, windowEnd, sliceDays: FINANCE_STEP2_SLICE_DAYS });
+
+    // Re-point the fetch at just this slice. `finStart` is a Date used below, so mutate it to match.
+    finStart.setTime(new Date(`${sliceInfo.sliceStart}T00:00:00.000Z`).getTime());
+    // Keep the live `now - 3min` when the slice ends today, so the most recent minutes are not
+    // skipped; otherwise clamp to the slice's own boundary.
+    if (sliceInfo.sliceEnd < windowEnd) {
+      finEnd = new Date(`${sliceInfo.sliceEnd}T23:59:59.999Z`);
+    }
+
+    // A run that has only searched part of the window cannot conclude a fee does not exist, so it
+    // must not expire anything. Only the run that closes the pass may.
+    allowExpiry = allowExpiry && sliceInfo.passComplete;
+  }
+
   const finSpanDays = Math.max(1, Math.round((finEnd - finStart) / 86400000));
 
   const tokenManager = inheritedTokenManager || createTokenManager({ accessToken, refreshToken, clientId, clientSecret });
 
-  logger.info(`[Step2] Finance API: ${finStart.toISOString()} → ${finEnd.toISOString()} (${finSpanDays}d, ${pendingOrders.length} pending orders)`);
+  logger.info(
+    `[Step2] Finance API: ${finStart.toISOString()} → ${finEnd.toISOString()} (${finSpanDays}d, ${pendingOrders.length} pending orders)` +
+    (sliceInfo
+      ? ` [slice ${sliceInfo.sliceStart}→${sliceInfo.sliceEnd}${sliceInfo.startingNewPass ? ', new pass' : ''}${sliceInfo.passComplete ? ', completes pass' : ''}]`
+      : '')
+  );
 
   // Stream and fold, same as Step 1 — nothing raw is retained.
   const step2StartedAt = Date.now();
@@ -2024,20 +2122,15 @@ async function backfillPendingExpenses({ userId, country, regionModel, accessTok
   const { expensesByOrderSku, unattributedExpensesByOrder, revenueByOrderSku, unattributedRevenueByOrder } = financeIndex;
 
   let resolved = 0, stillPending = 0, expired = 0;
-  const resolvedOrderIds = [];
+  const expiredOrderIds = [];
   const datesToUpdate = new Map();
+  // Which pending orderIds fed each (date, SKU) bucket. Needed because an order is now only
+  // removed from the queue once ITS bucket's write has actually landed — see the persist loop.
+  const orderIdsByDateSku = new Map();
 
   const now = new Date();
 
   for (const pending of pendingOrders) {
-    const ageMs = now.getTime() - new Date(pending.firstSeenAt).getTime();
-    const ageDays = ageMs / (24 * 60 * 60 * 1000);
-    if (ageDays > MAX_PENDING_AGE_DAYS) {
-      expired++;
-      resolvedOrderIds.push(pending.orderId);
-      continue;
-    }
-
     const sku = pending.sku || 'N/A';
     const expKey = `${pending.orderId}||${sku}`;
     // ★ Only looks at Shipment-type expenses (purchase-date rows)
@@ -2065,9 +2158,27 @@ async function backfillPendingExpenses({ userId, country, regionModel, accessTok
         unattributedRevenueByOrder.delete(pending.orderId);
       }
 
-      resolved++;
-      resolvedOrderIds.push(pending.orderId);
+      // NOT counted as resolved yet, and NOT queued for deletion yet. Both happen in the persist
+      // loop, once this bucket's DailySkuFinance write succeeds.
+      const dsKey = `${dateKey}||${sku}`;
+      if (!orderIdsByDateSku.has(dsKey)) orderIdsByDateSku.set(dsKey, []);
+      orderIdsByDateSku.get(dsKey).push(pending.orderId);
     } else {
+      // ── FIX: expiry is checked HERE, after the fee lookup, not before it ──
+      // It used to be the first thing in this loop, which meant an order turning 46 days old on the
+      // very run its fees finally arrived was expired and its ACTUAL fees thrown away — the
+      // estimate then stood permanently, with the queue row gone so nothing could ever correct it.
+      // Only give up on an order we genuinely could not resolve.
+      //
+      // `allowExpiry` is false on a sliced run that has not yet covered the whole window: a run
+      // that only searched 1/8 of the range has no business concluding a fee does not exist.
+      const ageDays = (now.getTime() - new Date(pending.firstSeenAt).getTime()) / (24 * 60 * 60 * 1000);
+      if (allowExpiry && ageDays > MAX_PENDING_AGE_DAYS) {
+        expired++;
+        expiredOrderIds.push(pending.orderId);
+        continue;
+      }
+
       stillPending++;
       await PendingExpenseOrder.updateOne(
         { _id: pending._id },
@@ -2097,6 +2208,12 @@ async function backfillPendingExpenses({ userId, country, regionModel, accessTok
         // thousands — enough `warn` output to feed the PM2 daemon's buffer, which is what OOM-killed
         // the box. The aggregate is reported once after the loop, which is more useful anyway: a
         // count tells you the scale of the mismatch, whereas 3,000 identical lines do not.
+        //
+        // ── FIX: the order STAYS QUEUED ──
+        // It used to be added to the delete list before this check ran, so an order whose
+        // DailySkuFinance row was missing left the queue with its fees never written — silent,
+        // permanent loss, surfaced only as an aggregate count. Leaving it queued means its
+        // `attempts` keeps rising and a later run (after Step 1 has created the row) can apply it.
         missingDailyRows.push(`${dateKey}/${sku}`);
         continue;
       }
@@ -2141,7 +2258,30 @@ async function backfillPendingExpenses({ userId, country, regionModel, accessTok
       update.totalTax = Math.round(((merged.salesTaxCollected || 0) + (merged.shippingTaxCollected || 0) + (merged.giftWrapTaxCollected || 0) + (merged.marketplaceFacilitatorTax || 0) + (merged.tdsDeducted || 0) + (merged.tcsCollected || 0)) * 100) / 100;
       update.netAmount = Math.round((update.totalRevenue + update.totalExpenses + update.totalTax) * 100) / 100;
 
+      // ── FIX: delete this bucket's queue rows BEFORE writing its fees ──
+      // The fee application above is a read-modify-write accumulate (`existing[field] + amount`)
+      // while the estimate reversal is self-clearing. The old code wrote every bucket and then
+      // issued ONE deleteMany at the very end of the run, so a crash in between left the queue rows
+      // alive with `isEstimated` already false — and the next run added the actual fees a SECOND
+      // time without subtracting the estimate again. Permanently overstated, unflagged, and
+      // undetectable after the fact.
+      //
+      // Ordering the delete first inverts the failure mode: a crash now loses one bucket's actual
+      // fees and leaves the estimate standing, which a later resync can recreate and correct.
+      // Losing a fee is recoverable; silently doubling one is not. Scope is one (date, SKU) row
+      // rather than the whole run.
+      const bucketOrderIds = orderIdsByDateSku.get(`${dateKey}||${sku}`) || [];
+      if (bucketOrderIds.length > 0) {
+        await PendingExpenseOrder.deleteMany({
+          User: userObjectId, country: country.toUpperCase(), region: regionModel,
+          orderId: { $in: bucketOrderIds },
+        });
+      }
+
       await DailySkuFinance.updateOne({ _id: existing._id }, { $set: update });
+
+      // Only now is the order genuinely resolved.
+      resolved += bucketOrderIds.length;
     }
   }
 
@@ -2158,16 +2298,63 @@ async function backfillPendingExpenses({ userId, country, regionModel, accessTok
     );
   }
 
-  // ── Remove resolved and expired pending orders ──
-  if (resolvedOrderIds.length > 0) {
+  // ── Remove expired pending orders ──
+  // Resolved orders are already gone: each was deleted alongside its own bucket's write above, so
+  // that a crash cannot leave a resolved row behind for a later run to double-apply. Only the
+  // give-up cases remain to be cleared here, and their estimate stays in place by design.
+  if (expiredOrderIds.length > 0) {
     await PendingExpenseOrder.deleteMany({
       User: userObjectId, country: country.toUpperCase(), region: regionModel,
-      orderId: { $in: resolvedOrderIds },
+      orderId: { $in: expiredOrderIds },
     });
   }
 
+  // ── Advance the cursor, AFTER every write above has landed ──
+  // Ordering matters: if this ran first and the process then died, the slice would be recorded as
+  // covered while its fees were never applied — and nothing would ever look at that date range
+  // again this pass. Writing it last means an interrupted slice is simply re-walked, which the
+  // per-bucket delete-then-write above makes safe.
+  if (slicingEnabled && sliceInfo) {
+    // A new pass RESETS the per-pass counters; a continuing pass increments them. Two shapes rather
+    // than one clever expression, because getting this wrong makes the observability lie about
+    // whether the backlog is actually draining.
+    const set = {
+      windowStart,
+      windowEnd: sliceInfo.startingNewPass ? windowEnd : (cursor && cursor.windowEnd) || windowEnd,
+      coveredUntil: sliceInfo.sliceStart,
+      lastRunAt: new Date(),
+      claimedUntil: null,
+    };
+    const update = sliceInfo.startingNewPass
+      ? {
+        $set: { ...set, passStartedAt: new Date(), slicesDone: 1, resolvedThisPass: resolved },
+        $inc: { passesCompleted: sliceInfo.passComplete ? 1 : 0 },
+      }
+      : {
+        $set: set,
+        $inc: { slicesDone: 1, resolvedThisPass: resolved, passesCompleted: sliceInfo.passComplete ? 1 : 0 },
+        $setOnInsert: { passStartedAt: new Date() },
+      };
+
+    await FinanceBackfillCursor.updateOne(
+      { User: userObjectId, country: country.toUpperCase(), region: regionModel },
+      update,
+      { upsert: true }
+    );
+    logger.info(
+      `[Step2] Slice done: covered back to ${sliceInfo.sliceStart}` +
+      (sliceInfo.passComplete
+        ? ` — pass COMPLETE (window ${windowStart}); next run starts a fresh pass.`
+        : ` — ${sliceInfo.sliceStart} > ${windowStart}, more slices remain.`)
+    );
+  }
+
   logger.info(`[Step2] Done. Resolved: ${resolved}, Still pending: ${stillPending}, Expired: ${expired}`);
-  return { resolved, stillPending, expired, token: tokenManager.token, tokenManager };
+  return {
+    resolved, stillPending, expired,
+    token: tokenManager.token, tokenManager,
+    ...(sliceInfo ? { slice: { ...sliceInfo, pendingRemaining: stillPending } } : {}),
+  };
 }
 
 // ═══════════════════════════════════════════════
@@ -2207,7 +2394,7 @@ async function syncFinanceData({ userId, country, regionModel, refreshToken, acc
 
   if (window.mode === 'up_to_date') {
     logger.info(`[Sync] ${window.note}`);
-    const step2 = await backfillPendingExpenses({ userId, country, regionModel, accessToken, refreshToken, clientId, clientSecret, tokenManager });
+    const step2 = await backfillPendingExpenses({ userId, country, regionModel, accessToken, refreshToken, clientId, clientSecret, tokenManager, slicingEnabled: financeStep2SlicingEnabledFor(userId) });
     await syncRelationshipsIfNeeded({ userId, country, regionModel, startDate: latestSyncDate, endDate: latestSyncDate, accessToken: tokenManager.token, refreshToken, clientId, clientSecret });
     return { status: 'up_to_date', latestDate: latestSyncDate, backfill: step2 };
   }
@@ -2264,7 +2451,7 @@ async function syncFinanceData({ userId, country, regionModel, refreshToken, acc
     }
 
     const step1 = loop.aggregate;
-    const step2 = await backfillPendingExpenses({ userId, country, regionModel, accessToken: tokenManager.token, refreshToken, clientId, clientSecret, tokenManager });
+    const step2 = await backfillPendingExpenses({ userId, country, regionModel, accessToken: tokenManager.token, refreshToken, clientId, clientSecret, tokenManager, slicingEnabled: financeStep2SlicingEnabledFor(userId) });
     await syncRelationshipsIfNeeded({ userId, country, regionModel, startDate, endDate, accessToken: tokenManager.token, refreshToken, clientId, clientSecret });
 
     return {
@@ -2429,7 +2616,7 @@ async function planFinanceSync({
  * Running it per chunk would re-walk every pending order each time for no benefit.
  */
 async function runFinanceSyncTail({ userId, country, regionModel, startDate, endDate, refreshToken, clientId, clientSecret, tokenManager }) {
-  const step2 = await backfillPendingExpenses({ userId, country, regionModel, accessToken: tokenManager.token, refreshToken, clientId, clientSecret, tokenManager });
+  const step2 = await backfillPendingExpenses({ userId, country, regionModel, accessToken: tokenManager.token, refreshToken, clientId, clientSecret, tokenManager, slicingEnabled: financeStep2SlicingEnabledFor(userId) });
   await syncRelationshipsIfNeeded({ userId, country, regionModel, startDate, endDate, accessToken: tokenManager.token, refreshToken, clientId, clientSecret });
   return step2;
 }
@@ -2559,6 +2746,10 @@ module.exports = {
   createFinanceIndex,
   addFinanceRowsToIndex,
   logFinanceIndexDedup,
+  // Step 2 slice selection — pure, and the only practical way to verify the boundary arithmetic,
+  // which is precisely where the previously-rejected window cap went wrong.
+  resolveStep2Slice,
+  FINANCE_STEP2_SLICE_DAYS,
   // Control-plane request helper. Exported for tests only: the verb-aware retry policy (replay
   // idempotent GETs, never replay the non-idempotent createReport POST) is the whole point of the
   // helper, and driving it through submitSalesReport/downloadSalesReportRows would drag in the S3
