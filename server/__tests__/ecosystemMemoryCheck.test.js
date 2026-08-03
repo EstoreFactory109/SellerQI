@@ -143,3 +143,56 @@ describe('checkMemoryBudget — must never throw', () => {
         expect(() => checkMemoryBudget(hostile, 'test', { totalMemBytes: 16 * GB })).not.toThrow();
     });
 });
+
+describe('the real ecosystem.config.js is sized for its target host', () => {
+    // Locks the sizing done for the 16 GB downsize so it cannot silently drift back up. The box was
+    // previously promising 20.7 GB (6 workers × 2G + a 3G integration-worker + a 2G weekly-history)
+    // while actually using 3.1 GB.
+    const loadApps = () => {
+        // Defaults only — a developer's local .env must not change what this asserts.
+        const saved = { i: process.env.WORKER_INSTANCES, c: process.env.WORKER_CONCURRENCY };
+        delete process.env.WORKER_INSTANCES;
+        delete process.env.WORKER_CONCURRENCY;
+        jest.resetModules();
+        try {
+            const cfg = require('../../ecosystem.config.js');
+            // The worker count is env-driven; pin it to the committed default for this assertion.
+            return cfg.apps.map((a) => (a.name === 'worker' ? { ...a, instances: 3 } : a));
+        } finally {
+            if (saved.i === undefined) delete process.env.WORKER_INSTANCES; else process.env.WORKER_INSTANCES = saved.i;
+            if (saved.c === undefined) delete process.env.WORKER_CONCURRENCY; else process.env.WORKER_CONCURRENCY = saved.c;
+        }
+    };
+
+    test('fits a 16 GB host with headroom to spare', () => {
+        const r = checkMemoryBudget(loadApps(), 'real-config', { totalMemBytes: 16 * GB });
+        expect(r.overCommitted).toBe(false);
+        expect(r.budget / GB).toBeLessThan(13);
+    });
+
+    test('every app declares a V8 heap cap', () => {
+        // Without --max-old-space-size V8 sizes old-space from total system RAM, so the heap ceiling
+        // exceeds the PM2 cap meant to contain it — and PM2's cap is a poll-based RSS check, so a
+        // fast allocation burst reaches the kernel OOM-killer before PM2 ever acts.
+        for (const app of loadApps()) {
+            expect(app.node_args || '').toMatch(/--max-old-space-size=\d+/);
+        }
+    });
+
+    test('each heap cap sits below its own max_memory_restart', () => {
+        for (const app of loadApps()) {
+            const heapMb = parseInt((app.node_args.match(/--max-old-space-size=(\d+)/) || [])[1], 10);
+            const capMb = parseMemoryString(app.max_memory_restart) / 1024 ** 2;
+            expect(heapMb).toBeLessThan(capMb);
+        }
+    });
+
+    test("the worker heap stays above the finance guard, or the guard can never fire", () => {
+        // FinanceService bails between chunks at FINANCE_HEAP_LIMIT_MB (1200). If the worker's V8
+        // ceiling were at or below that, V8 would OOM before the graceful bail-out ever ran — the
+        // guard would be dead code and a big account would hard-crash the worker instead.
+        const worker = loadApps().find((a) => a.name === 'worker');
+        const heapMb = parseInt(worker.node_args.match(/--max-old-space-size=(\d+)/)[1], 10);
+        expect(heapMb).toBeGreaterThan(1200);
+    });
+});

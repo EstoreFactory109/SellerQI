@@ -56,18 +56,21 @@ const config = {
         {
             name: 'worker',
             script: './server/Services/BackgroundJobs/worker.js',
-            // Cap V8's heap BELOW max_memory_restart (4G). Without this V8 sizes old-space from
+            // Cap V8's heap BELOW max_memory_restart (2G). Without this V8 sizes old-space from
             // total system RAM, so the heap ceiling exceeds the PM2 cap meant to contain it — and
             // PM2's cap is a poll-based RSS check, so a fast allocation burst reaches the kernel
             // OOM-killer before PM2 ever acts.
-            node_args: '--max-old-space-size=3072',
+            node_args: '--max-old-space-size=1536',
             //
-            // ⚠ DIVERGENCE FROM ecosystem.config.js — this file has NOT been through the memory
-            // consolidation that the single-box config got in b6c4266 (5×15 → 3×25, same 75 slots,
-            // ~2 V8 heaps less baseline RAM). Here it is still 5 × 4G = 20 GB of worker budget.
-            // That may be correct for a DEDICATED worker EC2 with the RAM to back it, which is what
-            // this file is for — so the numbers are left alone rather than guessed at. Before using
-            // this file, check the target host's RAM against that 20 GB and align it deliberately.
+            // Aligned with the `worker` app in ecosystem.config.js (2G cap / 1536M heap), which is
+            // sized from measured production RSS: peak 991MB at ~15 concurrency, and the heap must
+            // stay above FINANCE_HEAP_LIMIT_MB (1200) so the finance guard bails between chunks
+            // instead of V8 hitting its ceiling. This file previously carried 5 × 4G = 20 GB, set
+            // before any of that was measured.
+            // This is the DEDICATED-worker-host variant, so instance count is deliberately left to
+            // WORKER_INSTANCES — set it from the target host's RAM (roughly 2 GB per instance plus
+            // ~2 GB for the OS and PM2 daemon). The startup check at the bottom of this file will
+            // warn if the total cannot fit.
             //
             // SellerQI v2 Phase 1 default: 5 workers × 15 concurrency = 75 slots.
             // Override via WORKER_INSTANCES env var on the EC2 host.
@@ -97,8 +100,8 @@ const config = {
             min_uptime: '10s',
             // Graceful shutdown timeout - should be slightly above worker grace period
             kill_timeout: parseInt(process.env.WORKER_KILL_TIMEOUT_MS || '150000', 10), // default 2.5 minutes
-            // Memory limits (increased for 15 concurrent jobs per worker)
-            max_memory_restart: '4G',
+            // Memory limits — see the sizing note on node_args above.
+            max_memory_restart: '2G',
             // Watch mode (disable in production)
             watch: false,
             // Environment variables
@@ -112,10 +115,9 @@ const config = {
     ]
 };
 
-// This file still carries the pre-consolidation 5 × 4G = 20 GB worker budget (see the DIVERGENCE
-// note above). That is potentially fine on the dedicated worker EC2 it is written for, and
-// catastrophic on the shared 16 GB box — so rather than guess at numbers for a host we cannot see,
-// make the total announce itself against whatever host it is actually started on.
+// Instance count here is host-dependent (this is the dedicated-worker variant), so the total
+// cannot be fixed in the file. Make it announce itself against whatever host it is started on
+// instead — an over-committed box is exactly what preceded the 2 Jul 2026 OOM kill.
 checkMemoryBudget(config.apps, 'ecosystem.worker.config.js');
 
 module.exports = config;
