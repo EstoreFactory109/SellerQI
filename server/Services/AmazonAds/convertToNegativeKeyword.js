@@ -9,6 +9,12 @@
 
 const { Integration } = require('../main/Integration.js');
 const { generateAdsAccessToken } = require('./GenerateToken.js');
+const { chunkIds, sleep, ADS_CHUNK_DELAY_MS } = require('../../utils/adsIdFilter.js');
+
+// Deletion is destructive and user-triggered, so it stays more conservative than the read-only
+// chunk loops: default to a full second between chunks (matching batchConvertToNegativeKeywords)
+// but honour a zeroed shared knob so tests and operators can override it.
+const DELETE_CHUNK_DELAY_MS = ADS_CHUNK_DELAY_MS === 0 ? 0 : 1000;
 
 // Region base URIs (same as GetWastedSpendKeywords and other Amazon Ads services)
 const BASE_URIS = {
@@ -44,38 +50,88 @@ class AmazonAdsConfig {
 }
 
 /**
- * Delete (archive) keywords by their IDs
- * 
+ * Delete (archive) keywords by their IDs.
+ *
+ * `keywordIdFilter.include` is capped at 100 members by SP v3, so the IDs are chunked and each
+ * chunk issued as its own request (see utils/adsIdFilter.js). A single-chunk call returns the raw
+ * Amazon response exactly as before; only a genuinely chunked call returns the aggregate wrapper.
+ *
  * @param {AmazonAdsConfig} config - API configuration
  * @param {string[]} keywordIds - Array of keyword IDs to delete
- * @returns {Promise<Object>} - API response
+ * @returns {Promise<Object>} - API response, or { chunked, chunkCount, responses } when chunked
  */
 async function deleteKeywords(config, keywordIds) {
   const url = `${config.baseUrl}/sp/keywords/delete`;
-  
-  const payload = {
-    keywordIdFilter: {
-      include: keywordIds.map(id => String(id))
-    }
-  };
+  const chunks = chunkIds((keywordIds || []).map(id => String(id)));
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: config.getHeaders(),
-    body: JSON.stringify(payload)
-  });
+  if (chunks.length === 0) return { chunked: false, chunkCount: 0, responses: [] };
 
-  if (!response.ok) {
-    if (response.status === 401) {
-      const err = new Error('Amazon Ads API: Unauthorized (401)');
-      err.statusCode = 401;
-      throw err;
+  const responses = [];
+  // Deletion is DESTRUCTIVE and chunking makes it non-atomic: chunk 1 can archive 100 keywords at
+  // Amazon and chunk 3 can then fail. Pre-chunking, an oversized request 400'd and nothing was
+  // archived. So on failure we attach the IDs already archived to the thrown error — without them
+  // the caller cannot tell which keywords are now live-but-unarchived, and the caller goes on to
+  // create negatives for the whole batch regardless.
+  const deletedIds = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const payload = {
+      keywordIdFilter: {
+        include: chunks[i]
+      }
+    };
+
+    // Any throw from here on must carry what was already archived, so attach it in one place.
+    const attachPartial = (err) => {
+      err.partialDelete = { deletedIds: [...deletedIds], failedChunkIndex: i, totalChunks: chunks.length };
+      if (deletedIds.length > 0) {
+        console.error(
+          `[deleteKeywords] PARTIAL DELETE: ${deletedIds.length} keyword(s) were already archived ` +
+          `before chunk ${i + 1}/${chunks.length} failed. Archived IDs: ${deletedIds.join(', ')}`
+        );
+      }
+      return err;
+    };
+
+    let response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: config.getHeaders(),
+        body: JSON.stringify(payload)
+      });
+    } catch (netErr) {
+      throw attachPartial(netErr);
     }
-    const error = await response.json().catch(() => ({}));
-    throw new Error(`Failed to delete keywords: ${JSON.stringify(error)}`);
+
+    if (!response.ok) {
+      const err = response.status === 401
+        ? Object.assign(new Error('Amazon Ads API: Unauthorized (401)'), { statusCode: 401 })
+        : new Error(`Failed to delete keywords: ${JSON.stringify(await response.json().catch(() => ({})))}`);
+      throw attachPartial(err);
+    }
+
+    // Parsing a 2xx body can still throw — and by then Amazon HAS archived this chunk, so this is
+    // the case where knowing what was deleted matters most. Count the chunk as deleted first, then
+    // attach, so the ids include it.
+    let parsed;
+    try {
+      parsed = await response.json();
+    } catch (parseErr) {
+      deletedIds.push(...chunks[i]);
+      throw attachPartial(parseErr);
+    }
+    responses.push(parsed);
+    deletedIds.push(...chunks[i]);
+
+    // Space out chunks to avoid Ads throttling. Uses the shared knob so this destructive loop can
+    // be tuned/zeroed like the read-only ones rather than hardcoding its own pacing.
+    if (i < chunks.length - 1) {
+      await sleep(DELETE_CHUNK_DELAY_MS);
+    }
   }
 
-  return response.json();
+  if (responses.length === 1) return responses[0];
+  return { chunked: true, chunkCount: responses.length, responses };
 }
 
 /**
@@ -209,7 +265,14 @@ async function convertToNegativeKeywords(config, keywords, options = {}) {
     results.deleted = await deleteKeywords(config, keywordIds);
     console.log(`Successfully deleted ${keywordIds.length} keyword(s)`);
   } catch (error) {
-    results.errors.push({ step: 'delete', error: error.message });
+    // Propagate WHICH keywords were already archived. Chunked deletion is non-atomic, so a
+    // mid-batch failure leaves some positives archived; step 2 below still creates negatives for
+    // the whole batch, and without this the caller has no way to tell the two groups apart.
+    results.errors.push({
+      step: 'delete',
+      error: error.message,
+      ...(error.partialDelete ? { partialDelete: error.partialDelete } : {})
+    });
     console.error('Error deleting keywords:', error.message);
     // Continue to create negative keywords even if delete fails
   }

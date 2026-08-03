@@ -2,14 +2,16 @@ const axios = require('axios');
 const AdsGroup = require('../../models/amazon-ads/adsgroupModel.js');
 const logger = require('../../utils/Logger.js');
 const { getYesterdayMetricDateUtc } = require('../../utils/metricDateKey.js');
+const { chunkIds, ADS_ID_FILTER_MAX, ADS_CHUNK_DELAY_MS: CHUNK_DELAY_MS, sleep } = require('../../utils/adsIdFilter.js');
 
 /**
  * Ad groups list → one snapshot doc per `metricDate` (upsert).
  *
  * MIGRATED: v2 GET /v2/adGroups?campaignIdFilter=... → SP v3 POST /sp/adGroups/list
  * - POST with JSON body instead of GET with query params
- * - campaignIdFilter is now { "include": ["id1", "id2"] } in body
- * - Pagination via nextToken / maxResults (max 100 per page)
+ * - campaignIdFilter is now { "include": ["id1", "id2"] } in body, CHUNKED to <= 100 members
+ *   (v3 dropped v2's URL-length limit but still caps include[] size — see utils/adsIdFilter.js)
+ * - Pagination via nextToken / maxResults (max 100 per page), scoped to each filter chunk
  * - Response shape: { adGroups: [...], nextToken: "..." }
  * - Requires Accept header: application/vnd.spAdGroup.v3+json
  */
@@ -109,59 +111,99 @@ async function getAdGroups(accessToken, profileId, region, userId, country, camp
 
     console.log(`📡 Getting Ad Groups (SP v3) with ${validCampaignIds.length} campaign IDs`);
 
-    // ===== PAGINATED FETCH =====
-    // SP v3 supports campaignIdFilter in body; we can pass all IDs at once
-    // (v2 had URL length limits forcing chunking — v3 body has no such limit)
+    // ===== CHUNKED + PAGINATED FETCH =====
+    // The POST body removed v2's URL-length limit, but SP v3 still caps the number of members in
+    // `campaignIdFilter.include` — sending every campaign ID at once fails the entire request with
+    // 400 INVALID_ARGUMENT for any account with more than ~100 campaigns. So chunk the filter and
+    // paginate WITHIN each chunk (nextToken is scoped to the request that produced it, hence the
+    // per-chunk reset below).
     // Streamed: normalize each page immediately and drop the raw page, so we never hold the
     // full raw ad-group set AND a second normalized array at the same time.
     const normalizedAdGroups = [];
-    let nextToken = null;
 
     // Convert campaign IDs to strings (v3 expects string array)
     const campaignIdStrings = validCampaignIds.map(id => String(id));
+    const campaignIdChunks = chunkIds(campaignIdStrings);
 
-    do {
-      const requestBody = {
-        campaignIdFilter: {
-          include: campaignIdStrings
-        },
-        stateFilter: {
-          include: ['ENABLED', 'PAUSED']
-        },
-        maxResults: 100
-      };
+    console.log(`📦 Split ${campaignIdStrings.length} campaign IDs into ${campaignIdChunks.length} chunk(s) of <= ${ADS_ID_FILTER_MAX}`);
 
-      if (nextToken) {
-        requestBody.nextToken = nextToken;
-      }
+    // Tracks chunks whose pagination was cut short by a malformed response. Pre-chunking, that
+    // `break` ended the ONE request loop and we saved what we had; now it would end just one chunk
+    // of many and still save, silently publishing a partial ad-group set that starves
+    // `adGroupIdArray` downstream. So we record it and refuse to write below.
+    const incompleteChunks = [];
 
-      const response = await axios.post(url, requestBody, { headers });
+    for (let chunkIndex = 0; chunkIndex < campaignIdChunks.length; chunkIndex++) {
+      const campaignIdChunk = campaignIdChunks[chunkIndex];
+      let nextToken = null;
 
-      if (!response || !response.data) {
-        throw new Error('Invalid response from Amazon Ads API - no data received');
-      }
+      // Pace the chunks — 52 back-to-back POSTs is itself a plausible 429 trigger.
+      if (chunkIndex > 0) await sleep(CHUNK_DELAY_MS);
 
-      // SP v3 response shape: { adGroups: [...], nextToken: "..." }
-      const adGroups = response.data.adGroups;
+      do {
+        const requestBody = {
+          campaignIdFilter: {
+            include: campaignIdChunk
+          },
+          stateFilter: {
+            include: ['ENABLED', 'PAUSED']
+          },
+          maxResults: 100
+        };
 
-      if (!Array.isArray(adGroups)) {
-        logger.warn('Ad Groups API response adGroups field is not an array', {
-          responseType: typeof adGroups,
-          userId
-        });
-        break;
-      }
+        if (nextToken) {
+          requestBody.nextToken = nextToken;
+        }
 
-      // Normalize this page for backward compatibility and drop the raw page.
-      for (let i = 0; i < adGroups.length; i++) {
-        const ag = adGroups[i];
-        normalizedAdGroups.push({ ...ag, _v3Original: true, stateLower: (ag.state || '').toLowerCase() });
-      }
-      nextToken = response.data.nextToken || null;
+        const response = await axios.post(url, requestBody, { headers });
 
-      console.log(`  ↳ Fetched ${adGroups.length} ad groups (total so far: ${normalizedAdGroups.length})`);
+        if (!response || !response.data) {
+          throw new Error('Invalid response from Amazon Ads API - no data received');
+        }
 
-    } while (nextToken);
+        // SP v3 response shape: { adGroups: [...], nextToken: "..." }
+        const adGroups = response.data.adGroups;
+
+        // An ABSENT key is Amazon's normal "this chunk of campaigns has no ad groups" shape, which
+        // is legitimate — end this chunk's pagination without flagging it. An explicit `null`, or
+        // any other non-array value, is malformed and must block the write below.
+        if (adGroups === undefined) {
+          break;
+        }
+
+        if (!Array.isArray(adGroups)) {
+          logger.warn('Ad Groups API response adGroups field is not an array', {
+            responseType: typeof adGroups,
+            chunkIndex,
+            userId
+          });
+          incompleteChunks.push(chunkIndex);
+          break;
+        }
+
+        // Normalize this page for backward compatibility and drop the raw page.
+        for (let i = 0; i < adGroups.length; i++) {
+          const ag = adGroups[i];
+          normalizedAdGroups.push({ ...ag, _v3Original: true, stateLower: (ag.state || '').toLowerCase() });
+        }
+        nextToken = response.data.nextToken || null;
+
+        console.log(`  ↳ [chunk ${chunkIndex + 1}/${campaignIdChunks.length}] Fetched ${adGroups.length} ad groups (total so far: ${normalizedAdGroups.length})`);
+
+      } while (nextToken);
+    }
+
+    // Refuse to publish an incomplete set. The upsert below is a `$set` that REPLACES the stored
+    // snapshot, so writing a partial result would destroy a good one — and a silently short
+    // ad-group list is worse than a stale complete one, because `adGroupIdArray` is derived from
+    // it. Throwing leaves yesterday's snapshot intact and lets the caller record the failure.
+    if (incompleteChunks.length > 0) {
+      throw new Error(
+        `Ad Groups fetch incomplete: ${incompleteChunks.length}/${campaignIdChunks.length} chunk(s) ` +
+        `returned a malformed response (chunk indexes: ${incompleteChunks.join(', ')}). ` +
+        `Refusing to overwrite the existing snapshot with partial data.`
+      );
+    }
 
     console.log(`✅ Ad Groups data fetched: ${normalizedAdGroups.length} ad groups total`);
 

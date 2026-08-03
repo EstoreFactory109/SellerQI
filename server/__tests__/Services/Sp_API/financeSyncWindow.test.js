@@ -457,6 +457,16 @@ describe('classifySyncFailure', () => {
     expect(classifySyncFailure(new Error('Access to requested resource is denied (timeout)'))).toBe('auth_denied');
   });
 
+  test('socket-level drops are classified, not lumped into other', () => {
+    // Amazon resets the connection during long report polls. This surfaced as a bare
+    // `Error: socket hang up` that fell through to 'other', hiding a distinctly retryable cause
+    // and making a transient blip look like a permanent data problem in FinanceSyncLog.
+    expect(classifySyncFailure(new Error('socket hang up'))).toBe('timeout');
+    expect(classifySyncFailure(new Error('read ECONNRESET'))).toBe('timeout');
+    expect(classifySyncFailure(new Error('write EPIPE'))).toBe('timeout');
+    expect(classifySyncFailure(new Error('[FinanceService] request timed out after 30000ms'))).toBe('timeout');
+  });
+
   test('anything else is other', () => {
     expect(classifySyncFailure(new Error('E11000 duplicate key'))).toBe('other');
     expect(classifySyncFailure(new Error('parsed 0 rows'))).toBe('other');

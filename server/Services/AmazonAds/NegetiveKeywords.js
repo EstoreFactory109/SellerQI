@@ -2,6 +2,7 @@ const axios = require('axios');
 const NegativeKeywords = require('../../models/amazon-ads/NegetiveKeywords.js');
 const logger = require('../../utils/Logger.js');
 const { getYesterdayMetricDateUtc } = require('../../utils/metricDateKey.js');
+const { chunkIds, ADS_ID_FILTER_MAX, ADS_CHUNK_DELAY_MS: CHUNK_DELAY_MS, sleep } = require('../../utils/adsIdFilter.js');
 
 /**
  * Negative keyword entities → one snapshot doc per `metricDate` (upsert).
@@ -15,7 +16,10 @@ const { getYesterdayMetricDateUtc } = require('../../utils/metricDateKey.js');
  * - Pagination via nextToken / maxResults (max 100 per page)
  * - Response shape: { negativeKeywords: [...], nextToken: "..." }
  * - Requires Accept header: application/vnd.spNegativeKeyword.v3+json
- * - No more URL-length-based chunking needed (POST body has no URL length limit)
+ * - ID filters are CHUNKED to <= 100 members. The POST body removed v2's URL-length limit, but
+ *   v3 still caps include[] size, and exceeding it 400s the whole request. Because the errors
+ *   below are caught and logged as warnings, that previously degraded silently to
+ *   "0 negative keywords" for any account with more than ~100 campaigns. See utils/adsIdFilter.js.
  *
  * NOTE: SP v3 also has campaign-level negatives at POST /sp/campaignNegativeKeywords/list
  * This file fetches ad-group-level negatives via /sp/negativeKeywords/list
@@ -62,8 +66,23 @@ async function fetchAllPages(url, requestBody, headers, responseKey, { onPage = 
 
     const items = response.data[responseKey];
 
-    if (!Array.isArray(items)) {
+    // An ABSENT key is Amazon's normal "no results" shape — end pagination quietly.
+    // An explicit `null` is NOT that: a list field should never be null, so it falls through to
+    // the malformed check below rather than being mistaken for an empty result.
+    if (items === undefined) {
       break;
+    }
+
+    // A present-but-not-an-array value is malformed. Previously this `break` returned normally,
+    // so the caller published however many pages had arrived AS A SUCCESS — and the caller `$set`s
+    // that over the stored snapshot, silently replacing a complete set with a truncated one.
+    // Chunking multiplies the exposure (52+ chunks per large account), so fail loudly instead and
+    // let the per-level catch zero this level, leaving yesterday's complete snapshot intact.
+    if (!Array.isArray(items)) {
+      throw new Error(
+        `Malformed Amazon Ads response: expected '${responseKey}' to be an array, got ${typeof items}. ` +
+        `Refusing to treat a truncated page as a complete result.`
+      );
     }
 
     if (onPage) {
@@ -164,45 +183,71 @@ async function getNegativeKeywords(accessToken, profileId, userId, country, regi
       'Content-Type': SP_V3_NEG_KW_CONTENT_TYPE
     };
 
-    // Build filter body — include both campaignId and adGroupId filters if available
-    const adGroupNegBody = {};
+    // Both campaignIdFilter and adGroupIdFilter are capped at 100 members each, so chunking one
+    // while sending the other whole would still 400. Since the two filters intersect and
+    // adGroupId is the strictly narrower key, we chunk ONE filter and apply the other as an
+    // equivalent client-side Set test — same result set, no combinatorial nested chunk loop.
+    // Prefer chunking campaign IDs (the coarser filter, so fewer requests); fall back to
+    // chunking ad group IDs when no campaign IDs were supplied.
+    const adGroupIdSet = validAdGroupIds.length > 0 ? new Set(validAdGroupIds) : null;
+    const chunkByCampaign = validCampaignIds.length > 0;
+    const adGroupNegChunks = chunkByCampaign
+      ? chunkIds(validCampaignIds).map(chunk => ({ campaignIdFilter: { include: chunk } }))
+      : chunkIds(validAdGroupIds).map(chunk => ({ adGroupIdFilter: { include: chunk } }));
 
-    if (validCampaignIds.length > 0) {
-      adGroupNegBody.campaignIdFilter = { include: validCampaignIds };
-    }
-    if (validAdGroupIds.length > 0) {
-      adGroupNegBody.adGroupIdFilter = { include: validAdGroupIds };
-    }
+    console.log(`📦 Ad-group-level negatives: ${adGroupNegChunks.length} chunk(s) of <= ${ADS_ID_FILTER_MAX} ${chunkByCampaign ? 'campaign' : 'ad group'} IDs`);
 
     // Streamed: normalize each page into the accumulator; raw pages are dropped.
-    const normalizedAdGroupNeg = [];
+    // The accumulator spans all chunks, so the merge/dedupe below is unaffected by chunking.
+    // The try/catch deliberately wraps the WHOLE chunk loop, not each chunk. Chunking splits one
+    // logical fetch into many requests, so catching per chunk would let a single 429 drop a slice
+    // of the negatives while the function still reported success — and the caller `$set`s the
+    // result, overwriting a complete snapshot with a silently incomplete one. Failing the level as
+    // a unit preserves the pre-chunking contract exactly: this level yields all-or-nothing, the
+    // other level still proceeds independently, and a stale-but-complete snapshot survives.
+    let normalizedAdGroupNeg = [];
     try {
-      await fetchAllPages(
-        `${baseUrl}/sp/negativeKeywords/list`,
-        adGroupNegBody,
-        adGroupNegHeaders,
-        'negativeKeywords',
-        { onPage: (items) => {
-            for (const item of items) normalizedAdGroupNeg.push({
-              campaignId: item.campaignId || '',
-              adGroupId: item.adGroupId || '',
-              keywordId: item.keywordId || '',
-              keywordText: item.keywordText || '',
-              matchType: item.matchType || '',
-              state: item.state || 'ENABLED',
-              stateLower: (item.state || '').toLowerCase(),
-              _level: 'adGroup',
-              _v3Original: true
-            });
-          } }
-      );
-      console.log(`  ↳ Ad-group-level negative keywords: ${normalizedAdGroupNeg.length}`);
+      const collected = [];
+      for (let i = 0; i < adGroupNegChunks.length; i++) {
+        // Pace the chunks. Pre-chunking this was one request; a 5,102-campaign account now issues
+        // 52, and firing them back-to-back is itself a plausible 429 trigger.
+        if (i > 0) await sleep(CHUNK_DELAY_MS);
+        await fetchAllPages(
+          `${baseUrl}/sp/negativeKeywords/list`,
+          adGroupNegChunks[i],
+          adGroupNegHeaders,
+          'negativeKeywords',
+          { onPage: (items) => {
+              for (const item of items) {
+                // Stand-in for the adGroupIdFilter we could not send alongside a chunked
+                // campaignIdFilter. Only applied when chunking by campaign — when chunking by
+                // ad group the filter is already in the request.
+                if (chunkByCampaign && adGroupIdSet && !adGroupIdSet.has(String(item.adGroupId || ''))) continue;
+                collected.push({
+                  campaignId: item.campaignId || '',
+                  adGroupId: item.adGroupId || '',
+                  keywordId: item.keywordId || '',
+                  keywordText: item.keywordText || '',
+                  matchType: item.matchType || '',
+                  state: item.state || 'ENABLED',
+                  stateLower: (item.state || '').toLowerCase(),
+                  _level: 'adGroup',
+                  _v3Original: true
+                });
+              }
+            } }
+        );
+      }
+      // Only publish once every chunk landed, so a mid-loop throw cannot leak a partial set.
+      normalizedAdGroupNeg = collected;
     } catch (err) {
       logger.warn('Failed to fetch ad-group-level negative keywords, continuing with campaign-level', {
         error: err.message,
+        totalChunks: adGroupNegChunks.length,
         userId
       });
     }
+    console.log(`  ↳ Ad-group-level negative keywords: ${normalizedAdGroupNeg.length}`);
 
     // ===== FETCH CAMPAIGN-LEVEL NEGATIVE KEYWORDS =====
     // SP v3: POST /sp/campaignNegativeKeywords/list
@@ -216,48 +261,64 @@ async function getNegativeKeywords(accessToken, profileId, userId, country, regi
       'Content-Type': SP_V3_CAMP_NEG_KW_CONTENT_TYPE
     };
 
-    const campNegBody = {};
-    if (validCampaignIds.length > 0) {
-      campNegBody.campaignIdFilter = { include: validCampaignIds };
-    }
+    // Chunked for the same include[] cap. An empty campaign list yields no chunks, preserving the
+    // previous "no filter supplied" behaviour of a single unfiltered request.
+    const campNegChunks = validCampaignIds.length > 0
+      ? chunkIds(validCampaignIds).map(chunk => ({ campaignIdFilter: { include: chunk } }))
+      : [{}];
+
+    console.log(`📦 Campaign-level negatives: ${campNegChunks.length} chunk(s) of <= ${ADS_ID_FILTER_MAX} campaign IDs`);
 
     // Streamed: normalize each page into the accumulator; raw pages are dropped.
-    const normalizedCampNeg = [];
+    // All-or-nothing per level, for the same reason as the ad-group loop above.
+    let normalizedCampNeg = [];
     try {
-      await fetchAllPages(
-        `${baseUrl}/sp/campaignNegativeKeywords/list`,
-        campNegBody,
-        campNegHeaders,
-        'campaignNegativeKeywords',
-        { onPage: (items) => {
-            for (const item of items) normalizedCampNeg.push({
-              campaignId: item.campaignId || '',
-              adGroupId: '',  // Campaign-level negatives don't have adGroupId
-              keywordId: item.keywordId || '',
-              keywordText: item.keywordText || '',
-              matchType: item.matchType || '',
-              state: item.state || 'ENABLED',
-              stateLower: (item.state || '').toLowerCase(),
-              _level: 'campaign',
-              _v3Original: true
-            });
-          } }
-      );
-      console.log(`  ↳ Campaign-level negative keywords: ${normalizedCampNeg.length}`);
+      const collected = [];
+      for (let i = 0; i < campNegChunks.length; i++) {
+        if (i > 0) await sleep(CHUNK_DELAY_MS);
+        await fetchAllPages(
+          `${baseUrl}/sp/campaignNegativeKeywords/list`,
+          campNegChunks[i],
+          campNegHeaders,
+          'campaignNegativeKeywords',
+          { onPage: (items) => {
+              for (const item of items) collected.push({
+                campaignId: item.campaignId || '',
+                adGroupId: '',  // Campaign-level negatives don't have adGroupId
+                keywordId: item.keywordId || '',
+                keywordText: item.keywordText || '',
+                matchType: item.matchType || '',
+                state: item.state || 'ENABLED',
+                stateLower: (item.state || '').toLowerCase(),
+                _level: 'campaign',
+                _v3Original: true
+              });
+            } }
+        );
+      }
+      normalizedCampNeg = collected;
     } catch (err) {
       logger.warn('Failed to fetch campaign-level negative keywords, continuing with ad-group-level only', {
         error: err.message,
+        totalChunks: campNegChunks.length,
         userId
       });
     }
+    console.log(`  ↳ Campaign-level negative keywords: ${normalizedCampNeg.length}`);
 
     // ===== MERGE =====
     const allNegativeKeywordsData = [...normalizedAdGroupNeg, ...normalizedCampNeg];
 
-    // Remove duplicates based on keywordId (if any)
-    const uniqueNegativeKeywordsData = allNegativeKeywordsData.filter((item, index, self) =>
-      index === self.findIndex(t => t.keywordId === item.keywordId)
-    );
+    // Remove duplicates based on keywordId (if any), keeping first occurrence.
+    // Set-keyed rather than filter+findIndex: that was O(n^2) and only survived because the
+    // unchunked requests above always 400'd and left this array empty. Now that real data flows
+    // for large accounts it would be a hot loop over tens of thousands of rows.
+    const seenKeywordIds = new Set();
+    const uniqueNegativeKeywordsData = allNegativeKeywordsData.filter((item) => {
+      if (seenKeywordIds.has(item.keywordId)) return false;
+      seenKeywordIds.add(item.keywordId);
+      return true;
+    });
 
     console.log(`✅ Negative keywords processing complete: ${uniqueNegativeKeywordsData.length} unique keywords found`);
 

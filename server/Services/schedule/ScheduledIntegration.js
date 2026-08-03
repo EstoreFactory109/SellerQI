@@ -1489,54 +1489,18 @@ class ScheduledIntegration {
             } else if (scheduledFunctions['v1data']) {
                 apiData.v1data = { success: false, data: null, error: "SP-API token not available" };
             }
-            
-            // Process Ads data
-            if (scheduledFunctions['ppcSpendsBySKU'] && AdsAccessToken) {
-                apiData.ppcSpendsBySKU = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1] || 'PPC Spends by SKU');
-            } else if (scheduledFunctions['ppcSpendsBySKU']) {
-                apiData.ppcSpendsBySKU = { success: false, data: null, error: "Ads token not available" };
-            }
-            
-            if (scheduledFunctions['adsKeywordsPerformanceData'] && AdsAccessToken) {
-                apiData.adsKeywordsPerformanceData = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1] || 'Ads Keywords Performance');
-            } else if (scheduledFunctions['adsKeywordsPerformanceData']) {
-                apiData.adsKeywordsPerformanceData = { success: false, data: null, error: "Ads token not available" };
-            }
-            
-            if (scheduledFunctions['ppcSpendsDateWise'] && AdsAccessToken) {
-                apiData.ppcSpendsDateWise = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1] || 'PPC Spends Date Wise');
-            } else if (scheduledFunctions['ppcSpendsDateWise']) {
-                apiData.ppcSpendsDateWise = { success: false, data: null, error: "Ads token not available" };
-            }
-            
-            if (scheduledFunctions['ppcMetricsAggregated'] && AdsAccessToken) {
-                // Special handling for PPC Metrics Aggregated (returns structured result)
-                const result = firstBatchResults[resultIndex++];
-                // ★ Same defensive guard as processApiResult: `result` is undefined
-                //   when this index ran past the settled-results array (the ads
-                //   services are no longer pushed in the batch_1_2 phase — they
-                //   moved to sched_ads — but are still consumed here when an Ads
-                //   token exists, drifting the index). Without this, the inline
-                //   `result.status` read threw and failed the whole batch.
-                if (!result) {
-                    apiData.ppcMetricsAggregated = { success: false, data: null, error: 'No settled result for PPC Metrics Aggregated (index misalignment)' };
-                } else if (result.status === 'fulfilled') {
-                    const value = result.value;
-                    if (value && typeof value === 'object' && 'success' in value) {
-                        apiData.ppcMetricsAggregated = value;
-                    } else if (value && value.success !== false) {
-                        apiData.ppcMetricsAggregated = { success: true, data: value, error: null };
-                    } else {
-                        const errorMsg = value?.error || 'Unknown error';
-                        apiData.ppcMetricsAggregated = { success: false, data: null, error: errorMsg };
-                    }
-                } else {
-                    const errorMsg = result.reason?.message || 'Promise rejected';
-                    apiData.ppcMetricsAggregated = { success: false, data: null, error: errorMsg };
-                }
-            } else if (scheduledFunctions['ppcMetricsAggregated']) {
-                apiData.ppcMetricsAggregated = { success: false, data: null, error: "Ads token not available" };
-            }
+
+            // NOTE: the four ads services (ppcSpendsBySKU, adsKeywordsPerformanceData,
+            // ppcSpendsDateWise, ppcMetricsAggregated) are deliberately NOT consumed here.
+            // getBatchNumber() routes them to `adsBatchPromises` (the isolated sched_ads phase),
+            // so they never land in `firstBatchResults` — reading them here drifted `resultIndex`
+            // past the end of the settled array and produced phantom "No settled result
+            // (index misalignment)" failures. Worse, in the monolithic path (no _batchFilter)
+            // those phantom failure objects were truthy, so the Ads Batch's
+            // `if (!apiData[dataKey])` guard below then DISCARDED the real ads results.
+            // They are consumed correctly in the Ads Batch loop instead.
+            // The "Ads token not available" fallbacks are already set for all four by the
+            // requiresAdsToken check in the scheduling loop above, which runs in every phase.
         }
         logger.info("First Batch Ends");
 
@@ -2856,7 +2820,25 @@ class ScheduledIntegration {
             };
         } catch (error) {
             logger.error(`[ScheduledIntegration:AdsPhase] Failed for user ${userId}:`, error);
-            return { success: false, error: error.message, statusCode: 500 };
+            // Carry the failure FORWARD, don't just report it here. Finalize decides whether to
+            // stamp lastDailyUpdate by inspecting whether any ads key is present in apiResults
+            // (see the gate near markDailyUpdateComplete). Returning without dataForNextPhase
+            // leaves those keys absent, which finalize reads as "no ads service ran" — i.e. as
+            // benign — and it stamps the day complete, skipping the account until tomorrow. That
+            // is the silent data-hole this gate exists to prevent, so a hard failure here must be
+            // visible to it. Marking all four failed is the safe reading: the phase threw, so we
+            // genuinely do not know that any of them succeeded.
+            const adsServiceKeys = ['ppcSpendsBySKU', 'adsKeywordsPerformanceData', 'ppcSpendsDateWise', 'ppcMetricsAggregated'];
+            const failedAdsResults = {};
+            for (const key of adsServiceKeys) {
+                failedAdsResults[key] = { success: false, error: `Ads phase failed: ${error.message}` };
+            }
+            return {
+                success: false,
+                error: error.message,
+                statusCode: 500,
+                dataForNextPhase: { apiResults: { ...(phaseData.apiResults || {}), ...failedAdsResults } }
+            };
         }
     }
 
@@ -2983,7 +2965,24 @@ class ScheduledIntegration {
             };
         } catch (error) {
             logger.error(`[AdsAsync:${group}] Failed for user ${userId}:`, error);
-            return { success: false, error: error.message, statusCode: 500 };
+            // Carry the failure FORWARD for the same reason as the inline ads phase: finalize
+            // decides whether to stamp lastDailyUpdate by checking whether any ads key is present
+            // in apiResults. Returning without dataForNextPhase leaves them absent, which finalize
+            // reads as "no ads service ran" — benign — and it stamps the day complete, skipping the
+            // account until tomorrow with no ads data. Keys come from `services` so each caller of
+            // this shared runner (sched_ads, sched_ads_catchup, batch_4) reports only its own.
+            const failedResults = {};
+            for (const svc of (services || [])) {
+                if (svc && svc.serviceName) {
+                    failedResults[svc.serviceName] = { success: false, error: `Ads phase failed: ${error.message}` };
+                }
+            }
+            return {
+                success: false,
+                error: error.message,
+                statusCode: 500,
+                dataForNextPhase: { apiResults: { ...(phaseData.apiResults || {}), ...failedResults } }
+            };
         }
     }
 

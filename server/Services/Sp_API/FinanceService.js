@@ -158,7 +158,18 @@ function classifySyncFailure(err) {
     msg.includes('download stalled') ||
     msg.includes('no response within') ||
     msg.includes('etimedout') ||
-    msg.includes('timeout')
+    msg.includes('timeout') ||
+    // Our own per-request budget from httpsRequest. Matched on the full phrase rather than a bare
+    // 'timed out' so a Mongoose "buffering timed out after 10000ms" — a DB connectivity failure,
+    // not an Amazon one — keeps bucketing as 'other' instead of masquerading as a report timeout.
+    msg.includes('request timed out after') ||
+    // Socket-level drops. Amazon resets connections during long polls; without these a
+    // 'socket hang up' was logged as the catch-all 'other', hiding a distinctly retryable cause.
+    msg.includes('socket hang up') ||
+    msg.includes('econnreset') ||
+    msg.includes('econnaborted') ||
+    msg.includes('eai_again') ||
+    msg.includes('epipe')
   ) {
     return 'timeout';
   }
@@ -572,21 +583,126 @@ function internalRegionFromModel(regionModel) {
 // ─────────────────────────────────────────────
 // HTTP HELPERS
 // ─────────────────────────────────────────────
-function httpsRequest(options, postData = null) {
+// Transient socket-level failures that are worth retrying verbatim. Amazon resets connections
+// during long report-polling loops, and a bare `https.request` surfaces that as
+// `Error: socket hang up` (code ECONNRESET). Previously any such error rejected immediately and
+// `withRetry` below only rescues token expiry, so ONE reset aborted an entire multi-minute sync.
+// Mirrors the ECONNRESET/ETIMEDOUT convention already used across Services/AmazonAds/*.
+const TRANSIENT_NET_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'ECONNABORTED', 'EAI_AGAIN']);
+
+function isTransientNetworkError(err) {
+  if (!err) return false;
+  if (err.code && TRANSIENT_NET_CODES.has(err.code)) return true;
+  // Defensive: 'socket hang up' normally carries code ECONNRESET, but the code can be lost when
+  // the error is wrapped or re-thrown.
+  const msg = (err.message || String(err)).toLowerCase();
+  return msg.includes('socket hang up') || msg.includes('request timed out after');
+}
+
+// Per-request budget for the small JSON control-plane calls below (createReport / poll /
+// getReportDocument). Deliberately separate from the large-payload budgets in
+// utils/spApiReportDownload.js — these responses are a few KB, so a stall means a dead socket.
+const REQUEST_TIMEOUT_MS = financeEnvInt('FINANCE_REQUEST_TIMEOUT_MS', 30000);
+const REQUEST_MAX_RETRIES = financeEnvInt('FINANCE_REQUEST_MAX_RETRIES', 3);
+const REQUEST_RETRY_BASE_MS = financeEnvInt('FINANCE_REQUEST_RETRY_BASE_MS', 2000);
+
+function httpsRequestOnce(options, postData = null) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, arg) => {
+      if (settled) return;
+      settled = true;
+      fn(arg);
+    };
+
     const req = https.request(options, (res) => {
       const chunks = [];
       res.on('data', (chunk) => chunks.push(chunk));
+      res.on('error', (err) => finish(reject, err));
       res.on('end', () => {
         const body = Buffer.concat(chunks).toString('utf-8');
-        try { resolve({ statusCode: res.statusCode, headers: res.headers, body: JSON.parse(body) }); }
-        catch { resolve({ statusCode: res.statusCode, headers: res.headers, body }); }
+        try { finish(resolve, { statusCode: res.statusCode, headers: res.headers, body: JSON.parse(body) }); }
+        catch { finish(resolve, { statusCode: res.statusCode, headers: res.headers, body }); }
       });
     });
-    req.on('error', reject);
+
+    // Guards connect/TLS/headers AND mid-body stalls. Must destroy the socket ourselves, or a
+    // half-open connection leaks and keeps the BullMQ job lock held.
+    // Feature-detected: setTimeout/destroy are standard on http.ClientRequest, but stubbed
+    // request objects (tests, some custom agents) may not implement them, and a missing timeout
+    // must degrade to the old no-timeout behaviour rather than throwing.
+    if (REQUEST_TIMEOUT_MS > 0 && typeof req.setTimeout === 'function') {
+      req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+        const err = new Error(`[FinanceService] request timed out after ${REQUEST_TIMEOUT_MS}ms`);
+        err.code = 'ETIMEDOUT';
+        if (typeof req.destroy === 'function') req.destroy(err);
+        else finish(reject, err);
+      });
+    }
+
+    req.on('error', (err) => finish(reject, err));
     if (postData) req.write(postData);
     req.end();
   });
+}
+
+// Only replay requests that are safe to replay. A socket reset is ambiguous — the request may
+// have reached Amazon and only the RESPONSE was lost — so retrying a non-idempotent verb can
+// duplicate a server-side side effect.
+//
+// This matters concretely for `createReport` (POST): SP-API does not dedupe report requests, so a
+// blind retry can create a SECOND report for the same window, orphaning it and consuming a quota
+// that refills at roughly one request per minute. Since our backoff (2s/4s/8s) is far inside that
+// refill window, such a retry would almost certainly come back 429 anyway — harmful and useless.
+// GET polls and document lookups have no side effect and are exactly where the observed
+// 'socket hang up' occurs, so those are retried.
+const IDEMPOTENT_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/**
+ * `httpsRequestOnce` plus bounded retry on transient socket errors.
+ *
+ * Scope is deliberately narrow: only socket-level failures on idempotent verbs are retried here.
+ * HTTP status handling stays with the callers, token expiry stays with `withRetry`, and 429/503
+ * throttling stays with the existing SP-API retry helpers — retrying those here would double up
+ * on backoff.
+ *
+ * There is intentionally NO per-call override to force a retry. Such a flag would let a caller
+ * re-introduce the exact duplicate-report hazard this verb check exists to prevent, and nothing
+ * needs it — the policy follows from the HTTP method alone.
+ *
+ * @param {Object} options - https.request options
+ * @param {string|null} [postData]
+ */
+async function httpsRequest(options, postData = null) {
+  const method = (options.method || 'GET').toUpperCase();
+  const retryTransient = IDEMPOTENT_METHODS.has(method);
+
+  let lastError;
+  for (let attempt = 0; attempt <= REQUEST_MAX_RETRIES; attempt++) {
+    try {
+      return await httpsRequestOnce(options, postData);
+    } catch (err) {
+      lastError = err;
+      const canRetry = retryTransient && isTransientNetworkError(err) && attempt < REQUEST_MAX_RETRIES;
+      if (!canRetry) {
+        if (isTransientNetworkError(err) && !retryTransient) {
+          logger.warn(
+            `[FinanceService] transient network error on non-idempotent ${method} ${options.path || ''} ` +
+            `(${err.code || 'no-code'}: ${err.message}). NOT retried — replaying it could duplicate ` +
+            `the server-side effect. The caller will surface this and the next scheduled run retries.`
+          );
+        }
+        throw err;
+      }
+      const waitMs = REQUEST_RETRY_BASE_MS * Math.pow(2, attempt);
+      logger.warn(
+        `[FinanceService] transient network error on ${method} ${options.path || ''} ` +
+        `(${err.code || 'no-code'}: ${err.message}). Retry ${attempt + 1}/${REQUEST_MAX_RETRIES} in ${waitMs}ms.`
+      );
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+  }
+  throw lastError;
 }
 
 // NOTE: the local `downloadContent` was replaced by utils/spApiReportDownload.js. The old copy
@@ -2407,6 +2523,12 @@ module.exports = {
   createFinanceIndex,
   addFinanceRowsToIndex,
   logFinanceIndexDedup,
+  // Control-plane request helper. Exported for tests only: the verb-aware retry policy (replay
+  // idempotent GETs, never replay the non-idempotent createReport POST) is the whole point of the
+  // helper, and driving it through submitSalesReport/downloadSalesReportRows would drag in the S3
+  // document download, which cannot be mocked independently of the same `https` module.
+  httpsRequest,
+  isTransientNetworkError,
   // Async path: the shared halves of the inline fetch, plus the engine adapter that reuses them.
   submitSalesReport,
   downloadSalesReportRows,
