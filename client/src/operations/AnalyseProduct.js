@@ -24,7 +24,8 @@ const AnalyseProduct = async (asin,country) => {
           
             const data=response.data.data;
             const rankingResult=getRankings(data);
-            const totalPossibleErrors=12
+            // 11 ranking checks (5 title, 3 bullet point, 3 description) + 3 conversion checks
+            const totalPossibleErrors=14
             
             // Safe null checks for arrays
             const productPhotos = data["product_photos"] || [];

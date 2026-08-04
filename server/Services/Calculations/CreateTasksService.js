@@ -184,13 +184,47 @@ class CreateTaskService {
             charLim: 'Backend Keywords'
         };
         
-        // Issue labels for display
-        const issueLabels = {
-            RestictedWords: 'Restricted Words',
-            checkSpecialCharacters: 'Special Characters',
-            charLim: 'Character Limit'
-        };
-        
+        // Issue labels, error-type slugs, and fallback solutions per check.
+        // wordRepetition and capitalization only appear on Title (Amazon's title
+        // requirements); the first three are shared by every section.
+        const issueChecks = [
+            {
+                key: 'RestictedWords',
+                label: 'Restricted Words',
+                errorType: 'restricted_words',
+                fallbackMessage: 'Restricted words detected in listing content.',
+                fallbackSolution: 'Review your listing and remove any restricted or banned words according to Amazon\'s guidelines.'
+            },
+            {
+                key: 'checkSpecialCharacters',
+                label: 'Special Characters',
+                errorType: 'special_characters',
+                fallbackMessage: 'Special characters detected in listing content.',
+                fallbackSolution: 'Remove special characters from your listing content to improve search visibility.'
+            },
+            {
+                key: 'charLim',
+                label: 'Character Limit',
+                errorType: 'char_limit',
+                fallbackMessage: 'Character limit issue detected.',
+                fallbackSolution: 'Optimize your content length to meet Amazon\'s character requirements.'
+            },
+            {
+                key: 'wordRepetition',
+                label: 'Word Repetition',
+                errorType: 'word_repetition',
+                fallbackMessage: 'The same word is repeated more than twice.',
+                fallbackSolution: 'Rewrite so that no word appears more than twice. Prepositions, articles, and conjunctions are exempt; brand names are not.'
+            },
+            {
+                key: 'capitalization',
+                label: 'Capitalization',
+                errorType: 'capitalization',
+                fallbackMessage: 'Capitalization does not follow Amazon\'s requirements.',
+                fallbackSolution: 'Capitalize the first letter of each word, except prepositions, conjunctions, and articles. Do not use all caps or all lowercase.'
+            }
+        ];
+
         rankingErrors.forEach(error => {
             if (!error.data || error.data.TotalErrors === 0) return;
             
@@ -204,47 +238,21 @@ class CreateTaskService {
                 const section = error.data[sectionKey];
                 if (!section) return;
                 
-                // Check RestictedWords error
-                if (section.RestictedWords?.status === 'Error') {
+                issueChecks.forEach(({ key, label, errorType, fallbackMessage, fallbackSolution }) => {
+                    const check = section[key];
+                    if (check?.status !== 'Error') return;
+
                     tasks.push({
                         taskId: generateTaskId(),
                         productName,
                         asin,
                         errorCategory: 'ranking',
-                        errorType: `${sectionKey.toLowerCase()}_restricted_words`,
-                        error: `${sectionLabels[sectionKey]} | ${issueLabels.RestictedWords}: ${section.RestictedWords.Message || 'Restricted words detected in listing content.'}`,
-                        solution: section.RestictedWords.HowTOSolve || 'Review your listing and remove any restricted or banned words according to Amazon\'s guidelines.',
+                        errorType: `${sectionKey.toLowerCase()}_${errorType}`,
+                        error: `${sectionLabels[sectionKey]} | ${label}: ${check.Message || fallbackMessage}`,
+                        solution: check.HowTOSolve || fallbackSolution,
                         status: TaskStatus.PENDING
                     });
-                }
-                
-                // Check checkSpecialCharacters error
-                if (section.checkSpecialCharacters?.status === 'Error') {
-                    tasks.push({
-                        taskId: generateTaskId(),
-                        productName,
-                        asin,
-                        errorCategory: 'ranking',
-                        errorType: `${sectionKey.toLowerCase()}_special_characters`,
-                        error: `${sectionLabels[sectionKey]} | ${issueLabels.checkSpecialCharacters}: ${section.checkSpecialCharacters.Message || 'Special characters detected in listing content.'}`,
-                        solution: section.checkSpecialCharacters.HowTOSolve || 'Remove special characters from your listing content to improve search visibility.',
-                        status: TaskStatus.PENDING
-                    });
-                }
-                
-                // Check charLim error within section (for Title, Bullets, Description)
-                if (section.charLim?.status === 'Error') {
-                    tasks.push({
-                        taskId: generateTaskId(),
-                        productName,
-                        asin,
-                        errorCategory: 'ranking',
-                        errorType: `${sectionKey.toLowerCase()}_char_limit`,
-                        error: `${sectionLabels[sectionKey]} | ${issueLabels.charLim}: ${section.charLim.Message || 'Character limit issue detected.'}`,
-                        solution: section.charLim.HowTOSolve || 'Optimize your content length to meet Amazon\'s character requirements.',
-                        status: TaskStatus.PENDING
-                    });
-                }
+                });
             });
             
             // Process Backend Keywords (charLim at root level)

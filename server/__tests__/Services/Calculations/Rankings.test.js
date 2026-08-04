@@ -30,7 +30,7 @@ describe('Rankings Calculations', () => {
 
     it('should count errors across title, bullets, and description', () => {
       const productDetails = {
-        product_title: 'Short', // Error: < 80 chars
+        product_title: 'A'.repeat(80), // Error: > 75 chars, and all caps
         about_product: ['Short'], // Error: < 150 chars
         product_description: ['Short'], // Error: < 1700 chars
       };
@@ -45,29 +45,109 @@ describe('Rankings Calculations', () => {
   });
 
   describe('Title checks', () => {
-    it('should detect short title (< 80 chars)', () => {
-      const productDetails = {
-        product_title: 'Short title',
-        about_product: [],
-        product_description: [],
-      };
+    // Amazon's title requirements: max 75 characters, no promotional or
+    // subjective wording, no prohibited/decorative characters, no word more
+    // than twice, title case, numerals over spelled-out numbers.
+    const titleOf = (title) => getRankings({
+      product_title: title,
+      about_product: [],
+      product_description: [],
+    }).finalResult.TitleResult;
 
-      const result = getRankings(productDetails);
+    it('should detect a title over 75 characters', () => {
+      const result = titleOf('Amazon Essentials Super Comfortable Womens Winter Fleece Jacket with Pockets and Zipper Closure');
 
-      expect(result.finalResult.TitleResult.charLim.status).toBe('Error');
-      expect(result.finalResult.TitleResult.charLim.Message).toContain('under 80 characters');
+      expect(result.charLim.status).toBe('Error');
+      expect(result.charLim.Message).toContain("exceeds Amazon's 75-character limit");
     });
 
-    it('should pass title with 80+ characters', () => {
-      const productDetails = {
-        product_title: 'A'.repeat(80),
-        about_product: [],
-        product_description: [],
-      };
+    it('should pass a title within 75 characters', () => {
+      const result = titleOf("Amazon Essentials Women's Fleece Jacket, Black, Medium");
 
-      const result = getRankings(productDetails);
+      expect(result.charLim.status).toBe('Success');
+    });
 
-      expect(result.finalResult.TitleResult.charLim.status).toBe('Success');
+    it('should treat a missing title as an error', () => {
+      const result = titleOf('   ');
+
+      expect(result.charLim.status).toBe('Error');
+      expect(result.charLim.Message).toContain('missing');
+    });
+
+    it('should detect promotional and subjective wording', () => {
+      const result = titleOf('Cotton Crew Socks, Hot Item, Top Rated, Grey, 6 Pack');
+
+      expect(result.RestictedWords.status).toBe('Error');
+      expect(result.RestictedWords.Message).toContain('hot item');
+      expect(result.RestictedWords.Message).toContain('top rated');
+    });
+
+    it('should detect restricted eligibility phrases', () => {
+      const result = titleOf('Compression Socks, FSA/HSA Eligible, Black, Large');
+
+      expect(result.RestictedWords.status).toBe('Error');
+    });
+
+    it('should detect decorative symbols', () => {
+      const result = titleOf('Brother Printer★HL-L2350DW★Wireless Monochrome');
+
+      expect(result.checkSpecialCharacters.status).toBe('Error');
+      expect(result.checkSpecialCharacters.Message).toContain('decorative symbols');
+    });
+
+    it('should detect contextual symbols used decoratively', () => {
+      const result = titleOf('Paradise Towel Beach Coverup << Size Kids XXS >>');
+
+      expect(result.checkSpecialCharacters.status).toBe('Error');
+    });
+
+    it('should allow contextual symbols used as identifiers or measurements', () => {
+      expect(titleOf('Style #4301 Cotton Crew Socks, Grey, 6 Pack').checkSpecialCharacters.status).toBe('Success');
+      expect(titleOf('Digital Kitchen Scale, <10 lb Capacity, Steel').checkSpecialCharacters.status).toBe('Success');
+    });
+
+    it('should detect a word repeated more than twice', () => {
+      const result = titleOf("Levi's Men's Jeans Men's 501 Original Fit Men's Denim Jeans");
+
+      expect(result.wordRepetition.status).toBe('Error');
+      expect(result.wordRepetition.Message).toContain("men's (3 times)");
+    });
+
+    it('should allow a word used exactly twice', () => {
+      const result = titleOf('Samsung 55-inch 4K Smart TV, 55 in, 2023 Model');
+
+      expect(result.wordRepetition.status).toBe('Success');
+    });
+
+    it('should not count prepositions, articles, or conjunctions as repetition', () => {
+      const result = titleOf('Shelf for the Kitchen and for the Bath and for the Office');
+
+      expect(result.wordRepetition.status).toBe('Success');
+    });
+
+    it('should detect all-caps and all-lowercase titles', () => {
+      expect(titleOf('NIKE AIR RUNNING SHOES').capitalization.status).toBe('Error');
+      expect(titleOf('nike air running shoes').capitalization.status).toBe('Error');
+      expect(titleOf('Nike Air Running Shoes with Cushioned Sole').capitalization.status).toBe('Success');
+    });
+
+    it('should not flag short uppercase acronyms as all caps', () => {
+      const result = titleOf('Anker USB C to HDMI Cable, 6 ft, 4K');
+
+      expect(result.capitalization.status).toBe('Success');
+    });
+
+    it('should warn about spelled-out numbers without counting them as errors', () => {
+      const result = titleOf('Two-Pack Cotton Towels, Twenty-Four x Forty-Eight inches');
+
+      expect(result.spelledOutNumbers.status).toBe('Warning');
+      expect(result.NumberOfErrors).toBe(0);
+    });
+
+    it('should pass a fully compliant title with no errors', () => {
+      const result = titleOf('Amazon Fresh Decaf Colombia Whole Bean Coffee, Medium Roast, 12 oz');
+
+      expect(result.NumberOfErrors).toBe(0);
     });
 
     it('should detect restricted words in title', () => {
@@ -80,7 +160,7 @@ describe('Rankings Calculations', () => {
       const result = getRankings(productDetails);
 
       expect(result.finalResult.TitleResult.RestictedWords.status).toBe('Error');
-      expect(result.finalResult.TitleResult.RestictedWords.Message).toContain('restricted or banned words');
+      expect(result.finalResult.TitleResult.RestictedWords.Message).toContain('restricted, promotional, or subjective wording');
     });
 
     it('should detect special characters in title', () => {
@@ -293,22 +373,31 @@ describe('Rankings Calculations', () => {
   });
 
   describe('Special characters detection', () => {
+    // ! $ ? _ { } ^ ¬ ¦ are never allowed. ~ # < > * are allowed as identifiers
+    // or measurements, so a single use passes and repeated use does not.
     const specialCharsTestCases = [
       { char: '!', expected: true },
       { char: '$', expected: true },
-      { char: '#', expected: true },
-      { char: '<', expected: true },
-      { char: '>', expected: true },
-      { char: '*', expected: true },
+      { char: '?', expected: true },
+      { char: '_', expected: true },
+      { char: '{', expected: true },
+      { char: '^', expected: true },
+      { char: '★', expected: true },
+      { char: '#', expected: false },
+      { char: '<', expected: false },
+      { char: '>', expected: false },
+      { char: '*', expected: false },
+      { char: '# 2 # 3 #', expected: true },
+      { char: '<<', expected: true },
       { char: '-', expected: false },
       { char: '()', expected: false },
       { char: ',', expected: false },
     ];
 
     specialCharsTestCases.forEach(({ char, expected }) => {
-      it(`should ${expected ? 'detect' : 'not detect'} "${char}" as special character`, () => {
+      it(`should ${expected ? 'detect' : 'not detect'} "${char}" as a prohibited character`, () => {
         const productDetails = {
-          product_title: `Product with ${char} character ${'A'.repeat(80)}`,
+          product_title: `Product with ${char} Character`,
           about_product: [],
           product_description: [],
         };

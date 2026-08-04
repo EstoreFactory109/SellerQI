@@ -126,6 +126,19 @@ const FinanceSyncLogSchema = new mongoose.Schema(
     // Count of Pending-status order rows seen for this day (diagnostic — explains
     // why a day is provisional and how much sales may still be unconfirmed).
     pendingOrderCount: { type: Number, default: 0 },
+
+    // ── Per-date failure backoff ──
+    // The freshness sweeper runs every 3h and treats any `failed` day as broken, so before these
+    // existed a window that could not succeed was retried ~8x/day indefinitely. One account did
+    // exactly that for a full day, re-running Step 1 each time.
+    //
+    // `consecutiveFailures` is incremented by recordSyncFailure and reset to 0 by a success write.
+    // `nextRetryAfter` is when the sweeper may consider this date again; null means "no backoff
+    // pending", NOT "give up" — being capped is signalled by consecutiveFailures reaching
+    // FINANCE_MAX_DATE_RETRIES, which the sweeper checks separately. Conflating the two would make
+    // a capped date retry immediately, the opposite of the intent.
+    consecutiveFailures: { type: Number, default: 0 },
+    nextRetryAfter: { type: Date, default: null },
   },
   { timestamps: true }
 );

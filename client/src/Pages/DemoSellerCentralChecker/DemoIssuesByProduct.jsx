@@ -147,7 +147,10 @@ const RankingIssuesTable = ({ product }) => {
         const issueLabels = {
             RestictedWords: 'Restricted Words',
             checkSpecialCharacters: 'Special Characters',
-            charLim: 'Character Limit'
+            charLim: 'Character Limit',
+            // Title-only checks from Amazon's product title requirements
+            wordRepetition: 'Word Repetition',
+            capitalization: 'Capitalization'
         };
         
         sections.forEach((sectionKey) => {
@@ -1267,6 +1270,8 @@ const IssuesByProduct = () => {
             rankingErrors.TitleResult?.charLim?.status === "Error" ||
             rankingErrors.TitleResult?.RestictedWords?.status === "Error" ||
             rankingErrors.TitleResult?.checkSpecialCharacters?.status === "Error" ||
+            rankingErrors.TitleResult?.wordRepetition?.status === "Error" ||
+            rankingErrors.TitleResult?.capitalization?.status === "Error" ||
             rankingErrors.BulletPoints?.charLim?.status === "Error" ||
             rankingErrors.BulletPoints?.RestictedWords?.status === "Error" ||
             rankingErrors.BulletPoints?.checkSpecialCharacters?.status === "Error" ||
@@ -1319,7 +1324,8 @@ const IssuesByProduct = () => {
         const rankingErrors = rankingData.data;
         let count = 0;
         const sections = ['TitleResult', 'BulletPoints', 'Description'];
-        const checks = ['RestictedWords', 'checkSpecialCharacters', 'charLim'];
+        // wordRepetition and capitalization only exist on TitleResult; absent keys are skipped
+        const checks = ['RestictedWords', 'checkSpecialCharacters', 'charLim', 'wordRepetition', 'capitalization'];
         
         sections.forEach(section => {
             if (rankingErrors[section]) {

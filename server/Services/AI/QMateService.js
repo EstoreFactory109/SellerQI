@@ -1400,7 +1400,7 @@ Then set \`needs_clarification: true\` and \`clarifying_questions\` to ask:
 Your suggestions must align with the **same rules SellerQI uses** so they are error-free and actionable. For any suggested fix, apply the criteria below and output structured fields so the app can validate where possible.
 
 **1. Ranking**
-- **Title:** Length 80–200 characters; no restricted words (e.g. home, natural, safe, green, cure, heal, virus, antibacterial, antimicrobial, pesticide, fda approved, guarantee, proven, certified); no special characters: ! $ ? _ { } ^ ¬ ¦ ~ # < > *
+- **Title:** Maximum 75 characters including spaces; no restricted, promotional, or subjective wording (e.g. home, natural, safe, green, cure, heal, virus, antibacterial, fda approved, guarantee, proven, certified, best seller, hot item, FSA/HSA eligible); never use ! $ ? _ { } ^ ¬ ¦ and use ~ # < > * only as an identifier ("Style #4301") or measurement ("<10 lb"); no word more than twice (brand names included, prepositions/articles/conjunctions exempt); title case, not all caps or all lowercase; numerals not words ("2-Pack", not "Two-Pack")
   - When you suggest a fixed title, put the exact string in \`suggested_title\` so the app can validate it.
 - **Bullet points:** Each bullet ≥150 characters; same restricted words and special characters as title.
   - When you suggest fixed bullet points, put the array of strings in \`suggested_bullet_points\` so the app can validate.
@@ -1920,7 +1920,7 @@ You receive a comprehensive JSON payload with all SellerQI data. Here is the com
           "title": "Product Name",
           "totalIssueCount": 2,
           "issues": [
-            { "section": "Title", "type": "character_limit", "message": "Title is too short", "howToSolve": "Extend to 80-200 chars" },
+            { "section": "Title", "type": "character_limit", "message": "Title is too long", "howToSolve": "Trim to 75 characters or fewer" },
             { "section": "Backend Keywords", "type": "byte_limit", "message": "Exceeds 250-byte limit", "howToSolve": "Reduce to 249 bytes" }
           ]
         }
@@ -2458,7 +2458,7 @@ You MUST respond as a **single JSON object** with this exact shape:
     "total": 45,
     "next_prompt": "Show me more wasted spend keywords"
   },
-  "suggested_title": ["Title Option 1 (80-200 chars)", "Title Option 2", "Title Option 3"],
+  "suggested_title": ["Title Option 1 (max 75 chars)", "Title Option 2", "Title Option 3"],
   "suggested_bullet_points": ["Bullet 1 (min 150 chars each)", "Bullet 2", "Bullet 3", "Bullet 4", "Bullet 5"],
   "suggested_backend_keywords": "keyword1 keyword2 keyword3 (200-249 bytes, space-separated)",
   "suggested_description": "Full description text (min 1700 chars)",
@@ -2520,11 +2520,16 @@ Include a \`content_actions\` array with:
 When generating content suggestions, you MUST follow these exact rules:
 
 **1. TITLE:**
-- Length: 80-200 characters (MUST be at least 80)
-- NO restricted words (see list below)
-- NO special characters: ! $ ? _ { } ^ ¬ ¦ ~ # < > *
+- Length: MAXIMUM 75 characters including spaces (Amazon's hard limit; aim for 60-75)
+- Order: brand, flavor or style, product type, key attribute, color, size or pack count, model number
+- NO restricted words (see list below), promotional phrases, or subjective commentary ("Hot Item", "Best Seller")
+- NEVER use: ! $ ? _ { } ^ ¬ ¦ — and use ~ # < > * ONLY as an identifier ("Style #4301") or measurement ("<10 lb"), never decoratively or repeated
+- NO non-language characters (Æ, Š, Œ, Ÿ, Ž), symbols, stars, or emoji
+- NO word more than TWICE (brand names included; prepositions, articles, conjunctions exempt)
+- Title case — NOT all caps, NOT all lowercase
+- Numerals, not words: "2-Pack" not "Two-Pack"; abbreviate measurements (cm, oz, in, kg)
 - Keep brand name at start if present
-- Keep key attributes (size, color, pack size)
+- Keep key attributes (size, color, pack size); move any overflow detail to Item highlights (125 extra characters)
 
 **2. BULLET POINTS:**
 - Exactly 5 bullet points
@@ -2561,19 +2566,19 @@ home, natural, safe, green, heal, toxic, remedy, treatment
 
 **Example workflow for TITLE FIX:**
 
-User: "Fix the title for ASIN B08138LS42, it's too short"
+User: "Fix the title for ASIN B08138LS42, it's over the character limit"
 Your response should include:
 1. In \`answer_markdown\`: Explain the issue and mention you've generated 3 title options for them to choose from
-2. In \`suggested_title\`: An ARRAY of exactly 3 title suggestions (each 80-200 characters)
+2. In \`suggested_title\`: An ARRAY of exactly 3 title suggestions (each 75 characters or fewer)
 3. In \`content_actions\`: Include the action with asin, sku, and product_title
 
 Example JSON fields:
 \`\`\`json
 {
   "suggested_title": [
-    "Brand Name Professional Quality Product with Key Feature - Size/Color - Perfect for Use Case (Pack of X)",
-    "Brand Name Premium Product Title Alternative with Different Keywords and Benefits Highlighted",
-    "Brand Name Product Type with Unique Selling Points - Material, Size, Quantity Included"
+    "Brand Product Type, Key Feature, Color, Size, Pack of 2",
+    "Brand Product Type with Key Attribute, Material, Large, 2 Pack",
+    "Brand Product Type, Model ABC-123, Black, 12 oz"
   ],
   "content_actions": [{
     "action": "generate_suggestion",

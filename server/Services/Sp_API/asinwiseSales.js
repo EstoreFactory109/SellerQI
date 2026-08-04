@@ -254,9 +254,18 @@ async function pollReportStatus(accessToken, baseUrl, reportId) {
     }
 
     const status = res.body.processingStatus;
-    logger.info(`[Report] Poll #${attempt}: status = ${status}`);
+    // Sampled — same reasoning as the poll loop in FinanceService.js: this repeats the same status
+    // dozens of times per report while it queues, and every line is piped through the PM2 daemon.
+    if (attempt === 1 || attempt % 10 === 0) {
+      logger.info(`[Report] Poll #${attempt}: status = ${status}`);
+    } else {
+      logger.debug(`[Report] Poll #${attempt}: status = ${status}`);
+    }
 
-    if (status === "DONE") return res.body.reportDocumentId;
+    if (status === "DONE") {
+      if (attempt !== 1 && attempt % 10 !== 0) logger.info(`[Report] DONE after ${attempt} poll(s).`);
+      return res.body.reportDocumentId;
+    }
     if (status === "CANCELLED" || status === "FATAL") {
       throw new Error(`Report processing failed with status: ${status}`);
     }

@@ -101,7 +101,22 @@ function parseDate(dateStr) {
 // ─────────────────────────────────────────────
 // 3. HTTP HELPERS
 // ─────────────────────────────────────────────
-function httpsRequest(options, postData = null) {
+// Transient socket-level failures, by `code` AND by message. Node reports a mid-flight reset as
+// `Error('socket hang up')` with `code: 'ECONNRESET'`, so matching only one of the two misses cases.
+const TRANSIENT_NET_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'ECONNABORTED', 'EAI_AGAIN']);
+
+function isTransientNetworkError(err) {
+  if (!err) return false;
+  if (err.code && TRANSIENT_NET_CODES.has(err.code)) return true;
+  const msg = (err.message || String(err)).toLowerCase();
+  return msg.includes('socket hang up') || msg.includes('timed out');
+}
+
+const EXPENCES_REQUEST_TIMEOUT_MS = Math.max(1000, parseInt(process.env.FINANCE_TXN_REQUEST_TIMEOUT_MS || '60000', 10) || 60000);
+const EXPENCES_MAX_RETRIES = Math.max(0, parseInt(process.env.FINANCE_TXN_REQUEST_MAX_RETRIES || '3', 10) || 3);
+const EXPENCES_RETRY_BASE_MS = Math.max(100, parseInt(process.env.FINANCE_TXN_RETRY_BASE_MS || '2000', 10) || 2000);
+
+function httpsRequestOnce(options, postData = null) {
   return new Promise((resolve, reject) => {
     const req = https.request(options, (res) => {
       const chunks = [];
@@ -111,11 +126,58 @@ function httpsRequest(options, postData = null) {
         try { resolve({ statusCode: res.statusCode, headers: res.headers, body: JSON.parse(body) }); }
         catch { resolve({ statusCode: res.statusCode, headers: res.headers, body }); }
       });
+      res.on("error", reject);
+    });
+    // Without this a hung connection waits on the OS default (~2 min+) with nothing to break it.
+    req.setTimeout(EXPENCES_REQUEST_TIMEOUT_MS, () => {
+      req.destroy(Object.assign(new Error(`request timed out after ${EXPENCES_REQUEST_TIMEOUT_MS}ms`), { code: 'ETIMEDOUT' }));
     });
     req.on("error", reject);
     if (postData) req.write(postData);
     req.end();
   });
+}
+
+/**
+ * Finance API transport, with a timeout and bounded retry on transient socket failures.
+ *
+ * WHY THIS EXISTS
+ * This helper previously had NEITHER. A single `socket hang up` rejected outright, and its raw
+ * message propagated all the way up as `finalize failed: socket hang up` — the exact production
+ * error that put one account into a 3-hourly retry loop for a full day.
+ *
+ * That it happened at all is a numbers game: `fetchTransactions` walks 1000+ pages for a
+ * high-volume account, every one through here, so the probability of at least one reset across a
+ * full walk approaches 1. And because all Amazon I/O in Step 1 happens BEFORE the first database
+ * write, losing a single page throws away the entire chunk's work — zero forward progress, which is
+ * why the same chunk failed identically on every retry.
+ *
+ * Retrying is safe: these are GETs against a paginated read API, and a repeated page returns the
+ * same rows. The caller's fold is rebuilt from scratch on the outer `withRetry`, so no double
+ * counting either.
+ */
+async function httpsRequest(options, postData = null) {
+  const method = (options.method || 'GET').toUpperCase();
+  // Only replay idempotent verbs. A POST could have been received and acted upon before the socket
+  // dropped, so replaying it risks creating a second report.
+  const retryable = method === 'GET' || method === 'HEAD';
+  let lastErr;
+
+  for (let attempt = 0; attempt <= EXPENCES_MAX_RETRIES; attempt++) {
+    try {
+      return await httpsRequestOnce(options, postData);
+    } catch (err) {
+      lastErr = err;
+      if (!retryable || !isTransientNetworkError(err) || attempt === EXPENCES_MAX_RETRIES) throw err;
+      const waitMs = EXPENCES_RETRY_BASE_MS * Math.pow(2, attempt);
+      logger.warn(
+        `[Finance API] transient network error on ${options.path ? String(options.path).split('?')[0] : 'request'} ` +
+        `(${err.code || err.message}); retry ${attempt + 1}/${EXPENCES_MAX_RETRIES} in ${waitMs}ms`
+      );
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+  }
+  throw lastErr;
 }
 
 // ─────────────────────────────────────────────
@@ -183,6 +245,14 @@ function deriveFinanceDelayFromHeaders(headers) {
   return Math.ceil((1000 / rate) * 1.25); // 25% safety margin
 }
 
+// Log-sampling rates for the pagination loop. These exist because PM2's God daemon buffers every
+// process's stdout in its own heap when it cannot drain to disk — a per-page log line on a 1000-page
+// fetch is what fed it to 12.6 GB and an OOM kill. Env-overridable so verbosity can be raised during
+// an investigation without a deploy; set to 1 to restore per-page logging.
+const FINANCE_PAGE_LOG_EVERY = Math.max(1, parseInt(process.env.FINANCE_PAGE_LOG_EVERY || '50', 10) || 50);
+const FINANCE_PAGE_LOG_FULL_UNTIL = Math.max(1, parseInt(process.env.FINANCE_PAGE_LOG_FULL_UNTIL || '5', 10) || 5);
+const FINANCE_THROTTLE_LOG_EVERY = Math.max(1, parseInt(process.env.FINANCE_THROTTLE_LOG_EVERY || '25', 10) || 25);
+
 /**
  * Paginate the Finance API transactions endpoint.
  *
@@ -204,6 +274,7 @@ async function fetchTransactions(accessToken, baseUrl, postedAfter, postedBefore
   let pageCount = 0;
   let transactionCount = 0;
   let currentToken = accessToken;
+  let throttleWarnCount = 0;
   const MAX_RETRIES = 5;
   const MAX_AUTH_REFRESHES_PER_PAGE = 2;
 
@@ -251,9 +322,22 @@ async function fetchTransactions(accessToken, baseUrl, postedAfter, postedBefore
         // purely on the fixed exponential schedule.
         const headerDelay = deriveFinanceDelayFromHeaders(res.headers);
         const delayMs = Math.max(Math.min(10000 * Math.pow(2, attempt), 60000), headerDelay);
-        logger.warn(
-          `[Finance API v2024-06-19] Throttled on page ${pageCount + 1}, attempt ${attempt + 1}/${MAX_RETRIES}. Retrying in ${delayMs / 1000}s...`
-        );
+        throttleWarnCount++;
+        // Throttling is EXPECTED here, not exceptional: there is deliberately no pre-emptive
+        // inter-page delay (see the note at the end of this loop), so on a long run Amazon pushes
+        // back routinely. At up to 5 retries per page over 1000+ pages that is thousands of `warn`
+        // lines — all of which flow through the PM2 daemon. Log the first one at warn so the
+        // condition is still visible, then sample; the total is reported once when the fetch ends.
+        if (throttleWarnCount === 1 || throttleWarnCount % FINANCE_THROTTLE_LOG_EVERY === 0) {
+          logger.warn(
+            `[Finance API v2024-06-19] Throttled on page ${pageCount + 1}, attempt ${attempt + 1}/${MAX_RETRIES}. ` +
+            `Retrying in ${delayMs / 1000}s... (throttle #${throttleWarnCount} this fetch)`
+          );
+        } else {
+          logger.debug(
+            `[Finance API v2024-06-19] Throttled on page ${pageCount + 1}, attempt ${attempt + 1}/${MAX_RETRIES}. Retrying in ${delayMs / 1000}s...`
+          );
+        }
         await new Promise((r) => setTimeout(r, delayMs));
         continue;
       }
@@ -279,9 +363,31 @@ async function fetchTransactions(accessToken, baseUrl, postedAfter, postedBefore
       allTransactions.push(...transactions);
     }
 
-    logger.info(
-      `[Finance API v2024-06-19] Page ${pageCount}: fetched ${transactions.length} transactions. nextToken: ${nextToken ? "yes" : "no"}`
-    );
+    // ── Sampled, not per-page ─────────────────────────────────────────────────────────────────
+    // This was one `info` line PER PAGE, and a large account runs 1000+ pages — the single biggest
+    // producer of stdout on the box. PM2 pipes every process's stdout through its God daemon, and
+    // when that daemon's write to disk back-pressures (full disk, or a rotated-away fd) the
+    // unwritten lines buffer in the DAEMON's heap. That is how it reached 12.6 GB and got
+    // OOM-killed, taking every process down with it.
+    //
+    // Keep the signal, drop the volume: always log the first and last page (so "did it start" and
+    // "did it finish" stay visible at info), sample the middle, and keep the full per-page trace at
+    // debug for when someone is actually investigating. Same shape as the progress guard in
+    // MCP/EconomicsMetricsService.js:197.
+    // Log the opening pages in full rather than only page 1: the common case is an account with a
+    // handful of pages, whose logs were never the problem, and sampling those would lose detail for
+    // no benefit. Sampling only engages once a fetch is clearly in outlier territory.
+    const isFirstOrLastPage = pageCount <= FINANCE_PAGE_LOG_FULL_UNTIL || !nextToken;
+    if (isFirstOrLastPage || pageCount % FINANCE_PAGE_LOG_EVERY === 0) {
+      logger.info(
+        `[Finance API v2024-06-19] Page ${pageCount}: fetched ${transactions.length} transactions. ` +
+        `nextToken: ${nextToken ? "yes" : "no"}${isFirstOrLastPage ? "" : ` (sampled 1-in-${FINANCE_PAGE_LOG_EVERY})`}`
+      );
+    } else {
+      logger.debug(
+        `[Finance API v2024-06-19] Page ${pageCount}: fetched ${transactions.length} transactions. nextToken: ${nextToken ? "yes" : "no"}`
+      );
+    }
 
     // NOTE: deliberately NO pre-emptive inter-page delay. Amazon's documented 0.5 req/sec would
     // imply ~2.5s per page, and a large window can run to hundreds of pages — that alone would
@@ -290,8 +396,12 @@ async function fetchTransactions(accessToken, baseUrl, postedAfter, postedBefore
     // floor), and on the window being bounded so page counts stay modest.
   } while (nextToken);
 
+  // The per-page and per-throttle lines above are sampled, so this single summary is where the
+  // true totals live — including the throttle count, which is the signal that would otherwise be
+  // lost to sampling and is what tells you a fetch was rate-limited rather than merely slow.
   logger.info(
     `[Finance API v2024-06-19] Total transactions: ${transactionCount} across ${pageCount} page(s)` +
+    (throttleWarnCount > 0 ? `, ${throttleWarnCount} throttle retr${throttleWarnCount === 1 ? 'y' : 'ies'}` : '') +
     (onPage ? ' (streamed — not retained)' : '')
   );
   return allTransactions;

@@ -6,7 +6,11 @@ const {
   checkTitle,
   checkBulletPoints,
   checkDescription,
-  BackendKeyWordOrAttributesStatus
+  BackendKeyWordOrAttributesStatus,
+  TITLE_MAX_LENGTH,
+  TITLE_PROHIBITED_CHARACTERS,
+  TITLE_CONTEXTUAL_CHARACTERS,
+  TITLE_RESTRICTED_PHRASES
 } = require('../Calculations/Rankings.js');
 const NumberOfProductReviews = require('../../models/seller-performance/NumberOfProductReviewsModel.js');
 const { getListingItemsData } = require('../products/ListingItemsService.js');
@@ -339,19 +343,34 @@ You are an expert Amazon listing copywriter. Your output must satisfy the EXACT 
 === TITLE RULES (every condition is mandatory) ===
 
 1. CHARACTER LENGTH
-   - The product title MUST be at least 80 characters and at most 200 characters.
-   - Under 80 characters is an error: "The product title is under 80 characters, which can limit its visibility and effectiveness in search results."
-   - Extend to between 80 and 200 characters; include brand, size, color, and unique features.
+   - The product title MUST NOT exceed ${TITLE_MAX_LENGTH} characters, including spaces. This is Amazon's hard limit.
+   - Aim for 60-${TITLE_MAX_LENGTH} characters. Titles over the limit are truncated on mobile, can be automatically corrected, and may be kept out of search results.
+   - Order the information as: brand, flavor or style, product type, key attribute, color, size or pack count, model number.
+   - Drop non-essential detail rather than exceeding the limit. Do not pad the title to reach a length.
 
 2. RESTRICTED WORDS (banned entirely; word-boundary match, case-insensitive)
    You must NOT use any of these words or phrases in the title:
    ${RESTRICTED_WORDS_FOR_PROMPT}
+   Also banned: promotional phrases, subjective commentary, and restricted claims such as:
+   ${TITLE_RESTRICTED_PHRASES.join(', ')}
 
-3. SPECIAL CHARACTERS (prohibited)
-   Do NOT use any of these characters in the title: ${RANKING_SPECIAL_CHARS}
-   (These characters violate Amazon's guidelines and can lead to listing suppression.)
+3. SPECIAL CHARACTERS
+   - NEVER use these characters: ${TITLE_PROHIBITED_CHARACTERS.join(' ')}
+   - These are allowed ONLY as a product identifier ("Style #4301") or a measurement ("<10 lb"), never decoratively and never repeated: ${TITLE_CONTEXTUAL_CHARACTERS.join(' ')}
+   - Do NOT use non-language characters (Æ, Š, Œ, Ÿ, Ž), symbols, arrows, stars, or emoji.
+   - Allowed punctuation: hyphens (-), forward slashes (/), commas (,), ampersands (&), and periods (.).
 
-4. ADDITIONAL
+4. WORD REPETITION
+   - No word may appear more than TWICE in the title. Brand names are subject to the same two-instance limit.
+   - Prepositions, articles, and conjunctions are exempt.
+   - Wrong: "Levi's Men's Jeans Men's 501 Original Fit Men's Denim Jeans". Right: "Levi's Men's 501 Original Fit Jeans".
+
+5. CAPITALIZATION AND NUMBERS
+   - Capitalize the first letter of each word, except prepositions (in, on, over, with), conjunctions (and, or, for), and articles (the, a, an).
+   - Do NOT use all caps or all lowercase.
+   - Use numerals, not words: "2-Pack", not "Two-Pack". Abbreviate measurements: cm, oz, in, kg.
+
+6. ADDITIONAL
    - Keep the brand name at the start if it exists in the current title.
    - Keep the same product type and key attributes (size, color, pack size); improve clarity and keyword coverage.
    - Do NOT mention discounts, promotions, time-limited offers, or compare to other brands.
@@ -374,6 +393,27 @@ Generate three improved titles that obey all rules.
     const match = msg.match(/(?:Characters|words) used are:\s*(.+?)(?:\.|$)/i);
     if (!match) return [];
     return match[1].split(',').map(s => s.trim()).filter(Boolean);
+  }
+
+  // Turn a failed checkTitle() result into feedback the model can act on.
+  function collectTitleRejectionReasons(validation, title) {
+    const reasons = [];
+    if (validation?.charLim?.status === 'Error') {
+      reasons.push(`Length: a suggestion was ${title.length} characters. The hard limit is ${TITLE_MAX_LENGTH}.`);
+    }
+    if (validation?.RestictedWords?.status === 'Error') {
+      reasons.push('Restricted, promotional, or subjective wording was used.');
+    }
+    if (validation?.checkSpecialCharacters?.status === 'Error') {
+      reasons.push('Prohibited or decorative special characters were used.');
+    }
+    if (validation?.wordRepetition?.status === 'Error') {
+      reasons.push(validation.wordRepetition.Message);
+    }
+    if (validation?.capitalization?.status === 'Error') {
+      reasons.push(validation.capitalization.Message);
+    }
+    return reasons;
   }
 
   function runTitleGeneration(messages) {
@@ -418,9 +458,10 @@ Generate three improved titles that obey all rules.
     throw new ApiError(500, 'AI did not return any title suggestions');
   }
 
-  // Validate each candidate; collect validation errors for retry
+  // Validate each candidate; collect validation feedback for retry
   let validTitles = [];
   const rejectedWords = new Set();
+  const rejectionReasons = new Set();
   for (const t of cleanTitles) {
     const validation = checkTitle(t);
     if (!validation || validation.NumberOfErrors === 0) {
@@ -432,21 +473,28 @@ Generate three improved titles that obey all rules.
         errors: validation
       });
       extractRestrictedWordsFromValidation(validation).forEach(w => rejectedWords.add(w));
+      collectTitleRejectionReasons(validation, t).forEach(r => rejectionReasons.add(r));
     }
   }
 
-  // If all failed and we have specific restricted words, retry once with that feedback
-  if (validTitles.length === 0 && rejectedWords.size > 0) {
+  // Retry once on ANY validation failure. Under Amazon's 75-character limit the
+  // most common rejection is length, which reports no restricted words, so the
+  // retry must not be gated on rejectedWords alone.
+  if (validTitles.length === 0 && rejectionReasons.size > 0) {
     const avoidList = [...rejectedWords].join(', ');
     const retryUserPrompt = `
 ASIN: ${asin}
 Current title:
 ${currentTitle}
 
-Your previous suggestions were REJECTED because they contained these restricted words (do not use them in any form): ${avoidList}.
+Your previous suggestions were ALL REJECTED for these reasons:
+${[...rejectionReasons].map(r => `- ${r}`).join('\n')}
+
 Generate exactly 3 NEW alternative titles that:
-- Are 80–200 characters.
-- Do NOT contain any of: ${avoidList}.
+- Are ${TITLE_MAX_LENGTH} characters or fewer, including spaces. Count the characters before answering and drop non-essential words to fit.
+- Repeat no word more than twice, and use title case (not all caps, not all lowercase).
+- Use only standard letters, numbers, and the punctuation - / , & .
+${avoidList ? `- Do NOT contain any of: ${avoidList}.` : ''}
 - Do NOT use "non-toxic", "toxic", "hypoallergenic", "eco-friendly", "bpa-free", "lead-free", or any other word from the full restricted list.
 - Use neutral phrasing (e.g. "adhesive", "child-safe adhesive", material names) instead of restricted claims.
 `;

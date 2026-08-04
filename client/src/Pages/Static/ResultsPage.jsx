@@ -312,6 +312,20 @@ function ResultsPage() {
         message: analysisResult.rankingResult.TitleResult.checkSpecialCharacters.Message
       });
     }
+    if (analysisResult.rankingResult?.TitleResult?.wordRepetition?.status === 'Error') {
+      rankingIssues.push({
+        id: 'title-word-repetition',
+        label: 'Title Word Repetition',
+        message: analysisResult.rankingResult.TitleResult.wordRepetition.Message
+      });
+    }
+    if (analysisResult.rankingResult?.TitleResult?.capitalization?.status === 'Error') {
+      rankingIssues.push({
+        id: 'title-capitalization',
+        label: 'Title Capitalization',
+        message: analysisResult.rankingResult.TitleResult.capitalization.Message
+      });
+    }
 
     // Bullet Points checks
     if (analysisResult.rankingResult?.BulletPoints?.nullCheck?.status === 'Error') {

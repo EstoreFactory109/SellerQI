@@ -61,61 +61,257 @@ const containsRestrictedWords = (str) => {
   return matchedWords.length > 0 ? matchedWords : [];
 };
 
+// ─── Amazon product title requirements ────────────────────────────────────────
+// Source: Amazon Seller Central, "Product title requirements and guidelines".
+// These apply to every product type except media, in every store except Saudi
+// Arabia, Egypt, Türkiye, and the United Arab Emirates.
+
+const TITLE_MAX_LENGTH = 75;
+
+// Never permitted in a title, in any context.
+const TITLE_PROHIBITED_CHARACTERS = ['!', '$', '?', '_', '{', '}', '^', '¬', '¦'];
+
+// Permitted only as product identifiers ("Style #4301") or measurements
+// ("<10 lb"). Decorative use ("Beach Coverup << Size Kids XXS >>") is not.
+const TITLE_CONTEXTUAL_CHARACTERS = ['~', '#', '<', '>', '*'];
+
+// Non-language ASCII (Æ, Š, Œ, Ÿ, Ž) plus decorative symbols, arrows, dingbats
+// and emoji (★, ➤, 🔥 …), none of which belong in a title.
+const TITLE_DECORATIVE_CHARACTERS = new RegExp(
+  '[ÆæŒœŠšŸŽž]' +                                       // non-language ASCII
+  '|[\\u00AB\\u00BB\\u2020-\\u2023\\u2026\\u2030\\u2039\\u203A\\u203B\\u203C\\u2047-\\u2049]' +
+  '|[\\u2190-\\u21FF\\u2300-\\u23FF\\u2460-\\u24FF\\u25A0-\\u27BF\\u2B00-\\u2BFF]' +
+  '|[\\u{1F000}-\\u{1FAFF}]',                           // emoji and pictographs
+  'gu'
+);
+
+// Prepositions, articles, and conjunctions are exempt from the two-instance
+// word limit; every other word, brand names included, is not.
+const TITLE_REPETITION_EXEMPT_WORDS = new Set([
+  'a', 'an', 'the', 'and', 'or', 'nor', 'but', 'so', 'yet', 'for',
+  'in', 'on', 'at', 'by', 'to', 'of', 'off', 'up', 'with', 'without',
+  'from', 'into', 'onto', 'over', 'under', 'per', 'plus', 'via', 'as',
+  'than', 'about', 'after', 'before', 'between', 'through'
+]);
+
+// Promotional phrases, subjective commentary, and restricted claims that Amazon
+// does not allow in titles. The medical/claim wording lives in
+// containsRestrictedWords() and is checked alongside these.
+const TITLE_RESTRICTED_PHRASES = [
+  'fsa eligible', 'hsa eligible', 'fsa/hsa eligible', 'hsa/fsa eligible',
+  'hot item', 'hot deal', 'top rated', 'top seller', 'best selling', 'bestseller',
+  'must have', 'number one', 'number 1', 'no 1', '#1',
+  'free gift', 'free delivery', 'free returns', 'money back', 'lowest price',
+  'best price', 'cheapest', 'on sale', 'clearance', 'new arrival', 'order now',
+  'buy now', 'act now', 'while supplies last', 'satisfaction guaranteed',
+  'risk free', 'as seen on tv', 'flash sale', 'special offer', 'exclusive offer',
+  'amazing', 'incredible', 'unbeatable', 'perfect gift', 'wow'
+];
+
+// Amazon asks for numerals ("2") rather than words ("two"). "one" is left out:
+// it is far more often part of a name ("All-in-One") than a quantity.
+const TITLE_SPELLED_OUT_NUMBERS = [
+  'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+  'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
+  'seventeen', 'eighteen', 'nineteen', 'twenty', 'thirty', 'forty', 'fifty',
+  'sixty', 'seventy', 'eighty', 'ninety', 'hundred', 'thousand', 'dozen'
+];
+
+const escapeForRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Matches each phrase allowing a hyphen wherever the phrase has a space, so
+// "must-have" and "must have" are both found.
+const matchPhrases = (str, phrases) => {
+  const found = phrases.filter((phrase) => {
+    const body = escapeForRegex(phrase).replace(/ +/g, '[\\s-]+');
+    const prefix = /^\w/.test(phrase) ? '\\b' : '';
+    const suffix = /\w$/.test(phrase) ? '\\b' : '';
+    return new RegExp(`${prefix}${body}${suffix}`, 'i').test(str);
+  });
+  return [...new Set(found)];
+};
+
+const findTitleCharacterIssues = (str) => {
+  const prohibited = TITLE_PROHIBITED_CHARACTERS.filter((char) => str.includes(char));
+
+  const decorative = [...new Set(str.match(TITLE_DECORATIVE_CHARACTERS) || [])];
+
+  // A contextual symbol reads as decorative once it is repeated - either back to
+  // back ("<< Size >>") or more than twice across the title ("A*B*C*D").
+  const decorativeContextual = TITLE_CONTEXTUAL_CHARACTERS.filter((char) => {
+    const occurrences = str.split(char).length - 1;
+    if (occurrences === 0) return false;
+    if (str.includes(`${char}${char}`)) return true;
+    return occurrences > 2;
+  });
+
+  return { prohibited, decorative, decorativeContextual };
+};
+
+const findRepeatedTitleWords = (str) => {
+  const words = str.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}'’]*/gu) || [];
+  const counts = new Map();
+
+  words.forEach((word) => {
+    if (word.length < 2 || TITLE_REPETITION_EXEMPT_WORDS.has(word)) return;
+    counts.set(word, (counts.get(word) || 0) + 1);
+  });
+
+  return [...counts.entries()]
+    .filter(([, count]) => count > 2)
+    .map(([word, count]) => ({ word, count }));
+};
+
+const findTitleCapitalizationIssue = (str) => {
+  const letters = str.match(/\p{L}/gu) || [];
+  if (letters.length < 4) return null;
+
+  // A run of short acronyms (USB, LED, 4K) is not a shouted title, so all-caps
+  // is only flagged once a word of five or more letters is uppercase.
+  const hasLongUpperCaseWord = /\p{Lu}{5,}/u.test(str);
+
+  if (!/\p{Ll}/u.test(str) && hasLongUpperCaseWord) return 'allCaps';
+  if (!/\p{Lu}/u.test(str)) return 'allLowercase';
+  return null;
+};
+
 const checkTitle = (str) => {
-  let result = {};
-  let errorCount = 0;
+    let result = {};
+    let errorCount = 0;
 
-  if (str.length < 80) {
-    errorCount++;
-    result.charLim = {
-      status: "Error",
-      Message: "The product title is under 80 characters, which can limit its visibility and effectiveness in search results, potentially reducing click-through rates.",
-      HowTOSolve: "Extend the product title to between 80 to 200 characters. Include attributes such as brand, size, color, and unique features. Use keyword research tools like MerchantWords or Helium 10 to ensure optimization."
-    };
-  } else {
-    result.charLim = {
-      status: "Success",
-      Message: "Great job! Your product title is well-optimized for visibility and readability, enhancing its appeal to potential buyers.",
-      HowTOSolve: ""
-    };
-  }
+    const title = typeof str === 'string' ? str : '';
 
-  let RestictedWords = containsRestrictedWords(str);
+    // 1. Character limit - titles must not exceed 75 characters, spaces included.
+    if (!title.trim()) {
+        errorCount++;
+        result.charLim = {
+            status: "Error",
+            Message: "Your product title is missing. Amazon requires a title that clearly and concisely describes the product.",
+            HowTOSolve: "Add a title containing the minimum information needed to identify the product, such as brand plus product type (for example, \"Sony Headphones\"), and keep it within 75 characters."
+        }
+    } else if (title.length > TITLE_MAX_LENGTH) {
+        errorCount++;
+        result.charLim = {
+            status: "Error",
+            Message: `Your product title is ${title.length} characters, which exceeds Amazon's 75-character limit. Titles over the limit can be automatically corrected or kept out of search results, and they are truncated on mobile screens.`,
+            HowTOSolve: "Trim the title to 75 characters or fewer, ordering the words brand, flavor or style, product type, key attribute, color, size or pack count, model number. Move the remaining detail (materials, use cases) into Item highlights, which gives you another 125 characters shown below the title."
+        }
+    } else {
+        result.charLim = {
+            status: "Success",
+            Message: `Great job! Your product title is ${title.length} characters, within Amazon's 75-character limit.`,
+            HowTOSolve: ""
+        }
+    }
 
-  if (RestictedWords.length > 0) {
-    errorCount++;
-    result.RestictedWords = {
-      status: "Error",
-      Message: `Your product title contains restricted or banned words according to Amazon's guidelines. Using such words can lead to your product listing being suppressed or removed. The Characters used are: ${RestictedWords.join(', ')}`,
-      HowTOSolve: "Review your product title and remove restricted words. Refer to the latest Amazon seller policies to ensure compliance."
-    };
-  } else {
-    result.RestictedWords = {
-      status: "Success",
-      Message: "Excellent! Your product title complies with Amazon's guidelines, avoiding any restricted words.",
-      HowTOSolve: ""
-    };
-  }
+    // 2. Restricted, promotional, and subjective wording.
+    let RestictedWords = [...new Set([
+        ...containsRestrictedWords(title),
+        ...matchPhrases(title, TITLE_RESTRICTED_PHRASES)
+    ])];
 
-  const SpecialCharacters = checkSpecialCharacters(str);
+    if (RestictedWords.length>0) {
+        errorCount++;
+        result.RestictedWords = {
+            status: "Error",
+            Message: `Your product title contains restricted, promotional, or subjective wording that Amazon does not allow in titles. This covers promotional phrases such as "free shipping" or "100% quality guaranteed", subjective commentary such as "Hot Item" or "Best Seller", and restricted phrases such as "FSA/HSA eligible". The words used are: ${RestictedWords.join(', ')}`,
+            HowTOSolve: "Remove these words and describe the product factually instead. Keep claims, offers, and eligibility statements out of the title - Amazon can suppress or automatically correct titles that contain them."
+        }
+    } else {
+        result.RestictedWords = {
+            status: "Success",
+            Message: "Excellent! Your product title complies with Amazon's guidelines, avoiding restricted, promotional, and subjective wording.",
+            HowTOSolve: ""
+        }
+    }
 
-  if (SpecialCharacters.length > 0) {
-    errorCount++;
-    result.checkSpecialCharacters = {
-      status: "Error",
-      Message: `Your product title includes special characters that violate Amazon's guidelines. Using prohibited characters can lead to listing suppression or reduced search visibility. The characters which are used: ${SpecialCharacters.join(", ")} `,
-      HowTOSolve: "Remove all prohibited special characters from the product title. Follow Amazon's title guidelines to maintain visibility and prevent suppression."
-    };
-  } else {
-    result.checkSpecialCharacters = {
-      status: "Success",
-      Message: "Well done! Your product title adheres to Amazon's guidelines by avoiding prohibited special characters.",
-      HowTOSolve: ""
-    };
-  }
+    // 3. Special characters - prohibited outright, decorative, or contextual misuse.
+    const { prohibited, decorative, decorativeContextual } = findTitleCharacterIssues(title);
 
-  result.NumberOfErrors = errorCount;
-  return result;
+    if (prohibited.length > 0 || decorative.length > 0 || decorativeContextual.length > 0) {
+        errorCount++;
+        const details = [];
+        if (prohibited.length > 0) {
+            details.push(`characters that are never allowed in a title: ${prohibited.join(', ')}`);
+        }
+        if (decorative.length > 0) {
+            details.push(`non-language or decorative symbols: ${decorative.join(', ')}`);
+        }
+        if (decorativeContextual.length > 0) {
+            details.push(`symbols used decoratively rather than as an identifier or measurement: ${decorativeContextual.join(', ')}`);
+        }
+        result.checkSpecialCharacters = {
+            status: "Error",
+            Message: `Your product title uses special characters that violate Amazon's title requirements - ${details.join('; ')}. Non-compliant characters can lead to the title being suppressed or automatically corrected.`,
+            HowTOSolve: "Remove the characters listed above. The characters ! $ ? _ { } ^ ¬ ¦ are never allowed, and ~ # < > * are allowed only as product identifiers (\"Style #4301\") or measurements (\"<10 lb\") - never for decoration. Stick to standard letters and numbers plus necessary punctuation such as hyphens (-), forward slashes (/), commas (,), ampersands (&), and periods (.)."
+        }
+    } else {
+        result.checkSpecialCharacters = {
+            status: "Success",
+            Message: "Well done! Your product title adheres to Amazon's guidelines by avoiding prohibited and decorative special characters.",
+            HowTOSolve: ""
+        }
+    }
+
+    // 4. Word repetition - no word more than twice, brand names included.
+    const repeatedWords = findRepeatedTitleWords(title);
+
+    if (repeatedWords.length > 0) {
+        errorCount++;
+        result.wordRepetition = {
+            status: "Error",
+            Message: `Your product title repeats the same word more than twice, which Amazon does not allow. The repeated words are: ${repeatedWords.map(({ word, count }) => `${word} (${count} times)`).join(', ')}`,
+            HowTOSolve: "Rewrite the title so that no word appears more than twice. Prepositions, articles, and conjunctions are exempt, but every other word - brand names included - is limited to two instances. For example, \"Levi's Men's Jeans Men's 501 Original Fit Men's Denim Jeans\" becomes \"Levi's Men's 501 Original Fit Jeans\"."
+        }
+    } else {
+        result.wordRepetition = {
+            status: "Success",
+            Message: "Excellent! Your product title has no word repeated more than twice.",
+            HowTOSolve: ""
+        }
+    }
+
+    // 5. Capitalization - title case, neither all caps nor all lowercase.
+    const capitalizationIssue = findTitleCapitalizationIssue(title);
+
+    if (capitalizationIssue) {
+        errorCount++;
+        result.capitalization = {
+            status: "Error",
+            Message: capitalizationIssue === 'allCaps'
+                ? "Your product title is written in all capital letters. Amazon requires title case, and all-caps titles are harder for customers to read in search results."
+                : "Your product title is written entirely in lowercase. Amazon requires the first letter of each word to be capitalized.",
+            HowTOSolve: "Capitalize the first letter of each word, except prepositions (in, on, over, with), conjunctions (and, or, for), and articles (the, a, an). Use \"Nike Air Running Shoes with Cushioned Sole\" rather than \"NIKE AIR RUNNING SHOES\" or \"nike air running shoes\"."
+        }
+    } else {
+        result.capitalization = {
+            status: "Success",
+            Message: "Well done! Your product title uses proper title-case capitalization.",
+            HowTOSolve: ""
+        }
+    }
+
+    // 6. Numerals instead of spelled-out numbers. This is an Amazon best
+    //    practice rather than a hard requirement, so it is reported as a warning
+    //    and left out of NumberOfErrors.
+    const spelledOutNumbers = matchPhrases(title, TITLE_SPELLED_OUT_NUMBERS);
+
+    if (spelledOutNumbers.length > 0) {
+        result.spelledOutNumbers = {
+            status: "Warning",
+            Message: `Your product title spells out numbers instead of using numerals: ${spelledOutNumbers.join(', ')}. Numerals are quicker for customers to scan and use fewer of the 75 available characters.`,
+            HowTOSolve: "Replace spelled-out numbers with numerals and abbreviate measurements - \"2-Pack Cotton Towels, 24 x 48 inches\" rather than \"Two-Pack Cotton Towels, Twenty-Four x Forty-Eight inches\". Measurement abbreviations such as cm, oz, in, and kg are allowed."
+        }
+    } else {
+        result.spelledOutNumbers = {
+            status: "Success",
+            Message: "Well done! Your product title uses numerals for quantities and measurements.",
+            HowTOSolve: ""
+        }
+    }
+
+    result.NumberOfErrors = errorCount;
+    return result;
 };
 
 const checkBulletPoints = (arr) => {
