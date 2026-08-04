@@ -213,10 +213,56 @@ describe('runChunkedFetch — failure handling', () => {
 });
 
 describe('recordSyncFailure', () => {
+  // A mock that ENFORCES the real unique index (User, country, region, date).
+  //
+  // This matters: the previous mock was `{ findOneAndUpdate: jest.fn() }`, which cannot express a
+  // unique constraint — so these tests passed while production threw
+  // `E11000 duplicate key error ... User_1_country_1_region_1_date_1` on every single failure.
+  // The old code combined `status: { $ne: 'success' }` in the filter with `upsert: true`; when a
+  // 'success' row existed the filter missed, Mongo fell through to INSERT, and the index rejected
+  // it. The failure was therefore never recorded, which is what let one account loop on the same
+  // chunk ~8x/day for a full day with nothing downstream able to notice.
+  let rows;
   let model;
 
+  const keyOf = (d) => `${d.User}|${d.country}|${d.region}|${d.date}`;
+  const matches = (row, filter) => Object.entries(filter).every(([k, v]) => {
+    if (v && typeof v === 'object' && '$ne' in v) return row[k] !== v.$ne;
+    return row[k] === v;
+  });
+
   beforeEach(() => {
-    model = { findOneAndUpdate: jest.fn().mockResolvedValue({}) };
+    rows = [];
+    model = {
+      _rows: rows,
+      async updateOne(filter, update) {
+        const row = rows.find((r) => matches(r, filter));
+        if (!row) return { matchedCount: 0, modifiedCount: 0 };
+        Object.assign(row, update.$set || {});
+        for (const [k, n] of Object.entries(update.$inc || {})) row[k] = (row[k] || 0) + n;
+        return { matchedCount: 1, modifiedCount: 1 };
+      },
+      async exists(filter) {
+        const row = rows.find((r) => matches(r, filter));
+        return row ? { _id: keyOf(row) } : null;
+      },
+      async create(doc) {
+        if (rows.some((r) => keyOf(r) === keyOf(doc))) {
+          throw Object.assign(new Error('E11000 duplicate key error'), { code: 11000 });
+        }
+        rows.push({ ...doc });
+        return doc;
+      },
+      async findOne(filter) {
+        const row = rows.find((r) => matches(r, filter));
+        return { lean: async () => (row ? { ...row } : null) };
+      },
+    };
+    // findOne(...).lean() shape
+    model.findOne = (filter) => ({ lean: async () => {
+      const row = rows.find((r) => matches(r, filter));
+      return row ? { ...row } : null;
+    } });
   });
 
   const base = {
@@ -226,69 +272,91 @@ describe('recordSyncFailure', () => {
     err: new Error('Report did not complete within 600s'),
     errorKind: 'timeout',
   };
+  const call = (over = {}) => recordSyncFailure({ ...base, FinanceSyncLogModel: model, from: '2026-06-18', to: '2026-06-18', ...over });
 
   test('writes one row per date in the given range, inclusive', async () => {
-    const dates = await recordSyncFailure({
-      ...base,
-      FinanceSyncLogModel: model,
-      from: '2026-06-18',
-      to: '2026-06-20',
-    });
-
+    const dates = await call({ from: '2026-06-18', to: '2026-06-20' });
     expect(dates).toEqual(['2026-06-18', '2026-06-19', '2026-06-20']);
-    expect(model.findOneAndUpdate).toHaveBeenCalledTimes(3);
+    expect(rows.map((r) => r.date).sort()).toEqual(['2026-06-18', '2026-06-19', '2026-06-20']);
   });
 
   test('scopes to the failing chunk only — never days that were not attempted', async () => {
-    // The whole window was 06-15..06-23; only chunk 2 failed.
-    await recordSyncFailure({
-      ...base,
-      FinanceSyncLogModel: model,
-      from: '2026-06-18',
-      to: '2026-06-20',
-    });
-
-    const written = model.findOneAndUpdate.mock.calls.map(([f]) => f.date);
+    await call({ from: '2026-06-18', to: '2026-06-20' });
+    const written = rows.map((r) => r.date);
     expect(written).not.toContain('2026-06-15'); // earlier chunk succeeded
     expect(written).not.toContain('2026-06-21'); // later chunk never ran
   });
 
-  test('refuses to overwrite an existing success', async () => {
-    await recordSyncFailure({ ...base, FinanceSyncLogModel: model, from: '2026-06-18', to: '2026-06-18' });
+  test('an existing SUCCESS row is left untouched and does NOT throw', async () => {
+    // THE production bug. Previously this threw E11000 and aborted the whole chunk.
+    rows.push({ User: 'uid', country: 'US', region: 'NA', date: '2026-06-18', status: 'success', provisional: false });
+    await expect(call()).resolves.toEqual(['2026-06-18']);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe('success');   // never downgraded — the original intent, preserved
+  });
 
-    const [filter] = model.findOneAndUpdate.mock.calls[0];
-    expect(filter.status).toEqual({ $ne: 'success' });
+  test('one date with a success row does not stop the other dates being recorded', async () => {
+    // The old code had no per-date try/catch, so the first date's throw lost the whole chunk.
+    rows.push({ User: 'uid', country: 'US', region: 'NA', date: '2026-06-18', status: 'success' });
+    await call({ from: '2026-06-18', to: '2026-06-20' });
+    const failed = rows.filter((r) => r.status === 'failed').map((r) => r.date);
+    expect(failed).toEqual(['2026-06-19', '2026-06-20']);
+  });
+
+  test('an existing FAILED row is updated and its failure count increments', async () => {
+    rows.push({ User: 'uid', country: 'US', region: 'NA', date: '2026-06-18', status: 'failed', consecutiveFailures: 2 });
+    await call();
+    expect(rows[0].consecutiveFailures).toBe(3);
+    expect(rows[0].status).toBe('failed');
+  });
+
+  test('a first failure inserts a row with consecutiveFailures = 1', async () => {
+    await call();
+    expect(rows[0].consecutiveFailures).toBe(1);
+    expect(rows[0].status).toBe('failed');
+  });
+
+  test('a concurrent insert (E11000) is swallowed, not propagated', async () => {
+    // A racing run inserted first. Its row is as good as ours; this is the only legitimate E11000.
+    model.create = async () => { throw Object.assign(new Error('E11000 dup'), { code: 11000 }); };
+    await expect(call()).resolves.toEqual(['2026-06-18']);
+  });
+
+  test('a NON-E11000 write error is contained, never thrown to the caller', async () => {
+    // Recording a failure must never itself fail the run — being blind is how this went unnoticed.
+    model.updateOne = async () => { throw new Error('mongo exploded'); };
+    await expect(call({ from: '2026-06-18', to: '2026-06-19' })).resolves.toEqual(['2026-06-18', '2026-06-19']);
   });
 
   test('records errorKind and upper-cases the country', async () => {
-    await recordSyncFailure({ ...base, FinanceSyncLogModel: model, from: '2026-06-18', to: '2026-06-18' });
-
-    const [filter, update, opts] = model.findOneAndUpdate.mock.calls[0];
-    expect(filter.country).toBe('US');
-    expect(update.errorKind).toBe('timeout');
-    expect(update.status).toBe('failed');
-    expect(opts).toEqual({ upsert: true, new: true });
+    await call();
+    expect(rows[0].country).toBe('US');
+    expect(rows[0].errorKind).toBe('timeout');
+    expect(rows[0].status).toBe('failed');
   });
 
   test('truncates a very long error message', async () => {
-    await recordSyncFailure({
-      ...base,
-      err: new Error('x'.repeat(2000)),
-      FinanceSyncLogModel: model,
-      from: '2026-06-18',
-      to: '2026-06-18',
-    });
+    await call({ err: new Error('x'.repeat(2000)) });
+    expect(rows[0].error.length).toBe(500);
+  });
 
-    const [, update] = model.findOneAndUpdate.mock.calls[0];
-    expect(update.error.length).toBe(500);
+  test('backs off: early failures stay on the normal cadence, later ones do not', async () => {
+    // The sweeper runs every 3h and re-enqueues any `failed` day, so without a backoff a window
+    // that cannot succeed is retried ~8x/day forever.
+    rows.push({ User: 'uid', country: 'US', region: 'NA', date: '2026-06-18', status: 'failed', consecutiveFailures: 0 });
+    await call();
+    expect(rows[0].nextRetryAfter == null).toBe(true);          // attempt 1 — no backoff yet
+
+    rows[0].consecutiveFailures = 4;
+    await call();
+    expect(rows[0].nextRetryAfter).toBeInstanceOf(Date);        // attempt 5 — backed off
+    expect(rows[0].nextRetryAfter.getTime()).toBeGreaterThan(Date.now());
   });
 
   test('a single-day range writes exactly one row', async () => {
-    const dates = await recordSyncFailure({
-      ...base, FinanceSyncLogModel: model, from: '2026-06-18', to: '2026-06-18',
-    });
-
+    const dates = await call();
     expect(dates).toEqual(['2026-06-18']);
+    expect(rows).toHaveLength(1);
   });
 });
 

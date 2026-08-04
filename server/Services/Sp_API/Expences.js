@@ -101,7 +101,22 @@ function parseDate(dateStr) {
 // ─────────────────────────────────────────────
 // 3. HTTP HELPERS
 // ─────────────────────────────────────────────
-function httpsRequest(options, postData = null) {
+// Transient socket-level failures, by `code` AND by message. Node reports a mid-flight reset as
+// `Error('socket hang up')` with `code: 'ECONNRESET'`, so matching only one of the two misses cases.
+const TRANSIENT_NET_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'ECONNABORTED', 'EAI_AGAIN']);
+
+function isTransientNetworkError(err) {
+  if (!err) return false;
+  if (err.code && TRANSIENT_NET_CODES.has(err.code)) return true;
+  const msg = (err.message || String(err)).toLowerCase();
+  return msg.includes('socket hang up') || msg.includes('timed out');
+}
+
+const EXPENCES_REQUEST_TIMEOUT_MS = Math.max(1000, parseInt(process.env.FINANCE_TXN_REQUEST_TIMEOUT_MS || '60000', 10) || 60000);
+const EXPENCES_MAX_RETRIES = Math.max(0, parseInt(process.env.FINANCE_TXN_REQUEST_MAX_RETRIES || '3', 10) || 3);
+const EXPENCES_RETRY_BASE_MS = Math.max(100, parseInt(process.env.FINANCE_TXN_RETRY_BASE_MS || '2000', 10) || 2000);
+
+function httpsRequestOnce(options, postData = null) {
   return new Promise((resolve, reject) => {
     const req = https.request(options, (res) => {
       const chunks = [];
@@ -111,11 +126,58 @@ function httpsRequest(options, postData = null) {
         try { resolve({ statusCode: res.statusCode, headers: res.headers, body: JSON.parse(body) }); }
         catch { resolve({ statusCode: res.statusCode, headers: res.headers, body }); }
       });
+      res.on("error", reject);
+    });
+    // Without this a hung connection waits on the OS default (~2 min+) with nothing to break it.
+    req.setTimeout(EXPENCES_REQUEST_TIMEOUT_MS, () => {
+      req.destroy(Object.assign(new Error(`request timed out after ${EXPENCES_REQUEST_TIMEOUT_MS}ms`), { code: 'ETIMEDOUT' }));
     });
     req.on("error", reject);
     if (postData) req.write(postData);
     req.end();
   });
+}
+
+/**
+ * Finance API transport, with a timeout and bounded retry on transient socket failures.
+ *
+ * WHY THIS EXISTS
+ * This helper previously had NEITHER. A single `socket hang up` rejected outright, and its raw
+ * message propagated all the way up as `finalize failed: socket hang up` — the exact production
+ * error that put one account into a 3-hourly retry loop for a full day.
+ *
+ * That it happened at all is a numbers game: `fetchTransactions` walks 1000+ pages for a
+ * high-volume account, every one through here, so the probability of at least one reset across a
+ * full walk approaches 1. And because all Amazon I/O in Step 1 happens BEFORE the first database
+ * write, losing a single page throws away the entire chunk's work — zero forward progress, which is
+ * why the same chunk failed identically on every retry.
+ *
+ * Retrying is safe: these are GETs against a paginated read API, and a repeated page returns the
+ * same rows. The caller's fold is rebuilt from scratch on the outer `withRetry`, so no double
+ * counting either.
+ */
+async function httpsRequest(options, postData = null) {
+  const method = (options.method || 'GET').toUpperCase();
+  // Only replay idempotent verbs. A POST could have been received and acted upon before the socket
+  // dropped, so replaying it risks creating a second report.
+  const retryable = method === 'GET' || method === 'HEAD';
+  let lastErr;
+
+  for (let attempt = 0; attempt <= EXPENCES_MAX_RETRIES; attempt++) {
+    try {
+      return await httpsRequestOnce(options, postData);
+    } catch (err) {
+      lastErr = err;
+      if (!retryable || !isTransientNetworkError(err) || attempt === EXPENCES_MAX_RETRIES) throw err;
+      const waitMs = EXPENCES_RETRY_BASE_MS * Math.pow(2, attempt);
+      logger.warn(
+        `[Finance API] transient network error on ${options.path ? String(options.path).split('?')[0] : 'request'} ` +
+        `(${err.code || err.message}); retry ${attempt + 1}/${EXPENCES_MAX_RETRIES} in ${waitMs}ms`
+      );
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+  }
+  throw lastErr;
 }
 
 // ─────────────────────────────────────────────
