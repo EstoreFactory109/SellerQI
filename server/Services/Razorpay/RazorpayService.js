@@ -979,6 +979,7 @@ class RazorpayService {
                     { razorpaySubscriptionId: subscriptionId },
                     {
                         status: 'cancelled',
+                        gatewayStatus: 'cancelled',
                         cancelAtPeriodEnd: false
                     }
                 );
@@ -1063,7 +1064,8 @@ class RazorpayService {
                     { razorpaySubscriptionId: payment.subscription_id },
                     {
                         status: 'past_due',
-                        paymentStatus: 'unpaid'
+                        paymentStatus: 'unpaid',
+                        gatewayStatus: 'payment_failed'
                     },
                     { new: true }
                 );
@@ -1139,7 +1141,8 @@ class RazorpayService {
                     { razorpaySubscriptionId: subscriptionId },
                     {
                         status: 'cancelled',
-                        paymentStatus: 'unpaid'
+                        paymentStatus: 'unpaid',
+                        gatewayStatus: 'halted'
                     }
                 );
 
@@ -1202,7 +1205,8 @@ class RazorpayService {
                     { razorpaySubscriptionId: subscriptionId },
                     {
                         status: 'past_due',
-                        paymentStatus: 'pending'
+                        paymentStatus: 'pending',
+                        gatewayStatus: 'pending'
                     }
                 );
 
@@ -1258,12 +1262,15 @@ class RazorpayService {
                 const previousStatus = dbSubscription.status;
                 const previousPlanType = dbSubscription.planType;
                 
-                // Update subscription to expired
+                // Update subscription to expired. paymentStatus has no 'expired' member - 'unpaid'
+                // is the closest fit (collection stopped); the raw Razorpay status is kept in
+                // gatewayStatus so nothing is lost.
                 await Subscription.findOneAndUpdate(
                     { razorpaySubscriptionId: subscriptionId },
                     {
                         status: 'cancelled',
-                        paymentStatus: 'expired'
+                        paymentStatus: 'unpaid',
+                        gatewayStatus: 'expired'
                     }
                 );
 
@@ -1323,12 +1330,15 @@ class RazorpayService {
                 const previousStatus = dbSubscription.status;
                 const previousPlanType = dbSubscription.planType;
                 
-                // Update subscription to completed
+                // Update subscription to completed. paymentStatus has no 'completed' member -
+                // 'paid' is the closest fit (every committed cycle was paid); the raw Razorpay
+                // status is kept in gatewayStatus so nothing is lost.
                 await Subscription.findOneAndUpdate(
                     { razorpaySubscriptionId: subscriptionId },
                     {
                         status: 'cancelled',
-                        paymentStatus: 'completed'
+                        paymentStatus: 'paid',
+                        gatewayStatus: 'completed'
                     }
                 );
 

@@ -103,6 +103,14 @@ const subscriptionSchema = new mongoose.Schema(
       enum: ["active", "inactive", "cancelled", "past_due", "incomplete", "trialing"],
       default: "active",
     },
+    // Raw, un-normalized status string as reported by Stripe/Razorpay (e.g. 'unpaid',
+    // 'incomplete_expired', 'halted', 'expired', 'completed'). `status` above is folded down
+    // to our fixed enum so the rest of the app only has to branch on a small set of values -
+    // this field keeps the gateway's own wording around for support/debugging.
+    gatewayStatus: {
+      type: String,
+      required: false,
+    },
     currentPeriodStart: {
       type: Date,
       required: false,

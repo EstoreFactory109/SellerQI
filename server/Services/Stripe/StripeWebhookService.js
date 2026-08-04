@@ -332,11 +332,15 @@ class StripeWebhookService {
     }
 
     /**
-     * Normalize subscription status from Stripe to our database format
-     * Stripe uses American spelling 'canceled', we use British spelling 'cancelled'
+     * Normalize subscription status from Stripe to our database format.
+     * Stripe uses American spelling 'canceled', we use British spelling 'cancelled'.
+     * 'unpaid' and 'incomplete_expired' are Stripe-only terminal states with no matching
+     * enum value here - both mean the subscription stopped collecting payment, so they
+     * fold into 'cancelled' rather than falling through and failing schema validation.
+     * The original Stripe string is preserved separately via `gatewayStatus`.
      */
     normalizeStatus(stripeStatus) {
-        if (stripeStatus === 'canceled') {
+        if (stripeStatus === 'canceled' || stripeStatus === 'unpaid' || stripeStatus === 'incomplete_expired') {
             return 'cancelled';
         }
         return stripeStatus;
@@ -365,6 +369,7 @@ class StripeWebhookService {
             // Update subscription in our database
             const subscriptionData = {
                 status: normalizedStatus,
+                gatewayStatus: subscription.status,
                 currentPeriodStart: this.safeDate(subscription.current_period_start),
                 currentPeriodEnd: this.safeDate(subscription.current_period_end),
                 nextBillingDate: this.safeDate(subscription.trial_end || subscription.current_period_end),
@@ -436,7 +441,8 @@ class StripeWebhookService {
             // Update subscription status to cancelled
             await this.updateSubscription(userId, {
                 status: 'cancelled',
-                paymentStatus: 'unpaid'
+                paymentStatus: 'unpaid',
+                gatewayStatus: subscription.status
             });
 
             // Downgrade user to LITE plan
@@ -645,7 +651,8 @@ class StripeWebhookService {
                 // Update subscription to cancelled
                 await this.updateSubscription(userId, {
                     status: 'cancelled',
-                    paymentStatus: 'unpaid'
+                    paymentStatus: 'unpaid',
+                    gatewayStatus: subscription.status
                 });
 
                 // Downgrade user to LITE
@@ -686,7 +693,8 @@ class StripeWebhookService {
                 // More retries scheduled - mark as past_due but keep PRO access
                 await this.updateSubscription(userId, {
                     status: 'past_due',
-                    paymentStatus: 'unpaid'
+                    paymentStatus: 'unpaid',
+                    gatewayStatus: subscription.status
                 });
 
                 // Update User subscriptionStatus to past_due (but keep packageType as PRO)
