@@ -48,6 +48,18 @@ const FINANCE_LOOKBACK_DAYS = 30;
 // (it re-fetches them every run). Only OLDER still-provisional days — which the
 // daily cursor has likely moved past — are swept.
 const FINANCE_PROVISIONAL_STALE_DAYS = 6;
+
+// Minimum gap between re-checks of the SAME still-provisional day. Without this the sweep re-fetches
+// such a day every 3h forever (see the note at the stale-provisional branch below). Amazon does not
+// settle fees on a 3-hour cadence, so ~20h gives one attempt per day with slack for cron drift.
+const FINANCE_PROVISIONAL_RECHECK_MS = Math.max(
+    60 * 60 * 1000,
+    parseInt(process.env.FINANCE_PROVISIONAL_RECHECK_MS || String(20 * 60 * 60 * 1000), 10) || 20 * 60 * 60 * 1000
+);
+
+// Mirrors FINANCE_MAX_DATE_RETRIES in FinanceService.js — a date past this many consecutive
+// failures is no longer scheduled automatically.
+const FINANCE_MAX_DATE_RETRIES = Math.max(2, parseInt(process.env.FINANCE_MAX_DATE_RETRIES || '10', 10) || 10);
 // Cap accounts processed for finance per tick (each enqueues at most one job).
 const FINANCE_MAX_ENQUEUES_PER_TICK = 100;
 
@@ -429,7 +441,7 @@ async function findBrokenFinanceDatesForAccount(userObjectId, country, region) {
 
     const logs = await FinanceSyncLog.find(
         { User: userObjectId, country, region, date: { $gte: startDate, $lte: yesterday } },
-        { date: 1, status: 1, provisional: 1, _id: 0 }
+        { date: 1, status: 1, provisional: 1, fetchedAt: 1, consecutiveFailures: 1, nextRetryAfter: 1, _id: 0 }
     ).lean();
     const logByDate = new Map(logs.map((l) => [l.date, l]));
 
@@ -449,7 +461,10 @@ async function findBrokenFinanceDatesForAccount(userObjectId, country, region) {
     const today = new Date(Date.now() - PACIFIC_OFFSET_MS).toISOString().substring(0, 10);
     const ageDays = (d) => Math.round((new Date(`${today}T00:00:00.000Z`) - new Date(`${d}T00:00:00.000Z`)) / 86400000);
 
+    const nowMs = Date.now();
     const broken = [];
+    const skipped = { backedOff: 0, givenUp: 0, recentlyTried: 0 };
+
     for (const day of days) {
         const log = logByDate.get(day);
         // Truly missing = no log row AND no stored data. With the TTL, an expired
@@ -458,10 +473,48 @@ async function findBrokenFinanceDatesForAccount(userObjectId, country, region) {
             if (!daysWithData.has(day)) broken.push(day);          // never fetched
             continue;
         }
-        if (log.status === 'failed') { broken.push(day); continue; } // failed
-        if (log.provisional === true && ageDays(day) > FINANCE_PROVISIONAL_STALE_DAYS) {
-            broken.push(day);                                      // stale provisional
+
+        if (log.status === 'failed') {
+            // ── Backoff, added because this sweep runs every 3h and a `failed` day was
+            // unconditionally re-enqueued every single time. One account looped on the same chunk
+            // ~8x/day for a full day, re-running Step 1 on each pass. `recordSyncFailure` now
+            // tracks the attempt count and sets `nextRetryAfter`.
+            if ((log.consecutiveFailures || 0) >= FINANCE_MAX_DATE_RETRIES) {
+                // Given up on. Deliberately NOT silent — reported by diagnoseDailySchedule, because
+                // the bug that caused all this was a failure nobody could see.
+                skipped.givenUp++;
+                continue;
+            }
+            if (log.nextRetryAfter && new Date(log.nextRetryAfter).getTime() > nowMs) {
+                skipped.backedOff++;
+                continue;
+            }
+            broken.push(day);
+            continue;
         }
+
+        if (log.provisional === true && ageDays(day) > FINANCE_PROVISIONAL_STALE_DAYS) {
+            // ── Rate-limited, because this branch loops even when NOTHING is failing ──
+            // FINANCE_PROVISIONAL_STALE_DAYS (6) is deliberately shorter than FinanceService's
+            // PROVISIONAL_SETTLE_DAYS (14), so for a day aged 7-14 that still holds Pending-status
+            // orders a SUCCESSFUL sync re-writes `provisional: true` and this branch immediately
+            // re-flags it. That is a permanent 3-hourly oscillation with no error anywhere.
+            //
+            // Re-checking such a day is correct — it may have settled — but daily is enough. Amazon
+            // does not post fees on a 3-hour cadence.
+            if (log.fetchedAt && (nowMs - new Date(log.fetchedAt).getTime()) < FINANCE_PROVISIONAL_RECHECK_MS) {
+                skipped.recentlyTried++;
+                continue;
+            }
+            broken.push(day);
+        }
+    }
+
+    if (skipped.backedOff || skipped.givenUp || skipped.recentlyTried) {
+        logger.debug(
+            `[FinanceSweep] ${country}-${region}: skipped ${skipped.backedOff} backed-off, ` +
+            `${skipped.givenUp} given-up, ${skipped.recentlyTried} recently-checked date(s).`
+        );
     }
     return broken;
 }

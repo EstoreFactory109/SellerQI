@@ -86,6 +86,14 @@ const FINANCE_HEAP_LIMIT_MB = financeEnvInt('FINANCE_HEAP_LIMIT_MB', 1200);
 // across 55 days, 1000+ pages, dominated by throttle backoffs) instead of hours.
 const FINANCE_STEP2_SLICE_DAYS = Math.max(1, financeEnvInt('FINANCE_STEP2_SLICE_DAYS', 7));
 
+// Per-DATE failure backoff. The freshness sweeper runs every 3h and treats any `failed` day as
+// broken, so without a backoff a window that cannot succeed is retried ~8x/day forever — which is
+// exactly what happened to one account for a full day. The first few attempts keep the normal
+// cadence so a transient blip still self-heals fast; after that it goes quiet, and past the cap it
+// is not scheduled again automatically (and IS reported, see diagnoseDailySchedule).
+const FINANCE_DATE_RETRY_FREE_ATTEMPTS = Math.max(1, financeEnvInt('FINANCE_DATE_RETRY_FREE_ATTEMPTS', 3));
+const FINANCE_MAX_DATE_RETRIES = Math.max(2, financeEnvInt('FINANCE_MAX_DATE_RETRIES', 10));
+
 
 // ── Empty-report retry (FIX #1) ──────────────────────────────────────────────
 // Amazon's GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE report intermittently
@@ -526,22 +534,104 @@ async function recordSyncFailure({ FinanceSyncLogModel, userObjectId, country, r
   while (d <= endD) { dateList.push(formatDateUTC(d)); d.setUTCDate(d.getUTCDate() + 1); }
 
   for (const dateStr of dateList) {
-    await FinanceSyncLogModel.findOneAndUpdate(
-      { User: userObjectId, country: country.toUpperCase(), region, date: dateStr, status: { $ne: 'success' } },
-      {
-        User: userObjectId,
-        country: country.toUpperCase(),
-        region,
-        date: dateStr,
-        fetchedAt: new Date(),
-        status: 'failed',
-        error: err.message.substring(0, 500),
-        errorKind,
-      },
-      { upsert: true, new: true }
-    );
+    // Per-date try/catch: recording a failure must never itself throw. This function used to be a
+    // single findOneAndUpdate with `status: { $ne: 'success' }` in the filter AND `upsert: true`.
+    // The unique index is (User, country, region, date) — `status` is NOT part of it — so whenever a
+    // 'success' row already existed the filter missed, Mongo fell through to an INSERT, and the
+    // index rejected it with E11000. The failure was therefore NEVER RECORDED, which is why one
+    // account looped on the same chunk ~8x/day for a full day with nothing downstream able to tell.
+    //
+    // The `$ne: 'success'` intent is right and is preserved below — never downgrade a good day to
+    // failed. It just cannot be expressed as an upsert filter.
+    try {
+      const key = { User: userObjectId, country: country.toUpperCase(), region, date: dateStr };
+
+      // 1. Update an existing NON-success row. No upsert, so a missing row simply matches nothing.
+      const res = await FinanceSyncLogModel.updateOne(
+        { ...key, status: { $ne: 'success' } },
+        {
+          $set: {
+            fetchedAt: new Date(),
+            status: 'failed',
+            error: err.message.substring(0, 500),
+            errorKind,
+            nextRetryAfter: null, // recomputed below once we know the attempt count
+          },
+          $inc: { consecutiveFailures: 1 },
+        }
+      );
+
+      if ((res.matchedCount || res.n || 0) === 0) {
+        // Nothing matched: either no row at all, or a 'success' row we must leave alone.
+        const existing = await FinanceSyncLogModel.exists(key);
+        if (!existing) {
+          try {
+            await FinanceSyncLogModel.create({
+              ...key,
+              marketplaceId: '',
+              fetchedAt: new Date(),
+              status: 'failed',
+              error: err.message.substring(0, 500),
+              errorKind,
+              consecutiveFailures: 1,
+            });
+          } catch (insertErr) {
+            // A concurrent run inserted first. Its row is as good as ours — this is the only
+            // legitimate E11000 here, and swallowing it is correct rather than merely convenient.
+            if (insertErr && insertErr.code !== 11000) throw insertErr;
+          }
+        }
+        // else: a 'success' row exists. Deliberately untouched.
+      }
+
+      // Back off before the next attempt, so a window that cannot succeed stops being retried on
+      // every 3-hourly sweep. Read the row back for the authoritative counter (it may have been
+      // incremented by a concurrent run).
+      const after = await FinanceSyncLogModel
+        .findOne(key, { consecutiveFailures: 1, status: 1 })
+        .lean();
+      if (after && after.status !== 'success') {
+        const attempts = after.consecutiveFailures || 1;
+        await FinanceSyncLogModel.updateOne(key, {
+          $set: { nextRetryAfter: computeNextRetryAfter(attempts) },
+        });
+      }
+    } catch (recordErr) {
+      // One bad date must not abort the rest of the chunk's dates.
+      logger.warn(`[Sync] could not record failure for ${dateStr}: ${recordErr.message}`);
+    }
   }
   return dateList;
+}
+
+/**
+ * Escalating backoff for a repeatedly-failing date.
+ *
+ * The freshness sweeper runs every 3h and treats any `failed` day as broken, so without this a
+ * window that cannot succeed is retried ~8x/day forever — which is exactly what happened. Early
+ * attempts stay on the normal cadence so a genuinely transient problem still self-heals fast; later
+ * ones go quiet.
+ *
+ * Past FINANCE_MAX_DATE_RETRIES the date is not scheduled again at all. That is a real trade — the
+ * day keeps its estimated fees — so it MUST be surfaced loudly (diagnoseDailySchedule reports it)
+ * rather than silently abandoned.
+ *
+ * NOTE on the return value: `null` means "no backoff pending" — NOT "never retry". Being capped is
+ * signalled by `consecutiveFailures >= FINANCE_MAX_DATE_RETRIES`, which the sweeper checks
+ * separately. Conflating the two into one field would make "give up forever" and "retry on the
+ * normal cadence" indistinguishable, i.e. a capped date would be retried immediately — the exact
+ * opposite of the intent.
+ *
+ * @param {number} attempts consecutive failures INCLUDING the one just recorded
+ * @returns {Date|null} when the date may next be attempted, or null for no backoff
+ */
+function computeNextRetryAfter(attempts) {
+  // Capped: the counter alone excludes it, so no date is needed.
+  if (attempts >= FINANCE_MAX_DATE_RETRIES) return null;
+  // First few failures keep the normal 3-hourly sweep cadence so a transient blip self-heals fast.
+  if (attempts <= FINANCE_DATE_RETRY_FREE_ATTEMPTS) return null;
+  const hours = attempts <= FINANCE_DATE_RETRY_FREE_ATTEMPTS + 2 ? 12 : 24;
+  return new Date(Date.now() + hours * 3600 * 1000);
 }
 
 /**
@@ -1888,10 +1978,24 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
       }
     }
     for (const po of pendingByKey.values()) {
-      await PendingExpenseOrder.findOneAndUpdate(
+      // ── `firstSeenAt` and `attempts` are $setOnInsert, NOT $set ──
+      // This used to pass the whole `po` object as the update, which Mongoose turns into a $set of
+      // every field — including `attempts: 0` and `firstSeenAt: new Date()`. So every re-upsert of
+      // an already-pending order reset its age to zero.
+      //
+      // Step 2's give-up test is `now - firstSeenAt > MAX_PENDING_AGE_DAYS (45)`. With a catch-up
+      // looping every ~3h, `firstSeenAt` was refreshed ~8x/day and NO pending order could ever
+      // reach 45 days — the queue became append-only. That is the direct cause of one account's
+      // pending count going 7,124 -> 13,733 in a single day: not duplicate rows (the upsert is
+      // keyed per order), but a total failure to ever drain.
+      const { attempts: _ignoredAttempts, firstSeenAt: _ignoredFirstSeen, ...mutable } = po;
+      await PendingExpenseOrder.updateOne(
         { User: po.User, country: po.country, region: po.region, orderId: po.orderId },
-        po,
-        { upsert: true, new: true }
+        {
+          $set: mutable,
+          $setOnInsert: { attempts: 0, firstSeenAt: new Date() },
+        },
+        { upsert: true }
       );
     }
     logger.info(`[Step1] Saved ${pendingByKey.size} pending expense orders.`);
@@ -1914,7 +2018,7 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
       const isProvisional = pendingForDay > 0 && ageDays <= PROVISIONAL_SETTLE_DAYS;
       await FinanceSyncLog.findOneAndUpdate(
         { User: userObjectId, country: country.toUpperCase(), region: regionModel, date: dateStr },
-        { User: userObjectId, country: country.toUpperCase(), region: regionModel, marketplaceId, date: dateStr, fetchedAt: new Date(), status: 'success', provisional: isProvisional, pendingOrderCount: pendingForDay, expenseRowCount, revenueRowCount, skuCount: skuBuckets.size, error: '', ...(syncRunId ? { syncRunId } : {}) },
+        { User: userObjectId, country: country.toUpperCase(), region: regionModel, marketplaceId, date: dateStr, fetchedAt: new Date(), status: 'success', provisional: isProvisional, pendingOrderCount: pendingForDay, expenseRowCount, revenueRowCount, skuCount: skuBuckets.size, error: '', consecutiveFailures: 0, nextRetryAfter: null, ...(syncRunId ? { syncRunId } : {}) },
         { upsert: true, new: true }
       );
     } else {

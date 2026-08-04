@@ -60,7 +60,9 @@ jest.mock('https', () => ({
             },
         };
         setImmediate(() => cb(res));
-        return { on: () => {}, write: () => {}, end: () => {} };
+        // setTimeout: the transport now arms a per-request timeout, so the mocked request object
+        // must accept it. destroy() likewise, since the timeout handler calls it.
+        return { on: () => {}, write: () => {}, end: () => {}, setTimeout: () => {}, destroy: () => {} };
     },
 }));
 
