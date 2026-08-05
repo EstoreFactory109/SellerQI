@@ -344,7 +344,9 @@ async function checkAsyncReportRequests() {
       `${String(r.phase || '?').padEnd(8)} ${String(r.status || '?').padEnd(11)} ${polls.padEnd(8)} ` +
       `${r.service}/${r.paramsKey || '-'}${r.reportId ? `  report=${r.reportId}` : ''}`
     );
-    if (r.note) console.log(`  ${' '.repeat(20)} note: ${String(r.note).slice(0, 120)}`);
+    // 200, not 120: the note now carries a `[hop]` tag plus the error code, and clipping at 120 cut
+    // exactly the part that says WHICH hop failed — the whole point of adding the tag.
+    if (r.note) console.log(`  ${' '.repeat(20)} note: ${String(r.note).slice(0, 200)}`);
   }
 
   // Duplicate detection — the regression that would mean we are jamming the seller's queue again.
@@ -367,6 +369,102 @@ async function checkAsyncReportRequests() {
   const failed = rows.filter(r => r.status === 'FAILED');
   if (failed.length) {
     findings.push(`AsyncReportRequest has ${failed.length} FAILED row(s) (newest 200) — see notes above for the cause.`);
+  }
+}
+
+/**
+ * Finance per-date retry state: which dates are BACKED OFF, and which have been GIVEN UP ON.
+ *
+ * WHY THIS SECTION EXISTS
+ * Capping retries stops a permanently-broken window looping ~8x/day, but a capped date keeps
+ * estimated (or absent) fees FOREVER and the sweeper will never touch it again. That trade is only
+ * acceptable if it is loud. Until now it was completely silent: freshnessSweeper logs its skip
+ * counts via `logger.debug`, and Logger drops `debug` in production — so there was no signal at all.
+ *
+ * RECOVERY: a capped date is not permanently doomed. Clearing `consecutiveFailures`/`nextRetryAfter`
+ * on its FinanceSyncLog rows makes the next sweeper tick re-enqueue it with a fresh budget. Worth
+ * doing once the underlying cause (see the `[hop]` tag in the error text) is actually fixed.
+ */
+async function checkFinanceRetryBackoff() {
+  console.log('\n──── 8. FINANCE PER-DATE RETRY STATE (backoff / given-up) ────');
+
+  // Bucketed by the SAME helper the sweeper and the chunk walk use, so the three cannot disagree
+  // about whether a date is dead. Reimplementing the cap check here is how that drift starts.
+  let classifyFinanceRetryState, FINANCE_MAX_DATE_RETRIES;
+  try {
+    ({ classifyFinanceRetryState, FINANCE_MAX_DATE_RETRIES } = require('../Services/Sp_API/FinanceService.js'));
+  } catch (e) {
+    console.log(`  (FinanceService failed to load: ${e.message})`);
+    return;
+  }
+
+  const since = new Date(Date.now() - 30 * 86400000).toISOString().substring(0, 10);
+  const q = { status: 'failed', date: { $gte: since } };
+  if (FILTER_USER_ID) q.User = new mongoose.Types.ObjectId(FILTER_USER_ID);
+
+  const rows = await FinanceSyncLog.find(q, {
+    User: 1, country: 1, region: 1, date: 1, consecutiveFailures: 1, nextRetryAfter: 1,
+    errorKind: 1, error: 1, fetchedAt: 1,
+  }).lean();
+
+  if (!rows.length) {
+    console.log(`  No failed finance dates in the last 30 days${FILTER_USER_ID ? ' for this user' : ''}. Nothing backed off or given up on.`);
+    return;
+  }
+
+  const byAccount = new Map();
+  for (const r of rows) {
+    const key = `${r.User}|${r.country}-${r.region}`;
+    if (!byAccount.has(key)) byAccount.set(key, { capped: [], backed_off: [], due: [], kinds: {}, newest: null });
+    const acc = byAccount.get(key);
+    acc[classifyFinanceRetryState(r)].push(r.date);
+    acc.kinds[r.errorKind || 'unknown'] = (acc.kinds[r.errorKind || 'unknown'] || 0) + 1;
+    if (!acc.newest || new Date(r.fetchedAt || 0) > new Date(acc.newest.fetchedAt || 0)) acc.newest = r;
+  }
+
+  let totalCapped = 0;
+  let totalBackedOff = 0;
+  let worst = null;
+  for (const [key, acc] of byAccount) {
+    totalCapped += acc.capped.length;
+    totalBackedOff += acc.backed_off.length;
+    if (!worst || acc.capped.length > worst.acc.capped.length) worst = { key, acc };
+
+    const kinds = Object.entries(acc.kinds).map(([k, v]) => `${k}:${v}`).join(',');
+    console.log(
+      `  ${key}  capped=${acc.capped.length} backed_off=${acc.backed_off.length} due=${acc.due.length}  kinds=${kinds}`
+    );
+    if (acc.capped.length) {
+      const shown = acc.capped.sort().slice(0, 15);
+      console.log(`      GIVEN UP (>=${FINANCE_MAX_DATE_RETRIES} failures): ${shown.join(', ')}${acc.capped.length > 15 ? ` … +${acc.capped.length - 15} more` : ''}`);
+    }
+    // 160 chars so the `[hop]` tag and error code survive — that is what names the failing hop.
+    if (acc.newest?.error) console.log(`      newest error: ${String(acc.newest.error).slice(0, 160)}`);
+  }
+
+  if (totalCapped) {
+    findings.push(
+      `CRITICAL: ${totalCapped} finance date(s) across ${[...byAccount.values()].filter(a => a.capped.length).length} account(s) ` +
+      `are PAST the retry cap (>=${FINANCE_MAX_DATE_RETRIES} consecutive failures) and will NEVER be retried by the sweeper — ` +
+      `they keep estimated/absent fees. Worst: ${worst.key} (${worst.acc.capped.length} dates). ` +
+      `Fix the cause, then clear consecutiveFailures/nextRetryAfter on those rows to re-enable them.`
+    );
+    const cappedKinds = new Set();
+    for (const acc of byAccount.values()) {
+      if (acc.capped.length) Object.keys(acc.kinds).forEach(k => cappedKinds.add(k));
+    }
+    if (cappedKinds.size === 1 && cappedKinds.has('timeout')) {
+      findings.push(
+        `All capped dates bucket as 'timeout' — a TRANSPORT failure, not an Amazon rejection. ` +
+        `Check the [hop] tag in the error text above to see which network hop is dying.`
+      );
+    }
+  }
+  if (totalBackedOff) {
+    findings.push(
+      `${totalBackedOff} finance date(s) are in retry backoff — expected after a transient failure, but a growing ` +
+      `count means a window that cannot succeed.`
+    );
   }
 }
 
@@ -442,6 +540,7 @@ async function main() {
   await checkFinanceFreshness();
   await checkAsyncReportRequests();
   await checkStep2Cursors();
+  await checkFinanceRetryBackoff();
 
   section('ROOT-CAUSE SUMMARY');
   if (findings.length === 0) {
