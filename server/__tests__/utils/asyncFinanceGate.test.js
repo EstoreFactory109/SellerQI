@@ -125,3 +125,85 @@ describe('financeStep2SlicingEnabledFor', () => {
         }
     });
 });
+
+/**
+ * `adsAsyncEnabledFor` — the gate that makes soak-testing the ads async path on ONE account possible.
+ *
+ * Before it existed, `ADS_ASYNC_ENABLED` was a bare `process.env` read at four dispatch points
+ * (sched_batch_1_2, sched_ads, sched_ads_catchup, sched_batch_4), so turning it on to test one account
+ * switched four phases for EVERY account — on a code path that has never run in production.
+ */
+describe('adsAsyncEnabledFor', () => {
+    const { adsAsyncEnabledFor } = require('../../utils/asyncFinanceGate.js');
+
+    test('the flag alone, with no allowlist, enables everyone', () => {
+        expect(adsAsyncEnabledFor(A, { ADS_ASYNC_ENABLED: 'true' })).toBe(true);
+        expect(adsAsyncEnabledFor(B, { ADS_ASYNC_ENABLED: 'true' })).toBe(true);
+    });
+
+    test('the flag absent or not exactly "true" leaves everyone inline', () => {
+        expect(adsAsyncEnabledFor(A, {})).toBe(false);
+        for (const v of ['1', 'yes', 'TRUE', 'True', '', 'false']) {
+            expect(adsAsyncEnabledFor(A, { ADS_ASYNC_ENABLED: v })).toBe(false);
+        }
+    });
+
+    test('an allowlist restricts to exactly those ids', () => {
+        const env = { ADS_ASYNC_ENABLED: 'true', ADS_ASYNC_USER_IDS: A };
+        expect(adsAsyncEnabledFor(A, env)).toBe(true);
+        expect(adsAsyncEnabledFor(B, env)).toBe(false);
+    });
+
+    test('a blank/whitespace allowlist means everyone, not nobody', () => {
+        // Otherwise widening the rollout would require DELETING the var rather than blanking it, and a
+        // blank value would silently send every account back to the inline path.
+        expect(adsAsyncEnabledFor(A, { ADS_ASYNC_ENABLED: 'true', ADS_ASYNC_USER_IDS: '' })).toBe(true);
+        expect(adsAsyncEnabledFor(A, { ADS_ASYNC_ENABLED: 'true', ADS_ASYNC_USER_IDS: '   ' })).toBe(true);
+    });
+
+    test('an allowlist with nothing valid in it FAILS CLOSED', () => {
+        // One mistyped id must not silently move every account onto a path with zero production
+        // mileage — the exact blast radius this gate exists to prevent.
+        expect(adsAsyncEnabledFor(A, { ADS_ASYNC_ENABLED: 'true', ADS_ASYNC_USER_IDS: 'nope,also-nope' })).toBe(false);
+    });
+
+    test('a valid id survives alongside a malformed one', () => {
+        const env = { ADS_ASYNC_ENABLED: 'true', ADS_ASYNC_USER_IDS: `garbage, ${A} ` };
+        expect(adsAsyncEnabledFor(A, env)).toBe(true);
+        expect(adsAsyncEnabledFor(B, env)).toBe(false);
+    });
+
+    test('an allowlist is ignored while the flag is off', () => {
+        expect(adsAsyncEnabledFor(A, { ADS_ASYNC_USER_IDS: A })).toBe(false);
+        expect(adsAsyncEnabledFor(A, { ADS_ASYNC_ENABLED: 'false', ADS_ASYNC_USER_IDS: A })).toBe(false);
+    });
+
+    test('an ObjectId instance is accepted, not just a string', () => {
+        const mongoose = require('mongoose');
+        const env = { ADS_ASYNC_ENABLED: 'true', ADS_ASYNC_USER_IDS: A };
+        expect(adsAsyncEnabledFor(new mongoose.Types.ObjectId(A), env)).toBe(true);
+    });
+
+    test('ads and finance gates are INDEPENDENT', () => {
+        // The four ads dispatch points and the two finance ones must never influence each other;
+        // an earlier comment in the source wrongly claimed they shared sites.
+        const adsOnly = { ADS_ASYNC_ENABLED: 'true' };
+        expect(adsAsyncEnabledFor(A, adsOnly)).toBe(true);
+        expect(financeAsyncEnabledFor(A, adsOnly)).toBe(false);
+
+        const financeOnly = { FINANCE_ASYNC_ENABLED: 'true' };
+        expect(adsAsyncEnabledFor(A, financeOnly)).toBe(false);
+        expect(financeAsyncEnabledFor(A, financeOnly)).toBe(true);
+    });
+
+    test('with NO allowlist it is exactly equivalent to the bare env read it replaced', () => {
+        // This is the guarantee the four rewritten dispatch sites depend on: swapping
+        // `process.env.ADS_ASYNC_ENABLED === 'true'` for `adsAsyncEnabledFor(userId)` must change
+        // nothing at all until an allowlist is actually configured.
+        for (const v of [undefined, '', 'true', 'false', '1', 'yes', 'TRUE']) {
+            const env = v === undefined ? {} : { ADS_ASYNC_ENABLED: v };
+            expect(adsAsyncEnabledFor(A, env)).toBe(env.ADS_ASYNC_ENABLED === 'true');
+            expect(adsAsyncEnabledFor(B, env)).toBe(env.ADS_ASYNC_ENABLED === 'true');
+        }
+    });
+});

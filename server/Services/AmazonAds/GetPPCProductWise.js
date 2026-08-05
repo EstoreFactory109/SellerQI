@@ -7,6 +7,9 @@ const userModel = require('../../models/user-auth/userModel.js');
 // Use service layer for saving data (handles 16MB limit with separate collection)
 const { saveProductWiseSponsoredAdsData } = require('../amazon-ads/ProductWiseSponsoredAdsService.js');
 const { resolveReportDateRange } = require('../../utils/reportDateRange.js');
+// Single canonical definition, exported from GetPPCMetrics — see the note on its export. Duplicating
+// it here would let the two copies drift into a false alarm or a missed revocation.
+const { isAuthRevokedError } = require('./GetPPCMetrics.js');
 const logger = require('../../utils/Logger');
 
 /**
@@ -441,6 +444,21 @@ async function getPPCSpendsBySKU(accessToken, profileId, userId, country, region
         const spData = spRows.status === 'fulfilled' ? spRows.value : [];
         const sdData = sdRows.status === 'fulfilled' ? sdRows.value : [];
 
+        // Which ad types we actually MEASURED. This distinction already existed right here in the
+        // allSettled statuses and was being thrown away by defaulting a rejection to [] — which then
+        // let the date-scoped wipe inside the service DELETE that type's stored rows. Passing it
+        // through is what stops a one-sided fetch destroying the other side's data.
+        const usableAdTypes = [
+            ...(spRows.status === 'fulfilled' ? ['SP'] : []),
+            ...(sdRows.status === 'fulfilled' ? ['SD'] : []),
+        ];
+        if (usableAdTypes.length < 2) {
+            logger.warn(
+                `⚠️ [GetPPCProductWise] Partial fetch for userId ${userId}: measured [${usableAdTypes.join('+') || 'none'}]. ` +
+                `The other type's existing rows will be PRESERVED, not overwritten.`
+            );
+        }
+
         const allData = [...spData, ...sdData];
 
         logger.debug(`📊 [GetPPCProductWise] Total rows: ${allData.length} (SP: ${spData.length}, SD: ${sdData.length})`);
@@ -454,8 +472,8 @@ async function getPPCSpendsBySKU(accessToken, profileId, userId, country, region
             };
         }
 
-        // Save all rows (SP + SD merged)
-        const saveResult = await saveProductWiseSponsoredAdsData(userId, country, region, allData);
+        // Save all rows (SP + SD merged), scoped to the types actually measured.
+        const saveResult = await saveProductWiseSponsoredAdsData(userId, country, region, allData, { usableAdTypes });
         if (!saveResult || !saveResult.success) {
             return {
                 success: false,
@@ -525,14 +543,26 @@ function buildProductWiseSpecs({ accessToken, profileId, region, marketplaceId =
             params: { adType, startDate, endDate },
             marketplaceId,
             submit: async () => {
-                const r = await createReport(accessToken, profileId, region, config, startDate, endDate, null);
-                return (r && r.reportId) ? r.reportId : null;
+                try {
+                    const r = await createReport(accessToken, profileId, region, config, startDate, endDate, null);
+                    return (r && r.reportId) ? r.reportId : null;
+                } catch (err) {
+                    // Tag structurally so the flag reaches the persisted row and the phase can name
+                    // revocation instead of reporting a generic "all ads reports failed".
+                    if (isAuthRevokedError(err)) err.authRevoked = true;
+                    throw err;
+                }
             },
             checkStatusOnce: (reportId) => checkProductWiseStatusOnce(reportId, accessToken, profileId, region),
             finalize: async (handle) => {
-                const rawRows = await downloadReport(handle.location, accessToken, null);
-                const mapped = Array.isArray(rawRows) ? rawRows.map(config.mapRow) : [];
-                return { empty: mapped.length === 0, result: mapped };
+                try {
+                    const rawRows = await downloadReport(handle.location, accessToken, null);
+                    const mapped = Array.isArray(rawRows) ? rawRows.map(config.mapRow) : [];
+                    return { empty: mapped.length === 0, result: mapped };
+                } catch (err) {
+                    if (isAuthRevokedError(err)) err.authRevoked = true;
+                    throw err;
+                }
             },
         };
     });
@@ -543,8 +573,20 @@ async function saveProductWiseFromRows(userId, country, region, profileId, rows)
     const allData = rows
         .filter((r) => r.status === 'DONE' && Array.isArray(r.result))
         .flatMap((r) => r.result);
+
+    // Which ad types actually got MEASURED. NO_DATA means the report ran and this account genuinely
+    // has no spend of that type — safe to clear its rows. FAILED means we do not know, so its stored
+    // rows must be preserved rather than deleted by the date-scoped wipe inside the service.
+    const usableAdTypes = rows
+        .filter((r) => r.status === 'DONE' || r.status === 'NO_DATA')
+        .map((r) => r.params?.adType)
+        .filter(Boolean);
+
+    // Nothing measured at all: touch nothing. The phase reports success:false from the row statuses.
+    if (usableAdTypes.length === 0) return { documentsSaved: 0 };
     if (allData.length === 0) return { documentsSaved: 0 };
-    const saveResult = await saveProductWiseSponsoredAdsData(userId, country, region, allData);
+
+    const saveResult = await saveProductWiseSponsoredAdsData(userId, country, region, allData, { usableAdTypes });
     return { documentsSaved: saveResult?.itemCount || 0 };
 }
 

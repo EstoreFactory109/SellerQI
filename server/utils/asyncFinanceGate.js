@@ -1,29 +1,41 @@
 /**
- * asyncFinanceGate.js — decides whether ONE account runs finance sync on the non-blocking async
- * path or the inline one.
+ * asyncFinanceGate.js — decides whether ONE account runs a given phase family on the non-blocking
+ * async path or the inline one.
  *
- * Why this is separate from ADS_ASYNC_ENABLED
- * -------------------------------------------
- * `ADS_ASYNC_ENABLED` is a single global kill-switch read at six places in ScheduledIntegration:
- * sched_batch_1_2, sched_ads, sched_batch_4, sched_ads_catchup, sched_finance and
- * sched_finance_catchup. Flipping it to soak-test finance would also switch the ads and SP-API
- * report phases to async for EVERY account at once — including the ads `saveFromRows` path, which
- * has never executed in production (it was masked by a `ReferenceError` until recently). That is
- * far too much blast radius for validating one change on one account.
+ * Despite the filename this now hosts BOTH gates — finance and ads. Renaming the file would touch
+ * every importer for zero behaviour change, so the name simply under-sells it; read the exports.
  *
- * So finance gets its own switch, plus an optional allowlist:
+ * Why each family needs its own switch
+ * ------------------------------------
+ * `ADS_ASYNC_ENABLED` is read at FOUR places in ScheduledIntegration — `sched_batch_1_2`,
+ * `sched_ads`, `sched_ads_catchup`, `sched_batch_4`. Finance is NOT among them: it has always used
+ * `financeAsyncEnabledFor` below, in every commit. So the two families are independent, and enabling
+ * one cannot change the other's behaviour.
+ *
+ * (An earlier version of this comment claimed six sites including the two finance phases, and blamed
+ * a `ReferenceError` for the ads save never running in production. Both were wrong — `git log -S`
+ * finds no commit containing the buggy form, so it only ever existed in an uncommitted tree. The
+ * accurate and sufficient reason for caution is plainer: the ads async path has ZERO production
+ * mileage. It was added 2026-07-31 and has never been switched on anywhere.)
+ *
+ * Each family gets a flag plus an optional allowlist:
  *
  *   FINANCE_ASYNC_ENABLED=true
  *   FINANCE_ASYNC_USER_IDS=6a57b823571ceb9266953c30[,<more>]
  *
- * Semantics:
+ *   ADS_ASYNC_ENABLED=true
+ *   ADS_ASYNC_USER_IDS=6a57b823571ceb9266953c30[,<more>]
+ *
+ * Semantics (identical for both, via the shared `gateFor` — that sharing is the point):
  *   flag not 'true'              -> false for everyone (inline; the default and the rollback)
  *   flag 'true', no/empty list   -> true for everyone (the post-soak widened state)
  *   flag 'true', list present    -> true only for ids on the list
+ *   flag 'true', list all invalid-> false for everyone (fail CLOSED; see gateFor)
  *
- * Deployment note: the worker calls `dotenv.config()`, so this must live in the ROOT `.env`.
- * Putting it in a PM2 `env` block does NOT work — `ecosystem.worker.config.js` does not enumerate
- * it, and PM2 only passes through the keys it lists.
+ * Deployment note, and it bites every time: the worker calls `dotenv.config()`, so these must live
+ * in the ROOT `.env`. Putting them in a PM2 `env` block does NOT work —
+ * `ecosystem.worker.config.js` does not enumerate them, and PM2 only passes through the keys it
+ * lists.
  */
 
 const mongoose = require('mongoose');
@@ -110,4 +122,36 @@ function financeStep2SlicingEnabledFor(userId, env = process.env) {
     return gateFor(userId, env, 'FINANCE_STEP2_SLICING_ENABLED', 'FINANCE_STEP2_USER_IDS');
 }
 
-module.exports = { financeAsyncEnabledFor, financeStep2SlicingEnabledFor, parseUserIdList };
+/**
+ * Whether ONE account runs the ADS + SP-API report phases (`sched_batch_1_2`, `sched_ads`,
+ * `sched_ads_catchup`, `sched_batch_4`) on the async engine.
+ *
+ *   ADS_ASYNC_ENABLED=true
+ *   ADS_ASYNC_USER_IDS=6a57b823571ceb9266953c30[,<more>]
+ *
+ * This exists because `ADS_ASYNC_ENABLED` was a bare `process.env` read at those four dispatch
+ * points, so soak-testing the ads async path on one account meant switching four phases for EVERY
+ * account simultaneously — with no way to limit the blast radius of a path that has never run in
+ * production.
+ *
+ * NOTE the name under-sells the scope: `sched_batch_1_2` is SP-API *reports*, not ads. Anyone reading
+ * only the flag name would wrongly assume SP-API reports are unaffected.
+ *
+ * Behaviour with no allowlist configured is EXACTLY `env.ADS_ASYNC_ENABLED === 'true'`, which is what
+ * the four dispatch sites did before — so swapping them to this call changes nothing until an
+ * allowlist is actually set. `asyncFinanceGate.test.js` asserts that equivalence directly.
+ *
+ * @param {string|object} userId
+ * @param {object} [env]
+ * @returns {boolean}
+ */
+function adsAsyncEnabledFor(userId, env = process.env) {
+    return gateFor(userId, env, 'ADS_ASYNC_ENABLED', 'ADS_ASYNC_USER_IDS');
+}
+
+module.exports = {
+    financeAsyncEnabledFor,
+    financeStep2SlicingEnabledFor,
+    adsAsyncEnabledFor,
+    parseUserIdList,
+};
