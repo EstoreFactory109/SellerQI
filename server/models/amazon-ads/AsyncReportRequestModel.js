@@ -58,6 +58,13 @@ const asyncReportRequestSchema = new mongoose.Schema({
     maxPollAttempts: { type: Number, default: 240 },
     note:            { type: String, default: "" },
 
+    // Set by the ADAPTER (it tags its own error), merely persisted by the engine — the engine stays
+    // domain-agnostic and never interprets this. The phase reads it back to distinguish "Amazon was
+    // having a bad day" from "this seller revoked our Amazon Ads grant", which are the same
+    // `status: FAILED` but need completely different responses: retry vs. tell the seller to
+    // re-authorize. Structural rather than parsed out of `note`, which is length-capped.
+    authRevoked:     { type: Boolean, default: false },
+
     // Processed output stashed by finalize() when a report is downloaded. Some ads
     // services (e.g. PPC metrics) must merge multiple reports before saving a single
     // per-day document, so the phase reads these back once all rows are terminal and

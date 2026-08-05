@@ -15,6 +15,10 @@ const ProductWiseSponsoredAdsItem = require('../../models/amazon-ads/ProductWise
 const logger = require('../../utils/Logger');
 const { getRedisClient } = require('../../config/redisConn');
 
+// Every ad type this collection stores, i.e. what "we measured everything" means. Mirrors the enum on
+// ProductWiseSponsoredAdsItemModel.adType (:50-56); keep them in step.
+const ALL_AD_TYPES = ['SP', 'SD'];
+
 /**
  * Save Product-wise Sponsored Ads data to database
  * Always uses new format (separate collection) to prevent 16MB limit
@@ -25,8 +29,19 @@ const { getRedisClient } = require('../../config/redisConn');
  * @param {Array} sponsoredAdsArray - Array of sponsored ads items
  * @returns {Promise<Object>} Result with saved document info
  */
-async function saveProductWiseSponsoredAdsData(userId, country, region, sponsoredAdsArray) {
+async function saveProductWiseSponsoredAdsData(userId, country, region, sponsoredAdsArray, options = {}) {
     try {
+        // Which ad types this save actually MEASURED. The delete below is destructive and was scoped
+        // only by date, so an SP-only save deleted the SD rows for those same dates and the SD half of
+        // product-level ad spend vanished until a later full success. Scoping the delete to what we
+        // measured is the fix.
+        //
+        // Defaults to every type, so a caller that cannot tell the difference gets today's exact
+        // behaviour and nothing changes until it opts in.
+        const usableAdTypes = Array.isArray(options.usableAdTypes) && options.usableAdTypes.length
+            ? options.usableAdTypes
+            : ALL_AD_TYPES;
+
         if (!userId) {
             throw new Error('User ID is required');
         }
@@ -109,10 +124,41 @@ async function saveProductWiseSponsoredAdsData(userId, country, region, sponsore
             userId: userObjectId,
             country,
             region,
+            // Scoped to what we measured — see usableAdTypes above. There is already an index on
+            // (userId, country, region, date, adType) so this costs nothing.
+            adType: { $in: usableAdTypes },
             date: { $in: distinctDates },
         });
 
         const insertResult = await ProductWiseSponsoredAdsItem.insertMany(itemsToInsert, { ordered: false });
+
+        // Scoping the delete is necessary but NOT sufficient, and this is the subtle half.
+        // `findLatestByUserCountryRegion` reads only the NEWEST batchId
+        // (ProductWiseSponsoredAdsItemModel.js:132-148), and it is the main dashboard read path
+        // (Analyse.js, ProfitabilityService, OptimizationService, …). Rows we just preserved still
+        // carry their OLD batchId, so they would survive in the collection yet be invisible to every
+        // one of those readers — and deleteOldBatches(…, 3) below would purge them within three runs.
+        // Adopting them into this batch keeps them both visible and alive. `createdAt` is untouched,
+        // so the newest-batch sort and deleteOldBatches' ranking still resolve correctly.
+        const preservedAdTypes = ALL_AD_TYPES.filter((t) => !usableAdTypes.includes(t));
+        if (preservedAdTypes.length && distinctDates.length) {
+            const adopted = await ProductWiseSponsoredAdsItem.updateMany(
+                {
+                    userId: userObjectId,
+                    country,
+                    region,
+                    adType: { $in: preservedAdTypes },
+                    date: { $in: distinctDates },
+                },
+                { $set: { batchId } }
+            );
+            logger.warn(
+                `[ProductWiseSponsoredAds] PARTIAL save for ${country}-${region}: measured ` +
+                `[${usableAdTypes.join('+')}], carried ${adopted?.modifiedCount ?? 0} preserved ` +
+                `[${preservedAdTypes.join('/')}] row(s) into batch ${batchId} across ` +
+                `${distinctDates.length} date(s) rather than deleting them.`
+            );
+        }
         const insertedCount = Array.isArray(insertResult) ? insertResult.length : itemsToInsert.length;
 
         if (insertedCount === 0) {
