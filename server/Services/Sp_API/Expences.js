@@ -4,6 +4,7 @@ const zlib = require("zlib");
 const logger = require("../../utils/Logger.js");
 const { URIs, marketplaceConfig: sharedMarketplaceConfig } = require("../../controllers/config/config.js");
 const { getDefaultExpenseFinanceDaysBack } = require("../../config/expenseFinanceDaysBack.js");
+const { tagHop, HOP_NAMES } = require("../../utils/errorContext.js");
 
 // ═════════════════════════════════════════════════════════════════════════════
 // MIGRATED TO FINANCES API v2024-06-19
@@ -142,25 +143,40 @@ function httpsRequestOnce(options, postData = null) {
  * Finance API transport, with a timeout and bounded retry on transient socket failures.
  *
  * WHY THIS EXISTS
- * This helper previously had NEITHER. A single `socket hang up` rejected outright, and its raw
- * message propagated all the way up as `finalize failed: socket hang up` — the exact production
- * error that put one account into a 3-hourly retry loop for a full day.
+ * This helper previously had NEITHER, so a single `socket hang up` rejected outright and its raw
+ * message propagated up as `finalize failed: socket hang up`.
  *
- * That it happened at all is a numbers game: `fetchTransactions` walks 1000+ pages for a
- * high-volume account, every one through here, so the probability of at least one reset across a
- * full walk approaches 1. And because all Amazon I/O in Step 1 happens BEFORE the first database
- * write, losing a single page throws away the entire chunk's work — zero forward progress, which is
- * why the same chunk failed identically on every retry.
+ * CORRECTION (2026-08-05) — read this before trusting the paragraph below. The GET retry added here
+ * on 2026-08-04 did NOT fix that production error, because the GET walk was never the failing hop.
+ * `getAccessToken` (a POST, below) was: it was excluded by the idempotent-verb rule, so it got one
+ * attempt and no log line at all. Phase-0 evidence: ZERO `transient network error` warns anywhere in
+ * the 10 minutes around two real failures, which rules out every retried GET, since each logs per
+ * retry. Two earlier diagnoses blamed the wrong hop; the `tagHop` calls now in this file exist so
+ * that can never be ambiguous again.
  *
- * Retrying is safe: these are GETs against a paginated read API, and a repeated page returns the
+ * The GET retry is still worth having on its own terms, and this is why: `fetchTransactions` walks
+ * 1000+ pages for a high-volume account, every one through here, so the chance of at least one reset
+ * across a full walk is material. And because all Amazon I/O in Step 1 happens BEFORE the first
+ * database write, losing a single page throws away the entire chunk's work — zero forward progress.
+ *
+ * Retrying a GET is safe: these are reads against a paginated API, and a repeated page returns the
  * same rows. The caller's fold is rebuilt from scratch on the outer `withRetry`, so no double
- * counting either.
+ * counting either. Note the retry re-requests the SAME `path`, which already carries the nextToken,
+ * so the pagination position is preserved by construction.
  */
-async function httpsRequest(options, postData = null) {
+async function httpsRequest(options, postData = null, { retryTransient = false } = {}) {
   const method = (options.method || 'GET').toUpperCase();
-  // Only replay idempotent verbs. A POST could have been received and acted upon before the socket
-  // dropped, so replaying it risks creating a second report.
-  const retryable = method === 'GET' || method === 'HEAD';
+  // Only replay idempotent verbs by default. A POST could have been received and acted upon before
+  // the socket dropped, so replaying it risks duplicating a server-side effect.
+  //
+  // `retryTransient` is a narrow opt-in for a POST that is genuinely safe to replay. Exactly one
+  // caller uses it — `getAccessToken` — and the justification is specific to it, not general:
+  // replaying `grant_type=refresh_token` does not consume the refresh token, so the worst case is
+  // one unused access token. Contrast `createReport` (FinanceService.js), where a replay orphans a
+  // second Amazon report against a quota that refills at ~1/min. Do NOT widen this to other POSTs
+  // without the same argument.
+  const retryable = method === 'GET' || method === 'HEAD' || retryTransient === true;
+  const pathOnly = options.path ? String(options.path).split('?')[0] : 'request';
   let lastErr;
 
   for (let attempt = 0; attempt <= EXPENCES_MAX_RETRIES; attempt++) {
@@ -168,10 +184,31 @@ async function httpsRequest(options, postData = null) {
       return await httpsRequestOnce(options, postData);
     } catch (err) {
       lastErr = err;
-      if (!retryable || !isTransientNetworkError(err) || attempt === EXPENCES_MAX_RETRIES) throw err;
-      const waitMs = EXPENCES_RETRY_BASE_MS * Math.pow(2, attempt);
+      const transient = isTransientNetworkError(err);
+      if (!retryable || !transient || attempt === EXPENCES_MAX_RETRIES) {
+        // Both of these were previously SILENT, which is what made a production `socket hang up`
+        // undiagnosable: the failure surfaced with no accompanying log line at all, so there was no
+        // way to tell "this hop never retried" from "it retried and gave up".
+        if (transient && !retryable) {
+          logger.warn(
+            `[Finance API] transient network error on non-idempotent ${method} ${pathOnly} ` +
+            `(${err.code || 'no-code'}: ${err.message}). NOT retried — replaying it could duplicate ` +
+            `the server-side effect. The caller will surface this.`
+          );
+        } else if (transient) {
+          logger.warn(
+            `[Finance API] GAVE UP on ${method} ${pathOnly} after ${EXPENCES_MAX_RETRIES + 1} attempt(s) ` +
+            `(${err.code || 'no-code'}: ${err.message}).`
+          );
+        }
+        throw err;
+      }
+      // Jitter: several clustered workers hit the same Amazon blip at once, and a fixed schedule
+      // makes them all retry in lockstep — turning one blip into a synchronised thundering herd.
+      const nominal = EXPENCES_RETRY_BASE_MS * Math.pow(2, attempt);
+      const waitMs = Math.round(nominal * (0.75 + Math.random() * 0.5));
       logger.warn(
-        `[Finance API] transient network error on ${options.path ? String(options.path).split('?')[0] : 'request'} ` +
+        `[Finance API] transient network error on ${method} ${pathOnly} ` +
         `(${err.code || err.message}); retry ${attempt + 1}/${EXPENCES_MAX_RETRIES} in ${waitMs}ms`
       );
       await new Promise((r) => setTimeout(r, waitMs));
@@ -183,17 +220,34 @@ async function httpsRequest(options, postData = null) {
 // ─────────────────────────────────────────────
 // 4. SP-API AUTH
 // ─────────────────────────────────────────────
+/**
+ * Mint an SP-API access token.
+ *
+ * `retryTransient: true` — this POST is the one exception to the no-POST-retry rule, and it is the
+ * reason it exists. It was the ONLY unretried, unlogged, bare-message-capable hop inside the finance
+ * `finalize` path, which made it the confirmed source of a production `finalize failed: socket hang
+ * up` that killed a whole 3-day chunk ~8x/day. Two callers reach it from inside finalize:
+ * `createTokenManager.refresh` (an inherited token is deliberately treated as having ~5 min left, so
+ * this fires on most ticks) and `fetchTransactions`'s mid-walk 401 refresher.
+ *
+ * Replay is safe: a refresh-token grant does not consume the refresh token, so a duplicated request
+ * costs one unused access token — against losing an entire chunk's work.
+ */
 async function getAccessToken(clientId, clientSecret, refreshToken) {
   const postData = new URLSearchParams({
     grant_type: "refresh_token", refresh_token: refreshToken,
     client_id: clientId, client_secret: clientSecret,
   }).toString();
-  const res = await httpsRequest({
-    hostname: LWA_TOKEN_URL, path: "/auth/o2/token", method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded", "Content-Length": Buffer.byteLength(postData) },
-  }, postData);
-  if (!res.body.access_token) throw new Error(`Auth failed: ${JSON.stringify(res.body)}`);
-  return res.body.access_token;
+  try {
+    const res = await httpsRequest({
+      hostname: LWA_TOKEN_URL, path: "/auth/o2/token", method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "Content-Length": Buffer.byteLength(postData) },
+    }, postData, { retryTransient: true });
+    if (!res.body.access_token) throw new Error(`Auth failed: ${JSON.stringify(res.body)}`);
+    return res.body.access_token;
+  } catch (err) {
+    throw tagHop(err, HOP_NAMES.LWA_TOKEN);
+  }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -294,12 +348,23 @@ async function fetchTransactions(accessToken, baseUrl, postedAfter, postedBefore
     let res;
     let authRefreshCount = 0;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      res = await httpsRequest({
-        hostname: baseUrl,
-        path,
-        method: "GET",
-        headers: { "x-amz-access-token": currentToken },
-      });
+      try {
+        res = await httpsRequest({
+          hostname: baseUrl,
+          path,
+          method: "GET",
+          headers: { "x-amz-access-token": currentToken },
+        });
+      } catch (err) {
+        // Record HOW FAR the walk got before dying. Without this a mid-walk failure is
+        // indistinguishable from a page-1 failure in the stored note, which is most of why a
+        // production `socket hang up` took three rounds to attribute. `tagHop` is first-tag-wins, so
+        // a token-mint failure surfacing through here keeps its own (inner) `lwaToken` tag.
+        throw tagHop(err, HOP_NAMES.FINANCE_TXN_PAGE, {
+          pagesCompleted: pageCount,
+          page: pageCount + 1,
+        });
+      }
 
       // ★ Auto-renew on expired access token. Does not consume a throttle
       //   retry — token errors are independent of rate-limit retries.

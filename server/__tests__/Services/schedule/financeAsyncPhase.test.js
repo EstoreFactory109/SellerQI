@@ -49,12 +49,14 @@ jest.mock('../../../models/finance/FinanceSyncLogModel.js', () => ({}));
 const mockPlanFinanceSync = jest.fn();
 const mockRunFinanceSyncTail = jest.fn();
 const mockRecordSyncFailure = jest.fn();
+const mockClassifyChunkSkip = jest.fn();
 const mockBuildSpecs = jest.fn();
 jest.mock('../../../Services/Sp_API/FinanceService.js', () => ({
     createTokenManager: () => ({ token: 'tok', getValidToken: async () => 'tok' }),
     planFinanceSync: (...a) => mockPlanFinanceSync(...a),
     runFinanceSyncTail: (...a) => mockRunFinanceSyncTail(...a),
     recordSyncFailure: (...a) => mockRecordSyncFailure(...a),
+    classifyChunkSkip: (...a) => mockClassifyChunkSkip(...a),
     classifySyncFailure: () => 'other',
     PROVISIONAL_SETTLE_DAYS: 14,
     financeSalesReportAsync: {
@@ -103,6 +105,9 @@ beforeEach(() => {
     mockPlanFinanceSync.mockReset().mockResolvedValue({ window: WINDOW, chunks: CHUNKS, latestSyncDate: '2026-06-30' });
     mockRunFinanceSyncTail.mockReset().mockResolvedValue({ resolved: 5, stillPending: 0, expired: 0 });
     mockRecordSyncFailure.mockReset().mockResolvedValue(undefined);
+    // Default: NOT skippable. Stopping is the safe default, so every pre-existing test keeps the
+    // exact behaviour it was written against and only the new tests opt into a skip.
+    mockClassifyChunkSkip.mockReset().mockResolvedValue(null);
     mockBuildSpecs.mockReset().mockReturnValue([{ service: 'financeSalesReport', paramsKey: 'k', params: {} }]);
 
     jest.spyOn(SI, '_prepareForBatchPhase').mockResolvedValue({
@@ -392,5 +397,146 @@ describe('_runAsyncFinancePhase — guards', () => {
         });
 
         expect(res.success).toBe(true);
+    });
+});
+
+/**
+ * A chunk that can never succeed must not starve the chunks BEHIND it.
+ *
+ * Stopping at the first failure is correct while a window is still under retry — the cursor is
+ * max(success date), so jumping a gap strands those days at $0. But once every date in a chunk has
+ * burned FINANCE_MAX_DATE_RETRIES that window is already abandoned (the sweeper excludes it), and
+ * stopping there blocked everything after it. Observed in production: a 30-day deep re-sync never
+ * got past chunk 6 of 10 for days, so 2026-07-23→08-03 were never attempted at all.
+ */
+describe('_runAsyncFinancePhase — a capped chunk is SKIPPED, not stopped at', () => {
+    beforeEach(() => {
+        mockEngineRows = [engineRow('FAILED', { note: 'finalize failed: [lwaToken] ECONNRESET: socket hang up' })];
+        mockRunAsyncAdsReports.mockResolvedValue({ done: true, summary: {} });
+    });
+
+    test('capped => advances to the next chunk and reschedules', async () => {
+        mockClassifyChunkSkip.mockResolvedValue('capped');
+        const res = await SI._runAsyncFinancePhase({
+            userId: USER, Region: REGION, Country: COUNTRY, phaseData: frozenPhaseData({ financeChunkIndex: 0 }),
+        });
+
+        expect(res.success).toBe(true);
+        expect(res.dataForNextPhase.financeChunkIndex).toBe(1);
+        expect(res.reschedule).toBeDefined();
+        // The tail belongs to the terminal tick only — running it mid-walk would resolve pending
+        // fees repeatedly across a single run.
+        expect(mockRunFinanceSyncTail).not.toHaveBeenCalled();
+    });
+
+    test('the skip is RECORDED, never silent', async () => {
+        // A silent skip would recreate the original invisible-failure bug in a new form: the whole
+        // reason this ran unnoticed for a day was a failure nothing could see.
+        mockClassifyChunkSkip.mockResolvedValue('capped');
+        const res = await SI._runAsyncFinancePhase({
+            userId: USER, Region: REGION, Country: COUNTRY, phaseData: frozenPhaseData({ financeChunkIndex: 0 }),
+        });
+
+        expect(res.dataForNextPhase.financeSkippedChunks).toEqual([
+            expect.objectContaining({ paramsKey: '2026-07-01_2026-07-03', reason: 'capped' }),
+        ]);
+    });
+
+    test('already_success also skips (or a good chunk stalls the walk forever)', async () => {
+        // recordSyncFailure never downgrades a success row, so a deep-resync chunk whose days are all
+        // already synced produces ZERO capped dates. Without this arm that walk stalls every day.
+        mockClassifyChunkSkip.mockResolvedValue('already_success');
+        const res = await SI._runAsyncFinancePhase({
+            userId: USER, Region: REGION, Country: COUNTRY, phaseData: frozenPhaseData({ financeChunkIndex: 0 }),
+        });
+
+        expect(res.success).toBe(true);
+        expect(res.dataForNextPhase.financeChunkIndex).toBe(1);
+        expect(res.dataForNextPhase.financeSkippedChunks[0].reason).toBe('already_success');
+    });
+
+    test('the failure is recorded BEFORE the skip is decided', async () => {
+        // Order is load-bearing: the attempt that tips a date over the cap must be counted first, or
+        // the final failure is never seen as capped and the chunk blocks the walk one run longer.
+        mockClassifyChunkSkip.mockResolvedValue('capped');
+        await SI._runAsyncFinancePhase({
+            userId: USER, Region: REGION, Country: COUNTRY, phaseData: frozenPhaseData({ financeChunkIndex: 0 }),
+        });
+
+        expect(mockRecordSyncFailure).toHaveBeenCalled();
+        expect(mockClassifyChunkSkip).toHaveBeenCalled();
+        expect(mockRecordSyncFailure.mock.invocationCallOrder[0])
+            .toBeLessThan(mockClassifyChunkSkip.mock.invocationCallOrder[0]);
+    });
+
+    test('skips accumulate across ticks', async () => {
+        mockClassifyChunkSkip.mockResolvedValue('capped');
+        const res = await SI._runAsyncFinancePhase({
+            userId: USER, Region: REGION, Country: COUNTRY,
+            phaseData: frozenPhaseData({
+                financeChunkIndex: 1,
+                financeSkippedChunks: [{ paramsKey: '2026-07-01_2026-07-03', reason: 'capped', note: 'earlier' }],
+            }),
+        });
+
+        expect(res.dataForNextPhase.financeSkippedChunks).toHaveLength(2);
+    });
+
+    test('a skipped LAST chunk runs the tail exactly once and reports completed_with_skips', async () => {
+        mockClassifyChunkSkip.mockResolvedValue('capped');
+        const res = await SI._runAsyncFinancePhase({
+            userId: USER, Region: REGION, Country: COUNTRY, phaseData: frozenPhaseData({ financeChunkIndex: 2 }),
+        });
+
+        expect(res.success).toBe(true);
+        expect(res.reschedule).toBeUndefined();
+        expect(mockRunFinanceSyncTail).toHaveBeenCalledTimes(1);
+        // The LAST call, not the first: `jest.spyOn` in beforeEach re-uses the existing spy without
+        // clearing its history, so calls[0] belongs to whichever earlier test first wrote a slice.
+        const sliceCalls = SI._writeFinanceSlice.mock.calls;
+        expect(sliceCalls[sliceCalls.length - 1][0].summary).toMatchObject({
+            status: 'completed_with_skips',
+            skippedChunks: [expect.objectContaining({ reason: 'capped' })],
+        });
+    });
+
+    test('a chunk with NO engine row never skips, even if the dates look capped', async () => {
+        // No report was ever tracked — an engine-level anomaly, not an exhausted window. Skipping it
+        // would advance the cursor over days Amazon was never even asked about.
+        mockEngineRows = [];
+        mockClassifyChunkSkip.mockResolvedValue('capped');
+        const res = await SI._runAsyncFinancePhase({
+            userId: USER, Region: REGION, Country: COUNTRY, phaseData: frozenPhaseData({ financeChunkIndex: 0 }),
+        });
+
+        expect(res.success).toBe(false);
+        expect(mockClassifyChunkSkip).not.toHaveBeenCalled();
+    });
+
+    test('a classifier that THROWS degrades to stopping, and the tail still runs', async () => {
+        // This block is itself the failure path. The recordSyncFailure E11000 taught us that a
+        // failure handler which can throw takes the real error down with it — here that would lose
+        // dataForNextPhase and skip finishRun(), so chunks that DID land keep estimated fees.
+        mockClassifyChunkSkip.mockRejectedValue(new Error('mongo down'));
+        const res = await SI._runAsyncFinancePhase({
+            userId: USER, Region: REGION, Country: COUNTRY, phaseData: frozenPhaseData({ financeChunkIndex: 1 }),
+        });
+
+        expect(res.success).toBe(false);
+        expect(res.dataForNextPhase).toBeDefined();
+        expect(mockRunFinanceSyncTail).toHaveBeenCalledTimes(1);
+    });
+
+    test('a skip preserves the monotonic tick', async () => {
+        // A burnt pollAttempt makes BullMQ silently drop the re-enqueue and the chain dies with no
+        // error — the same trap the chunk N→N+1 hand-off already had to be fixed for.
+        mockClassifyChunkSkip.mockResolvedValue('capped');
+        const res = await SI._runAsyncFinancePhase({
+            userId: USER, Region: REGION, Country: COUNTRY,
+            phaseData: frozenPhaseData({ financeChunkIndex: 0, financeTick: 7 }),
+        });
+
+        expect(res.reschedule.pollAttempt).toBe(8);
+        expect(res.dataForNextPhase.financeTick).toBe(8);
     });
 });

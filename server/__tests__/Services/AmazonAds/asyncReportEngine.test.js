@@ -244,3 +244,86 @@ describe('asyncReportEngine — POLL stage', () => {
         expect(byService.slow).toBe('SUBMITTED');
     });
 });
+
+/**
+ * A finalize failure must be DIAGNOSABLE.
+ *
+ * This catch used to keep only `err.message` and log nothing at all. Three different transports on
+ * two branches of the finance finalize path can all emit a bare `socket hang up`, so the stored note
+ * was ambiguous — and it cost three rounds of production diagnosis, two of which reached the wrong
+ * conclusion. The stack now goes to the log, and a `[hop]` tag goes into the note.
+ */
+describe('finalize failure diagnosability', () => {
+    const logger = require('../../../utils/Logger.js');
+    const { tagHop, HOP_NAMES } = require('../../../utils/errorContext.js');
+
+    /** Drive a spec whose finalize rejects with `err`, and return the persisted row. */
+    async function failFinalizeWith(err) {
+        const Model = makeFakeModel();
+        const spec = specFor('financeSalesReport', {
+            submit: async () => 'rep-1',
+            checkStatusOnce: async () => ({ ready: true, handle: { reportDocumentId: 'd1' } }),
+            finalize: async () => { throw err; },
+        });
+        await runAsyncAdsReports({ ...ACCT, specs: [spec], Model, phase: 'finance' });       // SUBMIT
+        await runAsyncAdsReports({ ...ACCT, specs: [spec], Model, phase: 'finance', pollAttempt: 1 }); // POLL
+        return Model._docs.find(d => d.service === 'financeSalesReport');
+    }
+
+    test('the note names the hop that failed', async () => {
+        const err = tagHop(
+            Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }),
+            HOP_NAMES.LWA_TOKEN,
+        );
+        const row = await failFinalizeWith(err);
+        expect(row.status).toBe('FAILED');
+        expect(row.note).toContain('[lwaToken]');
+        expect(row.note).toContain('socket hang up');
+    });
+
+    test('the ERROR OBJECT reaches the logger, so the stack survives', async () => {
+        // utils/Logger renders a top-level Error argument as its stack. Passing only `err.message`
+        // is what threw the stack away and made the hop unknowable.
+        const spy = jest.spyOn(logger, 'error').mockImplementation(() => {});
+        try {
+            await failFinalizeWith(new Error('socket hang up'));
+            const passedAnError = spy.mock.calls.some(call => call.some(a => a instanceof Error));
+            expect(passedAnError).toBe(true);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    test('pagesCompleted survives into the note', async () => {
+        const err = tagHop(new Error('socket hang up'), HOP_NAMES.FINANCE_TXN_PAGE, { pagesCompleted: 847 });
+        const row = await failFinalizeWith(err);
+        expect(row.note).toContain('pagesCompleted=847');
+    });
+
+    test('an UNTAGGED error still yields a sane note', async () => {
+        // Rows already in flight when this deploys carry no tag; they must not render as "[undefined]".
+        const row = await failFinalizeWith(new Error('something structural'));
+        expect(row.note).toBe('finalize failed: something structural');
+    });
+
+    test('the note keeps the message verbatim so classifySyncFailure still buckets it', async () => {
+        // ScheduledIntegration rebuilds an Error from this note and re-runs classifySyncFailure,
+        // which does lowercase substring matching. If the descriptor paraphrased or clipped the
+        // message, a socket error would silently stop bucketing as 'timeout'.
+        const { classifySyncFailure } = require('../../../Services/Sp_API/FinanceService.js');
+        const err = tagHop(
+            Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }),
+            HOP_NAMES.FINANCE_WALK,
+        );
+        const row = await failFinalizeWith(err);
+        expect(classifySyncFailure(new Error(row.note))).toBe('timeout');
+    });
+
+    test('a huge message is bounded but still classifiable', async () => {
+        const err = tagHop(new Error(`socket hang up ${'x'.repeat(5000)}`), HOP_NAMES.LWA_TOKEN);
+        const row = await failFinalizeWith(err);
+        expect(row.note.length).toBeLessThan(340);        // ~300 descriptor + "finalize failed: "
+        expect(row.note).toContain('[lwaToken]');
+        expect(row.note).toContain('socket hang up');     // the head of the message is preserved
+    });
+});

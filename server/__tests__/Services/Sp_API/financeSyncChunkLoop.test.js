@@ -19,6 +19,9 @@ const {
   recordSyncFailure,
   enumerateDateChunks,
   resolveSyncWindow,
+  classifyChunkSkip,
+  classifyFinanceRetryState,
+  FINANCE_MAX_DATE_RETRIES,
 } = require('../../../Services/Sp_API/FinanceService.js');
 
 const CHUNKS_9_DAYS = enumerateDateChunks('2026-06-15', '2026-06-23', 3);
@@ -430,3 +433,124 @@ function addDaysStrLocal(dateStr, days) {
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().substring(0, 10);
 }
+
+/**
+ * `classifyChunkSkip` — may a FAILED chunk be skipped so the walk reaches LATER chunks?
+ *
+ * WHY THIS MATTERS
+ * `_runAsyncFinancePhase` stopped at the first failed chunk unconditionally. Cursor safety is the
+ * genuine reason (the cursor is `max(FinanceSyncLog.date)`, so jumping a gap strands those days at
+ * $0 forever) — but it only applies to a window still under retry. In production one permanently
+ * failing 3-day chunk starved every later chunk in the same job for days: the 30-day deep re-sync
+ * never got past chunk 6 of 10, so 2026-07-23→08-03 were never attempted at all.
+ *
+ * The single most important assertion here is the MISSING-ROW case. A date with no log row has never
+ * been attempted, and skipping it is exactly the silent-$0 outcome the stop rule exists to prevent.
+ */
+describe('classifyChunkSkip', () => {
+  const CAP = FINANCE_MAX_DATE_RETRIES;
+  const USER = 'u1';
+  const KEY = { userObjectId: USER, country: 'US', region: 'NA', from: '2026-07-20', to: '2026-07-22' };
+  const DATES = ['2026-07-20', '2026-07-21', '2026-07-22'];
+
+  /** Minimal stand-in for the model: only `.find(...).lean()` is used. */
+  const modelWith = (rows) => ({
+    find: () => ({ lean: async () => rows }),
+  });
+
+  test('all dates past the cap => capped (safe to skip: already abandoned)', async () => {
+    const rows = DATES.map((date) => ({ date, status: 'failed', consecutiveFailures: CAP }));
+    await expect(classifyChunkSkip({ ...KEY, FinanceSyncLogModel: modelWith(rows) })).resolves.toBe('capped');
+  });
+
+  test('all dates already successful => already_success', async () => {
+    // Essential, not defensive: recordSyncFailure never downgrades a success row, so a deep-resync
+    // chunk whose days are all good yields ZERO capped dates and would stall that walk every single
+    // day, forever. Skipping loses nothing — the data is already there.
+    const rows = DATES.map((date) => ({ date, status: 'success', consecutiveFailures: 0 }));
+    await expect(classifyChunkSkip({ ...KEY, FinanceSyncLogModel: modelWith(rows) })).resolves.toBe('already_success');
+  });
+
+  test('a date ONE failure below the cap => null (still retryable, must stop)', async () => {
+    const rows = DATES.map((date, i) => ({
+      date, status: 'failed', consecutiveFailures: i === 1 ? CAP - 1 : CAP,
+    }));
+    await expect(classifyChunkSkip({ ...KEY, FinanceSyncLogModel: modelWith(rows) })).resolves.toBeNull();
+  });
+
+  test('A DATE WITH NO ROW AT ALL => null — the cursor-safety case', async () => {
+    // Never attempted. Skipping would advance the cursor over a day we have never even asked Amazon
+    // about, settling real revenue at $0 with nothing to ever revisit it. This must never skip.
+    const rows = [
+      { date: '2026-07-20', status: 'failed', consecutiveFailures: CAP },
+      { date: '2026-07-21', status: 'failed', consecutiveFailures: CAP },
+      // 2026-07-22 absent
+    ];
+    await expect(classifyChunkSkip({ ...KEY, FinanceSyncLogModel: modelWith(rows) })).resolves.toBeNull();
+  });
+
+  test('a mix of success and capped => capped', async () => {
+    const rows = [
+      { date: '2026-07-20', status: 'success', consecutiveFailures: 0 },
+      { date: '2026-07-21', status: 'failed', consecutiveFailures: CAP },
+      { date: '2026-07-22', status: 'failed', consecutiveFailures: CAP + 3 },
+    ];
+    await expect(classifyChunkSkip({ ...KEY, FinanceSyncLogModel: modelWith(rows) })).resolves.toBe('capped');
+  });
+
+  test('a model error => null (fails CLOSED)', async () => {
+    // An unreadable retry state must never license skipping: that would turn a transient Mongo blip
+    // into a permanent $0 gap.
+    const model = { find: () => ({ lean: async () => { throw new Error('mongo down'); } }) };
+    await expect(classifyChunkSkip({ ...KEY, FinanceSyncLogModel: model })).resolves.toBeNull();
+  });
+
+  test('an empty date range => null', async () => {
+    await expect(classifyChunkSkip({
+      ...KEY, from: '2026-07-22', to: '2026-07-20', FinanceSyncLogModel: modelWith([]),
+    })).resolves.toBeNull();
+  });
+});
+
+/**
+ * `classifyFinanceRetryState` — the shared cap/backoff reading.
+ *
+ * Shared deliberately: the cap constant was already duplicated between FinanceService and
+ * freshnessSweeper, and a third copy in diagnoseDailySchedule is how the three drift into
+ * disagreeing about whether a date is dead.
+ */
+describe('classifyFinanceRetryState', () => {
+  const CAP = FINANCE_MAX_DATE_RETRIES;
+
+  test('at or past the cap => capped', () => {
+    expect(classifyFinanceRetryState({ consecutiveFailures: CAP })).toBe('capped');
+    expect(classifyFinanceRetryState({ consecutiveFailures: CAP + 5 })).toBe('capped');
+  });
+
+  test('capped is read from the COUNTER even though nextRetryAfter is null', () => {
+    // The exact conflation computeNextRetryAfter's own comment warns about: a capped row carries
+    // `nextRetryAfter: null` by design, so testing the date first would read "no backoff pending"
+    // and classify a permanently-dead date as due right now — retrying it immediately, forever.
+    expect(classifyFinanceRetryState({ consecutiveFailures: CAP, nextRetryAfter: null })).toBe('capped');
+  });
+
+  test('a future nextRetryAfter below the cap => backed_off', () => {
+    expect(classifyFinanceRetryState({
+      consecutiveFailures: 5, nextRetryAfter: new Date(Date.now() + 3600_000),
+    })).toBe('backed_off');
+  });
+
+  test('a PAST nextRetryAfter => due', () => {
+    expect(classifyFinanceRetryState({
+      consecutiveFailures: 5, nextRetryAfter: new Date(Date.now() - 3600_000),
+    })).toBe('due');
+  });
+
+  test('a fresh failure with no backoff => due', () => {
+    expect(classifyFinanceRetryState({ consecutiveFailures: 1, nextRetryAfter: null })).toBe('due');
+  });
+
+  test('a missing row => due (never silently treated as dead)', () => {
+    expect(classifyFinanceRetryState(null)).toBe('due');
+  });
+});

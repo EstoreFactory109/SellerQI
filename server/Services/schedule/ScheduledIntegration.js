@@ -3018,7 +3018,7 @@ class ScheduledIntegration {
         const AsyncReportRequest = require('../../models/amazon-ads/AsyncReportRequestModel.js');
         const {
             createTokenManager, financeSalesReportAsync, planFinanceSync, runFinanceSyncTail,
-            recordSyncFailure, classifySyncFailure, PROVISIONAL_SETTLE_DAYS,
+            recordSyncFailure, classifySyncFailure, classifyChunkSkip, PROVISIONAL_SETTLE_DAYS,
         } = require('../Sp_API/FinanceService.js');
         const FinanceSyncLog = require('../../models/finance/FinanceSyncLogModel.js');
         const mongoose = require('mongoose');
@@ -3151,6 +3151,10 @@ class ScheduledIntegration {
                 financeChunkIndex: chunkIndex,
                 financeEmptyRetries: phaseData.financeEmptyRetries || {},
                 financeAggregate: phaseData.financeAggregate || { salesOrders: 0, skuDocs: 0, overheadDocs: 0, pendingOrders: 0 },
+                // Chunks abandoned mid-walk. Threaded through every reschedule (including the NO_DATA
+                // re-submit) so the terminal tick can report them — a silent skip would recreate the
+                // original invisible-failure bug in a new form.
+                financeSkippedChunks: phaseData.financeSkippedChunks || [],
                 apiResults: { ...(phaseData.apiResults || {}) },
             };
 
@@ -3168,10 +3172,15 @@ class ScheduledIntegration {
             }).lean();
             const row = rows[0] || null;
 
-            // ── FAILED: stop the walk here. ──
-            // The cursor has NOT moved past this chunk, so tomorrow's run retries this same oldest
-            // chunk — the same stall semantics as the inline path, deliberately not an in-run retry
-            // loop (that is what jams the report queue).
+            // ── FAILED: skip past a dead chunk, otherwise stop the walk here. ──
+            // Stopping is the DEFAULT and it is deliberate: the cursor is max(FinanceSyncLog.date),
+            // so letting the walk jump a chunk we still intend to retry would strand those days at
+            // $0 forever. But that reasoning only holds for a window still under retry. A chunk
+            // whose dates have all burned FINANCE_MAX_DATE_RETRIES is already abandoned — the
+            // sweeper excludes it and computeNextRetryAfter returns null for it — and stopping there
+            // starved every LATER chunk in the same job. In production that meant a 30-day deep
+            // re-sync never got past chunk 6 of 10 for days, so 2026-07-23→08-03 were never
+            // attempted at all. `classifyChunkSkip` fails closed, so anything it cannot read stops.
             if (!row || row.status === 'FAILED') {
                 const note = row ? (row.note || 'report failed') : 'no engine row for chunk';
                 const err = new Error(note);
@@ -3189,10 +3198,90 @@ class ScheduledIntegration {
                     logger.error(`[AsyncFinance:${group}] recordSyncFailure failed: ${logErr.message}`);
                 }
 
+                // Classified AFTER recordSyncFailure so the attempt just made is counted — otherwise
+                // the final failure that tips a date over the cap would never be seen as capped.
+                // `!row` never skips: no report was even tracked, which is an engine-level anomaly
+                // rather than an exhausted window, and skipping it would hide that.
+                //
+                // Belt-and-braces around the classifier itself. It already fails closed internally,
+                // but this whole block IS the failure path — and the lesson from recordSyncFailure
+                // (whose own E11000 made every failure invisible for a day) is that a failure handler
+                // which can itself throw takes the real error down with it. Here that would mean
+                // losing dataForNextPhase AND skipping finishRun(), so the Step 2 tail would never
+                // run and chunks that DID land would keep estimated fees. Degrade to "stop" instead.
+                let skipReason = null;
+                if (row) {
+                    try {
+                        skipReason = typeof classifyChunkSkip === 'function'
+                            ? await classifyChunkSkip({
+                                userObjectId: new mongoose.Types.ObjectId(String(userId)),
+                                country: Country, region: Region,
+                                from: chunk.startDate, to: chunk.endDate,
+                            })
+                            : null;
+                    } catch (skipErr) {
+                        logger.warn(`[AsyncFinance:${group}] chunk-skip check failed (${skipErr.message}); stopping the walk, which is the safe default.`);
+                        skipReason = null;
+                    }
+                }
+
+                if (skipReason) {
+                    const nextIndex = chunkIndex + 1;
+                    const skipped = [
+                        ...(phaseData.financeSkippedChunks || []),
+                        { paramsKey, reason: skipReason, note: String(note).slice(0, 200) },
+                    ];
+                    // Consequence spelled out per reason — they are very different. `capped` means we
+                    // have permanently given up on real money; `already_success` means we skipped a
+                    // redundant re-fetch and lost nothing.
+                    const consequence = skipReason === 'capped'
+                        ? `Dates ${chunk.startDate}→${chunk.endDate} are GIVEN UP ON and keep their estimated/absent fees ` +
+                          `— see diagnoseDailySchedule section 8, and reset consecutiveFailures once the cause is fixed.`
+                        : `Dates ${chunk.startDate}→${chunk.endDate} already hold successful data, so nothing is lost.`;
+                    logger.warn(
+                        `[AsyncFinance:${group}] chunk ${chunkIndex + 1}/${chunks.length} (${paramsKey}) FAILED and is ` +
+                        `${skipReason} — SKIPPING to chunk ${nextIndex + 1}/${chunks.length} so later chunks are not ` +
+                        `starved. ${consequence} Cause: ${note}`
+                    );
+                    if (nextIndex < chunks.length && nextIndex < MAX_CHUNKS_PER_RUN) {
+                        // Reuse the MONOTONIC tick — a burnt pollAttempt makes BullMQ silently drop
+                        // the enqueue and the chain stalls with no error. Do NOT run finishRun() here;
+                        // the tail belongs to the terminal tick only.
+                        return {
+                            success: true,
+                            reschedule: { delayMs: CHUNK_HANDOFF_MS, pollAttempt: tick },
+                            dataForNextPhase: {
+                                ...carry,
+                                financeChunkIndex: nextIndex,
+                                financeSkippedChunks: skipped,
+                                financeEmptyRetries: phaseData.financeEmptyRetries || {},
+                            },
+                        };
+                    }
+                    // The skipped chunk was the last one (or hit the per-run cap): fall through to
+                    // the terminal path so the tail still runs exactly once.
+                    const { step2: tailStep2 } = await finishRun();
+                    const apiResults = { ...(phaseData.apiResults || {}), financeSync: { success: true, error: null } };
+                    await this._writeFinanceSlice({
+                        userId, Country, Region, group, sliceKeys,
+                        summary: {
+                            status: 'completed_with_skips',
+                            startDate: window.startDate, endDate: window.endDate,
+                            skippedChunks: skipped,
+                        },
+                        apiResults, phaseData,
+                    });
+                    logger.warn(
+                        `[AsyncFinance:${group}] finished with ${skipped.length} skipped chunk(s) ` +
+                        `(${skipped.map((s) => s.paramsKey).join(', ')}); backfill resolved=${tailStep2?.resolved ?? 0}`
+                    );
+                    return { success: true, dataForNextPhase: { apiResults } };
+                }
+
                 const { step2 } = await finishRun();
                 const apiResults = { ...(phaseData.apiResults || {}), financeSync: { success: false, error: note } };
-                await this._writeFinanceSlice({ userId, Country, Region, group, sliceKeys, summary: { status: 'failed', startDate: window.startDate, endDate: window.endDate }, apiResults, phaseData });
-                logger.warn(`[AsyncFinance:${group}] stopped at chunk ${chunkIndex + 1}/${chunks.length}; ${chunkIndex} chunk(s) completed, backfill resolved=${step2?.resolved ?? 0}`);
+                await this._writeFinanceSlice({ userId, Country, Region, group, sliceKeys, summary: { status: 'failed', startDate: window.startDate, endDate: window.endDate, skippedChunks: phaseData.financeSkippedChunks || [] }, apiResults, phaseData });
+                logger.warn(`[AsyncFinance:${group}] stopped at chunk ${chunkIndex + 1}/${chunks.length} (still retryable — attempts below the cap${row ? '' : ', or no engine row'}); ${chunkIndex} chunk(s) completed, backfill resolved=${step2?.resolved ?? 0}`);
                 return { success: false, error: note, dataForNextPhase: { apiResults } };
             }
 
@@ -3241,11 +3330,20 @@ class ScheduledIntegration {
                 logger.warn(`[AsyncFinance:${group}] hit FINANCE_MAX_CHUNKS_PER_RUN=${MAX_CHUNKS_PER_RUN} after ${nextIndex}/${chunks.length} chunks; the remaining ${chunks.length - nextIndex} resume next run (cursor has advanced).`);
             }
             const { step2 } = await finishRun();
-            const summary = { status: 'completed', startDate: window.startDate, endDate: chunks[nextIndex - 1].endDate };
+            const skippedChunks = carry.financeSkippedChunks || [];
+            const summary = {
+                // A run that abandoned a window is NOT plainly 'completed' — the dashboard slice is
+                // the only place this surfaces to a reader, so the distinction has to live in it.
+                status: skippedChunks.length ? 'completed_with_skips' : 'completed',
+                startDate: window.startDate,
+                endDate: chunks[nextIndex - 1].endDate,
+                skippedChunks,
+            };
             const apiResults = { ...(phaseData.apiResults || {}), financeSync: { success: true, error: null } };
             await this._writeFinanceSlice({ userId, Country, Region, group, sliceKeys, summary, apiResults, phaseData });
             logger.info(`[AsyncFinance:${group}] Completed for user ${userId}`, {
                 chunksCompleted: nextIndex, chunksTotal: chunks.length,
+                chunksSkipped: skippedChunks.length,
                 skuDocs: aggregate.skuDocs, resolved: step2?.resolved ?? 0,
             });
             return { success: true, error: null, dataForNextPhase: { apiResults } };

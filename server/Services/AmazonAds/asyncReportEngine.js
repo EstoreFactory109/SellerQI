@@ -31,6 +31,7 @@
 
 const defaultModel = require('../../models/amazon-ads/AsyncReportRequestModel.js');
 const logger = require('../../utils/Logger.js');
+const { describeError } = require('../../utils/errorContext.js');
 
 const TERMINAL = new Set(['DONE', 'NO_DATA', 'FAILED']);
 
@@ -118,8 +119,9 @@ async function submitAll({ Model, baseFilter, specs, maxPollAttempts }) {
             }
         } catch (err) {
             status = 'FAILED';
-            note = `submit failed: ${err.message}`;
-            logger.warn(`[asyncReportEngine] submit failed for ${spec.service}/${spec.paramsKey}: ${err.message}`);
+            note = `submit failed: ${describeError(err)}`;
+            // Error passed as an argument so the stack reaches the log (see the finalize catch).
+            logger.warn(`[asyncReportEngine] submit failed for ${spec.service}/${spec.paramsKey}:`, err);
         }
         // Idempotent upsert on the unique (account, runDate, service, paramsKey) key.
         await Model.updateOne(
@@ -163,7 +165,7 @@ async function pollAll({ Model, baseFilter, rows, specByKey }) {
         } catch (err) {
             // Transient status-check error: bump attempts, keep SUBMITTED so the next
             // tick retries. Only give up when the cap is exceeded.
-            await bumpOrFail(Model, row, `status check error: ${err.message}`);
+            await bumpOrFail(Model, row, `status check error: ${describeError(err)}`);
             continue;
         }
 
@@ -185,7 +187,18 @@ async function pollAll({ Model, baseFilter, rows, specByKey }) {
                 if (fin && fin.result !== undefined) set.result = fin.result;
                 await Model.updateOne({ _id: row._id }, { $set: set });
             } catch (err) {
-                await markStatus(Model, row._id, 'FAILED', `finalize failed: ${err.message}`);
+                // The note below is bounded and lands in Mongo; the STACK only survives if it is
+                // logged HERE. Two separate rounds of production diagnosis attributed a
+                // `finalize failed: socket hang up` to the wrong hop because this catch kept only
+                // `err.message` — three different transports on two branches of the finance finalize
+                // path emit that exact string. Pass the Error as an argument: utils/Logger.js renders
+                // a top-level Error as its stack, so no extra formatting is needed.
+                logger.error(
+                    `[asyncReportEngine] finalize failed for ${row.service}/${row.paramsKey} ` +
+                    `(user ${row.userId} ${row.country}-${row.region} runDate ${row.runDate})`,
+                    err
+                );
+                await markStatus(Model, row._id, 'FAILED', `finalize failed: ${describeError(err)}`);
             }
             continue;
         }

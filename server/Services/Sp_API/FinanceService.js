@@ -12,6 +12,7 @@ const FinanceBackfillCursor = require('../../models/finance/FinanceBackfillCurso
 const { downloadReportContent, isUnusableReportPayload } = require('../../utils/spApiReportDownload.js');
 const { checkSpApiStatusOnce } = require('./spApiReportAdapter.js');
 const { financeStep2SlicingEnabledFor } = require('../../utils/asyncFinanceGate.js');
+const { tagHop, HOP_NAMES } = require('../../utils/errorContext.js');
 
 // ★ VERSION — check this in logs to confirm deployment
 const FINANCE_SERVICE_VERSION = 'v3.1-sellerboard-match-20260506';
@@ -635,6 +636,77 @@ function computeNextRetryAfter(attempts) {
 }
 
 /**
+ * Bucket ONE FinanceSyncLog row's retry state. Single source of truth for the cap/backoff reading,
+ * shared by the sweeper, the chunk walk and diagnoseDailySchedule.
+ *
+ * It exists because the cap constant was already duplicated between here and freshnessSweeper.js,
+ * and a third copy in the diagnostics script is precisely how the three drift out of agreement and
+ * start disagreeing about whether a date is dead.
+ *
+ * The `capped` check MUST come first and MUST read the counter, not `nextRetryAfter` — a capped row
+ * has `nextRetryAfter: null` by design (see the note on computeNextRetryAfter), so testing the date
+ * first would read "no backoff pending" and classify a permanently-dead date as due right now.
+ *
+ * @param {{status?:string, consecutiveFailures?:number, nextRetryAfter?:Date|string|null}} log
+ * @returns {'capped'|'backed_off'|'due'}
+ */
+function classifyFinanceRetryState(log, { now = Date.now(), maxRetries = FINANCE_MAX_DATE_RETRIES } = {}) {
+  if (!log) return 'due';
+  if ((log.consecutiveFailures || 0) >= maxRetries) return 'capped';
+  if (log.nextRetryAfter && new Date(log.nextRetryAfter).getTime() > now) return 'backed_off';
+  return 'due';
+}
+
+/**
+ * Decide whether a FAILED chunk may be SKIPPED so the walk can reach later chunks, or whether the
+ * walk must STOP at it.
+ *
+ * WHY THIS EXISTS
+ * `_runAsyncFinancePhase` stopped at the first failed chunk unconditionally. Cursor safety is the
+ * real reason — the cursor is `max(FinanceSyncLog.date …)`, so jumping a gap strands those days at
+ * $0 forever — but that reason only applies to a window we still intend to retry. In production one
+ * permanently-failing 3-day chunk blocked every later chunk in the same job, every run, for days:
+ * the 30-day deep re-sync never got past chunk 6 of 10, so 2026-07-23→08-03 were never attempted.
+ *
+ * @returns {Promise<'capped'|'already_success'|null>} null means the caller MUST stop, not skip.
+ */
+async function classifyChunkSkip({ FinanceSyncLogModel = FinanceSyncLog, userObjectId, country, region, from, to }) {
+  try {
+    const dates = enumerateDatesInclusive(from, to);
+    if (!dates.length) return null;
+
+    const rows = await FinanceSyncLogModel.find(
+      { User: userObjectId, country: String(country).toUpperCase(), region, date: { $in: dates } },
+      { date: 1, status: 1, consecutiveFailures: 1 }
+    ).lean();
+
+    // A date with NO row has never been attempted. Skipping it would advance the cursor over a day
+    // we have never even asked Amazon about — the one case cursor safety genuinely protects.
+    if (rows.length < dates.length) return null;
+
+    const nonSuccess = rows.filter((r) => r.status !== 'success');
+
+    // Every day already good. This arm is essential, not defensive: recordSyncFailure never
+    // downgrades a success row, so a deep-re-sync chunk whose days are all already synced produces
+    // ZERO capped dates and would otherwise stall that walk every single day, forever.
+    if (nonSuccess.length === 0) return 'already_success';
+
+    // Capped means already abandoned: the sweeper excludes these dates and computeNextRetryAfter
+    // returns null for them. Advancing past them adds no new data loss — it only stops them
+    // blocking days that can still be fixed.
+    const allCapped = nonSuccess.every(
+      (r) => classifyFinanceRetryState(r) === 'capped'
+    );
+    return allCapped ? 'capped' : null;
+  } catch (err) {
+    // Fail CLOSED. An unreadable retry state must never license skipping a window — that is how a
+    // transient Mongo blip would turn into a permanent $0 gap.
+    logger.warn(`[Sync] classifyChunkSkip failed for ${from}→${to}: ${err.message}. Treating as "do not skip".`);
+    return null;
+  }
+}
+
+/**
  * Split a window into contiguous sub-ranges of at most `chunkDays`, OLDEST FIRST.
  *
  * Each sub-range becomes its own Amazon report. That is the fix for the deadlock: a 30-day
@@ -780,18 +852,29 @@ async function httpsRequest(options, postData = null) {
       return await httpsRequestOnce(options, postData);
     } catch (err) {
       lastError = err;
-      const canRetry = retryTransient && isTransientNetworkError(err) && attempt < REQUEST_MAX_RETRIES;
+      const transient = isTransientNetworkError(err);
+      const canRetry = retryTransient && transient && attempt < REQUEST_MAX_RETRIES;
       if (!canRetry) {
-        if (isTransientNetworkError(err) && !retryTransient) {
+        if (transient && !retryTransient) {
           logger.warn(
             `[FinanceService] transient network error on non-idempotent ${method} ${options.path || ''} ` +
             `(${err.code || 'no-code'}: ${err.message}). NOT retried — replaying it could duplicate ` +
             `the server-side effect. The caller will surface this and the next scheduled run retries.`
           );
+        } else if (transient) {
+          // Budget exhausted. Previously silent, which left "retried and gave up" and "never
+          // retried at all" indistinguishable in the logs — the ambiguity that made a production
+          // `socket hang up` take three rounds to attribute.
+          logger.warn(
+            `[FinanceService] GAVE UP on ${method} ${options.path || ''} after ` +
+            `${REQUEST_MAX_RETRIES + 1} attempt(s) (${err.code || 'no-code'}: ${err.message}).`
+          );
         }
         throw err;
       }
-      const waitMs = REQUEST_RETRY_BASE_MS * Math.pow(2, attempt);
+      // Jitter, so clustered workers hitting one Amazon blip do not retry in lockstep.
+      const nominal = REQUEST_RETRY_BASE_MS * Math.pow(2, attempt);
+      const waitMs = Math.round(nominal * (0.75 + Math.random() * 0.5));
       logger.warn(
         `[FinanceService] transient network error on ${method} ${options.path || ''} ` +
         `(${err.code || 'no-code'}: ${err.message}). Retry ${attempt + 1}/${REQUEST_MAX_RETRIES} in ${waitMs}ms.`
@@ -854,11 +937,17 @@ async function pollReportStatus(tokenManager, baseUrl, reportId) {
 }
 
 async function getReportDocumentUrl(tokenManager, baseUrl, reportDocumentId) {
-  return tokenManager.withRetry(async (accessToken) => {
-    const res = await httpsRequest({ hostname: baseUrl, path: `/reports/2021-06-30/documents/${encodeURIComponent(reportDocumentId)}`, method: 'GET', headers: { 'x-amz-access-token': accessToken } });
-    if (res.body.errors) throw new Error(`getReportDocument failed: ${JSON.stringify(res.body.errors)}`);
-    return res.body;
-  });
+  try {
+    return await tokenManager.withRetry(async (accessToken) => {
+      const res = await httpsRequest({ hostname: baseUrl, path: `/reports/2021-06-30/documents/${encodeURIComponent(reportDocumentId)}`, method: 'GET', headers: { 'x-amz-access-token': accessToken } });
+      if (res.body.errors) throw new Error(`getReportDocument failed: ${JSON.stringify(res.body.errors)}`);
+      return res.body;
+    });
+  } catch (err) {
+    // `withRetry` can mint a token on the way in, so a failure here may actually be `lwaToken`.
+    // tagHop is first-tag-wins, which keeps that distinction instead of flattening it to this hop.
+    throw tagHop(err, HOP_NAMES.REPORT_DOCUMENT_URL);
+  }
 }
 
 function parseTsv(rawData) {
@@ -1588,6 +1677,12 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
         addFinanceRowsToIndex(financeIndex, pageExpenses, pageRevenue);
       },
     });
+  }).catch((err) => {
+    // Outermost tag for the Finance-API leg of Step 1. First-tag-wins, so an inner `lwaToken` or
+    // `financeTxnPage` tag survives untouched; this only labels a failure that arrived with none —
+    // guaranteeing the stored note always names WHICH leg of finalize died, not just what the
+    // socket did.
+    throw tagHop(err, HOP_NAMES.FINANCE_WALK);
   });
   logFinanceIndexDedup(financeIndex);
 
@@ -2843,6 +2938,12 @@ module.exports = {
   runChunkedFetch,
   recordSyncFailure,
   classifySyncFailure,
+  // Retry-state reading. Exported so the sweeper, the chunk walk and diagnoseDailySchedule all
+  // agree on when a date is capped vs backed off vs due — the cap constant was already duplicated
+  // in freshnessSweeper.js, and a third copy is how the three start disagreeing.
+  classifyFinanceRetryState,
+  classifyChunkSkip,
+  FINANCE_MAX_DATE_RETRIES,
   addDaysStr,
   daysBetweenInclusive,
   // Incremental finance index — exported so the page-by-page fold can be proven equivalent to the
