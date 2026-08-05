@@ -554,3 +554,182 @@ describe('classifyFinanceRetryState', () => {
     expect(classifyFinanceRetryState(null)).toBe('due');
   });
 });
+
+/**
+ * `runChunkedFetch` + `classifySkip` — one dead chunk must not starve the chunks behind it.
+ *
+ * WHY THIS EXISTS
+ * Without a classifier this loop aborts the whole run at the first failure. Because the cursor is
+ * `MAX(FinanceSyncLog.date where status:'success')`, the next run's window starts at that same
+ * failing date — so the bad chunk is chunk 1 again and chunks 2..N are never reached, indefinitely.
+ * This is the inline twin of the async-path bug: there, a 30-day deep re-sync never got past chunk 6
+ * of 10 for days, so 2026-07-23→08-03 were never attempted at all.
+ *
+ * The classifier is consulted REACTIVELY — only after an attempt has already failed. Skipping
+ * pre-emptively would save the wasted attempt, but the window could then never self-heal: it would be
+ * stepped over on every future run including the forced deep re-sync, leaving a manual counter reset
+ * as the only way back.
+ */
+describe('runChunkedFetch — skipping an abandoned chunk', () => {
+  /** Fail exactly the chunk at `failIndex`; record every chunk actually attempted. */
+  function harness({ failIndex, classifySkip, chunks = CHUNKS_9_DAYS, budgetMs = 60000 }) {
+    const seen = [];
+    const failIndexes = Array.isArray(failIndex) ? failIndex : [failIndex];
+    return {
+      seen,
+      run: () => runChunkedFetch({
+        chunks,
+        budgetMs,
+        classifySkip,
+        fetchChunk: async (c, i) => {
+          seen.push(rangeOf(c));
+          if (failIndexes.includes(i)) throw new Error(`boom on ${i}`);
+          return STATS;
+        },
+      }),
+    };
+  }
+
+  test('capped => steps over the chunk and keeps going', async () => {
+    const h = harness({ failIndex: 0, classifySkip: async () => 'capped' });
+    const result = await h.run();
+
+    // The whole point: chunks 2 and 3 are reached despite chunk 1 failing.
+    expect(h.seen).toEqual([
+      '2026-06-15→2026-06-17',
+      '2026-06-18→2026-06-20',
+      '2026-06-21→2026-06-23',
+    ]);
+    expect(result.chunksCompleted).toBe(2);
+    expect(result.skippedChunks).toEqual([
+      expect.objectContaining({
+        chunk: { startDate: '2026-06-15', endDate: '2026-06-17' },
+        reason: 'capped',
+      }),
+    ]);
+  });
+
+  test('already_success => also steps over, with the other reason', async () => {
+    // Essential arm: recordSyncFailure never downgrades a success row, so a re-sync chunk whose days
+    // are all already good produces ZERO capped dates and would otherwise stall that walk forever.
+    const h = harness({ failIndex: 1, classifySkip: async () => 'already_success' });
+    const result = await h.run();
+
+    expect(result.chunksCompleted).toBe(2);
+    expect(result.skippedChunks[0].reason).toBe('already_success');
+  });
+
+  test('the skip carries the cause, so it is never silent', async () => {
+    const h = harness({ failIndex: 0, classifySkip: async () => 'capped' });
+    const result = await h.run();
+    expect(result.skippedChunks[0].error).toContain('boom on 0');
+  });
+
+  test('null => STILL STOPS, with failedChunk intact (the unchanged default path)', async () => {
+    const h = harness({ failIndex: 1, classifySkip: async () => null });
+    const err = await h.run().catch((e) => e);
+
+    expect(err.message).toBe('boom on 1');
+    expect(err.failedChunk).toEqual({ startDate: '2026-06-18', endDate: '2026-06-20' });
+    expect(err.chunksCompletedBeforeFailure).toBe(1);
+    // Chunk 3 must NOT run — this window is still retryable, so the cursor must stay behind it.
+    expect(h.seen).toHaveLength(2);
+  });
+
+  test('a classifier that THROWS fails CLOSED — the walk stops', async () => {
+    // An unreadable retry state must never license a skip: that turns a transient Mongo blip into a
+    // permanent $0 gap.
+    const h = harness({ failIndex: 0, classifySkip: async () => { throw new Error('mongo down'); } });
+    const err = await h.run().catch((e) => e);
+
+    expect(err.message).toBe('boom on 0');
+    expect(h.seen).toHaveLength(1);
+  });
+
+  test('omitting classifySkip is byte-identical to the old behaviour', async () => {
+    const seen = [];
+    const err = await runChunkedFetch({
+      chunks: CHUNKS_9_DAYS,
+      budgetMs: 60000,
+      fetchChunk: async (c, i) => { seen.push(rangeOf(c)); if (i === 0) throw new Error('boom'); return STATS; },
+    }).catch((e) => e);
+
+    expect(err.message).toBe('boom');
+    expect(seen).toHaveLength(1);
+  });
+
+  test('a skip does NOT count as a completed chunk', async () => {
+    const h = harness({ failIndex: [0, 1], classifySkip: async () => 'capped' });
+    const result = await h.run();
+
+    expect(result.chunksCompleted).toBe(1);        // only chunk 3 actually landed
+    expect(result.skippedChunks).toHaveLength(2);
+  });
+
+  test('but a skip DOES count toward the run budget', async () => {
+    // Load-bearing. A skip only happens after a failed attempt, which in production can burn 10-25
+    // minutes. If the budget guard counted completions, an all-doomed window would grind through
+    // every chunk and never trip the 40-minute budget, because the counter would sit at 0.
+    const h = harness({
+      failIndex: [0, 1, 2],
+      classifySkip: async () => 'capped',
+      budgetMs: 0,                                  // already spent on entry
+    });
+    const result = await h.run();
+
+    // One attempt is still mandatory (a backlog must never stall), but the second must not start.
+    expect(h.seen).toHaveLength(1);
+    expect(result.stopReason).toBe('budget');
+    expect(result.skippedChunks).toHaveLength(1);
+  });
+
+  test('a later NON-skippable failure still throws, and reports the earlier skip', async () => {
+    // Otherwise the run reads as a plain stop at chunk 2 and hides that chunk 1 was abandoned.
+    const h = harness({
+      failIndex: [0, 1],
+      classifySkip: async (chunk) => (chunk.startDate === '2026-06-15' ? 'capped' : null),
+    });
+    const err = await h.run().catch((e) => e);
+
+    expect(err.message).toBe('boom on 1');
+    expect(err.failedChunk).toEqual({ startDate: '2026-06-18', endDate: '2026-06-20' });
+    expect(err.skippedChunks).toHaveLength(1);
+    expect(err.skippedChunks[0].chunk.startDate).toBe('2026-06-15');
+  });
+
+  test('every chunk skippable => resolves with zero completed and no throw', async () => {
+    const h = harness({ failIndex: [0, 1, 2], classifySkip: async () => 'capped' });
+    const result = await h.run();
+
+    expect(result.chunksCompleted).toBe(0);
+    expect(result.skippedChunks).toHaveLength(3);
+    expect(result.stopReason).toBeNull();
+  });
+
+  test('the classifier receives the chunk, its index, and the error', async () => {
+    const calls = [];
+    await runChunkedFetch({
+      chunks: CHUNKS_9_DAYS,
+      budgetMs: 60000,
+      classifySkip: async (chunk, index, err) => { calls.push({ chunk, index, msg: err.message }); return 'capped'; },
+      fetchChunk: async (_c, i) => { if (i === 1) throw new Error('boom on 1'); return STATS; },
+    });
+
+    expect(calls).toEqual([
+      { chunk: { startDate: '2026-06-18', endDate: '2026-06-20' }, index: 1, msg: 'boom on 1' },
+    ]);
+  });
+
+  test('the classifier is NOT consulted for a chunk that succeeded', async () => {
+    // Reactive by construction: no failure, no classification, no wasted DB reads on the happy path.
+    let calls = 0;
+    await runChunkedFetch({
+      chunks: CHUNKS_9_DAYS,
+      budgetMs: 60000,
+      classifySkip: async () => { calls++; return 'capped'; },
+      fetchChunk: async () => STATS,
+    });
+
+    expect(calls).toBe(0);
+  });
+});

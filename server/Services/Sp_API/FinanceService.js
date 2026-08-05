@@ -467,22 +467,49 @@ function resolveSyncWindow({
  * On failure the chunk that failed is attached to the error as `err.failedChunk`, so the caller
  * can scope its bookkeeping to exactly those dates instead of the whole window.
  *
+ * `classifySkip` (optional) is what stops ONE dead chunk starving every chunk behind it. Without it
+ * this loop aborts the whole run at the first failure, and because the cursor is
+ * `MAX(FinanceSyncLog.date where status:'success')`, the next run's window starts at that same
+ * failing date — so the bad chunk is chunk 1 again and chunks 2..N are never reached, indefinitely.
+ * That is the inline twin of the async-path bug fixed in PR #8.
+ *
+ * It is consulted REACTIVELY — only after an attempt has already failed, never before one. Skipping
+ * pre-emptively would save the wasted attempt but the window could then never self-heal: it would be
+ * stepped over on every future run too, including the sweeper's forced deep re-sync, so only a manual
+ * counter reset could ever revive it.
+ *
  * @param {object} args
  * @param {Array<{startDate:string,endDate:string}>} args.chunks
  * @param {number} args.budgetMs
  * @param {Function} args.fetchChunk async (chunk, index) => {salesOrders, skuDocs, overheadDocs, pendingOrders}
- * @returns {Promise<{chunksCompleted:number, stopReason:string|null, aggregate:object}>}
+ * @param {number} [args.heapLimitBytes]
+ * @param {Function} [args.classifySkip] async (chunk, index, err) => 'capped'|'already_success'|null.
+ *        Called only after `fetchChunk` threw. A truthy reason steps over the chunk and continues;
+ *        anything else (including a throw, or the parameter being omitted) stops the walk — the
+ *        default, and the safe direction.
+ * @returns {Promise<{chunksCompleted:number, stopReason:string|null, aggregate:object, skippedChunks:Array}>}
  */
-async function runChunkedFetch({ chunks, budgetMs, fetchChunk, heapLimitBytes = 0 }) {
+async function runChunkedFetch({ chunks, budgetMs, fetchChunk, heapLimitBytes = 0, classifySkip = null }) {
   const deadlineAt = Date.now() + budgetMs;
   const aggregate = { salesOrders: 0, skuDocs: 0, overheadDocs: 0, pendingOrders: 0 };
+  const skippedChunks = [];
   let chunksCompleted = 0;
   let stopReason = null;
 
   for (let i = 0; i < chunks.length; i++) {
+    // Guards below count ATTEMPTS (completed + skipped), not completions.
+    //
+    // That distinction is load-bearing once `classifySkip` is in play. A skip does not increment
+    // `chunksCompleted`, and a skip only happens AFTER a failed attempt that may have burned
+    // 10-25 minutes — so guarding on completions would let a run grind through one doomed chunk
+    // after another and never trip its 40-minute budget, because the counter would sit at 0 the
+    // whole time. Counting attempts keeps the original intent intact (attempts is 0 on the first
+    // iteration, so the first chunk is never blocked) while making the budget effective again.
+    const chunksAttempted = chunksCompleted + skippedChunks.length;
+
     // Checked BETWEEN chunks only, and never before the first one. Interrupting mid-chunk would
     // leave its dates half-written; refusing to run any chunk would stall the backlog forever.
-    if (chunksCompleted > 0 && Date.now() >= deadlineAt) {
+    if (chunksAttempted > 0 && Date.now() >= deadlineAt) {
       stopReason = 'budget';
       break;
     }
@@ -494,7 +521,7 @@ async function runChunkedFetch({ chunks, budgetMs, fetchChunk, heapLimitBytes = 
     // Same placement rule as the budget check above — BETWEEN chunks, never before the first. A run
     // must always attempt at least one chunk, otherwise an account on a already-warm worker could
     // make zero progress indefinitely, which is the failure mode this whole effort exists to remove.
-    if (heapLimitBytes > 0 && chunksCompleted > 0 && process.memoryUsage().heapUsed >= heapLimitBytes) {
+    if (heapLimitBytes > 0 && chunksAttempted > 0 && process.memoryUsage().heapUsed >= heapLimitBytes) {
       stopReason = 'memory';
       break;
     }
@@ -507,15 +534,49 @@ async function runChunkedFetch({ chunks, budgetMs, fetchChunk, heapLimitBytes = 
       aggregate.pendingOrders += (res && res.pendingOrders) || 0;
       chunksCompleted++;
     } catch (err) {
-      // Stop here rather than skipping ahead: the cursor is the MAX success date, so continuing
-      // past a failed chunk could advance it beyond days that were never fetched.
+      // STOPPING IS THE DEFAULT, and it is deliberate: the cursor is the MAX success date, so
+      // continuing past a chunk we still intend to retry would advance it beyond days that were
+      // never fetched, stranding them at $0 forever.
+      //
+      // The one exception is a chunk that is already ABANDONED — every date past its retry cap, or
+      // every date already holding good data. Those cannot be made worse by moving on, and refusing
+      // to move on is what starved every chunk behind them.
+      let skipReason = null;
+      if (classifySkip) {
+        try {
+          skipReason = await classifySkip(chunks[i], i, err);
+        } catch (classifyErr) {
+          // Fail CLOSED. An unreadable retry state must never license a skip — that would turn a
+          // transient Mongo blip into a permanent $0 gap.
+          logger.warn(`[Sync] chunk-skip check failed for ${chunks[i].startDate}→${chunks[i].endDate} (${classifyErr.message}); stopping the walk, which is the safe default.`);
+          skipReason = null;
+        }
+      }
+
+      if (skipReason) {
+        // NOTE: no `recordSyncFailure` here, unlike the async path which records before classifying.
+        // Deliberate, and not an oversight to "correct": a chunk is only skippable once its dates are
+        // already at the cap, so bumping the counter further changes no decision and would grow it
+        // without bound. The caller's catch still records on the throw path below, so a failure is
+        // recorded exactly once either way.
+        skippedChunks.push({
+          chunk: chunks[i],
+          reason: skipReason,
+          error: String(err.message || err).slice(0, 200),
+        });
+        continue;
+      }
+
       err.failedChunk = chunks[i];
       err.chunksCompletedBeforeFailure = chunksCompleted;
+      // Carried so the caller can report that earlier chunks were stepped over on the way here —
+      // otherwise a later failure would make the run look like a plain stop at chunk N.
+      if (skippedChunks.length) err.skippedChunks = skippedChunks;
       throw err;
     }
   }
 
-  return { chunksCompleted, stopReason, aggregate };
+  return { chunksCompleted, stopReason, aggregate, skippedChunks };
 }
 
 /**
@@ -2632,6 +2693,16 @@ async function syncFinanceData({ userId, country, regionModel, refreshToken, acc
         }
         return fetchNewSalesAndExpenses({ userId, country, regionModel, startDate: chunk.startDate, endDate: chunk.endDate, accessToken, refreshToken, clientId, clientSecret, tokenManager });
       },
+      // Lets the walk step over a chunk that is already abandoned, instead of aborting the run and
+      // starving every chunk behind it (see runChunkedFetch's docblock). Fails closed, so a
+      // first-time backfill — where no date has a FinanceSyncLog row yet — can never skip.
+      classifySkip: (chunk) => classifyChunkSkip({
+        userObjectId,
+        country,
+        region: regionModel,
+        from: chunk.startDate,
+        to: chunk.endDate,
+      }),
     });
 
     chunksCompleted = loop.chunksCompleted;
@@ -2649,6 +2720,31 @@ async function syncFinanceData({ userId, country, regionModel, refreshToken, acc
       );
     }
 
+    // A skip must never be silent — the whole reason the original loop bug went unnoticed for a day
+    // was a failure nothing could see. `capped` and `already_success` have very different
+    // consequences, so name them separately rather than reporting a bare count.
+    if (loop.skippedChunks && loop.skippedChunks.length) {
+      const capped = loop.skippedChunks.filter((s) => s.reason === 'capped');
+      const redundant = loop.skippedChunks.filter((s) => s.reason !== 'capped');
+      if (capped.length) {
+        logger.warn(
+          `[Sync] SKIPPED ${capped.length} chunk(s) whose dates have all burned ` +
+          `${FINANCE_MAX_DATE_RETRIES} retries, so later chunks were not starved: ` +
+          `${capped.map((s) => `${s.chunk.startDate}→${s.chunk.endDate}`).join(', ')}. ` +
+          `Those days are GIVEN UP ON and keep their estimated/absent fees — see ` +
+          `diagnoseDailySchedule section 8, and reset consecutiveFailures once the cause is fixed. ` +
+          `Newest cause: ${capped[capped.length - 1].error}`
+        );
+      }
+      if (redundant.length) {
+        logger.warn(
+          `[Sync] Stepped over ${redundant.length} already-successful chunk(s) whose report failed ` +
+          `(nothing lost — those dates already hold data): ` +
+          `${redundant.map((s) => `${s.chunk.startDate}→${s.chunk.endDate}`).join(', ')}.`
+        );
+      }
+    }
+
     const step1 = loop.aggregate;
     const step2 = await backfillPendingExpenses({ userId, country, regionModel, accessToken: tokenManager.token, refreshToken, clientId, clientSecret, tokenManager, slicingEnabled: financeStep2SlicingEnabledFor(userId) });
     await syncRelationshipsIfNeeded({ userId, country, regionModel, startDate, endDate, accessToken: tokenManager.token, refreshToken, clientId, clientSecret });
@@ -2661,6 +2757,7 @@ async function syncFinanceData({ userId, country, regionModel, refreshToken, acc
       chunksTotal: chunks.length,
       chunksCompleted,
       stopReason,
+      skippedChunks: loop.skippedChunks || [],
     };
   } catch (err) {
     // Write a 'failed' sync log so failures are visible in the database.
@@ -2682,10 +2779,15 @@ async function syncFinanceData({ userId, country, regionModel, refreshToken, acc
     if (errorKind === 'auth_denied') {
       logger.error(`[Sync] SP-API AUTHORIZATION DENIED for ${country}-${regionModel} (user ${userId}) — the account must RE-AUTHORIZE; finance cannot be fetched until it reconnects. Window ${failedFrom}→${failedTo}.`);
     }
+    // Name any chunks stepped over on the way here, or this reads as a plain stop at chunk N and
+    // hides that earlier windows were abandoned in the same run.
+    const skippedNote = err.skippedChunks && err.skippedChunks.length
+      ? ` (after SKIPPING ${err.skippedChunks.length} abandoned chunk(s): ${err.skippedChunks.map((s) => `${s.chunk.startDate}→${s.chunk.endDate}[${s.reason}]`).join(', ')})`
+      : '';
     logger.error(
       `[Sync] Finance sync failed for ${country}-${regionModel} (kind=${errorKind}) on ` +
-      `${failedFrom}→${failedTo} after ${chunksCompleted}/${chunks.length} chunk(s): ${err.message}`,
-      { userId, startDate, endDate, failedFrom, failedTo, errorKind, stack: err.stack }
+      `${failedFrom}→${failedTo} after ${chunksCompleted}/${chunks.length} chunk(s)${skippedNote}: ${err.message}`,
+      { userId, startDate, endDate, failedFrom, failedTo, errorKind, skippedChunks: err.skippedChunks || [], stack: err.stack }
     );
     try {
       await recordSyncFailure({
