@@ -13,11 +13,11 @@ const sixMonthWarningTemplate = fs.readFileSync(
 
 /**
  * Send 6‑month account warning email to user
- * 
+ *
  * This email informs the user that:
- * - In 2 days it will be 6 months since registration
+ * - It has been 6 months since registration
  * - They have not connected their seller account or purchased a qualifying plan
- * - They can start a 7‑day free trial and must connect within 2 days
+ * - They can start a 7‑day free trial and must connect within 3 days
  * - Otherwise their account will be suspended
  *
  * @param {Object} params
@@ -42,8 +42,8 @@ const sendSixMonthAccountWarning = async ({ email, firstName, lastName, userId =
         receiverEmail: email,
         receiverId: userId,
         status: 'PENDING',
-        subject: 'Action Needed: Connect Your SellerQI Account in the Next 2 Days',
-        emailContent: `In 2 days it will be 6 months since you registered. You have not connected your seller or ads account or activated a Pro/LITE plan. Log in to your dashboard to start a 7‑day trial and connect within 2 days to avoid suspension.`,
+        subject: 'Action Needed: Connect Your SellerQI Account in the Next 3 Days',
+        emailContent: `It has been 6 months since you registered. You have not connected your seller or ads account or activated a Pro/LITE plan. Log in to your dashboard to start a 7‑day trial and connect within 3 days to avoid suspension.`,
         emailProvider: 'AWS_SES'
     });
 
@@ -76,11 +76,11 @@ const sendSixMonthAccountWarning = async ({ email, firstName, lastName, userId =
         const text = `
 Hi ${userName},
 
-In 2 days it will be 6 months since you registered your SellerQI account, but you still haven't connected your Amazon seller/ads accounts or activated a Pro plan.
+It has been 6 months since you registered your SellerQI account, but you still haven't connected your Amazon seller/ads accounts or activated a Pro plan.
 
-If you're still interested, please log in to your SellerQI dashboard within the next 2 days. From there you can start your 7‑day free trial and connect your accounts from the Settings → Plans & Billing and Account Integrations sections.
+If you're still interested, please log in to your SellerQI dashboard within the next 3 days. From there you can start your 7‑day free trial and connect your accounts from the Settings → Plans & Billing and Account Integrations sections.
 
-If you do not connect your accounts or upgrade to Pro from inside the dashboard within 2 days, your SellerQI account will be paused and your data may be removed.
+If you do not connect your accounts or upgrade to Pro from inside the dashboard within 3 days, your SellerQI account will be paused and your data may be removed.
 
 Best regards,
 SellerQI Team
@@ -107,7 +107,11 @@ SellerQI Team
         const mailOptions = {
             from: fromEmail,
             to: email,
-            subject: 'Action Needed: Connect Your SellerQI Account in the Next 2 Days',
+            // Support is CC'd so there's visibility into which accounts are on
+            // the 3-day deletion countdown. ADMIN_EMAIL_ID is already a
+            // comma-separated list (see .env), which nodemailer's `cc` accepts directly.
+            ...(process.env.ADMIN_EMAIL_ID && { cc: process.env.ADMIN_EMAIL_ID }),
+            subject: 'Action Needed: Connect Your SellerQI Account in the Next 3 Days',
             text,
             html,
         };

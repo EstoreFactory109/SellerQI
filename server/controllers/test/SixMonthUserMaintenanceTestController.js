@@ -11,17 +11,23 @@ const { sendAccountSuspendedEmail } = require('../../Services/Email/SendAccountS
 const { resolveRecipientEmail } = require('../../Services/Email/resolveRecipientEmail.js');
 
 const {
+    isEligibleForWarning,
+    isEligibleForDeletion,
     isUserConnectedToSpApiOrAds,
-    hasActiveSubscription,
-    addMonths,
+    resolveEffectiveLiteSince,
+    getDaysUntilSixMonthMark,
 } = require('../../Services/BackgroundJobs/SixMonthUserMaintenanceService.js');
 
 const { deleteUserById } = require('../../Services/User/deleteUserService.js');
 const { enqueueFullUserDataPurge } = require('../../Services/BackgroundJobs/deleteUserQueue.js');
 
+const USER_SELECT_FIELDS =
+    'firstName lastName email createdAt packageType subscriptionStatus isVerified isAgencyClient agencyId purgedAt sixMonthWarningSentAt';
+
 /**
  * Test endpoint: evaluate and optionally send the 6‑month warning email
- * for a single user.
+ * for a single user. Uses the exact same isEligibleForWarning predicate as
+ * the production cron job, so this can never drift from real behavior.
  *
  * Route: POST /api/test/six-month-maintenance/user/:userId/warning
  *
@@ -40,29 +46,18 @@ const testSixMonthWarningForUser = asyncHandler(async (req, res) => {
             .json(new ApiResponse(400, null, 'userId is required (path param or body)'));
     }
 
-    const user = await User.findById(userId).select(
-        'firstName lastName email createdAt packageType subscriptionStatus isVerified'
-    );
+    const user = await User.findById(userId).select(USER_SELECT_FIELDS).lean();
 
     if (!user) {
         return res.status(404).json(new ApiResponse(404, null, 'User not found'));
     }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const createdAt = new Date(user.createdAt);
-    const sixMonthsFromCreated = addMonths(createdAt, 6);
-    sixMonthsFromCreated.setHours(0, 0, 0, 0);
-    const diffDays = Math.ceil(
-        (sixMonthsFromCreated.getTime() - today.getTime()) / (24 * 60 * 60 * 1000)
-    );
-
-    const [connected, activeSub] = await Promise.all([
-        isUserConnectedToSpApiOrAds(user._id),
-        hasActiveSubscription(user._id),
-    ]);
-
-    const matchesServiceCriteria = diffDays === 2 && (!connected || !activeSub);
+    const now = new Date();
+    const effectiveLiteSince = await resolveEffectiveLiteSince(user);
+    const decoratedUser = { ...user, effectiveLiteSince };
+    const daysUntilSixMonths = getDaysUntilSixMonthMark(effectiveLiteSince, now);
+    const connected = await isUserConnectedToSpApiOrAds(user._id);
+    const matchesServiceCriteria = isEligibleForWarning(decoratedUser, now);
 
     let emailMessageId = null;
     let emailSent = false;
@@ -81,14 +76,17 @@ const testSixMonthWarningForUser = asyncHandler(async (req, res) => {
         if (result && !result.success && result.error) {
             emailError = result.error;
         }
+
+        // Mirror production behavior: only mark as warned on a confirmed send
+        if (emailSent) {
+            await User.updateOne({ _id: user._id }, { $set: { sixMonthWarningSentAt: now } });
+        }
     }
 
     logger.info('[SixMonthUserMaintenanceTest] Six-month warning evaluation for user', {
         userId: user._id.toString(),
         email: user.email,
-        diffDays,
-        connected,
-        activeSub,
+        daysUntilSixMonths,
         matchesServiceCriteria,
         sendRequested: !!send,
         emailSent,
@@ -107,11 +105,14 @@ const testSixMonthWarningForUser = asyncHandler(async (req, res) => {
                     packageType: user.packageType,
                     subscriptionStatus: user.subscriptionStatus,
                     isVerified: user.isVerified,
+                    isAgencyClient: user.isAgencyClient,
+                    agencyId: user.agencyId,
+                    purgedAt: user.purgedAt,
+                    sixMonthWarningSentAt: user.sixMonthWarningSentAt,
                 },
-                sixMonthDate: sixMonthsFromCreated,
-                daysUntilSixMonths: diffDays,
+                effectiveLiteSince,
+                daysUntilSixMonths,
                 isConnectedToSpApiOrAds: connected,
-                hasActiveSubscription: activeSub,
                 matchesServiceCriteria,
                 sendRequested: !!send,
                 emailSent,
@@ -124,14 +125,14 @@ const testSixMonthWarningForUser = asyncHandler(async (req, res) => {
 });
 
 /**
- * Test endpoint: evaluate and optionally delete a single user using
- * the same rules as the 6+ month LITE cleanup service.
+ * Test endpoint: evaluate and optionally purge a single user using the
+ * exact same isEligibleForDeletion predicate as the production cron job.
  *
  * Route: POST /api/test/six-month-maintenance/user/:userId/delete
  *
  * Body (optional):
  * {
- *   "force": true | false   // default false; if true, delete even if criteria don't fully match
+ *   "force": true | false   // default false; if true, purge even if criteria don't fully match
  * }
  */
 const testDeleteStaleLiteUser = asyncHandler(async (req, res) => {
@@ -144,23 +145,14 @@ const testDeleteStaleLiteUser = asyncHandler(async (req, res) => {
             .json(new ApiResponse(400, null, 'userId is required (path param or body)'));
     }
 
-    const user = await User.findById(userId).select(
-        'firstName lastName email createdAt packageType subscriptionStatus isVerified'
-    );
+    const user = await User.findById(userId).select(USER_SELECT_FIELDS).lean();
 
     if (!user) {
         return res.status(404).json(new ApiResponse(404, null, 'User not found'));
     }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const sixMonthsAgo = addMonths(today, -6);
-
-    const isLite = user.packageType === 'LITE';
-    const isSixMonthsOrOlder = user.createdAt && user.createdAt <= sixMonthsAgo;
-    const connected = await isUserConnectedToSpApiOrAds(user._id);
-
-    const matchesServiceCriteria = isLite && isSixMonthsOrOlder && !connected;
+    const now = new Date();
+    const matchesServiceCriteria = isEligibleForDeletion(user, now);
 
     let deleted = false;
     let purgeEnqueued = false;
@@ -168,13 +160,12 @@ const testDeleteStaleLiteUser = asyncHandler(async (req, res) => {
     let suspensionEmailError = null;
 
     if (matchesServiceCriteria || force) {
-        // Resolve agency email before deletion (user must still exist in DB)
         const userEmail = await resolveRecipientEmail(user.email, user._id);
         const userFirstName = user.firstName;
         const userLastName = user.lastName;
         const userIdStr = user._id.toString();
 
-        // Suspend first (delete user + enqueue purge) — no waiting
+        // Soft-delete: Seller removed, User document retained
         try {
             await deleteUserById(userIdStr);
             deleted = true;
@@ -197,7 +188,6 @@ const testDeleteStaleLiteUser = asyncHandler(async (req, res) => {
             }
         }
 
-        // Send suspension email after account is suspended (using captured data)
         try {
             const emailResult = await sendAccountSuspendedEmail({
                 email: userEmail,
@@ -210,16 +200,13 @@ const testDeleteStaleLiteUser = asyncHandler(async (req, res) => {
             }
         } catch (emailErr) {
             suspensionEmailError = emailErr?.message || String(emailErr);
-            logger.warn('[SixMonthUserMaintenanceTest] Suspension email failed (user already suspended):', emailErr);
+            logger.warn('[SixMonthUserMaintenanceTest] Suspension email failed:', emailErr);
         }
     }
 
     logger.info('[SixMonthUserMaintenanceTest] Delete evaluation for user', {
         userId: user._id.toString(),
         email: user.email,
-        isLite,
-        isSixMonthsOrOlder,
-        isConnectedToSpApiOrAds: connected,
         matchesServiceCriteria,
         force: !!force,
         deleted,
@@ -239,12 +226,11 @@ const testDeleteStaleLiteUser = asyncHandler(async (req, res) => {
                     packageType: user.packageType,
                     subscriptionStatus: user.subscriptionStatus,
                     isVerified: user.isVerified,
+                    isAgencyClient: user.isAgencyClient,
+                    agencyId: user.agencyId,
+                    purgedAt: user.purgedAt,
+                    sixMonthWarningSentAt: user.sixMonthWarningSentAt,
                 },
-                today,
-                sixMonthsAgo,
-                isLite,
-                isSixMonthsOrOlder,
-                isConnectedToSpApiOrAds: connected,
                 matchesServiceCriteria,
                 force: !!force,
                 deleted,
@@ -261,4 +247,3 @@ module.exports = {
     testSixMonthWarningForUser,
     testDeleteStaleLiteUser,
 };
-

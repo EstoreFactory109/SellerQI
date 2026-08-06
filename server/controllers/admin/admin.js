@@ -1081,20 +1081,21 @@ const deleteUser = asyncHandler(async (req, res) => {
             return res.status(400).json(new ApiResponse(400, "", "Cannot delete your own account"));
         }
 
-        // Use the delete service to delete user and seller documents (hybrid: immediate)
+        // Use the delete service to remove seller documents and operational data.
+        // The User document itself is retained for audit/history.
         const result = await deleteUserById(userId);
 
-        logger.info(`SuperAdmin ${adminId} deleted user ${userId}`);
+        logger.info(`SuperAdmin ${adminId} purged user ${userId}`);
 
         // Enqueue full data purge in background (independent queue; does not affect existing flows)
         try {
             await enqueueFullUserDataPurge(userId);
         } catch (enqueueErr) {
             logger.error(`[deleteUser] Failed to enqueue full user data purge for ${userId}:`, enqueueErr);
-            // Do not fail the request; user and sellers are already deleted
+            // Do not fail the request; seller documents are already deleted
         }
 
-        return res.status(200).json(new ApiResponse(200, result.data, "User account and seller documents deleted. Remaining data will be removed in the background."));
+        return res.status(200).json(new ApiResponse(200, result.data, "Seller documents and operational data removed. User account retained for record-keeping. Remaining data will be removed in the background."));
 
     } catch (error) {
         // Handle ApiError instances

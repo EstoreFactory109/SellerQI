@@ -3,6 +3,7 @@ const { DataUpdateService } = require('./DataUpdateService.js');
 const { UserSchedulingService } = require('./UserSchedulingService.js');
 const { sendMail } = require('./sendEmailWeekly.js');
 const { sendTrialReminderEmails } = require('./ReminderEmailToUpgrade.js');
+const { sendSixMonthAccountWarnings, deleteStaleLiteUsersWithoutIntegration } = require('./SixMonthUserMaintenanceService.js');
 const logger = require('../../utils/Logger.js');
 const config = require('../../config/config.js');
 
@@ -45,6 +46,8 @@ class JobScheduler {
             this.setupHealthCheckJob();
             this.setupWeeklyEmailJob();
             this.setupTrialReminderJob();
+            this.setupSixMonthWarningJob();
+            this.setupSixMonthCleanupJob();
 
             this.isInitialized = true;
             logger.info('Background job scheduler initialized successfully');
@@ -170,6 +173,56 @@ class JobScheduler {
     }
 
     /**
+     * Setup six-month inactivity warning email job - runs daily at 10:00 AM.
+     * Sends the warning to every LITE, non-agency user who is within
+     * WARNING_WINDOW_DAYS of (or past) their 6-month registration mark and
+     * hasn't been warned yet.
+     */
+    setupSixMonthWarningJob() {
+        const sixMonthWarningJob = cron.schedule('0 10 * * *', async () => {
+            try {
+                logger.info('Running six-month account warning job (daily at 10:00 AM)');
+                const result = await sendSixMonthAccountWarnings();
+                logger.info('Six-month account warning job completed successfully', result);
+            } catch (error) {
+                logger.error('Error in six-month account warning job:', error);
+            }
+        }, {
+            scheduled: false,
+            timezone: process.env.TIMEZONE || "UTC"
+        });
+
+        this.jobs.set('sixMonthWarning', sixMonthWarningJob);
+        sixMonthWarningJob.start();
+        logger.info('Six-month account warning job scheduled (runs daily at 10:00 AM)');
+    }
+
+    /**
+     * Setup six-month inactivity cleanup job - runs daily at 10:30 AM
+     * (after the warning job). Deletes (soft-delete: Seller removed, User
+     * document retained) every LITE, non-agency user whose grace period has
+     * elapsed since their warning email was sent.
+     */
+    setupSixMonthCleanupJob() {
+        const sixMonthCleanupJob = cron.schedule('30 10 * * *', async () => {
+            try {
+                logger.info('Running six-month account cleanup job (daily at 10:30 AM)');
+                const result = await deleteStaleLiteUsersWithoutIntegration();
+                logger.info('Six-month account cleanup job completed successfully', result);
+            } catch (error) {
+                logger.error('Error in six-month account cleanup job:', error);
+            }
+        }, {
+            scheduled: false,
+            timezone: process.env.TIMEZONE || "UTC"
+        });
+
+        this.jobs.set('sixMonthCleanup', sixMonthCleanupJob);
+        sixMonthCleanupJob.start();
+        logger.info('Six-month account cleanup job scheduled (runs daily at 10:30 AM)');
+    }
+
+    /**
      * Stop a specific job
      */
     stopJob(jobName) {
@@ -253,6 +306,10 @@ class JobScheduler {
                 case 'trialReminder':
                     await sendTrialReminderEmails();
                     return { message: 'Trial reminder email job executed successfully' };
+                case 'sixMonthWarning':
+                    return await sendSixMonthAccountWarnings();
+                case 'sixMonthCleanup':
+                    return await deleteStaleLiteUsersWithoutIntegration();
                 default:
                     throw new Error(`Unknown job: ${jobName}`);
             }

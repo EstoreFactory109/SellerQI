@@ -1,10 +1,19 @@
 /**
  * Delete User Service
- * 
- * Service to delete a user and all associated seller documents from the database.
- * This service handles the complete removal of user data including:
- * - All seller documents associated with the user
- * - The user document itself
+ *
+ * Removes a user's Amazon connection and operational data while retaining
+ * the User document itself for audit/history. This is the single delete
+ * behavior used by both the admin manual-delete route and the automated
+ * six-month inactivity cleanup — there is no separate hard-delete mode.
+ *
+ * What happens:
+ * - All Seller documents (Amazon SP-API/Ads tokens, product catalog) for
+ *   the user are deleted.
+ * - The User document's dangling refs into collections that
+ *   fullUserDataPurgeService is about to purge are cleared.
+ * - purgedAt is stamped on the User document.
+ * - email/password/name are left untouched, so the person can still log
+ *   back in later and reconnect their Amazon accounts.
  */
 
 const User = require('../../models/user-auth/userModel.js');
@@ -12,14 +21,40 @@ const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const logger = require('../../utils/Logger.js');
 const { ApiError } = require('../../utils/ApiError.js');
 
+// Refs on the User document that point into collections fullUserDataPurgeService
+// deletes. Cleared on purge so they don't dangle.
+const DANGLING_REF_FIELDS = {
+    sellerCentral: 1,
+    APlusContent: 1,
+    numberOfProductReviews: 1,
+    restockInventoryRecommendations: 1,
+    GET_FBA_INVENTORY_PLANNING_DATA: 1,
+    GET_V2_SELLER_PERFORMANCE_REPORT: 1,
+    listFinancialEvents: 1,
+};
+
 /**
- * Delete user and all associated seller documents by email
+ * Delete all Seller documents for a user, returning how many were removed.
+ * @param {string} userId
+ * @returns {Promise<number>}
+ */
+const deleteSellerDocumentsForUser = async (userId) => {
+    const sellerDocuments = await Seller.find({ User: userId });
+    let sellerDocumentsDeleted = 0;
+    for (const sellerDoc of sellerDocuments) {
+        await Seller.findByIdAndDelete(sellerDoc._id);
+        sellerDocumentsDeleted++;
+    }
+    return sellerDocumentsDeleted;
+};
+
+/**
+ * Purge a user's Seller data and mark the account purged, by email.
  * @param {string} email - User email address
  * @returns {Object} - Result object with success status and details
  */
 const deleteUserByEmail = async (email) => {
     try {
-        // Validate email format
         if (!email || typeof email !== 'string') {
             throw new ApiError(400, "Email is required and must be a string");
         }
@@ -29,7 +64,6 @@ const deleteUserByEmail = async (email) => {
             throw new ApiError(400, "Invalid email format");
         }
 
-        // Find user by email (case-insensitive)
         const user = await User.findOne({ email: email.toLowerCase().trim() });
 
         if (!user) {
@@ -39,36 +73,28 @@ const deleteUserByEmail = async (email) => {
         const userId = user._id;
         const userName = `${user.firstName} ${user.lastName}`;
 
-        // Find all seller documents associated with this user
-        const sellerDocuments = await Seller.find({ User: userId });
+        const sellerDocumentsDeleted = await deleteSellerDocumentsForUser(userId);
 
-        // Delete all seller documents
-        let sellerDocumentsDeleted = 0;
-        if (sellerDocuments && sellerDocuments.length > 0) {
-            for (const sellerDoc of sellerDocuments) {
-                await Seller.findByIdAndDelete(sellerDoc._id);
-                sellerDocumentsDeleted++;
-            }
-        }
+        await User.findByIdAndUpdate(userId, {
+            $set: { purgedAt: new Date() },
+            $unset: DANGLING_REF_FIELDS,
+        });
 
-        // Delete the user document
-        await User.findByIdAndDelete(userId);
-
-        logger.info(`User deleted: ${email} (${userId})`, {
-            email: email,
-            userId: userId,
-            userName: userName,
-            sellerDocumentsDeleted: sellerDocumentsDeleted
+        logger.info(`User purged (data cleared, account retained): ${email} (${userId})`, {
+            email,
+            userId,
+            userName,
+            sellerDocumentsDeleted
         });
 
         return {
             success: true,
-            message: "User and associated seller documents deleted successfully",
+            message: "Seller documents and operational data removed. User account retained.",
             data: {
-                email: email,
-                userId: userId,
-                userName: userName,
-                sellerDocumentsDeleted: sellerDocumentsDeleted
+                email,
+                userId,
+                userName,
+                sellerDocumentsDeleted
             }
         };
 
@@ -79,7 +105,6 @@ const deleteUserByEmail = async (email) => {
             email: email
         });
 
-        // Re-throw ApiError as-is, wrap other errors
         if (error instanceof ApiError) {
             throw error;
         }
@@ -89,18 +114,16 @@ const deleteUserByEmail = async (email) => {
 };
 
 /**
- * Delete user and all associated seller documents by user ID
+ * Purge a user's Seller data and mark the account purged, by user ID.
  * @param {string} userId - User ID
  * @returns {Object} - Result object with success status and details
  */
 const deleteUserById = async (userId) => {
     try {
-        // Validate userId
         if (!userId) {
             throw new ApiError(400, "User ID is required");
         }
 
-        // Find user by ID
         const user = await User.findById(userId);
 
         if (!user) {
@@ -110,36 +133,28 @@ const deleteUserById = async (userId) => {
         const email = user.email;
         const userName = `${user.firstName} ${user.lastName}`;
 
-        // Find all seller documents associated with this user
-        const sellerDocuments = await Seller.find({ User: userId });
+        const sellerDocumentsDeleted = await deleteSellerDocumentsForUser(userId);
 
-        // Delete all seller documents
-        let sellerDocumentsDeleted = 0;
-        if (sellerDocuments && sellerDocuments.length > 0) {
-            for (const sellerDoc of sellerDocuments) {
-                await Seller.findByIdAndDelete(sellerDoc._id);
-                sellerDocumentsDeleted++;
-            }
-        }
+        await User.findByIdAndUpdate(userId, {
+            $set: { purgedAt: new Date() },
+            $unset: DANGLING_REF_FIELDS,
+        });
 
-        // Delete the user document
-        await User.findByIdAndDelete(userId);
-
-        logger.info(`User deleted: ${email} (${userId})`, {
-            email: email,
-            userId: userId,
-            userName: userName,
-            sellerDocumentsDeleted: sellerDocumentsDeleted
+        logger.info(`User purged (data cleared, account retained): ${email} (${userId})`, {
+            email,
+            userId,
+            userName,
+            sellerDocumentsDeleted
         });
 
         return {
             success: true,
-            message: "User and associated seller documents deleted successfully",
+            message: "Seller documents and operational data removed. User account retained.",
             data: {
-                email: email,
-                userId: userId,
-                userName: userName,
-                sellerDocumentsDeleted: sellerDocumentsDeleted
+                email,
+                userId,
+                userName,
+                sellerDocumentsDeleted
             }
         };
 
@@ -150,7 +165,6 @@ const deleteUserById = async (userId) => {
             userId: userId
         });
 
-        // Re-throw ApiError as-is, wrap other errors
         if (error instanceof ApiError) {
             throw error;
         }

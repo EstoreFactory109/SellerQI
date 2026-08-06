@@ -10,6 +10,12 @@ const { enqueueFullUserDataPurge } = require('./deleteUserQueue.js');
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+// Warn once the account is within this many days of (or past) its 6-month mark.
+const WARNING_WINDOW_DAYS = 3;
+// Delete this many days after the warning was actually sent (not from createdAt),
+// so the promised grace period is always honored regardless of cron timing.
+const GRACE_PERIOD_DAYS = 3;
+
 /**
  * Add months to a date, preserving day-of-month when possible.
  * @param {Date} date
@@ -29,9 +35,11 @@ function addMonths(date, months) {
 
 /**
  * Check if a user has any connected SP-API or Ads account.
- * Considers a user connected if ANY sellerAccount entry has a non-empty
- * spiRefreshToken or adsRefreshToken.
- * 
+ * Informational only — no longer gates warning/deletion eligibility (see
+ * isEligibleForWarning/isEligibleForDeletion for why: packageType alone is
+ * the reliable "never paid" signal, since a paying user's package is never
+ * LITE and a lapsed trial is downgraded back to LITE elsewhere in the app).
+ *
  * @param {string} userId
  * @returns {Promise<boolean>}
  */
@@ -49,84 +57,185 @@ async function isUserConnectedToSpApiOrAds(userId) {
 }
 
 /**
- * Check if a user has any active subscription (any plan) that is currently active or trialing.
- * 
- * @param {string} userId
- * @returns {Promise<boolean>}
+ * A user counts as an agency admin or agency client if either applies —
+ * purging one could orphan the other side of the relationship, so both are
+ * excluded from the auto-cleanup flow entirely.
+ * @param {object} user
+ * @returns {boolean}
  */
-async function hasActiveSubscription(userId) {
-    const sub = await Subscription.findOne({
-        userId,
-        status: { $in: ['active', 'trialing'] },
-    }).lean();
-    return !!sub;
+function isNotAgency(user) {
+    return user.packageType !== 'AGENCY' && user.isAgencyClient !== true && !user.agencyId;
 }
 
 /**
- * Find users whose 6‑month anniversary is exactly 2 days from "today".
- * The filter is:
- *   ceil((createdAt + 6 months - today) / 1 day) === 2
- * 
- * Date math is performed in Node to avoid MongoDB version dependencies.
- * 
+ * Days remaining until six months after the given anchor date.
+ * Negative means the six-month mark has already passed.
+ * @param {Date|string} anchorDate
+ * @param {Date} [now]
+ * @returns {number}
+ */
+function getDaysUntilSixMonthMark(anchorDate, now = new Date()) {
+    const sixMonthMark = addMonths(new Date(anchorDate), 6);
+    return Math.ceil((sixMonthMark.getTime() - now.getTime()) / MS_PER_DAY);
+}
+
+/**
+ * Resolve the date this user most recently became a non-paying LITE user —
+ * i.e. the anchor for their 6-month inactivity window. A long-time paying
+ * customer who cancels gets the SAME fair 6-month window as a brand-new
+ * signup, measured from their cancellation, not from their (possibly
+ * years-old) registration date.
+ *
+ * - If a Subscription record exists and has a currentPeriodEnd (the date
+ *   paid access actually ends after cancelling), use that — it's the most
+ *   precise "stopped being a paying customer" date available.
+ * - Else if a Subscription record exists, fall back to its updatedAt.
+ * - Else (never subscribed at all) fall back to the user's createdAt.
+ *
+ * Deliberately does NOT touch any Stripe/Razorpay webhook code — this is a
+ * read-only lookup against the existing Subscription collection.
+ *
+ * @param {object} user - plain object with _id and createdAt
+ * @returns {Promise<Date>}
+ */
+async function resolveEffectiveLiteSince(user) {
+    const sub = await Subscription.findOne({ userId: user._id })
+        .select('currentPeriodEnd updatedAt')
+        .lean();
+
+    if (sub?.currentPeriodEnd) return new Date(sub.currentPeriodEnd);
+    if (sub?.updatedAt) return new Date(sub.updatedAt);
+    return new Date(user.createdAt);
+}
+
+/**
+ * Single source of truth for "should this user receive the six-month warning
+ * email right now". Shared by the bulk cron scan and the single-user test
+ * endpoint so the two can never drift apart.
+ *
+ * Expects `user.effectiveLiteSince` to already be resolved (via
+ * resolveEffectiveLiteSince) and attached by the caller; falls back to
+ * `user.createdAt` defensively if it isn't.
+ *
+ * @param {object} user - plain object with firstName/lastName/email/createdAt/
+ *   effectiveLiteSince/packageType/isAgencyClient/agencyId/purgedAt/sixMonthWarningSentAt
+ * @param {Date} [now]
+ * @returns {boolean}
+ */
+function isEligibleForWarning(user, now = new Date()) {
+    if (!user) return false;
+    const anchor = user.effectiveLiteSince || user.createdAt;
+    if (!anchor) return false;
+    if (user.packageType !== 'LITE') return false; // already paid/upgraded
+    if (!isNotAgency(user)) return false;
+    if (user.purgedAt) return false; // already cleaned up
+    if (user.sixMonthWarningSentAt) return false; // already warned once
+
+    return getDaysUntilSixMonthMark(anchor, now) <= WARNING_WINDOW_DAYS;
+}
+
+/**
+ * Single source of truth for "should this user be deleted right now" —
+ * i.e. the warning was sent and the grace period has elapsed with no
+ * upgrade. Shared by the bulk cron scan and the single-user test endpoint.
+ *
+ * @param {object} user - plain object with packageType/isAgencyClient/agencyId/
+ *   purgedAt/sixMonthWarningSentAt
+ * @param {Date} [now]
+ * @returns {boolean}
+ */
+function isEligibleForDeletion(user, now = new Date()) {
+    if (!user) return false;
+    if (user.packageType !== 'LITE') return false; // already paid/upgraded
+    if (!isNotAgency(user)) return false;
+    if (user.purgedAt) return false; // already cleaned up
+    if (!user.sixMonthWarningSentAt) return false; // never warned yet
+
+    const graceCutoff = now.getTime() - GRACE_PERIOD_DAYS * MS_PER_DAY;
+    return new Date(user.sixMonthWarningSentAt).getTime() <= graceCutoff;
+}
+
+/**
+ * Find users due for the six-month warning email.
+ * Narrows at the DB level (verified, still LITE, not agency, never warned,
+ * never purged) — NOT by createdAt age, since a long-time paying customer
+ * who just cancelled can be old-by-registration but only just became LITE.
+ * Resolves each candidate's effective "became LITE" anchor (registration
+ * date, or a more recent cancellation date from Subscription — see
+ * resolveEffectiveLiteSince) before applying the exact date-math predicate.
+ *
  * @returns {Promise<Array>}
  */
-async function findUsersWithSixMonthInTwoDays() {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    // To limit scan, only consider users older than ~5 months
-    const approxFiveMonthsAgo = addMonths(today, -5);
+async function findUsersDueForSixMonthWarning() {
+    const now = new Date();
 
     const candidates = await User.find({
         isVerified: true,
-        createdAt: { $lte: approxFiveMonthsAgo },
-    }).select('firstName lastName email createdAt packageType subscriptionStatus').lean();
+        packageType: 'LITE',
+        isAgencyClient: { $ne: true },
+        agencyId: null,
+        purgedAt: null,
+        sixMonthWarningSentAt: null,
+    })
+        .select('firstName lastName email createdAt packageType isAgencyClient agencyId purgedAt sixMonthWarningSentAt')
+        .lean();
 
-    return candidates.filter((user) => {
-        if (!user.createdAt) return false;
-        const createdAt = new Date(user.createdAt);
-        const sixMonthsFromCreated = addMonths(createdAt, 6);
-        sixMonthsFromCreated.setHours(0, 0, 0, 0);
+    const eligible = [];
+    for (const user of candidates) {
+        const effectiveLiteSince = await resolveEffectiveLiteSince(user);
+        const decorated = { ...user, effectiveLiteSince };
+        if (isEligibleForWarning(decorated, now)) {
+            eligible.push(decorated);
+        }
+    }
+    return eligible;
+}
 
-        const diffDays = Math.ceil((sixMonthsFromCreated.getTime() - today.getTime()) / MS_PER_DAY);
-        return diffDays === 2;
-    });
+/**
+ * Find users due for deletion: already warned, grace period elapsed, still
+ * on LITE (never upgraded/paid in the meantime).
+ *
+ * @returns {Promise<Array>}
+ */
+async function findUsersDueForDeletion() {
+    const now = new Date();
+    const graceCutoff = new Date(now.getTime() - GRACE_PERIOD_DAYS * MS_PER_DAY);
+
+    const candidates = await User.find({
+        isVerified: true,
+        packageType: 'LITE',
+        isAgencyClient: { $ne: true },
+        agencyId: null,
+        purgedAt: null,
+        sixMonthWarningSentAt: { $ne: null, $lte: graceCutoff },
+    })
+        .select('firstName lastName email createdAt packageType isAgencyClient agencyId purgedAt sixMonthWarningSentAt')
+        .lean();
+
+    return candidates.filter((user) => isEligibleForDeletion(user, now));
 }
 
 /**
  * Service 1:
- * Send warning emails to users who are 2 days away from completing 6 months
- * since registration AND who either:
- *  - have not connected their SP-API/Ads accounts, OR
- *  - do not have any active subscription (any plan, including LITE)
- * 
- * This function only sends emails; it does not modify user state beyond EmailLogs.
- * 
- * @returns {Promise<{ processed: number, emailed: number, skippedConnectedAndSubscribed: number }>}
+ * Send the six-month inactivity warning email to every eligible user
+ * (LITE package, not agency, never warned, never purged, within 3 days of
+ * or past their 6-month mark). Marks sixMonthWarningSentAt ONLY when the
+ * email is confirmed sent — a failed send is retried on the next run
+ * instead of being silently skipped forever.
+ *
+ * @returns {Promise<{ processed: number, emailed: number, failed: number }>}
  */
 async function sendSixMonthAccountWarnings() {
     logger.info('[SixMonthUserMaintenanceService] Starting six-month warning email process');
 
-    const users = await findUsersWithSixMonthInTwoDays();
-    logger.info(`[SixMonthUserMaintenanceService] Found ${users.length} users approaching 6 months (2 days left)`);
+    const users = await findUsersDueForSixMonthWarning();
+    logger.info(`[SixMonthUserMaintenanceService] Found ${users.length} users due for six-month warning`);
 
     let emailed = 0;
-    let skippedConnectedAndSubscribed = 0;
+    let failed = 0;
 
     for (const user of users) {
         try {
-            const [isConnected, hasSub] = await Promise.all([
-                isUserConnectedToSpApiOrAds(user._id),
-                hasActiveSubscription(user._id),
-            ]);
-
-            // Only target users who either haven't connected OR don't have an active subscription
-            if (isConnected && hasSub) {
-                skippedConnectedAndSubscribed++;
-                continue;
-            }
-
             const result = await sendSixMonthAccountWarning({
                 email: user.email,
                 firstName: user.firstName,
@@ -136,11 +245,17 @@ async function sendSixMonthAccountWarnings() {
             });
 
             if (result?.success) {
+                await User.updateOne(
+                    { _id: user._id },
+                    { $set: { sixMonthWarningSentAt: new Date() } }
+                );
                 emailed++;
-            } else if (result?.error) {
-                logger.warn(`[SixMonthUserMaintenanceService] Warning email failed for ${user.email}: ${result.error}`);
+            } else {
+                failed++;
+                logger.warn(`[SixMonthUserMaintenanceService] Warning email failed for ${user.email}: ${result?.error}`);
             }
         } catch (err) {
+            failed++;
             logger.error(
                 `[SixMonthUserMaintenanceService] Error processing six-month warning for user ${user.email} (${user._id}):`,
                 err
@@ -148,76 +263,50 @@ async function sendSixMonthAccountWarnings() {
         }
     }
 
-    const summary = {
-        processed: users.length,
-        emailed,
-        skippedConnectedAndSubscribed,
-    };
-
+    const summary = { processed: users.length, emailed, failed };
     logger.info('[SixMonthUserMaintenanceService] Six-month warning email process completed', summary);
     return summary;
 }
 
 /**
  * Service 2:
- * Find users who:
- *  - Have completed 6 months or more since registration
- *  - Are currently in LITE package
- *  - Have NOT connected SP-API and Ads (no spiRefreshToken/adsRefreshToken on any sellerAccount)
- * 
- * For these users we:
- *  - Delete the User and Seller documents using deleteUserById (immediate)
- *  - Enqueue full data purge job to remove all remaining data (including ads data)
- * 
- * This uses the same hybrid delete + purge flow as the admin delete route.
- * 
- * @returns {Promise<{ eligible: number, deleted: number, purgeEnqueued: number }>}
+ * Delete (soft-delete) every user whose grace period has elapsed since
+ * their warning email was sent, and who is still on LITE (never
+ * connected, connected-then-disconnected, and connected-but-never-paid
+ * all collapse to "still LITE" — see isEligibleForDeletion).
+ *
+ * "Delete" here means: remove Seller document(s), enqueue the full
+ * operational-data purge, and keep the User document (email/password/
+ * name intact) so the person can still log back in after reconnecting
+ * their Amazon accounts. This is the same deleteUserById used by the
+ * admin manual-delete route — one behavior, no hard/soft distinction.
+ *
+ * @returns {Promise<{ eligible: number, deleted: number, purgeEnqueued: number, suspensionEmailSent: number }>}
  */
 async function deleteStaleLiteUsersWithoutIntegration() {
-    logger.info('[SixMonthUserMaintenanceService] Starting cleanup of 6+ month LITE users without SP-API/Ads');
+    logger.info('[SixMonthUserMaintenanceService] Starting cleanup of LITE users past their grace period');
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const sixMonthsAgo = addMonths(today, -6);
+    const candidates = await findUsersDueForDeletion();
+    logger.info(`[SixMonthUserMaintenanceService] Found ${candidates.length} users past grace period`);
 
-    // Only LITE users who registered 6+ months ago
-    const candidates = await User.find({
-        isVerified: true,
-        packageType: 'LITE',
-        createdAt: { $lte: sixMonthsAgo },
-    }).select('firstName lastName email createdAt packageType subscriptionStatus').lean();
-
-    logger.info(
-        `[SixMonthUserMaintenanceService] Found ${candidates.length} candidate LITE users with 6+ months age`
-    );
-
-    let eligible = 0;
     let deleted = 0;
     let purgeEnqueued = 0;
+    let suspensionEmailSent = 0;
 
     for (const user of candidates) {
         try {
-            const isConnected = await isUserConnectedToSpApiOrAds(user._id);
-
-            // Only users without any SP-API or Ads connection
-            if (isConnected) {
-                continue;
-            }
-
-            eligible++;
-
-            // Capture email/name before deletion (for suspension email after)
+            const userIdStr = user._id.toString();
             const userFirstName = user.firstName;
             const userLastName = user.lastName;
-            const userIdStr = user._id.toString();
-            // Resolve agency email before deletion (user must still exist in DB)
+            // Resolve agency email before deletion (defensive — these users are
+            // already filtered to non-agency, but resolveRecipientEmail is a
+            // cheap no-op in that case).
             const userEmail = await resolveRecipientEmail(user.email, user._id);
 
-            // Suspend: delete User + Seller immediately (no waiting)
-            await deleteUserById(user._id);
+            // Soft-delete: Seller removed, User document retained.
+            await deleteUserById(userIdStr);
             deleted++;
 
-            // Enqueue full data purge in background to remove all remaining documents (including ads)
             try {
                 await enqueueFullUserDataPurge(userIdStr);
                 purgeEnqueued++;
@@ -228,15 +317,15 @@ async function deleteStaleLiteUsersWithoutIntegration() {
                 );
             }
 
-            // Send suspension email after account is suspended (using captured data)
             try {
-                await sendAccountSuspendedEmail({
+                const emailResult = await sendAccountSuspendedEmail({
                     email: userEmail,
                     firstName: userFirstName,
                     lastName: userLastName,
                 });
+                if (emailResult?.success) suspensionEmailSent++;
             } catch (emailErr) {
-                logger.warn(`[SixMonthUserMaintenanceService] Failed to send suspension email to ${userEmail} (already suspended):`, emailErr?.message);
+                logger.warn(`[SixMonthUserMaintenanceService] Failed to send suspension email to ${userEmail}:`, emailErr?.message);
             }
         } catch (err) {
             logger.error(
@@ -246,14 +335,10 @@ async function deleteStaleLiteUsersWithoutIntegration() {
         }
     }
 
-    const summary = {
-        eligible,
-        deleted,
-        purgeEnqueued,
-    };
+    const summary = { eligible: candidates.length, deleted, purgeEnqueued, suspensionEmailSent };
 
     logger.info(
-        '[SixMonthUserMaintenanceService] Cleanup of 6+ month LITE users without SP-API/Ads completed',
+        '[SixMonthUserMaintenanceService] Cleanup of LITE users past grace period completed',
         summary
     );
 
@@ -263,9 +348,14 @@ async function deleteStaleLiteUsersWithoutIntegration() {
 module.exports = {
     sendSixMonthAccountWarnings,
     deleteStaleLiteUsersWithoutIntegration,
-    // Export helpers for potential reuse/testing
+    // Exported for the single-user test controller and for tests, so
+    // eligibility logic can never drift between the bulk job and manual checks.
+    isEligibleForWarning,
+    isEligibleForDeletion,
     isUserConnectedToSpApiOrAds,
-    hasActiveSubscription,
+    resolveEffectiveLiteSince,
     addMonths,
+    getDaysUntilSixMonthMark,
+    WARNING_WINDOW_DAYS,
+    GRACE_PERIOD_DAYS,
 };
-

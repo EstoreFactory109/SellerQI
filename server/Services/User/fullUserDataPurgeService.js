@@ -1,8 +1,15 @@
 /**
  * fullUserDataPurgeService.js
  *
- * Purges all remaining user data from every collection that references the user.
- * Call this ONLY after User and Seller documents have already been deleted (e.g. by deleteUserById).
+ * Purges all remaining operational user data from every collection that
+ * references the user. Call this after deleteUserById has removed the
+ * user's Seller document(s) (the User document itself is retained for
+ * audit/history — see deleteUserService.js).
+ *
+ * Subscription and PaymentLogs are intentionally NOT purged here — billing
+ * history is kept for financial/audit purposes even after an account is
+ * purged.
+ *
  * Used by the dedicated delete-user worker; does not touch existing delete flow or other workers.
  */
 
@@ -10,8 +17,6 @@ const mongoose = require('mongoose');
 const logger = require('../../utils/Logger.js');
 
 // Models keyed by User (ObjectId)
-const Subscription = require('../../models/user-auth/SubscriptionModel.js');
-const PaymentLogs = require('../../models/system/PaymentLogsModel.js');
 const JobStatus = require('../../models/system/JobStatusModel.js');
 const UserUpdateSchedule = require('../../models/user-auth/UserUpdateScheduleModel.js');
 const Task = require('../../models/MCP/TaskModel.js');
@@ -104,8 +109,8 @@ const collectionsWithUser = [
 
 /** ProductWiseFinancial uses lowercase userid */
 const collectionsWithUserId = [
-    { model: Subscription, key: 'userId' },
-    { model: PaymentLogs, key: 'userId' },
+    // Subscription and PaymentLogs deliberately excluded — billing history is
+    // retained for financial/audit purposes.
     { model: JobStatus, key: 'userId' },
     { model: UserUpdateSchedule, key: 'userId' },
     { model: Task, key: 'userId' },

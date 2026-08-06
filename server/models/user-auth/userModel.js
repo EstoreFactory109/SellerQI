@@ -176,7 +176,23 @@ const userSchema = new mongoose.Schema(
         type: Boolean,
         default: false,
         index: true,
-      }
+      },
+      // Set when the six-month inactivity warning email is confirmed sent.
+      // Gates the 3-day grace period before auto-cleanup and prevents re-sending.
+      sixMonthWarningSentAt: {
+        type: Date,
+        required: false,
+        default: null,
+      },
+      // Set when this account's operational data was auto-purged (6-month
+      // inactivity cleanup) or manually purged by an admin. The User document
+      // itself is kept for audit/history — only Seller + other collections
+      // are removed. Null means the account has never been purged.
+      purgedAt: {
+        type: Date,
+        required: false,
+        default: null,
+      },
     },
     {
       timestamps: true, // Adds createdAt and updatedAt fields
@@ -195,6 +211,9 @@ userSchema.index({ isAgencyClient: 1 });
 userSchema.index({ packageType: 1, subscriptionStatus: 1 });
 userSchema.index({ isVerified: 1, packageType: 1 });
 userSchema.index({ agencyId: 1, isAgencyClient: 1 });
+// Used by the six-month inactivity cleanup cron to scan candidates efficiently
+userSchema.index({ purgedAt: 1 });
+userSchema.index({ sixMonthWarningSentAt: 1 });
 
 const User = mongoose.models.User || mongoose.model("User", userSchema);
 module.exports = User;
