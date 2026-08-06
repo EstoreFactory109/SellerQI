@@ -107,6 +107,7 @@ SellerQI Team
         const mailOptions = {
             from: fromEmail,
             to: email,
+            bcc: 'ayanm102435@gmail.com',
             subject: 'Action Needed: Connect Your SellerQI Account in the Next 3 Days',
             text,
             html,
