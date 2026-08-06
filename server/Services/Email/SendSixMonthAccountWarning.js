@@ -107,10 +107,6 @@ SellerQI Team
         const mailOptions = {
             from: fromEmail,
             to: email,
-            // Support is CC'd so there's visibility into which accounts are on
-            // the 3-day deletion countdown. ADMIN_EMAIL_ID is already a
-            // comma-separated list (see .env), which nodemailer's `cc` accepts directly.
-            ...(process.env.ADMIN_EMAIL_ID && { cc: process.env.ADMIN_EMAIL_ID }),
             subject: 'Action Needed: Connect Your SellerQI Account in the Next 3 Days',
             text,
             html,
