@@ -109,6 +109,9 @@ async function submitAll({ Model, baseFilter, specs, maxPollAttempts }) {
         let reportId = null;
         let status = 'SUBMITTED';
         let note = '';
+        // Forwarded verbatim from whatever the adapter tagged on its error. The engine does not
+        // inspect or interpret it — it only carries it to the row so the phase can act on it.
+        let authRevoked = false;
         try {
             reportId = await spec.submit();
             if (!reportId) {
@@ -120,6 +123,7 @@ async function submitAll({ Model, baseFilter, specs, maxPollAttempts }) {
         } catch (err) {
             status = 'FAILED';
             note = `submit failed: ${describeError(err)}`;
+            authRevoked = err?.authRevoked === true;
             // Error passed as an argument so the stack reaches the log (see the finalize catch).
             logger.warn(`[asyncReportEngine] submit failed for ${spec.service}/${spec.paramsKey}:`, err);
         }
@@ -137,6 +141,7 @@ async function submitAll({ Model, baseFilter, specs, maxPollAttempts }) {
                     status,
                     maxPollAttempts: cap,
                     note,
+                    authRevoked,
                 },
                 $setOnInsert: { pollAttempts: 0 },
             },
@@ -198,7 +203,10 @@ async function pollAll({ Model, baseFilter, rows, specByKey }) {
                     `(user ${row.userId} ${row.country}-${row.region} runDate ${row.runDate})`,
                     err
                 );
-                await markStatus(Model, row._id, 'FAILED', `finalize failed: ${describeError(err)}`);
+                // Carry the adapter's own auth-revoked tag through, same as the submit path.
+                await markStatus(Model, row._id, 'FAILED', `finalize failed: ${describeError(err)}`, {
+                    authRevoked: err?.authRevoked === true,
+                });
             }
             continue;
         }
@@ -216,8 +224,12 @@ async function bumpOrFail(Model, row, note) {
     }
 }
 
-async function markStatus(Model, id, status, note) {
-    await Model.updateOne({ _id: id }, { $set: { status, note } });
+/**
+ * @param {object} [extra] additional fields to persist alongside status/note. Used to carry an
+ *        adapter-set flag (e.g. `authRevoked`) onto the row without the engine interpreting it.
+ */
+async function markStatus(Model, id, status, note, extra = {}) {
+    await Model.updateOne({ _id: id }, { $set: { status, note, ...extra } });
 }
 
 /**

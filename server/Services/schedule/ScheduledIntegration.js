@@ -26,7 +26,7 @@ const DataFetchTrackingService = require('../system/DataFetchTrackingService.js'
 const { runFbaInventorySyncForMarketplace } = require('../Sp_API/FbaInventoryStorageService.js');
 // Incremental dashboard slice writes — additive, non-fatal (see DashboardSliceService).
 const dashboardSliceService = require('../dashboard/DashboardSliceService.js');
-const { financeAsyncEnabledFor } = require('../../utils/asyncFinanceGate.js');
+const { financeAsyncEnabledFor, adsAsyncEnabledFor } = require('../../utils/asyncFinanceGate.js');
 const { SLICE_KEYS } = dashboardSliceService;
 
 class ScheduledIntegration {
@@ -2631,7 +2631,7 @@ class ScheduledIntegration {
         // stranded) through the async engine so the worker isn't held during report generation.
         // The remaining batch 1/2 services (non-report + any not-yet-converted report services)
         // run inline on the first tick via _excludeFunctions. Inline path is the fallback.
-        if (process.env.ADS_ASYNC_ENABLED === 'true') {
+        if (adsAsyncEnabledFor(userId)) {
             return this.executeScheduledBatch1And2PhaseAsync(userId, Region, Country, phaseData);
         }
         try {
@@ -2757,7 +2757,7 @@ class ScheduledIntegration {
         // release the worker, re-check on a BullMQ delayed job) so a worker slot is not
         // pinned for the ~minutes-to-hours Amazon takes to generate reports. The inline
         // path below is the DEFAULT and the fallback if the flag is off.
-        if (process.env.ADS_ASYNC_ENABLED === 'true') {
+        if (adsAsyncEnabledFor(userId)) {
             return this.executeScheduledAdsPhaseAsync(userId, Region, Country, phaseData);
         }
         try {
@@ -2878,6 +2878,10 @@ class ScheduledIntegration {
     static async _runAsyncAdsPhase({ userId, Region, Country, phaseData, group, services, dateRange = null, inlineOnFirstTick = null, sliceKeys = [], buildArgsFrom = null, tokenGuard = null, pollConfig = null }) {
         const { runAsyncAdsReports } = require('../AmazonAds/asyncReportEngine.js');
         const AsyncReportRequest = require('../../models/amazon-ads/AsyncReportRequestModel.js');
+        // Same descriptor the engine uses for its own failures: keeps the message verbatim (so
+        // substring classification still works) and bounds it so an axios error body cannot bloat
+        // the session log.
+        const { describeError } = require('../../utils/errorContext.js');
         // Poll timing. Ads reports take ~40min–4h, so the default waits ~1h before the FIRST
         // check (95% are done by then), then re-checks every ~15min. Each phase can override
         // via pollConfig (SP-API passes its own). All env-overridable.
@@ -2936,20 +2940,62 @@ class ScheduledIntegration {
             const apiResults = { ...(phaseData.apiResults || {}), ...inlineResults };
             for (const svc of services) {
                 const rows = allRows.filter(r => r.service === svc.serviceName);
-                try {
-                    // BUGFIX: this was a bare `ProfileId`, which is not defined in this scope —
-                    // class bodies are strict mode, so every call threw a ReferenceError that the
-                    // catch below swallowed and logged as a generic failure. Services with a real
-                    // saveFromRows (the merged ads reports, e.g. ppcMetrics) therefore never saved.
-                    await svc.saveFromRows(userId, Country, Region, ctx.ProfileId, rows);
-                } catch (saveErr) {
-                    logger.error(`[AdsAsync:${group}] saveFromRows(${svc.serviceName}) failed for user ${userId}: ${saveErr.message}`);
+
+                // Parity with the inline path: a report that returned NO_DATA is NOT a failure —
+                // an account with no campaigns of that type legitimately has nothing. Only every
+                // report erroring counts as the reports being unusable.
+                const reportsUsable = rows.length > 0 && rows.some(r => r.status === 'DONE' || r.status === 'NO_DATA');
+
+                // A revoked Amazon Ads grant needs its own message. "all ads reports failed" sends
+                // an operator hunting an Amazon outage; only this names the one thing that fixes it.
+                // Ports the inline guard at GetPPCMetrics.js:1043-1057.
+                const allRevoked = rows.length > 0 && rows.every(r => r.authRevoked === true);
+                if (allRevoked) {
+                    logger.error(
+                        `[AdsAsync:${group}] Amazon Ads permission REVOKED for user ${userId} ` +
+                        `(${Country}-${Region}) — all ${rows.length} ${svc.serviceName} report(s) came back 401. ` +
+                        `The seller must RE-AUTHORIZE Amazon Ads; no retry will fix this. ` +
+                        `Sample note: ${rows.find(r => r.note)?.note || '(none)'}`
+                    );
                 }
-                // Parity with the inline path: "succeeded" if at least one report reached a
-                // completed terminal state (DONE or NO_DATA — no data is not a failure);
-                // fails only when every report errored (FAILED).
-                const ok = rows.length > 0 && rows.some(r => r.status === 'DONE' || r.status === 'NO_DATA');
-                apiResults[svc.serviceName] = { success: ok, error: ok ? null : 'all ads reports failed' };
+
+                let saveError = null;
+                if (reportsUsable) {
+                    try {
+                        await svc.saveFromRows(userId, Country, Region, ctx.ProfileId, rows);
+                    } catch (saveErr) {
+                        saveError = describeError(saveErr);
+                        // Pass the Error as an ARGUMENT so Logger renders its stack. Logging only
+                        // `${err.message}` is exactly what cost three rounds of diagnosis on the
+                        // finance side; do not "simplify" this back to interpolation.
+                        logger.error(
+                            `[AdsAsync:${group}] saveFromRows(${svc.serviceName}) failed for user ${userId} ` +
+                            `(${Country}-${Region} runDate ${runDate}) — reports were fetched but NOT persisted`,
+                            saveErr
+                        );
+                    }
+                } else {
+                    // Don't hand a save function nothing but failures. Harmless for today's two real
+                    // savers (they no-op on empty), but one refactor away from writing an all-zero doc
+                    // over good data.
+                    logger.warn(`[AdsAsync:${group}] ${svc.serviceName}: all ${rows.length} report(s) FAILED — skipping save`);
+                }
+
+                const ok = reportsUsable && !saveError;
+                apiResults[svc.serviceName] = {
+                    success: ok,
+                    error: ok
+                        ? null
+                        : (saveError ? `save failed: ${saveError}`
+                            : (allRevoked ? 'Amazon Ads permission revoked — seller must re-authorize'
+                                : 'all ads reports failed')),
+                    // Set ONLY when reports arrived and persisting them threw: we HAD the data and
+                    // lost it. Read by _canMarkDailyComplete to block stamping the day — no later run
+                    // will fill that hole, because these engine rows are terminal and tomorrow's run
+                    // covers tomorrow's window. Deliberately absent when every report failed: nothing
+                    // was measured, so nothing was lost, and success:false already carries that.
+                    ...(saveError ? { dataLoss: true } : {}),
+                };
             }
 
             await this._logApiResultsToSession(phaseData.sessionId, apiResults, userId, Region, Country, phaseData.phase || 'scheduled');
@@ -3419,7 +3465,7 @@ class ScheduledIntegration {
         // P8: non-blocking catch-up — same 4 ads services via the async engine, scoped to
         // the catch-up group + the single catchupDate. Re-runs itself via a delayed job and
         // does NOT chain (getNextPhase(sched_ads_catchup) === null). Inline path is fallback.
-        if (process.env.ADS_ASYNC_ENABLED === 'true') {
+        if (adsAsyncEnabledFor(userId)) {
             const services = [
                 require('../AmazonAds/GetPPCMetrics.js').adsAsync,
                 require('../AmazonAds/GetPPCProductWise.js').adsAsync,
@@ -3813,7 +3859,7 @@ class ScheduledIntegration {
         // its inline poll loop is UNCAPPED) through the async engine, so the worker is released
         // during report generation and the poll is bounded. negativeKeywords + keyword
         // recommendations are quick non-polling calls, so they run inline on the first tick.
-        if (process.env.ADS_ASYNC_ENABLED === 'true') {
+        if (adsAsyncEnabledFor(userId)) {
             const services = [require('../AmazonAds/GetSearchKeywords.js').adsAsync];
             const inlineOnFirstTick = async (ctx) => {
                 const dow = phaseData.dayOfWeek !== undefined ? phaseData.dayOfWeek : new Date().getDay();
@@ -3961,6 +4007,42 @@ class ScheduledIntegration {
      * flip the flag per environment. Slice assembler failures auto-fallback to
      * legacy, so an unexpected slice gap can't break finalize.
      */
+    /**
+     * Whether today may be stamped complete for this account.
+     *
+     * Split out of executeScheduledFinalizePhase purely so it can be unit-tested: this rule is the
+     * only thing standing between a data hole and an account that silently skips itself for the rest
+     * of the day (the May 22 hole). The enclosing phase is far too large to drive from a test.
+     *
+     * `anyAdsOk` deliberately stays `some`, not `every`: one permanently-broken ads service must not
+     * starve the other three — the same starvation pattern already fixed twice on the finance side.
+     *
+     * `adsDataLoss` is a different kind of signal and DOES block. It means a service fetched real data
+     * and then failed to WRITE it. Stamping over that hides a hole no later run will fill, because the
+     * async engine rows are terminal and tomorrow's run covers tomorrow's window. Blocking buys a real
+     * retry — cheap, because the engine's stored `result` is reused, so the retry re-runs only the save
+     * with no new Amazon reports — bounded by UserSchedulingService's MAX_DAILY_ATTEMPTS.
+     *
+     * Only `_runAsyncAdsPhase` ever sets `dataLoss`, so for every account on the inline path this
+     * function is exactly equivalent to the code it replaced.
+     *
+     * @param {object} apiResults  merged per-service `{success, error, dataLoss?}` map
+     */
+    static _canMarkDailyComplete(apiResults) {
+        const financeOk = !!(apiResults?.financeSync?.success);
+        const adsServiceKeys = ['ppcSpendsBySKU', 'adsKeywordsPerformanceData', 'ppcSpendsDateWise', 'ppcMetricsAggregated'];
+        const anyAdsOk = adsServiceKeys.some(k => apiResults?.[k]?.success === true);
+        const adsRan = adsServiceKeys.some(k => apiResults?.[k] && typeof apiResults[k] === 'object' && 'success' in apiResults[k]);
+        const adsDataLoss = adsServiceKeys.some(k => apiResults?.[k]?.dataLoss === true);
+        // Treat ads as "ok" when no ads service ran at all (e.g. user has no ads connection) — we only
+        // block on ads failures that actually surfaced from an attempted fetch.
+        const adsOk = !adsRan || anyAdsOk;
+        return {
+            canMarkComplete: financeOk && adsOk && !adsDataLoss,
+            financeOk, anyAdsOk, adsRan, adsDataLoss,
+        };
+    }
+
     static async executeScheduledFinalizePhase(userId, Region, Country, phaseData = {}) {
         logger.info(`[ScheduledIntegration:FinalizePhase] Starting for user ${userId}, ${Country}-${Region}`);
 
@@ -4085,22 +4167,16 @@ class ScheduledIntegration {
             // would skip the account for the rest of the day — the exact
             // silent-skip behaviour that caused May 22's data hole.
             const { UserSchedulingService } = require('../BackgroundJobs/UserSchedulingService.js');
-            const financeOk = !!(apiResults?.financeSync?.success);
-            const adsServiceKeys = ['ppcSpendsBySKU', 'adsKeywordsPerformanceData', 'ppcSpendsDateWise', 'ppcMetricsAggregated'];
-            const anyAdsOk = adsServiceKeys.some(k => apiResults?.[k]?.success === true);
-            const adsRan = adsServiceKeys.some(k => apiResults?.[k] && typeof apiResults[k] === 'object' && 'success' in apiResults[k]);
-            // Treat ads as "ok" when no ads service ran at all (e.g. user has no
-            // ads connection) — we only block on ads failures that actually
-            // surfaced from an attempted fetch.
-            const adsOk = !adsRan || anyAdsOk;
-            const canMarkComplete = financeOk && adsOk;
+            const gate = this._canMarkDailyComplete(apiResults);
 
-            if (canMarkComplete) {
+            if (gate.canMarkComplete) {
                 await UserSchedulingService.markDailyUpdateComplete(userId, Country, Region);
                 logger.info(`[ScheduledIntegration:FinalizePhase] Marked daily update complete for ${userId} ${Country}-${Region}`);
             } else {
                 logger.warn(`[ScheduledIntegration:FinalizePhase] Skipping markDailyUpdateComplete — finance/ads did not return data; next cron tick will retry.`, {
-                    userId, country: Country, region: Region, financeOk, anyAdsOk, adsRan
+                    userId, country: Country, region: Region,
+                    financeOk: gate.financeOk, anyAdsOk: gate.anyAdsOk, adsRan: gate.adsRan,
+                    adsDataLoss: gate.adsDataLoss,
                 });
             }
 

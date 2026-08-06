@@ -856,6 +856,128 @@ function buildDailyMetricsDocuments(reportResults, profileId) {
     return dailyDocs;
 }
 
+/** All campaign-type keys, i.e. what "we measured everything" means. */
+const ALL_CAMPAIGN_TYPE_KEYS = Object.keys(CAMPAIGN_TYPES);
+
+/**
+ * Recompute a day's `summary` from its (possibly merged) breakdown.
+ *
+ * Byte-identical formulas to the ones inside buildDailyMetricsDocuments above — factored out so the
+ * fresh path and the merged path can never disagree by a rounding step. If you change one, you are
+ * changing both, which is the point.
+ */
+function summariseBreakdown(breakdown) {
+    const parts = Object.values(breakdown || {});
+    const totalSales = parts.reduce((s, p) => s + (p?.sales || 0), 0);
+    const totalSpend = parts.reduce((s, p) => s + (p?.spend || 0), 0);
+    const totalImpressions = parts.reduce((s, p) => s + (p?.impressions || 0), 0);
+    const totalClicks = parts.reduce((s, p) => s + (p?.clicks || 0), 0);
+    const totalUnits = parts.reduce((s, p) => s + (p?.unitsSoldClicks1d || 0), 0);
+    return {
+        totalSales,
+        totalSpend,
+        totalImpressions,
+        totalClicks,
+        totalUnitsSoldClicks1d: totalUnits,
+        overallAcos: totalSales > 0 ? parseFloat(((totalSpend / totalSales) * 100).toFixed(2)) : 0,
+        overallRoas: totalSpend > 0 ? parseFloat((totalSales / totalSpend).toFixed(2)) : 0,
+        ctr: totalImpressions > 0 ? parseFloat(((totalClicks / totalImpressions) * 100).toFixed(2)) : 0,
+        cpc: totalClicks > 0 ? parseFloat((totalSpend / totalClicks).toFixed(2)) : 0,
+    };
+}
+
+/**
+ * Overlay one day's freshly-measured campaign types onto whatever is already stored.
+ *
+ * WHY THIS EXISTS
+ * `upsertMetricsForDate` writes a WHOLE-DOC `$set` (PPCMetricsModel.js:145, `...metricsData`), and
+ * `buildDailyMetricsDocuments` starts every day from `emptyBreakdown()` and fills only the types it
+ * actually has (`:793 if (skipped || !metrics) return;`). So writing a doc built from SP+SB while SD
+ * FAILED overwrites the stored `sponsoredDisplay` figures with ZEROS — and zeroes SD's share of
+ * totalSpend/totalSales/acos/roas with them. Ad spend silently under-reports for every affected day.
+ *
+ * `usableTypes` is what we MEASURED. The distinction that makes this correct is:
+ *   - a type that is usable but empty  -> legitimately writes zeros (a real "no spend" day)
+ *   - a type that FAILED               -> keeps whatever is already stored
+ * Conflating those in either direction is a bug: treat failed-as-empty and you destroy real data
+ * (today); treat empty-as-failed and stale rows survive forever and over-report spend.
+ *
+ * @param {object} freshDoc      one entry from buildDailyMetricsDocuments (without metricDate)
+ * @param {object|null} existingDoc  what is currently stored for that date, if anything
+ * @param {string[]} usableTypes CAMPAIGN_TYPES keys that were actually measured
+ */
+function mergeDailyMetricsDoc(freshDoc, existingDoc, usableTypes) {
+    const usable = new Set(usableTypes || []);
+    // Complete measurement: nothing to preserve, so this is exactly today's behaviour.
+    if (ALL_CAMPAIGN_TYPE_KEYS.every((t) => usable.has(t))) return freshDoc;
+
+    const breakdown = { ...(freshDoc.campaignTypeBreakdown || {}) };
+    const summaries = { ...(freshDoc.campaignSummaries || {}) };
+    const preserved = [];
+
+    for (const type of ALL_CAMPAIGN_TYPE_KEYS) {
+        if (usable.has(type)) continue;
+        const mapped = CAMPAIGN_TYPE_MAP[type];
+        if (!mapped) continue;
+        // No existing doc -> the fresh zeros stand. Honest: we have never had data for this day.
+        const priorBreakdown = existingDoc?.campaignTypeBreakdown?.[mapped];
+        if (priorBreakdown) {
+            breakdown[mapped] = priorBreakdown;
+            preserved.push(type);
+        }
+        const priorSummary = existingDoc?.campaignSummaries?.[mapped];
+        if (priorSummary) summaries[mapped] = priorSummary;
+    }
+
+    return {
+        ...freshDoc,
+        campaignTypeBreakdown: breakdown,
+        campaignSummaries: summaries,
+        // Recomputed from the MERGED breakdown, or the totals would still exclude the preserved types.
+        summary: summariseBreakdown(breakdown),
+        processedCampaignTypes: Array.from(new Set([
+            ...(freshDoc.processedCampaignTypes || []),
+            ...(existingDoc?.processedCampaignTypes || []).filter((t) => preserved.includes(t)),
+        ])),
+    };
+}
+
+/**
+ * Write each day's doc, preserving campaign types that were not measured this run.
+ *
+ * Shared by the inline and async paths so both get the same protection. Reads the existing doc ONLY
+ * when the write is partial, so the healthy case costs no extra query.
+ *
+ * @param {string[]} [usableTypes] defaults to every type, i.e. today's unguarded behaviour
+ */
+async function upsertDailyMetricsDocs(userIdStr, country, region, dailyDocs, usableTypes = ALL_CAMPAIGN_TYPE_KEYS) {
+    const complete = ALL_CAMPAIGN_TYPE_KEYS.every((t) => (usableTypes || []).includes(t));
+    let documentsSaved = 0;
+    let savedRecord = null;
+
+    for (const doc of dailyDocs) {
+        const { metricDate, ...payload } = doc;
+        let toWrite = payload;
+        if (!complete) {
+            const existing = await PPCMetrics.findByMetricDate(userIdStr, country, region, metricDate);
+            toWrite = mergeDailyMetricsDoc(payload, existing, usableTypes);
+        }
+        savedRecord = await PPCMetrics.upsertMetricsForDate(userIdStr, country, region, metricDate, toWrite);
+        documentsSaved += 1;
+    }
+
+    if (!complete) {
+        const missing = ALL_CAMPAIGN_TYPE_KEYS.filter((t) => !(usableTypes || []).includes(t));
+        logger.warn(
+            `[GetPPCMetrics] PARTIAL save for ${country}-${region}: measured [${(usableTypes || []).join(', ') || 'none'}], ` +
+            `preserved existing data for [${missing.join(', ')}] across ${documentsSaved} day(s). ` +
+            `Those types' stored figures were kept rather than overwritten with zeros.`
+        );
+    }
+    // savedRecord is returned so the inline caller's `recordId` field keeps its old value.
+    return { documentsSaved, savedRecord };
+}
+
 /**
  * Main function to get PPC metrics
  * @param {string} accessToken - Amazon Ads access token
@@ -1067,17 +1189,17 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
                 const userIdStr = userId?.toString() || userId;
                 logger.info(`💾 [GetPPCMetrics] Saving ${dailyDocs.length} per-day metric documents...`);
 
-                for (const doc of dailyDocs) {
-                    const { metricDate, ...payload } = doc;
-                    savedRecord = await PPCMetrics.upsertMetricsForDate(
-                        userIdStr,
-                        country,
-                        region,
-                        metricDate,
-                        payload
-                    );
-                    documentsSaved += 1;
-                }
+                // Which campaign types we actually MEASURED this run. `skipped` with NO `error` is
+                // createReport's documented 400/404 "campaign type not available for this seller"
+                // case (:246-249) — a legitimate zero. `skipped` WITH an `error` is a genuine
+                // failure, and its stored figures must be preserved rather than overwritten with the
+                // zeros buildDailyMetricsDocuments filled in.
+                const usableTypes = reportResults
+                    .filter((r) => !r.skipped || !r.error)
+                    .map((r) => r.campaignType)
+                    .filter(Boolean);
+
+                ({ documentsSaved, savedRecord } = await upsertDailyMetricsDocs(userIdStr, country, region, dailyDocs, usableTypes));
 
                 logger.info(
                     `✅ [GetPPCMetrics] Saved ${documentsSaved} daily PPC metric document(s). Last ID: ${savedRecord?._id}`
@@ -1184,11 +1306,26 @@ function buildPpcMetricsSpecs({ accessToken, profileId, region, marketplaceId = 
         params: { campaignType, startDate: range.startDate, endDate: range.endDate },
         marketplaceId,
         submit: async () => {
-            const r = await createReport(accessToken, profileId, region, campaignType, range.startDate, range.endDate, null);
-            return (r && r.reportId) ? r.reportId : null; // null → engine marks NO_DATA (e.g. type not enabled)
+            try {
+                const r = await createReport(accessToken, profileId, region, campaignType, range.startDate, range.endDate, null);
+                return (r && r.reportId) ? r.reportId : null; // null → engine marks NO_DATA (e.g. type not enabled)
+            } catch (err) {
+                // Tag structurally so the flag survives onto the row — the same escalation the inline
+                // path performs at :1164-1178. Relying on the persisted `note` instead would be
+                // fragile: it is bounded by describeError's cap.
+                if (isAuthRevokedError(err)) err.authRevoked = true;
+                throw err;
+            }
         },
         checkStatusOnce: (reportId) => checkPpcReportStatusOnce(reportId, accessToken, profileId, region),
-        finalize: (handle) => finalizePpcReport(handle, accessToken, profileId, campaignType),
+        finalize: async (handle) => {
+            try {
+                return await finalizePpcReport(handle, accessToken, profileId, campaignType);
+            } catch (err) {
+                if (isAuthRevokedError(err)) err.authRevoked = true;
+                throw err;
+            }
+        },
     }));
 }
 
@@ -1202,12 +1339,16 @@ async function savePpcMetricsFromResults(userId, country, region, profileId, per
     }));
     const dailyDocs = buildDailyMetricsDocuments(reportResults, profileId);
     const userIdStr = userId?.toString() || userId;
-    let documentsSaved = 0;
-    for (const doc of dailyDocs) {
-        const { metricDate, ...payload } = doc;
-        await PPCMetrics.upsertMetricsForDate(userIdStr, country, region, metricDate, payload);
-        documentsSaved += 1;
-    }
+
+    // Which types we actually MEASURED, as opposed to which returned rows. A caller that does not
+    // supply `usable` falls back to "has metrics", which is the old behaviour for anything that
+    // cannot tell the difference.
+    const usableTypes = perTypeResults
+        .filter((r) => (r.usable !== undefined ? r.usable : !!r.metrics))
+        .map((r) => r.campaignType)
+        .filter(Boolean);
+
+    const { documentsSaved } = await upsertDailyMetricsDocs(userIdStr, country, region, dailyDocs, usableTypes);
     logger.info(`✅ [GetPPCMetrics:async] Saved ${documentsSaved} daily PPC metric document(s)`);
     return { documentsSaved };
 }
@@ -1218,6 +1359,10 @@ async function savePpcMetricsFromRows(userId, country, region, profileId, rows) 
     const perTypeResults = rows.map((r) => ({
         campaignType: r.params?.campaignType,
         metrics: r.status === 'DONE' ? r.result : null,
+        // NO_DATA means the report ran and this account genuinely has no spend of that type — a real
+        // zero, safe to write. FAILED means we do not know, so the stored figures must be preserved.
+        // Collapsing both into `!metrics` (as this used to) is what lets a failed type zero real data.
+        usable: r.status === 'DONE' || r.status === 'NO_DATA',
     }));
     return savePpcMetricsFromResults(userId, country, region, profileId, perTypeResults);
 }
@@ -1229,8 +1374,22 @@ module.exports = {
     // P8 async adapters (see block above)
     buildPpcMetricsSpecs,
     savePpcMetricsFromResults,
+    // The async path's only route to Mongo for this service, so it is worth driving directly in tests
+    // rather than only through the adsAsync registry object below.
+    savePpcMetricsFromRows,
     checkPpcReportStatusOnce,
     finalizePpcReport,
+    // Partial-save protection. Exported for tests: the whole point is that a campaign type which
+    // FAILED keeps its stored figures instead of being overwritten with the zeros
+    // buildDailyMetricsDocuments fills in, and that is only provable by driving these directly.
+    buildDailyMetricsDocuments,
+    mergeDailyMetricsDoc,
+    upsertDailyMetricsDocs,
+    summariseBreakdown,
+    // The canonical revocation matcher — deliberately ONE definition. Its precision is the whole
+    // point (see its docblock: it must not false-positive on a transient token blip), so a second
+    // copy elsewhere would be free to drift into either a false alarm or a missed revocation.
+    isAuthRevokedError,
     // Uniform registry contract
     adsAsync: {
         serviceName: 'ppcMetricsAggregated',
