@@ -32,6 +32,7 @@ const logger = require('../../utils/Logger.js');
 const dbConnect = require('../../config/dbConn.js');
 const { connectRedis } = require('../../config/redisConn.js');
 const { Integration } = require('../main/Integration.js');
+const { runWithLockExtension: runWithLockExtensionShared } = require('./lockExtension.js');
 
 const INTEGRATION_WORKER_CONCURRENCY = parseInt(process.env.INTEGRATION_WORKER_CONCURRENCY || '2', 10);
 const WORKER_NAME = process.env.INTEGRATION_WORKER_NAME || `integration-worker-${process.pid}`;
@@ -40,6 +41,15 @@ const WORKER_NAME = process.env.INTEGRATION_WORKER_NAME || `integration-worker-$
 const LOCK_DURATION = 2 * 60 * 60 * 1000;
 const LOCK_EXTENSION_INTERVAL = 15 * 60 * 1000;
 const LOCK_EXTENSION_AMOUNT = 60 * 60 * 1000;
+// Hard ceiling on a single phase — the queue's only working timeout (see
+// runWithLockExtension below, and the fuller note in worker.js). Defaults higher than
+// the scheduled worker's because first-time onboarding genuinely fetches more: it walks
+// a full 30-day window for a catalog of unknown size, where the daily pipeline is
+// incremental.
+const MAX_LOCK_EXTENSION_MS = Math.max(
+    30 * 60 * 1000,
+    parseInt(process.env.INTEGRATION_MAX_PHASE_MS || String(4 * 60 * 60 * 1000), 10) || 4 * 60 * 60 * 1000
+);
 
 let isInitialized = false;
 async function initializeConnections() {
@@ -69,37 +79,20 @@ async function updateJobStatus(jobId, userId, status, metadata = {}) {
     }
 }
 
-async function extendLockWithRetry(job, extensionAmount, maxRetries = 3) {
-    let lastError;
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-            await job.extendLock(job.token, extensionAmount);
-            return true;
-        } catch (error) {
-            lastError = error;
-            if (attempt < maxRetries) {
-                const delay = Math.pow(2, attempt - 1) * 1000;
-                await new Promise((resolve) => setTimeout(resolve, delay));
-            }
-        }
-    }
-    logger.error(`[IntegrationWorker:${WORKER_NAME}] Lock extension failed after ${maxRetries} attempts for job ${job.id}: ${lastError?.message}`);
-    return false;
-}
-
-async function runWithLockExtension(job, asyncFn) {
-    let isRunning = true;
-    const timer = setInterval(async () => {
-        if (!isRunning) return;
-        await extendLockWithRetry(job, LOCK_EXTENSION_AMOUNT);
-    }, LOCK_EXTENSION_INTERVAL);
-
-    try {
-        return await asyncFn();
-    } finally {
-        isRunning = false;
-        clearInterval(timer);
-    }
+/**
+ * Lock keep-alive with a hard ceiling — shared with worker.js via ./lockExtension.js.
+ * See that file for why the ceiling is the only real timeout these queues have
+ * (job-level `timeout` has been a no-op since BullMQ v4) and the production hang that
+ * motivated it. The ceiling here is higher than the scheduled worker's because
+ * first-time onboarding walks a full 30-day window for a catalog of unknown size.
+ */
+function runWithLockExtension(job, asyncFn) {
+    return runWithLockExtensionShared(job, asyncFn, {
+        maxMs: MAX_LOCK_EXTENSION_MS,
+        intervalMs: LOCK_EXTENSION_INTERVAL,
+        amountMs: LOCK_EXTENSION_AMOUNT,
+        label: `IntegrationWorker:${WORKER_NAME}`,
+    });
 }
 
 /**
@@ -282,7 +275,11 @@ async function startWorker() {
             prefix: 'bullmq',
             concurrency: INTEGRATION_WORKER_CONCURRENCY,
             lockDuration: LOCK_DURATION,
-            stallInterval: 10 * 60 * 1000,
+            // `stallInterval` was a typo BullMQ never reads (it reads `stalledInterval`),
+            // so the library default of 30s has always applied. Pins that actual value
+            // under the correct name — no behaviour change, but now deliberate. This is
+            // how fast a hung phase is reclaimed once the ceiling stops renewing its lock.
+            stalledInterval: 30 * 1000,
             maxStalledCount: 3,
             removeOnComplete: { age: 4 * 3600, count: 100 },
             removeOnFail: { age: 24 * 3600, count: 500 }

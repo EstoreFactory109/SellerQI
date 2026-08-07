@@ -113,6 +113,19 @@ async function enqueueUsersForDailyUpdate() {
                             }
                         } else {
                             accountsSkipped++;
+                            // Say WHY, out loud. This branch fires when
+                            // enqueueScheduledAccountJob refuses — nearly always because a
+                            // previous phase job is still in flight under the same
+                            // deterministic id. That is usually benign (a healthy run is
+                            // mid-flight), but it is also exactly what a STUCK job looks
+                            // like, and counting it silently is why a pipeline frozen by a
+                            // hung phase went unnoticed for two days: the only trace was a
+                            // number in a summary line. `state` + `jobId` here are enough to
+                            // tell the two apart at a glance.
+                            logger.warn(
+                                `[CronProducer] Skipped ${userId} ${account.country}-${account.region}: ${result.message || 'enqueue refused'}`,
+                                { jobId: result.jobId, state: result.state }
+                            );
                         }
                     } catch (accountError) {
                         accountsFailed++;
