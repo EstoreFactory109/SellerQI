@@ -275,8 +275,8 @@ async function enqueueScheduledAccountJob(userId, country, region) {
         const job = await queue.add('process-user-data', jobData, {
             jobId: initJobId,
             attempts: 3,
-            backoff: { type: 'exponential', delay: 60000 },
-            timeout: 2 * 60 * 60 * 1000
+            backoff: { type: 'exponential', delay: 60000 }
+            // `timeout` intentionally absent — a no-op since BullMQ v4; see queue.js.
         });
 
         logger.info(`[Producer] Enqueued scheduled INIT for ${userId} ${country}-${region} (jobId: ${job.id})`);

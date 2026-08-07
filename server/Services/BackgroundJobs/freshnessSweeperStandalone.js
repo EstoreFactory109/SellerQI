@@ -11,21 +11,32 @@
  *     ingest pipeline is unaffected.
  *   - Easy on/off via PM2 without touching anything else.
  *
- * What it does
- *   - Every SWEEP_INTERVAL_CRON, calls `freshnessSweeper.sweep()`.
- *   - That function scans each ads-connected account for missing PPCMetrics
- *     days in the last 7 days and enqueues one catch-up job per missing date.
- *   - Bounded by MAX_ENQUEUES_PER_TICK inside `freshnessSweeper`.
+ * What it does — five sweeps per tick, each isolated so one cannot block the others
+ *   1. `sweep()`                  — missing PPCMetrics days (last 7d) -> ads catch-up jobs.
+ *                                   Bounded by MAX_ENQUEUES_PER_TICK.
+ *   2. `sweepFinance()`           — missing / broken / stale-provisional finance days.
+ *   3. `sweepStaleSessions()`     — closes UserAccountLogs sessions orphaned at
+ *                                   'in_progress' so the UI stops showing a spinner.
+ *   4. `sweepStalledPipelines()`  — re-drives accounts whose PHASE CHAIN stopped before
+ *                                   finalize. Those leave DataFetchTracking pinned at
+ *                                   'started', which freezes the dashboard's date range
+ *                                   while every per-day data check still looks green.
+ *   5. `sweepFinanceDeepResync()` — 30-day re-fetch for late cancellations. HEAVY, so
+ *                                   hour-gated to DEEP_RESYNC_HOUR (once daily).
  *
  * Safety
  *   - Wraps each tick in an `OrchestrationCronLock` (same pattern as
  *     `cronProducerStandalone.js`) so two sweeper instances can run safely.
  *   - Catch-up jobs use deterministic jobIds (BullMQ dedup) — re-enqueue is
  *     a no-op while a previous attempt is in flight or recently failed.
+ *   - The stalled-pipeline sweep additionally checks JobStatus liveness before acting,
+ *     so a long-but-healthy run is never duplicated, and caps re-drives per tick.
  *
  * Rollback
  *   - Don't start the `freshness-sweeper` PM2 app, OR set
  *     `FRESHNESS_SWEEPER_DISABLED=true` in env. Nothing else changes.
+ *   - Individual sweeps can be disabled on their own:
+ *     `STALE_SESSION_SWEEP_DISABLED=true`, `PIPELINE_STALL_SWEEP_DISABLED=true`.
  *
  * Run via PM2:
  *   pm2 start ecosystem.config.js --only freshness-sweeper
@@ -97,7 +108,7 @@ async function releaseSweepLock(lockKey) {
 
 function setupSweeperCron() {
     const cron = require('node-cron');
-    const { sweep, sweepFinance, sweepFinanceDeepResync, sweepStaleSessions } = require('./freshnessSweeper.js');
+    const { sweep, sweepFinance, sweepFinanceDeepResync, sweepStaleSessions, sweepStalledPipelines } = require('./freshnessSweeper.js');
 
     const job = cron.schedule(SWEEP_INTERVAL_CRON, async () => {
         const lockKey = 'freshness-sweeper-tick';
@@ -127,6 +138,17 @@ function setupSweeperCron() {
                 logger.info('[FreshnessSweeperStandalone] Stale-session sweep complete', sessionSummary);
             } catch (sessErr) {
                 logger.error('[FreshnessSweeperStandalone] Stale-session sweep failed', { error: sessErr?.message, stack: sessErr?.stack });
+            }
+            // Stalled daily-pipeline sweep — re-drives accounts whose phase chain stopped
+            // before finalize, which otherwise freezes the dashboard's date range
+            // indefinitely while every per-day data check still looks green. Cheap when
+            // nothing is frozen (two indexed queries), so it runs every tick rather than
+            // being hour-gated like the deep re-sync. Isolated try, same as the others.
+            try {
+                const stalledSummary = await sweepStalledPipelines();
+                logger.info('[FreshnessSweeperStandalone] Stalled-pipeline sweep complete', stalledSummary);
+            } catch (stalledErr) {
+                logger.error('[FreshnessSweeperStandalone] Stalled-pipeline sweep failed', { error: stalledErr?.message, stack: stalledErr?.stack });
             }
             // Deep re-sync (long-tail cancellations) — gated to ONE tick per day
             // (DEEP_RESYNC_HOUR) because it re-fetches a 30-day window per account
