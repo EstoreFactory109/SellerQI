@@ -20,7 +20,7 @@ const {
   marketplaceYesterdayStr,
   getMarketplaceTimezone,
 } = require('../../utils/marketplaceTimezone.js');
-const { deriveTaxRates, itemSalesForRow } = require('../../utils/marketplaceTax.js');
+const { itemSalesForRow, warnIfRateLooksWrong } = require('../../utils/marketplaceTax.js');
 
 // ★ VERSION — check this in logs to confirm deployment
 const FINANCE_SERVICE_VERSION = 'v3.1-sellerboard-match-20260506';
@@ -1155,27 +1155,22 @@ function parseSalesReportRows(reportRows, country) {
 
   // ── Match Seller Central's "ordered product sales" ────────────────────────
   // A raw sum of `item-price` overstates sales in tax-inclusive marketplaces whenever a
-  // promotion applies, because `item-price` holds the undiscounted tax-inclusive price while the
-  // tax actually charged (`item-tax`) is computed on the discounted amount. The difference is the
-  // uncollected tax, and it is exactly what put this AU account 25.07 above Seller Central on
-  // 2026-07-12. See utils/marketplaceTax.js for the derivation and the validation numbers.
+  // promotion applies: `item-price` holds the undiscounted tax-inclusive price while the tax
+  // actually charged (`item-tax`) is computed on the discounted amount. The difference is tax that
+  // was never collected, and it is what put this AU account 25.07 above Seller Central on
+  // 2026-07-12. See utils/marketplaceTax.js for the derivation and validation.
   //
-  // The rate is inferred from THIS report's own clean rows, so there is no rate table to
-  // maintain. It returns null for tax-exclusive marketplaces (US/CA) and on thin or implausible
-  // data, in which case `itemSalesForRow` yields the raw item-price — i.e. previous behaviour.
-  // Rates are resolved per SKU where possible, falling back to the marketplace rate — see
-  // MIN_SKU_RATE_SAMPLES for why (India taxes by product slab, not at one flat rate).
-  const taxRates = deriveTaxRates(reportRows, country);
-  if (taxRates) {
-    logger.info(`[SalesReport] ${country}: applying tax-inclusive sales correction at an inferred ${(taxRates.countryRate * 100).toFixed(2)}% rate (${taxRates.bySku.size} SKU-specific rate(s)).`);
-  }
+  // The correction is a pure function of each ROW — never of this batch. An earlier version
+  // inferred the rate from the batch median and so produced different totals for the same day
+  // depending on how the sync happened to be chunked. Do not reintroduce a batch-derived rate.
+  warnIfRateLooksWrong(reportRows, country);
 
   for (const row of reportRows) {
     if ((row['order-status'] || '').toLowerCase() === 'cancelled') continue;
     if ((row['sales-channel'] || '').toLowerCase() === 'non-amazon') continue;
     // Filter by marketplace when country is specified (NA region returns US+CA+MX+BR mixed)
     if (salesChannel && row['sales-channel'] !== salesChannel) { skippedChannel++; continue; }
-    const price = itemSalesForRow(row, taxRates);
+    const price = itemSalesForRow(row, country);
     const pacificDate = toMarketplaceDayKey(row['purchase-date'], country);
     if (!pacificDate) continue;
     const orderId = row['amazon-order-id'] || '';

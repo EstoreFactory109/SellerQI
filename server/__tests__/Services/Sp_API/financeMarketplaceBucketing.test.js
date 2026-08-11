@@ -225,10 +225,24 @@ describe('parseSalesReportRows — Seller Central sales reconciliation', () => {
     expect(sum(parseSalesReportRows(usRows, 'US'))).toBeCloseTo(54.99, 2);
   });
 
-  test('with too few rows to infer a rate, nothing is corrected', () => {
-    // Degrades to the previous behaviour rather than guessing at a rate.
-    const rows = [promoted(1), promoted(2)];
-    expect(sum(parseSalesReportRows(rows, 'AU'))).toBeCloseTo(49.98, 2);
+  test('★ a tiny batch is corrected exactly like a large one (chunk independence)', () => {
+    // THE regression guard. The first version of this correction inferred the tax rate from the
+    // current report batch. Production fetches in 3-day chunks (FINANCE_REPORT_CHUNK_DAYS), so
+    // batches were small, the inferred rate moved with the chunk boundaries, and the same day
+    // produced different totals — 2026-07-22 was stored as 269.71 against Seller Central's 269.51.
+    // A row's correction must depend on that row alone.
+    const perRow = 24.99 - 1.09;
+    expect(sum(parseSalesReportRows([promoted(1)], 'AU'))).toBeCloseTo(perRow, 2);
+    expect(sum(parseSalesReportRows([promoted(1), promoted(2)], 'AU'))).toBeCloseTo(2 * perRow, 2);
+
+    // Splitting a batch any which way must not change the total.
+    const all = Array.from({ length: 9 }, (_, i) => promoted(i));
+    const whole = sum(parseSalesReportRows(all, 'AU'));
+    for (const size of [1, 2, 3, 4, 5]) {
+      let split = 0;
+      for (let i = 0; i < all.length; i += size) split += sum(parseSalesReportRows(all.slice(i, i + size), 'AU'));
+      expect(Math.round(split * 100) / 100).toBeCloseTo(Math.round(whole * 100) / 100, 2);
+    }
   });
 
   test('zero-tax rows keep their full price even amid corrected ones', () => {
