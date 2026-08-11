@@ -20,6 +20,7 @@ const {
   marketplaceYesterdayStr,
   getMarketplaceTimezone,
 } = require('../../utils/marketplaceTimezone.js');
+const { deriveTaxRate, itemSalesForRow } = require('../../utils/marketplaceTax.js');
 
 // ★ VERSION — check this in logs to confirm deployment
 const FINANCE_SERVICE_VERSION = 'v3.1-sellerboard-match-20260506';
@@ -1151,12 +1152,28 @@ function parseSalesReportRows(reportRows, country) {
   let totalItems = 0;
   const salesChannel = country ? COUNTRY_TO_SALES_CHANNEL[country.toUpperCase()] : null;
   let skippedChannel = 0;
+
+  // ── Match Seller Central's "ordered product sales" ────────────────────────
+  // A raw sum of `item-price` overstates sales in tax-inclusive marketplaces whenever a
+  // promotion applies, because `item-price` holds the undiscounted tax-inclusive price while the
+  // tax actually charged (`item-tax`) is computed on the discounted amount. The difference is the
+  // uncollected tax, and it is exactly what put this AU account 25.07 above Seller Central on
+  // 2026-07-12. See utils/marketplaceTax.js for the derivation and the validation numbers.
+  //
+  // The rate is inferred from THIS report's own clean rows, so there is no rate table to
+  // maintain. It returns null for tax-exclusive marketplaces (US/CA) and on thin or implausible
+  // data, in which case `itemSalesForRow` yields the raw item-price — i.e. previous behaviour.
+  const taxRate = deriveTaxRate(reportRows, country);
+  if (taxRate) {
+    logger.info(`[SalesReport] ${country}: applying tax-inclusive sales correction at an inferred ${(taxRate * 100).toFixed(2)}% rate.`);
+  }
+
   for (const row of reportRows) {
     if ((row['order-status'] || '').toLowerCase() === 'cancelled') continue;
     if ((row['sales-channel'] || '').toLowerCase() === 'non-amazon') continue;
     // Filter by marketplace when country is specified (NA region returns US+CA+MX+BR mixed)
     if (salesChannel && row['sales-channel'] !== salesChannel) { skippedChannel++; continue; }
-    const price = parseFloat(row['item-price']) || 0;
+    const price = itemSalesForRow(row, taxRate);
     const pacificDate = toMarketplaceDayKey(row['purchase-date'], country);
     if (!pacificDate) continue;
     const orderId = row['amazon-order-id'] || '';

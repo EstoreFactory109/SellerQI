@@ -191,6 +191,55 @@ describe('salesReportWindowISO — must match the bucketing', () => {
   });
 });
 
+describe('parseSalesReportRows — Seller Central sales reconciliation', () => {
+  // Real 2026-07-12 shape for account 6a40e42712ce56d674f734a0: 23 promoted units at 24.99 with
+  // item-promotion-discount 10.91 (GST charged on the discounted amount, so item-tax is 1.18
+  // rather than 2.27). A raw item-price sum gave 925.63 where Seller Central said 900.56.
+  const promoted = (i) => row({
+    'amazon-order-id': `P-${i}`, 'item-price': '24.99', 'item-tax': '1.18',
+    'item-promotion-discount': '10.91',
+  });
+  const plain = (i) => row({
+    'amazon-order-id': `N-${i}`, 'item-price': '24.99', 'item-tax': '2.27',
+    'item-promotion-discount': '0',
+  });
+  const sum = (orderMap) => Math.round(items(orderMap).reduce((t, i) => t + i.totalPrice, 0) * 100) / 100;
+
+  test('the uncollected GST on promoted units is removed', () => {
+    const rows = [...Array.from({ length: 23 }, (_, i) => promoted(i)), ...Array.from({ length: 10 }, (_, i) => plain(i))];
+    // Raw would be 33 * 24.99 = 824.67; each promoted unit loses exactly 1.09.
+    expect(sum(parseSalesReportRows(rows, 'AU'))).toBeCloseTo(824.67 - 23 * 1.09, 2);
+  });
+
+  test('undiscounted AU rows are completely unaffected', () => {
+    const rows = Array.from({ length: 10 }, (_, i) => plain(i));
+    expect(sum(parseSalesReportRows(rows, 'AU'))).toBeCloseTo(249.90, 2);
+  });
+
+  test('★ US rows are never corrected — their prices are tax-exclusive', () => {
+    // The guard that makes this safe to ship fleet-wide. A US promoted row must keep item-price.
+    const usRows = [
+      row({ 'amazon-order-id': 'U1', 'sales-channel': 'Amazon.com', 'item-price': '24.99', 'item-tax': '2.06', 'item-promotion-discount': '0' }),
+      row({ 'amazon-order-id': 'U2', 'sales-channel': 'Amazon.com', 'item-price': '30.00', 'item-tax': '1.00', 'item-promotion-discount': '5.00' }),
+    ];
+    expect(sum(parseSalesReportRows(usRows, 'US'))).toBeCloseTo(54.99, 2);
+  });
+
+  test('with too few rows to infer a rate, nothing is corrected', () => {
+    // Degrades to the previous behaviour rather than guessing at a rate.
+    const rows = [promoted(1), promoted(2)];
+    expect(sum(parseSalesReportRows(rows, 'AU'))).toBeCloseTo(49.98, 2);
+  });
+
+  test('zero-tax rows keep their full price even amid corrected ones', () => {
+    const rows = [
+      ...Array.from({ length: 10 }, (_, i) => plain(i)),
+      row({ 'amazon-order-id': 'Z1', 'item-price': '19.99', 'item-tax': '0', 'item-promotion-discount': '0' }),
+    ];
+    expect(sum(parseSalesReportRows(rows, 'AU'))).toBeCloseTo(249.90 + 19.99, 2);
+  });
+});
+
 describe('buildOverheadBuckets — posted dates use the same calendar', () => {
   test('a posted date buckets in the marketplace calendar', () => {
     // Refunds/reimbursements/fees now share the sales calendar, so an order's revenue and its
