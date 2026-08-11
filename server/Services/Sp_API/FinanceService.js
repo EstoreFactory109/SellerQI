@@ -13,6 +13,13 @@ const { downloadReportContent, isUnusableReportPayload } = require('../../utils/
 const { checkSpApiStatusOnce } = require('./spApiReportAdapter.js');
 const { financeStep2SlicingEnabledFor } = require('../../utils/asyncFinanceGate.js');
 const { tagHop, HOP_NAMES } = require('../../utils/errorContext.js');
+const {
+  toMarketplaceDateStr,
+  marketplaceDayWindowISO,
+  marketplaceTodayStr,
+  marketplaceYesterdayStr,
+  getMarketplaceTimezone,
+} = require('../../utils/marketplaceTimezone.js');
 
 // ★ VERSION — check this in logs to confirm deployment
 const FINANCE_SERVICE_VERSION = 'v3.1-sellerboard-match-20260506';
@@ -106,7 +113,19 @@ const FINANCE_MAX_DATE_RETRIES = Math.max(2, financeEnvInt('FINANCE_MAX_DATE_RET
 // changes nothing about how rows are parsed or how sales/expenses are computed.
 const EMPTY_REPORT_RETRIES = 2;
 const EMPTY_REPORT_RETRY_DELAY_MS = 20000;
-const PACIFIC_OFFSET_HOURS = 7;
+
+// ── Day bucketing is MARKETPLACE-LOCAL ───────────────────────────────────────
+// There used to be a `const PACIFIC_OFFSET_HOURS = 7` here, applied to every account
+// regardless of marketplace. It was wrong twice: non-Pacific marketplaces were skewed by
+// the whole timezone gap (an AU seller's day was shifted 17 hours, under-reporting daily
+// sales against Seller Central), and even US accounts were an hour out for the ~5 months
+// a year Pacific is UTC-8 rather than UTC-7.
+//
+// Day keys now come from utils/marketplaceTimezone.js, which resolves each country to an
+// IANA zone so DST is handled by the tz database. For US in summer this is a byte-for-byte
+// no-op (pinned by a test), which is why it was safe to ship to all accounts at once.
+//
+// Do NOT reintroduce a numeric offset constant here — that is the bug, not the fix.
 
 // ─────────────────────────────────────────────
 // TOKEN MANAGER — auto-renew SP-API access tokens
@@ -298,6 +317,12 @@ const COUNTRY_TO_SALES_CHANNEL = {
   JP: 'Amazon.co.jp',
   AU: 'Amazon.com.au',
   SG: 'Amazon.sg',
+  // IE and ZA were missing here while being fully supported at connect time
+  // (see marketplaceConfig in controllers/config/config.js). Because the filter below is
+  // `if (salesChannel && ...)`, a missing entry made `salesChannel` undefined and skipped
+  // channel filtering ENTIRELY for those markets rather than erroring.
+  IE: 'Amazon.ie',
+  ZA: 'Amazon.co.za',
 };
 
 // ─────────────────────────────────────────────
@@ -795,12 +820,16 @@ function enumerateDateChunks(startDate, endDate, chunkDays) {
   return chunks;
 }
 
-function toPacificDateStr(dateInput) {
-  if (!dateInput) return null;
-  const d = dateInput instanceof Date ? dateInput : new Date(dateInput);
-  if (isNaN(d.getTime())) return null;
-  const pacificMs = d.getTime() - (PACIFIC_OFFSET_HOURS * 60 * 60 * 1000);
-  return new Date(pacificMs).toISOString().substring(0, 10);
+/**
+ * A UTC instant → the day key stored on DailySkuFinance / DailyOverheadFinance,
+ * in the MARKETPLACE's local calendar (see the note beside EMPTY_REPORT_RETRIES).
+ *
+ * `country` is required in practice: omitting it falls back to Pacific and logs a warning,
+ * which reproduces the old (wrong-for-most-marketplaces) behaviour rather than throwing
+ * inside the money path.
+ */
+function toMarketplaceDayKey(dateInput, country) {
+  return toMarketplaceDateStr(dateInput, country);
 }
 
 function internalRegionFromModel(regionModel) {
@@ -1128,7 +1157,7 @@ function parseSalesReportRows(reportRows, country) {
     // Filter by marketplace when country is specified (NA region returns US+CA+MX+BR mixed)
     if (salesChannel && row['sales-channel'] !== salesChannel) { skippedChannel++; continue; }
     const price = parseFloat(row['item-price']) || 0;
-    const pacificDate = toPacificDateStr(row['purchase-date']);
+    const pacificDate = toMarketplaceDayKey(row['purchase-date'], country);
     if (!pacificDate) continue;
     const orderId = row['amazon-order-id'] || '';
     if (!orderId) continue;
@@ -1465,11 +1494,21 @@ function createEmptyBucket(sku, asin, date) {
 // ═══════════════════════════════════════════════
 // BUILD OVERHEAD BUCKETS
 // ═══════════════════════════════════════════════
-function buildOverheadBuckets(overheadExpenses, overheadRevenue, rangeStart, rangeEnd) {
+/**
+ * @param {string} [country] Marketplace country, for local-calendar day keys. Optional so the
+ *   existing positional callers/tests keep working; omitting it falls back to Pacific.
+ *
+ * Note on the `|| postedDateStr` fallbacks below: `postedDateStr` is a UTC-derived key, so it
+ * would mix conventions — but Expences.js only ever sets it when `postedDate` is truthy
+ * (`postedDate ? formatDateYYYYMMDD(postedDate) : ""`, Expences.js:758/1024/1065), and a truthy
+ * Date always converts, so the fallback is unreachable in production. It is retained only
+ * because unit-test fixtures construct rows with `postedDate: null` plus a `postedDateStr`.
+ */
+function buildOverheadBuckets(overheadExpenses, overheadRevenue, rangeStart, rangeEnd, country) {
   const overheadBuckets = new Map();
 
   for (const e of overheadExpenses) {
-    const date = toPacificDateStr(e.postedDate) || e.postedDateStr || 'Unknown';
+    const date = toMarketplaceDayKey(e.postedDate, country) || e.postedDateStr || 'Unknown';
     if (rangeStart && rangeEnd && (date < rangeStart || date > rangeEnd)) continue;
     if (!OVERHEAD_CATEGORIES.has(e.category) && e.sku !== 'N/A') continue;
     const key = `${e.category}||${date}`;
@@ -1480,7 +1519,7 @@ function buildOverheadBuckets(overheadExpenses, overheadRevenue, rangeStart, ran
 
   for (const r of overheadRevenue) {
     if (!OVERHEAD_CATEGORIES.has(r.category)) continue;
-    const date = toPacificDateStr(r.postedDate) || r.postedDateStr || 'Unknown';
+    const date = toMarketplaceDayKey(r.postedDate, country) || r.postedDateStr || 'Unknown';
     // ★ Range-filter revenue exactly as the expense loop above does. Omitting this let an
     //   out-of-window date into `overheadBuckets` and therefore into `datesToClear`, whose
     //   deleteMany covers DailySkuFinance too — so a bucket for a date outside the requested
@@ -1576,32 +1615,39 @@ async function persistDailyBuckets({ userId, country, regionModel, marketplaceId
 // ═══════════════════════════════════════════════
 // STEP 1: FETCH NEW SALES + EXPENSES
 //
-// ★ KEY FIX: Date assignment now matches Sellerboard exactly:
+// ★ KEY FIX: Date assignment matches Sellerboard exactly:
 //
-//   Shipment expenses → placed on the order's PURCHASE DATE (Pacific)
+//   Shipment expenses → placed on the order's PURCHASE DATE
 //                       by joining Finance API orderId to Sales Report
 //
-//   Refund expenses   → placed on the refund's POSTED DATE (Pacific)
+//   Refund expenses   → placed on the refund's POSTED DATE
 //                       NOT on the original order's purchase date
 //
-//   Reimbursement     → placed on POSTED DATE (Pacific)
-//   ServiceFee        → placed on POSTED DATE (Pacific)
-//   Adjustment        → placed on POSTED DATE (Pacific)
+//   Reimbursement     → placed on POSTED DATE
+//   ServiceFee        → placed on POSTED DATE
+//   Adjustment        → placed on POSTED DATE
 //
-// This is confirmed by matching real data against Sellerboard's
-// actual per-day numbers (10/10 days exact match for FBA fees,
-// Commission, Refund cost, and Reimbursements).
+// This was confirmed by matching real data against Sellerboard's actual per-day numbers
+// (10/10 days exact match for FBA fees, Commission, Refund cost, and Reimbursements).
+//
+// ⚠️ Those days used to be Pacific days for every account; they are now the MARKETPLACE's
+// local days. For a US account that is the same thing in summer, so the Sellerboard match is
+// preserved if (as seems likely) it was validated on a US account — but the original commit
+// does not record which marketplace was used, so treat non-US refund/reimbursement DAY
+// PLACEMENT as unconfirmed until spot-checked against Seller Central. The sales figure
+// itself does not depend on this.
 // ═══════════════════════════════════════════════
 /**
- * Pacific-day boundaries for the Sales Report, as the ISO instants Amazon expects.
+ * Marketplace-local day boundaries for the Sales Report, as the ISO instants Amazon expects.
  * Extracted so the inline path and the async adapter request a byte-identical window.
+ *
+ * MUST stay in lockstep with `toMarketplaceDayKey`: this decides which orders Amazon returns,
+ * that decides which day they are filed under. If they disagree, the fetched window will not
+ * cover the days we then bucket into and days come back partially filled.
  */
-function salesReportWindowISO(startDate, endDate) {
-  const salesStartISO = `${startDate}T${String(PACIFIC_OFFSET_HOURS).padStart(2, '0')}:00:00.000Z`;
-  const endDateObj = new Date(`${endDate}T00:00:00.000Z`);
-  endDateObj.setUTCDate(endDateObj.getUTCDate() + 1);
-  const salesEndISO = `${formatDateUTC(endDateObj)}T${String(PACIFIC_OFFSET_HOURS - 1).padStart(2, '0')}:59:59.999Z`;
-  return { salesStartISO, salesEndISO };
+function salesReportWindowISO(startDate, endDate, country) {
+  const { startISO, endISO } = marketplaceDayWindowISO(startDate, endDate, country);
+  return { salesStartISO: startISO, salesEndISO: endISO };
 }
 
 /**
@@ -1618,10 +1664,10 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
   // chaining step1 → step2), reuse it so we don't lose lifetime tracking.
   const tokenManager = inheritedTokenManager || createTokenManager({ accessToken, refreshToken, clientId, clientSecret });
 
-  // ── Sales Report (Pacific Time boundaries) ──
-  const { salesStartISO, salesEndISO } = salesReportWindowISO(startDate, endDate);
+  // ── Sales Report (marketplace-local day boundaries) ──
+  const { salesStartISO, salesEndISO } = salesReportWindowISO(startDate, endDate, country);
 
-  logger.info(`[Step1] Sales Report: ${startDate} → ${endDate} (Pacific)`);
+  logger.info(`[Step1] Sales Report: ${startDate} → ${endDate} (${country} local)`);
   const reportRows = await fetchSalesReport(tokenManager, baseUrl, marketplaceId, salesStartISO, salesEndISO);
 
   return processSalesReportRows({ userId, country, regionModel, startDate, endDate, reportRows, tokenManager });
@@ -1655,7 +1701,7 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
   for (const row of reportRows) {
     const status = (row['order-status'] || '').toLowerCase();
     if (!status.startsWith('pending')) continue;
-    const d = toPacificDateStr(row['purchase-date']);
+    const d = toMarketplaceDayKey(row['purchase-date'], country);
     if (!d) continue;
     pendingCountByDate.set(d, (pendingCountByDate.get(d) || 0) + 1);
   }
@@ -1930,11 +1976,11 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
   }
 
   // ═══════════════════════════════════════════════
-  // ★ FIX: Place Refund/Reimbursement/ServiceFee expenses on POSTED DATE (Pacific)
+  // ★ FIX: Place Refund/Reimbursement/ServiceFee expenses on POSTED DATE
   //
   // These transactions have an orderId but they should NOT go to the
   // original order's purchase date. Sellerboard places them on the day
-  // the refund/reimbursement was processed (postedDate → Pacific).
+  // the refund/reimbursement was processed (postedDate → marketplace-local day).
   //
   // For REFUND transactions specifically, reversed fees (Commission,
   // Promotions) must be remapped to refund-specific fields so they
@@ -1943,7 +1989,7 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
   // ═══════════════════════════════════════════════
   let postedDateExpenseCount = 0;
   for (const e of postedDateExpenses) {
-    const pacificDate = toPacificDateStr(e.postedDate) || e.postedDateStr;
+    const pacificDate = toMarketplaceDayKey(e.postedDate, country) || e.postedDateStr;
     if (!pacificDate) continue;
     // Only include if the date falls within our display range
     if (pacificDate < startDate || pacificDate > endDate) continue;
@@ -1998,7 +2044,7 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
   let postedDateRevenueCount = 0;
   let postedDateRevenueSkipped = 0;
   for (const r of postedDateRevenue) {
-    const pacificDate = toPacificDateStr(r.postedDate) || r.postedDateStr;
+    const pacificDate = toMarketplaceDayKey(r.postedDate, country) || r.postedDateStr;
     if (!pacificDate) continue;
     if (pacificDate < startDate || pacificDate > endDate) {
       postedDateRevenueSkipped++;
@@ -2070,7 +2116,7 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
   }
 
   // Build overhead
-  const overheadBuckets = buildOverheadBuckets(overheadExpenses, overheadRevenue, startDate, endDate);
+  const overheadBuckets = buildOverheadBuckets(overheadExpenses, overheadRevenue, startDate, endDate, country);
 
   // ── Persist ──
   // ★ CRITICAL SAFETY (data-loss fix): datesToClear is ONLY the dates for which
@@ -2161,7 +2207,13 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
   const dateList = [];
   const dd = new Date(`${startDate}T00:00:00.000Z`);
   while (dd <= endD) { dateList.push(formatDateUTC(dd)); dd.setUTCDate(dd.getUTCDate() + 1); }
-  const todayPacificStr = new Date(Date.now() - PACIFIC_OFFSET_HOURS * 3600000).toISOString().substring(0, 10);
+  // "Today" must be in the SAME calendar as the day keys above, or the provisional age math
+  // drifts by a day for marketplaces far from Pacific.
+  const todayPacificStr = marketplaceTodayStr(country);
+  // Stamped on each day's sync log so a day bucketed on the OLD hardcoded-Pacific calendar
+  // (no value) is distinguishable from one bucketed marketplace-locally. See the field's comment
+  // in FinanceSyncLogModel.js for why identifying them exactly — not by date range — matters.
+  const bucketTimezone = getMarketplaceTimezone(country);
   for (const dateStr of dateList) {
     const hasFreshData = allDates.has(dateStr);
     const pendingForDay = pendingCountByDate.get(dateStr) || 0;
@@ -2174,7 +2226,7 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
       const isProvisional = pendingForDay > 0 && ageDays <= PROVISIONAL_SETTLE_DAYS;
       await FinanceSyncLog.findOneAndUpdate(
         { User: userObjectId, country: country.toUpperCase(), region: regionModel, date: dateStr },
-        { User: userObjectId, country: country.toUpperCase(), region: regionModel, marketplaceId, date: dateStr, fetchedAt: new Date(), status: 'success', provisional: isProvisional, pendingOrderCount: pendingForDay, expenseRowCount, revenueRowCount, skuCount: skuBuckets.size, error: '', consecutiveFailures: 0, nextRetryAfter: null, ...(syncRunId ? { syncRunId } : {}) },
+        { User: userObjectId, country: country.toUpperCase(), region: regionModel, marketplaceId, date: dateStr, fetchedAt: new Date(), status: 'success', provisional: isProvisional, pendingOrderCount: pendingForDay, expenseRowCount, revenueRowCount, skuCount: skuBuckets.size, error: '', consecutiveFailures: 0, nextRetryAfter: null, bucketTimezone, ...(syncRunId ? { syncRunId } : {}) },
         { upsert: true, new: true }
       );
     } else {
@@ -2189,7 +2241,7 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
       const provisionalForNew = ageDays <= PROVISIONAL_SETTLE_DAYS;
       await FinanceSyncLog.updateOne(
         { User: userObjectId, country: country.toUpperCase(), region: regionModel, date: dateStr },
-        { $setOnInsert: { User: userObjectId, country: country.toUpperCase(), region: regionModel, marketplaceId, date: dateStr, fetchedAt: new Date(), status: 'success', provisional: provisionalForNew, pendingOrderCount: 0, expenseRowCount: 0, revenueRowCount: 0, skuCount: 0, error: '', ...(syncRunId ? { syncRunId } : {}) } },
+        { $setOnInsert: { User: userObjectId, country: country.toUpperCase(), region: regionModel, marketplaceId, date: dateStr, fetchedAt: new Date(), status: 'success', provisional: provisionalForNew, pendingOrderCount: 0, expenseRowCount: 0, revenueRowCount: 0, skuCount: 0, error: '', bucketTimezone, ...(syncRunId ? { syncRunId } : {}) } },
         { upsert: true }
       );
     }
@@ -2253,10 +2305,9 @@ function resolveStep2Slice({ cursor, windowStart, windowEnd, sliceDays }) {
  *   MAX_PENDING_AGE_DAYS. Must be false on a sliced run that has not covered the whole window —
  *   a run that searched 1/8 of the range cannot conclude a fee does not exist.
  *
- * NOTE: `server/controllers/finance/FinanceDashboardController.js:673` holds a stale duplicate of
- * this function. It is unreachable (its route imports only the five read handlers and nothing else
- * imports that file), so it is deliberately left alone rather than kept in sync — see the
- * deprecation notice at the top of that file. It does NOT have the three correctness fixes below.
+ * NOTE: `server/controllers/finance/FinanceDashboardController.js` used to hold a stale duplicate
+ * of this function. That duplicate was deleted when day bucketing moved to marketplace-local, so
+ * this is now the single implementation. That file is read handlers only.
  */
 async function backfillPendingExpenses({ userId, country, regionModel, accessToken, refreshToken, clientId, clientSecret, tokenManager: inheritedTokenManager, allowExpiry = true, slicingEnabled = false }) {
   const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
@@ -2629,8 +2680,9 @@ async function syncFinanceData({ userId, country, regionModel, refreshToken, acc
   const tokenManager = createTokenManager({ accessToken, refreshToken, clientId, clientSecret });
 
   const now = new Date();
-  const yesterdayPacificMs = now.getTime() - (PACIFIC_OFFSET_HOURS * 60 * 60 * 1000) - (24 * 60 * 60 * 1000);
-  const yesterdayStr = new Date(yesterdayPacificMs).toISOString().substring(0, 10);
+  // Newest day Amazon has complete data for, in the MARKETPLACE's calendar — must match the
+  // calendar the day keys are written in, or the sync window can skip or re-fetch a day.
+  const yesterdayStr = marketplaceYesterdayStr(country, now);
 
   // Cursor = latest SETTLED (non-provisional) success day. Provisional days
   // (empty report / still-Pending orders) deliberately fall back inside the
@@ -2891,8 +2943,9 @@ async function planFinanceSync({
   chunkDays = FINANCE_REPORT_CHUNK_DAYS,
 }) {
   const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
-  const yesterdayStr = new Date(Date.now() - (PACIFIC_OFFSET_HOURS * 3600000) - 86400000)
-    .toISOString().substring(0, 10);
+  // Marketplace-local, matching syncFinanceData — see the docblock note above about a shifting
+  // yesterdayStr re-anchoring chunks and changing paramsKey.
+  const yesterdayStr = marketplaceYesterdayStr(country);
 
   let latestSyncDate = null;
   if (!(forceDates && forceDates.length === 2)) {
@@ -2931,13 +2984,14 @@ const financeSalesReportAsync = {
    * earlier one failed, the cursor would jump the gap and strand those days at $0 forever.
    *
    * `chunk` MUST come from a window frozen at submit time. Recomputing it on a poll tick that
-   * crosses Pacific midnight would shift the dates, change `paramsKey`, leave the persisted row
-   * with no matching spec, and make the engine skip it — rescheduling forever.
+   * crosses marketplace midnight would shift the dates, change `paramsKey`, leave the persisted
+   * row with no matching spec, and make the engine skip it — rescheduling forever.
    */
   buildSpecs({ userId, country, regionModel, tokenManager, chunk }) {
     const regionInternal = internalRegionFromModel(regionModel);
     const { baseUrl, marketplaceId } = resolveMarketplaceAndRegion(country.toUpperCase(), regionInternal);
-    const { salesStartISO, salesEndISO } = salesReportWindowISO(chunk.startDate, chunk.endDate);
+    // Same country-aware window as the inline path, so both request byte-identical bytes.
+    const { salesStartISO, salesEndISO } = salesReportWindowISO(chunk.startDate, chunk.endDate, country);
     const paramsKey = `${chunk.startDate}_${chunk.endDate}`;
     const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
 
@@ -3024,7 +3078,7 @@ module.exports = {
   getSyncStatus,
   // Helpers for testing
   parseSalesReportRows,
-  toPacificDateStr,
+  toMarketplaceDayKey,
   indexFinanceRowsByOrderId,
   buildOverheadBuckets,
   EXPENSE_CATEGORY_TO_FIELD,
@@ -3066,6 +3120,9 @@ module.exports = {
   // Async path: the shared halves of the inline fetch, plus the engine adapter that reuses them.
   submitSalesReport,
   downloadSalesReportRows,
+  // Submit → poll → download with the retry-on-empty loop, but WITHOUT any parse/persist.
+  // Exported so scripts/verifyMarketplaceBucketing.js can inspect a real report read-only.
+  fetchSalesReport,
   processSalesReportRows,
   salesReportWindowISO,
   enumerateDatesInclusive,

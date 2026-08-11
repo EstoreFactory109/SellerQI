@@ -38,6 +38,7 @@ const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
 const { getQueue } = require('./queue.js');
 const scheduledPhases = require('./scheduledPhases.js');
 const logger = require('../../utils/Logger.js');
+const { marketplaceTodayStr, marketplaceYesterdayStr, addDaysToDateStr } = require('../../utils/marketplaceTimezone.js');
 
 // How far back to scan for missing days.
 const ADS_LOOKBACK_DAYS = 7;
@@ -163,7 +164,13 @@ const CATCHUP_JOB_OPTS = {
 const PACIFIC_OFFSET_MS = 7 * 60 * 60 * 1000;
 
 /**
- * UTC yesterday in Pacific (matches what the daily ads phase fetches).
+ * UTC yesterday in Pacific (matches what the daily ADS phase fetches).
+ *
+ * ⚠️ ADS ONLY. The finance sweeps below deliberately do NOT use this — finance day keys are
+ * MARKETPLACE-LOCAL (see utils/marketplaceTimezone.js), and if this sweeper's notion of
+ * "yesterday" disagreed with the day keys FinanceService writes, it would look for a day that
+ * finance has not produced yet and re-enqueue that phantom missing day on every tick. AU is
+ * 17 hours ahead of Pacific, so that loop would start immediately.
  */
 function pacificYesterdayISO() {
     const ms = Date.now() - PACIFIC_OFFSET_MS - 24 * 60 * 60 * 1000;
@@ -465,12 +472,10 @@ async function isAccountFinanceAuthDenied(userObjectId, country, region) {
  * Returns a sorted array of YYYY-MM-DD. Excludes yesterday (the daily owns it).
  */
 async function findBrokenFinanceDatesForAccount(userObjectId, country, region) {
-    const yesterday = pacificYesterdayISO();
-    const startDate = (() => {
-        const d = new Date(`${yesterday}T00:00:00.000Z`);
-        d.setUTCDate(d.getUTCDate() - (FINANCE_LOOKBACK_DAYS - 1));
-        return d.toISOString().substring(0, 10);
-    })();
+    // MARKETPLACE-LOCAL, to match the day keys FinanceService writes. Using Pacific here would
+    // ask for a day finance has not produced yet and re-enqueue it forever.
+    const yesterday = marketplaceYesterdayStr(country);
+    const startDate = addDaysToDateStr(yesterday, -(FINANCE_LOOKBACK_DAYS - 1));
 
     // All days in the window.
     const days = [];
@@ -500,7 +505,7 @@ async function findBrokenFinanceDatesForAccount(userObjectId, country, region) {
     ]);
     const daysWithData = new Set(dataAgg.map((r) => r._id));
 
-    const today = new Date(Date.now() - PACIFIC_OFFSET_MS).toISOString().substring(0, 10);
+    const today = marketplaceTodayStr(country);
     const ageDays = (d) => Math.round((new Date(`${today}T00:00:00.000Z`) - new Date(`${d}T00:00:00.000Z`)) / 86400000);
 
     const nowMs = Date.now();
@@ -679,16 +684,18 @@ async function sweepFinanceDeepResync() {
     const queue = getQueue();
     const summary = { accountsScanned: 0, eligible: 0, enqueued: 0, skippedDup: 0, skippedCap: 0, errors: 0, rotation: false, cycleDays: 1, durationMs: 0 };
 
-    // Build the rolling window [today-(N-1) … yesterday] of Pacific dates to re-fetch.
-    const yesterday = pacificYesterdayISO();
-    const todayStr = new Date(Date.now() - PACIFIC_OFFSET_MS).toISOString().substring(0, 10);
-    const windowDates = [];
-    {
-        const d = new Date(`${yesterday}T00:00:00.000Z`);
-        d.setUTCDate(d.getUTCDate() - (FINANCE_DEEP_RESYNC_DAYS - 1));
-        const end = new Date(`${yesterday}T00:00:00.000Z`);
-        while (d <= end) { windowDates.push(d.toISOString().substring(0, 10)); d.setUTCDate(d.getUTCDate() + 1); }
-    }
+    // The rolling window [yesterday-(N-1) … yesterday] is MARKETPLACE-LOCAL, so it is built
+    // per account inside the loop below rather than once here — accounts in different
+    // marketplaces are on different calendar days at the same instant (AU is 17h ahead of
+    // Pacific), and the window has to line up with the day keys FinanceService writes.
+    const deepResyncWindowFor = (country) => {
+        const yesterday = marketplaceYesterdayStr(country);
+        const dates = [];
+        for (let i = FINANCE_DEEP_RESYNC_DAYS - 1; i >= 0; i--) {
+            dates.push(addDaysToDateStr(yesterday, -i));
+        }
+        return { yesterday, windowDates: dates };
+    };
 
     const sellers = await Seller.find(
         { 'sellerAccount.spiRefreshToken': { $exists: true, $ne: null, $ne: '' } },
@@ -751,8 +758,10 @@ async function sweepFinanceDeepResync() {
 
     for (let i = 0; i < perTick; i++) {
         const e = eligible[i];
-        // Date-stamped jobId → at most one deep re-sync per account per day.
-        const jobId = buildDeepResyncJobId(e.user, e.country, e.region, todayStr);
+        const { yesterday, windowDates } = deepResyncWindowFor(e.country);
+        // Date-stamped jobId → at most one deep re-sync per account per day. Stamped with the
+        // account's OWN calendar day, consistent with the window it is about to re-fetch.
+        const jobId = buildDeepResyncJobId(e.user, e.country, e.region, marketplaceTodayStr(e.country));
         let skip;
         try { skip = await shouldSkipEnqueue(queue, jobId); } catch (_) { skip = false; }
         if (skip) {
