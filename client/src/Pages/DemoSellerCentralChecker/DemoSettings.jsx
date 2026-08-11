@@ -15,6 +15,7 @@ import AdminUserProfile from '../../Components/settings/Admin/AdminUserProfile.j
 import AdminAccountIntegrations from '../../Components/settings/Admin/AdminAccountIntegrations.jsx';
 import AdminPlansAndBilling from '../../Components/settings/Admin/AdminPlansAndBilling.jsx';
 import AdminSupport from '../../Components/settings/Admin/AdminSupport.jsx';
+import Appearance from '../../Components/settings/Appearance/Appearance.jsx';
 
 const Settings = () => {
   const [searchParams] = useSearchParams();
@@ -45,14 +46,16 @@ const Settings = () => {
         case 'admin-support':
             return <AdminSupport />;
       
+      case 'appearance':
+        return <Appearance />;
       default:
         return <Profile />;
     }
   };
 
   return (
-    <div className="h-[90vh] bg-[#1a1a1a] w-full max-h-[90vh] p-4 lg:mt-0 mt-[8vh] overflow-y-auto">
-      <h1 className="text-2xl font-bold text-gray-100">Settings</h1>
+    <div className="h-[90vh] w-full max-h-[90vh] p-4 lg:mt-0 mt-[8vh] overflow-y-auto" style={{ background: 'var(--bg-base)' }}>
+      <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Settings</h1>
 
       {/* Content Area */}
       <div className="w-full mt-4">

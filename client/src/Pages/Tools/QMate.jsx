@@ -743,7 +743,7 @@ function QMateChart({ chart }) {
               borderRadius: '8px',
               padding: '8px 12px',
               fontSize: '12px',
-              color: '#f3f4f6',
+              color: 'var(--text-primary)',
             }}
             formatter={(value) => [typeof value === 'number' ? formatTick(value) : value]}
             labelFormatter={(label) => String(label)}
@@ -1240,7 +1240,7 @@ const QMate = () => {
         {/* QMate title */}
         <div className="p-3 border-b border-[#30363d] flex items-center gap-2">
           <Bot className="w-5 h-5 text-blue-400 flex-shrink-0" />
-          <h1 className="text-sm font-semibold text-white">QMate</h1>
+          <h1 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>QMate</h1>
         </div>
         {/* Search history */}
         <div className="p-3 border-b border-[#30363d]">
@@ -1294,8 +1294,9 @@ const QMate = () => {
                 }`} />
                 <div className="flex-1 min-w-0">
                   <p className={`text-sm font-medium truncate ${
-                    activeChatId === chat.id ? 'text-white' : 'text-gray-300'
-                  }`}>
+                    activeChatId === chat.id ? '' : 'text-gray-300'
+                  }`}
+                  style={activeChatId === chat.id ? { color: 'var(--text-primary)' } : undefined}>
                     {chat.title}
                   </p>
                   <p className="text-xs text-gray-500 mt-0.5">
@@ -1341,7 +1342,8 @@ const QMate = () => {
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.2 }}
-                    className="text-xl font-bold text-white tracking-tight bg-clip-text text-center max-w-md mx-auto leading-tight"
+                    className="text-xl font-bold tracking-tight bg-clip-text text-center max-w-md mx-auto leading-tight"
+                    style={{ color: 'var(--text-primary)' }}
                   >
                     {welcomeHeadline}
                   </motion.h2>
@@ -1369,7 +1371,7 @@ const QMate = () => {
                       <div className="flex items-start gap-3">
                         <div className="text-2xl flex-shrink-0">{suggestion.icon}</div>
                         <div className="flex-1 min-w-0">
-                          <h3 className="text-sm font-semibold text-white mb-1 group-hover:text-blue-400 transition-colors">
+                          <h3 className="text-sm font-semibold mb-1 group-hover:text-blue-400 transition-colors" style={{ color: 'var(--text-primary)' }}>
                             {suggestion.title}
                           </h3>
                           <p className="text-xs text-gray-400 line-clamp-2">
