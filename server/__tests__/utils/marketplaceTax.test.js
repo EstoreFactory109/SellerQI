@@ -118,6 +118,62 @@ describe('deriveTaxRate', () => {
   });
 });
 
+describe('deriveTaxRates — per-SKU rates for multi-slab marketplaces', () => {
+  const { deriveTaxRates, MIN_SKU_RATE_SAMPLES } = require('../../utils/marketplaceTax.js');
+
+  // India taxes by product category (5/12/18/28% GST). A single marketplace-wide median makes
+  // every product on a LOWER slab look under-taxed, so it gets "corrected" as if discounted.
+  const inRow = (sku, price, tax) => ({ sku, 'item-price': String(price), 'item-tax': String(tax), 'item-promotion-discount': '0', quantity: '1' });
+  const mixedSlabRows = () => [
+    ...Array.from({ length: 12 }, () => inRow('BIG', 118, 18)),      // 18% slab
+    ...Array.from({ length: 4 }, () => inRow('LOWSLAB', 105, 5)),    // 5% slab
+  ];
+
+  test('derives a distinct rate per SKU', () => {
+    const rates = deriveTaxRates(mixedSlabRows(), 'IN');
+    expect(rates.countryRate).toBeCloseTo(0.18, 10);
+    expect(rates.bySku.get('BIG')).toBeCloseTo(0.18, 10);
+    expect(rates.bySku.get('LOWSLAB')).toBeCloseTo(0.05, 10);
+  });
+
+  test('★ a lower-slab product is NOT corrected by the marketplace median', () => {
+    // Without per-SKU rates this 105.00 item was cut to ~94 — a silent 10% understatement.
+    const rates = deriveTaxRates(mixedSlabRows(), 'IN');
+    expect(itemSalesForRow(inRow('LOWSLAB', 105, 5), rates)).toBeCloseTo(105.00, 2);
+    // Contrast: the flat marketplace rate over-corrects it.
+    expect(itemSalesForRow(inRow('LOWSLAB', 105, 5), 0.18)).toBeLessThan(100);
+  });
+
+  test('a SKU with too few clean rows falls back to the marketplace rate', () => {
+    const rows = [...Array.from({ length: 10 }, () => inRow('BIG', 118, 18)), inRow('RARE', 118, 18)];
+    const rates = deriveTaxRates(rows, 'IN');
+    expect(MIN_SKU_RATE_SAMPLES).toBeGreaterThan(1);
+    expect(rates.bySku.has('RARE')).toBe(false);
+    expect(itemSalesForRow(inRow('RARE', 118, 18), rates)).toBeCloseTo(118.00, 2);
+  });
+
+  test('a single-rate marketplace is unaffected — every SKU derives the same rate', () => {
+    const rows = [...Array.from({ length: 6 }, () => auRow({ sku: 'A' })), ...Array.from({ length: 6 }, () => auRow({ sku: 'B' }))];
+    const rates = deriveTaxRates(rows, 'AU');
+    expect([...new Set(rates.bySku.values())]).toEqual([0.10]);
+  });
+
+  test('returns null for a tax-exclusive marketplace', () => {
+    const rows = Array.from({ length: 20 }, () => ({ sku: 'X', 'item-price': '24.99', 'item-tax': '2.06', 'item-promotion-discount': '0', quantity: '1' }));
+    expect(deriveTaxRates(rows, 'US')).toBeNull();
+  });
+
+  test('promoted rows still get corrected using their own SKU rate', () => {
+    const rows = [
+      ...Array.from({ length: 6 }, () => auRow({ sku: 'A' })),
+      auRow({ sku: 'A', 'item-tax': '1.18', 'item-promotion-discount': '10.91' }),
+    ];
+    const rates = deriveTaxRates(rows, 'AU');
+    const promotedRow = auRow({ sku: 'A', 'item-tax': '1.18', 'item-promotion-discount': '10.91' });
+    expect(itemSalesForRow(promotedRow, rates)).toBeCloseTo(23.90, 2);
+  });
+});
+
 describe('itemSalesForRow', () => {
   const RATE = 0.10;
 

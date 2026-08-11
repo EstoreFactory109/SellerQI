@@ -20,7 +20,7 @@ const {
   marketplaceYesterdayStr,
   getMarketplaceTimezone,
 } = require('../../utils/marketplaceTimezone.js');
-const { deriveTaxRate, itemSalesForRow } = require('../../utils/marketplaceTax.js');
+const { deriveTaxRates, itemSalesForRow } = require('../../utils/marketplaceTax.js');
 
 // ★ VERSION — check this in logs to confirm deployment
 const FINANCE_SERVICE_VERSION = 'v3.1-sellerboard-match-20260506';
@@ -1163,9 +1163,11 @@ function parseSalesReportRows(reportRows, country) {
   // The rate is inferred from THIS report's own clean rows, so there is no rate table to
   // maintain. It returns null for tax-exclusive marketplaces (US/CA) and on thin or implausible
   // data, in which case `itemSalesForRow` yields the raw item-price — i.e. previous behaviour.
-  const taxRate = deriveTaxRate(reportRows, country);
-  if (taxRate) {
-    logger.info(`[SalesReport] ${country}: applying tax-inclusive sales correction at an inferred ${(taxRate * 100).toFixed(2)}% rate.`);
+  // Rates are resolved per SKU where possible, falling back to the marketplace rate — see
+  // MIN_SKU_RATE_SAMPLES for why (India taxes by product slab, not at one flat rate).
+  const taxRates = deriveTaxRates(reportRows, country);
+  if (taxRates) {
+    logger.info(`[SalesReport] ${country}: applying tax-inclusive sales correction at an inferred ${(taxRates.countryRate * 100).toFixed(2)}% rate (${taxRates.bySku.size} SKU-specific rate(s)).`);
   }
 
   for (const row of reportRows) {
@@ -1173,7 +1175,7 @@ function parseSalesReportRows(reportRows, country) {
     if ((row['sales-channel'] || '').toLowerCase() === 'non-amazon') continue;
     // Filter by marketplace when country is specified (NA region returns US+CA+MX+BR mixed)
     if (salesChannel && row['sales-channel'] !== salesChannel) { skippedChannel++; continue; }
-    const price = itemSalesForRow(row, taxRate);
+    const price = itemSalesForRow(row, taxRates);
     const pacificDate = toMarketplaceDayKey(row['purchase-date'], country);
     if (!pacificDate) continue;
     const orderId = row['amazon-order-id'] || '';

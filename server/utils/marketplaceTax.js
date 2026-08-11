@@ -67,6 +67,20 @@ const TAX_INCLUSIVE_COUNTRIES = new Set([
 const MIN_RATE_SAMPLES = 5;
 
 /**
+ * Minimum clean rows for a SKU to get its OWN rate rather than the marketplace's.
+ *
+ * Per-SKU rates exist because some marketplaces tax by product category, not at one flat rate —
+ * India runs 5/12/18/28% GST slabs. With only a marketplace-wide median, a product on a LOWER
+ * slab than the median looks under-taxed and gets "corrected" as though it had been discounted:
+ * a 100.00 item on the 5% slab, against an 18% median, would be cut to 89.51. The tax slab is a
+ * property of the product, so deriving per SKU removes that entire failure mode.
+ *
+ * Kept low because the ratio is deterministic per slab (only cent-rounding varies) and the median
+ * plus snapping absorbs that; two rows is enough to not be led astray by one odd row.
+ */
+const MIN_SKU_RATE_SAMPLES = 2;
+
+/**
  * Plausibility bounds for a derived consumption-tax rate. Outside these we assume the derivation
  * is being fed something unexpected and skip the correction rather than apply nonsense to money.
  * (Real range in scope: AE 5% … SE 25%.)
@@ -110,19 +124,65 @@ function deriveTaxRate(reportRows, country) {
     ratios.push(tax / price);
   }
   if (ratios.length < MIN_RATE_SAMPLES) return null;
+  return rateFromRatios(ratios, country);
+}
 
+/** median-of-ratios → snapped rate, or null when implausible. */
+function rateFromRatios(ratios, label) {
   ratios.sort((a, b) => a - b);
   const u = ratios[Math.floor(ratios.length / 2)];   // tax as a fraction of the inclusive price
-  if (u <= 0 || u >= 1) return null;
+  if (!(u > 0) || u >= 1) return null;
 
   const raw = u / (1 - u);                            // convert to a rate on the ex-tax base
   const rate = Math.round(raw / RATE_SNAP) * RATE_SNAP;
 
   if (rate < MIN_PLAUSIBLE_RATE || rate > MAX_PLAUSIBLE_RATE) {
-    logger.warn(`[marketplaceTax] Derived implausible tax rate ${(raw * 100).toFixed(2)}% for ${country} from ${ratios.length} rows — skipping the sales correction for this run.`);
+    logger.warn(`[marketplaceTax] Derived implausible tax rate ${(raw * 100).toFixed(2)}% for ${label} from ${ratios.length} rows — skipping the sales correction there.`);
     return null;
   }
   return rate;
+}
+
+/**
+ * Rates for a whole report: one for the marketplace, plus a per-SKU override wherever a SKU has
+ * enough clean rows of its own. Pass the result to `itemSalesForRow`.
+ *
+ * The per-SKU layer is what makes multi-slab marketplaces (India) safe — see
+ * MIN_SKU_RATE_SAMPLES. For a single-rate marketplace like AU every SKU derives the same rate, so
+ * it changes nothing (verified: still 30/30 exact against Data Kiosk).
+ *
+ * @returns {{countryRate: number, bySku: Map<string, number>}|null} null → make no correction
+ */
+function deriveTaxRates(reportRows, country) {
+  const countryRate = deriveTaxRate(reportRows, country);
+  if (!countryRate) return null;
+
+  const bySkuRatios = new Map();
+  for (const row of reportRows) {
+    const price = num(row['item-price']);
+    const tax = num(row['item-tax']);
+    if (price <= 0 || tax <= 0 || num(row['item-promotion-discount']) !== 0) continue;
+    const sku = row.sku || '';
+    if (!sku) continue;
+    if (!bySkuRatios.has(sku)) bySkuRatios.set(sku, []);
+    bySkuRatios.get(sku).push(tax / price);
+  }
+
+  const bySku = new Map();
+  for (const [sku, ratios] of bySkuRatios) {
+    if (ratios.length < MIN_SKU_RATE_SAMPLES) continue;
+    const rate = rateFromRatios(ratios, `${country}/${sku}`);
+    if (rate) bySku.set(sku, rate);
+  }
+  return { countryRate, bySku };
+}
+
+/** The rate to use for one row: its SKU's own rate when known, else the marketplace's. */
+function rateForRow(row, rates) {
+  if (!rates) return null;
+  if (typeof rates === 'number') return rates;         // flat rate (tests, simple callers)
+  const sku = row.sku || '';
+  return (sku && rates.bySku && rates.bySku.get(sku)) || rates.countryRate || null;
 }
 
 /**
@@ -132,10 +192,12 @@ function deriveTaxRate(reportRows, country) {
  * the raw `item-price`, i.e. the previous behaviour.
  *
  * @param {object} row  a Sales Report row
- * @param {number|null} rate  from deriveTaxRate()
+ * @param {{countryRate:number,bySku:Map}|number|null} rates  from deriveTaxRates() (a bare number
+ *   is also accepted and treated as a flat rate for every row)
  */
-function itemSalesForRow(row, rate) {
+function itemSalesForRow(row, rates) {
   const price = num(row['item-price']);
+  const rate = rateForRow(row, rates);
   if (!rate) return price;
 
   const tax = num(row['item-tax']);
@@ -161,7 +223,10 @@ module.exports = {
   TAX_INCLUSIVE_COUNTRIES,
   isTaxInclusiveCountry,
   deriveTaxRate,
+  deriveTaxRates,
+  rateForRow,
   itemSalesForRow,
   RATE_SNAP,
   MIN_RATE_SAMPLES,
+  MIN_SKU_RATE_SAMPLES,
 };
