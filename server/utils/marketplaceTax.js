@@ -49,10 +49,16 @@ const logger = require('./Logger.js');
  *   - IN is omitted because GST runs several slabs (5/12/18/28%) with no single standard rate; a
  *     promoted Indian row still gets corrected via the per-row solve below, which needs no table.
  *
- * ⚠️ Only AU is empirically validated (30/30 days against Data Kiosk). The others carry their
- * published standard rate and share the same tax-inclusive display convention, but their numbers
- * have NOT been checked against Amazon's. `scripts/verifyMarketplaceBucketing.js` is the way to
- * confirm one. A stale rate here is surfaced by `warnIfRateLooksWrong`.
+ * VALIDATED against Amazon's Data Kiosk `orderedProductSales` over 30 consecutive days:
+ *   AU  30/30 days exact, 0.00 error   (raw item-price sum was 14/30, 36.56 off)
+ *   UK  29/30 days exact, 0.01 error   — and the raw sum scores the SAME 29/30, i.e. the
+ *       correction is correctly a no-op here; the residual cent is in Amazon's own aggregate.
+ *   US  29/29 days exact — no correction applied, which is the point (tax-exclusive).
+ *
+ * ⚠️ The remaining marketplaces carry their published standard rate and share the tax-inclusive
+ * display convention, but have NOT been checked against Amazon's numbers. Use
+ * `scripts/verifyMarketplaceBucketing.js` to confirm one before trusting it. A stale rate here is
+ * surfaced by `warnIfRateLooksWrong`.
  */
 const COUNTRY_TAX_RATE = {
   AU: 0.10,   // GST — validated
@@ -117,6 +123,23 @@ const TAX_INCLUSIVE_COUNTRIES = new Set([
  * (a 7% book against a 19% standard) still falls outside and keeps its solved rate.
  */
 const SOLVED_RATE_SNAP_TOLERANCE = 0.02;   // 2 percentage points
+
+/**
+ * Smallest per-unit shortfall that counts as real, for an UNPROMOTED row.
+ *
+ * `item-tax` is rounded to cents, so `expectedTax - actualTax` is almost never exactly zero even
+ * on a perfectly ordinary row. A raw shortfall just over half a cent rounds UP to a full cent and
+ * the row gets "corrected" by 0.01 it never lost. On a real UK account 10 such rows turned an
+ * otherwise-exact month into 10 mismatched days (total 0.11 of invented error), and UK's raw
+ * item-price sum had already matched Amazon on 29 of 30 days.
+ *
+ * Genuine under-taxing is an order of magnitude larger: the AU anomalies run 0.09–0.53 per unit
+ * (a 24.99 item taxed 2.16 instead of 2.27). 0.02 sits cleanly between the two, above the largest
+ * possible rounding artifact (0.005 → 0.01) and far below any real shortfall observed.
+ *
+ * Promoted rows are exempt — there the shortfall is explained by the discount, not by rounding.
+ */
+const MIN_UNPROMOTED_SHORTFALL = 0.02;
 
 /** Bounds for a rate SOLVED from a row; outside these the algebra found something meaningless. */
 const MIN_PLAUSIBLE_RATE = 0.03;
@@ -200,13 +223,20 @@ function taxFractionForRow(row, country) {
     return standard != null ? standard / (1 + standard) : null;
   }
 
-  // ── Unpromoted row: needs a standard rate to compare against, and only a SMALL shortfall is
-  //    treated as uncollected tax. A large one means a reduced-rate product, where "correcting" it
-  //    would understate its sales.
+  // ── Unpromoted row: needs a standard rate to compare against.
   if (standard == null) return null;
+  const u = standard / (1 + standard);
+
+  // A LARGE gap means a reduced-rate product, where "correcting" it would understate its sales.
   const impliedRate = tax / (price - tax);
   if (standard - impliedRate > REDUCED_RATE_TOLERANCE) return null;
-  return standard / (1 + standard);
+
+  // A TINY gap is cent-rounding in the reported tax, not uncollected tax. Correcting it invents
+  // money out of nothing — see MIN_UNPROMOTED_SHORTFALL.
+  const qty = Math.max(1, parseInt(row.quantity, 10) || 1);
+  if ((price / qty) * u - (tax / qty) < MIN_UNPROMOTED_SHORTFALL) return null;
+
+  return u;
 }
 
 /**
@@ -277,4 +307,5 @@ module.exports = {
   itemSalesForRow,
   warnIfRateLooksWrong,
   REDUCED_RATE_TOLERANCE,
+  MIN_UNPROMOTED_SHORTFALL,
 };

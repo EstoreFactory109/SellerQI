@@ -222,3 +222,43 @@ describe('malformed input', () => {
     expect(itemSalesForRow({ 'item-price': '-5.00', 'item-tax': '1.00', quantity: '1' }, 'AU')).toBe(-5);
   });
 });
+
+describe('MIN_UNPROMOTED_SHORTFALL — cent-rounding must not invent money', () => {
+  const { MIN_UNPROMOTED_SHORTFALL } = require('../../utils/marketplaceTax.js');
+
+  // A real UK account's raw item-price sum already matched Amazon on 29 of 30 days. Correcting
+  // rows whose shortfall was merely a rounded cent broke 10 of those days for 0.11 of invented
+  // error. item-tax is rounded to cents, so a tiny shortfall is arithmetic, not lost tax.
+  test('★ a 0.01 rounding shortfall is ignored (UK regression)', () => {
+    // 24.99 at 20% VAT-inclusive: expected tax 4.165, reported 4.16 → shortfall 0.005 → 0.01.
+    const row = { 'item-price': '24.99', 'item-tax': '4.16', 'item-promotion-discount': '0', quantity: '1' };
+    expect(taxFractionForRow(row, 'UK')).toBeNull();
+    expect(itemSalesForRow(row, 'UK')).toBeCloseTo(24.99, 10);
+  });
+
+  test('a genuine under-tax is still corrected (AU regression)', () => {
+    // 24.99 at 10% GST-inclusive: expected 2.27, reported 2.16 → shortfall 0.11, well above noise.
+    const row = { 'item-price': '24.99', 'item-tax': '2.16', 'item-promotion-discount': '0', quantity: '1' };
+    expect(taxFractionForRow(row, 'AU')).not.toBeNull();
+    expect(24.99 - itemSalesForRow(row, 'AU')).toBeCloseTo(0.11, 2);
+  });
+
+  test('the threshold sits above the largest possible rounding artifact', () => {
+    // Half a cent is the worst case before rounding turns it into a full cent.
+    expect(MIN_UNPROMOTED_SHORTFALL).toBeGreaterThan(0.01);
+    // …and well below the smallest real shortfall observed (0.09/unit).
+    expect(MIN_UNPROMOTED_SHORTFALL).toBeLessThan(0.09);
+  });
+
+  test('promoted rows are exempt — their shortfall comes from the discount', () => {
+    // A promoted row can have a small shortfall and must still be corrected.
+    const row = { 'item-price': '24.99', 'item-tax': '1.18', 'item-promotion-discount': '10.91', quantity: '1' };
+    expect(taxFractionForRow(row, 'AU')).not.toBeNull();
+  });
+
+  test('the threshold is applied PER UNIT, not per line', () => {
+    // A 10-unit line with a 0.01 per-unit artifact totals 0.10 — which must still be ignored.
+    const row = { 'item-price': '249.90', 'item-tax': '41.60', 'item-promotion-discount': '0', quantity: '10' };
+    expect(itemSalesForRow(row, 'UK')).toBeCloseTo(249.90, 2);
+  });
+});
