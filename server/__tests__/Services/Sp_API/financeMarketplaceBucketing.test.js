@@ -301,3 +301,87 @@ describe('buildOverheadBuckets — posted dates use the same calendar', () => {
     expect(buckets.size).toBe(2);
   });
 });
+
+describe('resolveDatesToClear — a fully-cancelled day must drop to $0', () => {
+  const { resolveDatesToClear } = require('../../../Services/Sp_API/FinanceService.js');
+  const START = '2026-07-10';
+  const END = '2026-07-13';
+  // Real shape from account 69b420ad2b222b2a74b99fa2 (US): 2026-07-11's single order was
+  // cancelled after we first recorded it. The report now returns only that Cancelled row, which
+  // parseSalesReportRows correctly drops — so the day produced no bucket. Before this, the day was
+  // therefore never cleared and kept a stale 20.73 against Seller Central's 0.00, permanently.
+  const cancelledJul11 = {
+    'purchase-date': '2026-07-11T18:00:00Z', 'order-status': 'Cancelled', 'item-status': 'Cancelled',
+    'item-price': '0.00', quantity: '0', sku: 'S', 'sales-channel': 'Amazon.com',
+  };
+  const shippedJul12 = {
+    'purchase-date': '2026-07-12T18:00:00Z', 'order-status': 'Shipped', 'item-status': 'Shipped',
+    'item-price': '20.73', quantity: '1', sku: 'S', 'sales-channel': 'Amazon.com',
+  };
+
+  test('★ a day covered by the report with no surviving order IS cleared', () => {
+    const { datesToClear, zeroedDays } = resolveDatesToClear({
+      reportRows: [cancelledJul11, shippedJul12], country: 'US',
+      startDate: START, endDate: END, bucketDates: new Set(['2026-07-12']),
+    });
+    expect(datesToClear).toContain('2026-07-11');
+    expect(zeroedDays).toEqual(['2026-07-11']);
+  });
+
+  test('a day the report says NOTHING about is left alone (the May-28 wipe guard)', () => {
+    // 07-10 and 07-13 appear in no row, so they must not be cleared — an aged-out report that
+    // omits a settled day must never zero it.
+    const { datesToClear } = resolveDatesToClear({
+      reportRows: [cancelledJul11, shippedJul12], country: 'US',
+      startDate: START, endDate: END, bucketDates: new Set(['2026-07-12']),
+    });
+    expect(datesToClear).not.toContain('2026-07-10');
+    expect(datesToClear).not.toContain('2026-07-13');
+  });
+
+  test('an entirely empty report clears nothing', () => {
+    const { datesToClear, zeroedDays } = resolveDatesToClear({
+      reportRows: [], country: 'US', startDate: START, endDate: END, bucketDates: new Set(),
+    });
+    expect(datesToClear).toEqual([]);
+    expect(zeroedDays).toEqual([]);
+  });
+
+  test('★ the chunk-safety invariant holds: nothing outside the requested range', () => {
+    // Clearing a neighbouring chunk's day would delete rows it had already written and stamped
+    // success. Rows outside the window must be ignored entirely.
+    const outside = { ...shippedJul12, 'purchase-date': '2026-06-01T18:00:00Z' };
+    const later = { ...shippedJul12, 'purchase-date': '2026-09-01T18:00:00Z' };
+    const { datesToClear } = resolveDatesToClear({
+      reportRows: [outside, later, cancelledJul11], country: 'US',
+      startDate: START, endDate: END, bucketDates: new Set(),
+    });
+    for (const d of datesToClear) expect(d >= START && d <= END).toBe(true);
+    expect(datesToClear).toEqual(['2026-07-11']);
+  });
+
+  test('days that produced buckets are not reported as zeroed', () => {
+    const { zeroedDays } = resolveDatesToClear({
+      reportRows: [shippedJul12], country: 'US',
+      startDate: START, endDate: END, bucketDates: new Set(['2026-07-12']),
+    });
+    expect(zeroedDays).toEqual([]);
+  });
+
+  test('bucket dates are always preserved, even with no report rows', () => {
+    const { datesToClear } = resolveDatesToClear({
+      reportRows: [], country: 'US', startDate: START, endDate: END,
+      bucketDates: new Set(['2026-07-12', '2026-07-13']),
+    });
+    expect(datesToClear.sort()).toEqual(['2026-07-12', '2026-07-13']);
+  });
+
+  test('the day key is marketplace-local, so a boundary row lands on the right day', () => {
+    // 2026-07-12T02:00Z is still 2026-07-11 in Los Angeles.
+    const { zeroedDays } = resolveDatesToClear({
+      reportRows: [{ ...cancelledJul11, 'purchase-date': '2026-07-12T02:00:00Z' }], country: 'US',
+      startDate: START, endDate: END, bucketDates: new Set(),
+    });
+    expect(zeroedDays).toEqual(['2026-07-11']);
+  });
+});

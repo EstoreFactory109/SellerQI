@@ -1194,6 +1194,38 @@ function parseSalesReportRows(reportRows, country) {
   return orderMap;
 }
 
+/**
+ * Which days this run may DELETE before reinserting.
+ *
+ * Two kinds of day qualify:
+ *   1. Days that produced fresh buckets — the normal case.
+ *   2. Days the report positively COVERED but which produced no bucket at all. Seeing any row for
+ *      a day (even a cancelled one) proves the report covers it, so "nothing survived the filters"
+ *      genuinely means $0. Without this, a day whose only order was later cancelled kept its stale
+ *      value forever: a real US account read 20.73 for 2026-07-11 against Seller Central's 0.00,
+ *      because the report returned just one `Cancelled` row, which is correctly dropped, so the
+ *      day produced no bucket and was never cleared.
+ *
+ * A day the report says NOTHING about is deliberately absent — that is the aged-out case that once
+ * wiped a settled May 28 to $0, and it must keep its existing data.
+ *
+ * Everything is clamped to [startDate, endDate] so `datesToClear ⊆ requested range` holds. That
+ * invariant is what stops one chunk's clear from deleting a neighbouring chunk's fresh rows.
+ *
+ * @returns {{datesToClear: string[], zeroedDays: string[]}}
+ */
+function resolveDatesToClear({ reportRows, country, startDate, endDate, bucketDates }) {
+  const datesToClear = new Set(bucketDates || []);
+  const zeroedDays = new Set();
+  for (const row of (reportRows || [])) {
+    const d = toMarketplaceDayKey(row['purchase-date'], country);
+    if (!d || d < startDate || d > endDate || datesToClear.has(d)) continue;
+    datesToClear.add(d);
+    zeroedDays.add(d);
+  }
+  return { datesToClear: [...datesToClear], zeroedDays: [...zeroedDays].sort() };
+}
+
 // ═══════════════════════════════════════════════
 // CATEGORY → FIELD MAPPING
 // ═══════════════════════════════════════════════
@@ -2150,9 +2182,18 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
   //       partial cancellations, still apply — that day still has a bucket).
   //     - A day the report returned nothing for → left exactly as it was; its
   //       existing good data is preserved. A re-fetch can never zero it.
-  //   Trade-off: a day whose orders were ALL cancelled after the fact keeps its
-  //   prior (stale) value instead of dropping to $0. That is rare and FAR less
-  //   harmful than destroying confirmed historical data.
+  //
+  //   ★ PLUS days the report positively COVERED but which produced no buckets. That is a
+  //   different situation from "the report returned nothing", and conflating the two left a
+  //   real account reading 20.73 for 2026-07-11 where Seller Central said 0.00: its single
+  //   order was cancelled after we first recorded it, the report now returns just that one
+  //   `Cancelled` row, `parseSalesReportRows` (correctly) drops it, and so the day produced no
+  //   bucket and was never cleared — freezing the stale estimate indefinitely.
+  //
+  //   Seeing ANY row for a day (even a cancelled one) is positive evidence that the report does
+  //   cover it, so "no surviving rows" genuinely means $0 rather than "we were told nothing".
+  //   The aged-out case that wiped May 28 returns NO rows for the day at all and is still
+  //   preserved, as is the wholly-empty report handled below.
   const allDates = new Set();
   for (const b of skuBuckets.values()) allDates.add(b.date);
   for (const b of overheadBuckets.values()) allDates.add(b.date);
@@ -2164,7 +2205,14 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
     logger.warn(`[Step1] Sales Report produced no buckets for ${startDate}→${endDate} (reportRows=${reportRows.length}). Clearing nothing — existing data for these days is preserved (re-fetch of aged-out days must never zero them).`);
   }
 
-  const saved = await persistDailyBuckets({ userId, country: country.toUpperCase(), regionModel, marketplaceId, skuBuckets, overheadBuckets, datesToClear: [...allDates] });
+  const { datesToClear, zeroedDays } = resolveDatesToClear({ reportRows, country, startDate, endDate, bucketDates: allDates });
+  if (zeroedDays.length > 0) {
+    // Worth a log line: this is the path that takes a day DOWN to $0, so it should be visible if
+    // it ever fires unexpectedly.
+    logger.info(`[Step1] ${zeroedDays.join(', ')}: report covered these day(s) but no order survived the filters (e.g. all cancelled) — clearing them to $0 rather than leaving a stale value.`);
+  }
+
+  const saved = await persistDailyBuckets({ userId, country: country.toUpperCase(), regionModel, marketplaceId, skuBuckets, overheadBuckets, datesToClear: [...datesToClear] });
 
   // ── ★ FIX: Clear previously-pending orders that were resolved in this sync ──
   // Without this, Step 2 (backfillPendingExpenses) would find these same orders
@@ -3093,6 +3141,7 @@ module.exports = {
   // Helpers for testing
   parseSalesReportRows,
   toMarketplaceDayKey,
+  resolveDatesToClear,
   indexFinanceRowsByOrderId,
   buildOverheadBuckets,
   EXPENSE_CATEGORY_TO_FIELD,
