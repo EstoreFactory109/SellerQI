@@ -31,7 +31,7 @@ const KPICard = ({
   const clickable = typeof onClick === 'function';
 
   const baseClasses = `rounded-2xl border flex flex-col transition-colors ${
-    compact ? 'p-4 gap-2.5' : 'p-6 gap-3.5'
+    compact ? 'p-4 gap-2.5' : 'p-5 gap-2.5'
   } ${clickable ? 'cursor-pointer' : ''} ${className}`;
   const baseStyle = { background: COLORS.surface, borderColor: COLORS.border };
 
@@ -63,13 +63,13 @@ const KPICard = ({
           : undefined
       }
     >
-      <div className="flex items-start gap-2 min-h-[40px]">
+      <div className="flex items-start gap-2 min-h-[32px]">
         <div>
           <div className="text-sm font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>
             {label}
           </div>
           {meaning && (
-            <div className="text-xs mt-1" style={{ color: COLORS.textMuted }}>
+            <div className="text-xs mt-0.5" style={{ color: COLORS.textMuted }}>
               {meaning}
             </div>
           )}
@@ -104,7 +104,7 @@ const KPICard = ({
         <>
           <div className="flex items-baseline gap-2.5">
             <div
-              className={`font-bold tracking-tight tabular-nums ${compact ? 'text-2xl' : 'text-[38px] leading-[44px]'}`}
+              className={`font-bold tracking-tight tabular-nums ${compact ? 'text-2xl' : 'text-[32px] leading-[38px]'}`}
               style={{ color: COLORS.textPrimary }}
             >
               {value}
