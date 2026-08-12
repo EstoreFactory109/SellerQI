@@ -6,7 +6,7 @@ import TotalSales from '../../Components/Dashboard/SamePageComponents/TotalSales
 import AccountHealth from '../../Components/Dashboard/SamePageComponents/AccountHealth.jsx'
 import Calender, { isClickInsideGaCalDropdown } from '../../Components/Calender/Calender.jsx'
 import ErrorBoundary from '../../Components/ErrorBoundary/ErrorBoundary.jsx'
-import { SkeletonStatValue, SkeletonCardBody, SkeletonChart, SkeletonTableBody } from '../../Components/Skeleton/PageSkeletons.jsx'
+import { SkeletonCardBody, SkeletonChart, SkeletonTableBody } from '../../Components/Skeleton/PageSkeletons.jsx'
 import { SkeletonBar } from '../../Components/Skeleton/Skeleton.jsx'
 import { useSelector, useDispatch } from 'react-redux'
 import { useNavigate, useLocation } from 'react-router-dom'
@@ -19,6 +19,8 @@ import { shouldUseCalendarDateRange } from '../../utils/totalSalesFilterUrl.js'
 import { useDashboardData } from '../../hooks/usePageData.js'
 import { devLog } from '../../utils/devLogger.js'
 import axiosInstance from '../../config/axios.config.js'
+import DownloadReport from '../../Components/DownloadReport/DownloadReport.jsx'
+import { StatusPill, KPICard, VerdictBanner, HealthGauge, STATUS, COLORS, getStatusConfig } from '../../Components/Shared/index.js'
 
 const Dashboard = () => {
   const [openCalender, setOpenCalender] = useState(false)
@@ -26,10 +28,24 @@ const Dashboard = () => {
   const CalenderRef = useRef(null)
   const calendarAnchorRef = useRef(null)
   const contentRef = useRef(null)
+  const totalSalesSectionRef = useRef(null)
   const navigate = useNavigate()
   const dispatch = useDispatch()
   const location = useLocation()
-  
+
+  // Redesign uses the Geist font (per the new design mock) — loaded at runtime so
+  // no other file (index.html/index.css) needs to change for this one page.
+  useEffect(() => {
+    const id = 'geist-font-link'
+    if (!document.getElementById(id)) {
+      const link = document.createElement('link')
+      link.id = id
+      link.rel = 'stylesheet'
+      link.href = 'https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap'
+      document.head.appendChild(link)
+    }
+  }, [])
+
   // Reset scroll position when navigating to Dashboard
   useEffect(() => {
     // Only reset scroll when navigating to Dashboard
@@ -460,94 +476,243 @@ const Dashboard = () => {
     { icon: FileWarning, label: 'Total Issues', value: totalIssues.toLocaleString(), change: 'N/A', trend: 'neutral', color: 'orange', link: '/seller-central-checker/issues' }
   ]
 
-  return (
-    <div className='w-full bg-[#1a1a1a]'>
-      {/* Header Section - compact */}
-      <div className='bg-[#161b22] border-b border-[#30363d] sticky top-0 z-40'>
-        <div className='px-2 lg:px-3 py-1.5'>
-          <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1'>
-            <div className='flex items-center gap-2'>
-              <h1 className='text-lg font-bold text-gray-100'>Dashboard</h1>
-              <div className='hidden sm:flex items-center gap-1 px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs font-medium border border-blue-500/30'>
-                <div className='w-1 h-1 bg-blue-500 rounded-full'></div>
-                OK
-              </div>
-            </div>
-            
-            <div className='flex items-center gap-1.5'>
-              <div className='relative' ref={CalenderRef}>
-                <button 
-                  ref={calendarAnchorRef}
-                  onClick={() => setOpenCalender(!openCalender)}
-                  className='flex items-center gap-1 px-2 py-1 bg-[#21262d] border border-[#30363d] hover:border-blue-500/50 rounded transition-all duration-200'
-                >
-                  <Calendar className='w-3 h-3 text-gray-300' />
-                  <span className='text-xs font-medium text-gray-200'>{selectedPeriod}</span>
-                </button>
-                
-                {openCalender && (
-                  <Calender
-                    anchorRef={calendarAnchorRef}
-                    setOpenCalender={setOpenCalender}
-                    setSelectedPeriod={setSelectedPeriod}
-                  />
-                )}
-              </div>
+  // Export report reuses the exact values already shown in the quick-stat tiles below.
+  const prepareDashboardExportData = () => ([
+    { Metric: 'Period', Value: selectedPeriod },
+    { Metric: 'Total Sales', Value: formatCurrencyLocal(totalSales) },
+    ...quickStats.map((stat) => ({ Metric: stat.label, Value: stat.value })),
+  ]);
 
-              <button
-                type="button"
-                onClick={() => refreshDashboard()}
-                disabled={
-                  loadingPhase1 || loadingPhase2 || loadingPhase3 || loadingTop4
-                }
-                title="Reload all dashboard data (sales, health, charts, top products)"
-                className="flex items-center gap-1 px-2.5 py-1 bg-[#21262d] border border-[#30363d] hover:border-blue-500/50 rounded text-xs font-medium text-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <RefreshCw
-                  className={`w-3 h-3 text-gray-300 ${loadingPhase1 || loadingPhase2 || loadingPhase3 || loadingTop4 ? 'animate-spin' : ''}`}
-                />
-                <span className="hidden sm:inline">Refresh</span>
-              </button>
-            </div>
-          </div>
+  // --- Real data for the redesigned Verdict Banner + KPI row (§3.1) ---
+  // Everything below reuses values already computed above — no new fetches, no invented numbers.
+
+  const healthPercentage = dashboardInfo?.accountHealthPercentage?.Percentage || 0;
+  const healthStatusRaw = dashboardInfo?.accountHealthPercentage?.status || 'POOR';
+  const healthPillStatus = (healthStatusRaw === 'GOOD' || healthStatusRaw === 'Healthy')
+    ? STATUS.GOOD
+    : (healthStatusRaw === 'FAIR' || healthStatusRaw === 'At Risk')
+      ? STATUS.WATCH
+      : STATUS.FIX;
+
+  const acosNum = parseFloat(acos) || 0;
+  // Thresholds follow the doc's own wording: "Healthy: under 25%", "Above 30% ... too costly".
+  const acosStatus = acosNum <= 25 ? STATUS.GOOD : acosNum <= 30 ? STATUS.WATCH : STATUS.FIX;
+  const ACOS_BAR_SCALE = 60; // normalizes ACoS onto the 0-100% benchmark bar width
+  const acosBenchmark = {
+    healthyText: 'Healthy: under 25%',
+    valueText: `You: ${acos}%`,
+    rangeStart: 0,
+    rangeEnd: (25 / ACOS_BAR_SCALE) * 100,
+    markerPosition: (Math.min(acosNum, ACOS_BAR_SCALE) / ACOS_BAR_SCALE) * 100,
+  };
+
+  const scrollToTotalSales = () => {
+    totalSalesSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const formatRelativeTime = (timestamp) => {
+    if (!timestamp) return null;
+    const minutes = Math.max(0, Math.round((Date.now() - timestamp) / 60000));
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.round(minutes / 60);
+    return `${hours}h ago`;
+  };
+
+  // Verdict Banner: which of the two evaluable KPIs (ACoS, Account Health) need attention,
+  // and how much is realistically recoverable (money owed + money already being wasted).
+  const attentionItems = [];
+  if (acosStatus !== STATUS.GOOD) attentionItems.push({ label: 'wasted ad spend', status: acosStatus });
+  if (healthPillStatus !== STATUS.GOOD) attentionItems.push({ label: 'account health', status: healthPillStatus });
+
+  const overallVerdictStatus = attentionItems.some((i) => i.status === STATUS.FIX)
+    ? STATUS.FIX
+    : attentionItems.length > 0
+      ? STATUS.WATCH
+      : STATUS.GOOD;
+
+  const recoverableAmount = moneyWastedInAds + expectedReimbursement;
+  const verdictDataReady = isPhase2Complete && isPhase3Complete && !reimbursementLoading;
+
+  return (
+    <div
+      className='w-full min-h-full bg-[#0B0E14] text-[#F5F7FA] text-sm leading-5'
+      style={{ fontFamily: "Geist, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" }}
+    >
+      {/* Utility bar: date range + refresh. Marketplace switcher and notifications
+          already live in the global TopNav rendered above this page — not duplicated here. */}
+      <div className='sticky top-0 z-40 flex items-center gap-3 px-7 py-3 border-b border-[#252C3A] bg-[rgba(11,14,20,.86)] backdrop-blur-md'>
+        <div className='relative' ref={CalenderRef}>
+          <button
+            ref={calendarAnchorRef}
+            onClick={() => setOpenCalender(!openCalender)}
+            className='flex items-center gap-2 px-[11px] py-[7px] border border-[#252C3A] hover:border-[#3B4658] rounded-lg bg-[#151A23] text-[#F5F7FA] text-[13px] transition-colors'
+          >
+            <Calendar className='w-3.5 h-3.5 text-[#6B7486]' />
+            <span>{selectedPeriod}</span>
+          </button>
+
+          {openCalender && (
+            <Calender
+              anchorRef={calendarAnchorRef}
+              setOpenCalender={setOpenCalender}
+              setSelectedPeriod={setSelectedPeriod}
+            />
+          )}
         </div>
+
+        <button
+          type="button"
+          onClick={() => refreshDashboard()}
+          disabled={
+            loadingPhase1 || loadingPhase2 || loadingPhase3 || loadingTop4
+          }
+          title="Reload all dashboard data (sales, health, charts, top products)"
+          className="flex items-center gap-2 px-[11px] py-[7px] border border-[#252C3A] hover:border-[#3B4658] rounded-lg bg-[#151A23] text-[#F5F7FA] text-[13px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <RefreshCw
+            className={`w-3.5 h-3.5 text-[#6B7486] ${loadingPhase1 || loadingPhase2 || loadingPhase3 || loadingTop4 ? 'animate-spin' : ''}`}
+          />
+          <span className="hidden sm:inline">Refresh</span>
+        </button>
       </div>
 
       {/* Main Content */}
-      <div 
+      <div
         ref={contentRef}
-        className='px-2 lg:px-3 py-1.5 pb-0'
+        className='px-7 pt-[26px] pb-6 max-w-[1400px] w-full'
       >
-          {/* Quick Stats - each card shows skeleton based on which phase provides its data */}
-          <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-1 mb-1'>
-            {quickStats.map((stat) => {
-              const Icon = stat.icon
-              // Determine loading state based on which phase provides the data
-              const isStatLoading = stat.label === 'Amazon Owes You'
-                ? (!isPhase1Complete || reimbursementLoading)
-                : stat.label === 'Money Wasted in Ads'
-                  ? !isPhase3Complete  // Money wasted comes from Phase 3 (adsKeywordsData)
-                  : stat.label === 'ACoS %'
-                    ? (!isPhase2Complete || ppcMetricsLoading)  // ACoS from Phase 2 (PPC summary)
-                    : !isPhase1Complete  // Total Issues from Phase 1
-              return (
-                <motion.div
-                  key={stat.label}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  whileHover={{ scale: 1.01 }}
-                  transition={{ duration: 0.2 }}
-                  onClick={() => !isStatLoading && navigate(stat.link)}
-                  className="rounded p-2 border border-border-dark hover:border-accent/50 transition-colors cursor-pointer"
-                >
-                  <div className='flex items-center gap-2 mb-1'>
-                    <Icon className="w-4 h-4 text-accent" />
-                    <p className='text-xs font-medium text-gray-300'>{stat.label}</p>
-                  </div>
-                  {isStatLoading ? <SkeletonStatValue /> : <div className='text-lg font-bold text-gray-100'>{stat.value}</div>}
-                </motion.div>
-              )
-            })}
+          {/* Page title row — exact match to the redesign mock (§3.1) */}
+          <div className='flex items-end justify-between gap-6 flex-wrap mb-[22px]'>
+            <div>
+              <h1 className='m-0 mb-1 text-2xl leading-8 font-semibold tracking-[-0.02em] text-[#F5F7FA]'>Dashboard</h1>
+              <p className='m-0 text-sm text-[#A5AEC0]'>Your account health, sales, and top issues — ranked by what needs attention first.</p>
+            </div>
+            <div className='flex items-center gap-2'>
+              <DownloadReport
+                buttonText="Export report"
+                filename="SellerQI_Dashboard_Summary"
+                showIcon={false}
+                buttonClass="flex items-center gap-2 px-[14px] py-[9px] border border-[#252C3A] hover:border-[#3B4658] rounded-lg bg-[#151A23] text-[#F5F7FA] text-[13px] font-medium transition-colors"
+                prepareDataFunc={prepareDashboardExportData}
+              />
+              <button
+                type="button"
+                onClick={() => navigate('/seller-central-checker/qmate')}
+                className="px-[14px] py-[9px] rounded-lg bg-[#3B82F6] hover:bg-[#5A97F8] text-[#061021] text-[13px] font-semibold transition-colors"
+              >
+                Ask QMate
+              </button>
+            </div>
+          </div>
+
+          {/* Verdict Banner — one-sentence takeaway, driven by real ACoS + Account Health status */}
+          <div className='mb-[22px]'>
+            {verdictDataReady ? (
+              <VerdictBanner
+                status={overallVerdictStatus}
+                actionLabel="See top fixes"
+                onAction={() => navigate('/seller-central-checker/issues')}
+              >
+                Your account is{' '}
+                <span style={{ color: getStatusConfig(STATUS.GOOD).color, fontWeight: 600 }}>
+                  {healthPercentage}% healthy
+                </span>
+                {attentionItems.length > 0 ? (
+                  <>
+                    {' '}— but{' '}
+                    <span style={{ color: getStatusConfig(overallVerdictStatus).color, fontWeight: 600 }}>
+                      {attentionItems.map((i) => i.label).join(' and ')} need{attentionItems.length === 1 ? 's' : ''} attention
+                    </span>
+                    {recoverableAmount > 0 && (
+                      <>
+                        {' '}and about{' '}
+                        <span style={{ fontWeight: 600 }}>{formatCurrencyLocal(recoverableAmount)}</span>
+                        {' '}may be recoverable this period.
+                      </>
+                    )}
+                  </>
+                ) : (
+                  ' — nothing urgent needs attention right now.'
+                )}
+              </VerdictBanner>
+            ) : (
+              <div className='h-[92px] rounded-[14px] animate-pulse' style={{ background: COLORS.surface }} />
+            )}
+          </div>
+
+          {/* KPI row — real data: reimbursements owed, wasted ad spend, net profit, account health */}
+          <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[14px] mb-[22px]'>
+            <KPICard
+              label="Money Amazon Owes You"
+              meaning="Unclaimed FBA reimbursements"
+              tooltip="Cases from the last 30 days where Amazon lost, damaged, or over-charged you. You still have to file the claim."
+              loading={!isPhase1Complete || reimbursementLoading}
+              value={formatCurrencyLocal(expectedReimbursement)}
+              status={expectedReimbursement > 0 ? STATUS.SETUP : undefined}
+              statusLabel={expectedReimbursement > 0 ? 'Ready to claim' : undefined}
+              noData={expectedReimbursement > 0 ? undefined : {
+                message: 'No unclaimed reimbursements found for this period.',
+                actionLabel: 'View reimbursements',
+                href: '/seller-central-checker/reimbursement-dashboard',
+              }}
+              footnote={formatRelativeTime(reimbursementLastFetched) ? `Updated ${formatRelativeTime(reimbursementLastFetched)}` : undefined}
+              onClick={() => navigate('/seller-central-checker/reimbursement-dashboard')}
+            />
+
+            <KPICard
+              label="Wasted Ad Spend"
+              meaning="ACoS — ad cost as % of ad sales"
+              tooltip="ACoS = ad cost as a % of the sales those ads made. Lower is better. Above 30% usually means you're paying more than the margin is worth."
+              loading={!isPhase2Complete || ppcMetricsLoading}
+              value={`${acos}%`}
+              secondaryValue={moneyWastedInAds > 0 ? `${formatCurrencyLocal(moneyWastedInAds)} wasted` : undefined}
+              status={acosStatus}
+              benchmark={acosBenchmark}
+              onClick={() => navigate('/seller-central-checker/ppc-dashboard')}
+            />
+
+            <KPICard
+              label="Net Profit"
+              meaning="After all fees, ads and costs"
+              tooltip="What's left after Amazon fees, ad spend, refunds and your product cost (COGS)."
+              noData={{
+                message: 'See the full profit breakdown in "Where Your Money Goes" below.',
+                actionLabel: 'View breakdown',
+                onAction: (e) => { e.preventDefault(); scrollToTotalSales(); },
+              }}
+            />
+
+            <div className='rounded-[13px] border flex gap-4 p-[17px]' style={{ background: COLORS.surface, borderColor: COLORS.border }}>
+              <div className='flex-1 min-w-0 flex flex-col gap-[11px]'>
+                <div>
+                  <div className='text-xs font-semibold uppercase tracking-wide' style={{ color: COLORS.textSecondary }}>Account Health</div>
+                  <div className='text-xs mt-0.5' style={{ color: COLORS.textMuted }}>Amazon-facing risk</div>
+                </div>
+                {isPhase2Complete ? (
+                  <>
+                    <StatusPill status={healthPillStatus} />
+                    <div className='text-xs' style={{ color: COLORS.textSecondary }}>
+                      {healthPillStatus === STATUS.GOOD
+                        ? 'Healthy — a few things need attention.'
+                        : healthPillStatus === STATUS.WATCH
+                          ? 'Fair — several things need attention.'
+                          : 'At risk — action needed soon.'}
+                    </div>
+                    <div className='h-px' style={{ background: COLORS.border }} />
+                    <div className='text-xs' style={{ color: COLORS.textMuted }}>{totalIssues.toLocaleString()} total issues across your account</div>
+                  </>
+                ) : (
+                  <>
+                    <div className='h-5 w-20 rounded animate-pulse' style={{ background: COLORS.border }} />
+                    <div className='h-8 w-full rounded animate-pulse' style={{ background: COLORS.border }} />
+                  </>
+                )}
+              </div>
+              {isPhase2Complete && (
+                <HealthGauge percentage={healthPercentage} status={healthPillStatus} />
+              )}
+            </div>
           </div>
 
           {/* Main grid - each section shows skeleton based on which phase provides its data */}
@@ -563,7 +728,7 @@ const Dashboard = () => {
               )}
             </motion.div>
             {/* TotalSales - needs Phase 3 data (datewiseSales array for chart) */}
-            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, delay: 0.03 }} className='lg:col-span-2 bg-[#161b22] rounded border border-[#30363d] overflow-visible'>
+            <motion.div ref={totalSalesSectionRef} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, delay: 0.03 }} className='lg:col-span-2 bg-[#161b22] rounded border border-[#30363d] overflow-visible'>
               {!isPhase3Complete ? (
                 <div className="p-1"><SkeletonChart height={220} /></div>
               ) : (

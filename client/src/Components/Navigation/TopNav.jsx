@@ -280,37 +280,37 @@ const TopNav = () => {
     }
 
     return (
-        <nav className="w-full lg:w-[83vw] lg:h-[10vh] h-[8vh] flex items-center justify-between p-10 lg:gap-7 gap-2 border-b border-[#30363d] bg-[#161b22] fixed top-0 z-50 lg:static">
+        <nav className="w-full lg:w-[83vw] lg:h-[10vh] h-[8vh] flex items-center justify-between px-4 lg:px-5 border-b border-[#252C3A] bg-[rgba(11,14,20,.86)] backdrop-blur-md fixed top-0 z-50 lg:static">
             {/* Enhanced Mobile Hamburger Button */}
-            <button 
-                className="lg:hidden p-2 rounded-lg hover:bg-[#21262d] active:bg-[#30363d] transition-colors duration-200 touch-manipulation"
+            <button
+                className="lg:hidden p-2 rounded-lg hover:bg-[#1C2230] active:bg-[#252C3A] transition-colors duration-200 touch-manipulation"
                 onClick={handleHamburger}
                 aria-label="Open mobile menu"
             >
-                <Menu className="w-6 h-6 text-gray-300" />
+                <Menu className="w-6 h-6 text-[#A5AEC0]" />
             </button>
-            {/* Breadcrumb - desktop only */}
+            {/* Breadcrumb - desktop only (hidden per redesign; current path is no longer shown here)
             {breadcrumbItems.length > 0 && (
                 <div className="hidden lg:flex items-center min-w-0 flex-1 mr-4">
-                    <div className="flex items-center gap-0.5 px-3 py-1.5 rounded-lg bg-[#0d1117]/80 border border-[#30363d]/60 backdrop-blur-sm">
+                    <div className="flex items-center gap-0.5 px-3 py-1.5 rounded-lg bg-[#151A23] border border-[#252C3A]">
                         {breadcrumbItems.map((item, index) => (
                             <React.Fragment key={`${item.label}-${index}`}>
                                 {index > 0 && (
-                                    <ChevronRight className="w-3.5 h-3.5 text-[#484f58] flex-shrink-0 mx-0.5" aria-hidden />
+                                    <ChevronRight className="w-3.5 h-3.5 text-[#6B7486] flex-shrink-0 mx-0.5" aria-hidden />
                                 )}
                                 {item.path ? (
                                     <button
                                         type="button"
                                         onClick={() => navigate(item.path)}
                                         title={item.label}
-                                        className="text-xs text-[#8b949e] hover:text-[#58a6ff] hover:bg-[#21262d]/50 px-1.5 py-0.5 rounded transition-colors duration-150 truncate max-w-[180px]"
+                                        className="text-xs text-[#A5AEC0] hover:text-[#7EA8F8] hover:bg-[#1C2230] px-1.5 py-0.5 rounded transition-colors duration-150 truncate max-w-[180px]"
                                     >
                                         {item.label}
                                     </button>
                                 ) : (
                                     <span
                                         title={item.label}
-                                        className="text-xs text-[#c9d1d9] font-medium px-1.5 py-0.5 truncate max-w-[220px]"
+                                        className="text-xs text-[#F5F7FA] font-medium px-1.5 py-0.5 truncate max-w-[220px]"
                                     >
                                         {item.label}
                                     </span>
@@ -320,15 +320,16 @@ const TopNav = () => {
                     </div>
                 </div>
             )}
+            */}
 
-            <div className='flex items-center justify-end lg:gap-7 gap-2 h-full'>
+            <div className='flex items-center justify-end gap-2 h-full'>
                 {/* Demo CTA: show only on /seller-central-checker-demo/* */}
                 {isDemoSellerCentralChecker && (
-                    <div className="relative mr-3">
+                    <div className="relative">
                         <button
                             type="button"
                             onClick={() => navigate('/sign-up')}
-                            className="group flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm cursor-pointer transition-all duration-300 border-2 border-orange-400 text-orange-400 hover:bg-gradient-to-r hover:from-orange-400 hover:to-amber-500 hover:text-black hover:shadow-lg hover:shadow-orange-500/25 hover:scale-[1.02] transform"
+                            className="group flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm cursor-pointer transition-colors duration-200 bg-[#3B82F6] text-[#061021] hover:bg-[#5A97F8]"
                             title="Start your free trial"
                         >
                             <span className="hidden lg:block">Start free trial</span>
@@ -339,51 +340,38 @@ const TopNav = () => {
 
                 {/* Switch Client Button - First for Agency Admin viewing client */}
                 {isAgencyAdminViewingClient && (
-                    <div className="relative mr-3">
+                    <div className="relative">
                         <button
                             onClick={handleSwitchToAgencyClients}
-                            className="group flex items-center gap-2 px-4 py-2 border-2 border-blue-500 text-blue-500 rounded-xl hover:bg-gradient-to-r hover:from-blue-500 hover:to-indigo-600 hover:text-white transition-all duration-300 hover:shadow-md text-sm font-medium"
+                            className="group flex items-center gap-2 px-3 py-2 border border-[#3B82F6]/50 text-[#7EA8F8] rounded-lg hover:border-[#3B82F6] hover:bg-[#3B82F6]/10 transition-colors duration-200 text-sm font-medium"
                             title="Switch client or go to manage clients"
                         >
-                            <ArrowLeftRight className="w-4 h-4 text-blue-500 group-hover:text-white transition-colors duration-300" />
+                            <ArrowLeftRight className="w-4 h-4 text-[#7EA8F8] transition-colors duration-200" />
                             <span className="hidden lg:block">Switch Client</span>
                         </button>
                     </div>
                 )}
 
                 <div className='fit-content relative' ref={dropdownRef}>
-                    <div 
-                        className={`group lg:px-6 lg:py-3 px-4 py-2 rounded-xl outline-none text-xs lg:text-sm flex justify-center items-center gap-3 min-w-[13rem] border transition-all duration-300 ${
+                    <div
+                        className={`group px-3 py-2 rounded-lg outline-none text-[13px] flex justify-center items-center gap-2 border transition-colors duration-200 ${
                             isAgencyAdminViewingClient
-                                ? 'bg-[#21262d] border-blue-500/40 cursor-default'
-                                : openDropDown 
-                                    ? 'bg-[#21262d] border-blue-500/50 ring-2 ring-blue-500/20 cursor-pointer' 
-                                    : 'bg-[#21262d] border-blue-500/40 hover:border-blue-500/60 hover:bg-[#1c2128] cursor-pointer'
+                                ? 'bg-[#151A23] border-[#252C3A] cursor-default'
+                                : openDropDown
+                                    ? 'bg-[#151A23] border-[#3B4658] cursor-pointer'
+                                    : 'bg-[#151A23] border-[#252C3A] hover:border-[#3B4658] cursor-pointer'
                         }`}
                         onClick={isAgencyAdminViewingClient ? undefined : openDropDownfnc}
                         role={isAgencyAdminViewingClient ? 'img' : 'button'}
                         aria-label={isAgencyAdminViewingClient ? 'Brand and marketplace (view only)' : 'Switch brand or account'}
                     >
-                        <div className="flex items-center gap-3 flex-1">
-                            <Building className={`w-4 h-4 flex-shrink-0 transition-colors duration-300 ${
-                                isAgencyAdminViewingClient ? 'text-blue-400' : openDropDown ? 'text-blue-400' : 'text-blue-400 group-hover:text-blue-300'
-                            }`} />
-                            <div className="flex flex-col items-start">
-                                <p className={`font-semibold transition-colors duration-200 ${
-                                    isAgencyAdminViewingClient ? 'text-blue-400' : openDropDown ? 'text-blue-400' : 'text-blue-400 group-hover:text-blue-300'
-                                }`}>
-                                    {truncateBrandName(user?.brand)}
-                                </p>
-                                <p className="text-xs text-blue-300 font-medium">
-                                    {marketplaces[Country]}
-                                </p>
-                            </div>
-                        </div>
+                        <Building className="w-3.5 h-3.5 flex-shrink-0 text-[#6B7486]" />
+                        <span className="font-medium text-[#F5F7FA] whitespace-nowrap">
+                            {marketplaces[Country]}
+                        </span>
                         {!isAgencyAdminViewingClient && (
-                            <ChevronDown className={`w-4 h-4 flex-shrink-0 transition-all duration-300 ${
-                                openDropDown 
-                                    ? 'text-blue-400 rotate-180' 
-                                    : 'text-blue-400 group-hover:text-blue-300 rotate-0'
+                            <ChevronDown className={`w-3.5 h-3.5 flex-shrink-0 text-[#6B7486] transition-transform duration-200 ${
+                                openDropDown ? 'rotate-180' : 'rotate-0'
                             }`} />
                         )}
                     </div>
@@ -394,7 +382,7 @@ const TopNav = () => {
                                 animate={{ opacity: 1, scaleY: 1 }}
                                 exit={{ opacity: 0, scaleY: 0 }}
                                 transition={{ duration: 0.25 }}
-                                className="w-full absolute top-16 flex flex-col border border-[#30363d] rounded-2xl p-3 bg-[#21262d] origin-top z-[99] min-w-[16rem]"
+                                className="w-full absolute top-16 flex flex-col border border-[#252C3A] rounded-[10px] p-2 bg-[#1C2230] origin-top z-[99] min-w-[16rem] shadow-xl"
                             >
                                 {/* Show existing accounts if there are multiple accounts */}
                                 {sellerAccount.length > 1 && sellerAccount
@@ -405,51 +393,51 @@ const TopNav = () => {
                                         initial={{ opacity: 0, x: -10 }}
                                         animate={{ opacity: 1, x: 0 }}
                                         transition={{ duration: 0.2, delay: key * 0.05 }}
-                                        className="group min-w-[13rem] bg-[#161b22] hover:bg-[#21262d] cursor-pointer rounded-lg text-xs lg:text-sm p-3 border border-transparent hover:border-blue-500/40 transition-all duration-200"
+                                        className="group min-w-[13rem] bg-[#151A23] hover:bg-[#252C3A] cursor-pointer rounded-lg text-xs lg:text-sm p-3 border border-transparent hover:border-[#3B4658] transition-colors duration-200"
                                         onClick={elm.userId ? () => switchAccount(elm.country, elm.region) : () => switchAccount(elm.country, elm.region)}
                                     >
                                         <div className="flex items-center gap-3">
-                                            <Building className="w-4 h-4 flex-shrink-0 text-gray-400 group-hover:text-blue-400 transition-colors duration-200" />
+                                            <Building className="w-4 h-4 flex-shrink-0 text-[#6B7486] group-hover:text-[#7EA8F8] transition-colors duration-200" />
                                             <div className="flex-1 min-w-0">
-                                                <p className="font-semibold text-gray-200 group-hover:text-blue-400 transition-colors duration-200 truncate">
+                                                <p className="font-semibold text-[#F5F7FA] group-hover:text-[#7EA8F8] transition-colors duration-200 truncate">
                                                     {truncateBrandName(elm.brand)}
                                                 </p>
-                                                <p className="text-xs text-gray-500 font-medium">
+                                                <p className="text-xs text-[#6B7486] font-medium">
                                                     {marketplaces[elm.country]}
                                                 </p>
                                             </div>
-                                            <ChevronRight className="w-4 h-4 text-gray-500 group-hover:text-blue-400 opacity-0 group-hover:opacity-100 transition-all duration-200" />
+                                            <ChevronRight className="w-4 h-4 text-[#6B7486] group-hover:text-[#7EA8F8] opacity-0 group-hover:opacity-100 transition-all duration-200" />
                                         </div>
                                     </motion.div>
                                 )}
-                                
+
                                 {/* Add New Account Option - Hidden for agency admin viewing client */}
                                 {!isAgencyAdminViewingClient && (
                                     <>
                                         {sellerAccount.length > 1 && (
-                                            <div className="border-t border-[#30363d] my-1"></div>
+                                            <div className="border-t border-[#252C3A] my-1"></div>
                                         )}
                                         <motion.div
                                             initial={{ opacity: 0, x: -10 }}
                                             animate={{ opacity: 1, x: 0 }}
                                             transition={{ duration: 0.2, delay: sellerAccount.length * 0.05 }}
-                                            className="group min-w-[13rem] bg-[#161b22] hover:bg-[#21262d] cursor-pointer rounded-lg text-xs lg:text-sm p-3 border border-dashed border-[#30363d] hover:border-green-500/50 transition-all duration-200"
+                                            className="group min-w-[13rem] bg-[#151A23] hover:bg-[#252C3A] cursor-pointer rounded-lg text-xs lg:text-sm p-3 border border-dashed border-[#252C3A] hover:border-[#22C55E]/50 transition-colors duration-200"
                                             onClick={() => {
                                                 setOpenDropDown(false);
                                                 navigate('/seller-central-checker/settings?tab=account-integration');
                                             }}
                                         >
                                             <div className="flex items-center gap-3">
-                                                <Plus className="w-4 h-4 flex-shrink-0 text-gray-400 group-hover:text-green-400 transition-colors duration-200" />
+                                                <Plus className="w-4 h-4 flex-shrink-0 text-[#6B7486] group-hover:text-[#22C55E] transition-colors duration-200" />
                                                 <div className="flex-1">
-                                                    <p className="font-semibold text-gray-300 group-hover:text-green-400 transition-colors duration-200">
+                                                    <p className="font-semibold text-[#A5AEC0] group-hover:text-[#22C55E] transition-colors duration-200">
                                                         Add New Account
                                                     </p>
-                                                    <p className="text-xs text-gray-500">
+                                                    <p className="text-xs text-[#6B7486]">
                                                         Connect another marketplace
                                                     </p>
                                                 </div>
-                                                <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-green-500 opacity-0 group-hover:opacity-100 transition-all duration-200" />
+                                                <ChevronRight className="w-4 h-4 text-[#6B7486] group-hover:text-[#22C55E] opacity-0 group-hover:opacity-100 transition-all duration-200" />
                                             </div>
                                         </motion.div>
                                     </>
@@ -462,32 +450,32 @@ const TopNav = () => {
                 
                 {/* Switch Account Button - Only visible for Super Admin */}
                 {isSuperAdmin && loggedInAsUser && (
-                    <div className="relative mr-3">
+                    <div className="relative">
                         <button
                             onClick={handleSwitchToAdmin}
-                            className="group flex items-center gap-2 px-4 py-2 border-2 border-orange-500 text-orange-500 rounded-xl hover:bg-gradient-to-r hover:from-orange-500 hover:to-red-600 hover:text-white transition-all duration-300 hover:shadow-md text-sm font-medium"
+                            className="w-8 h-8 rounded-lg flex items-center justify-center border border-[#F5A623]/50 text-[#F5A623] hover:border-[#F5A623] hover:bg-[#F5A623]/10 transition-colors duration-200"
                             title="Switch back to admin account"
+                            aria-label="Switch back to admin account"
                         >
-                            <ArrowLeftRight className="w-4 h-4 text-orange-500 group-hover:text-white transition-colors duration-300" />
-                            <span className="hidden lg:block">Switch Account</span>
+                            <ArrowLeftRight className="w-4 h-4" />
                         </button>
                     </div>
                 )}
 
-                <div className="relative mr-3" ref={notificationRef}>
-                    <div 
-                        className={`group w-10 h-10 lg:w-11 lg:h-11 rounded-xl flex items-center justify-center cursor-pointer transition-all duration-300 ${
-                            openNotifications 
-                                ? 'bg-gradient-to-br from-blue-500 to-indigo-600 ring-2 ring-blue-500/30' 
-                                : 'bg-[#21262d] hover:bg-[#1c2128] border border-[#30363d]'
+                <div className="relative" ref={notificationRef}>
+                    <div
+                        className={`group w-8 h-8 rounded-lg flex items-center justify-center cursor-pointer transition-colors duration-200 border ${
+                            openNotifications
+                                ? 'bg-[#1C2230] border-[#3B4658]'
+                                : 'bg-[#151A23] hover:border-[#3B4658] border-[#252C3A]'
                         }`}
                         onClick={handleNotificationClick}
                     >
-                        <Bell className={`w-5 h-5 transition-colors duration-300 ${
-                            openNotifications ? 'text-white' : 'text-gray-400 group-hover:text-blue-400'
+                        <Bell className={`w-4 h-4 transition-colors duration-200 ${
+                            openNotifications ? 'text-[#F5F7FA]' : 'text-[#A5AEC0] group-hover:text-[#F5F7FA]'
                         }`} />
                         {unreadCount > 0 && (
-                            <div className='absolute -top-1 -right-1 bg-gradient-to-r from-red-500 to-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full shadow-sm min-w-[20px] text-center'>
+                            <div className='absolute -top-1 -right-1 bg-[#EF4444] text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[16px] text-center leading-4'>
                                 {unreadCount > 99 ? '99+' : unreadCount}
                             </div>
                         )}
@@ -501,23 +489,23 @@ const TopNav = () => {
                                 animate={{ opacity: 1, scaleY: 1 }}
                                 exit={{ opacity: 0, scaleY: 0 }}
                                 transition={{ duration: 0.25 }}
-                                className="absolute top-14 right-0 w-96 max-h-[500px] bg-[#21262d] border border-[#30363d] rounded-2xl origin-top z-[999] overflow-hidden"
+                                className="absolute top-14 right-0 w-96 max-h-[500px] bg-[#1C2230] border border-[#252C3A] rounded-[10px] origin-top z-[999] overflow-hidden shadow-xl"
                             >
                                 {/* Header */}
-                                <div className="p-5 border-b border-[#30363d] flex justify-between items-center bg-[#161b22]">
+                                <div className="p-5 border-b border-[#252C3A] flex justify-between items-center bg-[#151A23]">
                                     <div className="flex items-center gap-3">
-                                        <Bell className="w-5 h-5 flex-shrink-0 text-blue-400" />
+                                        <Bell className="w-5 h-5 flex-shrink-0 text-[#7EA8F8]" />
                                         <div>
-                                            <h3 className="font-bold text-gray-100">Notifications</h3>
+                                            <h3 className="font-bold text-[#F5F7FA]">Notifications</h3>
                                             {unreadCount > 0 && (
-                                                <p className="text-xs text-gray-500">{unreadCount} unread</p>
+                                                <p className="text-xs text-[#6B7486]">{unreadCount} unread</p>
                                             )}
                                         </div>
                                     </div>
                                     {unreadCount > 0 && (
                                         <button
                                             onClick={handleMarkAllAsRead}
-                                            className="text-xs font-medium text-blue-400 hover:text-blue-300 bg-blue-500/20 hover:bg-blue-500/30 px-3 py-1.5 rounded-lg transition-all duration-200"
+                                            className="text-xs font-medium text-[#7EA8F8] hover:text-[#A9C4FB] bg-[#3B82F6]/15 hover:bg-[#3B82F6]/25 px-3 py-1.5 rounded-lg transition-colors duration-200"
                                         >
                                             Mark all read
                                         </button>
@@ -528,9 +516,9 @@ const TopNav = () => {
                                 <div className="max-h-80 overflow-y-auto">
                                     {notifications.length === 0 ? (
                                         <div className="p-8 text-center">
-                                            <Bell className="w-12 h-12 text-gray-500 mx-auto mb-4" />
-                                            <h4 className="font-semibold text-gray-300 mb-2">No notifications yet</h4>
-                                            <p className="text-sm text-gray-500">You're all caught up! New notifications will appear here.</p>
+                                            <Bell className="w-12 h-12 text-[#6B7486] mx-auto mb-4" />
+                                            <h4 className="font-semibold text-[#A5AEC0] mb-2">No notifications yet</h4>
+                                            <p className="text-sm text-[#6B7486]">You're all caught up! New notifications will appear here.</p>
                                         </div>
                                     ) : (
                                         notifications.slice(0, 10).map((notification, index) => (
@@ -540,59 +528,59 @@ const TopNav = () => {
                                                 animate={{ opacity: 1, x: 0 }}
                                                 transition={{ duration: 0.2, delay: index * 0.05 }}
                                                 onClick={() => handleNotificationItemClick(notification)}
-                                                className={`group p-4 mx-2 my-1 rounded-xl cursor-pointer transition-all duration-200 ${
-                                                    !notification.isRead 
-                                                        ? 'bg-blue-500/10 border border-blue-500/30 hover:border-blue-500/50' 
-                                                        : 'hover:bg-[#161b22] border border-transparent hover:border-[#30363d]'
+                                                className={`group p-4 mx-2 my-1 rounded-lg cursor-pointer transition-colors duration-200 ${
+                                                    !notification.isRead
+                                                        ? 'bg-[#3B82F6]/10 border border-[#3B82F6]/30 hover:border-[#3B82F6]/50'
+                                                        : 'hover:bg-[#151A23] border border-transparent hover:border-[#252C3A]'
                                                 }`}
                                             >
                                                 <div className="flex gap-3">
                                                     <Bell className={`w-4 h-4 flex-shrink-0 transition-colors duration-200 ${
                                                         notification.type === 'alert'
-                                                            ? (notification.alertType === 'ProductContentChange' ? 'text-amber-400' : notification.alertType === 'BuyBoxMissing' ? 'text-blue-400' : notification.alertType === 'APlusMissing' ? 'text-emerald-400' : 'text-red-400')
-                                                            : notification.type === 'analysis_complete' 
-                                                                ? 'text-green-400' 
-                                                                : 'text-orange-400'
+                                                            ? (notification.alertType === 'ProductContentChange' ? 'text-[#F5A623]' : notification.alertType === 'BuyBoxMissing' ? 'text-[#7EA8F8]' : notification.alertType === 'APlusMissing' ? 'text-[#22C55E]' : 'text-[#F87171]')
+                                                            : notification.type === 'analysis_complete'
+                                                                ? 'text-[#22C55E]'
+                                                                : 'text-[#F5A623]'
                                                     }`} />
                                                     <div className="flex-1 min-w-0">
                                                         <div className="flex justify-between items-start mb-2">
                                                             <h4 className={`text-sm font-semibold leading-tight ${
-                                                                !notification.isRead ? 'text-gray-100' : 'text-gray-300'
+                                                                !notification.isRead ? 'text-[#F5F7FA]' : 'text-[#A5AEC0]'
                                                             }`}>
                                                                 {notification.type === 'alert' ? getAlertDropdownTitle(notification.alertType) : notification.title}
                                                             </h4>
                                                             <div className="flex items-center gap-2 ml-2">
                                                                 {notification.type === 'issues_found' && notification.issueCount && (
-                                                                    <span className="px-2 py-1 bg-red-100 text-red-700 text-xs font-medium rounded-full">
+                                                                    <span className="px-2 py-1 bg-[#EF4444]/15 text-[#F87171] text-xs font-medium rounded-full">
                                                                         {notification.issueCount}
                                                                     </span>
                                                                 )}
                                                                 {!notification.isRead && (
-                                                                    <div className="w-2.5 h-2.5 bg-blue-500 rounded-full shadow-sm"></div>
+                                                                    <div className="w-2.5 h-2.5 bg-[#3B82F6] rounded-full"></div>
                                                                 )}
                                                             </div>
                                                         </div>
                                                         {notification.type === 'alert' ? (
-                                                            <p className="text-xs text-gray-400 mb-2 leading-relaxed">
+                                                            <p className="text-xs text-[#6B7486] mb-2 leading-relaxed">
                                                                 {notification.products?.length > 0
                                                                     ? `${notification.products.length} product${notification.products.length === 1 ? '' : 's'} affected`
                                                                     : (notification.message || 'Alert').slice(0, 50)}
                                                             </p>
                                                         ) : (
-                                                            <p className="text-xs text-gray-400 mb-3 line-clamp-2 leading-relaxed">
+                                                            <p className="text-xs text-[#6B7486] mb-3 line-clamp-2 leading-relaxed">
                                                                 {notification.message}
                                                             </p>
                                                         )}
                                                         <div className="flex justify-between items-center">
-                                                            <span className="text-xs text-gray-400 font-medium">
+                                                            <span className="text-xs text-[#6B7486] font-medium">
                                                                 {formatTimestamp(notification.timestamp)}
                                                             </span>
-                                                            <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
+                                                            <span className={`text-xs px-2.5 py-1 rounded-full font-medium border ${
                                                                 notification.type === 'alert'
-                                                                    ? (notification.alertType === 'ProductContentChange' ? 'bg-amber-100 text-amber-800 border border-amber-200' : notification.alertType === 'BuyBoxMissing' ? 'bg-blue-100 text-blue-700 border border-blue-200' : notification.alertType === 'APlusMissing' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 'bg-red-100 text-red-700 border border-red-200')
-                                                                    : notification.type === 'analysis_complete' 
-                                                                        ? 'bg-green-100 text-green-700 border border-green-200' 
-                                                                        : 'bg-orange-100 text-orange-700 border border-orange-200'
+                                                                    ? (notification.alertType === 'ProductContentChange' ? 'bg-[#F5A623]/12 text-[#F5A623] border-[#F5A623]/25' : notification.alertType === 'BuyBoxMissing' ? 'bg-[#3B82F6]/12 text-[#7EA8F8] border-[#3B82F6]/25' : notification.alertType === 'APlusMissing' ? 'bg-[#22C55E]/12 text-[#22C55E] border-[#22C55E]/25' : 'bg-[#EF4444]/12 text-[#F87171] border-[#EF4444]/25')
+                                                                    : notification.type === 'analysis_complete'
+                                                                        ? 'bg-[#22C55E]/12 text-[#22C55E] border-[#22C55E]/25'
+                                                                        : 'bg-[#F5A623]/12 text-[#F5A623] border-[#F5A623]/25'
                                                             }`}>
                                                                 {notification.type === 'alert' ? (notification.alertType === 'ProductContentChange' ? 'Content' : notification.alertType === 'BuyBoxMissing' ? 'Buy box' : notification.alertType === 'APlusMissing' ? 'A+ missing' : 'Reviews') : notification.type === 'analysis_complete' ? 'Analysis' : 'Issues'}
                                                             </span>
@@ -605,14 +593,14 @@ const TopNav = () => {
                                 </div>
 
                                 {/* Footer: See all */}
-                                <div className="p-3 border-t border-[#30363d] bg-[#161b22] text-center">
+                                <div className="p-3 border-t border-[#252C3A] bg-[#151A23] text-center">
                                     <button
                                         type="button"
                                         onClick={() => {
                                             setOpenNotifications(false);
                                             navigate(notificationsListPath);
                                         }}
-                                        className="text-sm font-medium text-blue-400 hover:text-blue-300 hover:underline"
+                                        className="text-sm font-medium text-[#7EA8F8] hover:text-[#A9C4FB] hover:underline"
                                     >
                                         See all
                                     </button>
@@ -622,25 +610,25 @@ const TopNav = () => {
                     </AnimatePresence>
                 </div>
                 {/* Profile Photo - Always visible; non-clickable for agency admin viewing client */}
-                <div 
-                    className={`group w-10 h-10 lg:w-11 lg:h-11 rounded-xl overflow-hidden transition-all duration-300 border-2 border-[#30363d] ${
-                        isAgencyAdminViewingClient 
-                            ? 'cursor-default opacity-90' 
-                            : 'cursor-pointer hover:scale-105 hover:border-blue-500/50'
+                <div
+                    className={`group w-8 h-8 rounded-lg overflow-hidden transition-colors duration-200 border border-[#252C3A] ${
+                        isAgencyAdminViewingClient
+                            ? 'cursor-default opacity-90'
+                            : 'cursor-pointer hover:border-[#3B4658]'
                     }`}
                     onClick={isAgencyAdminViewingClient ? undefined : () => navigate('/seller-central-checker/settings')}
                     role={isAgencyAdminViewingClient ? 'img' : 'button'}
                     aria-label={isAgencyAdminViewingClient ? 'Profile (view only)' : 'Go to settings'}
                 >
                     {profilepic ? (
-                        <img 
-                            src={profilepic} 
-                            alt="Profile" 
-                            className={`w-full h-full object-cover transition-transform duration-300 ${!isAgencyAdminViewingClient ? 'group-hover:scale-110' : ''}`} 
+                        <img
+                            src={profilepic}
+                            alt="Profile"
+                            className="w-full h-full object-cover"
                         />
                     ) : (
-                        <div className={`w-full h-full bg-gradient-to-br from-gray-400 to-gray-500 flex items-center justify-center transition-all duration-300 ${!isAgencyAdminViewingClient ? 'group-hover:from-blue-500 group-hover:to-indigo-600' : ''}`}>
-                            <User className="w-5 h-5 text-white" />
+                        <div className="w-full h-full bg-[#151A23] flex items-center justify-center">
+                            <User className="w-4 h-4 text-[#A5AEC0]" />
                         </div>
                     )}
                 </div>
@@ -655,10 +643,10 @@ const TopNav = () => {
                     transition={{ duration: 0.2 }}
                     className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]"
                 >
-                    <div className="bg-[#21262d] rounded-lg p-8 flex flex-col items-center justify-center border border-[#30363d]">
-                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mb-4"></div>
-                        <p className="text-gray-200 text-lg font-medium">Switching Account...</p>
-                        <p className="text-gray-500 text-sm mt-2">Please wait</p>
+                    <div className="bg-[#1C2230] rounded-[10px] p-8 flex flex-col items-center justify-center border border-[#252C3A]">
+                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#3B82F6] mb-4"></div>
+                        <p className="text-[#F5F7FA] text-lg font-medium">Switching Account...</p>
+                        <p className="text-[#6B7486] text-sm mt-2">Please wait</p>
                     </div>
                 </motion.div>
             )}
