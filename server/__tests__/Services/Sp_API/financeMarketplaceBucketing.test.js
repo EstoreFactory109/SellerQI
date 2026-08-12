@@ -252,6 +252,35 @@ describe('parseSalesReportRows — Seller Central sales reconciliation', () => {
     ];
     expect(sum(parseSalesReportRows(rows, 'AU'))).toBeCloseTo(249.90 + 19.99, 2);
   });
+
+  test('★ a promoted multi-quantity ES line matches Amazon via per-LINE rounding', () => {
+    // Found auditing a real ES account: raw sum already matched Data Kiosk on 23/28 days, but the
+    // tax correction (working correctly for AU, where every promoted row happened to be quantity 1)
+    // broke 5 of them. item-promotion-discount is a line total; dividing it into per-unit shares
+    // before rounding lost 2 cents on this 5-unit line. Fixed 4 of the 5 real mismatches; day
+    // remains its own describe block below since it needs day-level rather than row-level framing.
+    const esRow = row({
+      'amazon-order-id': 'ES-1', 'sales-channel': 'Amazon.es', 'item-price': '99.50',
+      'item-tax': '15.54', 'item-promotion-discount': '8.22', quantity: '5',
+    });
+    expect(sum(parseSalesReportRows([esRow], 'ES'))).toBeCloseTo(97.77, 2);
+  });
+
+  test('per-line rounding for promoted rows is still chunk-independent', () => {
+    // The determinism guarantee must survive the per-line/per-unit split: evaluating the ES line
+    // alone or alongside other rows must not change its value.
+    const esRow = row({
+      'amazon-order-id': 'ES-1', 'sales-channel': 'Amazon.es', 'item-price': '99.50',
+      'item-tax': '15.54', 'item-promotion-discount': '8.22', quantity: '5',
+    });
+    const alone = sum(parseSalesReportRows([esRow], 'ES'));
+    const withNeighbours = sum(parseSalesReportRows(
+      [esRow, ...Array.from({ length: 5 }, (_, i) => row({ 'amazon-order-id': `N-${i}`, 'sales-channel': 'Amazon.es', 'item-price': '19.90', 'item-tax': '3.45', 'item-promotion-discount': '0' }))],
+      'ES'
+    ));
+    expect(alone).toBeCloseTo(97.77, 2);
+    expect(withNeighbours).toBeCloseTo(97.77 + 5 * 19.90, 2);
+  });
 });
 
 describe('buildOverheadBuckets — posted dates use the same calendar', () => {

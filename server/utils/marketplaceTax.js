@@ -255,12 +255,25 @@ function itemSalesForRow(row, country) {
 
   const tax = num(row['item-tax']);
   const qty = Math.max(1, parseInt(row.quantity, 10) || 1);
+  const discounted = num(row['item-promotion-discount']) > 0;
+
+  // ── Rounding granularity: per LINE for a promoted row, per UNIT for an unpromoted one. ──
+  // `item-promotion-discount` is reported as a LINE total, not naturally divisible by quantity —
+  // splitting it into equal per-unit shares before rounding accumulates error. A real 5-unit
+  // promoted ES line (item-price 99.50, tax 15.54, discount 8.22) rounds to 97.75 per-unit but
+  // 97.77 per-line; Amazon's own total needs 97.77. Confirmed the other way too: unpromoted rows
+  // must stay per-unit — a real AU quantity-2 line (29.98 taxed 2.32) rounds to 29.57 per-line but
+  // Amazon's total needs 29.58, i.e. per-unit. Amazon computes tax per unit when there is no
+  // promotion to apply, but folds a promotion into one line-level adjustment.
+  if (discounted) {
+    const uncollected = Math.max(0, round2(price * u - tax));
+    return price - uncollected;
+  }
+
   const unitPrice = price / qty;
   const unitTax = tax / qty;
 
   // Tax expected on the full unit price, minus what was actually charged = the uncollected tax.
-  // Rounded per UNIT because that is what reproduces Amazon's figure on multi-quantity lines: a
-  // real quantity-2 line (29.98 taxed 2.32) is a cent out under per-line rounding.
   //
   // Clamped at 0 so the correction can only ever REMOVE uncollected tax. A row taxed ABOVE the
   // rate (an extra tax component, odd data) would otherwise push reported sales above the price

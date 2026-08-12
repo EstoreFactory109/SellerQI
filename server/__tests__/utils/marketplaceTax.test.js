@@ -123,13 +123,24 @@ describe('itemSalesForRow — AU, the validated case', () => {
     expect(itemSalesForRow({ 'item-price': '19.99', 'item-tax': '0', quantity: '1' }, 'AU')).toBeCloseTo(19.99, 10);
   });
 
-  test('★ rounding is PER UNIT, which multi-quantity lines depend on', () => {
+  test('★ an UNPROMOTED multi-quantity line rounds PER UNIT', () => {
     // Real 2026-07-14 line: quantity 2, item-price 29.98, item-tax 2.32.
     // per unit → 2 * (14.99 - 0.20) = 29.58 ← matches Amazon
     // per line → 29.98 - 0.41       = 29.57 ← one cent low
     const row = { 'item-price': '29.98', 'item-tax': '2.32', 'item-promotion-discount': '0', quantity: '2' };
     expect(itemSalesForRow(row, 'AU')).toBeCloseTo(29.58, 2);
     expect(itemSalesForRow(row, 'AU')).not.toBeCloseTo(29.57, 2);
+  });
+
+  test('★ a PROMOTED multi-quantity line rounds PER LINE, the opposite of an unpromoted one', () => {
+    // Real ES line: quantity 5, item-price 99.50, item-tax 15.54, item-promotion-discount 8.22.
+    // item-promotion-discount is a LINE total, not naturally divisible by 5 — splitting it into
+    // equal per-unit shares before rounding accumulated error and broke 5 of 30 real ES days.
+    // per line → 99.50 - round2(99.50*u - 15.54) = 99.50 - 1.73 = 97.77 ← matches Amazon
+    // per unit → 5 * (19.90 - round2(19.90*u - 3.108)) = 5 * 19.55 = 97.75 ← two cents low
+    const row = { 'item-price': '99.50', 'item-tax': '15.54', 'item-promotion-discount': '8.22', quantity: '5' };
+    expect(itemSalesForRow(row, 'ES')).toBeCloseTo(97.77, 2);
+    expect(itemSalesForRow(row, 'ES')).not.toBeCloseTo(97.75, 2);
   });
 
   test('the correction never increases reported sales', () => {
