@@ -1,10 +1,9 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
-import { Calendar, TrendingUp, AlertTriangle, DollarSign, Box, ShoppingBag, Activity, LineChart, PieChart, Users, Filter, Award, Target, RefreshCw, Receipt, TrendingDown, Gauge, FileWarning } from 'lucide-react'
+import { TrendingUp, AlertTriangle, DollarSign, Box, ShoppingBag, Activity, LineChart, PieChart, Users, Filter, Award, Target, Receipt, TrendingDown, Gauge, FileWarning } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import ProductChecker from '../../Components/Dashboard/SamePageComponents/ProductChecker.jsx'
 import TotalSales from '../../Components/Dashboard/SamePageComponents/TotalSales.jsx'
 import AccountHealth from '../../Components/Dashboard/SamePageComponents/AccountHealth.jsx'
-import Calender, { isClickInsideGaCalDropdown } from '../../Components/Calender/Calender.jsx'
 import ErrorBoundary from '../../Components/ErrorBoundary/ErrorBoundary.jsx'
 import { SkeletonCardBody, SkeletonChart, SkeletonTableBody } from '../../Components/Skeleton/PageSkeletons.jsx'
 import { SkeletonBar } from '../../Components/Skeleton/Skeleton.jsx'
@@ -23,10 +22,7 @@ import DownloadReport from '../../Components/DownloadReport/DownloadReport.jsx'
 import { StatusPill, KPICard, VerdictBanner, HealthGauge, STATUS, COLORS, getStatusConfig } from '../../Components/Shared/index.js'
 
 const Dashboard = () => {
-  const [openCalender, setOpenCalender] = useState(false)
   const [selectedPeriod, setSelectedPeriod] = useState('Last 30 Days')
-  const CalenderRef = useRef(null)
-  const calendarAnchorRef = useRef(null)
   const contentRef = useRef(null)
   const totalSalesSectionRef = useRef(null)
   const navigate = useNavigate()
@@ -92,15 +88,10 @@ const Dashboard = () => {
   // Phase 2: Core (~150ms) - sales totals, account health, finance, PPC summary
   // Phase 3: Charts (~200ms) - datewiseSales, orders, products arrays
   // Phase 4: Top Products (~50ms) - top 4 products by issues
-  const { 
-    data: dashboardInfo, 
-    loading: dashboardLoading, 
-    loadingPhase1,
-    loadingPhase2,
-    loadingPhase3,
-    loadingTop4,
-    error: dashboardError, 
-    forceRefresh: refreshDashboard,
+  const {
+    data: dashboardInfo,
+    loading: dashboardLoading,
+    error: dashboardError,
     isPhase1Complete,
     isPhase2Complete,
     isPhase3Complete,
@@ -356,19 +347,6 @@ const Dashboard = () => {
     }
   }, [dispatch, ppcMetricsLastFetched, ppcMetricsLoading, isPhase1Complete])
 
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (isClickInsideGaCalDropdown(event.target)) return
-      if (CalenderRef.current && !CalenderRef.current.contains(event.target)) {
-        setOpenCalender(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [])
-
   // Calculate PPC sales using PPCMetrics model (PRIMARY) or fallback to legacy data
   const calculatePPCSales = () => {
     // Same priority as PPC Dashboard KPIs when not using a custom calendar range
@@ -539,43 +517,8 @@ const Dashboard = () => {
       className='w-full min-h-full bg-[#0B0E14] text-[#F5F7FA] text-sm leading-5'
       style={{ fontFamily: "Geist, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" }}
     >
-      {/* Utility bar: date range + refresh. Marketplace switcher and notifications
-          already live in the global TopNav rendered above this page — not duplicated here. */}
-      <div className='sticky top-0 z-40 flex items-center gap-3 px-7 py-3 border-b border-[#252C3A] bg-[rgba(11,14,20,.86)] backdrop-blur-md'>
-        <div className='relative' ref={CalenderRef}>
-          <button
-            ref={calendarAnchorRef}
-            onClick={() => setOpenCalender(!openCalender)}
-            className='flex items-center gap-2 px-[11px] py-[7px] border border-[#252C3A] hover:border-[#3B4658] rounded-lg bg-[#151A23] text-[#F5F7FA] text-[13px] transition-colors'
-          >
-            <Calendar className='w-3.5 h-3.5 text-[#6B7486]' />
-            <span>{selectedPeriod}</span>
-          </button>
-
-          {openCalender && (
-            <Calender
-              anchorRef={calendarAnchorRef}
-              setOpenCalender={setOpenCalender}
-              setSelectedPeriod={setSelectedPeriod}
-            />
-          )}
-        </div>
-
-        <button
-          type="button"
-          onClick={() => refreshDashboard()}
-          disabled={
-            loadingPhase1 || loadingPhase2 || loadingPhase3 || loadingTop4
-          }
-          title="Reload all dashboard data (sales, health, charts, top products)"
-          className="flex items-center gap-2 px-[11px] py-[7px] border border-[#252C3A] hover:border-[#3B4658] rounded-lg bg-[#151A23] text-[#F5F7FA] text-[13px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <RefreshCw
-            className={`w-3.5 h-3.5 text-[#6B7486] ${loadingPhase1 || loadingPhase2 || loadingPhase3 || loadingTop4 ? 'animate-spin' : ''}`}
-          />
-          <span className="hidden sm:inline">Refresh</span>
-        </button>
-      </div>
+      {/* Date range + refresh live in the global TopNav (beside the marketplace pill) on this route.
+          Marketplace switcher and notifications are also already in TopNav — not duplicated here. */}
 
       {/* Main Content */}
       <div

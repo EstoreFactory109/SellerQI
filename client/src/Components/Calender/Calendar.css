@@ -11,9 +11,9 @@
   --ga-cal-accent: #3b82f6;
   --ga-cal-accent-2: rgba(59, 130, 246, 0.18);
   --ga-cal-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
-  --ga-cal-cell: 3rem;
-  --ga-cal-month-pad-x: 1.25rem;
-  --ga-cal-month-pad-y: 0.875rem;
+  --ga-cal-cell: 2.375rem;
+  --ga-cal-month-pad-x: 0.875rem;
+  --ga-cal-month-pad-y: 0.625rem;
 }
 
 .ga-cal-dropdown {
@@ -47,7 +47,7 @@
 
 .ga-cal-popover--split {
   width: auto;
-  max-width: min(1220px, calc(100vw - 32px));
+  max-width: min(720px, calc(100vw - 32px));
   overflow: visible;
 }
 
@@ -114,10 +114,10 @@
   flex-direction: column;
   min-width: 0;
   flex: 0 0 auto;
-  max-width: min(1000px, calc(100vw - 252px));
+  max-width: min(680px, calc(100vw - 40px));
   /* No max-height / inner scroll — full calendar + Apply stay in one view */
   overflow: visible;
-  padding: 16px 20px 18px;
+  padding: 12px 14px 14px;
   background: rgba(11, 18, 32, 0.55);
 }
 
@@ -130,6 +130,9 @@
 
 .ga-cal__pill {
   flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   border-radius: 10px;
   border: 1px solid var(--ga-cal-border);
   background: rgba(255, 255, 255, 0.03);
@@ -147,10 +150,10 @@
   text-transform: uppercase;
   color: rgba(229, 231, 235, 0.5);
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .ga-cal__pillValue {
-  margin-top: 4px;
   font-size: 13px;
   font-weight: 650;
   color: var(--ga-cal-text);
@@ -196,12 +199,10 @@
 .ga-cal__footer--custom {
   flex-shrink: 0;
   margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--ga-cal-border);
 }
 
 .ga-cal__footer--backOnly {
-  justify-content: flex-start;
+  justify-content: flex-end;
 }
 
 /* Month/year row: left cluster (arrows + pickers) | right Apply */
@@ -329,13 +330,14 @@
 }
 
 .ga-cal__btn--ghost {
-  background: rgba(255, 255, 255, 0.02);
-  color: var(--ga-cal-text);
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #f87171;
 }
 
 .ga-cal__btn--ghost:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: var(--ga-cal-border-strong);
+  background: rgba(239, 68, 68, 0.14);
+  border-color: rgba(239, 68, 68, 0.55);
   transform: translateY(-1px);
 }
 
@@ -480,10 +482,10 @@
 .ga-cal__calendar--embedded .rdrDateRangeWrapper,
 .ga-cal__calendar--embedded .rdrCalendarWrapper {
   width: 100% !important;
-  min-width: min(900px, 100%);
+  min-width: min(640px, 100%);
   max-width: none;
-  border-radius: 12px;
-  font-size: 14px;
+  border-radius: 10px;
+  font-size: 13px;
   margin: 0;
   overflow: visible;
   border: 1px solid var(--ga-cal-border-strong);
@@ -495,8 +497,8 @@
   flex-direction: row !important;
   align-items: flex-start;
   width: 100%;
-  gap: 28px;
-  padding: 6px 4px 10px;
+  gap: 14px;
+  padding: 4px 2px 8px;
   box-sizing: border-box;
 }
 
@@ -511,7 +513,7 @@
 
 .ga-cal__calendar--embedded .rdrMonthsHorizontal > .rdrMonth + .rdrMonth {
   border-left: 1px solid var(--ga-cal-border);
-  padding-left: calc(var(--ga-cal-month-pad-x) + 14px);
+  padding-left: calc(var(--ga-cal-month-pad-x) + 10px);
   margin-left: 0;
 }
 

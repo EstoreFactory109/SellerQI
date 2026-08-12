@@ -52,10 +52,11 @@ function readPortalStyle(anchorRef) {
   if (!anchorRef?.current || typeof window === 'undefined') return null;
   const r = anchorRef.current.getBoundingClientRect();
   const gap = 8;
+  const rightShift = 24; // nudges the dropdown further right relative to its anchor
   return {
     position: 'fixed',
     top: r.bottom + gap,
-    right: document.documentElement.clientWidth - r.right,
+    right: Math.max(8, document.documentElement.clientWidth - r.right - rightShift),
     left: 'auto',
     zIndex: 10050,
   };
@@ -716,28 +717,30 @@ export default function DateFilter({ setOpenCalender, setSelectedPeriod, anchorR
         transition={{ layout: gaCalLayoutSpring }}
         style={{ borderRadius: 8 }}
       >
-        <div className="ga-cal-menu">
-          {presets.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              role="option"
-              aria-selected={p.active}
-              onClick={() => handlePreset(p.id)}
-              disabled={Loader}
-              className={`ga-cal-menuItem ${p.active ? 'is-active' : ''}`}
-            >
-              <span className="ga-cal-menuItemLabel">{p.label}</span>
-              <span className="ga-cal-menuItemAffix">
-                {p.active ? (
-                  <Check className="w-4 h-4" aria-hidden />
-                ) : p.id === 'custom' && !customPanelOpen && !splitLayout ? (
-                  <ChevronRight className="w-4 h-4 opacity-50" aria-hidden />
-                ) : null}
-              </span>
-            </button>
-          ))}
-        </div>
+        {!customPanelOpen && (
+          <div className="ga-cal-menu">
+            {presets.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                role="option"
+                aria-selected={p.active}
+                onClick={() => handlePreset(p.id)}
+                disabled={Loader}
+                className={`ga-cal-menuItem ${p.active ? 'is-active' : ''}`}
+              >
+                <span className="ga-cal-menuItemLabel">{p.label}</span>
+                <span className="ga-cal-menuItemAffix">
+                  {p.active ? (
+                    <Check className="w-4 h-4" aria-hidden />
+                  ) : p.id === 'custom' ? (
+                    <ChevronRight className="w-4 h-4 opacity-50" aria-hidden />
+                  ) : null}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
 
         <AnimatePresence
           onExitComplete={() => {

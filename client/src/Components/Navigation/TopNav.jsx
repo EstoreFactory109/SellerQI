@@ -1,14 +1,57 @@
 import React, { useRef, useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useSelector, useDispatch } from 'react-redux'
 import { setPosition } from '../../redux/slices/MobileMenuSlice.js'
 import { markAsRead, markAllAsRead, setAlertsFromApi } from '../../redux/slices/notificationsSlice.js'
 import { setCurrency } from '../../redux/slices/currencySlice.js'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion';
-import { Building, Plus, ChevronRight, ChevronDown, Bell, User, Menu, ArrowLeftRight } from 'lucide-react'
+import { Building, Plus, ChevronRight, ChevronDown, Bell, User, Menu, ArrowLeftRight, Calendar, RefreshCw } from 'lucide-react'
 import axios from 'axios'
 import axiosInstance from '../../config/axios.config.js'
 import { amazonMarketplaceCurrencies } from '../../utils/amazonAllowedCountries.js'
+import Calender, { isClickInsideGaCalDropdown } from '../Calender/Calender.jsx'
+import { useDashboardData } from '../../hooks/usePageData.js'
+
+const DASHBOARD_ROUTES = ['/seller-central-checker/dashboard', '/seller-central-checker-demo/dashboard']
+
+// Marketplace shown as flag + Amazon domain (e.g. "🇺🇸 Amazon.com") instead of the full country name.
+const marketplaceMeta = {
+    US: { flag: '🇺🇸', domain: 'Amazon.com' },
+    CA: { flag: '🇨🇦', domain: 'Amazon.ca' },
+    MX: { flag: '🇲🇽', domain: 'Amazon.com.mx' },
+    BR: { flag: '🇧🇷', domain: 'Amazon.com.br' },
+    IE: { flag: '🇮🇪', domain: 'Amazon.ie' },
+    UK: { flag: '🇬🇧', domain: 'Amazon.co.uk' },
+    DE: { flag: '🇩🇪', domain: 'Amazon.de' },
+    FR: { flag: '🇫🇷', domain: 'Amazon.fr' },
+    IT: { flag: '🇮🇹', domain: 'Amazon.it' },
+    ES: { flag: '🇪🇸', domain: 'Amazon.es' },
+    NL: { flag: '🇳🇱', domain: 'Amazon.nl' },
+    BE: { flag: '🇧🇪', domain: 'Amazon.com.be' },
+    SE: { flag: '🇸🇪', domain: 'Amazon.se' },
+    PL: { flag: '🇵🇱', domain: 'Amazon.pl' },
+    ZA: { flag: '🇿🇦', domain: 'Amazon.co.za' },
+    TR: { flag: '🇹🇷', domain: 'Amazon.com.tr' },
+    SA: { flag: '🇸🇦', domain: 'Amazon.sa' },
+    AE: { flag: '🇦🇪', domain: 'Amazon.ae' },
+    EG: { flag: '🇪🇬', domain: 'Amazon.eg' },
+    IN: { flag: '🇮🇳', domain: 'Amazon.in' },
+    JP: { flag: '🇯🇵', domain: 'Amazon.co.jp' },
+    SG: { flag: '🇸🇬', domain: 'Amazon.sg' },
+    AU: { flag: '🇦🇺', domain: 'Amazon.com.au' },
+}
+
+const MarketplaceLabel = ({ countryCode, textClassName = '' }) => {
+    const meta = marketplaceMeta[countryCode]
+    if (!meta) return <span className={textClassName}>{countryCode || 'Marketplace'}</span>
+    return (
+        <span className="inline-flex items-center gap-1.5">
+            <span style={{ fontSize: '13px' }}>{meta.flag}</span>
+            <span className={textClassName}>{meta.domain}</span>
+        </span>
+    )
+}
 
 const TopNav = () => {
     const navigate = useNavigate()
@@ -17,32 +60,6 @@ const TopNav = () => {
     const notificationsListPath = isDemoNotificationsContext
         ? '/seller-central-checker-demo/notifications'
         : '/seller-central-checker/notifications';
-    const marketplaces = {
-        US: "United States",
-        CA: "Canada",
-        MX: "Mexico",
-        BR: "Brazil",
-        IE: "Ireland",
-        UK: "United Kingdom",
-        DE: "Germany",
-        FR: "France",
-        IT: "Italy",
-        ES: "Spain",
-        NL: "Netherlands",
-        BE: "Belgium",
-        SE: "Sweden",
-        PL: "Poland",
-        ZA: "South Africa",
-        TR: "Turkey",
-        SA: "Saudi Arabia",
-        AE: "United Arab Emirates",
-        EG: "Egypt",
-        IN: "India",
-        JP: "Japan",
-        SG: "Singapore",
-        AU: "Australia"
-    };
-
     // Helper function to truncate brand name to 10 characters including spaces
     const truncateBrandName = (brandName) => {
         const brand = brandName || "Brand Name";
@@ -83,6 +100,50 @@ const TopNav = () => {
     const profilepic = useSelector(state => state.profileImage?.imageLink)
     const dropdownRef = useRef(null)
     const notificationRef = useRef(null)
+
+    // Date-range control: shown here (beside the marketplace pill) only on the Dashboard route.
+    // Dashboard.jsx used to render its own trigger + dropdown; moved up here per redesign.
+    const isDashboardRoute = DASHBOARD_ROUTES.includes(location.pathname)
+    const dashboardInfoForDates = useSelector(state => state.Dashboard?.DashBoardInfo)
+    const [openCalender, setOpenCalender] = useState(false)
+    const [selectedPeriod, setSelectedPeriod] = useState('Last 30 Days')
+    const calenderRef = useRef(null)
+    const calendarAnchorRef = useRef(null)
+
+    // autoFetch=false: this hook must never trigger a dashboard data fetch on other pages —
+    // it's only used here to reach the same refresh action Dashboard.jsx already dispatches.
+    const {
+        forceRefresh: refreshDashboard,
+        loadingPhase1,
+        loadingPhase2,
+        loadingPhase3,
+        loadingTop4,
+    } = useDashboardData(false)
+    const isRefreshingDashboard = loadingPhase1 || loadingPhase2 || loadingPhase3 || loadingTop4
+
+    useEffect(() => {
+        if (!isDashboardRoute || !dashboardInfoForDates?.startDate || !dashboardInfoForDates?.endDate) return
+
+        const parseLocal = (dateString) => {
+            const [year, month, day] = dateString.split('-').map(Number)
+            return new Date(year, month - 1, day)
+        }
+        const formatDate = (date) => date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+
+        setSelectedPeriod(`${formatDate(parseLocal(dashboardInfoForDates.startDate))} - ${formatDate(parseLocal(dashboardInfoForDates.endDate))}`)
+    }, [isDashboardRoute, dashboardInfoForDates?.startDate, dashboardInfoForDates?.endDate, dashboardInfoForDates?.calendarMode])
+
+    useEffect(() => {
+        if (!isDashboardRoute) return
+        const handleClickOutsideCalendar = (event) => {
+            if (isClickInsideGaCalDropdown(event.target)) return
+            if (calenderRef.current && !calenderRef.current.contains(event.target)) {
+                setOpenCalender(false)
+            }
+        }
+        document.addEventListener('mousedown', handleClickOutsideCalendar)
+        return () => document.removeEventListener('mousedown', handleClickOutsideCalendar)
+    }, [isDashboardRoute])
 
     const switchAccount = async (country,region) => {
         try{
@@ -280,7 +341,7 @@ const TopNav = () => {
     }
 
     return (
-        <nav className="w-full lg:w-[83vw] lg:h-[10vh] h-[8vh] flex items-center justify-between px-4 lg:px-5 border-b border-[#252C3A] bg-[rgba(11,14,20,.86)] backdrop-blur-md fixed top-0 z-50 lg:static">
+        <nav className="w-full lg:h-14 h-[8vh] flex items-center justify-between px-4 lg:px-5 border-b border-[#252C3A] bg-[rgba(11,14,20,.86)] backdrop-blur-md fixed top-0 z-50 lg:static">
             {/* Enhanced Mobile Hamburger Button */}
             <button
                 className="lg:hidden p-2 rounded-lg hover:bg-[#1C2230] active:bg-[#252C3A] transition-colors duration-200 touch-manipulation"
@@ -322,7 +383,8 @@ const TopNav = () => {
             )}
             */}
 
-            <div className='flex items-center justify-end gap-2 h-full'>
+            <div className='flex-1 flex items-center justify-between gap-2 h-full'>
+              <div className='flex items-center gap-2'>
                 {/* Demo CTA: show only on /seller-central-checker-demo/* */}
                 {isDemoSellerCentralChecker && (
                     <div className="relative">
@@ -365,10 +427,7 @@ const TopNav = () => {
                         role={isAgencyAdminViewingClient ? 'img' : 'button'}
                         aria-label={isAgencyAdminViewingClient ? 'Brand and marketplace (view only)' : 'Switch brand or account'}
                     >
-                        <Building className="w-3.5 h-3.5 flex-shrink-0 text-[#6B7486]" />
-                        <span className="font-medium text-[#F5F7FA] whitespace-nowrap">
-                            {marketplaces[Country]}
-                        </span>
+                        <MarketplaceLabel countryCode={Country} textClassName="font-medium text-[#F5F7FA] whitespace-nowrap" />
                         {!isAgencyAdminViewingClient && (
                             <ChevronDown className={`w-3.5 h-3.5 flex-shrink-0 text-[#6B7486] transition-transform duration-200 ${
                                 openDropDown ? 'rotate-180' : 'rotate-0'
@@ -382,8 +441,21 @@ const TopNav = () => {
                                 animate={{ opacity: 1, scaleY: 1 }}
                                 exit={{ opacity: 0, scaleY: 0 }}
                                 transition={{ duration: 0.25 }}
-                                className="w-full absolute top-16 flex flex-col border border-[#252C3A] rounded-[10px] p-2 bg-[#1C2230] origin-top z-[99] min-w-[16rem] shadow-xl"
+                                className="w-full absolute top-11 flex flex-col border border-[#252C3A] rounded-[10px] p-2 bg-[#1C2230] origin-top z-[99] min-w-[16rem] shadow-xl"
                             >
+                                {/* Current account: brand + marketplace */}
+                                <div className="px-2 py-2">
+                                    <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6B7486] mb-1.5">Current account</p>
+                                    <div className="flex items-center gap-3">
+                                        <Building className="w-4 h-4 flex-shrink-0 text-[#7EA8F8]" />
+                                        <div className="flex-1 min-w-0">
+                                            <p className="font-semibold text-[#F5F7FA] truncate">{truncateBrandName(user?.brand)}</p>
+                                            <MarketplaceLabel countryCode={Country} textClassName="text-xs text-[#A5AEC0]" />
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="border-t border-[#252C3A] my-1"></div>
+
                                 {/* Show existing accounts if there are multiple accounts */}
                                 {sellerAccount.length > 1 && sellerAccount
                                     .filter(elm => !(elm.country === Country && (elm.brand || "Brand Name") === (user?.brand || "Brand Name")))
@@ -402,9 +474,7 @@ const TopNav = () => {
                                                 <p className="font-semibold text-[#F5F7FA] group-hover:text-[#7EA8F8] transition-colors duration-200 truncate">
                                                     {truncateBrandName(elm.brand)}
                                                 </p>
-                                                <p className="text-xs text-[#6B7486] font-medium">
-                                                    {marketplaces[elm.country]}
-                                                </p>
+                                                <MarketplaceLabel countryCode={elm.country} textClassName="text-xs text-[#6B7486] font-medium" />
                                             </div>
                                             <ChevronRight className="w-4 h-4 text-[#6B7486] group-hover:text-[#7EA8F8] opacity-0 group-hover:opacity-100 transition-all duration-200" />
                                         </div>
@@ -447,7 +517,43 @@ const TopNav = () => {
                     </AnimatePresence>
 
                 </div>
-                
+
+                {/* Date range - only on the Dashboard route, sits beside the marketplace pill */}
+                {isDashboardRoute && (
+                    <div className="relative" ref={calenderRef}>
+                        <button
+                            ref={calendarAnchorRef}
+                            onClick={() => setOpenCalender(!openCalender)}
+                            className="flex items-center gap-2 px-3 py-2 rounded-lg outline-none text-[13px] border transition-colors duration-200 bg-[#151A23] border-[#252C3A] hover:border-[#3B4658]"
+                        >
+                            <Calendar className="w-3.5 h-3.5 text-[#6B7486]" />
+                            <span className="font-medium text-[#F5F7FA] whitespace-nowrap">{selectedPeriod}</span>
+                        </button>
+
+                        {openCalender && (
+                            <Calender
+                                anchorRef={calendarAnchorRef}
+                                setOpenCalender={setOpenCalender}
+                                setSelectedPeriod={setSelectedPeriod}
+                            />
+                        )}
+                    </div>
+                )}
+
+                {/* Refresh - icon only, beside the date picker, Dashboard route only */}
+                {isDashboardRoute && (
+                    <button
+                        type="button"
+                        onClick={() => refreshDashboard()}
+                        disabled={isRefreshingDashboard}
+                        title="Reload all dashboard data (sales, health, charts, top products)"
+                        aria-label="Refresh dashboard data"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center border border-[#252C3A] hover:border-[#3B4658] bg-[#151A23] transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <RefreshCw className={`w-3.5 h-3.5 text-[#6B7486] ${isRefreshingDashboard ? 'animate-spin' : ''}`} />
+                    </button>
+                )}
+
                 {/* Switch Account Button - Only visible for Super Admin */}
                 {isSuperAdmin && loggedInAsUser && (
                     <div className="relative">
@@ -461,7 +567,9 @@ const TopNav = () => {
                         </button>
                     </div>
                 )}
+              </div>
 
+              <div className='flex items-center gap-2'>
                 <div className="relative" ref={notificationRef}>
                     <div
                         className={`group w-8 h-8 rounded-lg flex items-center justify-center cursor-pointer transition-colors duration-200 border ${
@@ -632,23 +740,22 @@ const TopNav = () => {
                         </div>
                     )}
                 </div>
+              </div>
             </div>
 
-            {/* Loading Screen Overlay */}
-            {isLoading && (
-                <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]"
-                >
+            {/* Loading Screen Overlay — rendered via portal to document.body. The nav has
+                backdrop-blur, which creates a new containing block for `position: fixed`
+                descendants, so without the portal this centers inside the 56px nav bar
+                instead of the viewport. Plain div (no framer-motion) to keep this path simple. */}
+            {isLoading && createPortal(
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
                     <div className="bg-[#1C2230] rounded-[10px] p-8 flex flex-col items-center justify-center border border-[#252C3A]">
                         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#3B82F6] mb-4"></div>
                         <p className="text-[#F5F7FA] text-lg font-medium">Switching Account...</p>
                         <p className="text-[#6B7486] text-sm mt-2">Please wait</p>
                     </div>
-                </motion.div>
+                </div>,
+                document.body
             )}
         </nav>
     )
