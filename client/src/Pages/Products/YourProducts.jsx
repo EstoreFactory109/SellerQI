@@ -15,9 +15,7 @@ import {
   AlertTriangle,
   AlertCircle,
   Check,
-  X,
-  FileText,
-  BookOpen
+  X
 } from 'lucide-react';
 import { 
   // V3 optimized endpoints
@@ -31,6 +29,7 @@ import {
 import { formatCurrencyWithLocale } from '../../utils/currencyUtils.js';
 import { SkeletonTableBody } from '../../Components/Skeleton/PageSkeletons.jsx';
 import AmazonFbaInventoryCell from '../../Components/Products/AmazonFbaInventoryCell.jsx';
+import { COLORS, KPICard, STATUS } from '../../Components/Shared/index.js';
 
 // Exactly 6 columns: 4 fixed (ASIN/SKU, Name, Issues or Recommendation, View) + 2 chosen from dropdown.
 // Product tabs: pick 2 from this list to fill columns 5 and 6.
@@ -620,7 +619,7 @@ const YourProducts = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center">
+      <div className="min-h-screen bg-[#0B0E14] flex items-center justify-center">
         <div className="text-center">
           <AlertCircle size={48} className="text-red-400 mx-auto mb-4" />
           <p className="text-red-400">{error}</p>
@@ -630,7 +629,7 @@ const YourProducts = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#1a1a1a] p-2 md:p-3 font-sans overflow-x-hidden" style={{ overflowY: 'visible' }}>
+    <div className="min-h-screen bg-[#0B0E14] p-2 md:p-3 font-sans overflow-x-hidden" style={{ overflowY: 'visible' }}>
       <style>{`
         .issues-cell { max-width: 0; overflow: hidden; }
         .issues-content { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
@@ -642,82 +641,64 @@ const YourProducts = () => {
       `}</style>
 
       <div className="w-full mx-auto px-2 lg:px-3 py-1.5" style={{ overflowX: 'hidden', overflowY: 'visible' }}>
-        {/* Header */}
-        <div className="bg-[#161b22] rounded border border-[#30363d] p-2 mb-2">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Box className="w-4 h-4 text-blue-400" />
-              <div>
-                <h1 className="text-lg font-bold text-gray-100">Your Products</h1>
-                <p className="text-gray-400 text-xs">
-                  {currentCountry ? `Marketplace: ${currentCountry.toUpperCase()}` : 'All Products'}
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={exportToCSV}
-              className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-500 text-white rounded text-xs font-medium hover:bg-blue-600 transition-colors"
-            >
-              <Download size={16} />
-              Export CSV
-            </button>
+        {/* Header — matches the redesign mock's page header */}
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-2 mb-4">
+          <div>
+            <h1 className="m-0 mb-1 text-2xl leading-8 font-semibold tracking-[-0.02em]" style={{ color: COLORS.textPrimary }}>Your Products</h1>
+            <p className="m-0 text-sm" style={{ color: COLORS.textSecondary }}>
+              {summary.totalProducts || 0} products in this marketplace
+              {currentCountry ? ` (${currentCountry.toUpperCase()})` : ''}.
+            </p>
           </div>
+          <button
+            onClick={exportToCSV}
+            className="flex items-center gap-2 px-[14px] py-[9px] rounded-lg text-[13px] font-medium border transition-colors"
+            style={{ background: COLORS.surface, borderColor: COLORS.border, color: COLORS.textPrimary }}
+          >
+            <Download size={15} />
+            Export CSV
+          </button>
         </div>
 
-        {/* Summary Cards - full width */}
-        <div className="w-full grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-1.5 mb-2">
+        {/* Summary tiles — real data, restyled with the shared KPICard/StatusPill components */}
+        <div className="w-full grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
           {v3Summary?.loading && !summary.totalProducts ? (
-            <>
-              {Array.from({ length: 6 }).map((_, idx) => (
-                <div key={idx} className="bg-[#161b22] rounded border border-[#30363d] p-2">
-                  <div className="mb-1 h-3 w-20 rounded bg-[#30363d] animate-pulse" />
-                  <div className="h-6 w-12 rounded bg-[#21262d] animate-pulse" />
-                </div>
-              ))}
-            </>
+            Array.from({ length: 5 }).map((_, idx) => (
+              <KPICard key={idx} loading compact />
+            ))
           ) : (
             <>
-              <div className="bg-[#161b22] rounded border border-[#30363d] p-2">
-                <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
-                  <Box className="w-3.5 h-3.5 flex-shrink-0 text-blue-400" />
-                  <span>Total Products</span>
-                </div>
-                <div className="text-lg font-bold text-white">{summary.totalProducts || 0}</div>
-              </div>
-              <div className="bg-[#161b22] rounded border border-[#30363d] p-2">
-                <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
-                  <CheckCircle className="w-3.5 h-3.5 flex-shrink-0 text-blue-400" />
-                  <span>Sellable Products</span>
-                </div>
-                <div className="text-lg font-bold text-white">{summary.activeProducts || 0}</div>
-              </div>
-              <div className="bg-[#161b22] rounded border border-[#30363d] p-2">
-                <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
-                  <XCircle className="w-3.5 h-3.5 flex-shrink-0 text-blue-400" />
-                  <span>Non-Sellable Products</span>
-                </div>
-                <div className="text-lg font-bold text-white">{(summary.inactiveProducts || 0) + (summary.incompleteProducts || 0) + (summary.zeroAvailabilityProducts || 0)}</div>
-              </div>
-              <div className="bg-[#161b22] rounded border border-[#30363d] p-2">
-                <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
-                  <FileText className="w-3.5 h-3.5 flex-shrink-0 text-blue-400" />
-                  <span>Without A+</span>
-                </div>
-                <div className="text-lg font-bold text-white">{summary.productsWithoutAPlus || 0}</div>
-              </div>
-              <div className="bg-[#161b22] rounded border border-[#30363d] p-2">
-                <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
-                  <BookOpen className="w-3.5 h-3.5 flex-shrink-0 text-blue-400" />
-                  <span>Brand Story</span>
-                </div>
-                <div className="flex items-center">
-                  {summary.hasBrandStory ? (
-                    <Check size={20} className="text-green-400" strokeWidth={3} />
-                  ) : (
-                    <X size={20} className="text-red-400" strokeWidth={3} />
-                  )}
-                </div>
-              </div>
+              <KPICard label="Total Products" value={summary.totalProducts || 0} compact tintBorder />
+              <KPICard
+                label="Sellable"
+                value={summary.activeProducts || 0}
+                status={STATUS.GOOD}
+                compact
+                tintBorder
+              />
+              <KPICard
+                label="Non-Sellable"
+                tooltip="Suppressed, inactive, or with no buy box — these earn nothing until fixed."
+                value={(summary.inactiveProducts || 0) + (summary.incompleteProducts || 0) + (summary.zeroAvailabilityProducts || 0)}
+                status={((summary.inactiveProducts || 0) + (summary.incompleteProducts || 0) + (summary.zeroAvailabilityProducts || 0)) > 0 ? STATUS.FIX : STATUS.GOOD}
+                compact
+                tintBorder
+              />
+              <KPICard
+                label="Without A+ Content"
+                value={summary.productsWithoutAPlus || 0}
+                status={(summary.productsWithoutAPlus || 0) > 0 ? STATUS.WATCH : STATUS.GOOD}
+                compact
+                tintBorder
+              />
+              <KPICard
+                label="Has Brand Story"
+                tooltip="Whether Brand Story content is set up for this account."
+                value={summary.hasBrandStory ? 'Yes' : 'No'}
+                status={summary.hasBrandStory ? STATUS.GOOD : undefined}
+                compact
+                tintBorder
+              />
             </>
           )}
         </div>
@@ -831,8 +812,8 @@ const YourProducts = () => {
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="bg-[#161b22] rounded-t border border-b-0 border-[#30363d] px-2 flex gap-1 overflow-x-auto">
+        {/* Tabs — same data/logic as before, restyled to the mock's underline + count-pill style */}
+        <div className="flex gap-1.5 overflow-x-auto mb-4" style={{ borderBottom: `1px solid ${COLORS.border}` }}>
           {[
             { key: 'active', label: 'Sellable Products', count: summary.activeProducts || 0 },
             { key: 'optimization', label: 'Optimization', count: null },
@@ -843,19 +824,30 @@ const YourProducts = () => {
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`px-2 py-1.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
-                activeTab === tab.key
-                  ? 'border-blue-400 text-blue-400'
-                  : 'border-transparent text-gray-400 hover:text-gray-300'
-              }`}
+              className="flex items-center gap-1.5 px-3.5 py-2.5 text-[13px] font-medium whitespace-nowrap transition-colors"
+              style={{
+                borderBottom: `2px solid ${activeTab === tab.key ? COLORS.accent : 'transparent'}`,
+                color: activeTab === tab.key ? COLORS.textPrimary : COLORS.textSecondary,
+              }}
             >
-              {tab.label}{tab.count != null ? ` (${tab.count})` : ''}
+              {tab.label}
+              {tab.count != null && (
+                <span
+                  className="px-1.5 py-0.5 rounded-full text-[11px] font-semibold"
+                  style={{ background: COLORS.surfaceElevated, color: COLORS.textSecondary }}
+                >
+                  {tab.count}
+                </span>
+              )}
             </button>
           ))}
         </div>
 
         {/* Products Table */}
-        <div className="bg-[#161b22] rounded-b border border-[#30363d] relative" style={{ overflowX: 'hidden', overflowY: 'visible', overflow: 'visible' }}>
+        <div className="rounded-2xl border relative" style={{ background: COLORS.surface, borderColor: COLORS.border, overflowX: 'hidden', overflowY: 'visible', overflow: 'visible' }}>
+          <div className="px-[18px] py-3 text-[13px]" style={{ borderBottom: `1px solid ${COLORS.border}`, color: COLORS.textSecondary }}>
+            Click a column header to re-sort. Click View to open a product's full details.
+          </div>
           {showTableSkeleton ? (
             <div className="p-2">
               <SkeletonTableBody rows={10} />
@@ -863,65 +855,65 @@ const YourProducts = () => {
           ) : (
           <div className="w-full" style={{ overflowX: 'hidden', overflowY: 'visible', maxWidth: '100%' }}>
             <table className="w-full" style={{ tableLayout: 'fixed', width: '100%', maxWidth: '100%' }}>
-              <thead className="bg-[#21262d]">
+              <thead style={{ background: COLORS.surfaceElevated }}>
                 <tr>
                   {activeTab === 'optimization' ? (
                     <>
-                      <th className="px-1.5 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: optimizationFixedWidths.asin }} onClick={() => handleSort('asin')}>ASIN/SKU {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="pl-1 pr-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: optimizationFixedWidths.title }} onClick={() => handleSort('title')}>Title {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: chosenColumnWidth }} onClick={() => handleSort(selectedOptimizationColumns[0])}>{OPTIMIZATION_SELECTABLE_COLUMNS.find(c => c.id === selectedOptimizationColumns[0])?.label ?? selectedOptimizationColumns[0]} {sortConfig.key === selectedOptimizationColumns[0] && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: chosenColumnWidth }} onClick={() => handleSort(selectedOptimizationColumns[1])}>{OPTIMIZATION_SELECTABLE_COLUMNS.find(c => c.id === selectedOptimizationColumns[1])?.label ?? selectedOptimizationColumns[1]} {sortConfig.key === selectedOptimizationColumns[1] && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="px-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: optimizationFixedWidths.recommendation }}>Recommendation</th>
-                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: optimizationFixedWidths.view }}>View Details</th>
+                      <th className="px-1.5 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: optimizationFixedWidths.asin, color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('asin')}>ASIN/SKU {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="pl-1 pr-2 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: optimizationFixedWidths.title, color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('title')}>Title {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: chosenColumnWidth, color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort(selectedOptimizationColumns[0])}>{OPTIMIZATION_SELECTABLE_COLUMNS.find(c => c.id === selectedOptimizationColumns[0])?.label ?? selectedOptimizationColumns[0]} {sortConfig.key === selectedOptimizationColumns[0] && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: chosenColumnWidth, color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort(selectedOptimizationColumns[1])}>{OPTIMIZATION_SELECTABLE_COLUMNS.find(c => c.id === selectedOptimizationColumns[1])?.label ?? selectedOptimizationColumns[1]} {sortConfig.key === selectedOptimizationColumns[1] && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider" style={{ width: optimizationFixedWidths.recommendation, color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }}>Recommendation</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider" style={{ width: optimizationFixedWidths.view, color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }}>View Details</th>
                     </>
                   ) : activeTab === 'nonSellable' ? (
                     <>
-                      <th className="px-1.5 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: '10%' }} onClick={() => handleSort('asin')}>ASIN/SKU {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="pl-1 pr-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: '24%' }} onClick={() => handleSort('title')}>Title {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: '10%' }} onClick={() => handleSort('status')}>Status {sortConfig.key === 'status' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="px-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: '56%' }}>Issues</th>
+                      <th className="px-1.5 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '10%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('asin')}>ASIN/SKU {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="pl-1 pr-2 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '24%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('title')}>Title {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '10%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('status')}>Status {sortConfig.key === 'status' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider" style={{ width: '56%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }}>Issues</th>
                     </>
                   ) : activeTab === 'active' ? (
                     <>
-                      <th className="px-1.5 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: productFixedWidths.asin }} onClick={() => handleSort('asin')}>ASIN/SKU {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="pl-1 pr-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: productFixedWidths.title }} onClick={() => handleSort('title')}>Title {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: productFixedWidths.issues }} onClick={() => handleSort('issueCount')}>Issues {sortConfig.key === 'issueCount' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: chosenColumnWidth }} onClick={() => handleSort(selectedProductColumns[0] === 'reviews' ? 'numRatings' : selectedProductColumns[0] === 'starRating' ? 'starRatings' : selectedProductColumns[0])}>{PRODUCT_SELECTABLE_COLUMNS.find(c => c.id === selectedProductColumns[0])?.label ?? selectedProductColumns[0]} {sortConfig.key === (selectedProductColumns[0] === 'reviews' ? 'numRatings' : selectedProductColumns[0] === 'starRating' ? 'starRatings' : selectedProductColumns[0]) && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: chosenColumnWidth }} onClick={() => handleSort(selectedProductColumns[1] === 'reviews' ? 'numRatings' : selectedProductColumns[1] === 'starRating' ? 'starRatings' : selectedProductColumns[1])}>{PRODUCT_SELECTABLE_COLUMNS.find(c => c.id === selectedProductColumns[1])?.label ?? selectedProductColumns[1]} {sortConfig.key === (selectedProductColumns[1] === 'reviews' ? 'numRatings' : selectedProductColumns[1] === 'starRating' ? 'starRatings' : selectedProductColumns[1]) && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: productFixedWidths.view }}>View Details</th>
+                      <th className="px-1.5 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: productFixedWidths.asin, color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('asin')}>ASIN/SKU {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="pl-1 pr-2 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: productFixedWidths.title, color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('title')}>Title {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: productFixedWidths.issues, color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('issueCount')}>Issues {sortConfig.key === 'issueCount' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: chosenColumnWidth, color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort(selectedProductColumns[0] === 'reviews' ? 'numRatings' : selectedProductColumns[0] === 'starRating' ? 'starRatings' : selectedProductColumns[0])}>{PRODUCT_SELECTABLE_COLUMNS.find(c => c.id === selectedProductColumns[0])?.label ?? selectedProductColumns[0]} {sortConfig.key === (selectedProductColumns[0] === 'reviews' ? 'numRatings' : selectedProductColumns[0] === 'starRating' ? 'starRatings' : selectedProductColumns[0]) && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: chosenColumnWidth, color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort(selectedProductColumns[1] === 'reviews' ? 'numRatings' : selectedProductColumns[1] === 'starRating' ? 'starRatings' : selectedProductColumns[1])}>{PRODUCT_SELECTABLE_COLUMNS.find(c => c.id === selectedProductColumns[1])?.label ?? selectedProductColumns[1]} {sortConfig.key === (selectedProductColumns[1] === 'reviews' ? 'numRatings' : selectedProductColumns[1] === 'starRating' ? 'starRatings' : selectedProductColumns[1]) && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider" style={{ width: productFixedWidths.view, color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }}>View Details</th>
                     </>
                   ) : (activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') ? (
                     <>
-                      <th className="px-1.5 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: '12%' }} onClick={() => handleSort('asin')}>ASIN/SKU {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="pl-1 pr-2 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: '48%' }} onClick={() => handleSort('title')}>Title {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300 border-b border-[#30363d]" style={{ width: '15%' }} onClick={() => handleSort('status')}>Status {sortConfig.key === 'status' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: '15%' }}>{activeTab === 'withoutAPlus' ? 'A+' : 'Ads'}</th>
-                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-[#30363d]" style={{ width: '10%' }}>View Details</th>
+                      <th className="px-1.5 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '12%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('asin')}>ASIN/SKU {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="pl-1 pr-2 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '48%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('title')}>Title {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '15%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('status')}>Status {sortConfig.key === 'status' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider" style={{ width: '15%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }}>{activeTab === 'withoutAPlus' ? 'A+' : 'Ads'}</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider" style={{ width: '10%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }}>View Details</th>
                     </>
                   ) : null}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#30363d]">
+              <tbody className="divide-y divide-[#252C3A]">
                 {displayedProducts.length > 0 ? (
                   displayedProducts.map((product, index) => {
                     const statusBadge = getStatusBadge(product.status);
-                    
+
                     // Optimization tab
                     if (activeTab === 'optimization') {
                       const perf = product.performance || {};
                       const rec = product.primaryRecommendation;
                       return (
-                        <tr key={`opt-${product.asin}-${index}`} onClick={() => navigate(`/seller-central-checker/${product.asin}`)} className="border-b border-[#30363d] hover:bg-[#21262d] cursor-pointer transition-colors">
-                          <td className="px-1.5 py-2 text-left align-top">
+                        <tr key={`opt-${product.asin}-${index}`} onClick={() => navigate(`/seller-central-checker/${product.asin}`)} className="border-[#252C3A] hover:bg-[#1A202B] cursor-pointer transition-colors">
+                          <td className="px-1.5 py-3 text-left align-top">
                             <div className="flex flex-col gap-1">
-                              <code className="text-xs font-mono text-blue-400 break-all">{product.asin || '—'}</code>
-                              <span className="text-xs text-gray-400 break-words">{product.sku || '—'}</span>
+                              <code className="text-xs font-mono break-all" style={{ color: COLORS.textSecondary }}>{product.asin || '—'}</code>
+                              <span className="text-xs break-words" style={{ color: COLORS.textMuted }}>{product.sku || '—'}</span>
                             </div>
                           </td>
-                          <td className="pl-1 pr-2 py-2 text-left align-top">
-                            <span className="text-xs text-gray-100 break-words line-clamp-2" title={product.name || product.title}>{product.name || product.title || '—'}</span>
+                          <td className="pl-1 pr-2 py-3 text-left align-top">
+                            <span className="text-[13px] break-words line-clamp-2" style={{ color: COLORS.textPrimary }} title={product.name || product.title}>{product.name || product.title || '—'}</span>
                           </td>
-                          <td className="px-2 py-2 text-center align-top text-xs text-gray-100">
+                          <td className="px-2 py-3 text-center align-top text-[13px]" style={{ color: COLORS.textPrimary }}>
                             {selectedOptimizationColumns[0] === 'sessions' && (perf.sessions ?? 0).toLocaleString()}
                             {selectedOptimizationColumns[0] === 'pageViews' && (perf.pageViews ?? 0).toLocaleString()}
                             {selectedOptimizationColumns[0] === 'conversionRate' && `${(perf.conversionRate ?? 0).toFixed(1)}%`}
@@ -929,7 +921,7 @@ const YourProducts = () => {
                             {selectedOptimizationColumns[0] === 'ppcSpend' && (perf.ppcSpend != null ? formatCurrencyWithLocale(perf.ppcSpend, currency, 2) : '—')}
                             {selectedOptimizationColumns[0] === 'acos' && (perf.acos != null ? `${Number(perf.acos).toFixed(1)}%` : '—')}
                           </td>
-                          <td className="px-2 py-2 text-center align-top text-xs text-gray-100">
+                          <td className="px-2 py-3 text-center align-top text-[13px]" style={{ color: COLORS.textPrimary }}>
                             {selectedOptimizationColumns[1] === 'sessions' && (perf.sessions ?? 0).toLocaleString()}
                             {selectedOptimizationColumns[1] === 'pageViews' && (perf.pageViews ?? 0).toLocaleString()}
                             {selectedOptimizationColumns[1] === 'conversionRate' && `${(perf.conversionRate ?? 0).toFixed(1)}%`}
@@ -937,52 +929,65 @@ const YourProducts = () => {
                             {selectedOptimizationColumns[1] === 'ppcSpend' && (perf.ppcSpend != null ? formatCurrencyWithLocale(perf.ppcSpend, currency, 2) : '—')}
                             {selectedOptimizationColumns[1] === 'acos' && (perf.acos != null ? `${Number(perf.acos).toFixed(1)}%` : '—')}
                           </td>
-                          <td className="px-2 py-2 text-left align-top">
+                          <td className="px-2 py-3 text-left align-top">
                             {rec?.shortLabel ? (
-                              <span className="flex items-center gap-1">
-                                <span className="text-xs text-amber-400 font-medium" title={rec.message}>{rec.shortLabel}</span>
+                              <span className="inline-flex items-center gap-1.5 max-w-full">
+                                <span
+                                  className="px-2.5 py-1 rounded-md text-xs font-semibold whitespace-nowrap overflow-hidden text-ellipsis"
+                                  style={{ background: 'rgba(245,166,35,.14)', color: '#F5A623' }}
+                                  title={rec.message}
+                                >
+                                  {rec.shortLabel}
+                                </span>
                                 {product.recommendations?.length > 1 && (
-                                  <span className="text-xs text-gray-400 bg-gray-700/50 px-1.5 py-0.5 rounded" title={`${product.recommendations.length - 1} more`}>+{product.recommendations.length - 1}</span>
+                                  <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: COLORS.surfaceElevated, color: COLORS.textMuted }} title={`${product.recommendations.length - 1} more`}>+{product.recommendations.length - 1}</span>
                                 )}
                               </span>
                             ) : (
-                              <span className="text-xs text-gray-500">—</span>
+                              <span className="text-xs" style={{ color: COLORS.textMuted }}>—</span>
                             )}
                           </td>
-                          <td className="px-2 py-2 text-center align-top">
-                            <button type="button" onClick={(e) => { e.stopPropagation(); navigate(`/seller-central-checker/${product.asin}`); }} className="px-2 py-1 text-xs font-medium text-blue-400 hover:text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 rounded transition-colors">View</button>
+                          <td className="px-2 py-3 text-center align-top">
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); navigate(`/seller-central-checker/${product.asin}`); }}
+                              className="px-3 py-1.5 text-xs font-medium rounded-md border transition-colors"
+                              style={{ borderColor: COLORS.border, color: COLORS.textSecondary, background: 'transparent' }}
+                            >
+                              View
+                            </button>
                           </td>
                         </tr>
                       );
                     }
-                    
+
                     // Non-Sellable tab (Inactive + Incomplete combined)
                     if (activeTab === 'nonSellable') {
                       const issueCount = product.issues?.length || 0;
-                      const statusColor = product.status === 'Inactive' ? 'text-red-400' : 'text-yellow-400';
+                      const statusColor = product.status === 'Inactive' ? '#F87171' : '#F5A623';
                       return (
-                        <tr key={`${product.asin}-${index}`} className="border-b border-[#30363d]">
-                          <td className="px-1.5 py-2 text-left align-top">
+                        <tr key={`${product.asin}-${index}`} style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+                          <td className="px-1.5 py-3 text-left align-top">
                             <div className="flex flex-col gap-1 items-start">
-                              <code className="text-xs font-mono text-gray-100 bg-[#21262d] px-1.5 py-0.5 rounded break-all">{product.asin || '—'}</code>
-                              <span className="text-xs font-medium text-gray-400 break-words">{product.sku || '—'}</span>
+                              <code className="text-xs font-mono px-1.5 py-0.5 rounded break-all" style={{ color: COLORS.textPrimary, background: COLORS.surfaceElevated }}>{product.asin || '—'}</code>
+                              <span className="text-xs font-medium break-words" style={{ color: COLORS.textMuted }}>{product.sku || '—'}</span>
                             </div>
                           </td>
-                          <td className="pl-1 pr-2 py-2 text-left align-top">
-                            <span className="text-sm text-gray-100 font-medium leading-relaxed block break-words">{product.title || '—'}</span>
+                          <td className="pl-1 pr-2 py-3 text-left align-top">
+                            <span className="text-sm font-medium leading-relaxed block break-words" style={{ color: COLORS.textPrimary }}>{product.title || '—'}</span>
                           </td>
-                          <td className="px-2 py-2 text-center align-top">
-                            <span className={`text-xs font-medium ${statusColor}`}>{product.status || '—'}</span>
+                          <td className="px-2 py-3 text-center align-top">
+                            <span className="text-xs font-medium" style={{ color: statusColor }}>{product.status || '—'}</span>
                           </td>
-                          <td className="px-2 py-2 text-left align-top issues-cell">
+                          <td className="px-2 py-3 text-left align-top issues-cell">
                             {issueCount > 0 ? (
                               <div className="space-y-2 issues-content">
                                 {product.issues.map((issue, issueIndex) => {
                                   const { hasHTML, processedHTML } = processIssueHTML(issue);
                                   return (
-                                    <div key={issueIndex} className="flex items-start gap-2.5 p-2.5 bg-[#21262d] border border-[#30363d] rounded hover:border-yellow-500/40 hover:bg-[#1c2128] transition-all min-w-0">
+                                    <div key={issueIndex} className="flex items-start gap-2.5 p-2.5 rounded border transition-all min-w-0" style={{ background: COLORS.surfaceElevated, borderColor: COLORS.border }}>
                                       <div className="flex-shrink-0 mt-0.5">
-                                        <AlertTriangle size={14} className="text-yellow-400" />
+                                        <AlertTriangle size={14} style={{ color: '#F5A623' }} />
                                       </div>
                                       <div className="flex-1 min-w-0">
                                         <FormattedIssueText text={issue} hasHTML={hasHTML} processedHTML={processedHTML} />
@@ -992,9 +997,9 @@ const YourProducts = () => {
                                 })}
                               </div>
                             ) : (
-                              <div className="flex items-center gap-2 px-2.5 py-2 bg-[#21262d] rounded border border-[#30363d]">
-                                <CheckCircle size={12} className="text-green-400 flex-shrink-0" />
-                                <span className="text-xs text-gray-400 italic">No issues recorded</span>
+                              <div className="flex items-center gap-2 px-2.5 py-2 rounded border" style={{ background: COLORS.surfaceElevated, borderColor: COLORS.border }}>
+                                <CheckCircle size={12} style={{ color: '#22C55E' }} className="flex-shrink-0" />
+                                <span className="text-xs italic" style={{ color: COLORS.textMuted }}>No issues recorded</span>
                               </div>
                             )}
                           </td>
@@ -1007,7 +1012,7 @@ const YourProducts = () => {
                       const issueCount = product.issueCount || 0;
                       const badge = getIssuesBadge(issueCount);
                       const renderProductChosenCell = (colId) => {
-                        if (colId === 'price') return <span className="text-xs font-medium text-gray-100 whitespace-nowrap">{product.price ? formatCurrencyWithLocale(parseFloat(product.price), currency, 2) : '—'}</span>;
+                        if (colId === 'price') return <span className="text-xs font-medium whitespace-nowrap" style={{ color: COLORS.textPrimary }}>{product.price ? formatCurrencyWithLocale(parseFloat(product.price), currency, 2) : '—'}</span>;
                         if (colId === 'quantity') {
                           return (
                             <AmazonFbaInventoryCell
@@ -1016,33 +1021,44 @@ const YourProducts = () => {
                             />
                           );
                         }
-                        if (colId === 'video') return product.hasVideo ? <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} /> : <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />;
-                        if (colId === 'b2b') return product.has_b2b_pricing ? <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} /> : <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />;
-                        if (colId === 'reviews') return <span className="text-xs text-gray-400 whitespace-nowrap">{product.numRatings ? parseInt(product.numRatings).toLocaleString() : '0'}</span>;
-                        if (colId === 'starRating') return <span className="text-xs text-gray-100 whitespace-nowrap">{product.starRatings != null && product.starRatings !== '' ? `${typeof product.starRatings === 'number' ? product.starRatings.toFixed(1) : String(product.starRatings)} ⭐` : '—'}</span>;
+                        if (colId === 'video') return product.hasVideo ? <Check size={16} style={{ color: '#22C55E' }} className="font-bold mx-auto" strokeWidth={3} /> : <X size={16} style={{ color: '#EF4444' }} className="font-bold mx-auto" strokeWidth={3} />;
+                        if (colId === 'b2b') return product.has_b2b_pricing ? <Check size={16} style={{ color: '#22C55E' }} className="font-bold mx-auto" strokeWidth={3} /> : <X size={16} style={{ color: '#EF4444' }} className="font-bold mx-auto" strokeWidth={3} />;
+                        if (colId === 'reviews') return <span className="text-xs whitespace-nowrap" style={{ color: COLORS.textMuted }}>{product.numRatings ? parseInt(product.numRatings).toLocaleString() : '0'}</span>;
+                        if (colId === 'starRating') return <span className="text-xs whitespace-nowrap" style={{ color: COLORS.textPrimary }}>{product.starRatings != null && product.starRatings !== '' ? `${typeof product.starRatings === 'number' ? product.starRatings.toFixed(1) : String(product.starRatings)} ⭐` : '—'}</span>;
                         return '—';
                       };
                       return (
-                        <tr key={`${product.asin}-${index}`} className="border-b border-[#30363d]">
-                          <td className="px-1.5 py-2 text-left align-top">
+                        <tr key={`${product.asin}-${index}`} style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+                          <td className="px-1.5 py-3 text-left align-top">
                             <div className="flex flex-col gap-1">
-                              <code className="text-xs font-mono text-gray-100 break-all">{product.asin || '—'}</code>
-                              <span className="text-xs text-gray-400 break-words">{product.sku || '—'}</span>
+                              <code className="text-xs font-mono break-all" style={{ color: COLORS.textSecondary }}>{product.asin || '—'}</code>
+                              <span className="text-xs break-words" style={{ color: COLORS.textMuted }}>{product.sku || '—'}</span>
                             </div>
                           </td>
-                          <td className="pl-1 pr-2 py-2 text-left align-top">
-                            <span className="text-xs text-gray-100 break-words line-clamp-2" title={product.title}>{product.title || '—'}</span>
+                          <td className="pl-1 pr-2 py-3 text-left align-top">
+                            <span className="text-[13px] break-words line-clamp-2" style={{ color: COLORS.textPrimary }} title={product.title}>{product.title || '—'}</span>
                           </td>
-                          <td className="px-2 py-2 text-center align-top">
-                            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border-2 ${issueCount > 0 ? 'border-red-500 text-red-400' : 'border-green-500 text-green-400'}`}>
-                              {issueCount > 0 && <AlertTriangle size={12} />}
+                          <td className="px-2 py-3 text-center align-top">
+                            <span
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold tabular-nums"
+                              style={issueCount > 0
+                                ? { background: 'rgba(239,68,68,.14)', color: '#F87171' }
+                                : { background: 'rgba(34,197,94,.14)', color: '#22C55E' }}
+                            >
                               {badge.text}
                             </span>
                           </td>
-                          <td className="px-2 py-2 text-center align-top">{renderProductChosenCell(selectedProductColumns[0])}</td>
-                          <td className="px-2 py-2 text-center align-top">{renderProductChosenCell(selectedProductColumns[1])}</td>
-                          <td className="px-2 py-2 text-center align-top">
-                            <button type="button" onClick={(e) => { e.stopPropagation(); navigate(`/seller-central-checker/${product.asin}`); }} className="px-2 py-1 text-xs font-medium text-blue-400 hover:text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 rounded transition-colors">View</button>
+                          <td className="px-2 py-3 text-center align-top">{renderProductChosenCell(selectedProductColumns[0])}</td>
+                          <td className="px-2 py-3 text-center align-top">{renderProductChosenCell(selectedProductColumns[1])}</td>
+                          <td className="px-2 py-3 text-center align-top">
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); navigate(`/seller-central-checker/${product.asin}`); }}
+                              className="px-3 py-1.5 text-xs font-medium rounded-md border transition-colors"
+                              style={{ borderColor: COLORS.border, color: COLORS.textSecondary, background: 'transparent' }}
+                            >
+                              View
+                            </button>
                           </td>
                         </tr>
                       );
@@ -1051,28 +1067,35 @@ const YourProducts = () => {
                     // Without A+ and Not Targeted to Ads tabs
                     if (activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') {
                       return (
-                        <tr key={`${product.asin}-${index}`} className="border-b border-[#30363d]">
-                          <td className="px-1.5 py-2 text-left align-top">
+                        <tr key={`${product.asin}-${index}`} style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+                          <td className="px-1.5 py-3 text-left align-top">
                             <div className="flex flex-col gap-1">
-                              <code className="text-xs font-mono text-gray-100 break-all">{product.asin || '—'}</code>
-                              <span className="text-xs text-gray-400 break-words">{product.sku || '—'}</span>
+                              <code className="text-xs font-mono break-all" style={{ color: COLORS.textSecondary }}>{product.asin || '—'}</code>
+                              <span className="text-xs break-words" style={{ color: COLORS.textMuted }}>{product.sku || '—'}</span>
                             </div>
                           </td>
-                          <td className="pl-1 pr-2 py-2 text-left align-top">
-                            <span className="text-xs text-gray-100 break-words line-clamp-2" title={product.title}>{product.title || '—'}</span>
+                          <td className="pl-1 pr-2 py-3 text-left align-top">
+                            <span className="text-[13px] break-words line-clamp-2" style={{ color: COLORS.textPrimary }} title={product.title}>{product.title || '—'}</span>
                           </td>
-                          <td className="px-2 py-2 text-center align-top">
-                            <span className={`text-xs font-medium ${product.status === 'Active' ? 'text-white' : 'text-gray-400'}`}>{product.status || '—'}</span>
+                          <td className="px-2 py-3 text-center align-top">
+                            <span className="text-xs font-medium" style={{ color: product.status === 'Active' ? COLORS.textPrimary : COLORS.textMuted }}>{product.status || '—'}</span>
                           </td>
-                          <td className="px-2 py-2 text-center align-top">
+                          <td className="px-2 py-3 text-center align-top">
                             {activeTab === 'withoutAPlus' ? (
-                              product.hasAPlus ? <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} /> : <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />
+                              product.hasAPlus ? <Check size={16} style={{ color: '#22C55E' }} className="font-bold mx-auto" strokeWidth={3} /> : <X size={16} style={{ color: '#EF4444' }} className="font-bold mx-auto" strokeWidth={3} />
                             ) : (
-                              product.isTargetedInAds ? <Check size={16} className="text-green-400 font-bold mx-auto" strokeWidth={3} /> : <X size={16} className="text-red-400 font-bold mx-auto" strokeWidth={3} />
+                              product.isTargetedInAds ? <Check size={16} style={{ color: '#22C55E' }} className="font-bold mx-auto" strokeWidth={3} /> : <X size={16} style={{ color: '#EF4444' }} className="font-bold mx-auto" strokeWidth={3} />
                             )}
                           </td>
-                          <td className="px-2 py-2 text-center align-top">
-                            <button type="button" onClick={(e) => { e.stopPropagation(); navigate(`/seller-central-checker/${product.asin}`); }} className="px-2 py-1 text-xs font-medium text-blue-400 hover:text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 rounded transition-colors">View</button>
+                          <td className="px-2 py-3 text-center align-top">
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); navigate(`/seller-central-checker/${product.asin}`); }}
+                              className="px-3 py-1.5 text-xs font-medium rounded-md border transition-colors"
+                              style={{ borderColor: COLORS.border, color: COLORS.textSecondary, background: 'transparent' }}
+                            >
+                              View
+                            </button>
                           </td>
                         </tr>
                       );
@@ -1082,20 +1105,20 @@ const YourProducts = () => {
                   })
                 ) : (
                   <tr>
-                    <td colSpan={activeTab === 'optimization' ? optimizationTableColCount : activeTab === 'nonSellable' ? 4 : (activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') ? 5 : productTableColCount} className="px-4 py-12 text-center text-gray-400">
+                    <td colSpan={activeTab === 'optimization' ? optimizationTableColCount : activeTab === 'nonSellable' ? 4 : (activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') ? 5 : productTableColCount} className="px-4 py-12 text-center text-[15px] font-semibold" style={{ color: COLORS.textPrimary }}>
                       {activeTab === 'optimization'
                         ? (optimizationProducts.length === 0 ? 'No optimization data yet. Data loads when you open this tab.' : 'No products match your current filters.')
                         : (products.length === 0 ? 'No products found. Please ensure your account is connected and data is synced.' : 'No products match your current filters.')}
                     </td>
                   </tr>
                 )}
-                
+
                 {loadingMore && displayedProducts.length > 0 && activeTab !== 'optimization' && (
                   <tr>
-                    <td colSpan={activeTab === 'nonSellable' ? 4 : (activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') ? 5 : productTableColCount} className="px-4 py-8 text-center bg-[#21262d]">
+                    <td colSpan={activeTab === 'nonSellable' ? 4 : (activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') ? 5 : productTableColCount} className="px-4 py-8 text-center" style={{ background: COLORS.surfaceElevated }}>
                       <div className="flex items-center justify-center gap-3">
-                        <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
-                        <span className="text-sm text-gray-400">Loading more products...</span>
+                        <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: COLORS.accent, borderTopColor: 'transparent' }}></div>
+                        <span className="text-sm" style={{ color: COLORS.textMuted }}>Loading more products...</span>
                       </div>
                     </td>
                   </tr>
@@ -1106,22 +1129,22 @@ const YourProducts = () => {
           )}
 
           {activeTab !== 'optimization' && hasMoreFromBackend && !loadingMore && (
-            <div className="px-4 py-3 border-t border-[#30363d] bg-[#21262d] flex items-center justify-center gap-3">
-              <button onClick={handleLoadMoreFromBackend} disabled={loadingMore} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500 text-white rounded text-xs font-medium hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+            <div className="px-4 py-3 flex items-center justify-center gap-3" style={{ borderTop: `1px solid ${COLORS.border}`, background: COLORS.surfaceElevated }}>
+              <button onClick={handleLoadMoreFromBackend} disabled={loadingMore} className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed" style={{ background: COLORS.accent, color: '#061021' }}>
                 Load More
                 <ChevronDown size={16} />
               </button>
             </div>
           )}
           {activeTab === 'optimization' && displayedProducts.length > 0 && (hasMoreOptimizationClientSide || hasMoreOptimizationFromBackend) && (
-            <div className="px-4 py-3 border-t border-[#30363d] bg-[#21262d] flex items-center justify-center gap-3">
+            <div className="px-4 py-3 flex items-center justify-center gap-3" style={{ borderTop: `1px solid ${COLORS.border}`, background: COLORS.surfaceElevated }}>
               {hasMoreOptimizationClientSide ? (
-                <button type="button" onClick={loadMoreOptimization} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500 text-white rounded text-xs font-medium hover:bg-blue-600 transition-colors">
+                <button type="button" onClick={loadMoreOptimization} className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors" style={{ background: COLORS.accent, color: '#061021' }}>
                   Load More
                   <ChevronDown size={16} />
                 </button>
               ) : hasMoreOptimizationFromBackend && !loadingMore ? (
-                <button type="button" onClick={handleLoadMoreFromBackend} disabled={loadingMore} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500 text-white rounded text-xs font-medium hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                <button type="button" onClick={handleLoadMoreFromBackend} disabled={loadingMore} className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed" style={{ background: COLORS.accent, color: '#061021' }}>
                   Load More
                   <ChevronDown size={16} />
                 </button>

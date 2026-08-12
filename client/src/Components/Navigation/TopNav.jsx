@@ -101,7 +101,7 @@ const TopNav = () => {
     const dropdownRef = useRef(null)
     const notificationRef = useRef(null)
 
-    // Date-range control: shown here (beside the marketplace pill) only on the Dashboard route.
+    // Date-range control: always visible, beside the marketplace pill, on every page.
     // Dashboard.jsx used to render its own trigger + dropdown; moved up here per redesign.
     const isDashboardRoute = DASHBOARD_ROUTES.includes(location.pathname)
     const dashboardInfoForDates = useSelector(state => state.Dashboard?.DashBoardInfo)
@@ -122,7 +122,7 @@ const TopNav = () => {
     const isRefreshingDashboard = loadingPhase1 || loadingPhase2 || loadingPhase3 || loadingTop4
 
     useEffect(() => {
-        if (!isDashboardRoute || !dashboardInfoForDates?.startDate || !dashboardInfoForDates?.endDate) return
+        if (!dashboardInfoForDates?.startDate || !dashboardInfoForDates?.endDate) return
 
         const parseLocal = (dateString) => {
             const [year, month, day] = dateString.split('-').map(Number)
@@ -131,10 +131,9 @@ const TopNav = () => {
         const formatDate = (date) => date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
         setSelectedPeriod(`${formatDate(parseLocal(dashboardInfoForDates.startDate))} - ${formatDate(parseLocal(dashboardInfoForDates.endDate))}`)
-    }, [isDashboardRoute, dashboardInfoForDates?.startDate, dashboardInfoForDates?.endDate, dashboardInfoForDates?.calendarMode])
+    }, [dashboardInfoForDates?.startDate, dashboardInfoForDates?.endDate, dashboardInfoForDates?.calendarMode])
 
     useEffect(() => {
-        if (!isDashboardRoute) return
         const handleClickOutsideCalendar = (event) => {
             if (isClickInsideGaCalDropdown(event.target)) return
             if (calenderRef.current && !calenderRef.current.contains(event.target)) {
@@ -143,7 +142,7 @@ const TopNav = () => {
         }
         document.addEventListener('mousedown', handleClickOutsideCalendar)
         return () => document.removeEventListener('mousedown', handleClickOutsideCalendar)
-    }, [isDashboardRoute])
+    }, [])
 
     const switchAccount = async (country,region) => {
         try{
@@ -518,27 +517,27 @@ const TopNav = () => {
 
                 </div>
 
-                {/* Date range - only on the Dashboard route, sits beside the marketplace pill */}
-                {isDashboardRoute && (
-                    <div className="relative" ref={calenderRef}>
-                        <button
-                            ref={calendarAnchorRef}
-                            onClick={() => setOpenCalender(!openCalender)}
-                            className="flex items-center gap-2 px-3 py-2 rounded-lg outline-none text-[13px] border transition-colors duration-200 bg-[#151A23] border-[#252C3A] hover:border-[#3B4658]"
-                        >
-                            <Calendar className="w-3.5 h-3.5 text-[#6B7486]" />
-                            <span className="font-medium text-[#F5F7FA] whitespace-nowrap">{selectedPeriod}</span>
-                        </button>
+                {/* Date range - always visible in the navbar, on every page. The underlying
+                    startDate/endDate/calendarMode in Redux already drives filtering on
+                    several pages (Dashboard, PPC, Profitability), not just this one. */}
+                <div className="relative" ref={calenderRef}>
+                    <button
+                        ref={calendarAnchorRef}
+                        onClick={() => setOpenCalender(!openCalender)}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg outline-none text-[13px] border transition-colors duration-200 bg-[#151A23] border-[#252C3A] hover:border-[#3B4658]"
+                    >
+                        <Calendar className="w-3.5 h-3.5 text-[#6B7486]" />
+                        <span className="font-medium text-[#F5F7FA] whitespace-nowrap">{selectedPeriod}</span>
+                    </button>
 
-                        {openCalender && (
-                            <Calender
-                                anchorRef={calendarAnchorRef}
-                                setOpenCalender={setOpenCalender}
-                                setSelectedPeriod={setSelectedPeriod}
-                            />
-                        )}
-                    </div>
-                )}
+                    {openCalender && (
+                        <Calender
+                            anchorRef={calendarAnchorRef}
+                            setOpenCalender={setOpenCalender}
+                            setSelectedPeriod={setSelectedPeriod}
+                        />
+                    )}
+                </div>
 
                 {/* Refresh - icon only, beside the date picker, Dashboard route only */}
                 {isDashboardRoute && (

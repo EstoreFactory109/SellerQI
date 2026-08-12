@@ -894,7 +894,7 @@ const Dashboard = () => {
           </div>
 
           {/* Where your money goes (+ account health detail) | Issue mix + QMate noticed — matches the mock's 2-column layout */}
-          <div className='grid grid-cols-1 lg:grid-cols-[1.45fr_1fr] gap-4 mb-[22px] items-start'>
+          <div className='grid grid-cols-1 lg:grid-cols-[1.45fr_1fr] gap-4 mb-[22px]'>
             <div className='flex flex-col gap-4'>
               {/* TotalSales - needs Phase 3 data (datewiseSales array for chart) */}
               <motion.div ref={totalSalesSectionRef} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className='rounded-2xl border overflow-visible' style={{ background: COLORS.surface, borderColor: COLORS.border }}>
@@ -949,20 +949,22 @@ const Dashboard = () => {
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.2, delay: 0.06 }}
-                className='rounded-2xl border p-5'
+                className='rounded-2xl border p-5 flex-1 flex flex-col justify-between'
                 style={{ background: `linear-gradient(160deg, rgba(59,130,246,.10), transparent 60%), ${COLORS.surface}`, borderColor: COLORS.border }}
               >
-                <div className='flex items-center gap-2 mb-2'>
-                  <div className='w-[22px] h-[22px] rounded-md flex items-center justify-center text-xs font-bold' style={{ background: COLORS.accent, color: '#061021' }}>Q</div>
-                  <div className='text-sm font-semibold' style={{ color: COLORS.textPrimary }}>QMate noticed</div>
+                <div>
+                  <div className='flex items-center gap-2 mb-2'>
+                    <div className='w-[22px] h-[22px] rounded-md flex items-center justify-center text-xs font-bold' style={{ background: COLORS.accent, color: '#061021' }}>Q</div>
+                    <div className='text-sm font-semibold' style={{ color: COLORS.textPrimary }}>QMate noticed</div>
+                  </div>
+                  <p className='m-0 text-sm' style={{ color: COLORS.textSecondary }}>
+                    Sessions on <b style={{ color: COLORS.textPrimary }}>B07XYZ</b> are up 22% but conversion fell 14.1% → 8.3%. Bullet 3 was edited Apr 9 and removed your top indexing keywords.
+                  </p>
                 </div>
-                <p className='m-0 mb-3 text-sm' style={{ color: COLORS.textSecondary }}>
-                  Sessions on <b style={{ color: COLORS.textPrimary }}>B07XYZ</b> are up 22% but conversion fell 14.1% → 8.3%. Bullet 3 was edited Apr 9 and removed your top indexing keywords.
-                </p>
                 <button
                   type='button'
                   onClick={() => navigate('/seller-central-checker/qmate')}
-                  className='w-full py-2.5 rounded-lg text-sm font-semibold border'
+                  className='w-full py-2.5 mt-3 rounded-lg text-sm font-semibold border'
                   style={{ background: 'rgba(59,130,246,.12)', borderColor: 'rgba(59,130,246,.4)', color: '#7EA8F8' }}
                 >
                   Ask about this →
@@ -972,6 +974,32 @@ const Dashboard = () => {
           </div>
 
       </div>
+
+      {/* Floating "Ask QMate" — opens the existing real QMate chat page (not a new inline
+          panel; reuses the same full chat experience the other Ask QMate buttons open). */}
+      <button
+        type="button"
+        onClick={() => navigate('/seller-central-checker/qmate')}
+        className="fixed z-50 flex items-center gap-2 rounded-full shadow-2xl transition-colors"
+        style={{
+          right: 26,
+          bottom: 26,
+          padding: '11px 16px 11px 12px',
+          border: '1px solid rgba(59,130,246,.45)',
+          background: COLORS.surface,
+          color: COLORS.textPrimary,
+          fontSize: 13,
+          fontWeight: 600,
+        }}
+      >
+        <span
+          className="w-[22px] h-[22px] rounded-md flex items-center justify-center text-xs font-bold"
+          style={{ background: COLORS.accent, color: '#061021' }}
+        >
+          Q
+        </span>
+        Ask QMate
+      </button>
     </div>
   )
 }

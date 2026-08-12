@@ -159,10 +159,12 @@ export default function DateFilter({ setOpenCalender, setSelectedPeriod, anchorR
   const [sevenDaysActive,setSevenDaysActive]=useState(initialState.sevenDaysActive);
   const [customActive,setCustomActive]=useState(initialState.customActive);
   const [fourteenDaysActive, setFourteenDaysActive] = useState(initialState.fourteenDaysActive || false);
-  /** True only after user picks Custom — calendar + apply show on the right */
-  const [customPanelOpen, setCustomPanelOpen] = useState(Boolean(initialState.customActive));
+  /** True only after user picks Custom — calendar + apply show on the right.
+   * Always starts closed: reopening the dropdown should show the preset menu first,
+   * even if Custom is the currently-applied mode (its row still shows a checkmark). */
+  const [customPanelOpen, setCustomPanelOpen] = useState(false);
   /** Keeps split popover layout until custom panel exit animation finishes (avoids layout jump) */
-  const [splitLayout, setSplitLayout] = useState(Boolean(initialState.customActive));
+  const [splitLayout, setSplitLayout] = useState(false);
 
   const [portalPosition, setPortalPosition] = useState(() => readPortalStyle(anchorRef));
 

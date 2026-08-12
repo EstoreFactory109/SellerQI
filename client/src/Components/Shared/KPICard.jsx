@@ -2,7 +2,7 @@ import React from 'react';
 import InfoTooltip from './InfoTooltip.jsx';
 import StatusPill from './StatusPill.jsx';
 import BenchmarkBar from './BenchmarkBar.jsx';
-import { COLORS, STATUS } from './tokens.js';
+import { COLORS, STATUS, getStatusConfig } from './tokens.js';
 
 const SkeletonLine = ({ width = '100%', height = 12 }) => (
   <div className="rounded animate-pulse" style={{ width, height, background: COLORS.border }} />
@@ -27,13 +27,19 @@ const KPICard = ({
   noData,
   onClick,
   className = '',
+  // Opt-in: tints the border to the status color for Fix/Watch (mock does this only on
+  // the Your Products tiles, not the Dashboard KPI cards, so it defaults off).
+  tintBorder = false,
 }) => {
   const clickable = typeof onClick === 'function';
 
   const baseClasses = `rounded-2xl border flex flex-col transition-colors ${
-    compact ? 'p-4 gap-2.5' : 'p-5 gap-2.5'
+    compact ? 'px-4 py-3 gap-2' : 'p-5 gap-2.5'
   } ${clickable ? 'cursor-pointer' : ''} ${className}`;
-  const baseStyle = { background: COLORS.surface, borderColor: COLORS.border };
+  const borderColor = tintBorder && (status === STATUS.FIX || status === STATUS.WATCH)
+    ? `${getStatusConfig(status).color}38`
+    : COLORS.border;
+  const baseStyle = { background: COLORS.surface, borderColor };
 
   if (loading) {
     return (
@@ -63,9 +69,9 @@ const KPICard = ({
           : undefined
       }
     >
-      <div className="flex items-start gap-2 min-h-[32px]">
+      <div className={`flex items-start gap-2 ${compact ? '' : 'min-h-[32px]'}`}>
         <div>
-          <div className="text-sm font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>
+          <div className={`${compact ? 'text-[11px]' : 'text-sm'} font-semibold uppercase tracking-wide`} style={{ color: COLORS.textSecondary }}>
             {label}
           </div>
           {meaning && (
@@ -102,7 +108,7 @@ const KPICard = ({
         </>
       ) : (
         <>
-          <div className="flex items-baseline gap-2.5">
+          <div className="flex items-baseline gap-2.5 flex-wrap">
             <div
               className={`font-bold tracking-tight tabular-nums ${compact ? 'text-2xl' : 'text-[32px] leading-[38px]'}`}
               style={{ color: COLORS.textPrimary }}
@@ -114,9 +120,11 @@ const KPICard = ({
                 {secondaryValue}
               </div>
             )}
+            {/* Compact tiles (e.g. Your Products) put the pill beside the number, mock-style */}
+            {compact && status && <StatusPill status={status} label={statusLabel} compact />}
           </div>
 
-          {status && <StatusPill status={status} label={statusLabel} compact={compact} />}
+          {!compact && status && <StatusPill status={status} label={statusLabel} />}
 
           {!compact && benchmark && <BenchmarkBar status={status} {...benchmark} />}
 
