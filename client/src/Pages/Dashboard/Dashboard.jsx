@@ -585,7 +585,7 @@ const Dashboard = () => {
           </div>
 
           {/* KPI row — real data: reimbursements owed, wasted ad spend, net profit, account health */}
-          <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[14px] mb-[22px]'>
+          <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-[22px]'>
             <KPICard
               label="Money Amazon Owes You"
               meaning="Unclaimed FBA reimbursements"
@@ -626,16 +626,16 @@ const Dashboard = () => {
               }}
             />
 
-            <div className='rounded-[13px] border flex gap-4 p-[17px]' style={{ background: COLORS.surface, borderColor: COLORS.border }}>
-              <div className='flex-1 min-w-0 flex flex-col gap-[11px]'>
+            <div className='rounded-2xl border flex gap-5 p-6' style={{ background: COLORS.surface, borderColor: COLORS.border }}>
+              <div className='flex-1 min-w-0 flex flex-col gap-3.5'>
                 <div>
-                  <div className='text-xs font-semibold uppercase tracking-wide' style={{ color: COLORS.textSecondary }}>Account Health</div>
-                  <div className='text-xs mt-0.5' style={{ color: COLORS.textMuted }}>Amazon-facing risk</div>
+                  <div className='text-sm font-semibold uppercase tracking-wide' style={{ color: COLORS.textSecondary }}>Account Health</div>
+                  <div className='text-xs mt-1' style={{ color: COLORS.textMuted }}>Amazon-facing risk</div>
                 </div>
                 {isPhase2Complete ? (
                   <>
                     <StatusPill status={healthPillStatus} />
-                    <div className='text-xs' style={{ color: COLORS.textSecondary }}>
+                    <div className='text-sm' style={{ color: COLORS.textSecondary }}>
                       {healthPillStatus === STATUS.GOOD
                         ? 'Healthy — a few things need attention.'
                         : healthPillStatus === STATUS.WATCH
@@ -643,7 +643,7 @@ const Dashboard = () => {
                           : 'At risk — action needed soon.'}
                     </div>
                     <div className='h-px' style={{ background: COLORS.border }} />
-                    <div className='text-xs' style={{ color: COLORS.textMuted }}>{totalIssues.toLocaleString()} total issues across your account</div>
+                    <div className='text-sm' style={{ color: COLORS.textMuted }}>{totalIssues.toLocaleString()} total issues across your account</div>
                   </>
                 ) : (
                   <>

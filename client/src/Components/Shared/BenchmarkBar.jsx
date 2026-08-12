@@ -9,12 +9,12 @@ const BenchmarkBar = ({ healthyText, valueText, rangeStart = 0, rangeEnd, marker
   return (
     <div>
       {(healthyText || valueText) && (
-        <div className="flex items-center justify-between text-xs mb-[5px]" style={{ color: COLORS.textSecondary }}>
+        <div className="flex items-center justify-between text-sm mb-2" style={{ color: COLORS.textSecondary }}>
           {healthyText && <span>{healthyText}</span>}
           {valueText && <span style={{ color: markerColor }}>{valueText}</span>}
         </div>
       )}
-      <div className="relative h-[5px] rounded-full overflow-hidden" style={{ background: COLORS.border }}>
+      <div className="relative h-[7px] rounded-full overflow-hidden" style={{ background: COLORS.border }}>
         {rangeEnd != null && (
           <div
             className="absolute top-0 bottom-0 rounded-full"
@@ -27,7 +27,7 @@ const BenchmarkBar = ({ healthyText, valueText, rangeStart = 0, rangeEnd, marker
         )}
         {markerPosition != null && (
           <div
-            className="absolute -top-[2px] w-[3px] h-[9px] rounded-sm"
+            className="absolute -top-[2.5px] w-[4px] h-[12px] rounded-sm"
             style={{ left: `${markerPosition}%`, background: markerColor }}
           />
         )}

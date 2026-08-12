@@ -9,7 +9,7 @@ const StatusPill = ({ status = STATUS.SETUP, label, compact = false }) => {
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full font-bold uppercase tracking-wide whitespace-nowrap ${
-        compact ? 'px-2 py-0.5 text-[10px]' : 'px-2.5 py-1 text-[11px]'
+        compact ? 'px-2.5 py-1 text-[11px]' : 'px-3 py-1.5 text-xs'
       }`}
       style={{ backgroundColor: config.bg, color: config.color }}
     >

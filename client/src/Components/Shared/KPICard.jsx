@@ -30,17 +30,17 @@ const KPICard = ({
 }) => {
   const clickable = typeof onClick === 'function';
 
-  const baseClasses = `rounded-[13px] border flex flex-col transition-colors ${
-    compact ? 'p-3 gap-2' : 'p-[17px] gap-[11px]'
+  const baseClasses = `rounded-2xl border flex flex-col transition-colors ${
+    compact ? 'p-4 gap-2.5' : 'p-6 gap-3.5'
   } ${clickable ? 'cursor-pointer' : ''} ${className}`;
   const baseStyle = { background: COLORS.surface, borderColor: COLORS.border };
 
   if (loading) {
     return (
       <div className={baseClasses} style={baseStyle} aria-busy="true">
-        <SkeletonLine width="60%" height={11} />
-        <SkeletonLine width="45%" height={compact ? 20 : 28} />
-        {!compact && <SkeletonLine width="35%" height={18} />}
+        <SkeletonLine width="60%" height={13} />
+        <SkeletonLine width="45%" height={compact ? 26 : 38} />
+        {!compact && <SkeletonLine width="35%" height={20} />}
       </div>
     );
   }
@@ -63,13 +63,13 @@ const KPICard = ({
           : undefined
       }
     >
-      <div className="flex items-start gap-1.5 min-h-[34px]">
+      <div className="flex items-start gap-2 min-h-[40px]">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>
+          <div className="text-sm font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>
             {label}
           </div>
           {meaning && (
-            <div className="text-xs mt-0.5" style={{ color: COLORS.textMuted }}>
+            <div className="text-xs mt-1" style={{ color: COLORS.textMuted }}>
               {meaning}
             </div>
           )}
@@ -85,7 +85,7 @@ const KPICard = ({
         <>
           <StatusPill status={STATUS.SETUP} label={statusLabel} compact={compact} />
           {noData.message && (
-            <div className="text-xs" style={{ color: COLORS.textSecondary }}>
+            <div className="text-sm" style={{ color: COLORS.textSecondary }}>
               {noData.message}
             </div>
           )}
@@ -93,7 +93,7 @@ const KPICard = ({
             <a
               href={noData.href || '#'}
               onClick={noData.onAction}
-              className="text-xs font-semibold"
+              className="text-sm font-semibold"
               style={{ color: COLORS.accent }}
             >
               {noData.actionLabel} →
@@ -102,15 +102,15 @@ const KPICard = ({
         </>
       ) : (
         <>
-          <div className="flex items-baseline gap-2">
+          <div className="flex items-baseline gap-2.5">
             <div
-              className={`font-bold tracking-tight tabular-nums ${compact ? 'text-xl' : 'text-[30px] leading-9'}`}
+              className={`font-bold tracking-tight tabular-nums ${compact ? 'text-2xl' : 'text-[38px] leading-[44px]'}`}
               style={{ color: COLORS.textPrimary }}
             >
               {value}
             </div>
             {secondaryValue && (
-              <div className="text-sm font-medium" style={{ color: COLORS.textSecondary }}>
+              <div className="text-base font-medium" style={{ color: COLORS.textSecondary }}>
                 {secondaryValue}
               </div>
             )}
@@ -123,7 +123,7 @@ const KPICard = ({
           {!compact && footnote && (
             <>
               <div className="h-px" style={{ background: COLORS.border }} />
-              <div className="text-xs" style={{ color: COLORS.textMuted }}>
+              <div className="text-sm" style={{ color: COLORS.textMuted }}>
                 {footnote}
               </div>
             </>
