@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck, ChevronRight, X, Calendar, DollarSign, Lock, Package, LogOut, Bot, BarChart3} from 'lucide-react'
+import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,ChartLine,LaptopMinimalCheck, ChevronRight, X, Calendar, DollarSign, Lock, Package, LogOut, Bot, BarChart3, User, Link2, LifeBuoy, CreditCard} from 'lucide-react'
 import { logout } from '../../redux/slices/authSlice.js'
 import { clearCogsData } from '../../redux/slices/cogsSlice.js'
 import axios from 'axios';
@@ -10,8 +10,17 @@ import { useSelector,useDispatch } from 'react-redux';
 import {setPosition} from '../../redux/slices/MobileMenuSlice.js'
 import { AnimatePresence, motion } from "framer-motion";
 import NavSearch from './NavSearch.jsx';
-import { fetchAccountIssues } from '../../redux/slices/PageDataSlice.js';
+import { fetchAccountIssues, fetchYourProductsSummaryV3 } from '../../redux/slices/PageDataSlice.js';
+import stripeService from '../../services/stripeService';
 import { COLORS } from '../Shared/index.js';
+
+// "NW" from "Northwind Goods" - first letter of up to the first two words.
+const getInitials = (name) => {
+    if (!name) return '';
+    return name.trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+};
+
+const PLAN_LABELS = { LITE: 'Lite', PRO: 'Pro', AGENCY: 'Agency' };
 
 // Same category-grouped nav item pattern as the desktop sidebar (LeftNavSection.jsx),
 // duplicated here since this component already duplicates the desktop nav's logic
@@ -89,7 +98,6 @@ const LeftNavSection = () => {
     const navigate=useNavigate();
     const location = useLocation();
     const [loader,setLoader]=useState(false)
-    const [settingsDropdownOpen, setSettingsDropdownOpen] = useState(false);
     const [sponsoredAdsDropdownOpen, setSponsoredAdsDropdownOpen] = useState(false);
 
     const position = useSelector(state => state.MobileMenu.position);
@@ -110,6 +118,24 @@ const LeftNavSection = () => {
             dispatch(fetchAccountIssues());
         }
     }, [accountIssuesState.data, accountIssuesState.loading, dispatch]);
+
+    // Real Your Products count for the sidebar badge - same summary Your Products page uses.
+    const yourProductsSummaryState = useSelector((state) => state.pageData?.yourProductsV3?.summary || { data: null, loading: false });
+    const yourProductsCount = yourProductsSummaryState.data?.totalProducts || 0;
+
+    React.useEffect(() => {
+        if (!yourProductsSummaryState.data && !yourProductsSummaryState.loading) {
+            dispatch(fetchYourProductsSummaryV3());
+        }
+    }, [yourProductsSummaryState.data, yourProductsSummaryState.loading, dispatch]);
+
+    // Real subscription renewal date for the bottom account box - fetched once locally.
+    const [nextBillingDate, setNextBillingDate] = useState(null);
+    React.useEffect(() => {
+        stripeService.getSubscription()
+            .then((sub) => setNextBillingDate(sub?.nextBillingDate || null))
+            .catch(() => {});
+    }, []);
 
     // Check if user's trial has expired
     const isTrialExpired = () => {
@@ -160,24 +186,12 @@ const LeftNavSection = () => {
     const isKeywordAnalysisPage = location.pathname === '/seller-central-checker/keyword-analysis';
     const isSponsoredAdsPage = isPPCDashboardPage || isKeywordAnalysisPage;
 
-    // Keep settings dropdown open if we're on settings page
-    React.useEffect(() => {
-        if (isSettingsPage) {
-            setSettingsDropdownOpen(true);
-        }
-    }, [isSettingsPage]);
-
     // Keep sponsored ads dropdown open if we're on any sponsored ads-related page
     React.useEffect(() => {
         if (isSponsoredAdsPage) {
             setSponsoredAdsDropdownOpen(true);
         }
     }, [isSponsoredAdsPage]);
-
-    // Handle Settings button click - just expand/collapse; picking an option below navigates.
-    const handleSettingsClick = () => {
-        setSettingsDropdownOpen(!settingsDropdownOpen);
-    };
 
     // Handle Sponsored Ads button click
     const handleSponsoredAdsClick = () => {
@@ -278,7 +292,7 @@ const LeftNavSection = () => {
                         <NavGroupLabel>Optimize</NavGroupLabel>
                         <div className="space-y-1">
                             {(!isLiteUser || isPremiumLocked) && (
-                                <NavItem to="/seller-central-checker/your-products" icon={Package} label="Your Products" locked={isPremiumLocked} onNavigate={closeMenu} />
+                                <NavItem to="/seller-central-checker/your-products" icon={Package} label="Your Products" locked={isPremiumLocked} onNavigate={closeMenu} count={yourProductsCount} />
                             )}
                             <NavItem to="/seller-central-checker/pre-analysis" icon={BarChart3} label="Listing Analyzer" onNavigate={closeMenu} />
 
@@ -381,121 +395,75 @@ const LeftNavSection = () => {
                 </div>
                 )}
 
-                {/* Settings Section - Hidden for agency admin viewing client */}
+                {/* Account & Settings - flat list like the other categories, no dropdown */}
                 {!isAgencyAdminViewingClient && (
                 <div className="px-3 mb-4">
-                    <NavGroupLabel>Settings</NavGroupLabel>
-
-                    {/* Settings with Dropdown */}
+                    <NavGroupLabel>Account &amp; Settings</NavGroupLabel>
                     <div className="space-y-1">
-                        <NavItem icon={Settings} label="Settings" isActive={isSettingsPage} onClick={handleSettingsClick} expanded={settingsDropdownOpen} />
+                        <NavItem to="/seller-central-checker/settings?tab=profile" icon={User} label="User Profile" isActive={isSettingsPage && currentSettingsTab === 'profile'} onNavigate={closeMenu} />
 
-                        <AnimatePresence>
-                            {settingsDropdownOpen && (
-                                <motion.div
-                                    initial={{ opacity: 0, height: 0 }}
-                                    animate={{ opacity: 1, height: "auto" }}
-                                    exit={{ opacity: 0, height: 0 }}
-                                    transition={{ duration: 0.25, ease: "easeInOut", opacity: { duration: 0.15 } }}
-                                    className="ml-5 space-y-1 overflow-hidden"
-                                >
-                                    <motion.div initial={{ y: -10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }} transition={{ delay: 0.05, duration: 0.15 }}>
-                                        <NavLink to="/seller-central-checker/settings?tab=profile" onClick={closeMenu} className={dropdownItemClass} style={() => dropdownItemStyle(isSettingsPage && currentSettingsTab === 'profile')}>
-                                            <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                            User Profile
-                                        </NavLink>
-                                    </motion.div>
+                        {/* Account Integration - Only for PRO users (not AGENCY) */}
+                        {!isLiteUser && !isAgencyUser && (
+                            <NavItem to="/seller-central-checker/settings?tab=account-integration" icon={Link2} label="Account Integration" isActive={isSettingsPage && currentSettingsTab === 'account-integration'} onNavigate={closeMenu} />
+                        )}
 
-                                    {/* Account Integration - Only for PRO users (not AGENCY) */}
-                                    {!isLiteUser && !isAgencyUser && (
-                                        <motion.div initial={{ y: -10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }} transition={{ delay: 0.08, duration: 0.15 }}>
-                                            <NavLink to="/seller-central-checker/settings?tab=account-integration" onClick={closeMenu} className={dropdownItemClass} style={() => dropdownItemStyle(isSettingsPage && currentSettingsTab === 'account-integration')}>
-                                                <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                Account Integration
-                                            </NavLink>
-                                        </motion.div>
-                                    )}
+                        {/* Support - Available for non-AGENCY users */}
+                        {!isAgencyUser && (
+                            <NavItem to="/seller-central-checker/settings?tab=support" icon={LifeBuoy} label="Support" isActive={isSettingsPage && currentSettingsTab === 'support'} onNavigate={closeMenu} />
+                        )}
 
-                                    {/* Support - Available for non-AGENCY users */}
-                                    {!isAgencyUser && (
-                                        <motion.div initial={{ y: -10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }} transition={{ delay: 0.14, duration: 0.15 }}>
-                                            <NavLink to="/seller-central-checker/settings?tab=support" onClick={closeMenu} className={dropdownItemClass} style={() => dropdownItemStyle(isSettingsPage && currentSettingsTab === 'support')}>
-                                                <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                Support
-                                            </NavLink>
-                                        </motion.div>
-                                    )}
+                        <NavItem to="/seller-central-checker/settings?tab=plans-billing" icon={CreditCard} label="Plans & Billing" isActive={isSettingsPage && currentSettingsTab === 'plans-billing'} onNavigate={closeMenu} />
 
-                                    {/* Plans & Billing - Available for all users */}
-                                    <motion.div initial={{ y: -10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }} transition={{ delay: 0.17, duration: 0.15 }}>
-                                        <NavLink to="/seller-central-checker/settings?tab=plans-billing" onClick={closeMenu} className={dropdownItemClass} style={() => dropdownItemStyle(isSettingsPage && currentSettingsTab === 'plans-billing')}>
-                                            <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                            Plans & Billing
-                                        </NavLink>
-                                    </motion.div>
-
-                                    {/* Admin Section - Only for AGENCY users */}
-                                    {isAgencyUser && (
-                                        <>
-                                            <motion.div initial={{ y: -10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }} transition={{ delay: 0.17, duration: 0.15 }} className="my-2">
-                                                <div className="flex items-center gap-2 px-3 py-1">
-                                                    <div className="h-px flex-1" style={{ background: COLORS.border }}></div>
-                                                    <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: COLORS.accent }}>Admin</span>
-                                                    <div className="h-px flex-1" style={{ background: COLORS.border }}></div>
-                                                </div>
-                                            </motion.div>
-
-                                            <motion.div initial={{ y: -10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }} transition={{ delay: 0.20, duration: 0.15 }}>
-                                                <NavLink to="/seller-central-checker/settings?tab=admin-user-profile" onClick={closeMenu} className={dropdownItemClass} style={() => dropdownItemStyle(isSettingsPage && currentSettingsTab === 'admin-user-profile')}>
-                                                    <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                    Admin User Profile
-                                                </NavLink>
-                                            </motion.div>
-
-                                            <motion.div initial={{ y: -10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }} transition={{ delay: 0.24, duration: 0.15 }}>
-                                                <NavLink to="/seller-central-checker/settings?tab=admin-account-integration" onClick={closeMenu} className={dropdownItemClass} style={() => dropdownItemStyle(isSettingsPage && currentSettingsTab === 'admin-account-integration')}>
-                                                    <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                    Admin Integrations
-                                                </NavLink>
-                                            </motion.div>
-
-                                            <motion.div initial={{ y: -10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }} transition={{ delay: 0.26, duration: 0.15 }}>
-                                                <NavLink to="/seller-central-checker/settings?tab=admin-plans-billing" onClick={closeMenu} className={dropdownItemClass} style={() => dropdownItemStyle(isSettingsPage && currentSettingsTab === 'admin-plans-billing')}>
-                                                    <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                    Admin Billing
-                                                </NavLink>
-                                            </motion.div>
-
-                                            <motion.div initial={{ y: -10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }} transition={{ delay: 0.28, duration: 0.15 }}>
-                                                <NavLink to="/seller-central-checker/settings?tab=admin-support" onClick={closeMenu} className={dropdownItemClass} style={() => dropdownItemStyle(isSettingsPage && currentSettingsTab === 'admin-support')}>
-                                                    <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                    Admin Support
-                                                </NavLink>
-                                            </motion.div>
-                                        </>
-                                    )}
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
+                        {/* Admin Section - Only for AGENCY users */}
+                        {isAgencyUser && (
+                            <>
+                                <div className="flex items-center gap-2 px-3 py-1 mt-2">
+                                    <div className="h-px flex-1" style={{ background: COLORS.border }}></div>
+                                    <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: COLORS.accent }}>Admin</span>
+                                    <div className="h-px flex-1" style={{ background: COLORS.border }}></div>
+                                </div>
+                                <NavItem to="/seller-central-checker/settings?tab=admin-user-profile" icon={User} label="Admin User Profile" isActive={isSettingsPage && currentSettingsTab === 'admin-user-profile'} onNavigate={closeMenu} />
+                                <NavItem to="/seller-central-checker/settings?tab=admin-account-integration" icon={Link2} label="Admin Integrations" isActive={isSettingsPage && currentSettingsTab === 'admin-account-integration'} onNavigate={closeMenu} />
+                                <NavItem to="/seller-central-checker/settings?tab=admin-plans-billing" icon={CreditCard} label="Admin Billing" isActive={isSettingsPage && currentSettingsTab === 'admin-plans-billing'} onNavigate={closeMenu} />
+                                <NavItem to="/seller-central-checker/settings?tab=admin-support" icon={LifeBuoy} label="Admin Support" isActive={isSettingsPage && currentSettingsTab === 'admin-support'} onNavigate={closeMenu} />
+                            </>
+                        )}
                     </div>
+                </div>
+                )}
+
+                {/* Logout - Hidden for agency admin viewing client */}
+                {!isAgencyAdminViewingClient && (
+                <div className="px-3 mb-2">
+                    <button
+                        className='group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-colors w-full'
+                        style={{ color: COLORS.fix, borderTop: `1px solid ${COLORS.border}`, paddingTop: '10px' }}
+                        onClick={(e)=>logoutUser(e)}
+                    >
+                        <LogOut className="w-3.5 h-3.5" style={{ color: COLORS.fix }} />
+                        <span className="font-medium">Log Out</span>
+                        {loader && <BeatLoader color={COLORS.fix} size={6} />}
+                    </button>
                 </div>
                 )}
             </div>
 
-            {/* Logout Section - Hidden for agency admin viewing client */}
-            {!isAgencyAdminViewingClient && (
-            <div className="px-4 py-3 flex-shrink-0" style={{ borderTop: `1px solid ${COLORS.border}` }}>
-                <button
-                    className='group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-colors w-full'
-                    style={{ color: COLORS.fix }}
-                    onClick={(e)=>logoutUser(e)}
+            {/* Account/plan identity box - pinned at the very bottom, unlike the nav above */}
+            <div className="flex-shrink-0 flex items-center gap-2.5 px-4 py-3.5" style={{ borderTop: `1px solid ${COLORS.border}` }}>
+                <div
+                    className="w-[30px] h-[30px] rounded-lg flex-shrink-0 flex items-center justify-center text-xs font-semibold"
+                    style={{ background: COLORS.surfaceElevated, border: `1px solid ${COLORS.border}`, color: COLORS.textSecondary }}
                 >
-                    <LogOut className="w-3.5 h-3.5" style={{ color: COLORS.fix }} />
-                    <span className="font-medium">Log Out</span>
-                    {loader && <BeatLoader color={COLORS.fix} size={6} />}
-                </button>
+                    {getInitials(user?.brand) || 'SQ'}
+                </div>
+                <div className="flex-1 min-w-0">
+                    <div className="text-[13px] font-medium truncate" style={{ color: COLORS.textPrimary }}>{user?.brand || 'Your Brand'}</div>
+                    <div className="text-[11px]" style={{ color: COLORS.textMuted }}>
+                        {PLAN_LABELS[userPlan] || userPlan}
+                        {nextBillingDate && ` · renews ${new Date(nextBillingDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
+                    </div>
+                </div>
             </div>
-            )}
         </aside>
         </>
     );
