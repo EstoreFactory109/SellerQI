@@ -582,8 +582,8 @@ const YourProducts = () => {
 
   const productTableColCount = 8; // + expand-caret + sales column
   const optimizationTableColCount = 8; // + expand-caret + sales column
-  const nonSellableTableColCount = 5; // + expand-caret column
-  const withoutAPlusTableColCount = 7; // + expand-caret + sales column
+  const nonSellableTableColCount = 8; // + expand-caret + price + stock + view columns
+  const withoutAPlusTableColCount = 10; // + expand-caret + sales + issues + price + stock columns
   const chosenColumnWidth = '14%';
   const CARET_COL_WIDTH = '32px';
   const productFixedWidths = { asin: '11%', title: '24%', issues: '14%', sales: '12%', view: '9%' };
@@ -922,10 +922,13 @@ const YourProducts = () => {
                   ) : activeTab === 'nonSellable' ? (
                     <>
                       <th className="py-2.5" style={{ width: CARET_COL_WIDTH, borderBottom: `1px solid ${COLORS.border}` }}></th>
-                      <th className="pl-1 pr-2 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '24%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('title')}>Product {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="pl-1 pr-2 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '26%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('title')}>Product {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
                       <th className="px-1.5 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '10%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('asin')}>ASIN {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '10%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('status')}>Status {sortConfig.key === 'status' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="px-2 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider" style={{ width: '52%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }}>Issues</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '9%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('status')}>Status {sortConfig.key === 'status' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider" style={{ width: '11%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }}>Issues</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '11%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('price')}>Price {sortConfig.key === 'price' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '13%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('quantity')}>FBA Stock {sortConfig.key === 'quantity' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider" style={{ width: '10%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }}>View Details</th>
                     </>
                   ) : activeTab === 'active' ? (
                     <>
@@ -941,12 +944,15 @@ const YourProducts = () => {
                   ) : (activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') ? (
                     <>
                       <th className="py-2.5" style={{ width: CARET_COL_WIDTH, borderBottom: `1px solid ${COLORS.border}` }}></th>
-                      <th className="pl-1 pr-2 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '38%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('title')}>Product {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="px-1.5 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '10%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('asin')}>ASIN {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '10%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('status')}>Status {sortConfig.key === 'status' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '12%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('sales')}>Sales {sortConfig.key === 'sales' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
-                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider" style={{ width: '12%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }}>{activeTab === 'withoutAPlus' ? 'A+' : 'Ads'}</th>
-                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider" style={{ width: '10%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }}>View Details</th>
+                      <th className="pl-1 pr-2 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '22%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('title')}>Product {sortConfig.key === 'title' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-1.5 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '9%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('asin')}>ASIN {sortConfig.key === 'asin' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '8%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('status')}>Status {sortConfig.key === 'status' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '10%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('sales')}>Sales {sortConfig.key === 'sales' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '9%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('issueCount')}>Issues {sortConfig.key === 'issueCount' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '9%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('price')}>Price {sortConfig.key === 'price' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider cursor-pointer" style={{ width: '11%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }} onClick={() => handleSort('quantity')}>FBA Stock {sortConfig.key === 'quantity' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider" style={{ width: '10%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }}>{activeTab === 'withoutAPlus' ? 'A+' : 'Ads'}</th>
+                      <th className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider" style={{ width: '9%', color: COLORS.textMuted, borderBottom: `1px solid ${COLORS.border}` }}>View Details</th>
                     </>
                   ) : null}
                 </tr>
@@ -1108,13 +1114,32 @@ const YourProducts = () => {
                           <td className="px-2 py-3 text-center align-top">
                             <span className="text-xs font-medium" style={{ color: statusColor }}>{product.status || '—'}</span>
                           </td>
-                          <td className="px-2 py-3 text-left align-top">
+                          <td className="px-2 py-3 text-center align-top">
                             <span
                               className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold tabular-nums"
                               style={{ background: issuesBg, color: issuesColor }}
                             >
                               {issueCount === 0 ? 'None' : issueCount}
                             </span>
+                          </td>
+                          <td className="px-2 py-3 text-center align-top">
+                            <span className="text-xs font-medium whitespace-nowrap" style={{ color: COLORS.textPrimary }}>{product.price ? formatCurrencyWithLocale(parseFloat(product.price), currency, 2) : '—'}</span>
+                          </td>
+                          <td className="px-2 py-3 text-center align-top">
+                            <AmazonFbaInventoryCell
+                              fbaInventory={product.fbaInventory}
+                              fallbackQuantity={product.quantity}
+                            />
+                          </td>
+                          <td className="px-2 py-3 text-center align-top">
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); navigate(`/seller-central-checker/${product.asin}`); }}
+                              className="px-3 py-1.5 text-xs font-medium rounded-md border transition-colors"
+                              style={{ borderColor: COLORS.border, color: COLORS.textSecondary, background: 'transparent' }}
+                            >
+                              View
+                            </button>
                           </td>
                         </tr>
                         {isOpen && (
@@ -1140,6 +1165,14 @@ const YourProducts = () => {
                                     <CheckCircle size={14} /> No open issues recorded for this product.
                                   </div>
                                 )}
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); navigate(`/seller-central-checker/${product.asin}`); }}
+                                  className="mt-3 px-3 py-1.5 text-xs font-medium rounded-md border transition-colors"
+                                  style={{ borderColor: COLORS.border, color: COLORS.textPrimary, background: COLORS.surface }}
+                                >
+                                  Open full analysis →
+                                </button>
                               </div>
                             </td>
                           </tr>
@@ -1147,7 +1180,7 @@ const YourProducts = () => {
                         </React.Fragment>
                       );
                     }
-                    
+
                     // Active tab (no A+/Ads columns)
                     if (activeTab === 'active') {
                       const issueCount = product.issueCount || 0;
@@ -1239,6 +1272,11 @@ const YourProducts = () => {
                                       );
                                     })}
                                   </div>
+                                ) : issueCount > 0 ? (
+                                  <div className="flex items-start gap-2.5 text-sm" style={{ color: COLORS.textSecondary }}>
+                                    <AlertTriangle size={14} style={{ color: '#F5A623' }} className="flex-shrink-0 mt-0.5" />
+                                    <span>This product has {issueCount} issue{issueCount === 1 ? '' : 's'} recorded, but the detailed breakdown isn&rsquo;t available in this quick view. Click &ldquo;Open full analysis&rdquo; below to see the full list.</span>
+                                  </div>
                                 ) : (
                                   <div className="flex items-center gap-2 text-sm" style={{ color: '#22C55E' }}>
                                     <CheckCircle size={14} /> No open issues recorded for this product.
@@ -1264,6 +1302,8 @@ const YourProducts = () => {
                     if (activeTab === 'withoutAPlus' || activeTab === 'notTargetedInAds') {
                       const isOpen = expandedRows.has(product.asin);
                       const realIssues = Array.isArray(product.issues) ? product.issues : [];
+                      const issueCount = product.issueCount || 0;
+                      const badge = getIssuesBadge(issueCount);
                       return (
                         <React.Fragment key={`${product.asin}-${index}`}>
                         <tr onClick={() => toggleExpand(product.asin)} className="cursor-pointer transition-colors hover:bg-[#1A202B]" style={{ borderBottom: `1px solid ${COLORS.border}` }}>
@@ -1294,6 +1334,25 @@ const YourProducts = () => {
                           </td>
                           <td className="px-2 py-3 text-center align-top">
                             <span className="text-xs font-semibold whitespace-nowrap" style={{ color: COLORS.textPrimary }}>{product.sales != null ? formatCurrencyWithLocale(product.sales, currency, 2) : '—'}</span>
+                          </td>
+                          <td className="px-2 py-3 text-center align-top">
+                            <span
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold tabular-nums"
+                              style={issueCount > 0
+                                ? { background: 'rgba(239,68,68,.14)', color: '#F87171' }
+                                : { background: 'rgba(34,197,94,.14)', color: '#22C55E' }}
+                            >
+                              {badge.text}
+                            </span>
+                          </td>
+                          <td className="px-2 py-3 text-center align-top">
+                            <span className="text-xs font-medium whitespace-nowrap" style={{ color: COLORS.textPrimary }}>{product.price ? formatCurrencyWithLocale(parseFloat(product.price), currency, 2) : '—'}</span>
+                          </td>
+                          <td className="px-2 py-3 text-center align-top">
+                            <AmazonFbaInventoryCell
+                              fbaInventory={product.fbaInventory}
+                              fallbackQuantity={product.quantity}
+                            />
                           </td>
                           <td className="px-2 py-3 text-center align-top">
                             {activeTab === 'withoutAPlus' ? (
@@ -1330,6 +1389,11 @@ const YourProducts = () => {
                                         </div>
                                       );
                                     })}
+                                  </div>
+                                ) : issueCount > 0 ? (
+                                  <div className="flex items-start gap-2.5 text-sm" style={{ color: COLORS.textSecondary }}>
+                                    <AlertTriangle size={14} style={{ color: '#F5A623' }} className="flex-shrink-0 mt-0.5" />
+                                    <span>This product has {issueCount} issue{issueCount === 1 ? '' : 's'} recorded, but the detailed breakdown isn&rsquo;t available in this quick view. Click &ldquo;Open full analysis&rdquo; below to see the full list.</span>
                                   </div>
                                 ) : (
                                   <div className="flex items-center gap-2 text-sm" style={{ color: '#22C55E' }}>
