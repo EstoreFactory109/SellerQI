@@ -954,7 +954,10 @@ const ProfitTable = ({
         }
       }
 
-      const renderFinanceRow = (row, rowNum, isChild) => {
+      // grid-per-row layout (mock structure) — one shared column template for header + every row
+      const GRID_COLS = 'minmax(0,2fr) 100px 70px 96px 120px 150px 90px 100px';
+
+      const renderFinanceRow = (row, isChild) => {
         const cogsPerUnit = cogsValues[row.asin] || 0;
         const totalCogs = cogsPerUnit * (row.units || 0);
         const rowExpenseTotal = computeRowExpenses(row);
@@ -966,262 +969,226 @@ const ProfitTable = ({
         const productName = financeRowDisplayName(row, productDetail);
 
         return (
-          <React.Fragment key={row.asin}>
-            <tr
-              style={{ borderBottom: `1px solid ${COLORS.border}`, background: isChild ? 'rgba(59, 130, 246, 0.06)' : 'transparent' }}
+          <React.Fragment key={`${row.asin}_${row.sku || 'x'}`}>
+            <div
+              style={{ display: 'grid', gridTemplateColumns: GRID_COLS, gap: '12px', padding: '14px 18px', borderBottom: `1px solid ${COLORS.border}`, fontSize: '14px', alignItems: 'center', background: isChild ? 'rgba(59, 130, 246, 0.05)' : 'transparent' }}
               className="hover:bg-[#1A202B] transition-colors"
             >
-              <td className="px-2 py-2 text-center text-xs" style={{ color: COLORS.textSecondary }}>
-                {isChild ? <div className="ml-2 w-0.5 h-4 rounded mx-auto" style={{ background: COLORS.accent }} /> : rowNum}
-              </td>
-              <td className="px-3 py-2 text-left">
-                <span className={`text-xs font-medium truncate block ${isChild ? 'pl-2' : ''}`} style={{ color: COLORS.textPrimary }} title={productName}>
-                  {productName}
-                </span>
-              </td>
-              <td className="px-3 py-2 text-left">
-                <div className="flex flex-col">
-                  <span className="text-xs font-mono px-1.5 py-0.5 rounded whitespace-nowrap inline-block" style={isChild ? { color: COLORS.accent, background: 'rgba(59, 130, 246, 0.15)' } : { color: '#60a5fa' }}>{row.asin || 'N/A'}</span>
-                  {isChild && <span className="text-[9px] mt-0.5" style={{ color: COLORS.accent }}>Child</span>}
+              <div className="min-w-0 flex items-center gap-2">
+                {isChild && <div className="w-0.5 h-4 rounded flex-shrink-0" style={{ background: COLORS.accent }} />}
+                <div className="min-w-0">
+                  <div className="truncate" style={{ fontWeight: 500, color: COLORS.textPrimary }} title={productName}>{productName}</div>
+                  <div className="text-[13px] truncate" style={{ color: COLORS.textMuted }} title={row.sku || ''}>{row.sku || '—'}</div>
                 </div>
-              </td>
-              <td className="px-2 py-2 text-left">
-                <span className="text-[10px] font-mono truncate block" style={{ color: COLORS.textSecondary }} title={row.sku || ''}>{row.sku}</span>
-              </td>
-              <td className="px-2 py-2 text-center text-xs font-medium" style={{ color: COLORS.textPrimary }}>
+              </div>
+              <span className="truncate" style={{ fontSize: '13px', color: COLORS.textSecondary, fontVariantNumeric: 'tabular-nums' }} title={row.asin}>{row.asin || 'N/A'}</span>
+              <span style={{ color: COLORS.textSecondary, fontVariantNumeric: 'tabular-nums' }}>{row.units || 0}</span>
+              <span style={{ color: COLORS.textPrimary, fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
                 {formatCurrencyWithLocale(row.productSales || 0, currency)}
-              </td>
-              <td className="px-2 py-2 text-center text-xs" style={{ color: COLORS.textSecondary }}>
-                {row.units || 0}
-              </td>
-              <td className="px-2 py-2 text-center text-xs" style={{ color: signedMoneyColor(displayExpenseAmount(rowExpenseTotal)) }}>
-                <div className="flex items-center justify-center gap-1">
-                  <span>{formatCurrencyWithLocale(displayExpenseAmount(rowExpenseTotal), currency)}</span>
-                  <button
-                    onClick={() => {
-                      const key = `exp_${row.asin}`;
-                      setExpandedRows(prev => {
-                        const next = new Set(prev);
-                        next.has(key) ? next.delete(key) : next.add(key);
-                        return next;
-                      });
-                    }}
-                    className="p-0.5 rounded hover:bg-white/5 transition-colors"
-                    title="View expense breakdown"
-                    style={{ color: '#60a5fa' }}
-                  >
-                    {isExpBreakdownOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                  </button>
-                </div>
-              </td>
-              <td className="px-2 py-2 text-center">
-                <div className="flex items-center justify-center gap-1">
-                  <span className="text-[10px]" style={{ color: COLORS.textSecondary }}>{cogsCurrencySymbol}</span>
-                  <input type="number" min="0" step="0.01" value={cogsValues[row.asin] ?? ''} onChange={(e) => handleCogsChange(row.asin, e.target.value)} placeholder="0.00" className="w-14 text-center text-xs rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-blue-500" style={{ background: COLORS.bgBase, color: COLORS.textPrimary, border: `1px solid ${COLORS.border}` }} />
-                  <button onClick={() => handleSaveCogs(row.asin, row.sku)} disabled={cogsSaving[row.asin] || !needsSave(row.asin)} className="p-0.5 rounded transition-colors" style={needsSave(row.asin) ? { background: 'rgba(34,197,94,0.2)', color: COLORS.good } : { color: COLORS.border }} title={cogsSaving[row.asin] ? 'Saving...' : needsSave(row.asin) ? 'Click to save COGS' : 'Enter COGS value to save'}>
-                    {cogsSaving[row.asin] ? <Loader2 className="w-3 h-3 animate-spin" /> : isSaved(row.asin) ? <CheckCircle2 className="w-3 h-3" /> : <Check className="w-3 h-3" />}
-                  </button>
-                </div>
-              </td>
-              <td className="px-2 py-2 text-center text-xs font-medium" style={{ color: grossProfit >= 0 ? COLORS.good : '#F87171' }}>
+              </span>
+              <div className="flex items-center gap-1">
+                <span style={{ color: signedMoneyColor(displayExpenseAmount(rowExpenseTotal)), fontVariantNumeric: 'tabular-nums' }}>{formatCurrencyWithLocale(displayExpenseAmount(rowExpenseTotal), currency)}</span>
+                <button
+                  onClick={() => {
+                    const key = `exp_${row.asin}`;
+                    setExpandedRows(prev => {
+                      const next = new Set(prev);
+                      next.has(key) ? next.delete(key) : next.add(key);
+                      return next;
+                    });
+                  }}
+                  className="p-0.5 rounded hover:bg-white/5 transition-colors flex-shrink-0"
+                  title="View expense breakdown"
+                  style={{ color: '#7EA8F8' }}
+                >
+                  {isExpBreakdownOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+              <div className="flex items-center gap-1 px-2 py-1.5 rounded-md" style={{ border: `1px dashed ${COLORS.borderStrong}` }}>
+                <span className="text-xs flex-shrink-0" style={{ color: COLORS.textMuted }}>{cogsCurrencySymbol}</span>
+                <input type="number" min="0" step="0.01" value={cogsValues[row.asin] ?? ''} onChange={(e) => handleCogsChange(row.asin, e.target.value)} placeholder="0.00" className="w-14 text-sm outline-none bg-transparent" style={{ color: COLORS.textPrimary }} />
+                <button onClick={() => handleSaveCogs(row.asin, row.sku)} disabled={cogsSaving[row.asin] || !needsSave(row.asin)} className="p-0.5 rounded transition-colors flex-shrink-0" style={needsSave(row.asin) ? { background: 'rgba(34,197,94,0.2)', color: COLORS.good } : { color: COLORS.borderStrong }} title={cogsSaving[row.asin] ? 'Saving...' : needsSave(row.asin) ? 'Click to save COGS' : 'Enter COGS value to save'}>
+                  {cogsSaving[row.asin] ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isSaved(row.asin) ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+              <span style={{ color: grossProfit >= 0 ? COLORS.good : '#F87171', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
                 {formatCurrencyWithLocale(grossProfit, currency)}
-              </td>
-              <td className="px-2 py-2 text-center text-xs font-medium">
-                {cogsPerUnit > 0 ? (
-                  <span style={{ color: netProfit >= 0 ? COLORS.good : '#F87171' }}>{formatCurrencyWithLocale(netProfit, currency)}</span>
-                ) : (
-                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded border" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa', borderColor: 'rgba(59, 130, 246, 0.3)' }}>Set up</span>
-                )}
-              </td>
-            </tr>
+              </span>
+              {cogsPerUnit > 0 ? (
+                <span
+                  className="justify-self-start px-2 py-1 rounded-md text-sm font-semibold"
+                  style={{ fontVariantNumeric: 'tabular-nums', background: netProfit >= 0 ? 'rgba(34,197,94,0.14)' : 'rgba(239,68,68,0.14)', color: netProfit >= 0 ? COLORS.good : '#F87171' }}
+                >
+                  {formatCurrencyWithLocale(netProfit, currency)}
+                </span>
+              ) : (
+                <span className="justify-self-start text-xs font-medium px-1.5 py-1 rounded border" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#7EA8F8', borderColor: 'rgba(59, 130, 246, 0.3)' }}>Set up</span>
+              )}
+            </div>
             {isExpBreakdownOpen && (
-              <tr style={{ background: COLORS.surfaceElevated }}>
-                <td colSpan={10} className="px-6 py-3">
-                  <div className="text-[10px] font-semibold uppercase mb-2" style={{ color: COLORS.textSecondary }}>Expense Breakdown</div>
-                  {breakdownGroups.length > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {breakdownGroups.map((group, gIdx) => (
-                        <div key={gIdx} className="rounded p-2" style={{ background: COLORS.surface }}>
-                          <div className="flex items-center justify-between mb-1.5">
-                            <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#93c5fd' }}>{group.label}</span>
-                            <span className="text-[10px] font-semibold" style={{ color: signedMoneyColor(group.total) }}>{formatCurrencyWithLocale(group.total, currency)}</span>
-                          </div>
-                          <div className="space-y-1">
-                            {group.items.map((item, iIdx) => (
-                              <div key={iIdx} className="flex items-center justify-between gap-2">
-                                <span className="text-[10px] truncate" style={{ color: COLORS.textSecondary }} title={item.label}>{item.label}</span>
-                                <span className="text-[10px] whitespace-nowrap font-medium" style={{ color: signedMoneyColor(item.amount) }}>{formatCurrencyWithLocale(item.amount, currency)}</span>
-                              </div>
-                            ))}
-                          </div>
+              <div style={{ background: COLORS.surfaceElevated, borderBottom: `1px solid ${COLORS.border}` }} className="px-6 py-4">
+                <div className="text-xs font-semibold uppercase mb-2" style={{ color: COLORS.textSecondary }}>Expense Breakdown</div>
+                {breakdownGroups.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {breakdownGroups.map((group, gIdx) => (
+                      <div key={gIdx} className="rounded p-2.5" style={{ background: COLORS.surface }}>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#7EA8F8' }}>{group.label}</span>
+                          <span className="text-[11px] font-semibold" style={{ color: signedMoneyColor(group.total) }}>{formatCurrencyWithLocale(group.total, currency)}</span>
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-[10px]" style={{ color: COLORS.textMuted }}>No expense data for this SKU</span>
-                  )}
-                </td>
-              </tr>
+                        <div className="space-y-1">
+                          {group.items.map((item, iIdx) => (
+                            <div key={iIdx} className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] truncate" style={{ color: COLORS.textSecondary }} title={item.label}>{item.label}</span>
+                              <span className="text-[11px] whitespace-nowrap font-medium" style={{ color: signedMoneyColor(item.amount) }}>{formatCurrencyWithLocale(item.amount, currency)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-[11px]" style={{ color: COLORS.textMuted }}>No expense data for this SKU</span>
+                )}
+              </div>
             )}
           </React.Fragment>
         );
       };
 
       return (
-        <div className="rounded-lg overflow-hidden" style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}` }}>
+        <div className="rounded-lg overflow-hidden" style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: '13px' }}>
           <div className="p-3 border-b" style={{ borderBottom: `1px solid ${COLORS.border}` }}>
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2 mb-1.5">
               <Table className="w-4 h-4" style={{ color: COLORS.accent }} />
-              <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: COLORS.textPrimary }}>Product Profitability Analysis</h3>
-              <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa' }}>{parentCount} products</span>
+              <h3 className="text-sm font-semibold uppercase tracking-wide" style={{ color: COLORS.textPrimary }}>Product Profitability Analysis</h3>
+              <span className="text-[11px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#7EA8F8' }}>{parentCount} products</span>
               {childCount > 0 && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#93c5fd' }}>+{childCount} variations</span>
+                <span className="text-[11px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#7EA8F8' }}>+{childCount} SKUs</span>
               )}
             </div>
-            <p className="text-[11px]" style={{ color: COLORS.textMuted }}>
+            <p className="text-xs" style={{ color: COLORS.textMuted }}>
               Sorted by net profit, worst first — money-losers surface at the top. Gross is before your product cost; net is after.
             </p>
           </div>
 
           <div className="w-full overflow-x-auto">
-            <table className="w-full table-fixed">
-              <thead>
-                <tr style={{ background: COLORS.surfaceElevated, borderBottom: `1px solid ${COLORS.border}` }}>
-                  <th className="w-8 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>#</th>
-                  <th className="w-1/5 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>Product</th>
-                  <th className="w-24 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>ASIN</th>
-                  <th className="w-20 px-2 py-2 text-left text-[10px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>SKU</th>
-                  <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>Sales</th>
-                  <th className="w-16 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>Units Sold</th>
-                  <th className="w-28 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>Expenses</th>
-                  <th className="w-28 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>COGS/Unit</th>
-                  <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>Gross</th>
-                  <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>Net</th>
-                </tr>
-              </thead>
-              <tbody>
-                {groupedRows.length === 0 ? (
-                  <tr><td colSpan={10} className="text-center py-8 text-sm" style={{ color: COLORS.textSecondary }}>No profitability data available</td></tr>
-                ) : groupedRows.map((group, gIdx) => {
-                  const hasChildren = group.children.length > 1;
-                  const isGroupExpanded = expandedRows.has(`grp_${group.parentAsin}`);
-                  const t = group.totals;
-                  const parentDetail = productDetailsMap.get(group.parentAsin);
-                  const parentName = financeParentDisplayName(group.children, group.parentAsin, parentDetail);
-                  const cogsPerUnit = cogsValues[group.parentAsin] || 0;
-                  const totalCogs = cogsPerUnit * (t.units || 0);
-                  const parentExpenseTotal = computeRowExpenses(t);
-                  const grossProfit = (t.productSales || 0) - parentExpenseTotal;
-                  const netProfit = grossProfit - totalCogs;
-                  const parentBreakdown = buildBreakdownGroups(t, { asinForCogs: group.parentAsin });
-                  const isExpBreakdownOpen = expandedRows.has(`exp_${group.parentAsin}`);
-
-                  if (!hasChildren) {
-                    return renderFinanceRow(group.children[0], gIdx + 1, false);
-                  }
-
-                  return (
-                    <React.Fragment key={group.parentAsin}>
-                      {/* Parent aggregated row */}
-                      <tr style={{ borderBottom: `1px solid ${COLORS.border}` }} className="hover:bg-[#1A202B] transition-colors">
-                        <td className="px-2 py-2 text-center text-xs" style={{ color: COLORS.textSecondary }}>{gIdx + 1}</td>
-                        <td className="px-3 py-2 text-left">
-                          <span className="text-xs font-medium truncate block" style={{ color: COLORS.textPrimary }} title={parentName}>{parentName}</span>
-                          <span className="text-[10px]" style={{ color: '#60a5fa' }}>{group.children.length} variation{group.children.length > 1 ? 's' : ''}</span>
-                        </td>
-                        <td className="px-3 py-2 text-left">
-                          <div className="flex flex-col">
-                            <span className="text-xs font-mono px-1.5 py-0.5 rounded whitespace-nowrap inline-block font-semibold" style={{ color: '#60a5fa', background: 'rgba(59, 130, 246, 0.15)' }}>{group.parentAsin}</span>
-                            <span className="text-[9px] mt-0.5 font-medium" style={{ color: '#60a5fa' }}>Parent</span>
-                          </div>
-                        </td>
-                        <td className="px-2 py-2 text-left">
-                          <button
-                            onClick={() => {
-                              const key = `grp_${group.parentAsin}`;
-                              setExpandedRows(prev => {
-                                const next = new Set(prev);
-                                next.has(key) ? next.delete(key) : next.add(key);
-                                return next;
-                              });
-                            }}
-                            className="flex items-center gap-1 px-2 py-1 rounded transition-colors text-[10px] font-medium"
-                            style={isGroupExpanded ? { background: 'rgba(59, 130, 246, 0.2)', color: COLORS.accent, border: `1px solid ${COLORS.accent}` } : { background: COLORS.bgBase, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
-                          >
-                            {isGroupExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                            {isGroupExpanded ? 'Collapse' : 'Expand'}
-                          </button>
-                        </td>
-                        <td className="px-2 py-2 text-center text-xs font-medium" style={{ color: COLORS.textPrimary }}>
-                          {formatCurrencyWithLocale(t.productSales || 0, currency)}
-                        </td>
-                        <td className="px-2 py-2 text-center text-xs" style={{ color: COLORS.textSecondary }}>{t.units || 0}</td>
-                        <td className="px-2 py-2 text-center text-xs" style={{ color: signedMoneyColor(displayExpenseAmount(parentExpenseTotal)) }}>
-                          <div className="flex items-center justify-center gap-1">
-                            <span>{formatCurrencyWithLocale(displayExpenseAmount(parentExpenseTotal), currency)}</span>
-                            <button
-                              onClick={() => {
-                                const key = `exp_${group.parentAsin}`;
-                                setExpandedRows(prev => {
-                                  const next = new Set(prev);
-                                  next.has(key) ? next.delete(key) : next.add(key);
-                                  return next;
-                                });
-                              }}
-                              className="p-0.5 rounded hover:bg-white/5 transition-colors"
-                              style={{ color: '#60a5fa' }}
-                            >
-                              {isExpBreakdownOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                            </button>
-                          </div>
-                        </td>
-                        <td className="px-2 py-2 text-center text-xs italic" style={{ color: COLORS.textMuted }}>See children</td>
-                        <td className="px-2 py-2 text-center text-xs font-medium" style={{ color: grossProfit >= 0 ? COLORS.good : '#F87171' }}>
-                          {formatCurrencyWithLocale(grossProfit, currency)}
-                        </td>
-                        <td className="px-2 py-2 text-center text-xs italic" style={{ color: COLORS.textMuted }}>See children</td>
-                      </tr>
-                      {isExpBreakdownOpen && (
-                        <tr style={{ background: COLORS.surfaceElevated }}>
-                          <td colSpan={10} className="px-6 py-3">
-                            <div className="text-[10px] font-semibold uppercase mb-2" style={{ color: COLORS.textSecondary }}>Aggregated Expense Breakdown</div>
-                            {parentBreakdown.length > 0 ? (
-                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                                {parentBreakdown.map((group, gIdx) => (
-                                  <div key={gIdx} className="rounded p-2" style={{ background: COLORS.surface }}>
-                                    <div className="flex items-center justify-between mb-1.5">
-                                      <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#93c5fd' }}>{group.label}</span>
-                                      <span className="text-[10px] font-semibold" style={{ color: signedMoneyColor(group.total) }}>{formatCurrencyWithLocale(group.total, currency)}</span>
-                                    </div>
-                                    <div className="space-y-1">
-                                      {group.items.map((item, iIdx) => (
-                                        <div key={iIdx} className="flex items-center justify-between gap-2">
-                                          <span className="text-[10px] truncate" style={{ color: COLORS.textSecondary }} title={item.label}>{item.label}</span>
-                                          <span className="text-[10px] whitespace-nowrap font-medium" style={{ color: signedMoneyColor(item.amount) }}>{formatCurrencyWithLocale(item.amount, currency)}</span>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <span className="text-[10px]" style={{ color: COLORS.textMuted }}>No expense data</span>
-                            )}
-                          </td>
-                        </tr>
-                      )}
-                      {/* Expanded children */}
-                      {isGroupExpanded && group.children
-                        .sort((a, b) => (b.productSales || 0) - (a.productSales || 0))
-                        .map(child => renderFinanceRow(child, null, true))
-                      }
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+            <div style={{ minWidth: 900 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: GRID_COLS, gap: '12px', padding: '12px 18px', borderBottom: `1px solid ${COLORS.border}`, background: COLORS.surfaceElevated, fontSize: '12px', letterSpacing: '.06em', textTransform: 'uppercase', color: COLORS.textMuted, fontWeight: 600 }}>
+                <span>Product</span><span>ASIN</span><span>Units</span><span>Sales</span><span>Expenses</span><span>COGS/unit</span><span>Gross</span><span>Net</span>
               </div>
+
+              {groupedRows.length === 0 ? (
+                <div className="text-center py-8 text-sm" style={{ color: COLORS.textSecondary }}>No profitability data available</div>
+              ) : groupedRows.map((group) => {
+                const hasChildren = group.children.length > 1;
+                const isGroupExpanded = expandedRows.has(`grp_${group.parentAsin}`);
+                const t = group.totals;
+                const parentDetail = productDetailsMap.get(group.parentAsin);
+                const parentName = financeParentDisplayName(group.children, group.parentAsin, parentDetail);
+                const parentExpenseTotal = computeRowExpenses(t);
+                const grossProfit = (t.productSales || 0) - parentExpenseTotal;
+                const parentBreakdown = buildBreakdownGroups(t, { asinForCogs: group.parentAsin });
+                const isExpBreakdownOpen = expandedRows.has(`exp_${group.parentAsin}`);
+
+                if (!hasChildren) {
+                  return renderFinanceRow(group.children[0], false);
+                }
+
+                return (
+                  <React.Fragment key={group.parentAsin}>
+                    {/* Parent aggregated row — same ASIN, multiple SKUs grouped underneath */}
+                    <div
+                      style={{ display: 'grid', gridTemplateColumns: GRID_COLS, gap: '12px', padding: '14px 18px', borderBottom: `1px solid ${COLORS.border}`, fontSize: '14px', alignItems: 'center' }}
+                      className="hover:bg-[#1A202B] transition-colors"
+                    >
+                      <div className="min-w-0 flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            const key = `grp_${group.parentAsin}`;
+                            setExpandedRows(prev => {
+                              const next = new Set(prev);
+                              next.has(key) ? next.delete(key) : next.add(key);
+                              return next;
+                            });
+                          }}
+                          className="flex-shrink-0 w-5 h-5 rounded flex items-center justify-center transition-colors"
+                          style={isGroupExpanded ? { background: 'rgba(59, 130, 246, 0.2)', border: `1px solid ${COLORS.accent}`, color: COLORS.accent } : { background: COLORS.bgBase, border: `1px solid ${COLORS.accent}`, color: COLORS.accent }}
+                          title={isGroupExpanded ? 'Collapse SKUs' : `Expand ${group.children.length} SKUs`}
+                        >
+                          {isGroupExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        </button>
+                        <div className="min-w-0">
+                          <div className="truncate" style={{ fontWeight: 500, color: COLORS.textPrimary }} title={parentName}>{parentName}</div>
+                          <div className="text-[13px]" style={{ color: '#7EA8F8' }}>{group.children.length} SKUs</div>
+                        </div>
+                      </div>
+                      <span className="truncate" style={{ fontSize: '13px', color: COLORS.textSecondary, fontVariantNumeric: 'tabular-nums' }} title={group.parentAsin}>{group.parentAsin}</span>
+                      <span style={{ color: COLORS.textSecondary, fontVariantNumeric: 'tabular-nums' }}>{t.units || 0}</span>
+                      <span style={{ color: COLORS.textPrimary, fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
+                        {formatCurrencyWithLocale(t.productSales || 0, currency)}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <span style={{ color: signedMoneyColor(displayExpenseAmount(parentExpenseTotal)), fontVariantNumeric: 'tabular-nums' }}>{formatCurrencyWithLocale(displayExpenseAmount(parentExpenseTotal), currency)}</span>
+                        <button
+                          onClick={() => {
+                            const key = `exp_${group.parentAsin}`;
+                            setExpandedRows(prev => {
+                              const next = new Set(prev);
+                              next.has(key) ? next.delete(key) : next.add(key);
+                              return next;
+                            });
+                          }}
+                          className="p-0.5 rounded hover:bg-white/5 transition-colors flex-shrink-0"
+                          style={{ color: '#7EA8F8' }}
+                        >
+                          {isExpBreakdownOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                      <span className="text-[13px] italic" style={{ color: COLORS.textMuted }}>See SKUs</span>
+                      <span style={{ color: grossProfit >= 0 ? COLORS.good : '#F87171', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
+                        {formatCurrencyWithLocale(grossProfit, currency)}
+                      </span>
+                      <span className="text-[13px] italic" style={{ color: COLORS.textMuted }}>See SKUs</span>
+                    </div>
+                    {isExpBreakdownOpen && (
+                      <div style={{ background: COLORS.surfaceElevated, borderBottom: `1px solid ${COLORS.border}` }} className="px-6 py-4">
+                        <div className="text-xs font-semibold uppercase mb-2" style={{ color: COLORS.textSecondary }}>Aggregated Expense Breakdown</div>
+                        {parentBreakdown.length > 0 ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {parentBreakdown.map((group, gIdx) => (
+                              <div key={gIdx} className="rounded p-2.5" style={{ background: COLORS.surface }}>
+                                <div className="flex items-center justify-between mb-1.5">
+                                  <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#7EA8F8' }}>{group.label}</span>
+                                  <span className="text-[11px] font-semibold" style={{ color: signedMoneyColor(group.total) }}>{formatCurrencyWithLocale(group.total, currency)}</span>
+                                </div>
+                                <div className="space-y-1">
+                                  {group.items.map((item, iIdx) => (
+                                    <div key={iIdx} className="flex items-center justify-between gap-2">
+                                      <span className="text-[11px] truncate" style={{ color: COLORS.textSecondary }} title={item.label}>{item.label}</span>
+                                      <span className="text-[11px] whitespace-nowrap font-medium" style={{ color: signedMoneyColor(item.amount) }}>{formatCurrencyWithLocale(item.amount, currency)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-[11px]" style={{ color: COLORS.textMuted }}>No expense data</span>
+                        )}
+                      </div>
+                    )}
+                    {/* Expanded SKUs */}
+                    {isGroupExpanded && group.children
+                      .sort((a, b) => (b.productSales || 0) - (a.productSales || 0))
+                      .map(child => renderFinanceRow(child, true))
+                    }
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          </div>
+        </div>
       );
     }
 

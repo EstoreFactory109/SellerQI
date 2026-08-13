@@ -1210,37 +1210,35 @@ const ProfitabilityDashboard = () => {
             {/* COGS completeness banner — persistent, real counts, only shown while some products are missing a cost */}
             {cogsCompletion.total > 0 && cogsCompletion.missing > 0 && (
               <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} style={{ marginBottom: '10px' }}>
-                <div style={{ background: 'rgba(59,130,246,.05)', border: '1px solid rgba(59,130,246,.28)', borderRadius: '6px', padding: '12px 15px' }}>
-                  <div className="flex items-start justify-between gap-3 flex-wrap">
-                    <div>
-                      <h3 className="text-sm font-semibold" style={{ color: COLORS.textPrimary }}>Add product costs to see true profit</h3>
-                      <p className="text-xs mt-1 max-w-2xl" style={{ color: COLORS.textSecondary }}>
-                        COGS is what you pay per unit before Amazon. Without it we can show revenue and fees, but not what you keep — so we show &ldquo;Set up&rdquo; rather than a misleading $0.00.
-                      </p>
+                <div style={{ background: 'rgba(59,130,246,.05)', border: '1px solid rgba(59,130,246,.28)', borderRadius: '13px', padding: '18px 20px', display: 'flex', alignItems: 'center', gap: '22px' }} className="flex-wrap">
+                  <div style={{ flex: 1 }}>
+                    <h3 className="text-[15px] font-semibold" style={{ color: COLORS.textPrimary, marginBottom: '4px' }}>Add product costs to see true profit</h3>
+                    <p className="text-[13px]" style={{ color: COLORS.textSecondary, margin: '0 0 12px', maxWidth: '80ch' }}>
+                      COGS is what you pay per unit before Amazon. Without it we can show revenue and fees, but not what you keep — so we show &ldquo;Set up&rdquo; rather than a misleading $0.00.
+                    </p>
+                    <div className="flex items-center gap-3" style={{ maxWidth: '420px' }}>
+                      <div className="flex-1 rounded-full overflow-hidden" style={{ height: '6px', background: COLORS.border }}>
+                        <div
+                          className="h-full rounded-full"
+                          style={{ width: `${Math.max(1.5, Math.round((cogsCompletion.withCogs / cogsCompletion.total) * 100))}%`, background: COLORS.accent }}
+                        />
+                      </div>
+                      <span className="text-xs flex-shrink-0" style={{ color: COLORS.textSecondary }}>
+                        {cogsCompletion.withCogs} of {cogsCompletion.total} done
+                      </span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setProfitabilityTab('table');
-                        tabsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                      }}
-                      className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
-                      style={{ background: COLORS.accent, color: '#061021' }}
-                    >
-                      Add costs
-                    </button>
                   </div>
-                  <div className="mt-3 flex items-center gap-2">
-                    <div className="flex-1 rounded-full overflow-hidden" style={{ height: '6px', background: COLORS.border }}>
-                      <div
-                        className="h-full rounded-full"
-                        style={{ width: `${Math.max(1.5, Math.round((cogsCompletion.withCogs / cogsCompletion.total) * 100))}%`, background: COLORS.accent }}
-                      />
-                    </div>
-                    <span className="text-[11px] flex-shrink-0" style={{ color: COLORS.textMuted }}>
-                      {cogsCompletion.withCogs} of {cogsCompletion.total} done
-                    </span>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfitabilityTab('table');
+                      tabsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }}
+                    className="flex-shrink-0 rounded-lg text-[13px] font-semibold transition-colors"
+                    style={{ padding: '10px 16px', background: COLORS.accent, color: '#061021' }}
+                  >
+                    Add costs
+                  </button>
                 </div>
               </motion.div>
             )}

@@ -113,34 +113,35 @@ const SuggestionList = ({
           </div>
         ) : rowsToDisplay.length > 0 ? (
           <>
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-3">
               {rowsToDisplay.map((row, idx) => (
                 <div
                   key={idx}
-                  className="rounded-lg p-3"
-                  style={{ background: COLORS.surfaceElevated, borderLeft: '3px solid #EF4444', border: `1px solid ${COLORS.border}`, borderLeftWidth: '3px' }}
+                  className="relative overflow-hidden rounded-lg"
+                  style={{ background: COLORS.surfaceElevated, border: `1px solid ${COLORS.border}`, padding: '16px 20px 16px 22px' }}
                 >
-                  <div className="flex items-start justify-between gap-3 flex-wrap">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {row.lossAmount != null && (
-                          <span className="text-sm font-bold" style={{ color: '#F87171' }}>
-                            Losing ${Math.abs(row.lossAmount).toFixed(2)}
-                          </span>
-                        )}
-                        <span className="text-xs font-medium truncate" style={{ color: COLORS.textPrimary }}>{row.productName}</span>
+                  <div className="absolute left-0 top-0 bottom-0" style={{ width: '3px', background: '#EF4444' }} />
+                  <div className="flex items-center gap-5 flex-wrap">
+                    <div className="min-w-0 flex-1">
+                      {row.lossAmount != null && (
+                        <div className="text-base font-bold" style={{ color: '#F87171', marginBottom: '3px' }}>
+                          Losing ${Math.abs(row.lossAmount).toFixed(2)}
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: '9px' }}>
+                        <span className="text-xs truncate" style={{ color: COLORS.textMuted }}>{row.productName}</span>
                         {row.asin !== '—' && (
                           <span className="text-[10px] font-mono px-1.5 py-0.5 rounded" style={{ color: '#60a5fa', background: 'rgba(59,130,246,0.15)' }}>{row.asin}</span>
                         )}
                       </div>
-                      <p className="text-xs mt-1.5 leading-relaxed" style={{ color: COLORS.textSecondary }}>{row.suggestion || row.issue}</p>
+                      <p className="text-[13px] leading-5" style={{ color: '#C7CFDD', maxWidth: '86ch' }}>{row.suggestion || row.issue}</p>
                     </div>
                     {onFixNow && (
                       <button
                         type="button"
                         onClick={() => onFixNow(row.asin)}
-                        className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
-                        style={{ background: COLORS.accent, color: '#061021' }}
+                        className="flex-shrink-0 rounded-lg text-[13px] font-semibold transition-colors"
+                        style={{ padding: '9px 15px', background: COLORS.accent, color: '#061021' }}
                       >
                         Fix now
                       </button>

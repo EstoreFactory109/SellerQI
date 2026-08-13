@@ -113,12 +113,12 @@ const MetricCard = ({ label, value, icon, breakdown, isExpandable, currency = '$
           whileHover={{ y: -2 }}
           transition={{ duration: 0.2 }}
           className="group rounded-lg transition-all duration-300 flex flex-col w-full"
-          style={{ background: COLORS.surface, border: `1px solid ${tintColor || COLORS.border}`, padding: '10px', cursor: canExpand ? 'pointer' : 'default' }}
+          style={{ background: COLORS.surface, border: `1px solid ${tintColor || COLORS.border}`, borderRadius: '12px', padding: '14px 16px', cursor: canExpand ? 'pointer' : 'default' }}
           onMouseEnter={(e) => { e.currentTarget.style.borderColor = COLORS.accent; }}
           onMouseLeave={(e) => { e.currentTarget.style.borderColor = tintColor || COLORS.border; }}
           onClick={handleClick}
         >
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-2">
             <IconComponent className="w-4 h-4" style={{ color: COLORS.textMuted }} />
             <div className="text-[11px] font-medium uppercase tracking-wide flex-1" style={{ color: COLORS.textSecondary }}>
               {label}
@@ -129,11 +129,11 @@ const MetricCard = ({ label, value, icon, breakdown, isExpandable, currency = '$
                 : <ChevronDown className="w-3.5 h-3.5" style={{ color: COLORS.textMuted }} />
             )}
           </div>
-          <div className="text-[18px] font-bold transition-colors duration-200 truncate" style={{ color: COLORS.textPrimary }}>
+          <div className="text-[21px] font-bold transition-colors duration-200 truncate" style={{ color: COLORS.textPrimary }}>
             {value}
           </div>
           {caption && (
-            <div className="text-[10px] mt-1 truncate" style={{ color: tintColor || COLORS.textMuted }}>
+            <div className="text-[12px] mt-1.5 truncate" style={{ color: tintColor || COLORS.textMuted }}>
               {caption}
             </div>
           )}
