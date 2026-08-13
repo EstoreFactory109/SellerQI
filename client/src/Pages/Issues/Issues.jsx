@@ -4,6 +4,7 @@ import Products from "../../Components/Issues_pages/Products.jsx";
 import Account from "../../Components/Issues_pages/Account.jsx";
 import { AlertTriangle } from 'lucide-react';
 import { useSearchParams } from "react-router-dom";
+import { COLORS } from "../../Components/Shared/index.js";
 
 export default function Dashboard() {
   const [searchParams] = useSearchParams();
@@ -21,19 +22,19 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-[#1a1a1a]">
-      {/* Modern Header Section */}
-      <div className='bg-[#161b22] border-b border-[#30363d] sticky top-0 z-40'>
+    <div className="min-h-screen" style={{ background: COLORS.bgBase }}>
+      {/* Header Section */}
+      <div className='sticky top-0 z-40' style={{ background: COLORS.surface, borderBottom: `1px solid ${COLORS.border}` }}>
         <div className='px-2 lg:px-3 py-1.5'>
           <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2'>
             <div className='flex items-center gap-2'>
               <div>
-                <h1 className='text-lg font-bold text-gray-100'>
+                <h1 className='m-0 text-2xl leading-8 font-semibold tracking-[-0.02em]' style={{ color: COLORS.textPrimary }}>
                   {currentTab === 'account' ? 'Account Issues' : 'Issues'}
                 </h1>
-                <p className='text-xs text-gray-400 mt-0.5'>
-                  {currentTab === 'account' 
-                    ? 'Monitor and resolve account health issues and policy violations' 
+                <p className='m-0 mt-1 text-sm' style={{ color: COLORS.textSecondary }}>
+                  {currentTab === 'account'
+                    ? 'Monitor and resolve account health issues and policy violations'
                     : 'Monitor and resolve product issues across your Amazon catalog'}
                 </p>
               </div>

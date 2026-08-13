@@ -974,32 +974,6 @@ const Dashboard = () => {
           </div>
 
       </div>
-
-      {/* Floating "Ask QMate" — opens the existing real QMate chat page (not a new inline
-          panel; reuses the same full chat experience the other Ask QMate buttons open). */}
-      <button
-        type="button"
-        onClick={() => navigate('/seller-central-checker/qmate')}
-        className="fixed z-50 flex items-center gap-2 rounded-full shadow-2xl transition-colors"
-        style={{
-          right: 26,
-          bottom: 26,
-          padding: '11px 16px 11px 12px',
-          border: '1px solid rgba(59,130,246,.45)',
-          background: COLORS.surface,
-          color: COLORS.textPrimary,
-          fontSize: 13,
-          fontWeight: 600,
-        }}
-      >
-        <span
-          className="w-[22px] h-[22px] rounded-md flex items-center justify-center text-xs font-bold"
-          style={{ background: COLORS.accent, color: '#061021' }}
-        >
-          Q
-        </span>
-        Ask QMate
-      </button>
     </div>
   )
 }
