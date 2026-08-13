@@ -91,6 +91,61 @@ function enrichProductsWithRecommendations(products, recommendationsMap) {
 }
 
 /**
+ * Build a short, real (not fabricated) category-level label list for one product's
+ * precomputed error data (as stored per-entry in productWiseError / IssuesDataChunks).
+ * Mirrors the field checks IssuesByProduct.jsx uses to render full issue text, but
+ * returns short "Category: Field" labels instead of full sentences - cheap enough to
+ * run inline on a paginated table response instead of the full dashboard computation.
+ *
+ * NOTE: field names verified against IssuesByProduct.jsx (the actual consumer) -
+ * they differ from the stale names in buildErrorMaps() below (e.g. imageResultErrorData,
+ * not imageErrorData).
+ */
+function getShortIssueLabels(productWiseErrorEntry) {
+    const labels = [];
+    if (!productWiseErrorEntry) return labels;
+
+    const ranking = productWiseErrorEntry.rankingErrors?.data;
+    if (ranking) {
+        const t = ranking.TitleResult;
+        if (t?.charLim?.status === 'Error' || t?.RestictedWords?.status === 'Error' || t?.checkSpecialCharacters?.status === 'Error' || t?.wordRepetition?.status === 'Error' || t?.capitalization?.status === 'Error') {
+            labels.push('Ranking: Title');
+        }
+        const b = ranking.BulletPoints;
+        if (b?.charLim?.status === 'Error' || b?.RestictedWords?.status === 'Error' || b?.checkSpecialCharacters?.status === 'Error') {
+            labels.push('Ranking: Bullet Points');
+        }
+        const d = ranking.Description;
+        if (d?.charLim?.status === 'Error' || d?.RestictedWords?.status === 'Error' || d?.checkSpecialCharacters?.status === 'Error') {
+            labels.push('Ranking: Description');
+        }
+        if (ranking.charLim?.status === 'Error' || ranking.dublicateWords === 'Error') {
+            labels.push('Ranking: Backend Search Terms');
+        }
+    }
+
+    const conversion = productWiseErrorEntry.conversionErrors;
+    if (conversion) {
+        if (conversion.imageResultErrorData?.status === 'Error') labels.push('Conversion: Image');
+        if (conversion.videoResultErrorData?.status === 'Error') labels.push('Conversion: Video');
+        if (conversion.productStarRatingResultErrorData?.status === 'Error') labels.push('Conversion: Star Rating');
+        if (conversion.productsWithOutBuyboxErrorData?.status === 'Error') labels.push('Conversion: Buy Box');
+        if (conversion.aplusErrorData?.status === 'Error') labels.push('Conversion: A+ Content');
+        if (conversion.brandStoryErrorData?.status === 'Error') labels.push('Conversion: Brand Story');
+    }
+
+    const inventory = productWiseErrorEntry.inventoryErrors;
+    if (inventory) {
+        if (inventory.inventoryPlanningErrorData) labels.push('Inventory: Planning');
+        if (inventory.strandedInventoryErrorData) labels.push('Inventory: Stranded Inventory');
+        if (inventory.inboundNonComplianceErrorData) labels.push('Inventory: Inbound Non-Compliance');
+        if (inventory.replenishmentErrorData) labels.push('Inventory: Replenishment');
+    }
+
+    return labels;
+}
+
+/**
  * Count error types from product-wise error arrays.
  * Kept for backward compatibility with PageWiseDataController.
  */
@@ -162,4 +217,5 @@ module.exports = {
     enrichProductsWithRecommendations,
     buildErrorMaps,
     countInventoryErrors,
+    getShortIssueLabels,
 };

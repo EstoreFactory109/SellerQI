@@ -3027,10 +3027,23 @@ const getYourProductsActiveV3 = asyncHandler(async (req, res) => {
             salesMap.set(asin.toUpperCase(), data.sales || 0);
         });
 
+        // Fetch precomputed short issue labels (cheap chunked read, not a live recompute -
+        // Active products never get real text in sellerAccount.products.issues, only Inactive/
+        // Incomplete do, so this is the only real source of short issue detail for this tab)
+        const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
+        const { getShortIssueLabels } = require('../../Services/Calculations/RecommendationService.js');
+        const productWiseErrorList = await IssuesDataChunks.getFieldData(userId, Country, Region, 'productWiseError');
+        const issueDetailMap = new Map();
+        productWiseErrorList.forEach(p => {
+            const k = (p.asin || '').toUpperCase();
+            if (k && pageAsinSet.has(k)) issueDetailMap.set(k, p);
+        });
+
         // Enrich products (NO A+, NO Ads)
         let enrichedProducts = rawProducts.map(product => {
             const key = product.asin?.toUpperCase() || '';
             const reviewData = reviewsMap.get(key) || {};
+            const rawIssues = Array.isArray(product.issues) ? product.issues : [];
 
             return {
                 asin: product.asin,
@@ -3043,7 +3056,7 @@ const getYourProductsActiveV3 = asyncHandler(async (req, res) => {
                 starRatings: reviewData.starRatings || '0',
                 image: reviewData.image || null,
                 sales: salesMap.has(key) ? salesMap.get(key) : null,
-                issues: Array.isArray(product.issues) ? product.issues : [],
+                issues: rawIssues.length > 0 ? rawIssues : getShortIssueLabels(issueDetailMap.get(key)),
                 issueCount: product.issueCount || 0,
                 has_b2b_pricing: product.has_b2b_pricing || false
             };
@@ -3524,9 +3537,22 @@ const getYourProductsWithoutAPlusV3 = asyncHandler(async (req, res) => {
             salesMap.set(asin.toUpperCase(), data.sales || 0);
         });
 
+        // Fetch precomputed short issue labels (cheap chunked read, not a live recompute -
+        // these are Active products, so sellerAccount.products.issues is never populated for
+        // them; the precomputed productWiseError snapshot is the only real source of detail)
+        const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
+        const { getShortIssueLabels } = require('../../Services/Calculations/RecommendationService.js');
+        const productWiseErrorList = await IssuesDataChunks.getFieldData(userId, Country, Region, 'productWiseError');
+        const issueDetailMap = new Map();
+        productWiseErrorList.forEach(p => {
+            const k = (p.asin || '').toUpperCase();
+            if (k && pageAsinSet.has(k)) issueDetailMap.set(k, p);
+        });
+
         // Map to response format
         const responseProducts = products.map(p => {
             const key = p.asin?.toUpperCase() || '';
+            const rawIssues = Array.isArray(p.issues) ? p.issues : [];
             return {
                 asin: p.asin,
                 sku: p.sku,
@@ -3536,7 +3562,7 @@ const getYourProductsWithoutAPlusV3 = asyncHandler(async (req, res) => {
                 quantity: p.quantity ?? 0,
                 image: reviewsMap.get(key)?.image || null,
                 sales: salesMap.has(key) ? salesMap.get(key) : null,
-                issues: Array.isArray(p.issues) ? p.issues : [],
+                issues: rawIssues.length > 0 ? rawIssues : getShortIssueLabels(issueDetailMap.get(key)),
                 issueCount: p.issueCount || 0,
                 hasAPlus: false
             };
@@ -3690,9 +3716,22 @@ const getYourProductsNotTargetedInAdsV3 = asyncHandler(async (req, res) => {
             salesMap.set(asin.toUpperCase(), data.sales || 0);
         });
 
+        // Fetch precomputed short issue labels (cheap chunked read, not a live recompute -
+        // these are Active products, so sellerAccount.products.issues is never populated for
+        // them; the precomputed productWiseError snapshot is the only real source of detail)
+        const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
+        const { getShortIssueLabels } = require('../../Services/Calculations/RecommendationService.js');
+        const productWiseErrorList = await IssuesDataChunks.getFieldData(userId, Country, Region, 'productWiseError');
+        const issueDetailMap = new Map();
+        productWiseErrorList.forEach(p => {
+            const k = (p.asin || '').toUpperCase();
+            if (k && pageAsinSet.has(k)) issueDetailMap.set(k, p);
+        });
+
         // Map to response format
         const responseProducts = products.map(p => {
             const key = p.asin?.toUpperCase() || '';
+            const rawIssues = Array.isArray(p.issues) ? p.issues : [];
             return {
                 asin: p.asin,
                 sku: p.sku,
@@ -3702,7 +3741,7 @@ const getYourProductsNotTargetedInAdsV3 = asyncHandler(async (req, res) => {
                 quantity: p.quantity ?? 0,
                 image: reviewsMap.get(key)?.image || null,
                 sales: salesMap.has(key) ? salesMap.get(key) : null,
-                issues: Array.isArray(p.issues) ? p.issues : [],
+                issues: rawIssues.length > 0 ? rawIssues : getShortIssueLabels(issueDetailMap.get(key)),
                 issueCount: p.issueCount || 0,
                 isTargetedInAds: false
             };

@@ -1260,17 +1260,41 @@ const YourProducts = () => {
                               <div className="pl-[70px] pr-[18px] py-4" style={{ background: COLORS.bgBase }}>
                                 {realIssues.length > 0 ? (
                                   <div className="space-y-2">
-                                    {realIssues.map((issue, issueIndex) => {
-                                      const { hasHTML, processedHTML } = processIssueHTML(issue);
+                                    {realIssues.slice(0, 4).map((issue, issueIndex) => {
+                                      const sepIdx = issue.indexOf(': ');
+                                      const category = sepIdx > -1 ? issue.slice(0, sepIdx) : null;
+                                      const detail = sepIdx > -1 ? issue.slice(sepIdx + 2) : issue;
                                       return (
-                                        <div key={issueIndex} className="flex items-start gap-2.5 py-2" style={{ borderTop: issueIndex > 0 ? `1px solid ${COLORS.border}` : 'none' }}>
-                                          <AlertTriangle size={14} style={{ color: '#F5A623' }} className="flex-shrink-0 mt-0.5" />
-                                          <div className="flex-1 min-w-0">
-                                            <FormattedIssueText text={issue} hasHTML={hasHTML} processedHTML={processedHTML} />
-                                          </div>
+                                        <div key={issueIndex} className="flex items-center gap-2.5 py-2" style={{ borderTop: issueIndex > 0 ? `1px solid ${COLORS.border}` : 'none' }}>
+                                          {category ? (
+                                            <span className="flex-shrink-0 px-2 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap" style={{ background: 'rgba(245,166,35,.14)', color: '#F5A623' }}>{category}</span>
+                                          ) : (
+                                            <AlertTriangle size={14} style={{ color: '#F5A623' }} className="flex-shrink-0" />
+                                          )}
+                                          <span className="flex-1 min-w-0 text-sm font-medium" style={{ color: COLORS.textPrimary }}>{detail}</span>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => { e.stopPropagation(); navigate(`/seller-central-checker/${product.asin}`); }}
+                                            className="flex-shrink-0 text-xs font-medium bg-transparent border-0 p-0 cursor-pointer"
+                                            style={{ color: COLORS.accent }}
+                                          >
+                                            Open task →
+                                          </button>
                                         </div>
                                       );
                                     })}
+                                    {realIssues.length > 4 && (() => {
+                                      const remaining = realIssues.slice(4);
+                                      const remainingCats = [...new Set(remaining.map(i => {
+                                        const idx = i.indexOf(': ');
+                                        return idx > -1 ? i.slice(0, idx) : null;
+                                      }).filter(Boolean))];
+                                      return (
+                                        <div className="pt-2 text-xs" style={{ borderTop: `1px solid ${COLORS.border}`, color: COLORS.textMuted }}>
+                                          + {remaining.length} more{remainingCats.length > 0 ? ` in ${remainingCats.join(', ')}` : ''}
+                                        </div>
+                                      );
+                                    })()}
                                   </div>
                                 ) : issueCount > 0 ? (
                                   <div className="flex items-start gap-2.5 text-sm" style={{ color: COLORS.textSecondary }}>
@@ -1378,17 +1402,41 @@ const YourProducts = () => {
                               <div className="pl-[70px] pr-[18px] py-4" style={{ background: COLORS.bgBase }}>
                                 {realIssues.length > 0 ? (
                                   <div className="space-y-2">
-                                    {realIssues.map((issue, issueIndex) => {
-                                      const { hasHTML, processedHTML } = processIssueHTML(issue);
+                                    {realIssues.slice(0, 4).map((issue, issueIndex) => {
+                                      const sepIdx = issue.indexOf(': ');
+                                      const category = sepIdx > -1 ? issue.slice(0, sepIdx) : null;
+                                      const detail = sepIdx > -1 ? issue.slice(sepIdx + 2) : issue;
                                       return (
-                                        <div key={issueIndex} className="flex items-start gap-2.5 py-2" style={{ borderTop: issueIndex > 0 ? `1px solid ${COLORS.border}` : 'none' }}>
-                                          <AlertTriangle size={14} style={{ color: '#F5A623' }} className="flex-shrink-0 mt-0.5" />
-                                          <div className="flex-1 min-w-0">
-                                            <FormattedIssueText text={issue} hasHTML={hasHTML} processedHTML={processedHTML} />
-                                          </div>
+                                        <div key={issueIndex} className="flex items-center gap-2.5 py-2" style={{ borderTop: issueIndex > 0 ? `1px solid ${COLORS.border}` : 'none' }}>
+                                          {category ? (
+                                            <span className="flex-shrink-0 px-2 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap" style={{ background: 'rgba(245,166,35,.14)', color: '#F5A623' }}>{category}</span>
+                                          ) : (
+                                            <AlertTriangle size={14} style={{ color: '#F5A623' }} className="flex-shrink-0" />
+                                          )}
+                                          <span className="flex-1 min-w-0 text-sm font-medium" style={{ color: COLORS.textPrimary }}>{detail}</span>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => { e.stopPropagation(); navigate(`/seller-central-checker/${product.asin}`); }}
+                                            className="flex-shrink-0 text-xs font-medium bg-transparent border-0 p-0 cursor-pointer"
+                                            style={{ color: COLORS.accent }}
+                                          >
+                                            Open task →
+                                          </button>
                                         </div>
                                       );
                                     })}
+                                    {realIssues.length > 4 && (() => {
+                                      const remaining = realIssues.slice(4);
+                                      const remainingCats = [...new Set(remaining.map(i => {
+                                        const idx = i.indexOf(': ');
+                                        return idx > -1 ? i.slice(0, idx) : null;
+                                      }).filter(Boolean))];
+                                      return (
+                                        <div className="pt-2 text-xs" style={{ borderTop: `1px solid ${COLORS.border}`, color: COLORS.textMuted }}>
+                                          + {remaining.length} more{remainingCats.length > 0 ? ` in ${remainingCats.join(', ')}` : ''}
+                                        </div>
+                                      );
+                                    })()}
                                   </div>
                                 ) : issueCount > 0 ? (
                                   <div className="flex items-start gap-2.5 text-sm" style={{ color: COLORS.textSecondary }}>
