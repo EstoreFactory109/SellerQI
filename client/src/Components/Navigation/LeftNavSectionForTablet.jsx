@@ -10,12 +10,13 @@ import { useSelector,useDispatch } from 'react-redux';
 import {setPosition} from '../../redux/slices/MobileMenuSlice.js'
 import { AnimatePresence, motion } from "framer-motion";
 import NavSearch from './NavSearch.jsx';
+import { fetchAccountIssues } from '../../redux/slices/PageDataSlice.js';
 import { COLORS } from '../Shared/index.js';
 
 // Same category-grouped nav item pattern as the desktop sidebar (LeftNavSection.jsx),
 // duplicated here since this component already duplicates the desktop nav's logic
 // for its own mobile-drawer chrome (backdrop, close button, slide position).
-const NavItem = ({ to, icon: Icon, label, isActive: isActiveOverride, locked, onClick, expanded, onNavigate }) => {
+const NavItem = ({ to, icon: Icon, label, isActive: isActiveOverride, locked, onClick, expanded, onNavigate, tag, count }) => {
     const content = ({ isActive: linkActive }) => {
         const isActive = isActiveOverride !== undefined ? isActiveOverride : linkActive;
         return (
@@ -23,6 +24,24 @@ const NavItem = ({ to, icon: Icon, label, isActive: isActiveOverride, locked, on
                 <Icon className="w-4 h-4 flex-shrink-0" style={{ color: isActive ? COLORS.accent : COLORS.textMuted }} />
                 <span className="flex-1 truncate">{label}</span>
                 {locked && <Lock className="w-3.5 h-3.5 flex-shrink-0" style={{ color: COLORS.watch }} />}
+                {/* Small pill tag, e.g. mock's "AI" badge beside Amazon Copilot */}
+                {tag && (
+                    <span
+                        className="flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                        style={{ letterSpacing: '.04em', background: 'rgba(59,130,246,.16)', color: '#7EA8F8' }}
+                    >
+                        {tag}
+                    </span>
+                )}
+                {/* Real count pill, e.g. Account Issues count */}
+                {count != null && count > 0 && (
+                    <span
+                        className="flex-shrink-0 text-[11px] font-semibold px-1.5 py-0.5 rounded-full"
+                        style={{ background: 'rgba(239,68,68,.14)', color: COLORS.fix }}
+                    >
+                        {count}
+                    </span>
+                )}
                 {expanded !== undefined && (
                     <motion.div animate={{ rotate: expanded ? 90 : 0 }} transition={{ duration: 0.2, ease: "easeInOut" }} className="flex items-center justify-center flex-shrink-0">
                         <ChevronRight className="w-4 h-4" style={{ color: COLORS.textMuted, opacity: 0.7 }} />
@@ -79,6 +98,18 @@ const LeftNavSection = () => {
     const user = useSelector((state) => state.Auth?.user);
     const userPlan = user?.packageType || 'LITE';
     const isAgencyUser = userPlan === 'AGENCY';
+
+    // Real Account Issues count for the sidebar badge - same source Account.jsx uses.
+    const legacyAccountInfo = useSelector((state) => state.Dashboard.DashBoardInfo);
+    const accountIssuesState = useSelector((state) => state.pageData?.issuesPaginated?.account || { data: null, loading: false });
+    const accountInfo = accountIssuesState.data || legacyAccountInfo;
+    const accountIssuesCount = accountInfo?.totalAccountErrors || 0;
+
+    React.useEffect(() => {
+        if (!accountIssuesState.data && !accountIssuesState.loading) {
+            dispatch(fetchAccountIssues());
+        }
+    }, [accountIssuesState.data, accountIssuesState.loading, dispatch]);
 
     // Check if user's trial has expired
     const isTrialExpired = () => {
@@ -143,12 +174,8 @@ const LeftNavSection = () => {
         }
     }, [isSponsoredAdsPage]);
 
-    // Handle Settings button click
+    // Handle Settings button click - just expand/collapse; picking an option below navigates.
     const handleSettingsClick = () => {
-        if (!isSettingsPage) {
-            // If not on settings page, navigate to profile
-            navigate('/seller-central-checker/settings?tab=profile');
-        }
         setSettingsDropdownOpen(!settingsDropdownOpen);
     };
 
@@ -241,7 +268,7 @@ const LeftNavSection = () => {
                                 <NavItem to="/seller-central-checker/dashboard" icon={LayoutDashboard} label="Dashboard" locked={isPremiumLocked} onNavigate={closeMenu} />
                             )}
                             {(!isLiteUser || isPremiumLocked) && (
-                                <NavItem to="/seller-central-checker/qmate" icon={Bot} label="Amazon Copilot" locked={isPremiumLocked} onNavigate={closeMenu} />
+                                <NavItem to="/seller-central-checker/qmate" icon={Bot} label="Amazon Copilot" locked={isPremiumLocked} onNavigate={closeMenu} tag="AI" />
                             )}
                         </div>
                     </div>
@@ -317,6 +344,7 @@ const LeftNavSection = () => {
                                     isActive={isIssuesPage && currentTab === 'account'}
                                     locked={isPremiumLocked}
                                     onNavigate={closeMenu}
+                                    count={accountIssuesCount}
                                 />
                             )}
                         </div>

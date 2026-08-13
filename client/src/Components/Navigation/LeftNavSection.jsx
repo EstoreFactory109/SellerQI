@@ -10,6 +10,7 @@ import BeatLoader from "react-spinners/BeatLoader";
 import { AnimatePresence, motion } from "framer-motion";
 import sellerQILogo from '../../assets/Logo/sellerQILogo.png';
 import NavSearch from './NavSearch.jsx';
+import { fetchAccountIssues } from '../../redux/slices/PageDataSlice.js';
 import { COLORS } from '../Shared/index.js';
 
 // Set to true to show Recent Orders in the left nav
@@ -17,7 +18,7 @@ const SHOW_RECENT_ORDERS_NAV = true;
 
 // Category-grouped nav item: flat background tint when active (matches the redesign
 // mock's sidebar), muted/primary text swap, icon tinted to accent when active.
-const NavItem = ({ to, icon: Icon, label, isActive: isActiveOverride, locked, onClick, badge, expanded }) => {
+const NavItem = ({ to, icon: Icon, label, isActive: isActiveOverride, locked, onClick, tag, count, expanded }) => {
     const content = ({ isActive: linkActive }) => {
         const isActive = isActiveOverride !== undefined ? isActiveOverride : linkActive;
         return (
@@ -25,12 +26,22 @@ const NavItem = ({ to, icon: Icon, label, isActive: isActiveOverride, locked, on
                 <Icon className="w-4 h-4 flex-shrink-0" style={{ color: isActive ? COLORS.accent : COLORS.textMuted }} />
                 <span className="flex-1 truncate">{label}</span>
                 {locked && <Lock className="w-3.5 h-3.5 flex-shrink-0" style={{ color: COLORS.watch }} />}
-                {badge != null && (
+                {/* Small pill tag, e.g. mock's "AI" badge beside Amazon Copilot */}
+                {tag && (
+                    <span
+                        className="flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                        style={{ letterSpacing: '.04em', background: 'rgba(59,130,246,.16)', color: '#7EA8F8' }}
+                    >
+                        {tag}
+                    </span>
+                )}
+                {/* Real count pill, e.g. Account Issues count */}
+                {count != null && count > 0 && (
                     <span
                         className="flex-shrink-0 text-[11px] font-semibold px-1.5 py-0.5 rounded-full"
-                        style={{ background: 'rgba(245,166,35,.14)', color: COLORS.watch }}
+                        style={{ background: 'rgba(239,68,68,.14)', color: COLORS.fix }}
                     >
-                        {badge}
+                        {count}
                     </span>
                 )}
                 {expanded !== undefined && (
@@ -96,6 +107,20 @@ const LeftNavSection = () => {
     const user = useSelector((state) => state.Auth?.user);
     const userPlan = user?.packageType || 'LITE';
     const isAgencyUser = userPlan === 'AGENCY';
+
+    // Real Account Issues count for the sidebar badge - same source Account.jsx uses.
+    // Fetch is cache-guarded (see fetchAccountIssues thunk), so mounting this on every
+    // page doesn't add a real request beyond the first, uncached one per session.
+    const legacyAccountInfo = useSelector((state) => state.Dashboard.DashBoardInfo);
+    const accountIssuesState = useSelector((state) => state.pageData?.issuesPaginated?.account || { data: null, loading: false });
+    const accountInfo = accountIssuesState.data || legacyAccountInfo;
+    const accountIssuesCount = accountInfo?.totalAccountErrors || 0;
+
+    React.useEffect(() => {
+        if (!accountIssuesState.data && !accountIssuesState.loading) {
+            dispatch(fetchAccountIssues());
+        }
+    }, [accountIssuesState.data, accountIssuesState.loading, dispatch]);
 
     // Check if user's trial has expired
     const isTrialExpired = () => {
@@ -166,10 +191,8 @@ const LeftNavSection = () => {
 
     // Handle Settings button click
     const handleSettingsClick = () => {
-        if (!isSettingsPage) {
-            // If not on settings page, navigate to profile
-            navigate('/seller-central-checker/settings?tab=profile');
-        }
+        // Just expand/collapse the dropdown - don't navigate. Picking an option
+        // below (User Profile, Support, etc.) is what actually navigates.
         setSettingsDropdownOpen(!settingsDropdownOpen);
     };
 
@@ -238,7 +261,7 @@ const LeftNavSection = () => {
                                     <NavItem to="/seller-central-checker/dashboard" icon={LayoutDashboard} label="Dashboard" locked={isPremiumLocked} />
                                 )}
                                 {(!isLiteUser || isPremiumLocked) && (
-                                    <NavItem to="/seller-central-checker/qmate" icon={Bot} label="Amazon Copilot" locked={isPremiumLocked} />
+                                    <NavItem to="/seller-central-checker/qmate" icon={Bot} label="Amazon Copilot" locked={isPremiumLocked} tag="AI" />
                                 )}
                             </div>
                         </div>
@@ -313,6 +336,7 @@ const LeftNavSection = () => {
                                         label="Account Issues"
                                         isActive={isIssuesPage && currentTab === 'account'}
                                         locked={isPremiumLocked}
+                                        count={accountIssuesCount}
                                     />
                                 )}
                                 {SHOW_RECENT_ORDERS_NAV && (!isLiteUser || isPremiumLocked) && (
