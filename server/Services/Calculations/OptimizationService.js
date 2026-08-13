@@ -223,7 +223,31 @@ const getOptimizationProducts = async (userId, region, country, options = {}) =>
     const startIndex = (page - 1) * limit;
     const paginatedProducts = enrichedProducts.slice(startIndex, startIndex + limit);
     const totalPages = Math.ceil(totalItems / limit);
-    
+
+    // Step 8b: Attach real product photos for this page only (same pattern as getYourProductsActiveV3)
+    const pageAsinSet = new Set(paginatedProducts.map(p => (p.asin || '').toUpperCase()).filter(Boolean));
+    if (pageAsinSet.size > 0) {
+        const NumberOfProductReviews = require('../../models/seller-performance/NumberOfProductReviewsModel.js');
+        const productReviews = await NumberOfProductReviews.findOne({
+            User: userObjectId,
+            country,
+            region
+        }).sort({ createdAt: -1 }).select('Products.asin Products.product_photos').lean();
+
+        const imageMap = new Map();
+        if (productReviews?.Products) {
+            productReviews.Products.forEach(p => {
+                const key = (p.asin || '').toUpperCase();
+                if (pageAsinSet.has(key)) {
+                    imageMap.set(key, p.product_photos?.[0] || null);
+                }
+            });
+        }
+        paginatedProducts.forEach(p => {
+            p.image = imageMap.get((p.asin || '').toUpperCase()) || null;
+        });
+    }
+
     const elapsed = Date.now() - startTime;
     logger.info(`[OptimizationService] Completed in ${elapsed}ms - returning ${paginatedProducts.length} of ${totalItems} products (page ${page}/${totalPages})`);
     

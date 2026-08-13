@@ -2968,6 +2968,7 @@ const getYourProductsActiveV3 = asyncHandler(async (req, res) => {
                                 status: '$sellerAccount.products.status',
                                 quantity: '$sellerAccount.products.quantity',
                                 issueCount: '$sellerAccount.products.issueCount',
+                                issues: { $ifNull: ['$sellerAccount.products.issues', []] },
                                 has_b2b_pricing: '$sellerAccount.products.has_b2b_pricing'
                             }
                         }
@@ -3018,6 +3019,14 @@ const getYourProductsActiveV3 = asyncHandler(async (req, res) => {
             });
         }
 
+        // Fetch real sales data (same Economics source the Optimization tab uses)
+        const economicsData = await EconomicsMetrics.findLatest(userId, Region, Country);
+        const { asinPpcSales } = await ProfitabilityService.getAsinPpcSalesFromEconomics(economicsData);
+        const salesMap = new Map();
+        Object.entries(asinPpcSales).forEach(([asin, data]) => {
+            salesMap.set(asin.toUpperCase(), data.sales || 0);
+        });
+
         // Enrich products (NO A+, NO Ads)
         let enrichedProducts = rawProducts.map(product => {
             const key = product.asin?.toUpperCase() || '';
@@ -3033,6 +3042,8 @@ const getYourProductsActiveV3 = asyncHandler(async (req, res) => {
                 numRatings: reviewData.numRatings || '0',
                 starRatings: reviewData.starRatings || '0',
                 image: reviewData.image || null,
+                sales: salesMap.has(key) ? salesMap.get(key) : null,
+                issues: Array.isArray(product.issues) ? product.issues : [],
                 issueCount: product.issueCount || 0,
                 has_b2b_pricing: product.has_b2b_pricing || false
             };
@@ -3325,12 +3336,31 @@ const getYourProductsNonSellableV3 = asyncHandler(async (req, res) => {
         const zeroAvailabilityTotal = result?.zeroAvailabilityCount[0]?.total || 0;
         const products = result?.products || [];
 
+        // Fetch real product photos for this page (same pattern as getYourProductsActiveV3)
+        const pageAsinSet = new Set(products.map(p => p.asin?.toUpperCase()).filter(Boolean));
+        const productReviews = pageAsinSet.size > 0 ? await NumberOfProductReviews.findOne({
+            User: userObjectId,
+            country: Country,
+            region: Region
+        }).sort({ createdAt: -1 }).select('Products.asin Products.product_photos').lean() : null;
+
+        const reviewsMap = new Map();
+        if (productReviews?.Products) {
+            productReviews.Products.forEach(p => {
+                const key = p.asin?.toUpperCase() || '';
+                if (pageAsinSet.has(key)) {
+                    reviewsMap.set(key, { image: p.product_photos?.[0] || null });
+                }
+            });
+        }
+
         // Map products to response format; for Active with qty 0, keep status Active and set issue to "0 availability"
         let responseProducts = products.map(p => {
             const statusLower = (p.status || '').toLowerCase();
             const qty = p.quantity ?? 0;
             const isZeroAvailability = statusLower === 'active' && qty <= 0;
             const issues = isZeroAvailability ? ['This product has 0 availability (out of stock).'] : (Array.isArray(p.issues) ? p.issues : []);
+            const reviewData = reviewsMap.get(p.asin?.toUpperCase()) || {};
             return {
                 asin: p.asin,
                 sku: p.sku,
@@ -3338,6 +3368,7 @@ const getYourProductsNonSellableV3 = asyncHandler(async (req, res) => {
                 price: p.price || '0',
                 status: statusLower === 'inactive' ? 'Inactive' : statusLower === 'incomplete' ? 'Incomplete' : 'Active',
                 quantity: qty,
+                image: reviewData.image || null,
                 issues
             };
         });
@@ -3453,7 +3484,9 @@ const getYourProductsWithoutAPlusV3 = asyncHandler(async (req, res) => {
                                 itemName: '$sellerAccount.products.itemName',
                                 price: '$sellerAccount.products.price',
                                 status: '$sellerAccount.products.status',
-                                quantity: '$sellerAccount.products.quantity'
+                                quantity: '$sellerAccount.products.quantity',
+                                issueCount: '$sellerAccount.products.issueCount',
+                                issues: { $ifNull: ['$sellerAccount.products.issues', []] }
                             }
                         }
                     ]
@@ -3465,16 +3498,49 @@ const getYourProductsWithoutAPlusV3 = asyncHandler(async (req, res) => {
         const totalItems = result?.count[0]?.total || 0;
         const products = result?.products || [];
 
+        // Fetch real product photos for this page (same pattern as getYourProductsActiveV3)
+        const pageAsinSet = new Set(products.map(p => p.asin?.toUpperCase()).filter(Boolean));
+        const productReviews = pageAsinSet.size > 0 ? await NumberOfProductReviews.findOne({
+            User: userObjectId,
+            country: Country,
+            region: Region
+        }).sort({ createdAt: -1 }).select('Products.asin Products.product_photos').lean() : null;
+
+        const reviewsMap = new Map();
+        if (productReviews?.Products) {
+            productReviews.Products.forEach(p => {
+                const key = p.asin?.toUpperCase() || '';
+                if (pageAsinSet.has(key)) {
+                    reviewsMap.set(key, { image: p.product_photos?.[0] || null });
+                }
+            });
+        }
+
+        // Fetch real sales data (same Economics source the Optimization tab uses)
+        const economicsData = await EconomicsMetrics.findLatest(userId, Region, Country);
+        const { asinPpcSales } = await ProfitabilityService.getAsinPpcSalesFromEconomics(economicsData);
+        const salesMap = new Map();
+        Object.entries(asinPpcSales).forEach(([asin, data]) => {
+            salesMap.set(asin.toUpperCase(), data.sales || 0);
+        });
+
         // Map to response format
-        const responseProducts = products.map(p => ({
-            asin: p.asin,
-            sku: p.sku,
-            title: p.itemName || '',
-            price: p.price || '0',
-            status: p.status || 'Active',
-            quantity: p.quantity ?? 0,
-            hasAPlus: false
-        }));
+        const responseProducts = products.map(p => {
+            const key = p.asin?.toUpperCase() || '';
+            return {
+                asin: p.asin,
+                sku: p.sku,
+                title: p.itemName || '',
+                price: p.price || '0',
+                status: p.status || 'Active',
+                quantity: p.quantity ?? 0,
+                image: reviewsMap.get(key)?.image || null,
+                sales: salesMap.has(key) ? salesMap.get(key) : null,
+                issues: Array.isArray(p.issues) ? p.issues : [],
+                issueCount: p.issueCount || 0,
+                hasAPlus: false
+            };
+        });
 
         const totalPages = Math.ceil(totalItems / limit);
         const elapsed = Date.now() - startTime;
@@ -3584,7 +3650,9 @@ const getYourProductsNotTargetedInAdsV3 = asyncHandler(async (req, res) => {
                                 itemName: '$sellerAccount.products.itemName',
                                 price: '$sellerAccount.products.price',
                                 status: '$sellerAccount.products.status',
-                                quantity: '$sellerAccount.products.quantity'
+                                quantity: '$sellerAccount.products.quantity',
+                                issueCount: '$sellerAccount.products.issueCount',
+                                issues: { $ifNull: ['$sellerAccount.products.issues', []] }
                             }
                         }
                     ]
@@ -3596,16 +3664,49 @@ const getYourProductsNotTargetedInAdsV3 = asyncHandler(async (req, res) => {
         const totalItems = result?.count[0]?.total || 0;
         const products = result?.products || [];
 
+        // Fetch real product photos for this page (same pattern as getYourProductsActiveV3)
+        const pageAsinSet = new Set(products.map(p => p.asin?.toUpperCase()).filter(Boolean));
+        const productReviews = pageAsinSet.size > 0 ? await NumberOfProductReviews.findOne({
+            User: userObjectId,
+            country: Country,
+            region: Region
+        }).sort({ createdAt: -1 }).select('Products.asin Products.product_photos').lean() : null;
+
+        const reviewsMap = new Map();
+        if (productReviews?.Products) {
+            productReviews.Products.forEach(p => {
+                const key = p.asin?.toUpperCase() || '';
+                if (pageAsinSet.has(key)) {
+                    reviewsMap.set(key, { image: p.product_photos?.[0] || null });
+                }
+            });
+        }
+
+        // Fetch real sales data (same Economics source the Optimization tab uses)
+        const economicsData = await EconomicsMetrics.findLatest(userId, Region, Country);
+        const { asinPpcSales } = await ProfitabilityService.getAsinPpcSalesFromEconomics(economicsData);
+        const salesMap = new Map();
+        Object.entries(asinPpcSales).forEach(([asin, data]) => {
+            salesMap.set(asin.toUpperCase(), data.sales || 0);
+        });
+
         // Map to response format
-        const responseProducts = products.map(p => ({
-            asin: p.asin,
-            sku: p.sku,
-            title: p.itemName || '',
-            price: p.price || '0',
-            status: p.status || 'Active',
-            quantity: p.quantity ?? 0,
-            isTargetedInAds: false
-        }));
+        const responseProducts = products.map(p => {
+            const key = p.asin?.toUpperCase() || '';
+            return {
+                asin: p.asin,
+                sku: p.sku,
+                title: p.itemName || '',
+                price: p.price || '0',
+                status: p.status || 'Active',
+                quantity: p.quantity ?? 0,
+                image: reviewsMap.get(key)?.image || null,
+                sales: salesMap.has(key) ? salesMap.get(key) : null,
+                issues: Array.isArray(p.issues) ? p.issues : [],
+                issueCount: p.issueCount || 0,
+                isTargetedInAds: false
+            };
+        });
 
         const totalPages = Math.ceil(totalItems / limit);
         const elapsed = Date.now() - startTime;
