@@ -9,6 +9,7 @@ import { parseLocalDate } from '../../utils/dateUtils';
 import { shouldUseCalendarDateRange } from '../../utils/totalSalesFilterUrl.js';
 import axiosInstance from '../../config/axios.config';
 import { SkeletonBar } from '../Skeleton/Skeleton.jsx';
+import { COLORS } from '../Shared/index.js';
 
 // Currency symbol mapping by country code
 const CURRENCY_SYMBOLS = {
@@ -720,9 +721,9 @@ const ProfitTable = ({
 
       const signedMoneyColor = (n) => {
         const v = Number(n || 0);
-        if (v > 0) return '#22c55e';
-        if (v < 0) return '#f87171';
-        return '#9ca3af';
+        if (v > 0) return COLORS.good;
+        if (v < 0) return '#F87171';
+        return COLORS.textSecondary;
       };
 
       /** Expenses are stored as positive magnitudes; show as negative outflows in the table. */
@@ -905,8 +906,16 @@ const ProfitTable = ({
         }
       });
 
+      // Sorted by net profit, worst first — money-losers surface at the top.
+      const netProfitOf = (group) => {
+        const t = group.totals;
+        const cogsPerUnit = cogsValues[group.parentAsin] || 0;
+        const totalCogs = cogsPerUnit * (t.units || 0);
+        const grossProfit = (t.productSales || 0) - computeRowExpenses(t);
+        return grossProfit - totalCogs;
+      };
       const groupedRows = Array.from(parentGroupsMap.values())
-        .sort((a, b) => b.totals.productSales - a.totals.productSales);
+        .sort((a, b) => netProfitOf(a) - netProfitOf(b));
 
       const financeRowDisplayName = (row, catalogDetail) => {
         const n = row?.productName != null ? String(row.productName).trim() : '';
@@ -959,30 +968,30 @@ const ProfitTable = ({
         return (
           <React.Fragment key={row.asin}>
             <tr
-              style={{ borderBottom: '1px solid #30363d', background: isChild ? 'rgba(59, 130, 246, 0.06)' : 'transparent' }}
-              className="hover:bg-[#21262d]/60 transition-colors"
+              style={{ borderBottom: `1px solid ${COLORS.border}`, background: isChild ? 'rgba(59, 130, 246, 0.06)' : 'transparent' }}
+              className="hover:bg-[#1A202B] transition-colors"
             >
-              <td className="px-2 py-2 text-center text-xs" style={{ color: '#9ca3af' }}>
-                {isChild ? <div className="ml-2 w-0.5 h-4 rounded mx-auto" style={{ background: '#3b82f6' }} /> : rowNum}
+              <td className="px-2 py-2 text-center text-xs" style={{ color: COLORS.textSecondary }}>
+                {isChild ? <div className="ml-2 w-0.5 h-4 rounded mx-auto" style={{ background: COLORS.accent }} /> : rowNum}
               </td>
               <td className="px-3 py-2 text-left">
-                <span className={`text-xs font-medium truncate block ${isChild ? 'pl-2' : ''}`} style={{ color: '#f3f4f6' }} title={productName}>
+                <span className={`text-xs font-medium truncate block ${isChild ? 'pl-2' : ''}`} style={{ color: COLORS.textPrimary }} title={productName}>
                   {productName}
                 </span>
               </td>
               <td className="px-3 py-2 text-left">
                 <div className="flex flex-col">
-                  <span className="text-xs font-mono px-1.5 py-0.5 rounded whitespace-nowrap inline-block" style={isChild ? { color: '#3b82f6', background: 'rgba(59, 130, 246, 0.15)' } : { color: '#60a5fa' }}>{row.asin || 'N/A'}</span>
-                  {isChild && <span className="text-[9px] mt-0.5" style={{ color: '#3b82f6' }}>Child</span>}
+                  <span className="text-xs font-mono px-1.5 py-0.5 rounded whitespace-nowrap inline-block" style={isChild ? { color: COLORS.accent, background: 'rgba(59, 130, 246, 0.15)' } : { color: '#60a5fa' }}>{row.asin || 'N/A'}</span>
+                  {isChild && <span className="text-[9px] mt-0.5" style={{ color: COLORS.accent }}>Child</span>}
                 </div>
               </td>
               <td className="px-2 py-2 text-left">
-                <span className="text-[10px] font-mono truncate block" style={{ color: '#9ca3af' }} title={row.sku || ''}>{row.sku}</span>
+                <span className="text-[10px] font-mono truncate block" style={{ color: COLORS.textSecondary }} title={row.sku || ''}>{row.sku}</span>
               </td>
-              <td className="px-2 py-2 text-center text-xs font-medium" style={{ color: '#f3f4f6' }}>
+              <td className="px-2 py-2 text-center text-xs font-medium" style={{ color: COLORS.textPrimary }}>
                 {formatCurrencyWithLocale(row.productSales || 0, currency)}
               </td>
-              <td className="px-2 py-2 text-center text-xs" style={{ color: '#9ca3af' }}>
+              <td className="px-2 py-2 text-center text-xs" style={{ color: COLORS.textSecondary }}>
                 {row.units || 0}
               </td>
               <td className="px-2 py-2 text-center text-xs" style={{ color: signedMoneyColor(displayExpenseAmount(rowExpenseTotal)) }}>
@@ -997,7 +1006,7 @@ const ProfitTable = ({
                         return next;
                       });
                     }}
-                    className="p-0.5 rounded hover:bg-[#30363d] transition-colors"
+                    className="p-0.5 rounded hover:bg-white/5 transition-colors"
                     title="View expense breakdown"
                     style={{ color: '#60a5fa' }}
                   >
@@ -1007,32 +1016,32 @@ const ProfitTable = ({
               </td>
               <td className="px-2 py-2 text-center">
                 <div className="flex items-center justify-center gap-1">
-                  <span className="text-[10px]" style={{ color: '#9ca3af' }}>{cogsCurrencySymbol}</span>
-                  <input type="number" min="0" step="0.01" value={cogsValues[row.asin] ?? ''} onChange={(e) => handleCogsChange(row.asin, e.target.value)} placeholder="0.00" className="w-14 text-center text-xs rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-blue-500" style={{ background: '#1a1a1a', color: '#f3f4f6', border: '1px solid #30363d' }} />
-                  <button onClick={() => handleSaveCogs(row.asin, row.sku)} disabled={cogsSaving[row.asin] || !needsSave(row.asin)} className="p-0.5 rounded transition-colors" style={needsSave(row.asin) ? { background: 'rgba(34,197,94,0.2)', color: '#22c55e' } : { color: '#30363d' }} title={cogsSaving[row.asin] ? 'Saving...' : needsSave(row.asin) ? 'Click to save COGS' : 'Enter COGS value to save'}>
+                  <span className="text-[10px]" style={{ color: COLORS.textSecondary }}>{cogsCurrencySymbol}</span>
+                  <input type="number" min="0" step="0.01" value={cogsValues[row.asin] ?? ''} onChange={(e) => handleCogsChange(row.asin, e.target.value)} placeholder="0.00" className="w-14 text-center text-xs rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-blue-500" style={{ background: COLORS.bgBase, color: COLORS.textPrimary, border: `1px solid ${COLORS.border}` }} />
+                  <button onClick={() => handleSaveCogs(row.asin, row.sku)} disabled={cogsSaving[row.asin] || !needsSave(row.asin)} className="p-0.5 rounded transition-colors" style={needsSave(row.asin) ? { background: 'rgba(34,197,94,0.2)', color: COLORS.good } : { color: COLORS.border }} title={cogsSaving[row.asin] ? 'Saving...' : needsSave(row.asin) ? 'Click to save COGS' : 'Enter COGS value to save'}>
                     {cogsSaving[row.asin] ? <Loader2 className="w-3 h-3 animate-spin" /> : isSaved(row.asin) ? <CheckCircle2 className="w-3 h-3" /> : <Check className="w-3 h-3" />}
                   </button>
                 </div>
               </td>
-              <td className="px-2 py-2 text-center text-xs font-medium" style={{ color: grossProfit >= 0 ? '#22c55e' : '#f87171' }}>
+              <td className="px-2 py-2 text-center text-xs font-medium" style={{ color: grossProfit >= 0 ? COLORS.good : '#F87171' }}>
                 {formatCurrencyWithLocale(grossProfit, currency)}
               </td>
               <td className="px-2 py-2 text-center text-xs font-medium">
                 {cogsPerUnit > 0 ? (
-                  <span style={{ color: netProfit >= 0 ? '#22c55e' : '#f87171' }}>{formatCurrencyWithLocale(netProfit, currency)}</span>
+                  <span style={{ color: netProfit >= 0 ? COLORS.good : '#F87171' }}>{formatCurrencyWithLocale(netProfit, currency)}</span>
                 ) : (
-                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded border" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa', borderColor: 'rgba(59, 130, 246, 0.3)' }}>+COGS</span>
+                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded border" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa', borderColor: 'rgba(59, 130, 246, 0.3)' }}>Set up</span>
                 )}
               </td>
             </tr>
             {isExpBreakdownOpen && (
-              <tr style={{ background: '#1a1f26' }}>
+              <tr style={{ background: COLORS.surfaceElevated }}>
                 <td colSpan={10} className="px-6 py-3">
-                  <div className="text-[10px] font-semibold uppercase mb-2" style={{ color: '#9ca3af' }}>Expense Breakdown</div>
+                  <div className="text-[10px] font-semibold uppercase mb-2" style={{ color: COLORS.textSecondary }}>Expense Breakdown</div>
                   {breakdownGroups.length > 0 ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                       {breakdownGroups.map((group, gIdx) => (
-                        <div key={gIdx} className="rounded p-2" style={{ background: '#21262d' }}>
+                        <div key={gIdx} className="rounded p-2" style={{ background: COLORS.surface }}>
                           <div className="flex items-center justify-between mb-1.5">
                             <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#93c5fd' }}>{group.label}</span>
                             <span className="text-[10px] font-semibold" style={{ color: signedMoneyColor(group.total) }}>{formatCurrencyWithLocale(group.total, currency)}</span>
@@ -1040,7 +1049,7 @@ const ProfitTable = ({
                           <div className="space-y-1">
                             {group.items.map((item, iIdx) => (
                               <div key={iIdx} className="flex items-center justify-between gap-2">
-                                <span className="text-[10px] truncate" style={{ color: '#d1d5db' }} title={item.label}>{item.label}</span>
+                                <span className="text-[10px] truncate" style={{ color: COLORS.textSecondary }} title={item.label}>{item.label}</span>
                                 <span className="text-[10px] whitespace-nowrap font-medium" style={{ color: signedMoneyColor(item.amount) }}>{formatCurrencyWithLocale(item.amount, currency)}</span>
                               </div>
                             ))}
@@ -1049,7 +1058,7 @@ const ProfitTable = ({
                       ))}
                     </div>
                   ) : (
-                    <span className="text-[10px]" style={{ color: '#6b7280' }}>No expense data for this SKU</span>
+                    <span className="text-[10px]" style={{ color: COLORS.textMuted }}>No expense data for this SKU</span>
                   )}
                 </td>
               </tr>
@@ -1059,37 +1068,40 @@ const ProfitTable = ({
       };
 
       return (
-        <div className="rounded-lg overflow-hidden" style={{ background: '#161b22', border: '1px solid #30363d' }}>
-          <div className="p-3 border-b" style={{ background: '#21262d', borderBottom: '1px solid #30363d' }}>
-            <div className="flex items-center gap-2">
-              <Table className="w-4 h-4" style={{ color: '#3b82f6' }} />
-              <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#f3f4f6' }}>Product Profitability Analysis</h3>
+        <div className="rounded-lg overflow-hidden" style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}` }}>
+          <div className="p-3 border-b" style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+            <div className="flex items-center gap-2 mb-1">
+              <Table className="w-4 h-4" style={{ color: COLORS.accent }} />
+              <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: COLORS.textPrimary }}>Product Profitability Analysis</h3>
               <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa' }}>{parentCount} products</span>
               {childCount > 0 && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#93c5fd' }}>+{childCount} variations</span>
               )}
             </div>
+            <p className="text-[11px]" style={{ color: COLORS.textMuted }}>
+              Sorted by net profit, worst first — money-losers surface at the top. Gross is before your product cost; net is after.
+            </p>
           </div>
 
           <div className="w-full overflow-x-auto">
             <table className="w-full table-fixed">
               <thead>
-                <tr style={{ background: '#21262d', borderBottom: '1px solid #30363d' }}>
-                  <th className="w-8 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>#</th>
-                  <th className="w-1/5 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Product</th>
-                  <th className="w-24 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>ASIN</th>
-                  <th className="w-20 px-2 py-2 text-left text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>SKU</th>
-                  <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Sales</th>
-                  <th className="w-16 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Units Sold</th>
-                  <th className="w-28 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Expenses</th>
-                  <th className="w-28 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>COGS/Unit</th>
-                  <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Gross</th>
-                  <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9ca3af' }}>Net</th>
+                <tr style={{ background: COLORS.surfaceElevated, borderBottom: `1px solid ${COLORS.border}` }}>
+                  <th className="w-8 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>#</th>
+                  <th className="w-1/5 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>Product</th>
+                  <th className="w-24 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>ASIN</th>
+                  <th className="w-20 px-2 py-2 text-left text-[10px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>SKU</th>
+                  <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>Sales</th>
+                  <th className="w-16 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>Units Sold</th>
+                  <th className="w-28 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>Expenses</th>
+                  <th className="w-28 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>COGS/Unit</th>
+                  <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>Gross</th>
+                  <th className="w-24 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>Net</th>
                 </tr>
               </thead>
               <tbody>
                 {groupedRows.length === 0 ? (
-                  <tr><td colSpan={10} className="text-center py-8 text-sm" style={{ color: '#9ca3af' }}>No profitability data available</td></tr>
+                  <tr><td colSpan={10} className="text-center py-8 text-sm" style={{ color: COLORS.textSecondary }}>No profitability data available</td></tr>
                 ) : groupedRows.map((group, gIdx) => {
                   const hasChildren = group.children.length > 1;
                   const isGroupExpanded = expandedRows.has(`grp_${group.parentAsin}`);
@@ -1111,10 +1123,10 @@ const ProfitTable = ({
                   return (
                     <React.Fragment key={group.parentAsin}>
                       {/* Parent aggregated row */}
-                      <tr style={{ borderBottom: '1px solid #30363d' }} className="hover:bg-[#21262d]/60 transition-colors">
-                        <td className="px-2 py-2 text-center text-xs" style={{ color: '#9ca3af' }}>{gIdx + 1}</td>
+                      <tr style={{ borderBottom: `1px solid ${COLORS.border}` }} className="hover:bg-[#1A202B] transition-colors">
+                        <td className="px-2 py-2 text-center text-xs" style={{ color: COLORS.textSecondary }}>{gIdx + 1}</td>
                         <td className="px-3 py-2 text-left">
-                          <span className="text-xs font-medium truncate block" style={{ color: '#f3f4f6' }} title={parentName}>{parentName}</span>
+                          <span className="text-xs font-medium truncate block" style={{ color: COLORS.textPrimary }} title={parentName}>{parentName}</span>
                           <span className="text-[10px]" style={{ color: '#60a5fa' }}>{group.children.length} variation{group.children.length > 1 ? 's' : ''}</span>
                         </td>
                         <td className="px-3 py-2 text-left">
@@ -1134,16 +1146,16 @@ const ProfitTable = ({
                               });
                             }}
                             className="flex items-center gap-1 px-2 py-1 rounded transition-colors text-[10px] font-medium"
-                            style={isGroupExpanded ? { background: 'rgba(59, 130, 246, 0.2)', color: '#3b82f6', border: '1px solid #3b82f6' } : { background: '#1a1a1a', color: '#3b82f6', border: '1px solid #3b82f6' }}
+                            style={isGroupExpanded ? { background: 'rgba(59, 130, 246, 0.2)', color: COLORS.accent, border: `1px solid ${COLORS.accent}` } : { background: COLORS.bgBase, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
                           >
                             {isGroupExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                             {isGroupExpanded ? 'Collapse' : 'Expand'}
                           </button>
                         </td>
-                        <td className="px-2 py-2 text-center text-xs font-medium" style={{ color: '#f3f4f6' }}>
+                        <td className="px-2 py-2 text-center text-xs font-medium" style={{ color: COLORS.textPrimary }}>
                           {formatCurrencyWithLocale(t.productSales || 0, currency)}
                         </td>
-                        <td className="px-2 py-2 text-center text-xs" style={{ color: '#9ca3af' }}>{t.units || 0}</td>
+                        <td className="px-2 py-2 text-center text-xs" style={{ color: COLORS.textSecondary }}>{t.units || 0}</td>
                         <td className="px-2 py-2 text-center text-xs" style={{ color: signedMoneyColor(displayExpenseAmount(parentExpenseTotal)) }}>
                           <div className="flex items-center justify-center gap-1">
                             <span>{formatCurrencyWithLocale(displayExpenseAmount(parentExpenseTotal), currency)}</span>
@@ -1156,27 +1168,27 @@ const ProfitTable = ({
                                   return next;
                                 });
                               }}
-                              className="p-0.5 rounded hover:bg-[#30363d] transition-colors"
+                              className="p-0.5 rounded hover:bg-white/5 transition-colors"
                               style={{ color: '#60a5fa' }}
                             >
                               {isExpBreakdownOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                             </button>
                           </div>
                         </td>
-                        <td className="px-2 py-2 text-center text-xs italic" style={{ color: '#6b7280' }}>See children</td>
-                        <td className="px-2 py-2 text-center text-xs font-medium" style={{ color: grossProfit >= 0 ? '#22c55e' : '#f87171' }}>
+                        <td className="px-2 py-2 text-center text-xs italic" style={{ color: COLORS.textMuted }}>See children</td>
+                        <td className="px-2 py-2 text-center text-xs font-medium" style={{ color: grossProfit >= 0 ? COLORS.good : '#F87171' }}>
                           {formatCurrencyWithLocale(grossProfit, currency)}
                         </td>
-                        <td className="px-2 py-2 text-center text-xs italic" style={{ color: '#6b7280' }}>See children</td>
+                        <td className="px-2 py-2 text-center text-xs italic" style={{ color: COLORS.textMuted }}>See children</td>
                       </tr>
                       {isExpBreakdownOpen && (
-                        <tr style={{ background: '#1a1f26' }}>
+                        <tr style={{ background: COLORS.surfaceElevated }}>
                           <td colSpan={10} className="px-6 py-3">
-                            <div className="text-[10px] font-semibold uppercase mb-2" style={{ color: '#9ca3af' }}>Aggregated Expense Breakdown</div>
+                            <div className="text-[10px] font-semibold uppercase mb-2" style={{ color: COLORS.textSecondary }}>Aggregated Expense Breakdown</div>
                             {parentBreakdown.length > 0 ? (
                               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                                 {parentBreakdown.map((group, gIdx) => (
-                                  <div key={gIdx} className="rounded p-2" style={{ background: '#21262d' }}>
+                                  <div key={gIdx} className="rounded p-2" style={{ background: COLORS.surface }}>
                                     <div className="flex items-center justify-between mb-1.5">
                                       <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#93c5fd' }}>{group.label}</span>
                                       <span className="text-[10px] font-semibold" style={{ color: signedMoneyColor(group.total) }}>{formatCurrencyWithLocale(group.total, currency)}</span>
@@ -1184,7 +1196,7 @@ const ProfitTable = ({
                                     <div className="space-y-1">
                                       {group.items.map((item, iIdx) => (
                                         <div key={iIdx} className="flex items-center justify-between gap-2">
-                                          <span className="text-[10px] truncate" style={{ color: '#d1d5db' }} title={item.label}>{item.label}</span>
+                                          <span className="text-[10px] truncate" style={{ color: COLORS.textSecondary }} title={item.label}>{item.label}</span>
                                           <span className="text-[10px] whitespace-nowrap font-medium" style={{ color: signedMoneyColor(item.amount) }}>{formatCurrencyWithLocale(item.amount, currency)}</span>
                                         </div>
                                       ))}
@@ -1193,7 +1205,7 @@ const ProfitTable = ({
                                 ))}
                               </div>
                             ) : (
-                              <span className="text-[10px]" style={{ color: '#6b7280' }}>No expense data</span>
+                              <span className="text-[10px]" style={{ color: COLORS.textMuted }}>No expense data</span>
                             )}
                           </td>
                         </tr>
@@ -1215,15 +1227,15 @@ const ProfitTable = ({
 
     if (useFinanceTableOnly && (!financeDashAsinWise || financeDashAsinWise.length === 0)) {
       return (
-        <div className="rounded-lg overflow-hidden" style={{ background: '#161b22', border: '1px solid #30363d' }}>
+        <div className="rounded-lg overflow-hidden" style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}` }}>
           <div className="p-8 flex flex-col items-center justify-center gap-3" style={{ minHeight: 200 }}>
             {tableLoading ? (
               <>
-                <Loader2 className="w-8 h-8 animate-spin" style={{ color: '#60a5fa' }} />
-                <span style={{ color: '#9ca3af', fontSize: '12px' }}>Loading profitability data…</span>
+                <Loader2 className="w-8 h-8 animate-spin" style={{ color: COLORS.accent }} />
+                <span style={{ color: COLORS.textSecondary, fontSize: '12px' }}>Loading profitability data…</span>
               </>
             ) : (
-              <span style={{ color: '#9ca3af', fontSize: '12px' }}>No profitability data for the selected date range.</span>
+              <span style={{ color: COLORS.textSecondary, fontSize: '12px' }}>No profitability data for the selected date range.</span>
             )}
           </div>
         </div>
