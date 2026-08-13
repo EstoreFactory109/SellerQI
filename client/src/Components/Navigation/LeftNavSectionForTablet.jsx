@@ -11,6 +11,7 @@ import {setPosition} from '../../redux/slices/MobileMenuSlice.js'
 import { AnimatePresence, motion } from "framer-motion";
 import NavSearch from './NavSearch.jsx';
 import { fetchAccountIssues, fetchYourProductsSummaryV3 } from '../../redux/slices/PageDataSlice.js';
+import { fetchTasks } from '../../redux/slices/TasksSlice.js';
 import stripeService from '../../services/stripeService';
 import { COLORS } from '../Shared/index.js';
 
@@ -25,7 +26,10 @@ const PLAN_LABELS = { LITE: 'Lite', PRO: 'Pro', AGENCY: 'Agency' };
 // Same category-grouped nav item pattern as the desktop sidebar (LeftNavSection.jsx),
 // duplicated here since this component already duplicates the desktop nav's logic
 // for its own mobile-drawer chrome (backdrop, close button, slide position).
-const NavItem = ({ to, icon: Icon, label, isActive: isActiveOverride, locked, onClick, expanded, onNavigate, tag, count }) => {
+const NavItem = ({ to, icon: Icon, label, isActive: isActiveOverride, locked, onClick, expanded, onNavigate, tag, count, countTone = 'fix' }) => {
+    const countStyle = countTone === 'watch'
+        ? { background: 'rgba(245,166,35,.14)', color: COLORS.watch }
+        : { background: 'rgba(239,68,68,.14)', color: COLORS.fix };
     const content = ({ isActive: linkActive }) => {
         const isActive = isActiveOverride !== undefined ? isActiveOverride : linkActive;
         return (
@@ -46,7 +50,7 @@ const NavItem = ({ to, icon: Icon, label, isActive: isActiveOverride, locked, on
                 {count != null && count > 0 && (
                     <span
                         className="flex-shrink-0 text-[11px] font-semibold px-1.5 py-0.5 rounded-full"
-                        style={{ background: 'rgba(239,68,68,.14)', color: COLORS.fix }}
+                        style={countStyle}
                     >
                         {count}
                     </span>
@@ -128,6 +132,16 @@ const LeftNavSection = () => {
             dispatch(fetchYourProductsSummaryV3());
         }
     }, [yourProductsSummaryState.data, yourProductsSummaryState.loading, dispatch]);
+
+    // Real pending Tasks count for the sidebar badge - same tasks list the Tasks page uses.
+    const tasksState = useSelector((state) => state.tasks || { tasks: [], loading: false, lastFetched: null });
+    const pendingTasksCount = tasksState.tasks.filter(t => t.status !== 'completed').length;
+
+    React.useEffect(() => {
+        if (!tasksState.lastFetched && !tasksState.loading) {
+            dispatch(fetchTasks());
+        }
+    }, [tasksState.lastFetched, tasksState.loading, dispatch]);
 
     // Real subscription renewal date for the bottom account box - fetched once locally.
     const [nextBillingDate, setNextBillingDate] = useState(null);
@@ -335,7 +349,7 @@ const LeftNavSection = () => {
                             )}
 
                             {(!isLiteUser || isPremiumLocked) && (
-                                <NavItem to="/seller-central-checker/tasks" icon={ClipboardPlus} label="Tasks" locked={isPremiumLocked} onNavigate={closeMenu} />
+                                <NavItem to="/seller-central-checker/tasks" icon={ClipboardPlus} label="Tasks" locked={isPremiumLocked} onNavigate={closeMenu} count={pendingTasksCount} countTone="watch" />
                             )}
                         </div>
                     </div>

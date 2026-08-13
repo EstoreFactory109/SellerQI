@@ -11,6 +11,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import sellerQILogo from '../../assets/Logo/sellerQILogo.png';
 import NavSearch from './NavSearch.jsx';
 import { fetchAccountIssues, fetchYourProductsSummaryV3 } from '../../redux/slices/PageDataSlice.js';
+import { fetchTasks } from '../../redux/slices/TasksSlice.js';
 import stripeService from '../../services/stripeService';
 import { COLORS } from '../Shared/index.js';
 
@@ -27,7 +28,10 @@ const SHOW_RECENT_ORDERS_NAV = true;
 
 // Category-grouped nav item: flat background tint when active (matches the redesign
 // mock's sidebar), muted/primary text swap, icon tinted to accent when active.
-const NavItem = ({ to, icon: Icon, label, isActive: isActiveOverride, locked, onClick, tag, count, expanded }) => {
+const NavItem = ({ to, icon: Icon, label, isActive: isActiveOverride, locked, onClick, tag, count, countTone = 'fix', expanded }) => {
+    const countStyle = countTone === 'watch'
+        ? { background: 'rgba(245,166,35,.14)', color: COLORS.watch }
+        : { background: 'rgba(239,68,68,.14)', color: COLORS.fix };
     const content = ({ isActive: linkActive }) => {
         const isActive = isActiveOverride !== undefined ? isActiveOverride : linkActive;
         return (
@@ -48,7 +52,7 @@ const NavItem = ({ to, icon: Icon, label, isActive: isActiveOverride, locked, on
                 {count != null && count > 0 && (
                     <span
                         className="flex-shrink-0 text-[11px] font-semibold px-1.5 py-0.5 rounded-full"
-                        style={{ background: 'rgba(239,68,68,.14)', color: COLORS.fix }}
+                        style={countStyle}
                     >
                         {count}
                     </span>
@@ -139,6 +143,16 @@ const LeftNavSection = () => {
             dispatch(fetchYourProductsSummaryV3());
         }
     }, [yourProductsSummaryState.data, yourProductsSummaryState.loading, dispatch]);
+
+    // Real pending Tasks count for the sidebar badge - same tasks list the Tasks page uses.
+    const tasksState = useSelector((state) => state.tasks || { tasks: [], loading: false, lastFetched: null });
+    const pendingTasksCount = tasksState.tasks.filter(t => t.status !== 'completed').length;
+
+    React.useEffect(() => {
+        if (!tasksState.lastFetched && !tasksState.loading) {
+            dispatch(fetchTasks());
+        }
+    }, [tasksState.lastFetched, tasksState.loading, dispatch]);
 
     // Real subscription renewal date for the bottom account box - same source
     // PlansAndBilling.jsx uses. Not in Redux, so fetched once locally on mount
@@ -328,7 +342,7 @@ const LeftNavSection = () => {
                                 )}
 
                                 {(!isLiteUser || isPremiumLocked) && (
-                                    <NavItem to="/seller-central-checker/tasks" icon={ClipboardPlus} label="Tasks" locked={isPremiumLocked} />
+                                    <NavItem to="/seller-central-checker/tasks" icon={ClipboardPlus} label="Tasks" locked={isPremiumLocked} count={pendingTasksCount} countTone="watch" />
                                 )}
                             </div>
                         </div>
