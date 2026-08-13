@@ -28,6 +28,7 @@ const Dashboard = () => {
   const [grossProfitData, setGrossProfitData] = useState({ grossProfitRaw: 0, totalSales: 0, hasFinanceData: false, loading: true })
   const contentRef = useRef(null)
   const totalSalesSectionRef = useRef(null)
+  const topFixesSectionRef = useRef(null)
   const navigate = useNavigate()
   const dispatch = useDispatch()
   const location = useLocation()
@@ -239,6 +240,34 @@ const Dashboard = () => {
   // Money wasted for custom calendar range (fetched from Campaign Audit aggregation API)
   const [customRangeMoneyWasted, setCustomRangeMoneyWasted] = useState(null);
   const [customRangeMoneyWastedLoading, setCustomRangeMoneyWastedLoading] = useState(false);
+
+  // AI-ranked "Top things to fix" — the top 5-6 money-recovery actions chosen by
+  // OpenAI from a pre-ranked shortlist of grouped issues (see
+  // server/Services/AI/TopOpportunitiesService.js). Pre-computed weekly and
+  // cached server-side, so this is a single cheap GET, no LLM call on page load.
+  const [topOpportunities, setTopOpportunities] = useState(null);
+  const [topOpportunitiesLoading, setTopOpportunitiesLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    axiosInstance
+      .get('/api/pagewise/top-opportunities')
+      .then((res) => {
+        if (!cancelled) setTopOpportunities(res.data?.data ?? null);
+      })
+      .catch(() => {
+        // Fails open — visibleFixes below falls back to the heuristic list.
+        if (!cancelled) setTopOpportunities(null);
+      })
+      .finally(() => {
+        if (!cancelled) setTopOpportunitiesLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!isDateRangeSelected || !dashboardInfo?.startDate || !dashboardInfo?.endDate) {
@@ -501,6 +530,10 @@ const Dashboard = () => {
     totalSalesSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
+  const scrollToTopFixes = () => {
+    topFixesSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   const formatRelativeTime = (timestamp) => {
     if (!timestamp) return null;
     const minutes = Math.max(0, Math.round((Date.now() - timestamp) / 60000));
@@ -510,24 +543,76 @@ const Dashboard = () => {
     return `${hours}h ago`;
   };
 
-  // Verdict Banner: which of the two evaluable KPIs (ACoS, Account Health) need attention,
-  // and how much is realistically recoverable (money owed + money already being wasted).
+  // Verdict Banner: which of the two evaluable KPIs (ACoS, Account Health) need attention.
+  // (Superseded below by the AI-ranked opportunity count/status when that data is available.)
   const attentionItems = [];
   if (acosStatus !== STATUS.GOOD) attentionItems.push({ label: 'wasted ad spend', status: acosStatus });
   if (healthPillStatus !== STATUS.GOOD) attentionItems.push({ label: 'account health', status: healthPillStatus });
 
+  // AI-ranked opportunities take over "Est. recoverable" when available — this is
+  // the actual dollar figure the AI selections were built from, not a client-side
+  // approximation. Falls back to the old heuristic (ads waste + reimbursements)
+  // for accounts that haven't been synced since this feature shipped.
+  const hasAiOpportunities = Array.isArray(topOpportunities?.opportunities) && topOpportunities.opportunities.length > 0;
+  const recoverableAmount = hasAiOpportunities
+    ? topOpportunities.totalEstimatedRecovery
+    : moneyWastedInAds + expectedReimbursement;
+  const verdictDataReady = isPhase2Complete && isPhase3Complete && !reimbursementLoading && !topOpportunitiesLoading;
+
+  // Badge/route/"start with" phrase per opportunity category — same destinations the
+  // old category rows below already used, so "See issues" behaves identically either way.
+  const OPPORTUNITY_CATEGORY_META = {
+    profitability: { badge: 'Profitability', ctaLabel: 'Review profitability', route: '/seller-central-checker/profitibility-dashboard', startWithPhrase: 'your money-losing products' },
+    sponsoredAds: { badge: 'Sponsored Ads', ctaLabel: 'Review ads', route: '/seller-central-checker/ppc-dashboard', startWithPhrase: 'your ad waste' },
+    inventory: { badge: 'Inventory', ctaLabel: 'See issues', route: '/seller-central-checker/issues?tab=category&filter=Inventory', startWithPhrase: 'your inventory issues' },
+    conversion: { badge: 'Conversion', ctaLabel: 'See issues', route: '/seller-central-checker/issues?tab=category&filter=Conversion', startWithPhrase: 'your Buy Box losses' },
+  };
+
+  // The AI already ranked opportunities by priority — its #1 pick drives "Start with...".
+  const topOpportunity = hasAiOpportunities ? topOpportunities.opportunities[0] : null;
+  const topOpportunityPhrase = topOpportunity
+    ? (OPPORTUNITY_CATEGORY_META[topOpportunity.category]?.startWithPhrase || 'your top issue')
+    : null;
+
+  // Overall banner status/color: a real AI-found opportunity means there's something
+  // to act on even if ACoS/Account Health both look fine on their own — but "healthy
+  // overall" framing (WATCH, not FIX) unless one of those two core KPIs is truly bad.
   const overallVerdictStatus = attentionItems.some((i) => i.status === STATUS.FIX)
     ? STATUS.FIX
-    : attentionItems.length > 0
+    : (attentionItems.length > 0 || hasAiOpportunities)
       ? STATUS.WATCH
       : STATUS.GOOD;
 
-  const recoverableAmount = moneyWastedInAds + expectedReimbursement;
-  const verdictDataReady = isPhase2Complete && isPhase3Complete && !reimbursementLoading;
+  const healthDescriptor = healthPillStatus === STATUS.GOOD
+    ? 'healthy overall'
+    : healthPillStatus === STATUS.WATCH
+      ? 'at risk'
+      : 'struggling';
 
-  // Top Things to Fix: every row reuses a value already computed above or already
-  // shown elsewhere on this page (same category counts ProductChecker.jsx charts).
-  // Dollar-backed rows sort first (real impact ordering); count-only rows follow.
+  // Top Things to Fix — AI-ranked opportunities when available (already ordered by
+  // the AI, considering overlaps/priority, not just raw dollars — so this list is
+  // NOT re-sorted, unlike the heuristic fallback below).
+  const aiFixCandidates = hasAiOpportunities
+    ? topOpportunities.opportunities.map((o) => {
+        const meta = OPPORTUNITY_CATEGORY_META[o.category] || { badge: o.category, ctaLabel: 'See issues', route: '/seller-central-checker/issues' };
+        const hasAmount = (o.amount || 0) > 0;
+        return {
+          key: o.candidateId,
+          status: o.isGrowthOpportunity ? STATUS.SETUP : (o.confidence === 'estimated' ? STATUS.WATCH : STATUS.FIX),
+          title: o.title,
+          badge: meta.badge,
+          why: o.why || o.action,
+          value: hasAmount ? formatFullCurrency(o.amount) : (o.count || 0).toLocaleString(),
+          valueLabel: hasAmount ? (o.confidence === 'estimated' ? 'est. recoverable' : 'recoverable') : (o.isGrowthOpportunity ? 'growth opportunity' : 'issues open'),
+          ctaLabel: meta.ctaLabel,
+          onCta: () => navigate(meta.route),
+        };
+      })
+    : [];
+
+  // Top Things to Fix (heuristic fallback): every row reuses a value already computed
+  // above or already shown elsewhere on this page (same category counts ProductChecker.jsx
+  // charts). Dollar-backed rows sort first (real impact ordering); count-only rows follow.
   const fixCandidates = [];
 
   if (moneyWastedInAds > 0) {
@@ -613,10 +698,14 @@ const Dashboard = () => {
     });
   }
 
-  const visibleFixes = fixCandidates
-    .filter((f) => !dismissedFixKeys.includes(f.key))
-    .sort((a, b) => b.sortValue - a.sortValue)
-    .slice(0, 5);
+  // AI-ranked candidates keep the AI's own order (it already weighed overlaps and
+  // priority) — only the heuristic fallback gets re-sorted by raw dollar value.
+  const visibleFixes = hasAiOpportunities
+    ? aiFixCandidates.filter((f) => !dismissedFixKeys.includes(f.key))
+    : fixCandidates
+        .filter((f) => !dismissedFixKeys.includes(f.key))
+        .sort((a, b) => b.sortValue - a.sortValue)
+        .slice(0, 5);
 
   // Gross Profit KPI card extras — same COGS-completion data already used for the
   // "Add product costs" row in Top Things to Fix, matching the mock's Net Profit card
@@ -633,9 +722,11 @@ const Dashboard = () => {
         ? STATUS.GOOD
         : STATUS.FIX;
   const grossProfitStatusLabel = cogsIncomplete ? 'Partial — Set up' : undefined;
-  const grossProfitFootnote = grossProfitData.hasFinanceData && cogsIncomplete
-    ? `Only ${productsWithCogsCount} of ${totalProducts} products have costs added, so this is understated.`
-    : undefined;
+  const grossProfitFootnote = grossProfitData.hasFinanceData && cogsIncomplete ? (
+    <>
+      Only {productsWithCogsCount} of {totalProducts} products have costs added, so this is understated.
+    </>
+  ) : undefined;
 
   // Account health detail (2x2 grid, bottom-left of the money-goes/issue-mix row).
   // The backend only reports Good/Error + a descriptive message for these 4 metrics —
@@ -714,13 +805,29 @@ const Dashboard = () => {
               <VerdictBanner
                 status={overallVerdictStatus}
                 actionLabel="See top fixes"
-                onAction={() => navigate('/seller-central-checker/issues')}
+                onAction={scrollToTopFixes}
               >
                 Your account is{' '}
-                <span style={{ color: getStatusConfig(STATUS.GOOD).color, fontWeight: 600 }}>
-                  {healthPercentage}% healthy
+                <span style={{ color: getStatusConfig(healthPillStatus).color, fontWeight: 600 }}>
+                  {healthDescriptor} ({healthPercentage}%)
                 </span>
-                {attentionItems.length > 0 ? (
+                {hasAiOpportunities ? (
+                  <>
+                    {' '}— but{' '}
+                    <span style={{ color: getStatusConfig(overallVerdictStatus).color, fontWeight: 600 }}>
+                      {topOpportunities.opportunities.length} thing{topOpportunities.opportunities.length === 1 ? '' : 's'} need{topOpportunities.opportunities.length === 1 ? 's' : ''} attention
+                    </span>
+                    {recoverableAmount > 0 && (
+                      <>
+                        {' '}and about{' '}
+                        <span style={{ fontWeight: 600 }}>{formatFullCurrency(recoverableAmount)}/mo</span>
+                        {' '}is recoverable
+                      </>
+                    )}
+                    {'. '}
+                    {topOpportunityPhrase && <>Start with {topOpportunityPhrase}.</>}
+                  </>
+                ) : attentionItems.length > 0 ? (
                   <>
                     {' '}— but{' '}
                     <span style={{ color: getStatusConfig(overallVerdictStatus).color, fontWeight: 600 }}>
@@ -774,23 +881,93 @@ const Dashboard = () => {
               onClick={() => navigate('/seller-central-checker/ppc-dashboard')}
             />
 
-            <KPICard
-              label="Gross Profit"
-              meaning="After all fees, ads and costs"
-              tooltip="Sales minus Amazon fees, refunds, overhead, PPC spend, and COGS (when entered) — the same figure shown in Where Your Money Goes below."
-              loading={grossProfitData.loading}
-              value={grossProfitData.hasFinanceData ? formatFullCurrency(grossProfitData.grossProfitRaw) : undefined}
-              secondaryValue={grossProfitMarginLabel}
-              status={grossProfitStatus}
-              statusLabel={grossProfitStatusLabel}
-              footnote={grossProfitFootnote}
-              noData={grossProfitData.hasFinanceData ? undefined : {
-                message: 'No finance data available for this period yet.',
-                actionLabel: 'View breakdown',
-                onAction: (e) => { e.preventDefault(); scrollToTotalSales(); },
-              }}
+            {/* Sales & Profit — a two-value variant of the KPI card. Total Sales and Gross
+                Profit get identical type treatment (same size/weight) so neither reads as
+                "the real number" with the other as an afterthought. */}
+            <div
+              className='rounded-2xl border p-5 flex flex-col gap-2.5 transition-colors cursor-pointer'
+              style={{ background: COLORS.surface, borderColor: COLORS.border }}
               onClick={() => navigate('/seller-central-checker/profitibility-dashboard')}
-            />
+              role='button'
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  navigate('/seller-central-checker/profitibility-dashboard');
+                }
+              }}
+            >
+              <div className='flex items-start gap-2 min-h-[32px]'>
+                <div>
+                  <div className='text-sm font-semibold uppercase tracking-wide' style={{ color: COLORS.textSecondary }}>Sales &amp; Profit</div>
+                  <div className='text-xs mt-0.5' style={{ color: COLORS.textMuted }}>What you sold vs. what you kept</div>
+                </div>
+                <div className='ml-auto'>
+                  <InfoTooltip
+                    text='Total Sales is everything sold this period. Gross Profit is Sales minus Amazon fees, refunds, overhead, PPC spend, and COGS (when entered) — the same figure shown in Where Your Money Goes below.'
+                    position='right'
+                  />
+                </div>
+              </div>
+
+              {grossProfitData.loading ? (
+                <>
+                  <div className='h-6 rounded animate-pulse' style={{ background: COLORS.border }} />
+                  <div className='h-6 rounded animate-pulse' style={{ background: COLORS.border }} />
+                  <div className='h-4 w-24 rounded animate-pulse' style={{ background: COLORS.border }} />
+                </>
+              ) : !grossProfitData.hasFinanceData ? (
+                <>
+                  <StatusPill status={STATUS.SETUP} />
+                  <div className='text-sm' style={{ color: COLORS.textSecondary }}>No finance data available for this period yet.</div>
+                  <a
+                    href='#'
+                    onClick={(e) => { e.preventDefault(); scrollToTotalSales(); }}
+                    className='text-sm font-semibold'
+                    style={{ color: COLORS.accent }}
+                  >
+                    View breakdown →
+                  </a>
+                </>
+              ) : (
+                <>
+                  {/* Stacked, not side-by-side — at this card's width (~270px in the 4-col
+                      grid) two numbers sharing one row forced ellipsis-truncation on real
+                      values. Full-width rows give each figure room to always render in full. */}
+                  <div className='flex flex-col gap-2'>
+                    <div className='flex items-baseline justify-between gap-3'>
+                      <div className='text-xs font-semibold uppercase tracking-wide' style={{ color: COLORS.textMuted }}>Total Sales</div>
+                      <div className='text-2xl font-bold tracking-tight tabular-nums' style={{ color: COLORS.textPrimary }}>
+                        {formatFullCurrency(grossProfitData.totalSales)}
+                      </div>
+                    </div>
+                    <div className='h-px' style={{ background: COLORS.border }} />
+                    <div className='flex items-baseline justify-between gap-3'>
+                      <div className='text-xs font-semibold uppercase tracking-wide' style={{ color: COLORS.textMuted }}>Gross Profit</div>
+                      <div
+                        className='text-2xl font-bold tracking-tight tabular-nums'
+                        style={{ color: grossProfitData.grossProfitRaw >= 0 ? getStatusConfig(STATUS.GOOD).color : getStatusConfig(STATUS.FIX).color }}
+                      >
+                        {formatFullCurrency(grossProfitData.grossProfitRaw)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {grossProfitMarginLabel && (
+                    <div className='text-sm font-medium' style={{ color: COLORS.textSecondary }}>{grossProfitMarginLabel}</div>
+                  )}
+
+                  {grossProfitStatus && <StatusPill status={grossProfitStatus} label={grossProfitStatusLabel} />}
+
+                  {grossProfitFootnote && (
+                    <>
+                      <div className='h-px' style={{ background: COLORS.border }} />
+                      <div className='text-sm' style={{ color: COLORS.textMuted }}>{grossProfitFootnote}</div>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
 
             <div className='rounded-2xl border flex items-center gap-4 p-5' style={{ background: COLORS.surface, borderColor: COLORS.border }}>
               <div className='flex-1 min-w-0 flex flex-col gap-2.5'>
@@ -826,7 +1003,7 @@ const Dashboard = () => {
 
           {/* Top Things to Fix — every row reuses a value already computed above, or already
               shown elsewhere on this page (ProductChecker.jsx's category counts). */}
-          <div className='rounded-2xl border overflow-hidden mb-[22px]' style={{ background: COLORS.surface, borderColor: COLORS.border }}>
+          <div ref={topFixesSectionRef} className='rounded-2xl border overflow-hidden mb-[22px]' style={{ background: COLORS.surface, borderColor: COLORS.border }}>
             <div className='flex items-center gap-4 px-7 py-5 border-b flex-wrap' style={{ borderColor: COLORS.border }}>
               <div className='flex-1 min-w-[240px]'>
                 <h2 className='m-0 text-xl font-semibold' style={{ color: COLORS.textPrimary }}>Top things to fix</h2>

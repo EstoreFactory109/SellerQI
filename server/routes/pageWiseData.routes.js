@@ -20,6 +20,7 @@ const {
     getProductCheckerData,
     getTop4ProductsOptimized,
     getTopPriorityProductsToFix,
+    getTopOpportunities,
     getProfitabilityData,
     getProfitabilitySummary,
     getPPCData,
@@ -143,6 +144,12 @@ router.get('/top4-products', auth, getLocation, analyseDataCache(3600, 'top4-pro
 // Returns top 4 products with issues, sorted by highest sales (desc)
 // Cache TTL: 1 hour
 router.get('/top-priority-products', auth, getLocation, analyseDataCache(3600, 'top-priority-products'), getTopPriorityProductsToFix);
+
+// ===== TOP OPPORTUNITIES (AI-ranked money recovery) =====
+// Returns the top 5-6 actions to recover the most money, chosen by the LLM from a
+// pre-ranked shortlist. Reads the weekly pre-computed result — no OpenAI call here.
+// Cache TTL: 1 hour
+router.get('/top-opportunities', auth, getLocation, analyseDataCache(3600, 'top-opportunities'), getTopOpportunities);
 
 // ===== MULTI-PHASE DASHBOARD (Progressive Loading) =====
 // Phase 1: Instant (~50ms) - precomputed error counts, product counts, date range

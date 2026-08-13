@@ -20,6 +20,28 @@ const SUNDAY_FUNCTIONS = {
         requiresAdsToken: true,
         apiDataKey: 'keywordRecommendations'
     },
+    // ── 'ltsfData' (Long-Term Storage Fee Charges) is DELIBERATELY NOT REGISTERED ──
+    // The sync exists at Services/Sp_API/GET_FBA_FULFILLMENT_LONGTERM_STORAGE_FEE_CHARGES_DATA.js
+    // and its report TYPE is verified, but its TSV column mapping has never been
+    // checked against a live response — no public source documents this report's
+    // headers. Running it unverified would silently store $0 long-term storage
+    // fees and burn a weekly report-quota slot for nothing.
+    //
+    // To enable:
+    //   1. node server/scripts/discoverLtsfReportHeaders.js --user-id=<id> --country=<CC> --region=<RR>
+    //   2. Correct the findField() candidate lists in the sync file to the real headers
+    //   3. Restore the entry below, and re-add 'ltsfData' to the batch-routing list
+    //      and _SLICE_CATEGORY_MAP.inventory in ScheduledIntegration.js
+    //
+    // 'ltsfData': {
+    //     service: require('../Sp_API/GET_FBA_FULFILLMENT_LONGTERM_STORAGE_FEE_CHARGES_DATA.js'),
+    //     functionName: null, // Default export, use service directly
+    //     description: 'Long-Term Storage Fee Charges',
+    //     requiresAccessToken: true,
+    //     apiDataKey: 'ltsfData',
+    //     isDefaultExport: true
+    // },
+
     // Issue calculation - runs after productReview to update issue counts
     // This calculates/updates IssueSummary and per-product issueCount
     'issueSummary': {
@@ -37,6 +59,16 @@ const SUNDAY_FUNCTIONS = {
         apiDataKey: 'issuesData',
         isCalculationService: true,
         runOrder: 101 // Runs after productIssues
+    },
+    // AI-selected top 5-6 money-recovery actions. Must run AFTER issuesData so the
+    // issue arrays (and their recoverable $ amounts) it reads are fresh.
+    'topOpportunities': {
+        service: require('../AI/TopOpportunitiesService.js'),
+        functionName: 'calculateAndStoreTopOpportunities',
+        description: 'Top Opportunities (AI-ranked money recovery)',
+        apiDataKey: 'topOpportunities',
+        isCalculationService: true,
+        runOrder: 102 // Runs after issuesData
     }
 };
 

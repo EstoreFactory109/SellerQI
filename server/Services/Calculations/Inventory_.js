@@ -1,3 +1,5 @@
+const { computeInventoryUnfulfillableAmount, computeInventoryStrandedAmount } = require('./RecoverableAmountUtils.js');
+
 /**
  * Map currency code to country code
  */
@@ -125,7 +127,12 @@ const replenishmentQty = (productArr) => {
     return replenishmentArr;
 }
 
-const inventoryPlanningData=(data)=>{
+/**
+ * @param {Object} data - raw inventory planning row for one ASIN
+ * @param {Object} costMap - {[asin]: per-unit COGS}, default {} when unknown
+ * @param {Object} ltsfAmountMap - {[asin]: real long-term storage fee $ from the LTSF sync}, default {} when not yet synced
+ */
+const inventoryPlanningData=(data, costMap = {}, ltsfAmountMap = {})=>{
     let longTermStorageFees={};
     const Total=Number(data.quantity_to_be_charged_ais_181_210_days)+Number(data.quantity_to_be_charged_ais_211_240_days)+Number(data.quantity_to_be_charged_ais_241_270_days)+Number(data.quantity_to_be_charged_ais_271_300_days)+Number(data.quantity_to_be_charged_ais_301_330_days)+Number(data.quantity_to_be_charged_ais_331_365_days)+Number(data.quantity_to_be_charged_ais_365_plus_days);
 
@@ -133,24 +140,30 @@ const inventoryPlanningData=(data)=>{
         longTermStorageFees.status="Error";
         longTermStorageFees.Message="Your inventory has been stored in FBA for a long period, making it eligible for Long-Term Storage Fees (LTSF). These fees can significantly increase your operating costs, reducing profit margins.";
         longTermStorageFees.HowToSolve="Review your inventory levels and sales velocity to identify slow-moving or stagnant stock. Consider running promotions or lowering prices to increase sales and reduce inventory levels. Alternatively, remove excess inventory from FBA to avoid additional LTSF. Strategically plan your inventory replenishment based on demand forecasts to prevent future stock from becoming eligible for LTSF.";
+        // Real $ from the GET_FBA_FULFILLMENT_LONGTERM_STORAGE_FEE_CHARGES_DATA sync when
+        // available; 0 until that sync is enabled + has run for this account.
+        longTermStorageFees.amount = ltsfAmountMap[data.asin] || 0;
     }else{
         longTermStorageFees.status="Success";
         longTermStorageFees.Message="Great job managing your FBA inventory efficiently! Keeping your inventory levels optimized helps avoid Long-Term Storage Fees and maximizes your profitability." ;
         longTermStorageFees.HowToSolve="";
+        longTermStorageFees.amount = 0;
     }
-    
+
     let unfulfillable={}
 
     if(Number(data.unfulfillable_quantity)>0){
         unfulfillable.status="Error";
         unfulfillable.Message=`You have unfulfillable inventory in FBA, which can tie up resources and increase operational costs due to items that cannot be sold in their current condition. Unfulfillable Quantity: ${data.unfulfillable_quantity} units`;
         unfulfillable.HowToSolve="Review the details of your unfulfillable inventory through your Amazon Seller Central account to understand the reasons for its status (such as damaged, customer returns, etc.). Decide whether to have the inventory returned to you for assessment, refurbishing, or disposal. If the items are repairable or repackageable, consider doing so to move them back to fulfillable status. Implement strategies to reduce future occurrences, such as improving packaging or quality control processes.";
+        unfulfillable.amount = computeInventoryUnfulfillableAmount({ costPerUnit: costMap[data.asin], quantity: Number(data.unfulfillable_quantity) });
     }else{
         unfulfillable.status="Success";
         unfulfillable.Message="Excellent! Your FBA inventory is fully fulfillable, which maximizes your sales potential and operational efficiency. Continue to maintain high quality and packaging standards to keep your inventory in sellable condition." ;
         unfulfillable.HowToSolve="";
+        unfulfillable.amount = 0;
     }
-    
+
     return {
         asin: data.asin,
         longTermStorageFees,
@@ -159,14 +172,22 @@ const inventoryPlanningData=(data)=>{
 
 }
 
-const inventoryStrandedData=(data)=>{
-    
+/**
+ * @param {Object} data - raw stranded-inventory row for one ASIN
+ * @param {Object} costMap - {[asin]: per-unit COGS}, default {} when unknown
+ * @param {Object} qtyMap - {[asin]: total FBA quantity}, used as a proxy for
+ *   stranded units since Amazon's Stranded Inventory report has no quantity field.
+ */
+const inventoryStrandedData=(data, costMap = {}, qtyMap = {})=>{
+
     return {
         asin:data.asin,
         status:"Error",
         Message:"Some of your inventory is stranded, meaning it is in Amazon’s fulfillment centers but not actively listed for sale. Stranded inventory can lead to unnecessary storage fees and lost sales opportunities.",
         HowToSolve:`Check the Stranded Inventory Report in Seller Central > Inventory > Manage Inventory to identify affected SKUs. Determine the reason for the issue, such as listing errors, pricing rules, or account suspensions. Resolve it by relisting the product, adjusting pricing, or creating a removal order if needed. Regularly monitor stranded inventory to prevent accumulation and reduce unnecessary FBA storage fees.
-        Reason: ${data.stranded_reason}`
+        Reason: ${data.stranded_reason}`,
+        amount: computeInventoryStrandedAmount({ costPerUnit: costMap[data.asin], quantity: qtyMap[data.asin] }),
+        amountIsEstimated: true
     }
 
 }

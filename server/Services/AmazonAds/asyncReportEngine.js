@@ -69,17 +69,43 @@ async function runAsyncAdsReports(args) {
 
     // Scope to (account, day, phase-group) so phases sharing a runDate (e.g. sched_ads
     // and sched_batch_4 in the same daily run) never see each other's rows.
+    //
+    // NOTE the filter deliberately has NO `paramsKey`: it is the "which rows are mine?"
+    // scope, NOT the "has my report been submitted yet?" test. Those are different
+    // questions and conflating them was a real bug — see the per-spec split below.
     const baseFilter = { userId: String(userId), country, region, runDate, group, phase };
     const specByKey = new Map(specs.map(s => [`${s.service}|${s.paramsKey}`, s]));
 
     const existing = await Model.find(baseFilter).lean();
-    const justSubmitted = existing.length === 0;
 
-    if (justSubmitted) {
-        // ---- SUBMIT stage: create every report, persist a SUBMITTED row -------
-        await submitAll({ Model, baseFilter, specs, maxPollAttempts });
-    } else {
-        // ---- POLL stage: advance each not-yet-terminal report ----------------
+    // ── Decide SUBMIT vs POLL PER SPEC, never for the bucket as a whole. ──
+    // This used to be `if (existing.length === 0) submitAll(specs) else pollAll(...)`, i.e. a
+    // single row anywhere in the bucket suppressed the submit for EVERY spec — including specs
+    // that had never been submitted at all. `pollAll` then skips rows it has no spec for, finds
+    // nothing pending, and returns done:true, so the caller's read-back
+    // (`find({...baseFilter, paramsKey})`) hits nothing and reports "no engine row for chunk".
+    //
+    // That is not hypothetical and not a timing race — it is deterministic and was live for
+    // finance. `runDate` there is `chunk.endDate` (a DATA date, not a run date), and chunk
+    // boundaries re-align whenever the shared FinanceSyncLog cursor moves, so a later run
+    // legitimately asks for a different `paramsKey` under a `runDate` an earlier run already
+    // occupied. Rows live 30 days (model TTL), so the stale one is always still there. Observed
+    // on account 6a57b823571ceb9266953c30: bucket (runDate 2026-08-02, group sched_finance) held
+    // `2026-08-01_2026-08-02` from Aug 4, which silently blocked `2026-07-31_2026-08-02` on Aug 7,
+    // and the failure then re-armed itself daily via the catch-up sweeper.
+    //
+    // Both halves are safe to run in the same tick: submitAll upserts on the unique
+    // (account, runDate, group, service, paramsKey) key, and pollAll already tolerates rows whose
+    // spec is absent — this is just the mirror of that same tolerance.
+    const existingKeys = new Set(existing.map(r => `${r.service}|${r.paramsKey}`));
+    const missingSpecs = specs.filter(s => !existingKeys.has(`${s.service}|${s.paramsKey}`));
+
+    if (missingSpecs.length > 0) {
+        // ---- SUBMIT stage: create the not-yet-submitted reports ---------------
+        await submitAll({ Model, baseFilter, specs: missingSpecs, maxPollAttempts });
+    }
+    if (existing.length > 0) {
+        // ---- POLL stage: advance each not-yet-terminal report -----------------
         await pollAll({ Model, baseFilter, rows: existing, specByKey });
     }
 
@@ -88,9 +114,12 @@ async function runAsyncAdsReports(args) {
     const pending = rows.filter(r => !TERMINAL.has(r.status));
 
     if (pending.length > 0) {
-        // First wait after SUBMIT uses the (long) initial delay; subsequent re-checks use
-        // the shorter poll delay.
-        const delayMs = justSubmitted ? firstDelayMs : pollDelayMs;
+        // A tick that submitted anything new waits the (long) initial delay before its first
+        // status check; a pure re-check uses the shorter poll delay. Keyed on whether THIS tick
+        // submitted, so a mixed tick (some polled, some newly submitted) still gives the fresh
+        // report its full head start instead of burning poll attempts on a report Amazon has
+        // only just accepted.
+        const delayMs = missingSpecs.length > 0 ? firstDelayMs : pollDelayMs;
         return { done: false, reschedule: { delayMs, pollAttempt: pollAttempt + 1 } };
     }
 

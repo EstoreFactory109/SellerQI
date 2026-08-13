@@ -22,6 +22,7 @@ const AsinWiseSalesRun = require('../../models/finance/AsinWiseSalesRunModel.js'
 const AsinWiseSalesItem = require('../../models/finance/AsinWiseSalesItemModel.js');
 const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
 const DataFetchTracking = require('../../models/system/DataFetchTrackingModel.js');
+const { computeProfitabilityAmount, computeSponsoredAdsAmount, computeBuyBoxBenchmark, computeBuyBoxLostRevenueAmount } = require('./RecoverableAmountUtils.js');
 
 // Chunk size for yielding to event loop during large data processing
 const YIELD_CHUNK_SIZE = 500;
@@ -523,8 +524,9 @@ const calculateCampaignWiseTotalSalesAndCost = (dateWisePPCData) => {
  */
 const calculateProfitabilityErrors = (profitibilityData, totalProducts = []) => {
     let totalErrors = 0;
+    let totalAmount = 0;
     const errorDetails = [];
-    
+
     // Create a map of ASIN to product name for quick lookup
     const productNameMap = new Map();
     if (Array.isArray(totalProducts)) {
@@ -534,29 +536,33 @@ const calculateProfitabilityErrors = (profitibilityData, totalProducts = []) => 
             }
         });
     }
-    
+
     profitibilityData.forEach((item) => {
         // Calculate net profit (assuming COGS is 0 initially, will be updated when user enters values)
         const netProfit = (item.sales || 0) - (item.ads || 0) - (item.amzFee || 0);
-        
+
         // Determine status based on profit margin
         const profitMargin = item.sales > 0 ? (netProfit / item.sales) * 100 : 0;
-        
+
         // Count as error if profit margin is below 10% or negative
         if (profitMargin < 10 || netProfit < 0) {
             totalErrors++;
+            const errorType = netProfit < 0 ? 'negative_profit' : 'low_margin';
+            const amount = computeProfitabilityAmount({ netProfit, profitMargin, sales: item.sales, issueType: errorType });
+            totalAmount += amount;
             errorDetails.push({
                 asin: item.asin,
                 productName: productNameMap.get(item.asin) || null,
                 sales: item.sales,
                 netProfit: netProfit,
                 profitMargin: profitMargin,
-                errorType: netProfit < 0 ? 'negative_profit' : 'low_margin'
+                errorType,
+                amount
             });
         }
     });
-    
-    return { totalErrors, errorDetails };
+
+    return { totalErrors, errorDetails, totalAmount };
 };
 
 /**
@@ -583,18 +589,21 @@ const calculateSponsoredAdsErrors = (
     keywords = []
 ) => {
     let totalErrors = 0;
+    let totalAmount = 0;
     const errorDetails = [];
-    
+
     // 1. High ACOS Campaigns (ACOS > 40% and sales > 0)
     if (Array.isArray(campaignWiseTotalSalesAndCost)) {
         campaignWiseTotalSalesAndCost.forEach((campaign) => {
             const spend = parseFloat(String(campaign.totalSpend)) || 0;
             const sales = parseFloat(String(campaign.totalSales)) || 0;
             const acos = sales > 0 ? (spend / sales) * 100 : 0;
-            
+
             // Count as error if ACOS > 40% and has sales
             if (acos > 40 && sales > 0) {
                 totalErrors++;
+                const amount = computeSponsoredAdsAmount({ errorType: 'high_acos_campaign', spend, sales });
+                totalAmount += amount;
                 errorDetails.push({
                     campaignId: campaign.campaignId,
                     campaignName: campaign.campaignName || 'Unknown Campaign',
@@ -602,7 +611,8 @@ const calculateSponsoredAdsErrors = (
                     sales: sales,
                     acos: acos,
                     errorType: 'high_acos_campaign',
-                    source: 'campaign'
+                    source: 'campaign',
+                    amount
                 });
             }
         });
@@ -641,6 +651,8 @@ const calculateSponsoredAdsErrors = (
         // Count as error if cost > 0 and sales < 0.01 (wasted spend)
         if (keyword.cost > 0 && keyword.attributedSales30d < 0.01) {
             totalErrors++;
+            const amount = computeSponsoredAdsAmount({ errorType: 'wasted_spend_keyword', spend: keyword.cost, sales: keyword.attributedSales30d });
+            totalAmount += amount;
             errorDetails.push({
                 keyword: keyword.keyword,
                 keywordId: keyword.keywordId,
@@ -650,7 +662,8 @@ const calculateSponsoredAdsErrors = (
                 spend: keyword.cost,
                 sales: keyword.attributedSales30d,
                 errorType: 'wasted_spend_keyword',
-                source: 'keyword'
+                source: 'keyword',
+                amount
             });
         }
     });
@@ -690,6 +703,8 @@ const calculateSponsoredAdsErrors = (
         // Count as error if clicks >= 10 and sales < 0.01
         if (term.clicks >= 10 && term.sales < 0.01) {
             totalErrors++;
+            const amount = computeSponsoredAdsAmount({ errorType: 'search_term_zero_sales', spend: term.spend, sales: term.sales });
+            totalAmount += amount;
             errorDetails.push({
                 searchTerm: term.searchTerm,
                 keyword: term.keyword,
@@ -700,7 +715,8 @@ const calculateSponsoredAdsErrors = (
                 spend: term.spend,
                 sales: term.sales,
                 errorType: 'search_term_zero_sales',
-                source: 'search_term'
+                source: 'search_term',
+                amount
             });
         }
     });
@@ -739,6 +755,9 @@ const calculateSponsoredAdsErrors = (
             if (!existsInManual) {
                 totalErrors++;
                 const acos = term.sales > 0 ? (term.spend / term.sales) * 100 : 0;
+                // Not a loss (sales already > $30) — a scaling opportunity, so amount is 0.
+                const amount = computeSponsoredAdsAmount({ errorType: 'auto_campaign_migration_needed', spend: term.spend, sales: term.sales });
+                totalAmount += amount;
                 errorDetails.push({
                     searchTerm: term.searchTerm,
                     keyword: term.keyword || '',
@@ -750,13 +769,14 @@ const calculateSponsoredAdsErrors = (
                     clicks: term.clicks,
                     acos: acos,
                     errorType: 'auto_campaign_migration_needed',
-                    source: 'auto_campaign_insight'
+                    source: 'auto_campaign_insight',
+                    amount
                 });
             }
         }
     });
-    
-    return { totalErrors, errorDetails };
+
+    return { totalErrors, errorDetails, totalAmount };
 };
 
 /**
@@ -1000,6 +1020,15 @@ const analyseData = async (data, userId = null) => {
             if (item && item.asin) strandedInventoryMap.set(item.asin, item);
         });
     }
+
+    // Sum recoverable $ across inventory error records (unfulfillable, LTSF, stranded)
+    let totalInventoryRecoverableAmount = 0;
+    inventoryPlanningMap.forEach(item => {
+        totalInventoryRecoverableAmount += (item.longTermStorageFees?.amount || 0) + (item.unfulfillable?.amount || 0);
+    });
+    strandedInventoryMap.forEach(item => {
+        totalInventoryRecoverableAmount += item.amount || 0;
+    });
     const inboundNonComplianceMap = new Map();
     if (activeInventoryAnalysis.inboundNonCompliance) {
         activeInventoryAnalysis.inboundNonCompliance.forEach(item => {
@@ -1038,18 +1067,30 @@ const analyseData = async (data, userId = null) => {
     // Get products without buybox - prioritize MCP BuyBox data, fallback to legacy ConversionData
     let productsWithOutBuyboxError = [];
     if (data.BuyBoxData && Array.isArray(data.BuyBoxData.asinBuyBoxData)) {
+        // Seller's own conversion rate + price from ASINs that DO have the Buy Box —
+        // used to estimate lost revenue for the ones that don't, without an external benchmark.
+        const { benchmarkCVR, benchmarkPrice } = computeBuyBoxBenchmark(data.BuyBoxData.asinBuyBoxData);
+
         // Use MCP BuyBox data - filter products with buyBoxPercentage = 0
         productsWithOutBuyboxError = data.BuyBoxData.asinBuyBoxData
             .filter((p) => p && p.buyBoxPercentage === 0 && p.childAsin && activeProductSet.has(p.childAsin))
-            .map((p) => ({ 
-                asin: p.childAsin, 
-                data: { 
-                    status: "Error", 
+            .map((p) => ({
+                asin: p.childAsin,
+                data: {
+                    status: "Error",
                     asin: p.childAsin,
                     buyBoxPercentage: p.buyBoxPercentage,
                     pageViews: p.pageViews,
-                    sessions: p.sessions
-                } 
+                    sessions: p.sessions,
+                    amount: computeBuyBoxLostRevenueAmount({
+                        sessions: p.sessions,
+                        actualRevenue: p.sales?.amount || 0,
+                        benchmarkCVR,
+                        benchmarkPrice
+                    }),
+                    amountIsEstimated: true,
+                    estimatedFromSingleDaySnapshot: true
+                }
             }));
         logger.info("Using MCP BuyBox data for products without buybox", {
             count: productsWithOutBuyboxError.length,
@@ -1070,7 +1111,13 @@ const analyseData = async (data, userId = null) => {
             buyBoxDataKeys: data.BuyBoxData ? Object.keys(data.BuyBoxData) : []
         });
     }
-    
+
+    // Sum estimated recoverable $ across Buy Box loss records (0 for the legacy
+    // ConversionData fallback path, which carries no sessions/sales data)
+    const totalConversionRecoverableAmount = productsWithOutBuyboxError.reduce(
+        (sum, p) => sum + (p.data?.amount || 0), 0
+    );
+
     // Override count with MCP data if available (for dashboard display)
     // Use the stored count from database, which is more accurate than filtering
     const productsWithoutBuyBoxCount = (data.BuyBoxData && data.BuyBoxData.productsWithoutBuyBox !== undefined && data.BuyBoxData.productsWithoutBuyBox !== null) 
@@ -1598,6 +1645,10 @@ const analyseData = async (data, userId = null) => {
         ProductWiseSponsoredAdsGraphData: data.ProductWiseSponsoredAdsGraphData || [],
         totalProfitabilityErrors: profitabilityErrorsData.totalErrors,
         totalSponsoredAdsErrors: sponsoredAdsErrorsData.totalErrors,
+        totalProfitabilityRecoverableAmount: profitabilityErrorsData.totalAmount || 0,
+        totalSponsoredAdsRecoverableAmount: sponsoredAdsErrorsData.totalAmount || 0,
+        totalInventoryRecoverableAmount: totalInventoryRecoverableAmount || 0,
+        totalConversionRecoverableAmount: totalConversionRecoverableAmount || 0,
         ProductWiseSponsoredAds: activeProductWiseSponsoredAds,
         profitabilityErrorDetails: profitabilityErrorsData.errorDetails,
         sponsoredAdsErrorDetails: sponsoredAdsErrorsData.errorDetails,

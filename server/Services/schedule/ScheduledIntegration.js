@@ -1072,7 +1072,7 @@ class ScheduledIntegration {
             }
             // Batch 5: Calculation services (run after all API fetches complete)
             // These are marked with isCalculationService: true in ScheduleConfig
-            if (['issueSummary', 'productIssues', 'issuesData'].includes(functionKey)) {
+            if (['issueSummary', 'productIssues', 'issuesData', 'topOpportunities'].includes(functionKey)) {
                 return 5;
             }
             // Batch 6: Review order ingestion (must complete before sender)
@@ -2560,7 +2560,7 @@ class ScheduledIntegration {
         // Keywords slice (batch 4)
         keywords: ['negativeKeywords', 'searchKeywords', 'keywordRecommendations'],
         // Issues slice (calc_review phase)
-        issues: ['issueSummary', 'productIssues', 'issuesData', 'reviewOrderIngestion', 'reviewRequestSender']
+        issues: ['issueSummary', 'productIssues', 'issuesData', 'topOpportunities', 'reviewOrderIngestion', 'reviewRequestSender']
     };
 
     /**

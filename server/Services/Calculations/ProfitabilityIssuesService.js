@@ -14,6 +14,7 @@ const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js')
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const { getAsinWisePL } = require('../Finance/FinanceDashboardReadService.js');
 const { getProductWiseSponsoredAdsData } = require('../amazon-ads/ProductWiseSponsoredAdsService.js');
+const { computeProfitabilityAmount } = require('./RecoverableAmountUtils.js');
 
 // ── Issue calculation (unchanged logic) ──
 
@@ -57,7 +58,8 @@ const calculateProfitabilityIssues = (profitabilityData) => {
                 unitsSold: item.quantity || item.unitsSold || 0,
                 issueType,
                 severity,
-                recommendation
+                recommendation,
+                amount: parseFloat(computeProfitabilityAmount({ netProfit, profitMargin, sales, issueType }).toFixed(2))
             });
         }
     });

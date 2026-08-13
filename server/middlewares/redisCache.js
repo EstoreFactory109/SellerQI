@@ -267,7 +267,7 @@ const clearAnalyseCache = async (userId, country, region, adminId = null) => {
         const redisClient = getRedisClient();
         
         // List of all page types that are cached
-        const pageTypes = ['navbar', 'dashboard', 'profitability', 'profitability-metrics', 'profitability-chart', 'profitability-issues-summary', 'ppc', 'issues', 'issues-by-product', 'keyword-analysis', 'reimbursement', 'inventory', 'your-products', 'your-products-v2-initial', 'your-products-v2-products', 'your-products-v3-summary', 'your-products-v3-active', 'your-products-v3-inactive', 'your-products-v3-incomplete', 'your-products-v3-without-aplus', 'your-products-v3-not-targeted-in-ads', 'asin-wise-sales', 'ppc-metrics-latest', 'ppc-metrics-graph', 'ppc-metrics-history', 'ppc-units-sold-latest', 'ppc-units-sold-summary', 'ppc-summary', 'ppc-tab-counts'];
+        const pageTypes = ['navbar', 'dashboard', 'profitability', 'profitability-metrics', 'profitability-chart', 'profitability-issues-summary', 'ppc', 'issues', 'issues-by-product', 'keyword-analysis', 'reimbursement', 'inventory', 'your-products', 'your-products-v2-initial', 'your-products-v2-products', 'your-products-v3-summary', 'your-products-v3-active', 'your-products-v3-inactive', 'your-products-v3-incomplete', 'your-products-v3-without-aplus', 'your-products-v3-not-targeted-in-ads', 'asin-wise-sales', 'ppc-metrics-latest', 'ppc-metrics-graph', 'ppc-metrics-history', 'ppc-units-sold-latest', 'ppc-units-sold-summary', 'ppc-summary', 'ppc-tab-counts', 'top-opportunities'];
         
         // Clear cache for all page types
         const clearPromises = pageTypes.map(pageType => {

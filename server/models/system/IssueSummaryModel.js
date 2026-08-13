@@ -78,7 +78,38 @@ const IssueSummarySchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
-    
+
+    // Dollar amount recoverable by fixing profitability errors (negative_profit / low_margin)
+    totalProfitabilityRecoverableAmount: {
+        type: Number,
+        default: 0
+    },
+
+    // Dollar amount recoverable by fixing sponsored ads errors (wasted spend, high ACOS overspend)
+    totalSponsoredAdsRecoverableAmount: {
+        type: Number,
+        default: 0
+    },
+
+    // Dollar amount recoverable by fixing inventory errors (unfulfillable, LTSF, stranded)
+    totalInventoryRecoverableAmount: {
+        type: Number,
+        default: 0
+    },
+
+    // Estimated $ recoverable by fixing Buy Box loss (Conversion) — extrapolated
+    // from a single-day BuyBoxData snapshot using the seller's own benchmark CVR
+    totalConversionRecoverableAmount: {
+        type: Number,
+        default: 0
+    },
+
+    // Combined recoverable amount across profitability + sponsored ads + inventory + conversion
+    totalRecoverableAmount: {
+        type: Number,
+        default: 0
+    },
+
     // Number of products with at least one issue
     numberOfProductsWithIssues: {
         type: Number,
@@ -137,6 +168,11 @@ IssueSummarySchema.statics.upsertIssueSummary = async function(userId, country, 
         totalRankingErrors: issueData.totalRankingErrors || 0,
         totalConversionErrors: issueData.totalConversionErrors || 0,
         totalAccountErrors: issueData.totalAccountErrors || 0,
+        totalProfitabilityRecoverableAmount: issueData.totalProfitabilityRecoverableAmount || 0,
+        totalSponsoredAdsRecoverableAmount: issueData.totalSponsoredAdsRecoverableAmount || 0,
+        totalInventoryRecoverableAmount: issueData.totalInventoryRecoverableAmount || 0,
+        totalConversionRecoverableAmount: issueData.totalConversionRecoverableAmount || 0,
+        totalRecoverableAmount: issueData.totalRecoverableAmount || 0,
         numberOfProductsWithIssues: issueData.numberOfProductsWithIssues || 0,
         totalActiveProducts: issueData.totalActiveProducts || 0,
         lastCalculatedAt: new Date(),
