@@ -581,7 +581,7 @@ const KeywordAnalysisDashboard = () => {
         th {
           padding: 12px 12px;
           text-align: left;
-          font-size: 11px;
+          font-size: 12px;
           font-weight: 600;
           color: ${COLORS.textMuted};
           text-transform: uppercase;
@@ -600,7 +600,7 @@ const KeywordAnalysisDashboard = () => {
         td {
           padding: 14px 12px;
           border-top: 1px solid ${COLORS.border};
-          font-size: 13px;
+          font-size: 14px;
           text-align: left;
           word-wrap: break-word;
           overflow-wrap: break-word;
@@ -619,7 +619,7 @@ const KeywordAnalysisDashboard = () => {
 
         .keyword-cell {
           font-weight: 600;
-          font-size: 14px;
+          font-size: 15px;
           color: ${COLORS.textPrimary};
           word-wrap: break-word;
           overflow-wrap: break-word;
@@ -628,9 +628,9 @@ const KeywordAnalysisDashboard = () => {
 
         .rank-pill {
           display: inline-block;
-          padding: 3px 9px;
+          padding: 4px 10px;
           border-radius: 7px;
-          font-size: 12px;
+          font-size: 13px;
           font-weight: 600;
         }
 
@@ -1142,7 +1142,7 @@ const KeywordAnalysisDashboard = () => {
                       </td>
                       <td>
                         {keyword.suggestedBid ? (
-                          <span style={{ fontSize: '11px', color: COLORS.textSecondary }}>
+                          <span style={{ fontSize: '13px', color: COLORS.textSecondary }}>
                             ${(keyword.suggestedBid.rangeStart / 100).toFixed(2)} - ${(keyword.suggestedBid.rangeEnd / 100).toFixed(2)}
                             <br />
                             <span style={{ color: '#7EA8F8', fontWeight: 600 }}>
