@@ -207,12 +207,8 @@ const LeftNavSection = () => {
         }
     }, [isSponsoredAdsPage]);
 
-    // Handle Sponsored Ads button click
+    // Handle Sponsored Ads button click — just toggles the dropdown, never navigates
     const handleSponsoredAdsClick = () => {
-        if (!isSponsoredAdsPage) {
-            // If not on sponsored ads page, navigate to campaign audit
-            navigate('/seller-central-checker/ppc-dashboard');
-        }
         setSponsoredAdsDropdownOpen(!sponsoredAdsDropdownOpen);
     };
 
