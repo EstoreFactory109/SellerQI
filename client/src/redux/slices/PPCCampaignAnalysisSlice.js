@@ -40,7 +40,7 @@ const initialState = {
     // Tab 0: High ACOS Campaigns
     highAcos: { ...initialTabState },
     // Tab 1: Wasted Spend Keywords
-    wastedSpend: { ...initialTabState },
+    wastedSpend: { ...initialTabState, totalWastedSpend: 0 },
     // Tab 2: Campaigns Without Negative Keywords
     noNegatives: { ...initialTabState },
     // Tab 3: Top Performing Keywords
@@ -359,6 +359,7 @@ const ppcCampaignAnalysisSlice = createSlice({
                     state.wastedSpend.data = action.payload.data;
                 }
                 state.wastedSpend.pagination = action.payload.pagination;
+                state.wastedSpend.totalWastedSpend = action.payload.totalWastedSpend ?? 0;
                 state.wastedSpend.lastFetched = Date.now();
             })
             .addCase(fetchWastedSpendKeywords.rejected, (state, action) => {
@@ -469,6 +470,8 @@ export const selectHighAcosLoading = (state) => state.ppcCampaignAnalysis?.highA
 export const selectWastedSpendKeywords = (state) => state.ppcCampaignAnalysis?.wastedSpend?.data || [];
 export const selectWastedSpendPagination = (state) => state.ppcCampaignAnalysis?.wastedSpend?.pagination;
 export const selectWastedSpendLoading = (state) => state.ppcCampaignAnalysis?.wastedSpend?.loading;
+// Full-dataset wasted-spend total (backend aggregate across ALL matching keywords, not just the loaded page).
+export const selectWastedSpendTotal = (state) => state.ppcCampaignAnalysis?.wastedSpend?.totalWastedSpend || 0;
 
 export const selectNoNegativesCampaigns = (state) => state.ppcCampaignAnalysis?.noNegatives?.data || [];
 export const selectNoNegativesPagination = (state) => state.ppcCampaignAnalysis?.noNegatives?.pagination;

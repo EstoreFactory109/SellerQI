@@ -54,8 +54,10 @@ import {
   selectAutoInsights,
   selectAutoInsightsPagination,
   selectAutoInsightsLoading,
+  selectWastedSpendTotal,
   resetTabPagination
 } from '../../redux/slices/PPCCampaignAnalysisSlice.js';
+import { COLORS, InfoTooltip } from '../../Components/Shared/index.js';
 
 import { parseLocalDate } from '../../utils/dateUtils.js';
 import { shouldUseCalendarDateRange } from '../../utils/totalSalesFilterUrl.js';
@@ -169,10 +171,10 @@ const TableSkeletonRows = ({ columns = 4, rows = 5 }) => {
   return (
     <>
       {Array.from({ length: rows }).map((_, idx) => (
-        <tr key={idx} className="border-b border-[#30363d]">
+        <tr key={idx} style={{ borderBottom: `1px solid ${COLORS.border}` }}>
           {Array.from({ length: columns }).map((_, colIdx) => (
             <td key={colIdx} className="py-3 px-2">
-              <div className="h-3 bg-[#30363d] rounded animate-pulse" style={{ width: `${60 + Math.random() * 30}%` }}></div>
+              <div className="h-3 rounded animate-pulse" style={{ width: `${60 + Math.random() * 30}%`, background: COLORS.border }}></div>
             </td>
           ))}
         </tr>
@@ -184,16 +186,16 @@ const TableSkeletonRows = ({ columns = 4, rows = 5 }) => {
 // Optimization Tips Component
 const OptimizationTip = ({ tip, icon = "💡" }) => {
   return (
-    <div className="mt-2 bg-blue-500/10 border border-blue-500/30 rounded p-2">
+    <div className="mt-2 rounded p-2" style={{ background: 'rgba(59,130,246,.1)', border: '1px solid rgba(59,130,246,.3)' }}>
       <div className="flex items-start gap-2">
-        <div className="flex-shrink-0 w-6 h-6 bg-blue-500/20 rounded flex items-center justify-center border border-blue-500/30">
-          <span className="text-blue-400 text-sm">{icon}</span>
+        <div className="flex-shrink-0 w-6 h-6 rounded flex items-center justify-center" style={{ background: 'rgba(59,130,246,.16)', border: '1px solid rgba(59,130,246,.3)' }}>
+          <span className="text-sm" style={{ color: '#7EA8F8' }}>{icon}</span>
         </div>
         <div className="flex-1">
-          <h4 className="text-xs font-semibold text-blue-400 mb-0.5">
+          <h4 className="text-xs font-semibold mb-0.5" style={{ color: '#7EA8F8' }}>
             Optimization Tip
           </h4>
-          <p className="text-xs text-blue-300 leading-relaxed">
+          <p className="text-xs leading-relaxed" style={{ color: COLORS.textSecondary }}>
             {tip}
           </p>
         </div>
@@ -369,6 +371,7 @@ const PPCDashboard = () => {
   const wastedSpendData = useSelector(selectWastedSpendKeywords);
   const wastedSpendPagination = useSelector(selectWastedSpendPagination);
   const wastedSpendLoading = useSelector(selectWastedSpendLoading);
+  const totalWastedSpend = useSelector(selectWastedSpendTotal);
 
   const selectedWastedRows = useMemo(
     () => wastedSpendData.filter((r) => selectedWastedKeys.includes(getWastedRowKey(r))),
@@ -640,7 +643,15 @@ const PPCDashboard = () => {
       dispatch(fetchPPCTabCounts());
     }
   }, [dispatch, info?.startDate, info?.endDate, info?.calendarMode]);
-  
+
+  // Fetch the wasted-spend total eagerly, independent of which tab is active,
+  // so the KPI caption and "Fix the waste" banner always reflect the real,
+  // current total rather than staying at 0 until the user visits that tab.
+  useEffect(() => {
+    dispatch(fetchWastedSpendKeywords({ page: 1, limit: itemsPerPage, startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
+    tabFetchAttempted.current.wastedSpend = true;
+  }, [dispatch, info?.startDate, info?.endDate]);
+
   // Fetch initial data for the first tab (High ACOS) on mount
   useEffect(() => {
     if (!tabFetchAttempted.current.highAcos && !highAcosLoading) {
@@ -1840,17 +1851,22 @@ const PPCDashboard = () => {
 
     const acos = ppcSales > 0 ? (spend / ppcSales) * 100 : 0;
 
-    // TACoS: prefer the backend value (uses SalesOnlyMetrics aggregated over
-    // the same window as PPC). Only fall back to the page's `info.TotalSales`
-    // / `TotalWeeklySale` if the backend didn't supply one.
-    if (tacos == null) {
-      let totalSales = 0;
+    // Real total-sales figure (all channels, same window as PPC sales) — prefer
+    // the backend's own aggregate over back-deriving one from TACoS.
+    let totalSales = ppcKPISummary?.totalSales != null ? Number(ppcKPISummary.totalSales) : 0;
+    if (!totalSales) {
       const totalSalesData = info?.TotalSales;
       if (Array.isArray(totalSalesData) && totalSalesData.length > 0) {
         totalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
       } else {
         totalSales = Number(info?.TotalWeeklySale || 0);
       }
+    }
+
+    // TACoS: prefer the backend value (uses SalesOnlyMetrics aggregated over
+    // the same window as PPC). Only fall back to the locally-derived totalSales
+    // if the backend didn't supply one.
+    if (tacos == null) {
       tacos = totalSales > 0 ? (spend / totalSales) * 100 : 0;
     }
 
@@ -1859,69 +1875,66 @@ const PPCDashboard = () => {
     if (cpc == null) cpc = clicks > 0 ? spend / clicks : 0;
     if (roas == null) roas = spend > 0 ? ppcSales / spend : 0;
 
-    return [
+    // Real captions — only shown when there's real data behind them (no invented numbers).
+    const pctOfTotalSales = totalSales > 0 ? (ppcSales / totalSales) * 100 : null;
+    const wastedSpendCaption = totalWastedSpend > 0
+      ? `${formatCurrencyWithLocale(totalWastedSpend, currency)} wasted`
+      : null;
+
+    const primary = [
       {
         label: 'PPC Sales',
         value: formatCurrencyWithLocale(ppcSales, currency),
         icon: TrendingUp,
-        color: 'blue'
+        caption: pctOfTotalSales != null ? `${pctOfTotalSales.toFixed(0)}% of total sales` : null,
       },
       {
-        label: 'Spend',
+        label: 'Ad Spend',
         value: formatCurrencyWithLocale(spend, currency),
         icon: DollarSign,
-        color: 'blue'
+        caption: wastedSpendCaption,
+        captionColor: wastedSpendCaption ? '#F87171' : undefined,
       },
       {
-        label: 'ACoS %',
-        value: `${acos.toFixed(2)}%`,
+        label: 'ACoS',
+        value: `${acos.toFixed(1)}%`,
         icon: Gauge,
-        color: 'blue'
+        valueColor: acos > 25 ? '#F87171' : undefined,
+        caption: 'Healthy: under 25%',
+        tooltip: 'Ad cost as % of ad sales. Lower is better.',
       },
       {
-        label: 'TACoS %',
-        value: `${tacos.toFixed(2)}%`,
+        label: 'TACoS',
+        value: `${tacos.toFixed(1)}%`,
         icon: Gauge,
-        color: 'blue'
-      },
-      {
-        label: 'Units Sold',
-        value: `${Number(unitsSold || 0).toLocaleString()}`,
-        icon: Package,
-        color: 'blue'
-      },
-      {
-        label: 'Impressions',
-        value: `${Number(impressions || 0).toLocaleString()}`,
-        icon: Eye,
-        color: 'blue'
-      },
-      {
-        label: 'Clicks',
-        value: `${Number(clicks || 0).toLocaleString()}`,
-        icon: MousePointerClick,
-        color: 'blue'
-      },
-      {
-        label: 'CTR %',
-        value: `${Number(ctr || 0).toFixed(2)}%`,
-        icon: Percent,
-        color: 'blue'
-      },
-      {
-        label: 'CPC',
-        value: formatCurrencyWithLocale(cpc, currency),
-        icon: Coins,
-        color: 'blue'
+        valueColor: tacos > 15 ? COLORS.watch : undefined,
+        caption: 'Share of total sales driven by ads',
+        tooltip: 'Ad spend as % of total sales — how dependent the business is on ads.',
       },
       {
         label: 'ROAS',
-        value: `${Number(roas || 0).toFixed(2)}x`,
+        value: `${roas.toFixed(2)}x`,
         icon: Target,
-        color: 'blue'
+        valueColor: roas >= 4 ? COLORS.good : undefined,
+        caption: 'Healthy: above 4x',
+        tooltip: 'Return on ad spend — dollars earned per $1 spent.',
+      },
+      {
+        label: 'Units from Ads',
+        value: `${Number(unitsSold || 0).toLocaleString()}`,
+        icon: Package,
       },
     ];
-  }, [ppcKPISummary, ppcSummary, sponsoredAdsMetrics, info?.TotalSales, info?.TotalWeeklySale, info?.accountFinance, currency]);
+
+    const mini = [
+      { label: 'Impressions', value: `${Number(impressions || 0).toLocaleString()}`, icon: Eye },
+      { label: 'Clicks', value: `${Number(clicks || 0).toLocaleString()}`, icon: MousePointerClick },
+      { label: 'CTR', value: `${Number(ctr || 0).toFixed(2)}%`, icon: Percent },
+      { label: 'CPC', value: formatCurrencyWithLocale(cpc, currency), icon: Coins },
+    ];
+
+    return { primary, mini, roas, spend, wastedSpend: totalWastedSpend };
+  }, [ppcKPISummary, ppcSummary, sponsoredAdsMetrics, info?.TotalSales, info?.TotalWeeklySale, info?.accountFinance, currency, totalWastedSpend]);
 
   const formatYAxis = (value) => {
     return formatYAxisCurrency(value, currency);
@@ -1964,7 +1977,7 @@ const PPCDashboard = () => {
     
     // Add KPI metrics
     csvData.push(['Key Performance Indicators']);
-    kpiData.forEach(kpi => {
+    [...kpiData.primary, ...kpiData.mini].forEach(kpi => {
       csvData.push([kpi.label, kpi.value]);
     });
     csvData.push([]);
@@ -2130,30 +2143,33 @@ const PPCDashboard = () => {
   };
 
   return (
-    <div className='min-h-screen w-full bg-[#1a1a1a] overflow-x-hidden'>
+    <div className='min-h-screen w-full overflow-x-hidden' style={{ background: COLORS.bgBase }}>
       {/* Header Section */}
-      <div className='bg-[#161b22] border-b border-[#30363d] sticky top-0 z-40'>
+      <div className='sticky top-0 z-40' style={{ background: COLORS.surface, borderBottom: `1px solid ${COLORS.border}` }}>
         <div className='px-2 lg:px-3 py-1.5'>
           <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2'>
             <div className='flex items-center gap-2'>
               <div>
-                <h1 className='text-lg font-bold text-gray-100'>Campaign Audit</h1>
-                <p className='text-xs text-gray-400 mt-0.5'>Monitor your Amazon PPC performance and optimize campaigns</p>
+                <h1 className='text-lg font-bold' style={{ color: COLORS.textPrimary }}>Campaign Audit</h1>
+                <p className='text-xs mt-0.5' style={{ color: COLORS.textSecondary }}>Monitor your Amazon PPC performance and optimize campaigns</p>
               </div>
-              <div className='hidden sm:flex items-center gap-1 px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs font-medium border border-blue-500/30'>
-                <div className='w-1.5 h-1.5 bg-blue-400 rounded-full'></div>
+              <div className='hidden sm:flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium' style={{ background: 'rgba(59,130,246,.16)', color: '#7EA8F8', border: '1px solid rgba(59,130,246,.3)' }}>
+                <div className='w-1.5 h-1.5 rounded-full' style={{ background: '#7EA8F8' }}></div>
                 PPC campaigns active
               </div>
             </div>
-            
+
             <div className='flex items-center gap-2'>
               <div className='relative' ref={CalenderRef}>
-                <button 
+                <button
                   ref={calendarAnchorRef}
                   onClick={() => setOpenCalender(!openCalender)}
-                  className='flex items-center gap-1 px-2 py-1 bg-[#21262d] border border-[#30363d] hover:border-[#30363d] rounded text-xs transition-all text-gray-300 hover:bg-[#161b22]'
+                  className='flex items-center gap-1 px-2 py-1 rounded text-xs transition-all'
+                  style={{ background: COLORS.bgBase, border: `1px solid ${COLORS.border}`, color: COLORS.textSecondary }}
+                  onMouseEnter={(e) => e.currentTarget.style.borderColor = COLORS.accent}
+                  onMouseLeave={(e) => e.currentTarget.style.borderColor = COLORS.border}
                 >
-                  <Calendar className='w-3 h-3 text-gray-400' />
+                  <Calendar className='w-3 h-3' style={{ color: COLORS.textMuted }} />
                   <span className='text-xs font-medium'>
                     {info?.startDate && info?.endDate
                       ? `${parseLocalDate(info.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - ${parseLocalDate(info.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
@@ -2161,12 +2177,12 @@ const PPCDashboard = () => {
                     }
                   </span>
                 </button>
-                
+
                 {openCalender && (
                   <Calender anchorRef={calendarAnchorRef} setOpenCalender={setOpenCalender} />
                 )}
               </div>
-              
+
               <DownloadReport
                 prepareDataFunc={preparePPCData}
                 filename="PPC_Dashboard_Report"
@@ -2181,64 +2197,101 @@ const PPCDashboard = () => {
       {/* Main Content - Scrollable */}
       <div className='overflow-y-auto' style={{ height: 'calc(100vh - 72px)', scrollBehavior: 'smooth' }}>
         <div className='px-2 lg:px-3 py-1.5 pb-1'>
+          {/* Ads performance banner — real ROAS + real wasted-spend total, only shown once there's real ad spend */}
+          {!ppcKPISummaryLoading && kpiData.spend > 0 && (
+            <div
+              className="relative overflow-hidden flex items-center gap-5 flex-wrap mb-2"
+              style={{ border: '1px solid rgba(34,197,94,.25)', borderRadius: '14px', background: `linear-gradient(90deg, rgba(34,197,94,.09), transparent 58%), ${COLORS.surface}`, padding: '16px 18px' }}
+            >
+              <div className="absolute left-0 top-0 bottom-0" style={{ width: '3px', background: COLORS.good }} />
+              <p className="flex-1 min-w-0" style={{ margin: 0, fontSize: '15px', lineHeight: '24px', fontWeight: 500, color: COLORS.textPrimary }}>
+                Your ads are {kpiData.roas >= 1 ? 'profitable overall' : 'running at a loss'} — every <span style={{ fontWeight: 600 }}>$1 returns {kpiData.roas.toFixed(2)}</span>.
+                {kpiData.wastedSpend > 0 && (
+                  <> But <span style={{ color: '#F87171', fontWeight: 600 }}>{formatCurrencyWithLocale(kpiData.wastedSpend, currency)}</span> went to search terms that never sold anything.</>
+                )}
+              </p>
+              {kpiData.wastedSpend > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedTab(1);
+                    tabsContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }}
+                  className="flex-shrink-0 rounded-lg text-sm font-semibold transition-colors"
+                  style={{ padding: '11px 18px', background: COLORS.accent, color: '#061021' }}
+                >
+                  Fix the waste
+                </button>
+              )}
+            </div>
+          )}
+
           {/* KPI Cards - skeleton when summary loading */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-2 mb-2">
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '10px' }}>
             {ppcKPISummaryLoading ? (
-              Array.from({ length: 10 }).map((_, index) => (
+              Array.from({ length: 6 }).map((_, index) => (
                 <motion.div
                   key={`skeleton-${index}`}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.3, delay: index * 0.05 }}
-                  className="bg-[#161b22] rounded border border-[#30363d] p-2 transition-all duration-300 h-full flex flex-col"
+                  className="transition-all duration-300 h-full flex flex-col"
+                  style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: '12px', padding: '14px 16px' }}
                   aria-hidden
                 >
-                  <div className="flex items-center gap-1.5 mb-1.5 flex-shrink-0">
-                    <div className="w-4 h-4 rounded bg-[#21262d] animate-pulse flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <SkeletonBar height="0.75rem" width="70%" className="bg-[#21262d]" />
-                    </div>
+                  <div className="mb-2 flex-shrink-0">
+                    <SkeletonBar height="0.75rem" width="70%" className="bg-[#21262d]" />
                   </div>
                   <div className="mt-auto">
-                    <SkeletonBar height="0.875rem" width="55%" className="bg-[#21262d]" />
+                    <SkeletonBar height="1.25rem" width="55%" className="bg-[#21262d]" />
                   </div>
                 </motion.div>
               ))
             ) : (
-              kpiData.map((kpi, index) => {
+              kpiData.primary.map((kpi, index) => {
                 const Icon = kpi.icon;
-                const colorMap = {
-                  green: 'text-green-400',
-                  orange: 'text-orange-400',
-                  purple: 'text-purple-400',
-                  blue: 'text-blue-400',
-                  red: 'text-red-400'
-                };
-                const iconColor = colorMap[kpi.color] || 'text-blue-400';
-                
                 return (
                   <motion.div
                     key={kpi.label}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.5, delay: index * 0.1 }}
-                    className="bg-[#161b22] rounded border border-[#30363d] p-2 transition-all duration-300 h-full flex flex-col"
+                    className="transition-all duration-300 h-full flex flex-col"
+                    style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: '12px', padding: '14px 16px' }}
                   >
-                    <div className="flex items-center gap-1.5 mb-1.5 flex-shrink-0">
-                      {Icon && <Icon className={`w-4 h-4 ${iconColor} flex-shrink-0`} />}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium text-gray-400 leading-tight whitespace-nowrap truncate">{kpi.label}</p>
-                      </div>
+                    <div className="flex items-center gap-1.5 mb-2 flex-shrink-0">
+                      {Icon && <Icon className="w-3.5 h-3.5 flex-shrink-0" style={{ color: COLORS.textMuted }} />}
+                      <span className="text-[11px] font-semibold uppercase tracking-wide truncate flex-1" style={{ color: COLORS.textSecondary }}>{kpi.label}</span>
+                      {kpi.tooltip && <InfoTooltip text={kpi.tooltip} />}
                     </div>
                     <div className="mt-auto">
-                      <div className="text-sm font-bold text-gray-100 leading-tight whitespace-nowrap truncate">{kpi.value}</div>
+                      <div className="text-[22px] font-bold leading-tight truncate" style={{ color: kpi.valueColor || COLORS.textPrimary }}>{kpi.value}</div>
+                      {kpi.caption && (
+                        <div className="text-xs mt-1.5 truncate" style={{ color: kpi.captionColor || COLORS.textMuted }}>{kpi.caption}</div>
+                      )}
                     </div>
                   </motion.div>
                 );
               })
             )}
           </div>
-        
+
+          {/* Engagement mini-stats */}
+          {!ppcKPISummaryLoading && (
+            <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px', marginBottom: '10px' }}>
+              {kpiData.mini.map((kpi) => (
+                <div
+                  key={kpi.label}
+                  className="flex items-baseline justify-between"
+                  style={{ border: `1px solid ${COLORS.border}`, borderRadius: '10px', background: COLORS.bgBase, padding: '11px 14px' }}
+                >
+                  <span className="text-xs" style={{ color: COLORS.textSecondary }}>{kpi.label}</span>
+                  <span className="text-[15px] font-semibold" style={{ color: COLORS.textPrimary }}>{kpi.value}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Performance Chart - skeleton when summary loading */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -2341,15 +2394,15 @@ const PPCDashboard = () => {
           </motion.div>
         
           {/* Campaign Analysis Tabs */}
-          <div className="bg-[#161b22] rounded border border-[#30363d] transition-all duration-300 overflow-hidden mb-2">
-            <div className="p-2 border-b border-[#30363d]">
+          <div className="transition-all duration-300 overflow-hidden mb-2" style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: '8px' }}>
+            <div className="p-2" style={{ borderBottom: `1px solid ${COLORS.border}` }}>
               <div className="flex items-center justify-between mb-2">
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-100">Campaign Analysis</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">Detailed insights across different campaign aspects</p>
+                  <h3 className="text-sm font-semibold" style={{ color: COLORS.textPrimary }}>Campaign Analysis</h3>
+                  <p className="text-xs mt-0.5" style={{ color: COLORS.textSecondary }}>Detailed insights across different campaign aspects</p>
                 </div>
               </div>
-              
+
               {/* Tabs - Only show tabs with data */}
               {tabs.length > 0 ? (
                 <div>
@@ -2358,7 +2411,8 @@ const PPCDashboard = () => {
                     {showLeftArrow && (
                       <button
                         onClick={scrollTabsLeft}
-                        className="bg-[#21262d] hover:bg-[#161b22] border border-[#30363d] rounded px-2 py-1 flex items-center justify-center transition-all text-gray-300"
+                        className="rounded px-2 py-1 flex items-center justify-center transition-all"
+                        style={{ background: COLORS.bgBase, border: `1px solid ${COLORS.border}`, color: COLORS.textSecondary }}
                         aria-label="Scroll tabs left"
                       >
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2369,7 +2423,8 @@ const PPCDashboard = () => {
                     {showRightArrow && (
                       <button
                         onClick={scrollTabsRight}
-                        className="bg-[#21262d] hover:bg-[#161b22] border border-[#30363d] rounded px-2 py-1 flex items-center justify-center transition-all text-gray-300"
+                        className="rounded px-2 py-1 flex items-center justify-center transition-all"
+                        style={{ background: COLORS.bgBase, border: `1px solid ${COLORS.border}`, color: COLORS.textSecondary }}
                         aria-label="Scroll tabs right"
                       >
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2378,43 +2433,36 @@ const PPCDashboard = () => {
                       </button>
                     )}
                   </div>
-                  
-                  {/* Tabs Container */}
-                  <div 
+
+                  {/* Tabs Container — wraps onto a second row instead of scrolling when it doesn't fit */}
+                  <div
                     ref={tabsContainerRef}
-                    className="flex gap-6 overflow-x-auto scrollbar-hide"
-                    style={{ 
-                      scrollbarWidth: 'none', 
-                      msOverflowStyle: 'none'
-                    }}
-                    onScroll={checkScrollButtons}
+                    className="flex flex-wrap gap-x-6 gap-y-2"
                   >
-                    <style>{`
-                      .scrollbar-hide::-webkit-scrollbar {
-                        display: none;
-                      }
-                    `}</style>
-                    {tabs.map((tab, index) => (
+                    {tabs.map((tab) => (
                       <div
                         key={tab.id}
-                        className="relative pb-3 cursor-pointer whitespace-nowrap flex-shrink-0"
+                        className="relative pb-3 cursor-pointer whitespace-nowrap flex-shrink-0 flex items-center gap-1.5"
                         onClick={() => handleTabClick(tab.id)}
                       >
                         <p
-                          className={`text-xs font-medium transition-colors ${
-                            selectedTab === tab.id 
-                              ? 'text-blue-400 font-semibold' 
-                              : 'text-gray-400 hover:text-gray-300'
-                          }`}
+                          className="text-[13px] font-medium transition-colors"
+                          style={{ color: selectedTab === tab.id ? COLORS.textPrimary : COLORS.textSecondary, fontWeight: selectedTab === tab.id ? 600 : 500 }}
                         >
                           {tab.label}
                         </p>
-                        
+                        {(tab.count ?? 0) > 0 && (
+                          <span className="px-1.5 py-0.5 rounded-full text-[11px] font-semibold" style={{ background: COLORS.surfaceElevated, color: COLORS.textSecondary }}>
+                            {tab.count}
+                          </span>
+                        )}
+
                         {/* Animated underline */}
                         {selectedTab === tab.id && (
                           <motion.div
                             layoutId="ppcUnderline"
-                            className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full"
+                            className="absolute bottom-0 left-0 right-0 h-[2px] rounded-full"
+                            style={{ background: COLORS.accent }}
                             transition={{ type: "spring", stiffness: 500, damping: 30 }}
                           />
                         )}
@@ -2423,12 +2471,12 @@ const PPCDashboard = () => {
                   </div>
                 </div>
               ) : (
-                <div className="text-xs text-gray-400 py-1">
+                <div className="text-xs py-1" style={{ color: COLORS.textSecondary }}>
                   No data available for any tabs
                 </div>
               )}
             </div>
-            
+
             {/* Tab Content */}
             <div className="p-2 relative overflow-hidden" style={{ minHeight: '300px' }}>
               {tabs.length > 0 && selectedTabIndex >= 0 ? (
@@ -2445,25 +2493,25 @@ const PPCDashboard = () => {
                   {/* High ACOS Campaigns Tab */}
                   {selectedTab === 0 && (
                     <>
-                      <h2 className="text-sm font-semibold text-gray-100 mb-1">High ACOS Campaigns</h2>
-                      <OptimizationTip 
+                      <h2 className="text-sm font-semibold mb-1" style={{ color: COLORS.textPrimary }}>High ACOS Campaigns</h2>
+                      <OptimizationTip
                         tip="Reduce bids or add negatives to lower ACoS."
                         icon="📉"
                       />
-                      <div className="mb-2 mt-1 text-xs text-gray-400">
+                      <div className="mb-2 mt-1 text-xs" style={{ color: COLORS.textSecondary }}>
                         Campaigns with high advertising cost of sales
                       </div>
                       <div className="w-full overflow-hidden">
                         <table className="w-full table-fixed">
                           <thead>
-                            <tr className="border-b border-[#30363d]">
-                              <th className="w-[28%] text-left py-2 px-2 text-xs font-medium text-gray-400">Campaign</th>
-                              <th className="w-[12%] text-center py-2 px-2 text-xs font-medium text-gray-400">Spend</th>
-                              <th className="w-[12%] text-center py-2 px-2 text-xs font-medium text-gray-400">Sales</th>
-                              <th className="w-[12%] text-center py-2 px-2 text-xs font-medium text-gray-400">ACoS %</th>
-                              <th className="w-[12%] text-center py-2 px-2 text-xs font-medium text-gray-400">CTR %</th>
-                              <th className="w-[12%] text-center py-2 px-2 text-xs font-medium text-gray-400">CPC</th>
-                              <th className="w-[12%] text-center py-2 px-2 text-xs font-medium text-gray-400">ROAS</th>
+                            <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+                              <th className="w-[28%] text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Campaign</th>
+                              <th className="w-[12%] text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Spend</th>
+                              <th className="w-[12%] text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Sales</th>
+                              <th className="w-[12%] text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>ACoS %</th>
+                              <th className="w-[12%] text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>CTR %</th>
+                              <th className="w-[12%] text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>CPC</th>
+                              <th className="w-[12%] text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>ROAS</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -2471,7 +2519,7 @@ const PPCDashboard = () => {
                               <TableSkeletonRows columns={7} rows={5} />
                             ) : highAcosCampaignsData.length === 0 ? (
                               <tr>
-                                <td colSpan={7} className="text-center py-6 text-gray-400 text-xs">
+                                <td colSpan={7} className="text-center py-6 text-xs" style={{ color: COLORS.textSecondary }}>
                                   No data available
                                 </td>
                               </tr>
@@ -2486,18 +2534,18 @@ const PPCDashboard = () => {
                                   const cpc = campaign.cpc != null ? Number(campaign.cpc) : (clicks > 0 ? spend / clicks : 0);
                                   const roas = campaign.roas != null ? Number(campaign.roas) : (spend > 0 ? sales / spend : 0);
                                   return (
-                                  <tr key={idx} className="border-b border-[#30363d]">
-                                    <td className="w-[28%] py-2 px-2 text-xs text-gray-100 break-words">
+                                  <tr key={idx} className="transition-colors hover:bg-[#1A202B]" style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+                                    <td className="w-[28%] py-3.5 px-3 text-sm font-semibold break-words" style={{ color: COLORS.textPrimary }}>
                                       {campaign.campaignName}
                                     </td>
-                                    <td className="w-[12%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(spend, currency)}</td>
-                                    <td className="w-[12%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(sales, currency)}</td>
-                                    <td className="w-[12%] py-2 px-2 text-xs text-center font-medium text-red-400 whitespace-nowrap">
+                                    <td className="w-[12%] py-3.5 px-3 text-[13px] text-center whitespace-nowrap" style={{ color: COLORS.textSecondary }}>{formatCurrencyWithLocale(spend, currency)}</td>
+                                    <td className="w-[12%] py-3.5 px-3 text-sm font-semibold text-center whitespace-nowrap" style={{ color: COLORS.textPrimary }}>{formatCurrencyWithLocale(sales, currency)}</td>
+                                    <td className="w-[12%] py-3.5 px-3 text-[13px] text-center font-medium whitespace-nowrap" style={{ color: '#F87171' }}>
                                       {(campaign.acos || 0).toFixed(2)}%
                                     </td>
-                                    <td className="w-[12%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{ctr.toFixed(2)}%</td>
-                                    <td className="w-[12%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(cpc, currency)}</td>
-                                    <td className="w-[12%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{roas.toFixed(2)}x</td>
+                                    <td className="w-[12%] py-3.5 px-3 text-[13px] text-center whitespace-nowrap" style={{ color: COLORS.textSecondary }}>{ctr.toFixed(2)}%</td>
+                                    <td className="w-[12%] py-3.5 px-3 text-[13px] text-center whitespace-nowrap" style={{ color: COLORS.textSecondary }}>{formatCurrencyWithLocale(cpc, currency)}</td>
+                                    <td className="w-[12%] py-3.5 px-3 text-[13px] text-center whitespace-nowrap" style={{ color: COLORS.textSecondary }}>{roas.toFixed(2)}x</td>
                                   </tr>
                                   );
                                 })}
@@ -2514,38 +2562,40 @@ const PPCDashboard = () => {
                   {/* Wasted Spend Keywords Tab */}
                   {selectedTab === 1 && (
                     <>
-                      <h2 className="text-sm font-semibold text-gray-100 mb-1">Wasted Spend Keywords</h2>
-                      <OptimizationTip 
+                      <h2 className="text-sm font-semibold mb-1" style={{ color: COLORS.textPrimary }}>Wasted Spend Keywords</h2>
+                      <OptimizationTip
                         tip="Consider pausing or lowering bids for unprofitable keywords."
                         icon="⚠️"
                       />
-                      <div className="mb-2 mt-1 text-xs text-gray-400">
+                      <div className="mb-2 mt-1 text-xs" style={{ color: COLORS.textSecondary }}>
                         Keywords with high spend but low returns
                       </div>
                       {selectedWastedKeys.length > 0 && (
-                        <div className="mb-2 flex flex-wrap items-center gap-2 py-2 px-3 rounded-md bg-[#21262d] border border-[#30363d]">
-                          <span className="text-xs text-gray-300">
+                        <div className="mb-2 flex flex-wrap items-center gap-2 py-2 px-3 rounded-md" style={{ background: COLORS.surfaceElevated, border: `1px solid ${COLORS.border}` }}>
+                          <span className="text-xs" style={{ color: COLORS.textSecondary }}>
                             {selectedWastedKeys.length}/{MAX_BULK_KEYWORDS} selected
                             {canPauseCount < selectedWastedKeys.length && (
-                              <span className="text-gray-500 ml-1">({canPauseCount} can pause, {canAddToNegativeCount} can add to negative)</span>
+                              <span className="ml-1" style={{ color: COLORS.textMuted }}>({canPauseCount} can pause, {canAddToNegativeCount} can add to negative)</span>
                             )}
                             {selectedWastedKeys.length >= MAX_BULK_KEYWORDS && (
-                              <span className="ml-2 text-amber-400">(max {MAX_BULK_KEYWORDS} keywords per bulk action)</span>
+                              <span className="ml-2" style={{ color: COLORS.watch }}>(max {MAX_BULK_KEYWORDS} keywords per bulk action)</span>
                             )}
                           </span>
                           <button
                             type="button"
                             onClick={() => setSelectedWastedKeys([])}
-                            className="text-xs text-gray-400 hover:text-gray-200"
+                            className="text-xs transition-colors"
+                            style={{ color: COLORS.textSecondary }}
                           >
                             Clear
                           </button>
-                          <span className="text-gray-600">|</span>
+                          <span style={{ color: COLORS.border }}>|</span>
                           <button
                             type="button"
                             onClick={handleBulkPause}
                             disabled={bulkWastedLoading !== null || canPauseCount === 0}
-                            className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            style={{ background: 'rgba(245,166,35,.16)', color: COLORS.watch, border: '1px solid rgba(245,166,35,.35)' }}
                           >
                             {bulkWastedLoading === 'pause' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Pause className="w-3.5 h-3.5" />}
                             Pause ({canPauseCount})
@@ -2554,7 +2604,8 @@ const PPCDashboard = () => {
                             type="button"
                             onClick={handleBulkAddToNegative}
                             disabled={bulkWastedLoading !== null || canAddToNegativeCount === 0}
-                            className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-slate-500/20 text-slate-400 border border-slate-500/30 hover:bg-slate-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            style={{ background: 'rgba(165,174,192,.14)', color: COLORS.textSecondary, border: `1px solid ${COLORS.borderStrong}` }}
                           >
                             {bulkWastedLoading === 'addToNegative' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Ban className="w-3.5 h-3.5" />}
                             Add to negative ({canAddToNegativeCount})
@@ -2563,7 +2614,8 @@ const PPCDashboard = () => {
                             type="button"
                             onClick={handleBulkPauseAndAddToNegative}
                             disabled={bulkWastedLoading !== null || canPauseAndAddCount === 0}
-                            className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            style={{ background: 'rgba(245,166,35,.16)', color: COLORS.watch, border: '1px solid rgba(245,166,35,.35)' }}
                           >
                             {bulkWastedLoading === 'pauseAndAdd' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
                             {bulkWastedLoading === 'pauseAndAdd' ? 'Processing…' : 'Pause & add to negative'}
@@ -2574,8 +2626,8 @@ const PPCDashboard = () => {
                       <div className="w-full overflow-hidden">
                         <table className="w-full table-fixed">
                           <thead>
-                            <tr className="border-b border-[#30363d]">
-                              <th className="w-8 py-2 px-2 text-center">
+                            <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+                              <th className="w-8 py-3.5 px-3 text-center">
                                 {wastedSpendData.length > 0 && (() => {
                                   const selectableRows = wastedSpendData.filter((r) => r.keywordId != null && r.keywordId !== '');
                                   const pageKeys = selectableRows.map(getWastedRowKey);
@@ -2606,12 +2658,12 @@ const PPCDashboard = () => {
                                   );
                                 })()}
                               </th>
-                              <th className="w-[18%] text-left py-2 px-2 text-xs font-medium text-gray-400">Keyword</th>
-                              <th className="w-[22%] text-left py-2 px-2 text-xs font-medium text-gray-400">Campaign</th>
-                              <th className="w-[22%] text-left py-2 px-2 text-xs font-medium text-gray-400">Ad Group</th>
-                              <th className="w-[14%] text-center py-2 px-2 text-xs font-medium text-gray-400">Sales</th>
-                              <th className="w-[14%] text-center py-2 px-2 text-xs font-medium text-gray-400">Spend</th>
-                              <th className="w-[10%] text-center py-2 px-2 text-xs font-medium text-gray-400">Action</th>
+                              <th className="w-[18%] text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Keyword</th>
+                              <th className="w-[22%] text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Campaign</th>
+                              <th className="w-[22%] text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Ad Group</th>
+                              <th className="w-[14%] text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Sales</th>
+                              <th className="w-[14%] text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Spend</th>
+                              <th className="w-[10%] text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Action</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -2619,7 +2671,7 @@ const PPCDashboard = () => {
                               <TableSkeletonRows columns={7} rows={5} />
                             ) : wastedSpendData.length === 0 ? (
                               <tr>
-                                <td colSpan={7} className="text-center py-6 text-gray-400 text-xs">
+                                <td colSpan={7} className="text-center py-6 text-xs" style={{ color: COLORS.textSecondary }}>
                                   <div className="flex flex-col items-center space-y-2">
                                     <div>No wasted keywords found</div>
                                     <div className="text-xs">
@@ -2631,8 +2683,8 @@ const PPCDashboard = () => {
                             ) : (
                               <>
                                 {wastedSpendData.map((keyword, idx) => (
-                                  <tr key={idx} className="border-b border-[#30363d]">
-                                  <td className="w-8 py-2 px-2 text-center">
+                                  <tr key={idx} className="transition-colors hover:bg-[#1A202B]" style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+                                  <td className="w-8 py-3.5 px-3 text-center">
                                     {keyword.keywordId != null && keyword.keywordId !== '' ? (() => {
                                       const k = getWastedRowKey(keyword);
                                       const isSelected = selectedWastedKeys.includes(k);
@@ -2651,30 +2703,31 @@ const PPCDashboard = () => {
                                         />
                                       );
                                     })() : (
-                                      <span className="text-gray-600">—</span>
+                                      <span style={{ color: COLORS.textMuted }}>—</span>
                                     )}
                                   </td>
-                                  <td className="w-[18%] py-2 px-2 text-xs text-gray-100 break-words">
+                                  <td className="w-[18%] py-3.5 px-3 text-sm font-semibold break-words" style={{ color: COLORS.textPrimary }}>
                                     {keyword.keyword}
                                   </td>
-                                  <td className="w-[22%] py-2 px-2 text-xs text-gray-300 break-words">
+                                  <td className="w-[22%] py-3.5 px-3 text-[13px] break-words" style={{ color: COLORS.textSecondary }}>
                                     {keyword.campaignName}
                                   </td>
-                                  <td className="w-[22%] py-2 px-2 text-xs text-gray-300 break-words">
+                                  <td className="w-[22%] py-3.5 px-3 text-[13px] break-words" style={{ color: COLORS.textSecondary }}>
                                     {keyword.adGroupName || 'N/A'}
                                   </td>
-                                  <td className="w-[14%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(keyword.sales, currency)}</td>
-                                  <td className="w-[14%] py-2 px-2 text-xs text-center font-medium text-red-400 whitespace-nowrap">
+                                  <td className="w-[14%] py-3.5 px-3 text-sm font-semibold text-center whitespace-nowrap" style={{ color: COLORS.textPrimary }}>{formatCurrencyWithLocale(keyword.sales, currency)}</td>
+                                  <td className="w-[14%] py-3.5 px-3 text-[13px] text-center font-medium whitespace-nowrap" style={{ color: '#F87171' }}>
                                     {formatCurrencyWithLocale(keyword.spend, currency)}
                                   </td>
-                                  <td className="w-[10%] py-2 px-2 relative" data-wasted-action-cell>
+                                  <td className="w-[10%] py-3.5 px-3 relative" data-wasted-action-cell>
                                     <div className="flex items-center justify-center">
                                       {(keyword.keywordId != null && keyword.keywordId !== '') || (keyword.campaignId != null && keyword.adGroupId != null && keyword.keyword) ? (
                                         <>
                                           <button
                                             type="button"
                                             onClick={() => setOpenWastedActionIndex(openWastedActionIndex === idx ? null : idx)}
-                                            className="p-1.5 rounded text-gray-400 hover:text-gray-200 hover:bg-white/5 border border-transparent hover:border-[#30363d]"
+                                            className="p-1.5 rounded hover:bg-white/5 border border-transparent transition-colors"
+                                            style={{ color: COLORS.textSecondary }}
                                             title="Actions"
                                             aria-haspopup="true"
                                             aria-expanded={openWastedActionIndex === idx}
@@ -2683,19 +2736,21 @@ const PPCDashboard = () => {
                                           </button>
                                           {openWastedActionIndex === idx && (
                                             <div
-                                              className={`absolute right-0 z-20 min-w-[160px] py-1 rounded-md border border-[#30363d] bg-[#161b22] shadow-lg ${idx <= 1 ? 'top-full mt-0.5' : 'bottom-full mb-0.5'}`}
+                                              className={`absolute right-0 z-20 min-w-[160px] py-1 rounded-md shadow-lg ${idx <= 1 ? 'top-full mt-0.5' : 'bottom-full mb-0.5'}`}
+                                              style={{ border: `1px solid ${COLORS.border}`, background: COLORS.surfaceElevated }}
                                             >
                                               {keyword.keywordId != null && keyword.keywordId !== '' && (
                                                 <button
                                                   type="button"
                                                   onClick={() => handlePauseKeyword(keyword)}
                                                   disabled={pausingKeywordId === keyword.keywordId}
-                                                  className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-gray-200 hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                  className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                  style={{ color: COLORS.textPrimary }}
                                                 >
                                                   {pausingKeywordId === keyword.keywordId ? (
-                                                    <Loader2 className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-spin" aria-hidden />
+                                                    <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" style={{ color: COLORS.watch }} aria-hidden />
                                                   ) : (
-                                                    <Pause className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                                    <Pause className="w-3.5 h-3.5 shrink-0" style={{ color: COLORS.watch }} />
                                                   )}
                                                   {pausingKeywordId === keyword.keywordId ? 'Pausing…' : 'Pause keyword'}
                                                 </button>
@@ -2705,12 +2760,13 @@ const PPCDashboard = () => {
                                                   type="button"
                                                   onClick={() => handleAddToNegative(keyword)}
                                                   disabled={addingToNegativeKeywordId === keyword.keywordId}
-                                                  className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-gray-200 hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                  className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                  style={{ color: COLORS.textPrimary }}
                                                 >
                                                   {addingToNegativeKeywordId === keyword.keywordId ? (
-                                                    <Loader2 className="w-3.5 h-3.5 text-slate-400 shrink-0 animate-spin" aria-hidden />
+                                                    <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" style={{ color: COLORS.textSecondary }} aria-hidden />
                                                   ) : (
-                                                    <Ban className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                                    <Ban className="w-3.5 h-3.5 shrink-0" style={{ color: COLORS.textSecondary }} />
                                                   )}
                                                   {addingToNegativeKeywordId === keyword.keywordId ? 'Adding…' : 'Add to negative'}
                                                 </button>
@@ -2720,14 +2776,15 @@ const PPCDashboard = () => {
                                                   type="button"
                                                   onClick={() => handlePauseAndAddToNegative(keyword)}
                                                   disabled={pausingAndAddingKeywordId === keyword.keywordId}
-                                                  className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-gray-200 hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed border-t border-[#30363d]"
+                                                  className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                  style={{ color: COLORS.textPrimary, borderTop: `1px solid ${COLORS.border}` }}
                                                 >
                                                   {pausingAndAddingKeywordId === keyword.keywordId ? (
-                                                    <Loader2 className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-spin" aria-hidden />
+                                                    <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" style={{ color: COLORS.watch }} aria-hidden />
                                                   ) : (
                                                     <>
-                                                      <Pause className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                                                      <Ban className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                                      <Pause className="w-3.5 h-3.5 shrink-0" style={{ color: COLORS.watch }} />
+                                                      <Ban className="w-3.5 h-3.5 shrink-0" style={{ color: COLORS.textSecondary }} />
                                                     </>
                                                   )}
                                                   {pausingAndAddingKeywordId === keyword.keywordId ? 'Pausing & adding…' : 'Pause then add to negative'}
@@ -2737,7 +2794,7 @@ const PPCDashboard = () => {
                                           )}
                                         </>
                                       ) : (
-                                        <span className="text-gray-500 text-xs">—</span>
+                                        <span className="text-xs" style={{ color: COLORS.textMuted }}>—</span>
                                       )}
                                     </div>
                                   </td>
@@ -2756,21 +2813,21 @@ const PPCDashboard = () => {
                   {/* Campaigns Without Negative Keywords Tab */}
                   {selectedTab === 2 && (
                     <>
-                      <h2 className="text-sm font-semibold text-gray-100 mb-1">Campaigns Without Negative Keywords</h2>
-                      <OptimizationTip 
+                      <h2 className="text-sm font-semibold mb-1" style={{ color: COLORS.textPrimary }}>Campaigns Without Negative Keywords</h2>
+                      <OptimizationTip
                         tip="Add negative keywords to these campaigns to prevent irrelevant traffic and improve ad performance."
                         icon="⚠️"
                       />
-                      <div className="mb-2 mt-1 text-xs text-gray-400">
+                      <div className="mb-2 mt-1 text-xs" style={{ color: COLORS.textSecondary }}>
                         Campaigns that don't have any negative keywords configured. Consider adding negative keywords to block irrelevant traffic.
                       </div>
                       <div className="w-full overflow-hidden">
                         <table className="w-full table-fixed">
                           <thead>
-                            <tr className="border-b border-[#30363d]">
-                              <th className="w-2/5 text-left py-2 px-2 text-xs font-medium text-gray-400">Campaign</th>
-                              <th className="w-2/5 text-left py-2 px-2 text-xs font-medium text-gray-400">AdGroup</th>
-                              <th className="w-1/5 text-center py-2 px-2 text-xs font-medium text-gray-400">Negatives</th>
+                            <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+                              <th className="w-2/5 text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Campaign</th>
+                              <th className="w-2/5 text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>AdGroup</th>
+                              <th className="w-1/5 text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Negatives</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -2778,22 +2835,22 @@ const PPCDashboard = () => {
                               <TableSkeletonRows columns={3} rows={5} />
                             ) : noNegativesData.length === 0 ? (
                               <tr>
-                                <td colSpan={3} className="text-center py-6 text-gray-400 text-xs">
+                                <td colSpan={3} className="text-center py-6 text-xs" style={{ color: COLORS.textSecondary }}>
                                   All campaigns have negative keywords configured
                                 </td>
                               </tr>
                             ) : (
                               <>
                                 {noNegativesData.map((row, idx) => (
-                                  <tr key={idx} className="border-b border-[#30363d]">
-                                  <td className="w-2/5 py-2 px-2 text-xs text-gray-100 break-words">
+                                  <tr key={idx} className="transition-colors hover:bg-[#1A202B]" style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+                                  <td className="w-2/5 py-3.5 px-3 text-sm font-semibold break-words" style={{ color: COLORS.textPrimary }}>
                                     {row.campaignName}
                                   </td>
-                                  <td className="w-2/5 py-2 px-2 text-xs text-gray-300 break-words">
+                                  <td className="w-2/5 py-3.5 px-3 text-[13px] break-words" style={{ color: COLORS.textSecondary }}>
                                     {row.adGroupName}
                                   </td>
-                                  <td className="w-1/5 py-2 px-2 text-xs text-center">
-                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-500/20 text-red-400 border border-red-500/30 whitespace-nowrap">
+                                  <td className="w-1/5 py-3.5 px-3 text-[13px] text-center">
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium whitespace-nowrap" style={{ background: 'rgba(239,68,68,.16)', color: '#F87171', border: '1px solid rgba(239,68,68,.3)' }}>
                                       {row.negatives}
                                     </span>
                                   </td>
@@ -2812,22 +2869,22 @@ const PPCDashboard = () => {
                   {/* Top Performing Keywords Tab */}
                   {selectedTab === 3 && (
                     <>
-                      <h2 className="text-sm font-semibold text-gray-100 mb-1">Top Performing Keywords</h2>
-                      <OptimizationTip 
+                      <h2 className="text-sm font-semibold mb-1" style={{ color: COLORS.textPrimary }}>Top Performing Keywords</h2>
+                      <OptimizationTip
                         tip="This keyword performs well — consider raising bid by 15–20%."
                         icon="📈"
                       />
                       <div className="w-full overflow-hidden">
                         <table className="w-full table-fixed">
                           <thead>
-                            <tr className="border-b border-[#30363d]">
-                              <th className="w-[18%] text-left py-2 px-2 text-xs font-medium text-gray-400">Keyword</th>
-                              <th className="w-[20%] text-left py-2 px-2 text-xs font-medium text-gray-400">Campaign</th>
-                              <th className="w-[20%] text-left py-2 px-2 text-xs font-medium text-gray-400">Ad Group</th>
-                              <th className="w-[12%] text-center py-2 px-2 text-xs font-medium text-gray-400">Sales</th>
-                              <th className="w-[12%] text-center py-2 px-2 text-xs font-medium text-gray-400">Spend</th>
-                              <th className="w-[9%] text-center py-2 px-2 text-xs font-medium text-gray-400">ACoS %</th>
-                              <th className="w-[9%] text-center py-2 px-2 text-xs font-medium text-gray-400">Impressions</th>
+                            <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+                              <th className="w-[18%] text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Keyword</th>
+                              <th className="w-[20%] text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Campaign</th>
+                              <th className="w-[20%] text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Ad Group</th>
+                              <th className="w-[12%] text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Sales</th>
+                              <th className="w-[12%] text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Spend</th>
+                              <th className="w-[9%] text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>ACoS %</th>
+                              <th className="w-[9%] text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Impressions</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -2835,7 +2892,7 @@ const PPCDashboard = () => {
                               <TableSkeletonRows columns={7} rows={5} />
                             ) : topKeywordsData.length === 0 ? (
                               <tr>
-                                <td colSpan={7} className="text-center py-6 text-gray-400 text-xs">
+                                <td colSpan={7} className="text-center py-6 text-xs" style={{ color: COLORS.textSecondary }}>
                                   <div className="flex flex-col items-center space-y-2">
                                     <div>No top performing keywords found</div>
                                     <div className="text-xs">
@@ -2847,26 +2904,26 @@ const PPCDashboard = () => {
                             ) : (
                               <>
                                 {topKeywordsData.map((keyword, idx) => (
-                                  <tr key={idx} className="border-b border-[#30363d]">
-                                  <td className="w-[18%] py-2 px-2 text-xs text-gray-100 break-words">
+                                  <tr key={idx} className="transition-colors hover:bg-[#1A202B]" style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+                                  <td className="w-[18%] py-3.5 px-3 text-sm font-semibold break-words" style={{ color: COLORS.textPrimary }}>
                                     {keyword.keyword}
                                   </td>
-                                  <td className="w-[20%] py-2 px-2 text-xs text-gray-300 break-words">
+                                  <td className="w-[20%] py-3.5 px-3 text-[13px] break-words" style={{ color: COLORS.textSecondary }}>
                                     {keyword.campaignName}
                                   </td>
-                                  <td className="w-[20%] py-2 px-2 text-xs text-gray-300 break-words">
+                                  <td className="w-[20%] py-3.5 px-3 text-[13px] break-words" style={{ color: COLORS.textSecondary }}>
                                     {keyword.adGroupName || 'N/A'}
                                   </td>
-                                  <td className="w-[12%] py-2 px-2 text-xs text-center font-medium text-green-400 whitespace-nowrap">
+                                  <td className="w-[12%] py-3.5 px-3 text-sm font-semibold text-center whitespace-nowrap" style={{ color: COLORS.good }}>
                                     {formatCurrencyWithLocale(keyword.sales, currency)}
                                   </td>
-                                  <td className="w-[12%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">
+                                  <td className="w-[12%] py-3.5 px-3 text-[13px] text-center whitespace-nowrap" style={{ color: COLORS.textSecondary }}>
                                     {formatCurrencyWithLocale(keyword.spend, currency)}
                                   </td>
-                                  <td className="w-[9%] py-2 px-2 text-xs text-center font-medium text-green-400 whitespace-nowrap">
+                                  <td className="w-[9%] py-3.5 px-3 text-[13px] text-center font-medium whitespace-nowrap" style={{ color: COLORS.good }}>
                                     {(keyword.acos || 0).toFixed(2)}%
                                   </td>
-                                  <td className="w-[9%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">
+                                  <td className="w-[9%] py-3.5 px-3 text-[13px] text-center whitespace-nowrap" style={{ color: COLORS.textSecondary }}>
                                     {(keyword.impressions || 0).toLocaleString()}
                                   </td>
                                 </tr>
@@ -2884,24 +2941,24 @@ const PPCDashboard = () => {
                   {/* Search Terms Tab */}
                   {selectedTab === 4 && (
                     <>
-                      <h2 className="text-sm font-semibold text-gray-100 mb-1">Search Terms with Zero Sales</h2>
-                      <OptimizationTip 
+                      <h2 className="text-sm font-semibold mb-1" style={{ color: COLORS.textPrimary }}>Search Terms with Zero Sales</h2>
+                      <OptimizationTip
                         tip="Consider adding a negative keyword or revising listing content."
                         icon="📝"
                       />
-                      <div className="mb-2 mt-1 text-xs text-gray-400">
+                      <div className="mb-2 mt-1 text-xs" style={{ color: COLORS.textSecondary }}>
                         Search terms that generated clicks but no conversions
                       </div>
                       <div className="w-full overflow-hidden">
                         <table className="w-full table-fixed">
                           <thead>
-                            <tr className="border-b border-[#30363d]">
-                              <th className="w-[22%] text-left py-2 px-2 text-xs font-medium text-gray-400">Search Term</th>
-                              <th className="w-[22%] text-left py-2 px-2 text-xs font-medium text-gray-400">Matched Keyword</th>
-                              <th className="w-[22%] text-left py-2 px-2 text-xs font-medium text-gray-400">Ad Group</th>
-                              <th className="w-[11%] text-center py-2 px-2 text-xs font-medium text-gray-400">Clicks</th>
-                              <th className="w-[11%] text-center py-2 px-2 text-xs font-medium text-gray-400">Sales</th>
-                              <th className="w-[12%] text-center py-2 px-2 text-xs font-medium text-gray-400">Spend</th>
+                            <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+                              <th className="w-[22%] text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Search Term</th>
+                              <th className="w-[22%] text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Matched Keyword</th>
+                              <th className="w-[22%] text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Ad Group</th>
+                              <th className="w-[11%] text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Clicks</th>
+                              <th className="w-[11%] text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Sales</th>
+                              <th className="w-[12%] text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Spend</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -2909,26 +2966,26 @@ const PPCDashboard = () => {
                               <TableSkeletonRows columns={6} rows={5} />
                             ) : zeroSalesData.length === 0 ? (
                               <tr>
-                                <td colSpan={6} className="text-center py-6 text-gray-400 text-xs">
+                                <td colSpan={6} className="text-center py-6 text-xs" style={{ color: COLORS.textSecondary }}>
                                   No data available
                                 </td>
                               </tr>
                             ) : (
                               <>
                                 {zeroSalesData.map((term, idx) => (
-                                  <tr key={idx} className="border-b border-[#30363d]">
-                                  <td className="w-[22%] py-2 px-2 text-xs text-gray-100 break-words">
+                                  <tr key={idx} className="transition-colors hover:bg-[#1A202B]" style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+                                  <td className="w-[22%] py-3.5 px-3 text-sm font-semibold break-words" style={{ color: COLORS.textPrimary }}>
                                     {term.searchTerm}
                                   </td>
-                                  <td className="w-[22%] py-2 px-2 text-xs text-gray-300 break-words">
+                                  <td className="w-[22%] py-3.5 px-3 text-[13px] break-words" style={{ color: COLORS.textSecondary }}>
                                     {term.keyword || 'N/A'}
                                   </td>
-                                  <td className="w-[22%] py-2 px-2 text-xs text-gray-300 break-words">
+                                  <td className="w-[22%] py-3.5 px-3 text-[13px] break-words" style={{ color: COLORS.textSecondary }}>
                                     {term.adGroupName || 'N/A'}
                                   </td>
-                                  <td className="w-[11%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{term.clicks}</td>
-                                  <td className="w-[11%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(term.sales, currency)}</td>
-                                  <td className="w-[12%] py-2 px-2 text-xs text-center font-medium text-red-400 whitespace-nowrap">
+                                  <td className="w-[11%] py-3.5 px-3 text-[13px] text-center whitespace-nowrap" style={{ color: COLORS.textSecondary }}>{term.clicks}</td>
+                                  <td className="w-[11%] py-3.5 px-3 text-sm font-semibold text-center whitespace-nowrap" style={{ color: COLORS.textPrimary }}>{formatCurrencyWithLocale(term.sales, currency)}</td>
+                                  <td className="w-[12%] py-3.5 px-3 text-[13px] text-center font-medium whitespace-nowrap" style={{ color: '#F87171' }}>
                                     {formatCurrencyWithLocale(term.spend, currency)}
                                   </td>
                                 </tr>
@@ -2942,30 +2999,30 @@ const PPCDashboard = () => {
                       <div ref={zeroSalesSentinelRef} className="h-px w-full" />
                     </>
                   )}
-                  
+
                   {/* Auto Campaign Insights Tab */}
                   {selectedTab === 5 && (
                     <>
-                      <h2 className="text-sm font-semibold text-gray-100 mb-1">Auto Campaign Insights</h2>
-                      <OptimizationTip 
+                      <h2 className="text-sm font-semibold mb-1" style={{ color: COLORS.textPrimary }}>Auto Campaign Insights</h2>
+                      <OptimizationTip
                         tip="Promote high performing search terms to manual campaigns for better control."
                         icon="🎯"
                       />
-                      <div className="mb-2 mt-1 text-xs text-gray-400">
+                      <div className="mb-2 mt-1 text-xs" style={{ color: COLORS.textSecondary }}>
                         Performance insights from automatic targeting campaigns
                       </div>
                       <div className="w-full overflow-hidden">
                         <table className="w-full table-fixed">
                           <thead>
-                            <tr className="border-b border-[#30363d]">
-                              <th className="w-[20%] text-left py-2 px-2 text-xs font-medium text-gray-400">Search Term</th>
-                              <th className="w-[22%] text-left py-2 px-2 text-xs font-medium text-gray-400">Campaign Name</th>
-                              <th className="w-[18%] text-left py-2 px-2 text-xs font-medium text-gray-400">Ad Group</th>
-                              <th className="w-[8%] text-center py-2 px-2 text-xs font-medium text-gray-400">Sales</th>
-                              <th className="w-[8%] text-center py-2 px-2 text-xs font-medium text-gray-400">ACoS %</th>
-                              <th className="w-[8%] text-center py-2 px-2 text-xs font-medium text-gray-400">CTR %</th>
-                              <th className="w-[8%] text-center py-2 px-2 text-xs font-medium text-gray-400">CPC</th>
-                              <th className="w-[8%] text-center py-2 px-2 text-xs font-medium text-gray-400">ROAS</th>
+                            <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+                              <th className="w-[20%] text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Search Term</th>
+                              <th className="w-[22%] text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Campaign Name</th>
+                              <th className="w-[18%] text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Ad Group</th>
+                              <th className="w-[8%] text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>Sales</th>
+                              <th className="w-[8%] text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>ACoS %</th>
+                              <th className="w-[8%] text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>CTR %</th>
+                              <th className="w-[8%] text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>CPC</th>
+                              <th className="w-[8%] text-center py-3 px-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>ROAS</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -2973,7 +3030,7 @@ const PPCDashboard = () => {
                               <TableSkeletonRows columns={8} rows={5} />
                             ) : autoInsightsData.length === 0 ? (
                               <tr>
-                                <td colSpan={8} className="text-center py-6 text-gray-400 text-xs">
+                                <td colSpan={8} className="text-center py-6 text-xs" style={{ color: COLORS.textSecondary }}>
                                   No data available
                                 </td>
                               </tr>
@@ -2988,25 +3045,25 @@ const PPCDashboard = () => {
                                   const cpc = insight.cpc != null ? Number(insight.cpc) : (clicks > 0 ? spend / clicks : 0);
                                   const roas = insight.roas != null ? Number(insight.roas) : (spend > 0 ? sales / spend : 0);
                                   return (
-                                  <tr key={idx} className="border-b border-[#30363d]">
-                                  <td className="w-[20%] py-2 px-2 text-xs text-gray-100 break-words">
+                                  <tr key={idx} className="transition-colors hover:bg-[#1A202B]" style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+                                  <td className="w-[20%] py-3.5 px-3 text-sm font-semibold break-words" style={{ color: COLORS.textPrimary }}>
                                     {insight.searchTerm}
                                   </td>
-                                  <td className="w-[22%] py-2 px-2 text-xs text-gray-300 break-words">
+                                  <td className="w-[22%] py-3.5 px-3 text-[13px] break-words" style={{ color: COLORS.textSecondary }}>
                                     {insight.campaignName}
                                   </td>
-                                  <td className="w-[18%] py-2 px-2 text-xs text-gray-300 break-words">
+                                  <td className="w-[18%] py-3.5 px-3 text-[13px] break-words" style={{ color: COLORS.textSecondary }}>
                                     {insight.adGroupName || 'N/A'}
                                   </td>
-                                  <td className="w-[8%] py-2 px-2 text-xs text-center font-medium text-green-400 whitespace-nowrap">
+                                  <td className="w-[8%] py-3.5 px-3 text-sm font-semibold text-center whitespace-nowrap" style={{ color: COLORS.good }}>
                                     {formatCurrencyWithLocale(sales, currency)}
                                   </td>
-                                  <td className="w-[8%] py-2 px-2 text-xs text-center font-medium whitespace-nowrap text-gray-300">
+                                  <td className="w-[8%] py-3.5 px-3 text-[13px] text-center font-medium whitespace-nowrap" style={{ color: COLORS.textSecondary }}>
                                     {(insight.acos || 0).toFixed(2)}%
                                   </td>
-                                  <td className="w-[8%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{ctr.toFixed(2)}%</td>
-                                  <td className="w-[8%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{formatCurrencyWithLocale(cpc, currency)}</td>
-                                  <td className="w-[8%] py-2 px-2 text-xs text-center whitespace-nowrap text-gray-300">{roas.toFixed(2)}x</td>
+                                  <td className="w-[8%] py-3.5 px-3 text-[13px] text-center whitespace-nowrap" style={{ color: COLORS.textSecondary }}>{ctr.toFixed(2)}%</td>
+                                  <td className="w-[8%] py-3.5 px-3 text-[13px] text-center whitespace-nowrap" style={{ color: COLORS.textSecondary }}>{formatCurrencyWithLocale(cpc, currency)}</td>
+                                  <td className="w-[8%] py-3.5 px-3 text-[13px] text-center whitespace-nowrap" style={{ color: COLORS.textSecondary }}>{roas.toFixed(2)}x</td>
                                 </tr>
                                   );
                                 })}
@@ -3022,9 +3079,9 @@ const PPCDashboard = () => {
                 </motion.div>
               </AnimatePresence>
               ) : (
-                <div className="flex items-center justify-center py-6 text-gray-400">
+                <div className="flex items-center justify-center py-6" style={{ color: COLORS.textSecondary }}>
                   <div className="text-center">
-                    <p className="text-sm font-medium mb-1">No data available</p>
+                    <p className="text-sm font-medium mb-1" style={{ color: COLORS.textPrimary }}>No data available</p>
                     <p className="text-xs">Please sync your data to view campaign analysis</p>
                   </div>
                 </div>

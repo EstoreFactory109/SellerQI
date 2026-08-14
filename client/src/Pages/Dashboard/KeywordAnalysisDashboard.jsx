@@ -15,6 +15,7 @@ import {
   setError
 } from '../../redux/slices/KeywordRecommendationsSlice.js';
 import { TablePageSkeleton } from '../../Components/Skeleton/PageSkeletons.jsx';
+import { COLORS } from '../../Components/Shared/index.js';
 
 // Main Dashboard Component
 const KeywordAnalysisDashboard = () => {
@@ -343,9 +344,9 @@ const KeywordAnalysisDashboard = () => {
     return (
       <div className="dashboard-container">
         <div className="container" style={{ padding: '10px 0' }}>
-          <div className="bg-[#161b22] rounded border border-[#30363d] p-4 text-center">
-            <AlertCircle size={32} color="#ef4444" className="mx-auto mb-2" />
-            <p style={{ color: '#ef4444', fontSize: '12px' }}>No ASINs with keyword recommendations found. Please ensure keyword data has been processed.</p>
+          <div className="rounded p-4 text-center" style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}` }}>
+            <AlertCircle size={32} color="#F87171" className="mx-auto mb-2" />
+            <p style={{ color: '#F87171', fontSize: '12px' }}>No ASINs with keyword recommendations found. Please ensure keyword data has been processed.</p>
           </div>
         </div>
       </div>
@@ -363,8 +364,8 @@ const KeywordAnalysisDashboard = () => {
           flexDirection: 'column',
           gap: '10px'
         }}>
-          <AlertCircle size={32} color="#ef4444" />
-          <p style={{ color: '#ef4444', fontSize: '12px' }}>{reduxError}</p>
+          <AlertCircle size={32} color="#F87171" />
+          <p style={{ color: '#F87171', fontSize: '12px' }}>{reduxError}</p>
         </div>
       </div>
     );
@@ -378,320 +379,310 @@ const KeywordAnalysisDashboard = () => {
       <style>{`
         .dashboard-container {
           min-height: 100vh;
-          background: #1a1a1a;
+          background: ${COLORS.bgBase};
           padding: 10px;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
-        
+
         .container {
           max-width: 1400px;
           margin: 0 auto;
         }
-        
+
         .header {
-          background: #161b22;
+          background: ${COLORS.surface};
           padding: 10px 15px;
           border-radius: 6px;
-          border: 1px solid #30363d;
+          border: 1px solid ${COLORS.border};
           margin-bottom: 10px;
           display: flex;
           justify-content: space-between;
           align-items: center;
         }
-        
+
         .logo {
           font-size: 16px;
           font-weight: 700;
-          color: #f3f4f6;
+          color: ${COLORS.textPrimary};
           display: flex;
           align-items: center;
           gap: 8px;
         }
-        
+
         .asin-filter-container {
-          background: #161b22;
+          background: ${COLORS.surface};
           padding: 8px 12px;
           border-radius: 6px;
-          border: 1px solid #30363d;
+          border: 1px solid ${COLORS.border};
           margin-bottom: 10px;
           display: flex;
           align-items: center;
           gap: 8px;
         }
-        
+
         .asin-filter-label {
           font-size: 12px;
           font-weight: 600;
-          color: #9ca3af;
+          color: ${COLORS.textSecondary};
           white-space: nowrap;
         }
-        
+
         .asin-filter-select {
           flex: 1;
           min-width: 0;
           padding: 6px 10px;
-          border: 1px solid #30363d;
+          border: 1px solid ${COLORS.border};
           border-radius: 6px;
-          background: #1a1a1a;
+          background: ${COLORS.bgBase};
           font-size: 12px;
           font-weight: 500;
-          color: #f3f4f6;
+          color: ${COLORS.textPrimary};
           cursor: pointer;
           transition: all 0.2s;
           appearance: none;
-          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%239ca3af' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23A5AEC0' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
           background-repeat: no-repeat;
           background-position: right 10px center;
           padding-right: 30px;
         }
-        
+
         .asin-filter-select option {
           padding: 6px;
           white-space: normal;
-          background: #21262d;
-          color: #f3f4f6;
+          background: ${COLORS.surfaceElevated};
+          color: ${COLORS.textPrimary};
         }
-        
+
         .asin-filter-select:hover:not(:disabled) {
-          border-color: #3b82f6;
+          border-color: ${COLORS.accent};
         }
-        
+
         .asin-filter-select:focus:not(:disabled) {
           outline: none;
-          border-color: #3b82f6;
+          border-color: ${COLORS.accent};
           box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
         }
-        
+
         .asin-filter-select:disabled {
-          background-color: #21262d;
-          color: #6b7280;
+          background-color: ${COLORS.surfaceElevated};
+          color: ${COLORS.textMuted};
           cursor: not-allowed;
         }
-        
+
         .metrics-grid {
           display: grid;
           grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
           gap: 8px;
           margin-bottom: 10px;
         }
-        
+
         .metric-card {
-          background: #161b22;
-          padding: 10px;
-          border-radius: 6px;
-          border: 1px solid #30363d;
+          background: ${COLORS.surface};
+          padding: 14px 16px;
+          border-radius: 12px;
+          border: 1px solid ${COLORS.border};
         }
-        
+
         .metric-content {
           flex: 1;
         }
-        
+
         .metric-label {
           font-size: 11px;
-          color: #9ca3af;
-          margin-bottom: 2px;
+          font-weight: 600;
+          letter-spacing: .06em;
+          text-transform: uppercase;
+          color: ${COLORS.textSecondary};
+          margin-bottom: 8px;
           display: flex;
           align-items: center;
           gap: 6px;
         }
-        
+
         .metric-label-icon {
-          color: #60a5fa;
+          color: ${COLORS.textMuted};
           flex-shrink: 0;
         }
-        
+
         .metric-value {
-          font-size: 18px;
+          font-size: 22px;
           font-weight: 700;
-          color: #f3f4f6;
+          color: ${COLORS.textPrimary};
         }
-        
-        .icon-blue { color: #60a5fa; }
-        .icon-green { color: #34d399; }
-        .icon-orange { color: #fb923c; }
-        .icon-purple { color: #c084fc; }
-        
+
+        .metric-caption {
+          font-size: 12px;
+          color: ${COLORS.textMuted};
+          margin-top: 6px;
+        }
+
         .tabs-container {
-          background: #161b22;
+          background: ${COLORS.surface};
           border-radius: 6px 6px 0 0;
           padding: 0 12px;
           display: flex;
           gap: 16px;
-          border-bottom: 1px solid #30363d;
-          border: 1px solid #30363d;
-          border-bottom: 1px solid #30363d;
+          border: 1px solid ${COLORS.border};
+          border-bottom: 1px solid ${COLORS.border};
         }
-        
+
         .tab {
           padding: 8px 0;
           border-bottom: 2px solid transparent;
           cursor: pointer;
           font-weight: 500;
-          color: #9ca3af;
+          color: ${COLORS.textSecondary};
           transition: all 0.2s;
-          font-size: 12px;
-        }
-        
-        .tab:hover {
-          color: #d1d5db;
-        }
-        
-        .tab.active {
-          color: #60a5fa;
-          border-bottom-color: #3b82f6;
-        }
-        
-        .filters-bar {
-          background: #21262d;
-          padding: 8px 12px;
+          font-size: 13px;
           display: flex;
-          justify-content: space-between;
           align-items: center;
-          border-left: 1px solid #30363d;
-          border-right: 1px solid #30363d;
-        }
-        
-        .filter-group {
-          display: flex;
           gap: 6px;
         }
-        
-        .filter-select {
-          padding: 4px 8px;
-          border: 1px solid #30363d;
-          border-radius: 4px;
-          background: #1a1a1a;
-          font-size: 11px;
-          color: #f3f4f6;
-          cursor: pointer;
+
+        .tab:hover {
+          color: ${COLORS.textPrimary};
         }
-        
+
+        .tab.active {
+          color: ${COLORS.textPrimary};
+          font-weight: 600;
+          border-bottom-color: ${COLORS.accent};
+        }
+
+        .tab-count {
+          padding: 1px 7px;
+          border-radius: 999px;
+          background: ${COLORS.surfaceElevated};
+          color: ${COLORS.textSecondary};
+          font-size: 11px;
+          font-weight: 600;
+        }
+
         .table-container {
-          background: #161b22;
+          background: ${COLORS.surface};
           border-radius: 0 0 6px 6px;
           overflow-x: hidden;
           overflow-y: visible;
-          border: 1px solid #30363d;
+          border: 1px solid ${COLORS.border};
           border-top: none;
         }
-        
+
         table {
           width: 100%;
           border-collapse: collapse;
           table-layout: fixed;
         }
-        
+
         thead {
-          background: #21262d;
+          background: ${COLORS.surfaceElevated};
           position: relative;
         }
-        
+
         th {
-          padding: 8px 10px;
+          padding: 12px 12px;
           text-align: left;
-          font-size: 10px;
+          font-size: 11px;
           font-weight: 600;
-          color: #9ca3af;
+          color: ${COLORS.textMuted};
           text-transform: uppercase;
-          letter-spacing: 0.5px;
+          letter-spacing: .06em;
           cursor: pointer;
           user-select: none;
           word-wrap: break-word;
           overflow-wrap: break-word;
           word-break: break-word;
         }
-        
+
         th:hover {
-          color: #d1d5db;
+          color: ${COLORS.textPrimary};
         }
-        
+
         td {
-          padding: 8px 10px;
-          border-top: 1px solid #30363d;
-          font-size: 11px;
+          padding: 14px 12px;
+          border-top: 1px solid ${COLORS.border};
+          font-size: 13px;
           text-align: left;
           word-wrap: break-word;
           overflow-wrap: break-word;
           word-break: break-word;
-          color: #f3f4f6;
+          color: ${COLORS.textPrimary};
         }
-        
+
         tbody tr {
-          border-bottom: 1px solid #30363d;
+          border-bottom: 1px solid ${COLORS.border};
+          transition: background 0.15s;
         }
-        
+
+        tbody tr:hover {
+          background: #1A202B;
+        }
+
         .keyword-cell {
-          font-weight: 500;
-          color: #f3f4f6;
+          font-weight: 600;
+          font-size: 14px;
+          color: ${COLORS.textPrimary};
           word-wrap: break-word;
           overflow-wrap: break-word;
           word-break: break-word;
         }
-        
-        .badge {
+
+        .rank-pill {
           display: inline-block;
-          padding: 4px 10px;
-          border-radius: 12px;
-          font-size: 11px;
+          padding: 3px 9px;
+          border-radius: 7px;
+          font-size: 12px;
           font-weight: 600;
         }
-        
-        .match-type-badge {
-          padding: 4px 10px;
-          border-radius: 12px;
-          font-size: 11px;
-          font-weight: 600;
-        }
-        
+
         .empty-state {
           padding: 60px 20px;
           text-align: center;
-          color: #64748b;
+          color: ${COLORS.textSecondary};
         }
-        
+
         .loading {
           display: inline-block;
           width: 14px;
           height: 14px;
-          border: 2px solid #e2e8f0;
-          border-top-color: #3b82f6;
+          border: 2px solid ${COLORS.border};
+          border-top-color: ${COLORS.accent};
           border-radius: 50%;
           animation: spin 0.8s linear infinite;
         }
-        
+
         .table-container-wrapper {
           position: relative;
           overflow: visible;
         }
-        
+
         @keyframes spin {
           to { transform: rotate(360deg); }
         }
-        
+
         @keyframes fadeIn {
           from { opacity: 0; }
           to { opacity: 1; }
         }
-        
+
         .tooltip-container {
           position: relative;
           display: inline-flex;
           align-items: center;
           margin-left: 6px;
         }
-        
+
         .tooltip-icon {
           width: 14px;
           height: 14px;
-          color: #94a3b8;
+          color: ${COLORS.textMuted};
           cursor: help;
           transition: color 0.2s;
         }
-        
+
         .tooltip-icon:hover {
-          color: #3b82f6;
+          color: ${COLORS.accent};
         }
-        
+
         .tooltip-content {
           position: absolute;
           top: 100%;
@@ -699,9 +690,9 @@ const KeywordAnalysisDashboard = () => {
           transform: translateY(4px);
           margin-top: 6px;
           padding: 8px 10px;
-          background: #21262d;
-          color: #f3f4f6;
-          border: 1px solid #30363d;
+          background: ${COLORS.surfaceElevated};
+          color: ${COLORS.textPrimary};
+          border: 1px solid ${COLORS.border};
           border-radius: 6px;
           font-size: 11px;
           font-weight: 400;
@@ -716,24 +707,24 @@ const KeywordAnalysisDashboard = () => {
           text-align: left;
           box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
         }
-        
+
         .tooltip-container:hover .tooltip-content {
           opacity: 1;
           pointer-events: auto;
           transform: translateY(0);
         }
-        
+
         .tooltip-container.tooltip-last .tooltip-content {
           left: auto;
           right: 0;
           transform: translateX(0) translateY(4px);
           text-align: left;
         }
-        
+
         .tooltip-container.tooltip-last:hover .tooltip-content {
           transform: translateX(0) translateY(0);
         }
-        
+
         .tooltip-content::before {
           content: '';
           position: absolute;
@@ -741,15 +732,15 @@ const KeywordAnalysisDashboard = () => {
           left: 16px;
           transform: translateX(0);
           border: 5px solid transparent;
-          border-bottom-color: #21262d;
+          border-bottom-color: ${COLORS.surfaceElevated};
         }
-        
+
         .tooltip-container.tooltip-last .tooltip-content::before {
           left: auto;
           right: 20px;
           transform: translateX(0);
         }
-        
+
         .th-with-tooltip {
           display: flex;
           align-items: center;
@@ -762,7 +753,8 @@ const KeywordAnalysisDashboard = () => {
         {/* Header */}
         <div className="header">
           <div className="logo">
-            🎯 Keyword Opportunities Dashboard
+            <Target size={18} style={{ color: COLORS.good }} />
+            Keyword Opportunities
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
             <button
@@ -772,22 +764,22 @@ const KeywordAnalysisDashboard = () => {
                 alignItems: 'center',
                 gap: '6px',
                 padding: '6px 12px',
-                backgroundColor: '#3b82f6',
-                color: 'white',
+                backgroundColor: COLORS.accent,
+                color: '#061021',
                 border: 'none',
-                borderRadius: '4px',
+                borderRadius: '8px',
                 cursor: 'pointer',
-                fontSize: '11px',
-                fontWeight: '500',
+                fontSize: '13px',
+                fontWeight: '600',
                 transition: 'background-color 0.2s'
               }}
-              onMouseEnter={(e) => e.target.style.backgroundColor = '#2563eb'}
-              onMouseLeave={(e) => e.target.style.backgroundColor = '#3b82f6'}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#5A97F8'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = COLORS.accent}
             >
               <Download size={14} />
               Export CSV
             </button>
-            <div style={{ fontSize: '11px', color: '#9ca3af' }}>
+            <div style={{ fontSize: '13px', color: COLORS.textSecondary }}>
               {currentCountry ? `Marketplace: ${currentCountry.toUpperCase()}` : 'Amazon Ads'}
             </div>
           </div>
@@ -802,6 +794,9 @@ const KeywordAnalysisDashboard = () => {
                 <span>Total Recommendations</span>
               </div>
               <div className="metric-value">{metrics.totalKeywords}</div>
+              {asinsList.length > 0 && (
+                <div className="metric-caption">Across {asinsList.length} advertised ASIN{asinsList.length === 1 ? '' : 's'}</div>
+              )}
             </div>
           </div>
           <div className="metric-card">
@@ -819,7 +814,10 @@ const KeywordAnalysisDashboard = () => {
                 <Target className="metric-label-icon" size={14} />
                 <span>High Relevance Keywords</span>
               </div>
-              <div className="metric-value">{metrics.highRankKeywords}</div>
+              <div className="metric-value" style={{ color: metrics.highRankKeywords > 0 ? COLORS.good : COLORS.textPrimary }}>{metrics.highRankKeywords}</div>
+              {metrics.highRankKeywords > 0 && (
+                <div className="metric-caption">Start with these</div>
+              )}
             </div>
           </div>
         </div>
@@ -840,12 +838,12 @@ const KeywordAnalysisDashboard = () => {
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 padding: '6px 10px',
-                border: '1px solid #30363d',
+                border: `1px solid ${COLORS.border}`,
                 borderRadius: '6px',
-                background: '#1a1a1a',
+                background: COLORS.bgBase,
                 fontSize: '12px',
                 fontWeight: '500',
-                color: selectedAsin ? '#f3f4f6' : '#6b7280',
+                color: selectedAsin ? COLORS.textPrimary : COLORS.textMuted,
                 cursor: (loadingAsins || asinsList.length === 0) ? 'not-allowed' : 'pointer',
                 transition: 'all 0.2s',
                 appearance: 'none',
@@ -853,7 +851,7 @@ const KeywordAnalysisDashboard = () => {
               }}
             >
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {loadingAsins ? 'Loading ASINs...' : 
+                {loadingAsins ? 'Loading ASINs...' :
                  asinsList.length === 0 ? 'No ASINs available' :
                  selectedAsin ? (() => {
                    const productName = getProductName(selectedAsin);
@@ -861,20 +859,20 @@ const KeywordAnalysisDashboard = () => {
                    const selectedItem = asinsList.find(a => a.asin === selectedAsin);
                    const skuDisplay = productSku ? ` | SKU: ${productSku}` : '';
                    const asinSkuDisplay = `ASIN: ${selectedAsin}${skuDisplay}`;
-                   return productName 
+                   return productName
                      ? `${asinSkuDisplay} - ${productName}${selectedItem?.keywordCount ? ` (${selectedItem.keywordCount} keywords)` : ''}`
                      : `${asinSkuDisplay}${selectedItem?.keywordCount ? ` (${selectedItem.keywordCount} keywords)` : ''}`;
                  })() : 'Select an ASIN'}
               </span>
-              <ChevronDown 
-                size={14} 
-                style={{ 
-                  position: 'absolute', 
-                  right: '10px', 
-                  color: '#9ca3af',
+              <ChevronDown
+                size={14}
+                style={{
+                  position: 'absolute',
+                  right: '10px',
+                  color: COLORS.textSecondary,
                   transform: isAsinDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)',
                   transition: 'transform 0.2s'
-                }} 
+                }}
               />
             </button>
 
@@ -885,8 +883,8 @@ const KeywordAnalysisDashboard = () => {
                 left: 0,
                 right: 0,
                 marginTop: '2px',
-                backgroundColor: '#21262d',
-                border: '1px solid #30363d',
+                backgroundColor: COLORS.surfaceElevated,
+                border: `1px solid ${COLORS.border}`,
                 borderRadius: '6px',
                 boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2)',
                 zIndex: 1000,
@@ -895,17 +893,17 @@ const KeywordAnalysisDashboard = () => {
                 flexDirection: 'column'
               }}>
                 {/* Search Bar */}
-                <div style={{ padding: '6px', borderBottom: '1px solid #30363d' }}>
+                <div style={{ padding: '6px', borderBottom: `1px solid ${COLORS.border}` }}>
                   <div style={{ position: 'relative' }}>
-                    <Search 
-                      size={14} 
-                      style={{ 
-                        position: 'absolute', 
-                        left: '8px', 
-                        top: '50%', 
-                        transform: 'translateY(-50%)', 
-                        color: '#6b7280' 
-                      }} 
+                    <Search
+                      size={14}
+                      style={{
+                        position: 'absolute',
+                        left: '8px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        color: COLORS.textMuted
+                      }}
                     />
                     <input
                       type="text"
@@ -916,16 +914,16 @@ const KeywordAnalysisDashboard = () => {
                       style={{
                         width: '100%',
                         padding: '6px 8px 6px 28px',
-                        border: '1px solid #30363d',
+                        border: `1px solid ${COLORS.border}`,
                         borderRadius: '4px',
                         fontSize: '11px',
                         outline: 'none',
                         transition: 'border-color 0.2s',
-                        backgroundColor: '#1a1a1a',
-                        color: '#f3f4f6'
+                        backgroundColor: COLORS.bgBase,
+                        color: COLORS.textPrimary
                       }}
-                      onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-                      onBlur={(e) => e.target.style.borderColor = '#30363d'}
+                      onFocus={(e) => e.target.style.borderColor = COLORS.accent}
+                      onBlur={(e) => e.target.style.borderColor = COLORS.border}
                     />
                     {isSearching && (
                       <div className="loading" style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)' }} />
@@ -934,17 +932,17 @@ const KeywordAnalysisDashboard = () => {
                 </div>
 
                 {/* Dropdown Options */}
-                <div style={{ 
-                  maxHeight: '250px', 
+                <div style={{
+                  maxHeight: '250px',
                   overflowY: 'auto',
                   padding: '2px'
                 }}>
                   {displayedAsinsList.length === 0 ? (
-                    <div style={{ 
-                      padding: '10px', 
-                      textAlign: 'center', 
-                      color: '#9ca3af', 
-                      fontSize: '11px' 
+                    <div style={{
+                      padding: '10px',
+                      textAlign: 'center',
+                      color: COLORS.textSecondary,
+                      fontSize: '11px'
                     }}>
                       {isSearching ? 'Searching...' : `No ASINs found matching "${asinSearchQuery}"`}
                     </div>
@@ -953,7 +951,7 @@ const KeywordAnalysisDashboard = () => {
                       const productName = getProductName(asinItem.asin);
                       const productSku = getProductSku(asinItem.asin);
                       const isSelected = selectedAsin === asinItem.asin;
-                      
+
                       return (
                         <button
                           key={asinItem.asin}
@@ -964,8 +962,8 @@ const KeywordAnalysisDashboard = () => {
                             padding: '8px 10px',
                             textAlign: 'left',
                             border: 'none',
-                            background: isSelected ? 'rgba(59, 130, 246, 0.2)' : '#21262d',
-                            color: isSelected ? '#60a5fa' : '#f3f4f6',
+                            background: isSelected ? 'rgba(59, 130, 246, 0.16)' : 'transparent',
+                            color: isSelected ? '#7EA8F8' : COLORS.textPrimary,
                             cursor: 'pointer',
                             fontSize: '11px',
                             transition: 'background-color 0.15s',
@@ -973,22 +971,22 @@ const KeywordAnalysisDashboard = () => {
                             margin: '2px 0'
                           }}
                           onMouseEnter={(e) => {
-                            if (!isSelected) e.target.style.backgroundColor = '#161b22';
+                            if (!isSelected) e.target.style.backgroundColor = COLORS.surface;
                           }}
                           onMouseLeave={(e) => {
-                            if (!isSelected) e.target.style.backgroundColor = '#21262d';
+                            if (!isSelected) e.target.style.backgroundColor = 'transparent';
                           }}
                         >
                           <div style={{ fontWeight: isSelected ? '600' : '500', marginBottom: '2px', fontSize: '11px' }}>
-                            {productSku 
+                            {productSku
                               ? `ASIN: ${asinItem.asin} | SKU: ${productSku}`
                               : `ASIN: ${asinItem.asin}`
                             }
                           </div>
                           {productName && (
-                            <div style={{ 
-                              fontSize: '10px', 
-                              color: isSelected ? '#60a5fa' : '#9ca3af',
+                            <div style={{
+                              fontSize: '10px',
+                              color: isSelected ? '#7EA8F8' : COLORS.textSecondary,
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',
                               whiteSpace: 'nowrap'
@@ -997,9 +995,9 @@ const KeywordAnalysisDashboard = () => {
                             </div>
                           )}
                           {asinItem.keywordCount !== undefined && (
-                            <div style={{ 
-                              fontSize: '10px', 
-                              color: isSelected ? '#60a5fa' : '#9ca3af',
+                            <div style={{
+                              fontSize: '10px',
+                              color: isSelected ? '#7EA8F8' : COLORS.textSecondary,
                               marginTop: '2px'
                             }}>
                               {asinItem.keywordCount} keywords
@@ -1024,23 +1022,26 @@ const KeywordAnalysisDashboard = () => {
         <>
         {/* Tabs */}
         <div className="tabs-container">
-          <div 
+          <div
             className={`tab ${activeTab === 'all' ? 'active' : ''}`}
             onClick={() => handleTabChange('all')}
           >
-            All Keywords ({summary?.totalKeywords || pagination.totalItems || 0})
+            All Keywords
+            <span className="tab-count">{summary?.totalKeywords || pagination.totalItems || 0}</span>
           </div>
-          <div 
+          <div
             className={`tab ${activeTab === 'highRank' ? 'active' : ''}`}
             onClick={() => handleTabChange('highRank')}
           >
-            High Relevance ({summary?.highRelevanceCount || metrics.highRankKeywords})
+            High Relevance
+            <span className="tab-count">{summary?.highRelevanceCount || metrics.highRankKeywords}</span>
           </div>
-          <div 
+          <div
             className={`tab ${activeTab === 'highImpression' ? 'active' : ''}`}
             onClick={() => handleTabChange('highImpression')}
           >
-            High Impression ({summary?.highImpressionCount || metrics.highImpressionKeywords})
+            High Impression
+            <span className="tab-count">{summary?.highImpressionCount || metrics.highImpressionKeywords}</span>
           </div>
         </div>
 
@@ -1050,7 +1051,7 @@ const KeywordAnalysisDashboard = () => {
           {loadingKeywords ? (
             <div style={{ padding: '40px', textAlign: 'center' }}>
               <div className="loading" style={{ margin: '0 auto' }} />
-              <p style={{ color: '#9ca3af', fontSize: '12px', marginTop: '10px' }}>Loading keywords...</p>
+              <p style={{ color: COLORS.textSecondary, fontSize: '12px', marginTop: '10px' }}>Loading keywords...</p>
             </div>
           ) : (
           <table>
@@ -1119,23 +1120,32 @@ const KeywordAnalysisDashboard = () => {
                       </td>
                       <td>
                         {keyword.rank !== null ? (
-                          <span style={{ fontWeight: 600, color: keyword.rank <= 5 ? '#34d399' : keyword.rank <= 10 ? '#fbbf24' : '#f87171' }}>
+                          <span
+                            className="rank-pill"
+                            style={
+                              keyword.rank <= 5
+                                ? { background: 'rgba(34,197,94,.14)', color: COLORS.good }
+                                : keyword.rank <= 10
+                                  ? { background: 'rgba(245,166,35,.16)', color: COLORS.watch }
+                                  : { background: 'rgba(239,68,68,.14)', color: '#F87171' }
+                            }
+                          >
                             #{keyword.rank}
                           </span>
                         ) : '—'}
                       </td>
-                      <td>
+                      <td style={{ color: COLORS.textSecondary }}>
                         {keyword.searchTermImpressionShare !== null ? `${keyword.searchTermImpressionShare.toFixed(2)}%` : '—'}
                       </td>
-                      <td>
+                      <td style={{ color: COLORS.textSecondary }}>
                         {keyword.searchTermImpressionRank !== null ? `#${keyword.searchTermImpressionRank}` : '—'}
                       </td>
                       <td>
                         {keyword.suggestedBid ? (
-                          <span style={{ fontSize: '10px', color: '#9ca3af' }}>
+                          <span style={{ fontSize: '11px', color: COLORS.textSecondary }}>
                             ${(keyword.suggestedBid.rangeStart / 100).toFixed(2)} - ${(keyword.suggestedBid.rangeEnd / 100).toFixed(2)}
                             <br />
-                            <span style={{ color: '#60a5fa', fontWeight: 600 }}>
+                            <span style={{ color: '#7EA8F8', fontWeight: 600 }}>
                               Median: ${(keyword.suggestedBid.rangeMedian / 100).toFixed(2)}
                             </span>
                           </span>
@@ -1161,13 +1171,13 @@ const KeywordAnalysisDashboard = () => {
           {pagination.hasMore && (
             <div style={{
               padding: '8px 12px',
-              borderTop: '1px solid #30363d',
+              borderTop: `1px solid ${COLORS.border}`,
               display: 'flex',
               justifyContent: 'center',
               alignItems: 'center',
-              background: '#21262d'
+              background: COLORS.surfaceElevated
             }}>
-              <div style={{ fontSize: '11px', color: '#9ca3af', marginRight: '10px' }}>
+              <div style={{ fontSize: '11px', color: COLORS.textSecondary, marginRight: '10px' }}>
                 Showing {sortedKeywords.length} of {pagination.totalItems} keywords
               </div>
               <button
@@ -1175,23 +1185,23 @@ const KeywordAnalysisDashboard = () => {
                 disabled={loadingMoreKeywords}
                 style={{
                   padding: '6px 12px',
-                  border: '1px solid #3b82f6',
+                  border: `1px solid ${COLORS.accent}`,
                   borderRadius: '4px',
-                  background: loadingMoreKeywords ? '#1e3a5f' : '#3b82f6',
-                  color: 'white',
+                  background: loadingMoreKeywords ? COLORS.border : COLORS.accent,
+                  color: '#061021',
                   cursor: loadingMoreKeywords ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
                   fontSize: '11px',
-                  fontWeight: '500',
+                  fontWeight: '600',
                   transition: 'background-color 0.2s'
                 }}
                 onMouseEnter={(e) => {
-                  if (!loadingMoreKeywords) e.target.style.backgroundColor = '#2563eb';
+                  if (!loadingMoreKeywords) e.currentTarget.style.backgroundColor = '#5A97F8';
                 }}
                 onMouseLeave={(e) => {
-                  if (!loadingMoreKeywords) e.target.style.backgroundColor = '#3b82f6';
+                  if (!loadingMoreKeywords) e.currentTarget.style.backgroundColor = COLORS.accent;
                 }}
               >
                 {loadingMoreKeywords ? (
@@ -1211,13 +1221,13 @@ const KeywordAnalysisDashboard = () => {
           {!pagination.hasMore && sortedKeywords.length > 0 && (
             <div style={{
               padding: '8px 12px',
-              borderTop: '1px solid #30363d',
+              borderTop: `1px solid ${COLORS.border}`,
               display: 'flex',
               justifyContent: 'center',
               alignItems: 'center',
-              background: '#21262d'
+              background: COLORS.surfaceElevated
             }}>
-              <div style={{ fontSize: '11px', color: '#9ca3af' }}>
+              <div style={{ fontSize: '11px', color: COLORS.textSecondary }}>
                 Showing all {pagination.totalItems} keywords
               </div>
             </div>
