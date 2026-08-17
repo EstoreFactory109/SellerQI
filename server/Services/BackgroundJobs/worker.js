@@ -173,6 +173,15 @@ function runWithLockExtension(job, asyncFn) {
         amountMs: LOCK_EXTENSION_AMOUNT,
         label: `Worker:${WORKER_NAME}`,
         verbose: true,
+        // Keep this job's JobStatus row warm while it runs, so "has this account gone quiet?"
+        // is answerable. Status stays 'running' — this only moves updatedAt/lastHeartbeatAt.
+        // See lockExtension.js for who reads it and why the absence of this was a real freeze.
+        onHeartbeat: (runningJob, elapsedMs) => updateJobStatus(
+            runningJob.id,
+            runningJob.data?.userId,
+            'running',
+            { lastHeartbeatAt: new Date(), elapsedMs }
+        ),
     });
 }
 

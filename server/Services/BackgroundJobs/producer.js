@@ -19,6 +19,47 @@ const { PHASES } = scheduledPhasesModule;
 
 const MAX_SCHEDULED_JOB_AGE = 8 * 60 * 60 * 1000; // 8 hours - safety net for orphaned phase jobs
 
+// How long a phase job may go without a liveness heartbeat before this producer is willing to
+// remove it even though it is still older than MAX_SCHEDULED_JOB_AGE.
+//
+// WHY THIS EXISTS. The flat 8h age check above removes any job in waiting/active/delayed that
+// is older than 8h — including one that is actively running. That directly contradicts
+// worker.js, which grants `sched_calc_review` a 26h lock-extension ceiling because production
+// data shows it legitimately reaching 23.8h. Both statements shipped in the same commit. On the
+// largest accounts the 8h side won: a healthy calc_review was deleted mid-flight, the chain
+// restarted from sched_init, and the account could never reach finalize. Its dashboard sat
+// frozen for five days.
+//
+// Age alone cannot tell "running for 9h" from "died 9h ago", which is why the old code had to
+// guess. runWithLockExtension now writes a heartbeat to JobStatus every 15 minutes, so the two
+// are distinguishable and this no longer has to be a guess. A generous multiple of that
+// interval, so a couple of missed beats (Mongo blip, event-loop stall) never costs a live job.
+const HEARTBEAT_STALE_MS = Math.max(
+    15 * 60 * 1000,
+    parseInt(process.env.SCHEDULED_JOB_HEARTBEAT_STALE_MS || String(60 * 60 * 1000), 10) || 60 * 60 * 1000
+);
+
+/**
+ * Is this job still demonstrably alive?
+ *
+ * Fails SAFE (returns false = "cannot vouch for it") on any error or missing row, so a
+ * heartbeat problem degrades to exactly the previous age-only behaviour rather than pinning a
+ * dead job in place forever — the failure mode this whole area exists to prevent.
+ *
+ * @returns {Promise<boolean>} true only when a recent heartbeat proves the job is running
+ */
+async function hasRecentHeartbeat(jobId) {
+    try {
+        const JobStatus = require('../../models/system/JobStatusModel.js');
+        const row = await JobStatus.findOne({ jobId }).select('status updatedAt').lean();
+        if (!row || row.status !== 'running' || !row.updatedAt) return false;
+        return (Date.now() - new Date(row.updatedAt).getTime()) < HEARTBEAT_STALE_MS;
+    } catch (err) {
+        logger.warn(`[Producer] Could not read heartbeat for ${jobId}: ${err.message}`);
+        return false;
+    }
+}
+
 /**
  * Enqueue a single user for data processing
  * 
@@ -245,10 +286,17 @@ async function enqueueScheduledAccountJob(userId, country, region) {
             if (state === 'waiting' || state === 'active' || state === 'delayed') {
                 const jobAge = Date.now() - existingJob.timestamp;
 
-                if (jobAge > MAX_SCHEDULED_JOB_AGE) {
-                    logger.warn(`[Producer] Removing stale scheduled job ${jid} for user ${userId} ${country}-${region} (age: ${Math.round(jobAge / 3600000)}h, state: ${state})`);
+                // Old AND not demonstrably alive -> orphaned, remove it and re-drive.
+                // Old but still beating -> a legitimately long phase (calc_review runs up to
+                // 23.8h in production); removing it would destroy hours of real work and
+                // restart the chain, which is exactly how an account gets stuck forever.
+                if (jobAge > MAX_SCHEDULED_JOB_AGE && !(await hasRecentHeartbeat(jid))) {
+                    logger.warn(`[Producer] Removing stale scheduled job ${jid} for user ${userId} ${country}-${region} (age: ${Math.round(jobAge / 3600000)}h, state: ${state}, no heartbeat within ${Math.round(HEARTBEAT_STALE_MS / 60000)}min)`);
                     try { await existingJob.remove(); } catch (re) { logger.warn(`[Producer] Could not remove stale job ${jid}: ${re.message}`); }
                 } else {
+                    if (jobAge > MAX_SCHEDULED_JOB_AGE) {
+                        logger.info(`[Producer] Job ${jid} is ${Math.round(jobAge / 3600000)}h old but still heartbeating — leaving it alone (long-running phase, not orphaned)`);
+                    }
                     logger.info(`[Producer] Scheduled job already in progress for ${userId} ${country}-${region} (jobId: ${jid}, state: ${state}, age: ${Math.round(jobAge / 60000)}min)`);
                     return { success: false, message: 'Account already has a scheduled job in progress', jobId: jid, state };
                 }
