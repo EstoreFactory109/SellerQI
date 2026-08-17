@@ -94,7 +94,7 @@ async function extendLockWithRetry(job, extensionAmount, { maxRetries = 3, label
  * @param {boolean} [opts.verbose=false]  log each successful extension
  * @returns {Promise<*>} whatever asyncFn returns
  */
-async function runWithLockExtension(job, asyncFn, { maxMs, intervalMs, amountMs, label = 'Worker', verbose = false } = {}) {
+async function runWithLockExtension(job, asyncFn, { maxMs, intervalMs, amountMs, label = 'Worker', verbose = false, onHeartbeat } = {}) {
     let isRunning = true;
     let extensionCount = 0;
     let failedExtensions = 0;
@@ -119,6 +119,28 @@ async function runWithLockExtension(job, asyncFn, { maxMs, intervalMs, amountMs,
             }
             clearInterval(timer);
             return;
+        }
+
+        // Liveness heartbeat. Two separate recovery mechanisms — producer.js's stale-job
+        // removal and freshnessSweeper's sweepStalledPipelines — decide whether an account is
+        // frozen by asking when its JobStatus row last moved. But JobStatus is only written at
+        // phase START and phase END, so a phase legitimately running for hours looks identical
+        // to a dead one. The sweeper's own comment ("a phase legitimately mid-flight keeps its
+        // JobStatus row warm") describes a guarantee that did not exist until this call.
+        //
+        // Piggybacking the existing timer rather than adding another one: this interval already
+        // fires for exactly the long-running jobs that need it, and it is already cleared on
+        // every exit path in the `finally` below.
+        //
+        // Deliberately BEFORE the lock extension and independently guarded: a failing heartbeat
+        // (transient Mongo blip) must never skip the lock renewal, which is what actually keeps
+        // the job alive. Worst case we miss a beat and a caller waits one more interval.
+        if (typeof onHeartbeat === 'function') {
+            try {
+                await onHeartbeat(job, Date.now() - startedAt);
+            } catch (hbErr) {
+                logger.warn(`[${label}] Liveness heartbeat failed for job ${job.id}: ${hbErr.message}`);
+            }
         }
 
         const ok = await extendLockWithRetry(job, amountMs, { label });
