@@ -1,17 +1,18 @@
-import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import TopNav from '../Components/Navigation/TopNav'
 import LeftNavSection from '../Components/Navigation/LeftNavSection'
 import LeftNavSectionForTablet from '../Components/Navigation/LeftNavSectionForTablet'
 import TrialBanner from '../Components/TrialBanner/TrialBanner'
 import ErrorBoundary from '../Components/ErrorBoundary/ErrorBoundary'
+import QMatePanel from '../Components/QMate/QMatePanel.jsx'
 import { COLORS } from '../Components/Shared/index.js'
 
 const MainPagesLayout = () => {
   const location = useLocation()
-  const navigate = useNavigate()
   const scrollContainerRef = useRef(null)
   const [showArrivalFlash, setShowArrivalFlash] = useState(false)
+  const [qmatePanelOpen, setQmatePanelOpen] = useState(false)
   const onQMatePage = location.pathname.includes('qmate')
 
   // Reset scroll position when route changes
@@ -90,12 +91,12 @@ const MainPagesLayout = () => {
         </section>
 
         {/* Floating "Ask QMate" - available on every page under this layout except the
-            QMate chat page itself (where it would be redundant). Opens the real QMate
-            chat page/route, same destination the other Ask QMate buttons use. */}
+            QMate chat page itself (where it would be redundant). Opens a slide-in chat
+            drawer in place, rather than navigating away to the full QMate page. */}
         {!onQMatePage && (
             <button
                 type="button"
-                onClick={() => navigate('/seller-central-checker/qmate')}
+                onClick={() => setQmatePanelOpen(true)}
                 className="fixed z-50 flex items-center gap-2 rounded-full shadow-2xl transition-colors"
                 style={{
                     right: 26,
@@ -117,6 +118,8 @@ const MainPagesLayout = () => {
                 Ask QMate
             </button>
         )}
+
+        <QMatePanel isOpen={qmatePanelOpen} onClose={() => setQmatePanelOpen(false)} />
     </div>
   )
 }
