@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { toYyyyMmDd } = require('../../utils/metricDateKey.js');
+const { toYyyyMmDd, shiftMetricDateKey } = require('../../utils/metricDateKey.js');
 
 const adsKeywordsPerformanceSchema = new mongoose.Schema({
     userId: {
@@ -97,10 +97,25 @@ function toUserObjectId(userId) {
 /**
  * Merge per-day documents for optional [startDate, endDate] (YYYY-MM-DD strings).
  * Falls back to legacy single document (no metricDate) when no per-day docs exist.
+ *
+ * WINDOWING — why `options.lookbackDays` exists
+ * This collection holds ONE document per account per day, forever, with no TTL. Callers that
+ * passed `{}` therefore loaded every day ever recorded, then `flatMap`ed a second full copy
+ * while the first was still live. Measured in production: 78.8 MB of BSON for a single account
+ * (62 docs, largest 1.40 MB) inside a ~30-query Promise.all, on heaps of 1536 MB (worker) and
+ * 768 MB (api). Cost grew with account age with no upper bound.
+ *
+ * `lookbackDays` bounds that. It is anchored to the account's LATEST metricDate rather than to
+ * today, deliberately: the ingestion pipeline routinely lags by days, so a today-anchored window
+ * would return zero rows for a lagging account and silently blank its dashboard — trading a
+ * memory bug for a correctness bug.
+ *
+ * Precedence: explicit startDate+endDate > lookbackDays > unbounded (legacy behaviour, kept so
+ * existing callers are unaffected).
  */
 adsKeywordsPerformanceSchema.statics.findMergedKeywordsData = async function(userId, country, region, options = {}) {
     const userIdObj = toUserObjectId(userId);
-    const { startDate, endDate } = options;
+    const { startDate, endDate, lookbackDays } = options;
     const startStr = toYyyyMmDd(startDate);
     const endStr = toYyyyMmDd(endDate);
 
@@ -112,6 +127,22 @@ adsKeywordsPerformanceSchema.statics.findMergedKeywordsData = async function(use
     };
     if (startStr && endStr) {
         dailyQuery.metricDate = { $gte: startStr, $lte: endStr };
+    } else if (Number.isFinite(lookbackDays) && lookbackDays > 0) {
+        // Anchor on the newest day this account actually has. Uses the same
+        // {userId, country, region, metricDate} index as the range query below.
+        const newest = await this.findOne(dailyQuery)
+            .sort({ metricDate: -1 })
+            .select('metricDate')
+            .lean();
+        const anchor = toYyyyMmDd(newest?.metricDate);
+        // No anchor => no per-day rows at all; leave the query unbounded so the legacy
+        // fallback below is still reached instead of returning an empty window.
+        if (anchor) {
+            const windowStart = shiftMetricDateKey(anchor, -(lookbackDays - 1));
+            if (windowStart) {
+                dailyQuery.metricDate = { $gte: windowStart, $lte: anchor };
+            }
+        }
     }
 
     const dailyDocs = await this.find(dailyQuery).sort({ metricDate: 1 }).lean();
