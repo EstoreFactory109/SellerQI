@@ -49,8 +49,21 @@ const DEFAULT_TIMEOUT_MS = () => envInt('SPAPI_REPORT_DOWNLOAD_TIMEOUT_MS', 5 * 
 // Idle ceiling: no bytes at all for this long means the transfer is dead, even if the overall
 // budget has time left. This is what actually catches a silent stall quickly.
 const DEFAULT_IDLE_TIMEOUT_MS = () => envInt('SPAPI_REPORT_IDLE_TIMEOUT_MS', 60 * 1000);
-// 0 = unlimited. Set it to fail fast rather than push the worker past max_memory_restart.
-const DEFAULT_MAX_BYTES = () => envInt('SPAPI_REPORT_MAX_BYTES', 0);
+// Compressed-byte ceiling. 0 disables it entirely.
+//
+// This defaulted to 0 and was set NOWHERE — checked across the tree and the deployed process
+// environment — so the cap documented here did not actually exist in production.
+//
+// The default below is a CATASTROPHE BACKSTOP, not a tuning knob: real reports here run to a
+// few MB compressed, so 256 MB never fires for legitimate traffic. A 256 MB compressed TSV
+// decompresses to multiple GB and is then parsed into JS objects at a further multiple — on
+// heaps of 1536 MB (worker) and 768 MB (api) that is an OOM, and PM2 then recycles the whole
+// process, killing every other job it was holding. Failing one report loudly is much cheaper
+// than taking several concurrent accounts down with it.
+//
+// Lower it via SPAPI_REPORT_MAX_BYTES for a genuinely tight cap; doing that well needs real
+// report sizes, which are computed here but not currently recorded anywhere.
+const DEFAULT_MAX_BYTES = () => envInt('SPAPI_REPORT_MAX_BYTES', 256 * 1024 * 1024);
 
 /**
  * Download (and optionally gunzip) a report document.

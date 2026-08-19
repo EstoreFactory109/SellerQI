@@ -7,6 +7,13 @@ const logger = require('../../utils/Logger');
 
 const gunzip = promisify(zlib.gunzip);
 
+// axios has no default timeout — a socket that connects but never responds hangs the
+// caller forever, with nothing for BullMQ's stalled-job detection to reclaim (a keep-alive
+// timer just kept renewing the job's lock). Every bare axios call in this file gets one of
+// these explicit budgets; downloads get the wider one since they legitimately take longer.
+const PPC_REQUEST_TIMEOUT_MS = 30000;
+const PPC_DOWNLOAD_TIMEOUT_MS = 120000;
+
 // Base URIs for different regions
 const BASE_URIS = {
     'NA': 'https://advertising-api.amazon.com',
@@ -204,7 +211,8 @@ async function createReport(accessToken, profileId, region, campaignType, startD
                 }
             };
 
-            const response = await axios.post(url, body, { headers });
+            // axios has no default timeout — a hung socket here hangs the caller forever.
+            const response = await axios.post(url, body, { headers, timeout: PPC_REQUEST_TIMEOUT_MS });
             return { ...response.data, currentAccessToken };
 
         } catch (error) {
@@ -286,7 +294,10 @@ async function checkReportStatus(reportId, accessToken, profileId, region, token
                     'Content-Type': 'application/vnd.createasyncreportrequest.v3+json'
                 };
 
-                const response = await axios.get(url, { headers });
+                // No timeout here previously meant a hung socket produced neither a response nor
+                // an error — this poll loop's own ECONNRESET/ETIMEDOUT retry branch below could
+                // never fire, because axios never raises ETIMEDOUT without an explicit `timeout`.
+                const response = await axios.get(url, { headers, timeout: PPC_REQUEST_TIMEOUT_MS });
                 const { status } = response.data;
                 const location = response.data.url;
 
@@ -382,9 +393,12 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
 
     while (true) {
         try {
+            // Downloads can legitimately take longer than a status check, hence the wider budget —
+            // but unbounded is still a hang risk if the connection stalls mid-transfer.
             const response = await axios.get(location, {
                 responseType: 'arraybuffer',
-                decompress: false
+                decompress: false,
+                timeout: PPC_DOWNLOAD_TIMEOUT_MS
             });
 
             const inflatedBuffer = await gunzip(response.data);
@@ -1280,7 +1294,7 @@ async function checkPpcReportStatusOnce(reportId, accessToken, profileId, region
         'Amazon-Advertising-API-Scope': profileId,
         'Content-Type': 'application/vnd.createasyncreportrequest.v3+json'
     };
-    const response = await axios.get(url, { headers });
+    const response = await axios.get(url, { headers, timeout: PPC_REQUEST_TIMEOUT_MS });
     const status = response.data.status;
     const location = response.data.url;
     if (status === 'COMPLETED') return { ready: true, handle: { location } };

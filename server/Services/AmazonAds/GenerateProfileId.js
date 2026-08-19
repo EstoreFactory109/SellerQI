@@ -42,7 +42,9 @@ const getProfileById = async (accessToken,region ,country,userId) => {
                     'Authorization': `Bearer ${accessToken}`,
                     'Amazon-Advertising-API-ClientId': process.env.AMAZON_ADS_CLIENT_ID,
                     'Content-Type': 'application/json'
-                }
+                },
+                // No default timeout in axios — a hung socket here would hang the caller forever.
+                timeout: 15000
             }
         );
 

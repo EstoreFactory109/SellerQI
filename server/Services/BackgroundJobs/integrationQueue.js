@@ -64,8 +64,9 @@ function getIntegrationQueueConfig() {
                 type: 'exponential',
                 delay: 120000 // Start with 2 minute delay (API rate limits)
             },
-            // Job timeout (2 hours for comprehensive integration)
-            timeout: 2 * 60 * 60 * 1000, // 2 hours in milliseconds
+            // No `timeout`: job-level timeout was removed in BullMQ v4 and we run 5.x,
+            // so it never applied. Integration phases are bounded by the lock-extension
+            // ceiling in integrationWorker.js (INTEGRATION_MAX_PHASE_MS).
             // Enable job progress tracking
             jobId: undefined // Let BullMQ generate unique IDs
         }

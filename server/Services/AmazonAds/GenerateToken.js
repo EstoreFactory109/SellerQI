@@ -29,7 +29,13 @@ const generateAdsAccessToken=async(refreshToken)=>{
                         client_secret: clientSecret
                     }),
                     {
-                        headers: { "Content-Type": "application/x-www-form-urlencoded" }
+                        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                        // Without this, a socket that connects but never responds hangs FOREVER —
+                        // axios has no default timeout. This call is the first thing the whole
+                        // sched_ads phase does, so a hang here silently froze the entire daily
+                        // pipeline for hours with zero error, zero log line, and nothing for BullMQ's
+                        // stalled-job detection to reclaim (the lock kept getting renewed).
+                        timeout: 15000
                     }
                 );
             
