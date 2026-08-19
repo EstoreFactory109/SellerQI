@@ -151,6 +151,7 @@ const getUserLoggingStats = asyncHandler(async (req, res) => {
             successfulSessions: 0,
             failedSessions: 0,
             partialSessions: 0,
+            inProgressSessions: 0,
             avgSuccessRate: 0,
             avgDuration: 0,
             avgDurationFormatted: 'N/A',
@@ -168,7 +169,12 @@ const getUserLoggingStats = asyncHandler(async (req, res) => {
             totalSessions: stats.totalSessions || 0,
             successfulSessions: stats.successfulSessions || 0,
             failedSessions: stats.failedSessions || 0,
-            partialSessions: (stats.totalSessions || 0) - (stats.successfulSessions || 0) - (stats.failedSessions || 0),
+            // Counted directly by the aggregation now. This used to be derived by subtraction,
+            // which reported every still-RUNNING session as "partial". That was always wrong, and
+            // became more visible once the sweep stopped force-closing live sessions at 6h, since
+            // long runs legitimately stay 'in_progress' for hours.
+            partialSessions: stats.partialSessions || 0,
+            inProgressSessions: stats.inProgressSessions || 0,
             avgSuccessRate: Math.round(stats.avgSuccessRate || 0),
             avgDuration: stats.avgDuration || 0,
             avgDurationFormatted: formatDuration(stats.avgDuration || 0),

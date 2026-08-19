@@ -137,6 +137,21 @@ const UserAccountLogsSchema = new mongoose.Schema({
         default: 'in_progress',
         index: true
     },
+    // Audit marker: this session was closed by freshnessSweeper's stale-session sweep rather than
+    // by the run itself reaching finalize.
+    //
+    // These were previously written WITHOUT being declared here. They survived only because the
+    // sweep uses an aggregation-pipeline update, which bypasses Mongoose's strict-mode filtering —
+    // so a non-lean() read silently stripped them, and anyone converting that update to a plain
+    // $set would have silently stopped persisting them. Declared so neither is true any more.
+    autoClosedStale: {
+        type: Boolean,
+        required: false
+    },
+    autoClosedAt: {
+        type: Date,
+        required: false
+    },
     overallSummary: {
         totalFunctions: {
             type: Number,
@@ -401,6 +416,16 @@ UserAccountLogsSchema.statics.getSessionStats = function(userId, days = 30) {
                 },
                 failedSessions: {
                     $sum: { $cond: [{ $eq: ['$sessionStatus', 'failed'] }, 1, 0] }
+                },
+                // Counted explicitly rather than derived as (total - successful - failed), which
+                // silently lumped every still-running session into the "partial" bucket. That was
+                // always wrong; it became more visible once the sweep stopped force-closing live
+                // sessions at 6h, since long runs now legitimately stay 'in_progress' for hours.
+                partialSessions: {
+                    $sum: { $cond: [{ $eq: ['$sessionStatus', 'partial'] }, 1, 0] }
+                },
+                inProgressSessions: {
+                    $sum: { $cond: [{ $eq: ['$sessionStatus', 'in_progress'] }, 1, 0] }
                 },
                 avgSuccessRate: { $avg: '$overallSummary.successRate' },
                 avgDuration: { $avg: '$sessionDuration' },

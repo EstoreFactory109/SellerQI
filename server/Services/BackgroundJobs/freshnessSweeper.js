@@ -92,15 +92,26 @@ const MAX_ENQUEUES_PER_TICK = 50;
 // sessionId). Hard crashes (OOM/kill), stalls, or broken phase chains leave it
 // pinned at 'in_progress' forever, so the frontend "user logging" page shows a
 // perpetual spinner. This sweep is the guaranteed safety net that catches ALL
-// leak causes (including crashes a process can't clean up after). Any session
-// with no end older than the max-age is definitively orphaned.
+// leak causes (including crashes a process can't clean up after).
 const STALE_SESSION_SWEEP_ENABLED = process.env.STALE_SESSION_SWEEP_DISABLED !== 'true';
-// Comfortably beyond any real run (worker lock 2h + extensions; longest PPC
-// report path capped ~4h). Anything older with no end is dead.
+// Age alone does NOT mean orphaned — see the liveness guard in sweepStaleSessions.
+//
+// This comment used to read "comfortably beyond any real run (worker lock 2h + extensions;
+// longest PPC report path capped ~4h)". That was wrong by a wide margin: worker.js documents
+// sched_calc_review reaching 23.8h in production and grants it a 26h lock ceiling. A flat age
+// that genuinely covered the worst case would have to be ~27h, which would defeat the sweep for
+// the sessions that ARE dead. So the age is kept tight and liveness decides, exactly as
+// producer.js concluded for the identical 8h-vs-26h contradiction.
 const STALE_SESSION_MAX_AGE_HOURS = parseInt(process.env.STALE_SESSION_MAX_AGE_HOURS || '6', 10);
 // Bound per tick so a large backlog drains over several ticks rather than one
 // enormous write. At the default 3h cadence this drains ~16k/day.
 const STALE_SESSION_MAX_PER_TICK = parseInt(process.env.STALE_SESSION_MAX_PER_TICK || '2000', 10);
+// How quiet an account's JobStatus rows must be before its sessions count as orphaned.
+// Mirrors PIPELINE_STALL_QUIET_MINUTES below: the worker heartbeats every 15 min
+// (LOCK_EXTENSION_INTERVAL), so 60 tolerates a few missed beats without ever sparing a job that
+// is genuinely gone. Self-bounding by design — runWithLockExtension STOPS heartbeating at the
+// lock ceiling, so a hung run cannot keep itself looking alive indefinitely.
+const STALE_SESSION_QUIET_MINUTES = Math.max(15, parseInt(process.env.STALE_SESSION_QUIET_MINUTES || '60', 10) || 60);
 
 // ── Stalled daily-pipeline sweep ─────────────────────────────────────────────
 // BACKSTOP for "the phase chain stopped walking and nothing noticed".
@@ -798,10 +809,11 @@ async function sweepFinanceDeepResync() {
  */
 async function sweepStaleSessions() {
     if (!STALE_SESSION_SWEEP_ENABLED) {
-        return { enabled: false, closed: 0, remaining: 0 };
+        return { enabled: false, closed: 0, skippedLive: 0, remaining: 0 };
     }
 
     const UserAccountLogs = require('../../models/system/ErrorLogs.js');
+    const JobStatus = require('../../models/system/JobStatusModel.js');
     const cutoff = new Date(Date.now() - STALE_SESSION_MAX_AGE_HOURS * 60 * 60 * 1000);
     const query = {
         sessionStatus: 'in_progress',
@@ -809,38 +821,97 @@ async function sweepStaleSessions() {
         $or: [{ sessionEndTime: null }, { sessionEndTime: { $exists: false } }]
     };
 
-    // Grab a bounded batch of oldest-first ids, then close exactly those.
+    // Grab a bounded batch, oldest first. userId/country/region come along because the liveness
+    // check below needs them — they are first-class indexed fields on the model, which matters:
+    // sessionId is `userId_REGION_COUNTRY_ts` while the jobId this builds is
+    // `scheduled-userId-COUNTRY-REGION-phase`. Region and country are SWAPPED between the two,
+    // and a five-part sessionId variant also exists, so parsing the sessionId would be wrong
+    // twice over. Always use the fields.
     const batch = await UserAccountLogs.find(query)
         .sort({ sessionStartTime: 1 })
         .limit(STALE_SESSION_MAX_PER_TICK)
-        .select('_id')
+        .select('_id userId country region')
         .lean();
 
     if (!batch.length) {
-        return { enabled: true, closed: 0, remaining: 0 };
+        return { enabled: true, closed: 0, skippedLive: 0, remaining: 0 };
     }
 
-    const ids = batch.map((d) => d._id);
-    // Re-assert sessionStatus:'in_progress' so a session that legitimately closes
-    // between the read and the write is never clobbered. overallSummary (a numeric
-    // object) and the per-function log entries are intentionally left untouched.
-    const res = await UserAccountLogs.updateMany(
-        { _id: { $in: ids }, sessionStatus: 'in_progress' },
-        [
-            {
-                $set: {
-                    sessionStatus: 'partial',
-                    sessionEndTime: '$$NOW',
-                    sessionDuration: { $subtract: ['$$NOW', '$sessionStartTime'] },
-                    autoClosedStale: true,
-                    autoClosedAt: '$$NOW'
-                }
-            }
-        ]
-    );
+    // Group by account. One liveness query per ACCOUNT, not per session: the batch cap is 2000 and
+    // this runs in a 384MB-heap process, so a per-document query would be its own regression.
+    // Overlapping sessions for one account also share the same answer, which is correct.
+    const groups = new Map();
+    for (const d of batch) {
+        const key = `${d.userId}|${d.country}|${d.region}`;
+        if (!groups.has(key)) groups.set(key, { userId: d.userId, country: d.country, region: d.region, ids: [] });
+        groups.get(key).ids.push(d._id);
+    }
 
-    const remaining = await UserAccountLogs.countDocuments(query);
-    return { enabled: true, closed: res.modifiedCount, remaining };
+    const quietBefore = new Date(Date.now() - STALE_SESSION_QUIET_MINUTES * 60 * 1000);
+    let closed = 0;
+    let skippedLive = 0;
+
+    for (const g of groups.values()) {
+        // Liveness. JobStatus rows are UPSERTED under a deterministic jobId, never appended, so
+        // `updatedAt` is a true per-account "something moved" signal. This is the whole fix: age
+        // cannot tell "running for 9h" from "died 9h ago", and this account's phases legitimately
+        // run that long. Same guard sweepStalledPipelines uses below.
+        //
+        // Fails SAFE: any error, or no matching row, is treated as dead and the session is closed
+        // — degrading to exactly the previous age-only behaviour rather than pinning a dead
+        // session open forever, which is the failure mode this sweep exists to prevent.
+        let live = null;
+        try {
+            live = await JobStatus.findOne({
+                jobId: { $regex: `^scheduled-${g.userId}-${g.country}-${g.region}` },
+                updatedAt: { $gt: quietBefore },
+            }).select('_id').lean();
+        } catch (err) {
+            logger.warn(`[StaleSessionSweep] Liveness check failed for ${g.userId} ${g.country}-${g.region}; treating as stale: ${err.message}`);
+        }
+
+        if (live) {
+            skippedLive += g.ids.length;
+            continue;
+        }
+
+        // Re-assert sessionStatus:'in_progress' so a session that legitimately closes
+        // between the read and the write is never clobbered. overallSummary (a numeric
+        // object) and the per-function log entries are intentionally left untouched.
+        //
+        // Kept as an aggregation pipeline deliberately: sessionDuration is computed per document
+        // from ITS OWN sessionStartTime, which a plain $set cannot express, and $$NOW pins one
+        // server-side instant across the whole group. (It also means autoClosedStale/autoClosedAt
+        // bypass strict-mode filtering — they are now declared on the schema so that is no longer
+        // load-bearing, but do not convert this to a plain $set without checking.)
+        const res = await UserAccountLogs.updateMany(
+            { _id: { $in: g.ids }, sessionStatus: 'in_progress' },
+            [
+                {
+                    $set: {
+                        sessionStatus: 'partial',
+                        sessionEndTime: '$$NOW',
+                        sessionDuration: { $subtract: ['$$NOW', '$sessionStartTime'] },
+                        autoClosedStale: true,
+                        autoClosedAt: '$$NOW'
+                    }
+                }
+            ]
+        );
+        closed += res.modifiedCount;
+    }
+
+    if (skippedLive > 0) {
+        logger.info(`[StaleSessionSweep] Left ${skippedLive} session(s) open — their pipeline is still active (quiet window ${STALE_SESSION_QUIET_MINUTES}min)`);
+    }
+
+    // `remaining` is net of the sessions deliberately spared, or a healthy sweep would report a
+    // permanent backlog. Sessions live-but-outside this batch are not counted here; at current
+    // scale (~16 open sessions against a 2000 cap) that is immaterial, but it is the thing to
+    // revisit if the open-session count ever approaches the per-tick bound, since live sessions
+    // do occupy slots in the oldest-first batch.
+    const stillStale = await UserAccountLogs.countDocuments(query);
+    return { enabled: true, closed, skippedLive, remaining: Math.max(0, stillStale - skippedLive) };
 }
 
 /**
@@ -1037,4 +1108,7 @@ module.exports = {
     FINANCE_DEEP_RESYNC_DAYS,
     PIPELINE_STALL_MAX_AGE_HOURS,
     PIPELINE_STALL_MAX_RECOVERIES_PER_TICK,
+    STALE_SESSION_MAX_AGE_HOURS,
+    STALE_SESSION_MAX_PER_TICK,
+    STALE_SESSION_QUIET_MINUTES,
 };
