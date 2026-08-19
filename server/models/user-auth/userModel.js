@@ -19,7 +19,23 @@ const userSchema = new mongoose.Schema(
       phone: {
         type: String,
         required: [true, "Phone number is required"],
-      
+
+      },
+      // True when the stored phone number cannot be trusted and the user should
+      // be asked for it. Two cases, told apart by phoneUpdateReason:
+      //   'missing'      - Google OAuth signup never collects a phone, so a unique
+      //                    placeholder is written to satisfy the required field.
+      //   'country_code' - a real number is stored, but without its country code
+      //                    (signups from before the country-code fix, and agency
+      //                    clients added through the 10-digit-only client form).
+      needsPhoneUpdate: {
+        type: Boolean,
+        default: false,
+      },
+      phoneUpdateReason: {
+        type: String,
+        enum: ["missing", "country_code", null],
+        default: null,
       },
       whatsapp: {
         type: String,

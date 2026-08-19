@@ -1,11 +1,12 @@
 const express=require('express');
 const router=express.Router();
-const {registerUser,registerAgencyClient,verifyUser,loginUser,profileUser,logoutUser,refreshAccessToken,updateProfilePic,updateDetails,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser, updateSubscriptionPlan, activateFreeTrial, checkTrialStatus, getAdminProfile, updateAdminProfile, updateAdminProfilePic, updateAdminPassword, getAdminClients, removeAdminClient, switchToClient, completeAgencySignup, getAdminBillingInfo, resendOtp, superAdminUpdateUserPassword, checkFirstAnalysisStatus}=require('../controllers/user-auth/UserController.js')
+const {registerUser,registerAgencyClient,verifyUser,loginUser,profileUser,logoutUser,refreshAccessToken,updateProfilePic,updateDetails,updateUserPhone,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser, updateSubscriptionPlan, activateFreeTrial, checkTrialStatus, getAdminProfile, updateAdminProfile, updateAdminProfilePic, updateAdminPassword, getAdminClients, removeAdminClient, switchToClient, completeAgencySignup, getAdminBillingInfo, resendOtp, superAdminUpdateUserPassword, checkFirstAnalysisStatus}=require('../controllers/user-auth/UserController.js')
 const registerValidate=require('../middlewares/validator/registerValidate.js')
 const validateLogin =require('../middlewares/validator/LoginValidate.js');
 const { validatePasswordResetEmail, validateResetPasswordCode, validateNewPassword } = require('../middlewares/validator/passwordResetValidate.js');
 const { validateOtpResend } = require('../middlewares/validator/otpValidate.js');
 const { validateUpdateDetails } = require('../middlewares/validator/updateDetailsValidate.js');
+const { validateUpdatePhone } = require('../middlewares/validator/updatePhoneValidate.js');
 const { validateGoogleIdToken } = require('../middlewares/validator/googleAuthValidate.js');
 const { validateAgencyClientRegistration } = require('../middlewares/validator/agencyClientValidate.js');
 const { validateAgencyAdminProfile } = require('../middlewares/validator/agencyAdminProfileValidate.js');
@@ -26,6 +27,7 @@ router.post('/refresh-token', refreshAccessToken); // No auth middleware - uses 
 router.get('/logout', auth, logoutUser);
 router.put('/updateProfilePic', auth, upload.single('avatar'), updateProfilePic);
 router.put('/updateDetails', auth, validateUpdateDetails, updateDetails);
+router.put('/update-phone', auth, validateUpdatePhone, updateUserPhone); // phone-collection modal
 router.post('/switch-account', auth, switchAccount);
 router.post('/verify-email-for-password-reset', passwordResetRateLimiter, validatePasswordResetEmail, verifyEmailForPasswordReset);
 router.post('/verify-reset-password-code', passwordResetRateLimiter, validateResetPasswordCode, verifyResetPasswordCode);

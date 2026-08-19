@@ -17,17 +17,40 @@ const validateUpdateDetails = [
         .isAlpha().withMessage("Last name must contain only letters")
         .isLength({ min: 2, max: 50 }).withMessage("Last name must be between 2 to 50 characters"),
 
+    // Same rules as registerValidate.js. These used to require exactly 10 bare
+    // digits, which rejected every number stored with its country code - so a
+    // user with "+919876543210" could not save their profile at all.
     body("phone")
         .optional()
         .trim()
-        .isNumeric().withMessage("Phone number must contain only numbers")
-        .isLength({ min: 10, max: 10 }).withMessage("Phone number must be exactly 10 digits"),
+        .custom((value) => {
+            const cleaned = value.replace(/[\s\-\(\)]/g, '');
+            const digitsOnly = cleaned.replace(/^\+/, '');
+            if (!/^\d+$/.test(digitsOnly)) {
+                throw new Error('Phone number must contain only numbers');
+            }
+            if (digitsOnly.length < 10 || digitsOnly.length > 15) {
+                throw new Error('Phone number must be between 10 and 15 digits');
+            }
+            return true;
+        })
+        .customSanitizer((value) => value.replace(/[\s\-\(\)]/g, '')),
 
     body("whatsapp")
         .optional()
         .trim()
-        .isNumeric().withMessage("WhatsApp number must contain only numbers")
-        .isLength({ min: 10, max: 10 }).withMessage("WhatsApp number must be exactly 10 digits"),
+        .custom((value) => {
+            const cleaned = value.replace(/[\s\-\(\)]/g, '');
+            const digitsOnly = cleaned.replace(/^\+/, '');
+            if (!/^\d+$/.test(digitsOnly)) {
+                throw new Error('WhatsApp number must contain only numbers');
+            }
+            if (digitsOnly.length < 10 || digitsOnly.length > 15) {
+                throw new Error('WhatsApp number must be between 10 and 15 digits');
+            }
+            return true;
+        })
+        .customSanitizer((value) => value.replace(/[\s\-\(\)]/g, '')),
 
     body("email")
         .optional()
