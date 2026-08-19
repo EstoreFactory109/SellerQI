@@ -166,6 +166,35 @@ function buildCollections() {
             // order, and `firstSeenAt` is a timestamp. Both differ on a legitimate re-run.
             ignoreFields: ['attempts', 'firstSeenAt'],
         },
+
+        // ── Seller products ──────────────────────────────────────────────────────────────────
+        // The per-product rows the dashboard reads for issue counts. Added because the daily
+        // pipeline rebuilds this array wholesale every run, and a regression there is invisible to
+        // every other entry above — this script would have printed "✅ Data parity confirmed"
+        // while the entire products array was being reset. Same false-pass class as the finance
+        // collections that were missing before.
+        //
+        // Seller is ONE document per user with the interesting data nested two levels down, so it
+        // is expanded to one entry per product. That also means `TotatProducts` (appended on every
+        // run, read by nothing) never reaches the hash — otherwise every comparison would report a
+        // mismatch that isn't real.
+        {
+            name: 'SellerProducts',
+            modelPath: '../models/user-auth/sellerCentralModel.js',
+            // Country/region live on the nested account, not the document, so the document filter
+            // is user-only and the scoping happens in `expand`.
+            filter: (uid) => ({ User: uid }),
+            dateField: null,
+            expand: (d, _uid, country, region) =>
+                (d.sellerAccount || [])
+                    .filter((a) => a
+                        && String(a.country || '').toUpperCase() === String(country || '').toUpperCase()
+                        && String(a.region || '').toUpperCase() === String(region || '').toUpperCase())
+                    .flatMap((a) => (a.products || []).map((p) => ({
+                        country: a.country, region: a.region, ...p,
+                    }))),
+            keyOf: (d) => `${d.country}|${d.region}|${d.asin || ''}|${d.sku || ''}`,
+        },
     ];
 
     return list
@@ -219,6 +248,12 @@ async function snapshot() {
         const query = c.filter(userId, country, region);
         if (sinceStr && c.dateField) query[c.dateField] = { $gte: sinceStr };
         let docs = await c.model.find(query).lean();
+        // `expand` flattens a document that holds the interesting data in a nested array into one
+        // pseudo-document per element, so the hash and the per-key docHashes pinpoint the element
+        // rather than collapsing everything into a single opaque whole-document hash.
+        if (typeof c.expand === 'function') {
+            docs = docs.flatMap((d) => c.expand(d, userId, country, region));
+        }
         const extraVolatile = c.ignoreFields ? new Set(c.ignoreFields) : null;
         const normalized = docs
             .map((d) => stripVolatile(d, extraVolatile))
