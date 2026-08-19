@@ -20,8 +20,20 @@ const validateAgencyClientRegistration = [
     body("phone")
         .trim()
         .notEmpty().withMessage("Phone number is required")
-        .isNumeric().withMessage("Phone number must contain only numbers")
-        .isLength({ min: 10, max: 10 }).withMessage("Phone number must be exactly 10 digits"),
+        .custom((value) => {
+            // Same rules as registerValidate.js - keep the leading "+" so the
+            // client's country code survives instead of being trimmed away.
+            const cleaned = value.replace(/[\s\-\(\)]/g, '');
+            const digitsOnly = cleaned.replace(/^\+/, '');
+            if (!/^\d+$/.test(digitsOnly)) {
+                throw new Error('Phone number must contain only numbers');
+            }
+            if (digitsOnly.length < 10 || digitsOnly.length > 15) {
+                throw new Error('Phone number must be between 10 and 15 digits');
+            }
+            return true;
+        })
+        .customSanitizer((value) => value.replace(/[\s\-\(\)]/g, '')),
         
     body("email")
         .trim()

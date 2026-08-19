@@ -738,6 +738,60 @@ const updateDetails = asyncHandler(async (req, res) => {
     res.status(200).json(new ApiResponse(200, { UpdateInfo }, "Details updated successfully"));
 })
 
+/**
+ * Save the phone number collected by the phone-collection modal.
+ *
+ * Used by users whose stored phone is either a Google-signup placeholder or a
+ * real number missing its country code (see needsPhoneUpdate on the model).
+ * whatsapp is set to the same value, matching what registerUser does.
+ */
+const updateUserPhone = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const { phone } = req.body; // already sanitised by validateUpdatePhone
+
+    if (!userId) {
+        logger.error(new ApiError(400, "User id is missing"));
+        return res.status(400).json(new ApiResponse(400, "", "User id is missing"));
+    }
+
+    try {
+        const updated = await UserModel.findByIdAndUpdate(
+            userId,
+            {
+                $set: {
+                    phone: phone,
+                    whatsapp: phone,
+                    needsPhoneUpdate: false,
+                    phoneUpdateReason: null
+                }
+            },
+            { new: true, runValidators: true }
+        ).select('phone whatsapp needsPhoneUpdate phoneUpdateReason');
+
+        if (!updated) {
+            logger.error(new ApiError(404, "User not found"));
+            return res.status(404).json(new ApiResponse(404, "", "User not found"));
+        }
+
+        logger.info(`Phone number collected for user ${userId}`);
+        return res.status(200).json(new ApiResponse(200, {
+            phone: updated.phone,
+            whatsapp: updated.whatsapp,
+            needsPhoneUpdate: updated.needsPhoneUpdate,
+            phoneUpdateReason: updated.phoneUpdateReason
+        }, "Phone number updated successfully"));
+    } catch (error) {
+        // phone still carries a unique index in the DB, so the same number cannot
+        // be saved on two accounts. Tell the user instead of failing silently.
+        if (error?.code === 11000) {
+            logger.error(new ApiError(409, `Duplicate phone number for user ${userId}`));
+            return res.status(409).json(new ApiResponse(409, "", "This phone number is already used by another account. Please use a different number."));
+        }
+        logger.error(`Error in updating phone for user ${userId}: ${error.message}`);
+        return res.status(500).json(new ApiResponse(500, "", "Internal server error in updating phone number"));
+    }
+})
+
 const switchAccount = asyncHandler(async (req, res) => {
     const userId = req.userId; // Getting admin id from auth middleware
 
@@ -1242,6 +1296,8 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
 
         // For Google OAuth users, we'll use unique placeholder values for required fields
         // Generate unique placeholder phone numbers to avoid unique constraint conflicts
+        // (phone still carries a unique index in the DB, so these cannot be null).
+        // needsPhoneUpdate below makes the frontend ask for the real number.
         const timestamp = Date.now().toString().slice(-10); // Last 10 digits of timestamp
         const placeholderPhone = timestamp; // Use timestamp as unique phone placeholder
         const placeholderWhatsapp = (parseInt(timestamp) + 1).toString(); // Slightly different for whatsapp
@@ -1264,14 +1320,16 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
             OTP: null,
             packageType: packageType,
             isInTrialPeriod: isInTrialPeriod,
-            subscriptionStatus: subscriptionStatus
+            subscriptionStatus: subscriptionStatus,
+            needsPhoneUpdate: true,        // phone above is a placeholder, not a real number
+            phoneUpdateReason: 'missing'
         };
-        
+
         // Only set trialEndsDate if it's provided (for trial users)
         if (trialEndsDate) {
             userData.trialEndsDate = trialEndsDate;
         }
-        
+
         const newUser = new UserModel(userData);
 
         const savedUser = await newUser.save();
@@ -1351,7 +1409,8 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
             phone: savedUser.phone,
             whatsapp: savedUser.whatsapp,
             accessType: savedUser.accessType,
-            needsPhoneUpdate: true // Flag to indicate user needs to update phone numbers
+            needsPhoneUpdate: true, // Flag to indicate user needs to update phone numbers
+            phoneUpdateReason: 'missing'
         };
 
         res.status(201)
@@ -2177,6 +2236,7 @@ module.exports = {
     refreshAccessToken,
     updateProfilePic,
     updateDetails,
+    updateUserPhone,
     switchAccount,
     verifyEmailForPasswordReset,
     verifyResetPasswordCode,

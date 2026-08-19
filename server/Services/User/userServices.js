@@ -81,7 +81,7 @@ const getUserById =async(id)=>{
         logger.error(new ApiError(404,"Id is missing"));
         return false;
     }
-    const user=await UserModel.findOne({_id:id,isVerified:true}).select("firstName lastName phone whatsapp email profilePic packageType subscriptionStatus isInTrialPeriod trialEndsDate accessType servedTrial agencyName agencyId isAgencyClient");
+    const user=await UserModel.findOne({_id:id,isVerified:true}).select("firstName lastName phone whatsapp email profilePic packageType subscriptionStatus isInTrialPeriod trialEndsDate accessType servedTrial agencyName agencyId isAgencyClient needsPhoneUpdate phoneUpdateReason");
     if(!user){
         logger.error(new ApiError(404,"User not found"));
         return false;
@@ -107,6 +107,9 @@ const getUserById =async(id)=>{
         agencyName: user.agencyName || null,
         agencyId: user.agencyId || null,
         isAgencyClient: user.isAgencyClient || false,
+        // Drives the phone-collection modal on the frontend
+        needsPhoneUpdate: user.needsPhoneUpdate || false,
+        phoneUpdateReason: user.phoneUpdateReason || null,
         // Include sellerCentral data for SP-API and Ads connection check
         sellerCentral: sellerCentral ? {
             sellerAccount: (sellerCentral.sellerAccount || []).map(account => ({
