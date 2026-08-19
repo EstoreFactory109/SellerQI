@@ -27,6 +27,7 @@ import {
   Loader2
 } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
+import PipelineProgress from '../../Components/Monitoring/PipelineProgress.jsx';
 
 const UserLogging = () => {
   // Authentication check - using same logic as TopNav switch account button
@@ -58,6 +59,12 @@ const UserLogging = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('7');
   const [expandedErrors, setExpandedErrors] = useState(new Set());
+
+  // Pipeline progress (stage dots). Kept in its own state so a failure here can never break the
+  // rest of the page — it is supplementary monitoring, not core content.
+  const [pipelineProgress, setPipelineProgress] = useState(null);
+  const [pipelineLoading, setPipelineLoading] = useState(true);
+  const [pipelineError, setPipelineError] = useState(null);
 
   // Integration trigger (top button – runs for current user)
   const [triggerSubmitting, setTriggerSubmitting] = useState(false);
@@ -190,6 +197,32 @@ const UserLogging = () => {
   useEffect(() => {
     fetchData();
   }, [activeTab, dateFilter]);
+
+  // ── Pipeline progress ──────────────────────────────────────────────────────
+  // Polls only while a run is in flight and stops once it reaches a terminal status: a finished run
+  // cannot change, and this page stays open for long stretches while watching a multi-hour run.
+  const fetchPipelineProgress = async () => {
+    try {
+      const res = await axiosInstance.get('/app/jobs/pipeline-progress?pipeline=scheduled');
+      setPipelineProgress(res?.data?.data || null);
+      setPipelineError(null);
+    } catch (err) {
+      // Quiet by design: a supplementary widget must never break the page it sits on. It renders
+      // its own inline error instead.
+      setPipelineError(err?.response?.data?.message || 'Unavailable');
+    } finally {
+      setPipelineLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPipelineProgress();
+    // 'started' is the only non-terminal DataFetchTracking status.
+    const inFlight = !pipelineProgress || pipelineProgress.overallStatus === 'started';
+    if (!inFlight) return undefined;
+    const id = setInterval(fetchPipelineProgress, 15000);
+    return () => clearInterval(id);
+  }, [pipelineProgress?.overallStatus]);
 
   const fetchData = async (silent = false) => {
     if (!silent) {
@@ -517,6 +550,16 @@ const UserLogging = () => {
         {/* Overview Tab */}
         {activeTab === 'overview' && (
           <div className="space-y-2">
+            {/* Which stage the current fetch is on, and whether it is still alive.
+                Placed above the stat cards because "is it moving right now?" is the question
+                this page is usually opened to answer. */}
+            <PipelineProgress
+              data={pipelineProgress}
+              loading={pipelineLoading}
+              error={pipelineError}
+              onRefresh={fetchPipelineProgress}
+            />
+
             {/* Statistics Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
               <StatCard
