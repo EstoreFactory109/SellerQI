@@ -223,7 +223,7 @@ const SignUp = () => {
     if (!formData.password) {
       newErrors.password = 'Password is required';
     } else if (!passwordRegex.test(formData.password)) {
-      newErrors.password = 'Password must be at least 8 characters, with a letter, a number, and a special character';
+      newErrors.password = 'Password must be at least 8 characters, with 1 uppercase letter, 1 lowercase letter, a number, and a special character';
     }
     
     if (!termsAccepted) {
@@ -617,7 +617,7 @@ const SignUp = () => {
                   </motion.p>
                 )}
                                  <p className="text-xs text-gray-500 mt-0.5">
-                   Min 8 chars with letters, numbers & symbols
+                   Min 8 chars with 1 uppercase, 1 lowercase, a number & a symbol
                  </p>
               </div>
 
