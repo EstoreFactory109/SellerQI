@@ -10,8 +10,7 @@ import {
   ArrowRight,
   Loader2,
   AlertCircle,
-  X,
-  Check
+  X
 } from 'lucide-react';
 
 import axios from 'axios';
@@ -25,45 +24,13 @@ import { detectCountry } from '../../utils/countryDetection.js';
 import axiosInstance from '../../config/axios.config.js';
 import { devLog } from '../../utils/devLogger.js';
 import PhoneRequiredModal from '../../Components/PhoneUpdate/PhoneRequiredModal.jsx';
+import PasswordCriteriaList from '../../Components/Shared/PasswordCriteriaList.jsx';
+import { isPasswordValid, passwordErrorMessage, extractServerError } from '../../utils/passwordCriteria.js';
 
 // Helper function to get country flag from ISO code
 const getCountryFlag = (isoCode) => {
   if (!isoCode || isoCode === 'XX') return '🏳️'; // Default flag for unknown countries
   return `https://flagsapi.com/${isoCode}/flat/32.png`;
-};
-
-/**
- * Password rules, kept deliberately identical to registerValidate.js on the server.
- * They used to differ — the form asked for "a letter" while the server demanded both
- * an uppercase AND a lowercase one, so passwords like "password1!" passed here and
- * came back as a bare 400 with no message the user could act on.
- */
-const PASSWORD_CRITERIA = [
-  { label: 'At least 8 characters', test: (v) => v.length >= 8 },
-  { label: '1 uppercase letter', test: (v) => /[A-Z]/.test(v) },
-  { label: '1 lowercase letter', test: (v) => /[a-z]/.test(v) },
-  { label: '1 number', test: (v) => /[0-9]/.test(v) },
-  { label: '1 special character', test: (v) => /[!@#$%^&*(),.?":{}|<>]/.test(v) },
-];
-
-const unmetPasswordCriteria = (value) => PASSWORD_CRITERIA.filter((c) => !c.test(value || ''));
-
-/**
- * Pull something readable out of a failed request.
- *
- * The two error shapes the API can return are not the same: the controllers send
- * `{ message }`, while express-validator rejections send `{ errors: [{ msg }] }`
- * with no `message` at all. Reading only `.message` meant every validation
- * rejection surfaced as an empty banner — the request failed and the form just
- * sat there saying nothing.
- */
-const extractServerError = (error) => {
-  const data = error?.response?.data;
-  if (data?.message) return data.message;
-  if (Array.isArray(data?.errors) && data.errors.length) {
-    return data.errors.map((e) => e.msg).filter(Boolean).join('. ');
-  }
-  return 'Sign-up failed. Please check your details and try again.';
 };
 
 // Default fallback country data for unknown codes
@@ -102,7 +69,7 @@ const SignUp = () => {
   const dispatch = useDispatch();
 
   // Something typed, but not yet meeting every rule — keeps the field red as they go.
-  const passwordIncomplete = !!formData.password && unmetPasswordCriteria(formData.password).length > 0;
+  const passwordIncomplete = !!formData.password && !isPasswordValid(formData.password);
 
   // Continue the Google signup flow once the phone modal is saved or skipped.
   // Takes the routing explicitly so it can also be called straight away, without
@@ -259,11 +226,8 @@ const SignUp = () => {
     
     if (!formData.password) {
       newErrors.password = 'Password is required';
-    } else {
-      const unmet = unmetPasswordCriteria(formData.password);
-      if (unmet.length > 0) {
-        newErrors.password = `Password still needs: ${unmet.map((c) => c.label.toLowerCase()).join(', ')}`;
-      }
+    } else if (!isPasswordValid(formData.password)) {
+      newErrors.password = passwordErrorMessage(formData.password);
     }
     
     if (!termsAccepted) {
@@ -651,39 +615,7 @@ const SignUp = () => {
                     {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
                 </div>
-                {/* Once anything is typed the live criteria say exactly what is still
-                    missing, so they replace the submit-time message. With an empty
-                    field there is no checklist to read, so show the error there. */}
-                {formData.password ? (
-                  <ul className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1">
-                    {PASSWORD_CRITERIA.map(({ label, test }) => {
-                      const met = test(formData.password);
-                      return (
-                        <li
-                          key={label}
-                          className={`flex items-center gap-1.5 text-xs transition-colors duration-200 ${
-                            met ? 'text-green-400' : 'text-red-400'
-                          }`}
-                        >
-                          {met ? <Check className="w-3.5 h-3.5 shrink-0" /> : <X className="w-3.5 h-3.5 shrink-0" />}
-                          <span>{label}</span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : errors.password ? (
-                  <motion.p
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="text-red-400 text-xs mt-1"
-                  >
-                    {errors.password}
-                  </motion.p>
-                ) : (
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    Min 8 chars with 1 uppercase, 1 lowercase, a number &amp; a symbol
-                  </p>
-                )}
+                <PasswordCriteriaList value={formData.password} error={errors.password} />
               </div>
 
               {/* Terms Checkbox */}
