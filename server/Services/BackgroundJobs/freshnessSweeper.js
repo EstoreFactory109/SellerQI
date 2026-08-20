@@ -144,6 +144,41 @@ const PIPELINE_STALL_QUIET_MINUTES = Math.max(15, parseInt(process.env.PIPELINE_
 // fanning out into one simultaneous re-run per account. Truncation is logged.
 const PIPELINE_STALL_MAX_RECOVERIES_PER_TICK = Math.max(1, parseInt(process.env.PIPELINE_STALL_MAX_RECOVERIES_PER_TICK || '5', 10) || 5);
 
+// ── Seller document-size monitor ─────────────────────────────────────────────
+// MongoDB's 16MB per-document ceiling is a HARD limit: past it `sellerDetails.save()`
+// throws and every write path that touches the seller document (products, issues, B2B
+// pricing, issue counts) fails at once. The seller document embeds `sellerAccount[].products`,
+// so it grows with catalogue size and has no natural bound.
+//
+// Measured 2026-08-20: exactly ONE of 301 seller documents exceeds 4MB — 8.21MB, and it
+// belongs to a CANCELLED account that has been flat at 27,263 products and has not been
+// fetched since 2026-07-08. The next largest is 3.00MB. So nothing is close today and
+// nothing is trending; restructuring `products[]` out of the document would be a large
+// migration for a problem no active account has.
+//
+// What is worth having is a warning if that changes — which is all this does. Read-only:
+// no writes, no deletes, bounded output. It is hour-gated by the caller (once a day)
+// because the aggregation must read every seller document to size it.
+const DOC_SIZE_SWEEP_ENABLED = process.env.DOC_SIZE_SWEEP_DISABLED !== 'true';
+// 8MB = half the hard limit. Below this there is nothing to say.
+const DOC_SIZE_WARN_BYTES = Math.max(
+    1,
+    parseInt(process.env.SELLER_DOC_WARN_BYTES || '', 10) || 8 * 1024 * 1024
+);
+// 12MB = 75% of the limit. At this point a single large catalogue refresh could push a
+// document over, so it is logged at error level rather than warn.
+const DOC_SIZE_CRITICAL_BYTES = Math.max(
+    DOC_SIZE_WARN_BYTES,
+    parseInt(process.env.SELLER_DOC_CRITICAL_BYTES || '', 10) || 12 * 1024 * 1024
+);
+// Bound the report. If this ever fires for dozens of accounts the count matters, not the list.
+const DOC_SIZE_MAX_REPORTED = Math.max(
+    1,
+    parseInt(process.env.SELLER_DOC_MAX_REPORTED || '', 10) || 20
+);
+// MongoDB's hard per-document ceiling, for the percentage in the log line.
+const MONGO_MAX_DOC_BYTES = 16 * 1024 * 1024;
+
 /**
  * BullMQ priority for catch-up work. Backfill must never queue ahead of the daily pipeline.
  *
@@ -905,6 +940,124 @@ async function sweepStaleSessions() {
  *
  * Idempotent and safe to run repeatedly.
  */
+/**
+ * Split sized documents into warn/critical bands.
+ *
+ * Pure and exported so the threshold logic can be tested without a database — the
+ * aggregation below is the only part that needs Mongo, and it does no classification.
+ *
+ * @param {Array<{_id: any, User: any, sizeBytes: number, productCount: number}>} rows
+ * @param {{warnBytes: number, criticalBytes: number}} thresholds
+ * @returns {{warn: Array, critical: Array, worst: Object|null}}
+ */
+function classifyDocumentSizes(rows, { warnBytes, criticalBytes } = {}) {
+    const warnAt = Number.isFinite(warnBytes) ? warnBytes : DOC_SIZE_WARN_BYTES;
+    const criticalAt = Number.isFinite(criticalBytes) ? criticalBytes : DOC_SIZE_CRITICAL_BYTES;
+    const warn = [];
+    const critical = [];
+    let worst = null;
+
+    for (const row of Array.isArray(rows) ? rows : []) {
+        const size = Number(row?.sizeBytes);
+        if (!Number.isFinite(size)) continue;
+        if (!worst || size > Number(worst.sizeBytes)) worst = row;
+        // Bands are exclusive: a critical document is not also counted as a warning,
+        // so `warn.length + critical.length` is the number of distinct accounts.
+        if (size >= criticalAt) critical.push(row);
+        else if (size >= warnAt) warn.push(row);
+    }
+
+    return { warn, critical, worst };
+}
+
+/**
+ * Read-only check for seller documents approaching MongoDB's 16MB ceiling.
+ *
+ * See the DOC_SIZE_* block above for why this is monitoring rather than a fix. It
+ * writes nothing and enqueues nothing; its entire output is a log line.
+ *
+ * Cost: the `$bsonSize` projection forces a full scan of the sellers collection, so
+ * the caller gates this to one tick per day rather than running it every 3 hours.
+ */
+async function sweepDocumentSizes() {
+    const startedAt = Date.now();
+    const summary = {
+        enabled: true, scanned: 0, warned: 0, critical: 0,
+        worstBytes: 0, worstUserId: null, worstProductCount: 0, errors: 0, durationMs: 0,
+    };
+    if (!DOC_SIZE_SWEEP_ENABLED) return { ...summary, enabled: false };
+
+    try {
+        // Project down to four scalars before anything else so the pipeline never
+        // materialises a full seller document (the largest is >8MB) in the cursor.
+        const rows = await Seller.aggregate([
+            {
+                $project: {
+                    User: 1,
+                    sizeBytes: { $bsonSize: '$$ROOT' },
+                    productCount: {
+                        $sum: {
+                            $map: {
+                                input: { $ifNull: ['$sellerAccount', []] },
+                                as: 'acct',
+                                in: { $size: { $ifNull: ['$$acct.products', []] } }
+                            }
+                        }
+                    }
+                }
+            },
+            // Filter server-side: only documents already worth talking about cross the wire.
+            { $match: { sizeBytes: { $gte: DOC_SIZE_WARN_BYTES } } },
+            { $sort: { sizeBytes: -1 } },
+            { $limit: DOC_SIZE_MAX_REPORTED }
+        ]).allowDiskUse(true);
+
+        summary.scanned = rows.length;
+
+        const { warn, critical, worst } = classifyDocumentSizes(rows, {
+            warnBytes: DOC_SIZE_WARN_BYTES,
+            criticalBytes: DOC_SIZE_CRITICAL_BYTES,
+        });
+        summary.warned = warn.length;
+        summary.critical = critical.length;
+
+        if (worst) {
+            summary.worstBytes = Number(worst.sizeBytes) || 0;
+            summary.worstUserId = worst.User ? String(worst.User) : String(worst._id);
+            summary.worstProductCount = Number(worst.productCount) || 0;
+        }
+
+        const describe = (row) => ({
+            userId: row.User ? String(row.User) : String(row._id),
+            sizeMB: +(Number(row.sizeBytes) / (1024 * 1024)).toFixed(2),
+            percentOfLimit: +((Number(row.sizeBytes) / MONGO_MAX_DOC_BYTES) * 100).toFixed(1),
+            productCount: Number(row.productCount) || 0,
+        });
+
+        if (critical.length > 0) {
+            logger.error('[FreshnessSweeper] Seller documents near MongoDB 16MB limit', {
+                count: critical.length,
+                thresholdMB: +(DOC_SIZE_CRITICAL_BYTES / (1024 * 1024)).toFixed(2),
+                documents: critical.map(describe),
+            });
+        }
+        if (warn.length > 0) {
+            logger.warn('[FreshnessSweeper] Large seller documents', {
+                count: warn.length,
+                thresholdMB: +(DOC_SIZE_WARN_BYTES / (1024 * 1024)).toFixed(2),
+                documents: warn.map(describe),
+            });
+        }
+    } catch (error) {
+        summary.errors++;
+        logger.error('[FreshnessSweeper] Document-size sweep failed', { error: error?.message });
+    }
+
+    summary.durationMs = Date.now() - startedAt;
+    logger.info('[FreshnessSweeper] Document-size sweep complete', summary);
+    return summary;
+}
+
 async function sweepStalledPipelines() {
     const summary = {
         enabled: true, scanned: 0, frozen: 0, recovered: 0, blocked: 0,
@@ -1061,6 +1214,8 @@ module.exports = {
     sweepFinanceDeepResync,
     sweepStaleSessions,
     sweepStalledPipelines,
+    sweepDocumentSizes,
+    classifyDocumentSizes,
     findMissingDatesForAccount,
     findBrokenFinanceDatesForAccount,
     buildCatchupJobId,
@@ -1075,4 +1230,6 @@ module.exports = {
     FINANCE_DEEP_RESYNC_DAYS,
     PIPELINE_STALL_MAX_AGE_HOURS,
     PIPELINE_STALL_MAX_RECOVERIES_PER_TICK,
+    DOC_SIZE_WARN_BYTES,
+    DOC_SIZE_CRITICAL_BYTES,
 };
