@@ -1,11 +1,16 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from 'framer-motion';
-import { Globe, ChevronDown, ArrowRight, Loader2, Package, ShoppingCart, Zap, Search } from 'lucide-react';
+import { Globe, ChevronDown, ArrowRight, Loader2, Search } from 'lucide-react';
 import axios from 'axios';
 import { useSelector } from 'react-redux';
 import { hasPremiumAccess } from '../../utils/subscriptionCheck.js';
 import { devLog } from '../../utils/devLogger.js';
+import OnboardingShell from '../../Components/Onboarding/OnboardingShell.jsx';
+import { COLORS } from '../../Components/Shared/index.js';
+
+// Matches the onboarding shell's inset panel shade.
+const PANEL_BG = '#10141C';
 
 // Complete list of Amazon marketplaces with region mapping
 const COUNTRY_DATA = [
@@ -53,7 +58,23 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [checkingSubscription, setCheckingSubscription] = useState(true);
+  const marketplaceDropdownRef = useRef(null);
   const navigate = useNavigate();
+
+  // Close the marketplace dropdown on an outside click. Uses a document listener rather
+  // than a full-screen overlay div — a `position: fixed` overlay sits outside the content
+  // column's scroll chain, which would swallow the wheel and block page scrolling.
+  useEffect(() => {
+    if (!isDropdownOpen) return;
+    const handleClickOutside = (event) => {
+      if (marketplaceDropdownRef.current && !marketplaceDropdownRef.current.contains(event.target)) {
+        setIsDropdownOpen(false);
+        setSearchQuery("");
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isDropdownOpen]);
   
   // Get user data from Redux
   const userData = useSelector(state => state.Auth?.user);
@@ -149,140 +170,107 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
   // Show loading state while checking subscription
   if (checkingSubscription) {
     return (
-      <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center" style={{ background: COLORS.bgBase }}>
         <div className="flex flex-col items-center gap-4">
-          <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
-          <p className="text-white/70">Verifying subscription...</p>
+          <Loader2 className="w-8 h-8 animate-spin" style={{ color: COLORS.accent }} />
+          <p style={{ color: COLORS.textSecondary }}>Verifying subscription...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center font-roboto relative overflow-hidden">
-      {/* Main Content */}
-      <div className="relative z-10 w-full max-w-6xl mx-auto px-4 py-8">
-        <div className="grid lg:grid-cols-2 gap-12 items-center">
-          
-          {/* Left Side - Marketing Content */}
-          <motion.div
-            initial={{ opacity: 0, x: -50 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.8 }}
-            className="space-y-8"
-          >
-            {/* Brand Logo/Identity */}
-            <div className="flex items-center space-x-3">
-              <img 
-                src="https://res.cloudinary.com/ddoa960le/image/upload/v1749657303/Seller_QI_Logo_Final_1_1_tfybls.png"
-                alt="SellerQI Logo"
-                className="h-8 w-auto object-contain"
-              />
-              <div>
-                <h2 className="text-xl font-bold text-white">SellerQI</h2>
-                <p className="text-sm text-white/60">Amazon Analytics Platform</p>
-              </div>
-            </div>
+    <OnboardingShell currentStep={2} doneSteps={[1]}>
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
+        <div
+          className="inline-flex items-center gap-2"
+          style={{ padding: '5px 11px', borderRadius: 999, background: 'rgba(59,130,246,.12)', color: '#7EA8F8', fontSize: 12, fontWeight: 600, marginBottom: 16 }}
+        >
+          Step 2 of 5 · About 60 seconds
+        </div>
+        <h1 style={{ margin: '0 0 8px', fontSize: 27, lineHeight: '34px', fontWeight: 600, letterSpacing: '-0.025em', color: COLORS.textPrimary }}>
+          Connect Amazon Seller Central
+        </h1>
+        <p style={{ margin: '0 0 22px', fontSize: 14, lineHeight: '22px', color: COLORS.textSecondary, maxWidth: '62ch' }}>
+          This is the one step that makes SellerQI work. Until it&rsquo;s connected we have nothing to audit — every screen in the product stays empty.
+        </p>
 
-            <div className="space-y-6">
-              <h1 className="text-4xl lg:text-5xl font-bold text-white leading-tight">
-                Connect to <span className="text-blue-400">Amazon</span>
-              </h1>
-              
-              <p className="text-lg text-white/70 leading-relaxed">
-                Unlock powerful insights from your Amazon seller account. Get comprehensive analytics, 
-                track performance, and optimize your business within 24 hours.
-              </p>
-
-              {/* Feature highlights */}
-              <div className="grid grid-cols-1 gap-4">
-                {[
-                  { icon: ShoppingCart, title: "Sales Analytics", desc: "Track revenue, units sold, and trends" },
-                  { icon: Zap, title: "Performance Insights", desc: "Monitor product rankings and metrics" },
-                  { icon: Package, title: "Inventory Management", desc: "Stay on top of stock levels" }
-                ].map((feature, index) => (
-                  <motion.div
-                    key={index}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.3 + index * 0.1 }}
-                    className="flex items-center space-x-4 p-4 bg-[#161b22] backdrop-blur-sm rounded-xl border border-[#30363d]"
-                  >
-                    <div className="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center border border-blue-500/30">
-                      <feature.icon className="w-5 h-5 text-blue-400" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-white">{feature.title}</h3>
-                      <p className="text-sm text-white/70">{feature.desc}</p>
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Right Side - Form */}
-          <motion.div
-            initial={{ opacity: 0, x: 50 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.8, delay: 0.2 }}
-            className="w-full"
-          >
-            <div className="bg-[#161b22] rounded-3xl shadow-2xl border border-[#30363d] p-8 lg:p-10">
-              <form onSubmit={handleSubmit} className="space-y-8">
-                {/* Header */}
-                <div className="text-center space-y-4">
-                  <motion.div
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    transition={{ delay: 0.5, type: "spring", stiffness: 200 }}
-                    className="flex justify-center"
-                  >
-                    <img 
-                      src="https://res.cloudinary.com/ddoa960le/image/upload/v1749657303/Seller_QI_Logo_Final_1_1_tfybls.png"
-                      alt="SellerQI Logo"
-                      className="h-12 w-auto object-contain"
-                    />
-                  </motion.div>
-                  <div>
-                    <h2 className="text-2xl font-bold text-white">Start Your Journey</h2>
-                    <p className="text-white/60">Select your Amazon marketplace to begin</p>
-                  </div>
-                </div>
-
-                {/* Country Selection with Search */}
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.6 }}
-                  className="space-y-3"
+        {/* What happens next — describes the real sequence: pick marketplace here, then Amazon's consent page */}
+        <div style={{ border: `1px solid ${COLORS.border}`, borderRadius: 13, background: COLORS.surface, padding: 20, marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 14, color: COLORS.textPrimary }}>Exactly what happens next</div>
+          <div className="flex flex-col" style={{ gap: 13 }}>
+            {[
+              'You pick the marketplace your account sells in — that tells us which Amazon region to talk to.',
+              "Amazon's own consent page opens, so you sign in on amazon.com and not on our site.",
+              'Amazon sends you back here and the scan starts. No keys to copy, nothing to paste.',
+            ].map((line, i) => (
+              <div key={i} className="flex" style={{ gap: 13 }}>
+                <span
+                  className="flex-none flex items-center justify-center"
+                  style={{ width: 22, height: 22, borderRadius: 999, background: COLORS.surfaceElevated, color: COLORS.textSecondary, fontSize: 11, fontWeight: 700 }}
                 >
-                  <label className="flex items-center gap-3 text-base font-semibold text-white/90">
-                    <div className="w-8 h-8 bg-blue-500/20 rounded-lg flex items-center justify-center border border-blue-500/30">
-                      <Globe className="w-4 h-4 text-blue-400" />
-                    </div>
-                    Select Your Country
-                  </label>
-                  
-                  <div className="relative">
+                  {i + 1}
+                </span>
+                <span style={{ fontSize: 13, lineHeight: '20px', color: '#C7CFDD' }}>{line}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Access disclosure. Worded to match what the app actually does: it reads broadly, and it
+            can write to ads/listings but only on an explicit click, never on its own. */}
+        <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: 12, marginBottom: 22 }}>
+          <div style={{ border: '1px solid rgba(34,197,94,.22)', borderRadius: 12, background: PANEL_BG, padding: '16px 18px' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: COLORS.good, marginBottom: 10 }}>
+              What we read
+            </div>
+            <div className="flex flex-col" style={{ gap: 7, fontSize: 13, lineHeight: '19px', color: '#C7CFDD' }}>
+              <div>Listings, inventory and pricing</div>
+              <div>Orders, returns and FBA fees</div>
+              <div>Account health metrics</div>
+            </div>
+          </div>
+          <div style={{ border: `1px solid ${COLORS.border}`, borderRadius: 12, background: PANEL_BG, padding: '16px 18px' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: COLORS.textMuted, marginBottom: 10 }}>
+              What we never do on our own
+            </div>
+            <div className="flex flex-col" style={{ gap: 7, fontSize: 13, lineHeight: '19px', color: COLORS.textSecondary }}>
+              <div>Change a price, listing or bid unless you click to apply it</div>
+              <div>Contact your customers</div>
+              <div>Move money or open cases for you</div>
+            </div>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: 14 }}>
+            <label className="flex items-center gap-2" style={{ fontSize: 12, fontWeight: 600, color: COLORS.textSecondary, marginBottom: 8 }}>
+              <Globe className="w-3.5 h-3.5" style={{ color: COLORS.textMuted }} />
+              Which marketplace is your account in?
+            </label>
+
+                  <div className="relative" ref={marketplaceDropdownRef}>
                     {/* Selected Country Display / Dropdown Trigger */}
                     <button
                       type="button"
                       onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                      className="w-full px-5 py-4 bg-[#21262d] border-2 border-[#30363d] rounded-xl outline-none transition-all duration-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 text-base shadow-sm hover:shadow-md text-left flex items-center justify-between text-gray-100"
+                      className="w-full outline-none transition-colors text-left flex items-center justify-between"
+                      style={{ padding: '11px 14px', background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, fontSize: 13, color: COLORS.textPrimary }}
                     >
                       {selectedCountry ? (
                         <span className="flex items-center gap-2">
-                          <span className="text-xl">{selectedCountry.flag}</span>
+                          <span style={{ fontSize: 16 }}>{selectedCountry.flag}</span>
                           <span>{selectedCountry.name}</span>
-                          <span className="text-xs text-gray-400 bg-[#161b22] px-2 py-0.5 rounded-full ml-2 border border-[#30363d]">
+                          <span
+                            style={{ fontSize: 11, color: COLORS.textSecondary, background: COLORS.surfaceElevated, padding: '2px 8px', borderRadius: 999, marginLeft: 4 }}
+                          >
                             {REGION_NAMES[selectedCountry.region]}
                           </span>
                         </span>
                       ) : (
-                        <span className="text-gray-500">-- Select your country --</span>
+                        <span style={{ color: COLORS.textMuted }}>Select your marketplace</span>
                       )}
-                      <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} />
+                      <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} style={{ color: COLORS.textMuted }} />
                     </button>
 
                     {/* Dropdown */}
@@ -291,28 +279,33 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
                         initial={{ opacity: 0, y: -10 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -10 }}
-                        className="absolute z-50 w-full mt-2 bg-[#161b22] border-2 border-[#30363d] rounded-xl shadow-xl overflow-hidden"
+                        className="absolute z-50 w-full mt-2 overflow-hidden"
+                        style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,.5)' }}
                       >
                         {/* Search Input */}
-                        <div className="p-3 border-b border-[#30363d]">
+                        <div className="p-2.5" style={{ borderBottom: `1px solid ${COLORS.border}` }}>
                           <div className="relative">
-                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4" style={{ color: COLORS.textMuted }} />
                             <input
                               type="text"
                               placeholder="Search country..."
                               value={searchQuery}
                               onChange={(e) => setSearchQuery(e.target.value)}
-                              className="w-full pl-10 pr-4 py-2.5 bg-[#21262d] border border-[#30363d] text-gray-100 rounded-lg outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-sm placeholder-gray-500"
+                              className="w-full pl-10 pr-4 py-2 outline-none"
+                              style={{ background: COLORS.bgBase, border: `1px solid ${COLORS.border}`, color: COLORS.textPrimary, borderRadius: 8, fontSize: 13 }}
+                              onFocus={(e) => e.target.style.borderColor = COLORS.accent}
+                              onBlur={(e) => e.target.style.borderColor = COLORS.border}
                               autoFocus
                             />
                           </div>
                         </div>
 
-                        {/* Country List */}
-                        <div className="max-h-64 overflow-y-auto">
+                        {/* Country List — intentionally not its own scroll container, so the
+                            wheel scrolls the whole page (dropdown included) instead of just this list. */}
+                        <div>
                           {filteredCountries.length === 0 ? (
-                            <div className="px-4 py-8 text-center text-gray-500">
-                              No countries found matching "{searchQuery}"
+                            <div className="px-4 py-8 text-center" style={{ color: COLORS.textMuted, fontSize: 13 }}>
+                              No countries found matching &ldquo;{searchQuery}&rdquo;
                             </div>
                           ) : (
                             <>
@@ -320,10 +313,13 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
                               {['NA', 'EU', 'FE'].map(regionCode => {
                                 const regionCountries = filteredCountries.filter(c => c.region === regionCode);
                                 if (regionCountries.length === 0) return null;
-                                
+
                                 return (
                                   <div key={regionCode}>
-                                    <div className="px-4 py-2 bg-[#21262d] text-xs font-semibold text-gray-400 uppercase tracking-wider sticky top-0 border-b border-[#30363d]">
+                                    <div
+                                      className="px-4 py-2"
+                                      style={{ background: COLORS.surfaceElevated, fontSize: 11, fontWeight: 600, color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: '.06em', borderBottom: `1px solid ${COLORS.border}` }}
+                                    >
                                       {REGION_NAMES[regionCode]}
                                     </div>
                                     {regionCountries.map(country => (
@@ -331,13 +327,18 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
                                         key={country.code}
                                         type="button"
                                         onClick={() => handleCountrySelect(country.code)}
-                                        className={`w-full px-4 py-3 text-left hover:bg-[#21262d] transition-colors flex items-center gap-3 text-gray-300 ${
-                                          marketPlace === country.code ? 'bg-blue-500/10 border-l-4 border-blue-500' : ''
-                                        }`}
+                                        className="w-full px-4 py-2.5 text-left transition-colors flex items-center gap-3"
+                                        style={{
+                                          fontSize: 13,
+                                          color: marketPlace === country.code ? COLORS.textPrimary : COLORS.textSecondary,
+                                          background: marketPlace === country.code ? 'rgba(59,130,246,.12)' : 'transparent',
+                                        }}
+                                        onMouseEnter={(e) => { if (marketPlace !== country.code) e.currentTarget.style.background = COLORS.surfaceElevated; }}
+                                        onMouseLeave={(e) => { if (marketPlace !== country.code) e.currentTarget.style.background = 'transparent'; }}
                                       >
-                                        <span className="text-xl">{country.flag}</span>
+                                        <span style={{ fontSize: 16 }}>{country.flag}</span>
                                         <span className="flex-1">{country.name}</span>
-                                        <span className="text-xs text-gray-500">{country.code}</span>
+                                        <span style={{ fontSize: 11, color: COLORS.textMuted }}>{country.code}</span>
                                       </button>
                                     ))}
                                   </div>
@@ -349,72 +350,42 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
                       </motion.div>
                     )}
                   </div>
-                </motion.div>
+          </div>
 
-                {/* Click outside to close dropdown */}
-                {isDropdownOpen && (
-                  <div 
-                    className="fixed inset-0 z-40" 
-                    onClick={() => {
-                      setIsDropdownOpen(false);
-                      setSearchQuery("");
-                    }}
-                  />
-                )}
+          <button
+            type="submit"
+            disabled={loading || !region || !marketPlace}
+            className="inline-flex items-center justify-center gap-2 transition-colors"
+            style={{
+              padding: '13px 22px',
+              border: 0,
+              borderRadius: 10,
+              background: loading || !region || !marketPlace ? COLORS.surfaceElevated : COLORS.accent,
+              color: loading || !region || !marketPlace ? COLORS.textMuted : '#061021',
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: loading || !region || !marketPlace ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Saving…
+              </>
+            ) : (
+              <>
+                Connect with Amazon
+                <ArrowRight className="w-4 h-4" />
+              </>
+            )}
+          </button>
 
-                {/* Submit Button */}
-                <motion.button
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.8 }}
-                  type="submit"
-                  disabled={loading || !region || !marketPlace}
-                  className={`group relative w-full py-4 px-6 rounded-xl font-bold text-lg transition-all duration-300 flex items-center justify-center gap-3 shadow-lg ${
-                    loading || !region || !marketPlace
-                      ? 'bg-gray-600 text-white/60 cursor-not-allowed'
-                       : 'bg-blue-600 text-white hover:bg-blue-500 transform hover:scale-[1.02] active:scale-[0.98]'
-                   }`}
-                 >
-                   <div className="relative flex items-center gap-3">
-                     {loading ? (
-                       <Loader2 className="w-6 h-6 animate-spin" />
-                     ) : (
-                       <>
-                         <Package className="w-6 h-6" />
-                         <span>Connect to Amazon</span>
-                         <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-all duration-300" />
-                       </>
-                     )}
-                   </div>
-                </motion.button>
-
-                {/* Trust indicators */}
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.9 }}
-                  className="text-center space-y-2"
-                >
-                  <div className="flex items-center justify-center gap-4 text-sm text-white/60">
-                     <div className="flex items-center gap-1">
-                       <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
-                       <span>Secure Connection</span>
-                     </div>
-                    <div className="flex items-center gap-1">
-                      <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
-                      <span>24hr Setup</span>
-                    </div>
-                  </div>
-                  <p className="text-xs text-white/50">
-                    Your Amazon data is processed securely and never stored permanently
-                  </p>
-                </motion.div>
-              </form>
-            </div>
-          </motion.div>
-        </div>
-      </div>
-    </div>
+          <div style={{ marginTop: 14, fontSize: 12, color: COLORS.textMuted }}>
+            Read-only to start. You can revoke access from Seller Central at any time.
+          </div>
+        </form>
+      </motion.div>
+    </OnboardingShell>
   );
 };
 

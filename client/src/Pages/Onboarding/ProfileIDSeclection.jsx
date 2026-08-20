@@ -8,6 +8,11 @@ import axiosInstance from '../../config/axios.config.js';
 import { detectCountry } from '../../utils/countryDetection.js';
 import { hasPremiumAccess } from '../../utils/subscriptionCheck.js';
 import stripeService from '../../services/stripeService.js';
+import OnboardingShell from '../../Components/Onboarding/OnboardingShell.jsx';
+import { COLORS } from '../../Components/Shared/index.js';
+
+// Matches the onboarding shell's inset panel shade.
+const PANEL_BG = '#10141C';
 
 
 const ProfileIDSelection = () => {
@@ -549,67 +554,63 @@ const ProfileIDSelection = () => {
 
 
   return (
-    <div className="min-h-screen bg-[#1a1a1a] w-full p-6 overflow-y-auto">
-      <div className="max-w-[1600px] mx-auto">
+    <OnboardingShell currentStep={3} doneSteps={[1, 2]} maxWidth="960px">
         {/* Show loader while data is being fetched */}
         {dataLoading ? (
-          <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="flex items-center justify-center" style={{ minHeight: '60vh' }}>
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               className="flex flex-col items-center gap-4"
             >
-              <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
+              <div
+                className="animate-spin"
+                style={{ width: 46, height: 46, borderRadius: '50%', border: `3px solid ${COLORS.surfaceElevated}`, borderTopColor: COLORS.accent }}
+              />
               <div className="text-center">
-                <h3 className="text-lg font-semibold text-gray-100 mb-2">Loading Profile Data</h3>
-                <p className="text-sm text-gray-400">Please wait while we fetch your profile information...</p>
+                <h3 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 600, color: COLORS.textPrimary }}>Loading your ad profiles</h3>
+                <p style={{ margin: 0, fontSize: 14, color: COLORS.textSecondary }}>Amazon is sending over the profiles on your account…</p>
               </div>
             </motion.div>
           </div>
         ) : (
-          <>
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
             {/* Header Section */}
-            <motion.div 
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6 }}
-              className="mb-8"
-            >
-              <div className="flex items-center gap-3 mb-2">
-                <User className="w-5 h-5 text-blue-400" />
-                <div>
-                  <h1 className="text-2xl lg:text-3xl font-bold text-gray-100">
-                    Profile ID Selection
-                  </h1>
-                  <p className="text-sm text-gray-400 mt-1">
-                    Select your Amazon marketplace profile ID and country
-                  </p>
-                </div>
+            <div style={{ marginBottom: 22 }}>
+              <div
+                className="inline-flex items-center gap-2"
+                style={{ padding: '5px 11px', borderRadius: 999, background: 'rgba(59,130,246,.12)', color: '#7EA8F8', fontSize: 12, fontWeight: 600, marginBottom: 16 }}
+              >
+                Step 3 of 5 · Almost done
               </div>
-            </motion.div>
+              <h1 style={{ margin: '0 0 8px', fontSize: 27, lineHeight: '34px', fontWeight: 600, letterSpacing: '-0.025em', color: COLORS.textPrimary }}>
+                Pick your ads profile
+              </h1>
+              <p style={{ margin: 0, fontSize: 14, lineHeight: '22px', color: COLORS.textSecondary, maxWidth: '62ch' }}>
+                Amazon Ads is connected. One account can hold several advertising profiles — choose the one whose campaigns you want audited.
+              </p>
+            </div>
 
             {/* Waiting for Analysis Banner - Show when waiting for analysis to start */}
             {waitingForAnalysis && (
               <motion.div
-                initial={{ opacity: 0, y: -20 }}
+                initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                className="mb-6 bg-yellow-500/10 border border-yellow-500/40 rounded-xl p-4 shadow-sm"
+                exit={{ opacity: 0, y: -10 }}
+                className="flex items-center gap-3"
+                style={{ marginBottom: 16, padding: 14, borderRadius: 11, background: 'rgba(245,166,35,.1)', border: '1px solid rgba(245,166,35,.35)' }}
               >
-                <div className="flex items-center gap-3">
-                  <motion.div
-                    className="w-5 h-5 border-2 border-yellow-400 border-t-transparent rounded-full flex-shrink-0"
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                  />
-                  <div className="flex-1">
-                    <h3 className="text-sm font-semibold text-yellow-300 mb-1">
-                      Starting Analysis...
-                    </h3>
-                    <p className="text-xs text-yellow-400">
-                      Please wait while we start your account analysis. You will be redirected to payment setup shortly.
-                    </p>
-                  </div>
+                <motion.div
+                  className="flex-shrink-0"
+                  style={{ width: 18, height: 18, borderRadius: '50%', border: `2px solid ${COLORS.watch}`, borderTopColor: 'transparent' }}
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                />
+                <div className="flex-1">
+                  <h3 style={{ margin: '0 0 2px', fontSize: 13, fontWeight: 600, color: COLORS.watch }}>Starting analysis…</h3>
+                  <p style={{ margin: 0, fontSize: 12, color: COLORS.textSecondary }}>
+                    Hang on while the scan kicks off — we&rsquo;ll take you to the plan step next.
+                  </p>
                 </div>
               </motion.div>
             )}
@@ -617,198 +618,206 @@ const ProfileIDSelection = () => {
             {/* Analysis Started Banner - Show when analysis has started */}
             {analysisStarted && !waitingForAnalysis && (
               <motion.div
-                initial={{ opacity: 0, y: -20 }}
+                initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                className="mb-6 bg-blue-500/10 border border-blue-500/40 rounded-xl p-4 shadow-sm"
+                exit={{ opacity: 0, y: -10 }}
+                className="flex items-center gap-3"
+                style={{ marginBottom: 16, padding: 14, borderRadius: 11, background: 'rgba(59,130,246,.1)', border: '1px solid rgba(59,130,246,.4)' }}
               >
-                <div className="flex items-center gap-3">
-                  <motion.div
-                    className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full flex-shrink-0"
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                  />
-                  <div className="flex-1">
-                    <h3 className="text-sm font-semibold text-blue-300 mb-1">
-                      Analysis Started
-                    </h3>
-                    <p className="text-xs text-blue-400">
-                      Your account analysis is running in the background. Redirecting to payment setup...
-                    </p>
-                  </div>
+                <motion.div
+                  className="flex-shrink-0"
+                  style={{ width: 18, height: 18, borderRadius: '50%', border: `2px solid ${COLORS.accent}`, borderTopColor: 'transparent' }}
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                />
+                <div className="flex-1">
+                  <h3 style={{ margin: '0 0 2px', fontSize: 13, fontWeight: 600, color: '#7EA8F8' }}>Analysis started</h3>
+                  <p style={{ margin: 0, fontSize: 12, color: COLORS.textSecondary }}>
+                    The scan is running in the background. Taking you to the plan step…
+                  </p>
                 </div>
               </motion.div>
             )}
 
-            {/* Search and Stats Section */}
-            <motion.div 
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.05 }}
-              className="bg-[#161b22] rounded-2xl border border-[#30363d] shadow-sm p-6 mb-6"
-            >
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                {/* Search Input */}
-                <div className="relative flex-1 max-w-md">
-                  <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Search by name, profile ID, or country..."
-                    className="pl-11 pr-4 py-2.5 border border-[#30363d] bg-[#21262d] text-gray-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full transition-all duration-200 shadow-sm hover:shadow-md placeholder-gray-500"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
-                </div>
-
-                {/* Stats */}
-                <div className="flex items-center gap-6">
-                  <div className="text-center">
-                    <div className="text-sm text-gray-400">Total Profiles</div>
-                    <div className="text-xl font-bold text-gray-100">{profileData.length}</div>
-                  </div>
-                  <div className="w-px h-12 bg-[#30363d]"></div>
-                  <div className="text-center">
-                    <div className="text-sm text-gray-400">Filtered Results</div>
-                    <div className="text-xl font-bold text-blue-400">{filteredProfiles.length}</div>
-                  </div>
-                </div>
+            {/* Search and count */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between" style={{ gap: 12, marginBottom: 14 }}>
+              <div className="relative flex-1" style={{ maxWidth: 380 }}>
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4" style={{ color: COLORS.textMuted }} />
+                <input
+                  type="text"
+                  placeholder="Search by name, profile ID, or country…"
+                  className="w-full outline-none transition-colors"
+                  style={{ padding: '9px 12px 9px 36px', border: `1px solid ${COLORS.border}`, background: COLORS.surface, color: COLORS.textPrimary, borderRadius: 9, fontSize: 13 }}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onFocus={(e) => e.target.style.borderColor = COLORS.accent}
+                  onBlur={(e) => e.target.style.borderColor = COLORS.border}
+                />
               </div>
-            </motion.div>
+              <div style={{ fontSize: 13, color: COLORS.textSecondary }}>
+                {searchQuery.trim()
+                  ? <>{filteredProfiles.length} of {profileData.length} profiles</>
+                  : <>{profileData.length} profile{profileData.length === 1 ? '' : 's'} found</>}
+              </div>
+            </div>
 
             {/* Show message if no profiles found */}
             {profileData.length === 0 ? (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: 0.1 }}
-                className="bg-[#161b22] rounded-2xl border border-[#30363d] shadow-sm p-8 text-center"
+              <div
+                className="text-center"
+                style={{ border: `1px solid ${COLORS.border}`, borderRadius: 13, background: COLORS.surface, padding: '40px 28px' }}
               >
-                <User className="w-8 h-8 text-gray-500 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-gray-100 mb-2">No Profiles Found</h3>
-                <p className="text-gray-400 mb-4">
-                  We could not find an Amazon Advertising profile for this account. This usually means Amazon Advertising is not set up for this marketplace yet. You can retry, or continue without a profile — your analysis will still run, but advertising (PPC) data will not be available until a profile is connected.
+                <div
+                  className="mx-auto flex items-center justify-center"
+                  style={{ width: 40, height: 40, borderRadius: 11, background: 'rgba(245,166,35,.14)', marginBottom: 14 }}
+                >
+                  <User className="w-5 h-5" style={{ color: COLORS.watch }} />
+                </div>
+                <h3 style={{ margin: '0 0 8px', fontSize: 17, fontWeight: 600, color: COLORS.textPrimary }}>No ads profiles on this account</h3>
+                <p style={{ margin: '0 auto 18px', maxWidth: '62ch', fontSize: 13, lineHeight: '20px', color: COLORS.textSecondary }}>
+                  Amazon didn&rsquo;t return an advertising profile for this marketplace, which usually means Amazon Ads isn&rsquo;t set up there yet. You can retry, or carry on without one — the audit still runs, but PPC data stays unavailable until a profile is connected.
                 </p>
-                <div className="flex items-center justify-center gap-3">
+                <div className="flex items-center justify-center gap-3 flex-wrap">
                   <button
                     onClick={() => window.location.reload()}
                     disabled={loading || waitingForAnalysis}
-                    className="px-6 py-2 bg-[#21262d] text-gray-300 rounded-lg hover:bg-[#1c2128] transition-colors duration-200 font-medium border border-[#30363d] disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="transition-colors"
+                    style={{
+                      padding: '11px 18px', border: `1px solid ${COLORS.border}`, borderRadius: 9, background: PANEL_BG,
+                      color: COLORS.textPrimary, fontSize: 13, fontWeight: 500,
+                      cursor: (loading || waitingForAnalysis) ? 'not-allowed' : 'pointer',
+                      opacity: (loading || waitingForAnalysis) ? 0.5 : 1,
+                    }}
                   >
                     Retry
                   </button>
                   <button
                     onClick={handleContinueWithoutProfile}
                     disabled={loading || waitingForAnalysis}
-                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors duration-200 font-medium shadow-lg shadow-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    className="inline-flex items-center justify-center gap-2 transition-colors"
+                    style={{
+                      padding: '11px 18px', border: 0, borderRadius: 9,
+                      background: (loading || waitingForAnalysis) ? COLORS.surfaceElevated : COLORS.accent,
+                      color: (loading || waitingForAnalysis) ? COLORS.textMuted : '#061021',
+                      fontSize: 13, fontWeight: 600,
+                      cursor: (loading || waitingForAnalysis) ? 'not-allowed' : 'pointer',
+                    }}
                   >
                     {(loading || waitingForAnalysis) ? (
                       <>
-                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        Starting...
+                        <div className="animate-spin" style={{ width: 14, height: 14, borderRadius: '50%', border: `2px solid ${COLORS.textMuted}`, borderTopColor: 'transparent' }} />
+                        Starting…
                       </>
                     ) : (
                       'Continue without a profile'
                     )}
                   </button>
                 </div>
-              </motion.div>
+              </div>
             ) : (
               <>
                 {/* Table Section */}
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.6, delay: 0.1 }}
-                  className="bg-[#161b22] rounded-2xl border border-[#30363d] shadow-sm overflow-hidden"
-                >
+                <div style={{ border: `1px solid ${COLORS.border}`, borderRadius: 13, background: COLORS.surface, overflow: 'hidden' }}>
                   <div className="overflow-x-auto">
                     <table className="min-w-full">
                       <thead>
-                        <tr className="bg-[#21262d] border-b border-[#30363d]">
-                          <th className="px-6 py-4 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider">
+                        <tr style={{ background: COLORS.surfaceElevated, borderBottom: `1px solid ${COLORS.border}` }}>
+                          <th className="px-5 py-3 text-left" style={{ fontSize: 11, fontWeight: 600, color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: '.06em' }}>
                             Brand Name
                           </th>
-                          <th className="px-6 py-4 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider">
+                          <th className="px-5 py-3 text-left" style={{ fontSize: 11, fontWeight: 600, color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: '.06em' }}>
                             Profile ID
                           </th>
-                          <th className="px-6 py-4 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider">
+                          <th className="px-5 py-3 text-left" style={{ fontSize: 11, fontWeight: 600, color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: '.06em' }}>
                             Country
                           </th>
-                          <th className="px-6 py-4 text-center text-xs font-semibold text-gray-300 uppercase tracking-wider">
+                          <th className="px-5 py-3 text-center" style={{ fontSize: 11, fontWeight: 600, color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: '.06em' }}>
                             Action
                           </th>
                         </tr>
                       </thead>
-                      <tbody className="bg-[#161b22] divide-y divide-[#30363d]">
+                      <tbody>
                         <AnimatePresence>
-                          {paginatedProfiles.map((profile, index) => (
-                            <motion.tr
-                              key={profile.id}
-                              initial={{ opacity: 0, y: 10 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              exit={{ opacity: 0, y: -10 }}
-                              transition={{ duration: 0.3, delay: index * 0.05 }}
-                              className={`hover:bg-[#21262d] transition-colors duration-200 cursor-pointer ${
-                                selectedProfile?.id === profile.id ? 'bg-blue-500/10 border-l-4 border-blue-500' : ''
-                              }`}
-                              onClick={() => handleProfileSelect(profile)}
-                            >
-                                                            <td className="px-6 py-4">
-                                <div className="flex items-center gap-2">
-                                  <Store className="w-4 h-4 text-green-400 flex-shrink-0" />
-                                  <span className="text-sm font-medium text-gray-100">
-                                    {String(profile.name || 'N/A')}
-                                  </span>
-                                </div>
-                              </td>
-                              
-                              <td className="px-6 py-4">
-                                <div className="flex items-center gap-3">
-                                  <Globe className="w-4 h-4 text-blue-400 flex-shrink-0" />
-                                  <div>
-                                    <p className="text-sm font-medium text-gray-100 font-mono">
-                                      {String(profile.profileId || 'N/A')}
-                                    </p>
-                                    <p className="text-xs text-gray-500">
-                                      ID: {String(profile.id || 'N/A')}
-                                    </p>
+                          {paginatedProfiles.map((profile, index) => {
+                            const isSelected = selectedProfile?.id === profile.id;
+                            return (
+                              <motion.tr
+                                key={profile.id}
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -10 }}
+                                transition={{ duration: 0.3, delay: index * 0.05 }}
+                                className="transition-colors cursor-pointer"
+                                style={{
+                                  borderBottom: `1px solid ${COLORS.border}`,
+                                  background: isSelected ? 'rgba(59,130,246,.10)' : 'transparent',
+                                }}
+                                onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = '#1A202B'; }}
+                                onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+                                onClick={() => handleProfileSelect(profile)}
+                              >
+                                <td className="px-5 py-4">
+                                  <div className="flex items-center gap-2">
+                                    <Store className="w-4 h-4 flex-shrink-0" style={{ color: COLORS.textMuted }} />
+                                    <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.textPrimary }}>
+                                      {String(profile.name || 'N/A')}
+                                    </span>
                                   </div>
-                                </div>
-                              </td>
-                              
-                              <td className="px-6 py-4">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-lg">{getCountryFlag(String(profile.country || ''))}</span>
-                                  <span className="text-sm font-medium text-gray-100">
-                                    {String(profile.country || 'N/A')}
-                                  </span>
-                                </div>
-                              </td>
+                                </td>
 
-                              <td className="px-6 py-4 text-center">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleProfileSelect(profile);
-                                  }}
-                                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                                    selectedProfile?.id === profile.id
-                                      ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25'
-                                      : 'bg-[#21262d] text-gray-300 hover:bg-blue-500/10 hover:text-blue-400 border border-[#30363d]'
-                                  }`}
-                                >
-                                  {selectedProfile?.id === profile.id ? (
-                                    <div className="flex items-center gap-1">
-                                      <Check className="w-4 h-4" />
-                                      Selected
+                                <td className="px-5 py-4">
+                                  <div className="flex items-center gap-2.5">
+                                    <Globe className="w-4 h-4 flex-shrink-0" style={{ color: COLORS.textMuted }} />
+                                    <div>
+                                      <p className="font-mono" style={{ margin: 0, fontSize: 13, color: COLORS.textPrimary, fontVariantNumeric: 'tabular-nums' }}>
+                                        {String(profile.profileId || 'N/A')}
+                                      </p>
+                                      <p style={{ margin: '2px 0 0', fontSize: 11, color: COLORS.textMuted }}>
+                                        ID: {String(profile.id || 'N/A')}
+                                      </p>
                                     </div>
-                                  ) : (
-                                    'Select'
-                                  )}
-                                </button>
-                              </td>
-                            </motion.tr>
-                          ))}
+                                  </div>
+                                </td>
+
+                                <td className="px-5 py-4">
+                                  <div className="flex items-center gap-2">
+                                    <span style={{ fontSize: 16 }}>{getCountryFlag(String(profile.country || ''))}</span>
+                                    <span style={{ fontSize: 13, color: COLORS.textSecondary }}>
+                                      {String(profile.country || 'N/A')}
+                                    </span>
+                                  </div>
+                                </td>
+
+                                <td className="px-5 py-4 text-center">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleProfileSelect(profile);
+                                    }}
+                                    className="inline-flex items-center justify-center gap-1.5 transition-colors"
+                                    style={{
+                                      padding: '7px 14px',
+                                      borderRadius: 8,
+                                      fontSize: 12,
+                                      fontWeight: 600,
+                                      background: isSelected ? COLORS.accent : 'transparent',
+                                      color: isSelected ? '#061021' : COLORS.textSecondary,
+                                      border: `1px solid ${isSelected ? COLORS.accent : COLORS.border}`,
+                                    }}
+                                  >
+                                    {isSelected ? (
+                                      <>
+                                        <Check className="w-3.5 h-3.5" />
+                                        Selected
+                                      </>
+                                    ) : (
+                                      'Select'
+                                    )}
+                                  </button>
+                                </td>
+                              </motion.tr>
+                            );
+                          })}
                         </AnimatePresence>
                       </tbody>
                     </table>
@@ -816,39 +825,51 @@ const ProfileIDSelection = () => {
 
                   {/* Pagination */}
                   {totalPages > 1 && (
-                    <div className="px-6 py-4 border-t border-[#30363d] bg-[#21262d]">
-                      <div className="flex items-center justify-between">
-                        <div className="text-sm text-gray-400">
-                          Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(currentPage * ITEMS_PER_PAGE, filteredProfiles.length)} of {filteredProfiles.length} results
+                    <div className="px-5 py-3" style={{ borderTop: `1px solid ${COLORS.border}`, background: COLORS.surfaceElevated }}>
+                      <div className="flex items-center justify-between flex-wrap gap-3">
+                        <div style={{ fontSize: 12, color: COLORS.textSecondary }}>
+                          Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredProfiles.length)} of {filteredProfiles.length}
                         </div>
-                        
-                        <div className="flex items-center gap-2">
+
+                        <div className="flex items-center gap-1.5">
                           <button
                             onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
                             disabled={currentPage === 1}
-                            className="p-2 rounded-lg border border-[#30363d] text-gray-400 hover:bg-[#161b22] disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                            className="transition-colors"
+                            style={{
+                              padding: 7, borderRadius: 8, border: `1px solid ${COLORS.border}`, background: 'transparent',
+                              color: COLORS.textSecondary, opacity: currentPage === 1 ? 0.4 : 1,
+                              cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+                            }}
                           >
                             <ChevronLeft className="w-4 h-4" />
                           </button>
-                          
+
                           {getPaginationGroup().map(page => (
                             <button
                               key={page}
                               onClick={() => setCurrentPage(page)}
-                              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200 ${
-                                currentPage === page
-                                  ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25'
-                                  : 'text-gray-300 hover:bg-[#161b22]'
-                              }`}
+                              className="transition-colors"
+                              style={{
+                                padding: '6px 11px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                                background: currentPage === page ? COLORS.accent : 'transparent',
+                                color: currentPage === page ? '#061021' : COLORS.textSecondary,
+                                border: `1px solid ${currentPage === page ? COLORS.accent : 'transparent'}`,
+                              }}
                             >
                               {page}
                             </button>
                           ))}
-                          
+
                           <button
                             onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
                             disabled={currentPage === totalPages}
-                            className="p-2 rounded-lg border border-[#30363d] text-gray-400 hover:bg-[#161b22] disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                            className="transition-colors"
+                            style={{
+                              padding: 7, borderRadius: 8, border: `1px solid ${COLORS.border}`, background: 'transparent',
+                              color: COLORS.textSecondary, opacity: currentPage === totalPages ? 0.4 : 1,
+                              cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+                            }}
                           >
                             <ChevronRight className="w-4 h-4" />
                           </button>
@@ -856,60 +877,73 @@ const ProfileIDSelection = () => {
                       </div>
                     </div>
                   )}
-                </motion.div>
+                </div>
 
                 {/* Selected Profile & Confirm Section */}
                 {selectedProfile && (
                   <motion.div
-                    initial={{ opacity: 0, y: 20 }}
+                    initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.4 }}
-                    className="mt-6 bg-blue-500/10 rounded-2xl border border-blue-500/40 p-6"
+                    transition={{ duration: 0.3 }}
+                    style={{ marginTop: 16, border: '1px solid rgba(59,130,246,.4)', borderRadius: 13, background: 'rgba(59,130,246,.06)', padding: 20 }}
                   >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="text-lg font-semibold text-gray-100 mb-2">Selected Profile</h3>
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 text-sm">
+                    <div className="flex items-center justify-between flex-wrap" style={{ gap: 20 }}>
+                      <div className="min-w-0">
+                        <h3 style={{ margin: '0 0 12px', fontSize: 15, fontWeight: 600, color: COLORS.textPrimary }}>Selected profile</h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-3" style={{ gap: 16 }}>
                           <div>
-                            <span className="text-gray-400">Brand Name:</span>
-                            <p className="font-medium text-gray-100">{String(selectedProfile.name || 'N/A')}</p>
+                            <span style={{ fontSize: 12, color: COLORS.textMuted }}>Brand name</span>
+                            <p style={{ margin: '2px 0 0', fontSize: 13, fontWeight: 500, color: COLORS.textPrimary }}>{String(selectedProfile.name || 'N/A')}</p>
                           </div>
                           <div>
-                            <span className="text-gray-400">Profile ID:</span>
-                            <p className="font-medium text-gray-100 font-mono">{String(selectedProfile.profileId || 'N/A')}</p>
+                            <span style={{ fontSize: 12, color: COLORS.textMuted }}>Profile ID</span>
+                            <p className="font-mono" style={{ margin: '2px 0 0', fontSize: 13, fontWeight: 500, color: COLORS.textPrimary }}>{String(selectedProfile.profileId || 'N/A')}</p>
                           </div>
                           <div>
-                            <span className="text-gray-400">Country:</span>
-                            <p className="font-medium text-gray-100">{getCountryFlag(String(selectedProfile.country || ''))} {String(selectedProfile.country || 'N/A')}</p>
+                            <span style={{ fontSize: 12, color: COLORS.textMuted }}>Country</span>
+                            <p style={{ margin: '2px 0 0', fontSize: 13, fontWeight: 500, color: COLORS.textPrimary }}>
+                              {getCountryFlag(String(selectedProfile.country || ''))} {String(selectedProfile.country || 'N/A')}
+                            </p>
                           </div>
                         </div>
                       </div>
-                      
-                      <div className="flex gap-3">
-                        <button 
+
+                      <div className="flex gap-3 flex-none">
+                        <button
                           onClick={handleConfirm}
                           disabled={loading}
-                          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-lg shadow-blue-500/25"
+                          className="inline-flex items-center justify-center gap-2 transition-colors"
+                          style={{
+                            padding: '11px 18px', border: 0, borderRadius: 9,
+                            background: loading ? COLORS.surfaceElevated : COLORS.accent,
+                            color: loading ? COLORS.textMuted : '#061021',
+                            fontSize: 13, fontWeight: 600,
+                            cursor: loading ? 'not-allowed' : 'pointer',
+                          }}
                         >
                           {loading ? (
                             <>
-                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                              Saving...
+                              <div className="animate-spin" style={{ width: 14, height: 14, borderRadius: '50%', border: `2px solid ${COLORS.textMuted}`, borderTopColor: 'transparent' }} />
+                              Saving…
                             </>
                           ) : (
                             <>
                               <Check className="w-4 h-4" />
-                              Confirm Selection
+                              Confirm and continue
                             </>
                           )}
                         </button>
-                        <button 
+                        <button
                           onClick={() => {
                             setSelectedProfile(null);
                             setProfileId('');
                             setCurrencyCode('');
                           }}
-                          className="px-6 py-2 bg-[#21262d] text-gray-300 rounded-lg hover:bg-[#1c2128] transition-colors duration-200 font-medium border border-[#30363d]"
+                          className="transition-colors"
+                          style={{
+                            padding: '11px 16px', border: `1px solid ${COLORS.border}`, borderRadius: 9,
+                            background: 'transparent', color: COLORS.textSecondary, fontSize: 13, cursor: 'pointer',
+                          }}
                         >
                           Clear
                         </button>
@@ -919,10 +953,9 @@ const ProfileIDSelection = () => {
                 )}
               </>
             )}
-          </>
+          </motion.div>
         )}
-      </div>
-    </div>
+    </OnboardingShell>
   );
 };
 
