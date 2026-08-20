@@ -144,10 +144,46 @@ const PIPELINE_STALL_QUIET_MINUTES = Math.max(15, parseInt(process.env.PIPELINE_
 // fanning out into one simultaneous re-run per account. Truncation is logged.
 const PIPELINE_STALL_MAX_RECOVERIES_PER_TICK = Math.max(1, parseInt(process.env.PIPELINE_STALL_MAX_RECOVERIES_PER_TICK || '5', 10) || 5);
 
+/**
+ * BullMQ priority for catch-up work. Backfill must never queue ahead of the daily pipeline.
+ *
+ * WHY THIS EXISTS. Observed in production: 36 active jobs, every one a catch-up job, ZERO
+ * daily-pipeline phases, with 26 more catch-up jobs queued behind them. A customer's account sat
+ * frozen because its `sched_init` was stuck behind that backlog. Stopping this sweeper by hand freed
+ * the queue and the account immediately progressed — that was the workaround; this is the fix.
+ *
+ * The arithmetic makes it inevitable rather than unlucky: one 3-hourly tick can enqueue up to 450
+ * jobs (ads 50 + finance 100 + deep-resync 300) into 18 slots (6 workers x concurrency 3), while a
+ * single daily run needs ~9 SEQUENTIAL slots.
+ *
+ * MIND THE VERSION. BullMQ INVERTED priority between v4 and v5. In the installed 5.76.7, job.js
+ * states: "Ranges from 0 (highest priority) to 2,097,152 (lowest priority). @defaultValue 0" — so 0
+ * is the HIGHEST priority, and it is what every un-prioritised job already gets.
+ *
+ * That is what makes this a one-line fix. moveToActive-11.js drains strictly in this order:
+ *     local jobId = rcall("RPOPLPUSH", waitKey, activeKey)       -- priority 0 jobs
+ *     if jobId then ... else moveJobFromPrioritizedToActive(...)  -- priority > 0 jobs
+ * and placement is `if priority == 0 then` -> `wait`, else -> `prioritized`. The `wait` list is
+ * emptied before `prioritized` is touched at all. The daily pipeline sets no priority, so it is
+ * already at 0 and already in `wait` — marking catch-up alone is sufficient and the scheduled path
+ * needs no edit. DO NOT "tidy" this by giving the daily pipeline an explicit priority: any non-zero
+ * value would move it into `prioritized` and forfeit exactly the precedence this buys.
+ *
+ * Limit worth knowing: this orders WAITING jobs, it does not preempt RUNNING ones. If every slot is
+ * already busy with catch-up, a daily job still waits for one to free — but catch-up now only
+ * occupies slots the daily pipeline is not asking for.
+ */
+const CATCHUP_JOB_PRIORITY = Math.max(
+    1,
+    parseInt(process.env.CATCHUP_JOB_PRIORITY || '10', 10) || 10
+);
+
 // Job options for catch-up jobs.
 const CATCHUP_JOB_OPTS = {
     attempts: 3,
     backoff: { type: 'exponential', delay: 60_000 },
+    // Lower precedence than the daily pipeline — see CATCHUP_JOB_PRIORITY above.
+    priority: CATCHUP_JOB_PRIORITY,
     // No `timeout`: it is a no-op since BullMQ v4 (see queue.js). Ads async reports
     // usually finish in 30-45 min per call; anything that hangs far past that is caught
     // by the lock-extension ceiling in worker.js, not by a per-job option.
@@ -1031,6 +1067,8 @@ module.exports = {
     buildFinanceCatchupJobId,
     buildDeepResyncJobId,
     // Exposed for tests / scripts
+    CATCHUP_JOB_OPTS,
+    CATCHUP_JOB_PRIORITY,
     ADS_LOOKBACK_DAYS,
     MAX_ENQUEUES_PER_TICK,
     FINANCE_LOOKBACK_DAYS,

@@ -16,6 +16,7 @@ const mongoose = require('mongoose');
 const ProductWiseFBAData = require('../../models/inventory/ProductWiseFBADataModel');
 const ProductWiseFBADataItem = require('../../models/inventory/ProductWiseFBADataItemModel');
 const logger = require('../../utils/Logger');
+const { insertManyChunked } = require('../../utils/chunkedInsert');
 
 /**
  * Save Product-wise FBA data to database
@@ -76,8 +77,10 @@ async function saveProductWiseFBAData(userId, country, region, fbaDataArray) {
             ...item
         }));
 
-        // Use insertMany with ordered:false for better performance
-        await ProductWiseFBADataItem.insertMany(itemsToInsert, { ordered: false });
+        // Chunked to bound peak memory. These are the widest rows in the codebase (~25 string
+        // columns via a blind spread of the report row), so this is the largest win of the four
+        // sites. Documents are still hydrated — see utils/chunkedInsert.js for why not `lean`.
+        await insertManyChunked(ProductWiseFBADataItem, itemsToInsert, { ordered: false });
 
         logger.info('Product-wise FBA data saved successfully', {
             userId: userObjectId.toString(),

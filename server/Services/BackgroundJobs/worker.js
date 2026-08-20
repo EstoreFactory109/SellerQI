@@ -41,10 +41,43 @@ const pidBasedName = `worker-${process.pid}`;
 const WORKER_NAME = envWorkerName || pidBasedName;
 
 // Lock configuration for long-running jobs (prevents stalling)
-// These settings match integrationWorker.js for consistency
-const LOCK_DURATION = 2 * 60 * 60 * 1000; // 2 hours - job lock duration
-const LOCK_EXTENSION_INTERVAL = 15 * 60 * 1000; // Extend lock every 15 minutes
-const LOCK_EXTENSION_AMOUNT = 60 * 60 * 1000; // Extend by 1 hour each time
+// These settings match integrationWorker.js for consistency — keep the two in step.
+//
+// WHY THESE NUMBERS CHANGED. When a worker process dies, its jobs stay `active` and keep holding
+// their concurrency slot until the Redis lock lapses. Measured in production: 36 jobs reported
+// active against 18 real slots — roughly HALF the queue's apparent capacity was phantom, held by
+// workers that no longer existed.
+//
+// The old values made that window enormous. The lock only shrinks to LOCK_EXTENSION_AMOUNT after
+// the FIRST renewal, so a worker dying inside its first 15 minutes left the job pinned for the full
+// 2h LOCK_DURATION. That initial-lock hole is precisely why all three constants move together:
+// reducing the extension alone would not have closed it.
+//
+// COUNTER-INTUITIVELY THIS IS SAFER THAN BEFORE, not riskier. The hazard is a lock lapsing while a
+// job is genuinely running, because BullMQ then RE-RUNS it — and sched_calc_review sends review
+// requests, so a spurious re-run risks duplicate requests to real sellers. What guards against that
+// is how many consecutive renewals may fail, not the absolute numbers:
+//
+//   before: renew every 15min, extend to 60min -> tolerates 3 missed renewals, reclaim <=60min (2h if early)
+//   after:  renew every  2min, extend to 20min -> tolerates 9 missed renewals, reclaim <=20min
+//
+// Fault tolerance triples while reclaim latency drops threefold. Cost is trivial: ~9 extendLock
+// calls/min across 18 concurrent jobs, plus the JobStatus heartbeat that piggybacks the same timer.
+//
+// Env-overridable so the old timing can be restored without a deploy. INVARIANT to preserve:
+// LOCK_EXTENSION_INTERVAL must stay well below BOTH LOCK_DURATION and LOCK_EXTENSION_AMOUNT.
+const LOCK_DURATION = Math.max(
+    5 * 60 * 1000,
+    parseInt(process.env.WORKER_LOCK_DURATION_MS || String(20 * 60 * 1000), 10) || 20 * 60 * 1000
+); // initial lock granted when a job is picked up
+const LOCK_EXTENSION_INTERVAL = Math.max(
+    30 * 1000,
+    parseInt(process.env.WORKER_LOCK_EXTENSION_INTERVAL_MS || String(2 * 60 * 1000), 10) || 2 * 60 * 1000
+); // how often the keep-alive fires
+const LOCK_EXTENSION_AMOUNT = Math.max(
+    5 * 60 * 1000,
+    parseInt(process.env.WORKER_LOCK_EXTENSION_AMOUNT_MS || String(20 * 60 * 1000), 10) || 20 * 60 * 1000
+); // how far out each renewal pushes the lock
 // Hard ceiling on how long ONE job may hold its slot. See lockExtension.js for the full
 // reasoning — in short, this is the only working timeout in the queue, because a job-level
 // `timeout` option has been a no-op since BullMQ v4 dropped it.
