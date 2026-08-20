@@ -126,13 +126,22 @@ const OnboardingShell = ({
   const progressWidth = `${Math.round(((idx + 1) / steps.length) * 100)}%`;
 
   // Onboarding is forward-only. Going back would let a user re-enter a step they
-  // already cleared and re-trigger an Amazon connection, so the browser Back
-  // button is neutralised here: we seed a history entry and re-push it whenever
-  // a popstate fires. Forward navigation via navigate() is unaffected.
+  // already cleared and re-trigger an Amazon connection, so Back is neutralised
+  // here for every route that renders through this shell.
+  //
+  // How it works: we seed a duplicate history entry for the current URL, then
+  // re-seed it on every popstate. Because the sentinel carries the *same* URL, a
+  // Back press lands on an identical location — React Router sees no route change
+  // and renders nothing new, so there's no flash. This covers the Back button,
+  // Alt/Cmd+Left, the mouse back button and trackpad swipe-back alike, since all
+  // of them surface as popstate. Forward navigation via navigate() is untouched,
+  // and the listener is torn down on unmount so Back works normally once the user
+  // leaves onboarding.
   useEffect(() => {
-    window.history.pushState(null, '', window.location.href);
+    const lockedUrl = window.location.href;
+    window.history.pushState(null, '', lockedUrl);
     const handlePopState = () => {
-      window.history.pushState(null, '', window.location.href);
+      window.history.pushState(null, '', lockedUrl);
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);

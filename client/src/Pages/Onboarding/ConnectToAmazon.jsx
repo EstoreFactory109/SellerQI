@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from 'framer-motion';
-import { Globe, ChevronDown, ArrowRight, Loader2, Search } from 'lucide-react';
+import { Globe, ChevronDown, ArrowRight, Loader2, Search, AlertTriangle } from 'lucide-react';
 import axios from 'axios';
 import { useSelector } from 'react-redux';
 import { hasPremiumAccess } from '../../utils/subscriptionCheck.js';
@@ -243,6 +243,20 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
         </div>
 
         <form onSubmit={handleSubmit}>
+          {/* One marketplace only, and it governs both connections — flagged up front
+              because picking the wrong one here makes the Ads profiles in step 3 mismatch. */}
+          <div
+            className="flex items-start gap-2.5"
+            style={{ padding: '13px 15px', border: '1px solid rgba(245,166,35,.3)', borderRadius: 11, background: 'rgba(245,166,35,.07)', marginBottom: 16 }}
+          >
+            <AlertTriangle className="w-4 h-4 flex-shrink-0" style={{ color: COLORS.watch, marginTop: 1 }} />
+            <div style={{ fontSize: 13, lineHeight: '20px', color: '#C7CFDD' }}>
+              <span style={{ fontWeight: 600, color: COLORS.textPrimary }}>Pick one marketplace.</span>{' '}
+              This same marketplace is used for both your Seller Central and Amazon Ads connections, and only
+              one can be connected during setup. Choosing a different one later means reconnecting both accounts.
+            </div>
+          </div>
+
           <div style={{ marginBottom: 14 }}>
             <label className="flex items-center gap-2" style={{ fontSize: 12, fontWeight: 600, color: COLORS.textSecondary, marginBottom: 8 }}>
               <Globe className="w-3.5 h-3.5" style={{ color: COLORS.textMuted }} />

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Globe, ChevronLeft, ChevronRight, User, Check, Store } from 'lucide-react';
+import { Search, Globe, ChevronLeft, ChevronRight, User, Check, Store, AlertTriangle } from 'lucide-react';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import axios from 'axios';
@@ -48,6 +48,12 @@ const ProfileIDSelection = () => {
   // Get region from URL parameters
   const region = searchParams.get('region') || 'NA'; // Default to NA if no region specified
   const selectedBaseUri = BASE_URIS[region] || BASE_URIS['NA']; // Fallback to NA if invalid region
+
+  // The marketplace the Seller Central account was connected for. Only some entry
+  // points pass it (Login does, the OAuth callback doesn't), so it's treated as
+  // optional — when present we flag profiles that don't match it, but we never hide
+  // them, since a missing param would otherwise look like "no profiles found".
+  const connectedCountry = (searchParams.get('country') || '').trim().toUpperCase();
 
   useEffect(() => {
     let isMounted = true;
@@ -639,6 +645,21 @@ const ProfileIDSelection = () => {
               </motion.div>
             )}
 
+            {/* Same-account / one-profile constraint. Getting this wrong silently
+                mismatches Seller and Advertising data, so it's called out before the list. */}
+            <div
+              className="flex items-start gap-2.5"
+              style={{ padding: '13px 15px', border: '1px solid rgba(245,166,35,.3)', borderRadius: 11, background: 'rgba(245,166,35,.07)', marginBottom: 16 }}
+            >
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" style={{ color: COLORS.watch, marginTop: 1 }} />
+              <div style={{ fontSize: 13, lineHeight: '20px', color: '#C7CFDD' }}>
+                <span style={{ fontWeight: 600, color: COLORS.textPrimary }}>Pick one profile, from the same account.</span>{' '}
+                Only one advertising profile can be connected, and it must belong to the same Amazon account and
+                marketplace{connectedCountry ? <> you connected as Seller Central (<span style={{ color: COLORS.textPrimary, fontWeight: 500 }}>{connectedCountry}</span>)</> : ' you connected as Seller Central'}.
+                Choosing a profile from a different account or marketplace will make your Seller and Advertising data mismatch.
+              </div>
+            </div>
+
             {/* Search and count */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between" style={{ gap: 12, marginBottom: 14 }}>
               <div className="relative flex-1" style={{ maxWidth: 380 }}>
@@ -780,11 +801,24 @@ const ProfileIDSelection = () => {
                                 </td>
 
                                 <td className="px-5 py-4">
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
                                     <span style={{ fontSize: 16 }}>{getCountryFlag(String(profile.country || ''))}</span>
                                     <span style={{ fontSize: 13, color: COLORS.textSecondary }}>
                                       {String(profile.country || 'N/A')}
                                     </span>
+                                    {/* Flagged, not hidden — a mismatched param shouldn't make valid profiles vanish. */}
+                                    {connectedCountry && String(profile.country || '').toUpperCase() !== connectedCountry && (
+                                      <span
+                                        title={`This profile is for ${profile.country}, but you connected Seller Central for ${connectedCountry}.`}
+                                        style={{
+                                          padding: '1px 6px', borderRadius: 5, fontSize: 10, fontWeight: 700,
+                                          letterSpacing: '.04em', textTransform: 'uppercase',
+                                          background: 'rgba(245,166,35,.16)', color: COLORS.watch,
+                                        }}
+                                      >
+                                        Different marketplace
+                                      </span>
+                                    )}
                                   </div>
                                 </td>
 
@@ -908,7 +942,17 @@ const ProfileIDSelection = () => {
                         </div>
                       </div>
 
-                      <div className="flex gap-3 flex-none">
+                      <div className="flex flex-col items-end gap-2 flex-none">
+                        {/* Last-chance caution if the chosen profile isn't the connected marketplace. */}
+                        {connectedCountry && String(selectedProfile.country || '').toUpperCase() !== connectedCountry && (
+                          <div className="flex items-center gap-2" style={{ fontSize: 12, color: COLORS.watch, maxWidth: 320, textAlign: 'right' }}>
+                            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span>
+                              This profile is for {String(selectedProfile.country || 'another marketplace')}, not {connectedCountry}. Your ads and sales data won&rsquo;t line up.
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex gap-3">
                         <button
                           onClick={handleConfirm}
                           disabled={loading}
@@ -947,9 +991,17 @@ const ProfileIDSelection = () => {
                         >
                           Clear
                         </button>
+                        </div>
                       </div>
                     </div>
                   </motion.div>
+                )}
+
+                {/* Selection status — mirrors the "select a profile to continue" cue. */}
+                {!selectedProfile && (
+                  <div style={{ marginTop: 14, fontSize: 12, color: COLORS.textMuted }}>
+                    Select one profile above to continue.
+                  </div>
                 )}
               </>
             )}
