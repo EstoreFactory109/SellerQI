@@ -3,12 +3,21 @@
  *
  * Purges all remaining operational user data from every collection that
  * references the user. Call this after deleteUserById has removed the
- * user's Seller document(s) (the User document itself is retained for
- * audit/history — see deleteUserService.js).
+ * user's Seller document(s).
  *
- * Subscription and PaymentLogs are intentionally NOT purged here — billing
- * history is kept for financial/audit purposes even after an account is
- * purged.
+ * Whether the User document survives is decided by the caller, not here:
+ * the six-month inactivity cleanup keeps it (stamped with purgedAt), while an
+ * admin's manual delete removes it. See deleteUserService.js.
+ *
+ * Billing history (Subscription + PaymentLogs) follows the same split, via the
+ * `includeBillingHistory` option:
+ *   - six-month cleanup: kept, because the account itself is kept and the person
+ *     can come back.
+ *   - admin manual delete: removed, since nothing of the account remains.
+ *
+ * Keeping this list complete matters: any model with a `ref: 'User'` field that
+ * is missing below leaves rows behind forever. To audit, compare the entries
+ * here against `grep -rl "ref: 'User'" server/models`.
  *
  * Used by the dedicated delete-user worker; does not touch existing delete flow or other workers.
  */
@@ -68,13 +77,47 @@ const LedgerDetailView = require('../../models/finance/LedgerDetailViewModel.js'
 const V2_Seller_Performance_Report = require('../../models/seller-performance/V2_Seller_Performance_ReportModel.js');
 const APlusContent = require('../../models/seller-performance/APlusContentModel.js');
 const NumberOfProductReviews = require('../../models/seller-performance/NumberOfProductReviewsModel.js');
-const Alert = require('../../models/alerts/Alert.js');
+// Alert.js exports a map of discriminators, not a model. Importing the module
+// object made `Alert.deleteMany` undefined, so every alert purge threw and was
+// swallowed by the per-collection try/catch — alerts were never purged. The base
+// model has no __t filter, so deleting through it covers all alert types.
+const { Alert } = require('../../models/alerts/Alert.js');
 const GET_FBA_INVENTORY_PLANNING_DATA = require('../../models/inventory/GET_FBA_INVENTORY_PLANNING_DATA_Model.js');
 const V1_Seller_Performance_Report = require('../../models/seller-performance/V1_Seller_Performance_Report_Model.js');
 const QMateChat = require('../../models/ai/QMateChatModel.js');
 const ProductWiseFinancial = require('../../models/finance/ProductWiseFinancialModel.js');
 const WeekLyFinance = require('../../models/finance/WeekLyFinanceModel.js');
 const ShipmentModel = require('../../models/inventory/ShipmentModel.js');
+// Finance / expense / review collections added later than this service. They were
+// never in the purge lists below, so they accumulated rows for purged users.
+const AsinRelationship = require('../../models/finance/AsinRelationshipModel.js');
+const AsinWiseSalesDateItem = require('../../models/finance/AsinWiseSalesDateItemModel.js');
+const AsinWiseSalesItem = require('../../models/finance/AsinWiseSalesItemModel.js');
+const AsinWiseSalesRun = require('../../models/finance/AsinWiseSalesRunModel.js');
+const DailyOverheadFinance = require('../../models/finance/DailyOverheadFinanceModel.js');
+const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
+const ExpenseAmazonFeeCategoryAgg = require('../../models/finance/ExpenseAmazonFeeCategoryAggModel.js');
+const ExpenseAmazonFeeDateAgg = require('../../models/finance/ExpenseAmazonFeeDateAggModel.js');
+const ExpenseCategoryAgg = require('../../models/finance/ExpenseCategoryAggModel.js');
+const ExpenseDateAgg = require('../../models/finance/ExpenseDateAggModel.js');
+const ExpenseRawRow = require('../../models/finance/ExpenseRawRowModel.js');
+const ExpenseReportRun = require('../../models/finance/ExpenseReportRunModel.js');
+const ExpenseSkuAgg = require('../../models/finance/ExpenseSkuAggModel.js');
+const ExpenseSkuDateAgg = require('../../models/finance/ExpenseSkuDateAggModel.js');
+const FinanceBackfillCursor = require('../../models/finance/FinanceBackfillCursorModel.js');
+const FinanceSyncLog = require('../../models/finance/FinanceSyncLogModel.js');
+const PendingExpenseOrder = require('../../models/finance/PendingExpenseOrderModel.js');
+const SalesOrderId = require('../../models/finance/SalesOrderIdModel.js');
+const FbaInventoryApiDetail = require('../../models/inventory/FbaInventoryApiDetailModel.js');
+const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
+const ReviewIngestSlice = require('../../models/review/ReviewIngestSliceModel.js');
+const ReviewOrderItem = require('../../models/review/ReviewOrderItemModel.js');
+const ReviewOrder = require('../../models/review/ReviewOrderModel.js');
+const ListingFixStatus = require('../../models/system/ListingFixStatusModel.js');
+const WhatsAppLink = require('../../models/user-auth/WhatsAppLinkModel.js');
+// Billing history — purged only for an admin's manual delete, see below.
+const Subscription = require('../../models/user-auth/SubscriptionModel.js');
+const PaymentLogs = require('../../models/system/PaymentLogsModel.js');
 
 /** @type {{ model: import('mongoose').Model, key: string }[]} Collections with User (ObjectId) */
 const collectionsWithUser = [
@@ -105,12 +148,38 @@ const collectionsWithUser = [
     { model: QMateChat, key: 'User' },
     { model: WeekLyFinance, key: 'User' },
     { model: ShipmentModel, key: 'User' },
+    // Finance / expense / sales
+    { model: AsinRelationship, key: 'User' },
+    { model: AsinWiseSalesDateItem, key: 'User' },
+    { model: AsinWiseSalesItem, key: 'User' },
+    { model: AsinWiseSalesRun, key: 'User' },
+    { model: DailyOverheadFinance, key: 'User' },
+    { model: DailySkuFinance, key: 'User' },
+    { model: ExpenseAmazonFeeCategoryAgg, key: 'User' },
+    { model: ExpenseAmazonFeeDateAgg, key: 'User' },
+    { model: ExpenseCategoryAgg, key: 'User' },
+    { model: ExpenseDateAgg, key: 'User' },
+    { model: ExpenseRawRow, key: 'User' },
+    { model: ExpenseReportRun, key: 'User' },
+    { model: ExpenseSkuAgg, key: 'User' },
+    { model: ExpenseSkuDateAgg, key: 'User' },
+    { model: FinanceBackfillCursor, key: 'User' },
+    { model: FinanceSyncLog, key: 'User' },
+    { model: PendingExpenseOrder, key: 'User' },
+    { model: SalesOrderId, key: 'User' },
+    // Inventory / metrics
+    { model: FbaInventoryApiDetail, key: 'User' },
+    { model: SalesOnlyMetrics, key: 'User' },
+    // Review request data
+    { model: ReviewIngestSlice, key: 'User' },
+    { model: ReviewOrderItem, key: 'User' },
+    { model: ReviewOrder, key: 'User' },
 ];
 
 /** ProductWiseFinancial uses lowercase userid */
 const collectionsWithUserId = [
-    // Subscription and PaymentLogs deliberately excluded — billing history is
-    // retained for financial/audit purposes.
+    // Billing history lives in billingHistoryCollections below, not here — it is
+    // only purged when the caller asks for it (admin manual delete).
     { model: JobStatus, key: 'userId' },
     { model: UserUpdateSchedule, key: 'userId' },
     { model: Task, key: 'userId' },
@@ -137,6 +206,18 @@ const collectionsWithUserId = [
     { model: ProductWiseFBADataItem, key: 'userId' },
     { model: GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE, key: 'userId' },
     { model: UserAccountLogs, key: 'userId' },
+    { model: ListingFixStatus, key: 'userId' },
+    { model: WhatsAppLink, key: 'userId' },
+];
+
+/**
+ * Billing history. Purged ONLY when the caller passes includeBillingHistory — the
+ * six-month cleanup keeps the account, so its payment record is kept with it; an
+ * admin's manual delete removes the account, so this goes too.
+ */
+const billingHistoryCollections = [
+    { model: Subscription, key: 'userId' },
+    { model: PaymentLogs, key: 'userId' },
 ];
 
 /** EmailLogs uses receiverId */
@@ -167,11 +248,15 @@ async function deleteForModel(model, filter) {
 
 /**
  * Purge all remaining user data from every collection.
- * User and Seller must already be deleted before calling this.
+ * The Seller document(s) must already be deleted before calling this.
  * @param {string} userId - MongoDB user ObjectId (string or ObjectId)
+ * @param {{ includeBillingHistory?: boolean }} [options] - also purge Subscription
+ *        and PaymentLogs. Set by the admin's manual delete, which removes the whole
+ *        account; the six-month cleanup leaves billing history in place.
  * @returns {Promise<{ success: boolean, deletedByCollection: object, totalDeleted: number, errors: string[] }>}
  */
-async function purgeAllUserData(userId) {
+async function purgeAllUserData(userId, options = {}) {
+    const { includeBillingHistory = false } = options;
     const userObjectId = mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : userId;
     const userIdStr = userObjectId.toString();
     const deletedByCollection = {};
@@ -196,11 +281,15 @@ async function purgeAllUserData(userId) {
     await runOne(collectionsWithUserIdString, { userId: userIdStr });
     await runOne(collectionsWithReceiverId, { receiverId: userObjectId });
     await runOne(collectionsWithUserid, { userid: userObjectId });
+    if (includeBillingHistory) {
+        await runOne(billingHistoryCollections, { userId: userObjectId });
+    }
 
     const totalDeleted = Object.values(deletedByCollection).reduce((s, n) => s + n, 0);
     logger.info(`[fullUserDataPurge] Purged user ${userIdStr}: total docs ${totalDeleted}, collections: ${Object.keys(deletedByCollection).length}`, {
         userId: userIdStr,
         deletedByCollection,
+        includeBillingHistory,
         errors: errors.length,
     });
 

@@ -49,10 +49,18 @@ function getDeleteUserQueue() {
  * @param {string} userId - MongoDB ObjectId of the user (already deleted)
  * @returns {Promise<Job>}
  */
-async function enqueueFullUserDataPurge(userId) {
+async function enqueueFullUserDataPurge(userId, options = {}) {
+    const { includeBillingHistory = false } = options;
     const queue = getDeleteUserQueue();
-    const job = await queue.add('purge-user-data', { userId }, { jobId: `purge-${userId}` });
-    logger.info('[DeleteUserQueue] Enqueued full user data purge job', { jobId: job.id, userId });
+    // No explicit jobId: BullMQ silently drops an add() whose jobId matches an
+    // existing job, and completed jobs are retained for 24h. The old fixed
+    // `purge-${userId}` therefore meant a second purge for the same user within a
+    // day -- six-month cleanup first, admin delete after -- never ran at all.
+    // Letting BullMQ assign the id guarantees uniqueness (a timestamp does not:
+    // two enqueues in the same millisecond collide). Re-running a purge is safe,
+    // since it is deleteMany over rows that are already gone.
+    const job = await queue.add('purge-user-data', { userId, includeBillingHistory });
+    logger.info('[DeleteUserQueue] Enqueued full user data purge job', { jobId: job.id, userId, includeBillingHistory });
     return job;
 }
 
