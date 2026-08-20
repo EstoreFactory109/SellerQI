@@ -239,20 +239,25 @@ describe('purgeAllUserData billing history', () => {
         };
     };
 
+    // These walk every collection, and the service sleeps DELAY_BETWEEN_COLLECTIONS_MS
+    // (100ms) between each - roughly 8s per run, over the 10s default. The timeout
+    // belongs on each `it`; passing it to `describe` does nothing.
+    const PURGE_WALK_TIMEOUT_MS = 30000;
+
     it('leaves billing history alone by default (six-month cleanup)', async () => {
         const { touched, subscriptions, paymentLogs } = await runPurge(undefined);
         expect(touched).not.toContain(subscriptions);
         expect(touched).not.toContain(paymentLogs);
         // ...but still purged the operational collections.
         expect(touched.length).toBeGreaterThan(50);
-    });
+    }, PURGE_WALK_TIMEOUT_MS);
 
     it('purges billing history when asked (admin manual delete)', async () => {
         const { touched, subscriptions, paymentLogs } = await runPurge({ includeBillingHistory: true });
         expect(touched).toContain(subscriptions);
         expect(touched).toContain(paymentLogs);
-    });
-}, 30000);
+    }, PURGE_WALK_TIMEOUT_MS);
+});
 
 describe('purge job ids', () => {
     it('are unique per enqueue so a second purge for the same user still runs', async () => {
