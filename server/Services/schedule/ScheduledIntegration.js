@@ -1066,8 +1066,9 @@ class ScheduledIntegration {
             if (functionKey === 'financeSync') {
                 return 'finance';
             }
-            // Batch 4: Negative Keywords, Search Keywords, Keyword Recommendations
-            if (['negativeKeywords', 'searchKeywords', 'keywordRecommendations'].includes(functionKey)) {
+            // Batch 4: Negative Keywords, Search Keywords, Keyword Recommendations,
+            // Listing Items (Sunday only; handled inline, see the block after batch 7).
+            if (['negativeKeywords', 'searchKeywords', 'keywordRecommendations', 'GetListingItem'].includes(functionKey)) {
                 return 4;
             }
             // Batch 5: Calculation services (run after all API fetches complete)
@@ -1181,6 +1182,12 @@ class ScheduledIntegration {
             }
             // Skip explicitly excluded services (handled by the async engine elsewhere).
             if (excludeSet.has(functionKey)) {
+                continue;
+            }
+            // GetListingItem is not a one-shot call: it needs paired sku/asin arrays and
+            // persists its own output. It runs inline after batch 7 (gated on runBatch(4)),
+            // so keep it out of the promise registry.
+            if (functionKey === 'GetListingItem') {
                 continue;
             }
 
@@ -1759,14 +1766,41 @@ class ScheduledIntegration {
         }
         logger.info("Seventh Batch (Review Request Sender) Ends");
 
-        // Process listing items if scheduled (simplified version)
-        if (scheduledFunctions['GetListingItem'] && AccessToken) {
-            logger.info("Processing Listing Items (simplified)");
-            // For scheduled runs, we'll skip the complex batch processing
-            // This can be enhanced later if needed
-            apiData.genericKeyWordArray = [];
-        } else {
-            apiData.genericKeyWordArray = [];
+        // Listing items for ACTIVE SKUs — weekly (Sunday), inside batch 4.
+        //
+        // This used to be a stub that always assigned []. Two things were broken by that:
+        //   1. `has_b2b_pricing` never refreshed on the scheduled path (it is only written
+        //      by this endpoint and by the inactive-SKU endpoint), so it went stale from
+        //      the last manual reconnect onwards.
+        //   2. `genericKeyWordArray` was always empty, so the backend-keyword check in
+        //      Analyse.js ran against listing data that only refreshed on manual reconnect.
+        //
+        // Integration.processListingItems is a static taking everything as arguments, so it
+        // can be reused directly; it also performs the B2B write itself.
+        apiData.genericKeyWordArray = [];
+        const listingSkuArray = Array.isArray(productData?.skuArray) ? productData.skuArray : [];
+        const listingAsinArray = Array.isArray(productData?.asinArray) ? productData.asinArray : [];
+        if (scheduledFunctions['GetListingItem'] && AccessToken && runBatch(4)
+            && !excludeSet.has('GetListingItem') && listingSkuArray.length > 0) {
+            logger.info("Processing Listing Items (active SKUs)", { skuCount: listingSkuArray.length });
+            try {
+                const { Integration } = require('../main/Integration.js');
+                const genericKeyWordArray = await Integration.processListingItems(
+                    AccessToken, listingSkuArray, listingAsinArray, dataToSend,
+                    userId, Base_URI, Country, Region, RefreshToken, AdsRefreshToken, loggingHelper
+                );
+                const fetchedCount = Array.isArray(genericKeyWordArray) ? genericKeyWordArray.length : 0;
+                // Persist here rather than leaving the array on apiData: the phased path
+                // never calls processAndSaveData, and carrying a few thousand items on
+                // apiData for the rest of the phase is pure memory cost.
+                if (fetchedCount > 0) {
+                    await saveListingItemsData(userId, Country, Region, genericKeyWordArray);
+                }
+                apiData.listingItems = { success: true, data: { fetchedCount }, error: null };
+            } catch (listingError) {
+                logger.error("Listing Items (active SKUs) failed", { error: listingError.message, userId });
+                apiData.listingItems = { success: false, data: null, error: listingError.message };
+            }
         }
 
         return apiData;
@@ -1934,6 +1968,12 @@ class ScheduledIntegration {
 
     /**
      * Update Seller model with issues for inactive products (same as Integration)
+     *
+     * Also writes `has_b2b_pricing`, which GetListingItemIssuesForInactive returns in the
+     * same response and which the scheduled path previously dropped on the floor. Applied
+     * in this method rather than through a separate updateSellerProductB2BPricing call so
+     * the (potentially multi-MB) seller document is loaded and saved once per batch, not
+     * twice. No extra SP-API calls: the data is already in `issuesDataArray`.
      */
     static async updateSellerProductIssues(userId, Country, Region, issuesDataArray) {
         logger.info("updateSellerProductIssues starting", {
@@ -1960,15 +2000,24 @@ class ScheduledIntegration {
 
             // Create a map of SKU to issues for quick lookup
             const issuesMap = new Map();
+            // ...and a separate map for B2B pricing. Kept separate on purpose: a SKU can
+            // report B2B pricing without reporting issues and vice versa, and a SKU absent
+            // from the response must not be forced to false.
+            const b2bPricingMap = new Map();
             issuesDataArray.forEach(item => {
-                if (item && item.sku && Array.isArray(item.issues)) {
+                if (!item || !item.sku) return;
+                if (Array.isArray(item.issues)) {
                     issuesMap.set(item.sku, item.issues);
+                }
+                if (item.has_b2b_pricing !== undefined) {
+                    b2bPricingMap.set(item.sku, item.has_b2b_pricing);
                 }
             });
 
             // Update the products array with issues
             const products = sellerDetails.sellerAccount[accountIndex].products;
             let updatedCount = 0;
+            let b2bUpdatedCount = 0;
 
             products.forEach(product => {
                 // Update issues for both Inactive and Incomplete products
@@ -1976,12 +2025,19 @@ class ScheduledIntegration {
                     product.issues = issuesMap.get(product.sku);
                     updatedCount++;
                 }
+                // B2B pricing is not status-dependent — match Integration's semantics and
+                // key purely on SKU.
+                if (b2bPricingMap.has(product.sku)) {
+                    product.has_b2b_pricing = b2bPricingMap.get(product.sku);
+                    b2bUpdatedCount++;
+                }
             });
 
             await sellerDetails.save();
 
             logger.info("updateSellerProductIssues ended", {
                 updatedCount,
+                b2bUpdatedCount,
                 totalProducts: products.length
             });
 
