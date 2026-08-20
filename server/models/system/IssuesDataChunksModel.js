@@ -15,8 +15,13 @@
  */
 
 const mongoose = require('mongoose');
+const { insertManyChunked } = require('../../utils/chunkedInsert');
 
 const CHUNK_SIZE = 200; // Max items per chunk (tuned for safety margin under 16MB)
+// Chunk DOCUMENTS per insertMany call. Deliberately far below the shared 500 default: each document
+// already carries a CHUNK_SIZE-item `data` payload, so 25 of these is a heavier write than 500
+// ordinary rows.
+const ISSUE_CHUNK_INSERT_BATCH = 25;
 
 // List of all array field names
 const ARRAY_FIELD_NAMES = [
@@ -162,8 +167,15 @@ IssuesDataChunksSchema.statics.saveAsChunks = async function(params) {
         });
     }
     
-    // Insert all chunks
-    return this.insertMany(chunks, { ordered: true });
+    // Insert all chunks, batched to bound peak memory.
+    //
+    // Each element here already carries a ~200-item `data` payload, so the array is short but heavy;
+    // batching therefore uses a smaller documents-per-call size than the 500 default.
+    //
+    // `ordered: true` is deliberate and preserved: chunks are built in chunkIndex order and
+    // reconstruction depends on it. Batching keeps that intact because chunks are inserted
+    // sequentially in array order.
+    return insertManyChunked(this, chunks, { ordered: true, chunkSize: ISSUE_CHUNK_INSERT_BATCH });
 };
 
 /**

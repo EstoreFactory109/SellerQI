@@ -14,6 +14,7 @@ const ProductWiseSponsoredAdsData = require('../../models/amazon-ads/ProductWise
 const ProductWiseSponsoredAdsItem = require('../../models/amazon-ads/ProductWiseSponsoredAdsItemModel');
 const logger = require('../../utils/Logger');
 const { getRedisClient } = require('../../config/redisConn');
+const { insertManyChunked } = require('../../utils/chunkedInsert');
 
 // Every ad type this collection stores, i.e. what "we measured everything" means. Mirrors the enum on
 // ProductWiseSponsoredAdsItemModel.adType (:50-56); keep them in step.
@@ -130,7 +131,9 @@ async function saveProductWiseSponsoredAdsData(userId, country, region, sponsore
             date: { $in: distinctDates },
         });
 
-        const insertResult = await ProductWiseSponsoredAdsItem.insertMany(itemsToInsert, { ordered: false });
+        // Chunked to bound peak memory. Every document is still hydrated, so what lands in Mongo is
+        // byte-identical — see utils/chunkedInsert.js for why this is NOT `{ lean: true }`.
+        const insertedCountFromChunks = await insertManyChunked(ProductWiseSponsoredAdsItem, itemsToInsert, { ordered: false });
 
         // Scoping the delete is necessary but NOT sufficient, and this is the subtle half.
         // `findLatestByUserCountryRegion` reads only the NEWEST batchId
@@ -159,7 +162,7 @@ async function saveProductWiseSponsoredAdsData(userId, country, region, sponsore
                 `${distinctDates.length} date(s) rather than deleting them.`
             );
         }
-        const insertedCount = Array.isArray(insertResult) ? insertResult.length : itemsToInsert.length;
+        const insertedCount = insertedCountFromChunks;
 
         if (insertedCount === 0) {
             throw new Error('insertMany returned 0 documents — check schema validation');
