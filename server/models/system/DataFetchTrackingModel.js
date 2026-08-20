@@ -28,6 +28,29 @@
  */
 
 const mongoose = require('mongoose');
+const { marketplaceConfig } = require('../../controllers/config/config.js');
+
+/**
+ * Countries this model accepts, derived from the SP-API marketplace table rather than
+ * hand-listed.
+ *
+ * WHY. This enum used to be a literal of 15 countries while `marketplaceConfig` — the
+ * table the fetch layer actually onboards sellers against — has 23. BR, TR, EG, IE, NL,
+ * SE, PL and AE could all be connected but not stored. That gap is not theoretical:
+ * production logs show 63 `BuyBoxData validation failed: country: 'BR' is not a valid
+ * enum value` errors from the identical literal in BuyBoxDataModel, and the ZA
+ * marketplace bug fixed earlier was the same shape.
+ *
+ * It is worse here than anywhere else. `createTrackingEntry` builds the document with
+ * `new this({...})` and `.save()`, so validation IS enforced, and it runs in `sched_init`
+ * — the FIRST phase. A country outside the list throws there, the whole pipeline never
+ * starts, and because no tracking document is ever written there is nothing for
+ * `sweepStalledPipelines` to detect. The account simply goes quiet.
+ *
+ * Deriving the list means a country the fetch layer can onboard is a country this model
+ * can store, and the two can no longer drift.
+ */
+const SUPPORTED_COUNTRIES = Object.keys(marketplaceConfig);
 
 const dataFetchTrackingSchema = new mongoose.Schema({
     User: {
@@ -45,7 +68,7 @@ const dataFetchTrackingSchema = new mongoose.Schema({
     country: {
         type: String,
         required: true,
-        enum: ['US', 'CA', 'MX', 'UK', 'DE', 'FR', 'IT', 'ES', 'JP', 'AU', 'IN', 'SG', 'SA', 'ZA', 'BE'],
+        enum: SUPPORTED_COUNTRIES,
         index: true
     },
     // When the worker ran (UTC)

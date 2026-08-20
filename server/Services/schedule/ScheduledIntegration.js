@@ -2776,6 +2776,10 @@ class ScheduledIntegration {
         return this._runAsyncAdsPhase({
             userId, Region, Country, phaseData, group: 'sched_batch_1_2', services,
             inlineOnFirstTick, sliceKeys: [SLICE_KEYS.INVENTORY, SLICE_KEYS.PERFORMANCE],
+            // These are SP-API report services, not Amazon Ads. Without this the shared
+            // runner reports their failures as "all Amazon Ads reports failed" and tells
+            // the seller to re-authorize Ads — the wrong integration entirely.
+            integration: 'SP-API',
             // SP-API reports: wait ~15 min before the first check, then re-check every ~15 min.
             pollConfig: {
                 initialDelayMs: parseInt(process.env.SPAPI_INITIAL_POLL_DELAY_MS || '900000', 10), // 15 min
@@ -2931,7 +2935,7 @@ class ScheduledIntegration {
      * runDate don't collide. `dateRange` restricts to a single day (catch-up).
      * `inlineOnFirstTick(ctx)` runs any non-polling sibling services once (BATCH_4).
      */
-    static async _runAsyncAdsPhase({ userId, Region, Country, phaseData, group, services, dateRange = null, inlineOnFirstTick = null, sliceKeys = [], buildArgsFrom = null, tokenGuard = null, pollConfig = null }) {
+    static async _runAsyncAdsPhase({ userId, Region, Country, phaseData, group, services, dateRange = null, inlineOnFirstTick = null, sliceKeys = [], buildArgsFrom = null, tokenGuard = null, pollConfig = null, integration = 'Amazon Ads' }) {
         const { runAsyncAdsReports } = require('../AmazonAds/asyncReportEngine.js');
         const AsyncReportRequest = require('../../models/amazon-ads/AsyncReportRequestModel.js');
         // Same descriptor the engine uses for its own failures: keeps the message verbatim (so
@@ -3002,15 +3006,23 @@ class ScheduledIntegration {
                 // report erroring counts as the reports being unusable.
                 const reportsUsable = rows.length > 0 && rows.some(r => r.status === 'DONE' || r.status === 'NO_DATA');
 
-                // A revoked Amazon Ads grant needs its own message. "all ads reports failed" sends
+                // A revoked grant needs its own message. A generic "all reports failed" sends
                 // an operator hunting an Amazon outage; only this names the one thing that fixes it.
                 // Ports the inline guard at GetPPCMetrics.js:1043-1057.
+                //
+                // `integration` is NOT cosmetic. This runner is shared: sched_batch_1_2 drives
+                // SP-API report services (stranded inventory, inbound non-compliance, restock,
+                // V1/V2 performance) through it, while sched_ads / sched_ads_catchup /
+                // sched_batch_4 drive Amazon Ads. Hard-coding "Ads" here told operators to
+                // re-authorize the WRONG integration — production logs carry 445
+                // `strandedInventoryData: all ads reports failed` and 405 the same on
+                // `inboundNonComplianceData`, neither of which is an ads service.
                 const allRevoked = rows.length > 0 && rows.every(r => r.authRevoked === true);
                 if (allRevoked) {
                     logger.error(
-                        `[AdsAsync:${group}] Amazon Ads permission REVOKED for user ${userId} ` +
+                        `[AsyncReports:${group}] ${integration} permission REVOKED for user ${userId} ` +
                         `(${Country}-${Region}) — all ${rows.length} ${svc.serviceName} report(s) came back 401. ` +
-                        `The seller must RE-AUTHORIZE Amazon Ads; no retry will fix this. ` +
+                        `The seller must RE-AUTHORIZE ${integration}; no retry will fix this. ` +
                         `Sample note: ${rows.find(r => r.note)?.note || '(none)'}`
                     );
                 }
@@ -3025,7 +3037,7 @@ class ScheduledIntegration {
                         // `${err.message}` is exactly what cost three rounds of diagnosis on the
                         // finance side; do not "simplify" this back to interpolation.
                         logger.error(
-                            `[AdsAsync:${group}] saveFromRows(${svc.serviceName}) failed for user ${userId} ` +
+                            `[AsyncReports:${group}] saveFromRows(${svc.serviceName}) failed for user ${userId} ` +
                             `(${Country}-${Region} runDate ${runDate}) — reports were fetched but NOT persisted`,
                             saveErr
                         );
@@ -3034,7 +3046,7 @@ class ScheduledIntegration {
                     // Don't hand a save function nothing but failures. Harmless for today's two real
                     // savers (they no-op on empty), but one refactor away from writing an all-zero doc
                     // over good data.
-                    logger.warn(`[AdsAsync:${group}] ${svc.serviceName}: all ${rows.length} report(s) FAILED — skipping save`);
+                    logger.warn(`[AsyncReports:${group}] ${svc.serviceName}: all ${rows.length} report(s) FAILED — skipping save`);
                 }
 
                 const ok = reportsUsable && !saveError;
@@ -3043,8 +3055,8 @@ class ScheduledIntegration {
                     error: ok
                         ? null
                         : (saveError ? `save failed: ${saveError}`
-                            : (allRevoked ? 'Amazon Ads permission revoked — seller must re-authorize'
-                                : 'all ads reports failed')),
+                            : (allRevoked ? `${integration} permission revoked — seller must re-authorize`
+                                : `all ${integration} reports failed`)),
                     // Set ONLY when reports arrived and persisting them threw: we HAD the data and
                     // lost it. Read by _canMarkDailyComplete to block stamping the day — no later run
                     // will fill that hole, because these engine rows are terminal and tomorrow's run
@@ -3066,7 +3078,7 @@ class ScheduledIntegration {
                 dataForNextPhase: { apiResults },
             };
         } catch (error) {
-            logger.error(`[AdsAsync:${group}] Failed for user ${userId}:`, error);
+            logger.error(`[AsyncReports:${group}] Failed for user ${userId}:`, error);
             // Carry the failure FORWARD for the same reason as the inline ads phase: finalize
             // decides whether to stamp lastDailyUpdate by checking whether any ads key is present
             // in apiResults. Returning without dataForNextPhase leaves them absent, which finalize
