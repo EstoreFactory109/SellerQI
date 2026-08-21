@@ -2,8 +2,6 @@ const ShipmentModel = require('../../models/inventory/ShipmentModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 // Use service layer for LedgerSummaryView (handles both old and new formats)
 const { getLedgerSummaryViewData } = require('../Finance/LedgerSummaryViewService.js');
-const LedgerDetailView = require('../../models/finance/LedgerDetailViewModel.js');
-const FBAReimbursements = require('../../models/finance/FBAReimbursementsModel.js');
 // Use service layer to get ProductWiseFBAData (handles both old and new formats)
 const { getProductWiseFBAData } = require('../inventory/ProductWiseFBADataService.js');
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
@@ -346,11 +344,10 @@ const calculateLostInventoryReimbursement = async (userId, country, region) => {
         }
 
         // 2. Get FBA reimbursements data (Report 2) - for already reimbursed units
-        const fbaReimbursementsData = await FBAReimbursements.findOne({
-            User: userId,
-            country: country,
-            region: region
-        }).sort({ createdAt: -1 });
+        // Reads the newest BATCH from the item collection, shaped exactly like the legacy
+        // document — see Services/Finance/FBAReimbursementsService.js for why the report no
+        // longer lives in one document.
+        const fbaReimbursementsData = await getFBAReimbursementsData(userId, country, region);
 
         // 3. Get seller product data to get prices
         const sellerData = await Seller.findOne({ User: userId });
@@ -653,11 +650,9 @@ const DAMAGED_REASON_CODES = ['6', '7', 'E', 'H', 'K', 'U'];
 const calculateDamagedInventoryReimbursement = async (userId, country, region) => {
     try {
         // 1. Get ledger detail data for damaged inventory
-        const ledgerDetailData = await LedgerDetailView.findOne({
-            User: userId,
-            country: country,
-            region: region
-        }).sort({ createdAt: -1 });
+        // Newest batch from the item collection, shaped like the legacy document — see
+        // Services/Finance/LedgerDetailViewService.js.
+        const ledgerDetailData = await getLedgerDetailViewData(userId, country, region);
 
         // Fallback to ledger summary if detail not available
         if (!ledgerDetailData || !ledgerDetailData.data || ledgerDetailData.data.length === 0) {
@@ -992,11 +987,9 @@ const DISPOSED_DISPOSITIONS = ['SELLABLE', 'WAREHOUSE_DAMAGED', 'EXPIRED'];
 const calculateDisposedInventoryReimbursement = async (userId, country, region) => {
     try {
         // 1. Get ledger detail data for disposed inventory
-        const ledgerDetailData = await LedgerDetailView.findOne({
-            User: userId,
-            country: country,
-            region: region
-        }).sort({ createdAt: -1 });
+        // Newest batch from the item collection, shaped like the legacy document — see
+        // Services/Finance/LedgerDetailViewService.js.
+        const ledgerDetailData = await getLedgerDetailViewData(userId, country, region);
 
         // Fallback to ledger summary if detail not available
         if (!ledgerDetailData || !ledgerDetailData.data || ledgerDetailData.data.length === 0) {
