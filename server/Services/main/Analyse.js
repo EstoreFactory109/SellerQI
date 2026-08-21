@@ -427,7 +427,15 @@ class AnalyseService {
                 )
             ),
             timedQuery('orderData', () => GetOrderDataModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
-            timedQuery('ppcSpend', () => GetDateWisePPCspendModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()),
+            // Per-day merge with the same bounded window as its ads siblings above. The old
+            // `findOne().sort({createdAt:-1})` loaded ONE document holding the whole report —
+            // 13MB for the largest account — and, because a catch-up run writes a single-day
+            // document, could collapse the entire chart to that one day.
+            timedQuery('ppcSpend', () =>
+                GetDateWisePPCspendModel.findMergedDateWiseSpends(userId, country, region, { lookbackDays: dashboardLookbackDays }).then((rows) =>
+                    rows?.length ? { userId, country, region, dateWisePPCSpends: rows } : null
+                )
+            ),
             timedQuery('adsGroup', () => loadLatestSnapshotDoc(AdsGroup, userId, country, region)),
             timedQuery('keywordTracking', () => KeywordTrackingModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()),
             timedQuery('ppcUnitsSold', () => PPCUnitsSold.findLatestForUser(userId, country, region))
