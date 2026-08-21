@@ -2994,9 +2994,13 @@ class ScheduledIntegration {
             }
 
             // ---- All reports terminal: per-service combine+save + success flags. -------
+            // `result: 0` — adapters persist their own output inside finalize and this loop only
+            // needs status/note/authRevoked. Historical rows still carry a legacy `result` blob
+            // (up to 15MB) until the model TTL clears them; pulling those into the worker heap
+            // here bought nothing. See ROW_PROJECTION in asyncReportEngine.js.
             const allRows = await AsyncReportRequest.find({
                 userId: String(userId), country: Country, region: Region, runDate, group
-            }).lean();
+            }, { result: 0 }).lean();
             const apiResults = { ...(phaseData.apiResults || {}), ...inlineResults };
             for (const svc of services) {
                 const rows = allRows.filter(r => r.service === svc.serviceName);

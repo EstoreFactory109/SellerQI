@@ -36,6 +36,21 @@ const { describeError } = require('../../utils/errorContext.js');
 const TERMINAL = new Set(['DONE', 'NO_DATA', 'FAILED']);
 
 /**
+ * Exclude the legacy `result` blob from every row read.
+ *
+ * Nothing writes `result` any more (see the finalize handler below), but historical rows keep
+ * theirs until the model's 30-day TTL expires them, and these reads happen on EVERY poll tick —
+ * once every ~15 minutes per account per phase. Without this, each tick hydrates up to 15MB per
+ * row into the worker heap for data no caller uses. Worker memory is the known reason the largest
+ * accounts cannot finish a daily cycle, so this is not just tidiness.
+ *
+ * Kept as an explicit exclusion rather than an inclusion list so a new field added to the schema
+ * still reaches callers by default — but if anything ever stashes a payload again, exclude it here
+ * too rather than letting the poll path carry it.
+ */
+const ROW_PROJECTION = { result: 0 };
+
+/**
  * @param {object} args
  * @param {string} args.userId
  * @param {string} args.country
@@ -76,7 +91,7 @@ async function runAsyncAdsReports(args) {
     const baseFilter = { userId: String(userId), country, region, runDate, group, phase };
     const specByKey = new Map(specs.map(s => [`${s.service}|${s.paramsKey}`, s]));
 
-    const existing = await Model.find(baseFilter).lean();
+    const existing = await Model.find(baseFilter, ROW_PROJECTION).lean();
 
     // ── Decide SUBMIT vs POLL PER SPEC, never for the bucket as a whole. ──
     // This used to be `if (existing.length === 0) submitAll(specs) else pollAll(...)`, i.e. a
@@ -110,7 +125,7 @@ async function runAsyncAdsReports(args) {
     }
 
     // Recompute terminal/pending counts after this pass.
-    const rows = await Model.find(baseFilter).lean();
+    const rows = await Model.find(baseFilter, ROW_PROJECTION).lean();
     const pending = rows.filter(r => !TERMINAL.has(r.status));
 
     if (pending.length > 0) {
@@ -215,11 +230,26 @@ async function pollAll({ Model, baseFilter, rows, specByKey }) {
             try {
                 const fin = await spec.finalize(result.handle, row);
                 const status = fin && fin.empty ? 'NO_DATA' : 'DONE';
-                // Stash any processed output so the phase can combine across reports
-                // (e.g. PPC metrics merges SP/SB/SD into one per-day doc before saving).
-                const set = { status, note: '' };
-                if (fin && fin.result !== undefined) set.result = fin.result;
-                await Model.updateOne({ _id: row._id }, { $set: set });
+                // A finalize must PERSIST its own output and return only `{ empty }`.
+                //
+                // This used to stash `fin.result` on the row so a later `saveFromRows` could
+                // combine SP/SB/SD before writing. That made the tracking row carry an entire
+                // 31-day report, and two services duly outgrew MongoDB's 16MB document ceiling:
+                // measured 2026-08-21, ppcSpendsBySKU rows reached 15.13MB and
+                // ppcMetricsAggregated 10.00MB, together 233.5MB of this collection's 233.9MB.
+                // Past the limit `updateOne` throws ERR_OUT_OF_RANGE, the catch below marks the
+                // row FAILED, and the fetched report is discarded — so the very mechanism meant
+                // to let the phase combine reports was destroying the data instead.
+                //
+                // Both services now save per ad type inside finalize, using partial-save
+                // machinery they already had (GetPPCMetrics.mergeDailyMetricsDoc and the
+                // adType-scoped delete in ProductWiseSponsoredAdsService). That matches what
+                // every other adapter here already did.
+                //
+                // Deliberately NOT persisted even if an adapter returns one: silently accepting
+                // it is how the blob crept in. `result` remains on the schema only so historical
+                // rows still deserialize.
+                await Model.updateOne({ _id: row._id }, { $set: { status, note: '' } });
             } catch (err) {
                 // The note below is bounded and lands in Mongo; the STACK only survives if it is
                 // logged HERE. Two separate rounds of production diagnosis attributed a
