@@ -101,6 +101,18 @@ const USED_COLLECTIONS = [
     'searchterms',
     'keywords',
     'negativekeywords',
+    // Overflow-chunk collections, written when a snapshot is too large for one 16MB
+    // document — utils/snapshotChunkStore.js, and Keywords.js for the original.
+    // Allow-listed so this script never offers to drop them.
+    //
+    // `keywordchunks` was MISSING here ever since keyword chunking shipped. It holds 3,999
+    // live documents across 225 chunked snapshots, and for those accounts it is the ONLY
+    // copy of the keyword set — the primary doc is an empty flagged header. This script
+    // would have offered to drop it.
+    'keywordchunks',
+    'negativekeywordchunks',
+    'campaignchunks',
+    'adsgroupchunks',
     'productwisesponsoredadsdatas',
     'ppcmetrics',
     'ppcunitssolds',

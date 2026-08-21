@@ -47,6 +47,9 @@ const CampaignModel = require('../../models/amazon-ads/CampaignModel.js');
 const SearchTermsModel = require('../../models/amazon-ads/SearchTermsModel.js');
 const keywordModel = require('../../models/amazon-ads/keywordModel.js');
 const keywordChunkModel = require('../../models/amazon-ads/keywordChunkModel.js');
+const negativeKeywordChunkModel = require('../../models/amazon-ads/negativeKeywordChunkModel.js');
+const campaignChunkModel = require('../../models/amazon-ads/campaignChunkModel.js');
+const adsGroupChunkModel = require('../../models/amazon-ads/adsGroupChunkModel.js');
 const KeywordTrackingModel = require('../../models/amazon-ads/KeywordTrackingModel.js');
 const ProductWiseSponsoredAdsData = require('../../models/amazon-ads/ProductWiseSponseredAdsModel.js');
 const ProductWiseSponsoredAdsItem = require('../../models/amazon-ads/ProductWiseSponsoredAdsItemModel.js');
@@ -229,6 +232,11 @@ const collectionsWithUserid = [{ model: ProductWiseFinancial, key: 'userid' }];
 /** Some models store userId as string (use string for query) */
 const collectionsWithUserIdString = [
     { model: NegativeKeywords, key: 'userId' },
+    // Overflow-chunk siblings. Must be purged alongside their primary snapshot or the
+    // chunk documents outlive the account. See utils/snapshotChunkStore.js.
+    { model: negativeKeywordChunkModel, key: 'userId' },
+    { model: campaignChunkModel, key: 'userId' },
+    { model: adsGroupChunkModel, key: 'userId' },
     { model: AsinKeywordRecommendations, key: 'userId' },
     { model: KeywordRecommendations, key: 'userId' },
 ];
