@@ -1,9 +1,19 @@
 /**
  * pruneSupersededLegacyAdsDocs.js
  *
- * One-off garbage collection for the two large ads collections:
+ * One-off garbage collection for collections whose rows have moved elsewhere, leaving behind
+ * superseded parent documents no code path can reach.
+ *
+ * Ads collections, still written per-day (--model=keywords / searchterms):
  *   - adsKeywordsPerformance  (keywordsData[])
  *   - searchterms             (searchTermData[])
+ *
+ * Fully migrated parents, no writer since 2026-02-03 (--model=productwiseads / ledgersummary):
+ *   - productwisesponsoredadsdatas (sponsoredAds[])  -> ProductWiseSponsoredAdsItem
+ *   - ledgersummaryviews           (data[])          -> LedgerSummaryViewItem
+ * These two are read ONLY as a fallback for accounts whose last successful write predates their
+ * migration, so the same conservative rule applies: keep the newest per (user, country, region) and
+ * delete only the unreachable rest. Dry run 2026-08-21 found 1,301 + 220 candidates = 2,338.8 MB.
  *
  * WHAT THIS IS NOT. It is not a TTL / retention policy. Measured 2026-08-20, a TTL on
  * `metricDate` would reclaim about 1% of these collections, because 85-88% of the bytes
@@ -48,6 +58,8 @@
  *   node server/scripts/pruneSupersededLegacyAdsDocs.js --model=keywords --dryRun
  *   node server/scripts/pruneSupersededLegacyAdsDocs.js --confirm
  *   node server/scripts/pruneSupersededLegacyAdsDocs.js --confirm --batchSize=200 --minAgeDays=60
+ *   node server/scripts/pruneSupersededLegacyAdsDocs.js --model=productwiseads --dryRun
+ *   node server/scripts/pruneSupersededLegacyAdsDocs.js --model=ledgersummary --dryRun
  */
 
 const path = require('path');
@@ -158,7 +170,7 @@ function parseArgs() {
         }
         const key = arg.slice(2, eq);
         const val = arg.slice(eq + 1);
-        if (key === 'model' && ['all', 'keywords', 'searchterms'].includes(val)) args.model = val;
+        if (key === 'model' && ['all', 'keywords', 'searchterms', 'productwiseads', 'ledgersummary'].includes(val)) args.model = val;
         else if (key === 'batchSize') {
             const n = parseInt(val, 10);
             if (!Number.isNaN(n) && n > 0) args.batchSize = n;
@@ -178,12 +190,14 @@ const mb = (bytes) => (Number(bytes || 0) / (1024 * 1024)).toFixed(1);
  * `$bsonSize` forces a collection scan whatever we do, so the size comes along for free
  * and gives the dry run a number that can be reconciled against `collStats`.
  */
-async function loadLegacyDocs(Model) {
+async function loadLegacyDocs(Model, { userField = 'userId' } = {}) {
     return Model.aggregate([
         { $match: { $or: [{ metricDate: { $exists: false } }, { metricDate: null }] } },
         {
             $project: {
-                userId: 1,
+                // Normalise the scope key: the ads collections store it as `userId`, the finance
+                // ones as `User`. Everything downstream then reads `userId` regardless.
+                userId: `$${userField}`,
                 country: 1,
                 region: 1,
                 createdAt: 1,
@@ -193,10 +207,10 @@ async function loadLegacyDocs(Model) {
     ]).allowDiskUse(true);
 }
 
-async function pruneModel(Model, label, { willWrite, batchSize, minAgeMs }) {
+async function pruneModel(Model, label, { willWrite, batchSize, minAgeMs, userField = 'userId' }) {
     console.log(`\n=== ${label} ===`);
 
-    const docs = await loadLegacyDocs(Model);
+    const docs = await loadLegacyDocs(Model, { userField });
     const totalLegacyBytes = docs.reduce((sum, d) => sum + (Number(d.sizeBytes) || 0), 0);
     console.log(`  legacy docs (no metricDate): ${docs.length}  (${mb(totalLegacyBytes)} MB)`);
 
@@ -272,11 +286,33 @@ async function main() {
     if (model === 'all' || model === 'searchterms') {
         targets.push([SearchTerms, 'searchterms']);
     }
+    // Two collections whose migration to an item collection is COMPLETE: neither parent has had a
+    // writer since 2026-02-03, and both are read only as a fallback for accounts whose last
+    // successful write predates the migration. Measured 2026-08-21:
+    //   productwisesponsoredadsdatas  1,346 docs / 2,356MB
+    //   ledgersummaryviews              257 docs /    51MB
+    // Same conservative rule as the ads collections — keep the newest per (user, country, region)
+    // so the fallback still resolves for every account, and delete only the unreachable rest.
+    if (model === 'all' || model === 'productwiseads') {
+        targets.push([
+            require('../models/amazon-ads/ProductWiseSponseredAdsModel.js'),
+            'productwisesponsoredadsdatas',
+            { userField: 'userId' },
+        ]);
+    }
+    if (model === 'all' || model === 'ledgersummary') {
+        targets.push([
+            require('../models/finance/LedgerSummaryViewModel.js'),
+            'ledgersummaryviews',
+            // Finance parents key on `User`, not `userId`.
+            { userField: 'User' },
+        ]);
+    }
 
     const minAgeMs = minAgeDays * 24 * 60 * 60 * 1000;
     const results = [];
-    for (const [Model, label] of targets) {
-        results.push(await pruneModel(Model, label, { willWrite, batchSize, minAgeMs }));
+    for (const [Model, label, opts = {}] of targets) {
+        results.push(await pruneModel(Model, label, { willWrite, batchSize, minAgeMs, ...opts }));
     }
 
     console.log('\n=== Summary ===');

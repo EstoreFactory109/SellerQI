@@ -27,6 +27,11 @@ const PURGE_SERVICE = path.join(__dirname, '..', '..', '..', 'Services', 'User',
 const INTENTIONALLY_EXCLUDED = {
     'userModel.js': 'the account itself - removed by deleteUserById when hardDelete is set',
     'sellerCentralModel.js': 'deleted separately by deleteSellerDocumentsForUser',
+    // A schema FACTORY, not a model: it registers no collection and owns no documents. The schemas
+    // it builds become real models in their own files (LedgerDetailViewItemModel,
+    // FBAReimbursementsItemModel) and those ARE listed in the purge service, so this scan still
+    // covers every collection that actually holds rows.
+    'batchedItemModel.js': 'schema factory - the models it builds are listed individually',
 };
 
 /** Purged only when the caller passes includeBillingHistory (admin manual delete). */

@@ -122,6 +122,10 @@ const USED_COLLECTIONS = [
     
     // Finance
     'ledgersummaryviewitems',
+    // Item collections holding the ledger-detail and reimbursement rows. For migrated
+    // accounts these are the ONLY copy — the legacy parent is no longer written.
+    'ledgerdetailviewitems',
+    'fbareimbursementsitems',
     'fbareimbursements',
     'ledgerdetailviews',
     'weeklyfinancemodels',

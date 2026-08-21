@@ -62,6 +62,8 @@ const ProductWiseFinancial = require('../models/finance/ProductWiseFinancialMode
 const WeekLyFinance = require('../models/finance/WeekLyFinanceModel.js');
 const LedgerSummaryView = require('../models/finance/LedgerSummaryViewModel.js');
 const LedgerSummaryViewItem = require('../models/finance/LedgerSummaryViewItemModel.js');
+const LedgerDetailViewItem = require('../models/finance/LedgerDetailViewItemModel.js');
+const FBAReimbursementsItem = require('../models/finance/FBAReimbursementsItemModel.js');
 const LedgerDetailView = require('../models/finance/LedgerDetailViewModel.js');
 const FBAReimbursements = require('../models/finance/FBAReimbursementsModel.js');
 const LongTermStorageFees = require('../models/finance/LongTermStorageFeesModel.js');
@@ -261,7 +263,9 @@ const USER_TARGETS = [
   { label: 'LedgerSummaryView', model: LedgerSummaryView },
   { label: 'LedgerSummaryViewItem', model: LedgerSummaryViewItem },
   { label: 'LedgerDetailView', model: LedgerDetailView },
+  { label: 'LedgerDetailViewItem', model: LedgerDetailViewItem },
   { label: 'FBAReimbursements', model: FBAReimbursements },
+  { label: 'FBAReimbursementsItem', model: FBAReimbursementsItem },
   { label: 'LongTermStorageFees', model: LongTermStorageFees },
   { label: 'WeekLyFinance', model: WeekLyFinance },
   { label: 'DataFetchTracking', model: DataFetchTracking },

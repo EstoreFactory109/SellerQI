@@ -64,6 +64,8 @@ const ListingItems = require('../../models/products/GetListingItemsModel.js');
 const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
 const LedgerSummaryView = require('../../models/finance/LedgerSummaryViewModel.js');
 const LedgerSummaryViewItem = require('../../models/finance/LedgerSummaryViewItemModel.js');
+const LedgerDetailViewItem = require('../../models/finance/LedgerDetailViewItemModel.js');
+const FBAReimbursementsItem = require('../../models/finance/FBAReimbursementsItemModel.js');
 const StrandedInventoryUIData = require('../../models/inventory/GET_STRANDED_INVENTORY_UI_DATA_MODEL.js');
 const StrandedInventoryUIDataItem = require('../../models/inventory/StrandedInventoryUIDataItemModel.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
@@ -138,10 +140,14 @@ const collectionsWithUser = [
     { model: ProductWiseSales, key: 'User' },
     { model: OrderAndRevenue, key: 'User' },
     { model: FBAReimbursements, key: 'User' },
+    { model: FBAReimbursementsItem, key: 'User' },
     { model: AgencySeller, key: 'User' },
     { model: DataFetchTracking, key: 'User' },
     { model: AccountHistory, key: 'User' },
     { model: LedgerDetailView, key: 'User' },
+    // Item collection holding the actual rows. MUST be purged with its parent, whose
+    // embedded array is no longer written — otherwise the rows outlive the account.
+    { model: LedgerDetailViewItem, key: 'User' },
     { model: V2_Seller_Performance_Report, key: 'User' },
     { model: APlusContent, key: 'User' },
     { model: NumberOfProductReviews, key: 'User' },
