@@ -1127,8 +1127,14 @@ async function sweepStalledPipelines() {
             //
             // This is what stops the sweep fighting a long-but-healthy run: a phase
             // legitimately mid-flight keeps its JobStatus row warm. It also covers the
-            // ads/finance `-pollN` job ids, which getAllPhaseJobIds does not enumerate,
-            // so producer.js's own dedup is blind to them.
+            // ads/finance `-pollN` job ids, which getAllPhaseJobIds does not enumerate.
+            //
+            // producer.js used to be blind to exactly those ids, which is how it started a
+            // second run on top of a live one: 100 of 334 runs on the 10 async-engine accounts
+            // were marked stalled over 14 days, against 0 of 2,056 elsewhere. It now runs this
+            // SAME prefix query — see producer.hasLiveAccountPhase. Keep the two windows equal
+            // (PIPELINE_STALL_QUIET_MINUTES here, HEARTBEAT_STALE_MS there, both 60 min) or one
+            // will re-drive an account the other still considers alive.
             const live = await JobStatus.findOne({
                 jobId: { $regex: `^scheduled-${userId}-${country}-${region}` },
                 updatedAt: { $gt: quietBefore },
@@ -1230,6 +1236,9 @@ module.exports = {
     FINANCE_DEEP_RESYNC_DAYS,
     PIPELINE_STALL_MAX_AGE_HOURS,
     PIPELINE_STALL_MAX_RECOVERIES_PER_TICK,
+    // Exported so a test can pin it against producer.HEARTBEAT_STALE_MS: the two gate the same
+    // decision from opposite sides and must not drift apart.
+    PIPELINE_STALL_QUIET_MINUTES,
     DOC_SIZE_WARN_BYTES,
     DOC_SIZE_CRITICAL_BYTES,
 };
