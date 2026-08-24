@@ -32,6 +32,7 @@ const { connectRedis } = require('../../config/redisConn.js');
 const { ScheduledIntegration } = require('../schedule/ScheduledIntegration.js');
 const scheduledPhases = require('./scheduledPhases.js');
 const { runWithLockExtension: runWithLockExtensionShared, resolveCeiling } = require('./lockExtension.js');
+const v8 = require('v8');
 
 // Worker configuration
 const WORKER_CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || '3', 10); // Process 3 jobs concurrently
@@ -39,6 +40,65 @@ const WORKER_CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || '3', 10); 
 const envWorkerName = process.env.WORKER_NAME;
 const pidBasedName = `worker-${process.pid}`;
 const WORKER_NAME = envWorkerName || pidBasedName;
+
+// ── Crash visibility ─────────────────────────────────────────────────────────
+//
+// WHY THIS EXISTS. This process had ONLY SIGTERM/SIGINT handlers, and even those were registered
+// inside startWorker() — i.e. after the Mongo/Redis connect. Every other way a worker can die left
+// the app log completely silent: a V8 heap OOM, an unhandled rejection, an uncaught throw and a
+// kernel SIGKILL were all indistinguishable, because none of them wrote anything at all.
+//
+// That silence cost real diagnostic time. A `sched_calc_review` job died mid-phase leaving its
+// JobStatus row pinned at 'running' with no terminal status and no heartbeat, and the only evidence
+// available — RSS climbing with uptime — pointed at a memory leak which turned out not to be the
+// cause of the symptom under investigation. Absence of evidence read as evidence.
+//
+// Registered at MODULE TOP LEVEL on purpose, so a failure during startup is covered too.
+process.on('uncaughtException', (err) => {
+    // Pass the Error as an ARGUMENT — utils/Logger renders a top-level Error as its stack.
+    logger.error(`[Worker:${WORKER_NAME}] FATAL uncaughtException — exiting`, err);
+    // Non-zero so PM2 treats this as a crash and restarts, rather than as a clean stop.
+    process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+    const err = reason instanceof Error ? reason : new Error(`Non-Error rejection: ${String(reason)}`);
+    logger.error(`[Worker:${WORKER_NAME}] FATAL unhandledRejection — exiting`, err);
+    process.exit(1);
+});
+
+/**
+ * Periodic heap/RSS sample.
+ *
+ * Nothing in this repo read `v8` before, so "is RSS growth actually HEAP growth?" was unanswerable —
+ * and that is the question separating a real leak from native retention or fragmentation. PM2's
+ * `mem` column is RSS, while the OOM ceiling (--max-old-space-size) applies to the heap, so reading
+ * one without the other is how a wrong conclusion gets reached confidently.
+ *
+ * `external`/`arrayBuffers` are included deliberately: native allocations (e.g. zlib contexts) show
+ * up there and in RSS but NOT in used_heap_size, which is exactly the divergence to watch for.
+ *
+ * `.unref()` so this timer can never hold the process open during shutdown.
+ */
+const HEAP_LOG_INTERVAL_MS = Math.max(
+    60 * 1000,
+    parseInt(process.env.WORKER_HEAP_LOG_INTERVAL_MS || String(5 * 60 * 1000), 10) || 5 * 60 * 1000
+);
+const heapLogTimer = setInterval(() => {
+    try {
+        const h = v8.getHeapStatistics();
+        const m = process.memoryUsage();
+        const mb = (n) => Math.round((n || 0) / 1048576);
+        logger.info(
+            `[Worker:${WORKER_NAME}] heap usedMB=${mb(h.used_heap_size)} totalMB=${mb(h.total_heap_size)} ` +
+            `limitMB=${mb(h.heap_size_limit)} rssMB=${mb(m.rss)} externalMB=${mb(m.external)} ` +
+            `arrayBuffersMB=${mb(m.arrayBuffers)} uptimeH=${(process.uptime() / 3600).toFixed(1)}`
+        );
+    } catch (err) {
+        logger.warn(`[Worker:${WORKER_NAME}] heap sample failed: ${err.message}`);
+    }
+}, HEAP_LOG_INTERVAL_MS);
+heapLogTimer.unref();
 
 // Lock configuration for long-running jobs (prevents stalling)
 // These settings match integrationWorker.js for consistency — keep the two in step.

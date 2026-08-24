@@ -60,6 +60,61 @@ async function hasRecentHeartbeat(jobId) {
     }
 }
 
+/** Escape a value before embedding it in a RegExp. */
+function escapeRegex(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Is ANY phase of this account's pipeline still demonstrably running?
+ *
+ * WHY THIS EXISTS — the bug it fixes is worth stating exactly, because the symptom looked like
+ * something else entirely for a long time.
+ *
+ * `getAllPhaseJobIds` returns only `${parentJobId}-${phase}`. But the async ads/finance phases do
+ * NOT hold a worker slot while Amazon generates reports: they re-enqueue THEMSELVES as a delayed
+ * job under `${parentJobId}-${phase}-poll${n}` (worker.js), and that suffix is not in the list. So
+ * the loop below would look up `…-sched_ads`, find the ORIGINAL job already `completed`, remove it,
+ * conclude nothing was running, and enqueue a whole new run on top of a live one.
+ *
+ * The first run's DataFetchTracking doc is then never closed (only sched_finalize closes it), and
+ * ~9h later sweepStalledPipelines marks it `stalled-pipeline-autorecovered`. Measured over 14 days:
+ * 100 of 334 runs on the 10 async-engine accounts stalled (29.9%), against 0 of 2,056 runs on the
+ * other 42 accounts. Median 86 minutes from a stalled run to the next one starting — accounts are
+ * scheduled roughly hourly and async runs take longer than that, so the overlap was systematic.
+ *
+ * A prefix match sidesteps the whole problem: it covers every phase id AND every `-pollN` id without
+ * having to enumerate them, so a future self-rescheduling phase is covered for free.
+ *
+ * This is deliberately the SAME query freshnessSweeper.sweepStalledPipelines already uses for its
+ * own liveness guard — whose comment notes this very blind spot in the producer. Keep the two
+ * thresholds equal (HEARTBEAT_STALE_MS here, PIPELINE_STALL_QUIET_MINUTES there, both 60 min) or
+ * one will re-drive an account the other considers alive.
+ *
+ * FAILS SAFE = degrades to the previous behaviour. On error, or no row, we report "not live" and the
+ * caller proceeds to enqueue. Failing closed would let one bad query starve an account indefinitely,
+ * which is worse than the double-enqueue this prevents.
+ *
+ * @returns {Promise<{live: boolean, jobId?: string, ageMs?: number}>}
+ */
+async function hasLiveAccountPhase(parentJobId) {
+    try {
+        const JobStatus = require('../../models/system/JobStatusModel.js');
+        // Anchored so the index on `jobId` is usable — an unanchored regex would collection-scan.
+        const row = await JobStatus.findOne({
+            jobId: { $regex: `^${escapeRegex(parentJobId)}` },
+            status: 'running',
+            updatedAt: { $gt: new Date(Date.now() - HEARTBEAT_STALE_MS) },
+        }).select('jobId updatedAt').lean();
+
+        if (!row) return { live: false };
+        return { live: true, jobId: row.jobId, ageMs: Date.now() - new Date(row.updatedAt).getTime() };
+    } catch (err) {
+        logger.warn(`[Producer] Could not check account liveness for ${parentJobId}: ${err.message}`);
+        return { live: false };
+    }
+}
+
 /**
  * Enqueue a single user for data processing
  * 
@@ -308,6 +363,28 @@ async function enqueueScheduledAccountJob(userId, country, region) {
             }
         }
 
+        // The id checks above only see the phase ids getAllPhaseJobIds enumerates. An async
+        // ads/finance phase waiting on Amazon lives under a `-poll{n}` id that is NOT in that list,
+        // so at this point the pipeline can be very much alive while every id we looked at is gone.
+        // Starting a second run on top of it is what orphaned the first run's tracking doc and
+        // produced ~30% "stalled" runs on exactly the accounts that use the async engine.
+        //
+        // Deliberately AFTER the loop: the stale-job removal above must still get its chance to
+        // clear a genuinely dead chain, or an account could be pinned by its own dead row forever.
+        const liveness = await hasLiveAccountPhase(parentJobId);
+        if (liveness.live) {
+            logger.info(
+                `[Producer] Pipeline still running for ${userId} ${country}-${region} ` +
+                `(jobId: ${liveness.jobId}, heartbeat ${Math.round((liveness.ageMs || 0) / 60000)}min ago) — not starting another run`
+            );
+            return {
+                success: false,
+                message: 'Account already has a scheduled job in progress',
+                jobId: liveness.jobId,
+                state: 'running',
+            };
+        }
+
         // Create the INIT phase job
         const jobData = {
             userId: userId.toString(),
@@ -341,6 +418,10 @@ module.exports = {
     enqueueUsers,
     enqueueScheduledAccountJob,
     getQueueStats,
-    removeJob
+    removeJob,
+    // Exported for tests: the liveness check is the whole fix, and the threshold is asserted
+    // against freshnessSweeper's so the two cannot silently drift apart.
+    hasLiveAccountPhase,
+    HEARTBEAT_STALE_MS
 };
 

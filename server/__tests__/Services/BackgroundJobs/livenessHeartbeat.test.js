@@ -163,13 +163,25 @@ describe('producer — removing an old job only when it is not demonstrably aliv
         jest.doMock('../../../utils/Logger.js', () => ({
             info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn(),
         }));
+        // This mock APPLIES the query rather than returning a canned row, because the producer now
+        // has two callers with different strategies and only a faithful mock can tell them apart:
+        //   - hasRecentHeartbeat  does findOne({ jobId }) and filters status/age in JS
+        //   - hasLiveAccountPhase filters status/updatedAt IN THE QUERY, so it stays index-backed
+        //     on `jobId` instead of pulling rows into Node to filter them
+        // A mock that ignored the query would hand the second one rows Mongo would never return,
+        // and every assertion below about "heartbeat went cold" or "not running" would silently
+        // stop testing anything.
         jest.doMock('../../../models/system/JobStatusModel.js', () => ({
-            findOne: () => ({
+            findOne: (query = {}) => ({
                 select: () => ({
-                    lean: async () => (rowMissing ? null : {
-                        status,
-                        updatedAt: new Date(Date.now() - heartbeatAgeMs),
-                    }),
+                    lean: async () => {
+                        if (rowMissing) return null;
+                        const row = { jobId: job.id, status, updatedAt: new Date(Date.now() - heartbeatAgeMs) };
+                        if (query.status && query.status !== row.status) return null;
+                        if (query.updatedAt?.$gt && !(row.updatedAt > query.updatedAt.$gt)) return null;
+                        if (query.jobId?.$regex && !new RegExp(query.jobId.$regex).test(row.jobId)) return null;
+                        return row;
+                    },
                 }),
             }),
         }));
