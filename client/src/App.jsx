@@ -99,6 +99,7 @@ import DemoEcommerceCalendar from './Pages/DemoSellerCentralChecker/DemoEcommerc
 import DemoAccountHistory from './Pages/DemoSellerCentralChecker/DemoAccountHistory.jsx';
 import DemoAutoLogin from './Pages/DemoSellerCentralChecker/DemoAutoLogin.jsx';
 import ProtectedDemoRouteWrapper from './Layout/ProtectedDemoRouteWrapper.jsx';
+import PhoneRequiredModal from './Components/PhoneUpdate/PhoneRequiredModal.jsx';
 
 const App = () => {
   const location = useLocation();
@@ -248,6 +249,11 @@ const App = () => {
         <Route path='/error/:status' element={<Error />} />
         <Route path='*' element={<Navigate to="/error/404" />} />
       </Routes>
+
+      {/* Sits outside <Routes> so it can cover onboarding pages too (e.g. a Google
+          signup lands on /connect-to-amazon, which is not under MainLayout).
+          It renders nothing unless the logged-in user has needsPhoneUpdate set. */}
+      <PhoneRequiredModal />
 
     </>
   );

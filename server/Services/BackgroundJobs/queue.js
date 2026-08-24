@@ -34,8 +34,12 @@ function getQueueConfig() {
             removeOnComplete: { age: 2 * 3600, count: 100 },
             removeOnFail: { age: 24 * 3600, count: 500 },
             attempts: 3,
-            backoff: { type: 'exponential', delay: 60000 },
-            timeout: 2 * 60 * 60 * 1000
+            backoff: { type: 'exponential', delay: 60000 }
+            // NO `timeout` here on purpose: BullMQ removed job-level `timeout` in v4
+            // (we run 5.x), so setting it does nothing at all — it silently reads as a
+            // safety net that is not there. A phase is bounded instead by the
+            // lock-extension ceiling in worker.js (MAX_LOCK_EXTENSION_MS); past it the
+            // lock lapses and BullMQ reclaims the job as stalled.
         }
     };
 }

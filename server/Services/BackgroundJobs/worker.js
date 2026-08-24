@@ -31,6 +31,7 @@ const dbConnect = require('../../config/dbConn.js');
 const { connectRedis } = require('../../config/redisConn.js');
 const { ScheduledIntegration } = require('../schedule/ScheduledIntegration.js');
 const scheduledPhases = require('./scheduledPhases.js');
+const { runWithLockExtension: runWithLockExtensionShared, resolveCeiling } = require('./lockExtension.js');
 
 // Worker configuration
 const WORKER_CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || '3', 10); // Process 3 jobs concurrently
@@ -44,6 +45,52 @@ const WORKER_NAME = envWorkerName || pidBasedName;
 const LOCK_DURATION = 2 * 60 * 60 * 1000; // 2 hours - job lock duration
 const LOCK_EXTENSION_INTERVAL = 15 * 60 * 1000; // Extend lock every 15 minutes
 const LOCK_EXTENSION_AMOUNT = 60 * 60 * 1000; // Extend by 1 hour each time
+// Hard ceiling on how long ONE job may hold its slot. See lockExtension.js for the full
+// reasoning — in short, this is the only working timeout in the queue, because a job-level
+// `timeout` option has been a no-op since BullMQ v4 dropped it.
+//
+// THESE NUMBERS ARE MEASURED, NOT GUESSED. Over 1,384 completed scheduled phases in
+// production, duration by phase (minutes):
+//
+//     phase          p50     p95     max        >3h ceiling would reclaim
+//     ads            6.4    40.1    55.1                    0
+//     batch_1_2      1.6     2.3   107.2                    0
+//     batch_4        8.2    35.1    69.6                    0
+//     batch_3        0.8    24.4    34.6                    0
+//     finance        1.0    11.4    41.5                    0
+//     init/finalize  0.5     1.5    41.4                    0
+//     calc_review    1.3   141.1  1426.8 (23.8h!)           4   <-- the exception
+//
+// So 3h is comfortably above every phase EXCEPT calc_review, where legitimate runs reach
+// nearly a full day and a 3h ceiling would have wrongly reclaimed 4 real runs. That is not
+// a harmless false positive: calc_review does review ingestion/sending, so re-running a
+// live one risks duplicate review requests to real customers. It therefore gets its own,
+// much higher ceiling — 26h clears the observed 23.8h max with margin and still bounds it,
+// where the old code bounded nothing at all.
+//
+// (A phase that can legitimately run 24h is itself worth fixing — it should release the
+// worker and poll via the `reschedule` path rather than hold a slot for a day. Out of
+// scope here; this change only stops a hang lasting FOREVER.)
+const MAX_LOCK_EXTENSION_MS = Math.max(
+    30 * 60 * 1000,
+    parseInt(process.env.WORKER_MAX_PHASE_MS || String(3 * 60 * 60 * 1000), 10) || 3 * 60 * 60 * 1000
+);
+// For phases measured to run legitimately for many hours, and for the legacy phaseless
+// whole-account job whose runtime is unbounded by design.
+const MAX_LOCK_EXTENSION_LONG_MS = Math.max(
+    MAX_LOCK_EXTENSION_MS,
+    parseInt(process.env.WORKER_MAX_LONG_PHASE_MS || String(26 * 60 * 60 * 1000), 10) || 26 * 60 * 60 * 1000
+);
+const LONG_PHASES = new Set([scheduledPhases.PHASES.CALC_REVIEW]);
+
+/** Ceiling for this job. Resolution logic lives in lockExtension.js so it can be tested. */
+function ceilingForJob(job) {
+    return resolveCeiling(job?.data?.phase, {
+        defaultMs: MAX_LOCK_EXTENSION_MS,
+        longMs: MAX_LOCK_EXTENSION_LONG_MS,
+        longPhases: LONG_PHASES,
+    });
+}
 
 // Log worker name source for debugging (only on startup)
 if (!global.workerNameLogged) {
@@ -111,71 +158,31 @@ async function updateJobStatus(jobId, userId, status, metadata = {}) {
 }
 
 /**
- * Extend job lock with retry logic for transient failures.
- * Uses exponential backoff to handle temporary network issues.
- * 
- * @param {Object} job - BullMQ job object
- * @param {number} extensionAmount - Lock extension duration in ms
- * @param {number} maxRetries - Maximum retry attempts (default: 3)
- * @returns {Promise<boolean>} True if extension succeeded, false otherwise
+ * Lock keep-alive for long-running phases, with a hard ceiling.
+ *
+ * Both implementations live in ./lockExtension.js — worker.js and integrationWorker.js
+ * used to carry separate copies, which is how the missing ceiling had to be found and
+ * fixed twice. See that file for why the ceiling is the only real timeout these queues
+ * have (job-level `timeout` has been a no-op since BullMQ v4) and the 7.8h hang it exists
+ * to end.
  */
-async function extendLockWithRetry(job, extensionAmount, maxRetries = 3) {
-    let lastError;
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-            await job.extendLock(job.token, extensionAmount);
-            return true;
-        } catch (error) {
-            lastError = error;
-            if (attempt < maxRetries) {
-                const delay = Math.pow(2, attempt - 1) * 1000;
-                logger.warn(`[Worker:${WORKER_NAME}] Lock extension attempt ${attempt}/${maxRetries} failed for job ${job.id}, retrying in ${delay}ms:`, error.message);
-                await new Promise(resolve => setTimeout(resolve, delay));
-            }
-        }
-    }
-    logger.error(`[Worker:${WORKER_NAME}] Lock extension failed after ${maxRetries} attempts for job ${job.id}:`, lastError?.message);
-    return false;
-}
-
-/**
- * Run an async function with periodic lock extension to prevent job stalling.
- * This is critical for jobs that can run for hours (e.g., SP-API reports, Amazon Ads).
- * 
- * @param {Object} job - BullMQ job object
- * @param {Function} asyncFn - Async function to execute
- * @returns {Promise} Result of the async function
- */
-async function runWithLockExtension(job, asyncFn) {
-    let extensionCount = 0;
-    let failedExtensions = 0;
-    let isRunning = true;
-
-    const lockExtensionTimer = setInterval(async () => {
-        if (!isRunning) return;
-        
-        const success = await extendLockWithRetry(job, LOCK_EXTENSION_AMOUNT);
-        if (success) {
-            extensionCount++;
-            failedExtensions = 0;
-            logger.info(`[Worker:${WORKER_NAME}] Extended lock for job ${job.id} (extension #${extensionCount})`);
-        } else {
-            failedExtensions++;
-            if (failedExtensions >= 2) {
-                logger.error(`[Worker:${WORKER_NAME}] Multiple consecutive lock extension failures (${failedExtensions}) for job ${job.id} - job may be at risk of stalling`);
-            }
-        }
-    }, LOCK_EXTENSION_INTERVAL);
-
-    try {
-        return await asyncFn();
-    } finally {
-        isRunning = false;
-        clearInterval(lockExtensionTimer);
-        if (extensionCount > 0 || failedExtensions > 0) {
-            logger.info(`[Worker:${WORKER_NAME}] Lock extension timer cleared for job ${job.id} - ${extensionCount} successful extensions, ${failedExtensions} final failures`);
-        }
-    }
+function runWithLockExtension(job, asyncFn) {
+    return runWithLockExtensionShared(job, asyncFn, {
+        maxMs: ceilingForJob(job),
+        intervalMs: LOCK_EXTENSION_INTERVAL,
+        amountMs: LOCK_EXTENSION_AMOUNT,
+        label: `Worker:${WORKER_NAME}`,
+        verbose: true,
+        // Keep this job's JobStatus row warm while it runs, so "has this account gone quiet?"
+        // is answerable. Status stays 'running' — this only moves updatedAt/lastHeartbeatAt.
+        // See lockExtension.js for who reads it and why the absence of this was a real freeze.
+        onHeartbeat: (runningJob, elapsedMs) => updateJobStatus(
+            runningJob.id,
+            runningJob.data?.userId,
+            'running',
+            { lastHeartbeatAt: new Date(), elapsedMs }
+        ),
+    });
 }
 
 /**
@@ -317,8 +324,8 @@ async function processScheduledPhase(job) {
                 jobId: selfJobId,
                 delay: phaseOutcome.reschedule.delayMs,
                 attempts: 3,
-                backoff: { type: 'exponential', delay: 60000 },
-                timeout: 2 * 60 * 60 * 1000
+                backoff: { type: 'exponential', delay: 60000 }
+                // `timeout` intentionally absent — a no-op since BullMQ v4; see queue.js.
             });
             logger.info(
                 `[Worker:${WORKER_NAME}] Scheduled phase ${phase} not done — rescheduled poll ${pollAttempt} in ${phaseOutcome.reschedule.delayMs}ms`,
@@ -362,8 +369,8 @@ async function processScheduledPhase(job) {
             await queue.add('process-user-data', nextJobData, {
                 jobId: nextJobId,
                 attempts: 3,
-                backoff: { type: 'exponential', delay: 60000 },
-                timeout: 2 * 60 * 60 * 1000
+                backoff: { type: 'exponential', delay: 60000 }
+                // `timeout` intentionally absent — a no-op since BullMQ v4; see queue.js.
             });
 
             logger.info(
@@ -516,9 +523,18 @@ async function startWorker() {
             prefix: 'bullmq',
             concurrency: WORKER_CONCURRENCY,
             lockDuration: LOCK_DURATION,
-            // Reduced from 4 hours to 10 minutes: phased jobs are shorter and
-            // stall detection needs to be fast enough to recover orphaned jobs
-            stallInterval: 10 * 60 * 1000,
+            // How often BullMQ scans for jobs whose lock has lapsed. Since the
+            // lock-extension ceiling (MAX_LOCK_EXTENSION_MS) is now the queue's only
+            // real timeout, this is what decides how quickly a hung phase is actually
+            // reclaimed after we stop renewing it — keep it tight.
+            //
+            // The key was previously spelled `stallInterval`, which BullMQ does not
+            // recognise (it reads `stalledInterval`), so the "reduced to 10 minutes"
+            // intent never took effect and the library default of 30s applied. 30s is
+            // the better value here anyway, so this pins the behaviour that was
+            // actually running rather than changing it — but now deliberately, and
+            // under the name the library reads.
+            stalledInterval: 30 * 1000,
             maxStalledCount: 3,
             limiter: {
                 max: 10,

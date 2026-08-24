@@ -73,11 +73,22 @@ async function checkEligibility() {
   });
 
   const currentHour = new Date().getUTCHours();
+  // $lte, NOT equality — production's getUsersNeedingDailyUpdate uses `$lte` so that a
+  // failed first attempt is retried on later ticks in the same UTC day. This previously
+  // used `dailyUpdateHour: currentHour`, which under-reported "eligible right now" and
+  // hid the fact that an account's retry window CLOSES at UTC midnight (an account with
+  // slot 21 is invisible to every tick from 00:00 to 20:59).
   const eligibleNow = await UserUpdateSchedule.countDocuments({
-    dailyUpdateHour: currentHour,
+    dailyUpdateHour: { $lte: currentHour },
     $or: [{ lastDailyUpdate: null }, { lastDailyUpdate: { $lt: startOfTodayUtc } }]
   });
   const dueThisHour = await UserUpdateSchedule.countDocuments({ dailyUpdateHour: currentHour });
+  // Accounts whose slot has not come round yet today — structurally unreachable by the
+  // cron until it does, no matter how broken they are.
+  const notYetDueToday = await UserUpdateSchedule.countDocuments({
+    dailyUpdateHour: { $gt: currentHour },
+    $or: [{ lastDailyUpdate: null }, { lastDailyUpdate: { $lt: startOfTodayUtc } }]
+  });
 
   console.log(`Schedules total: ${total}`);
   console.log(`  with dailyUpdateHour set: ${withHour}`);
@@ -85,7 +96,8 @@ async function checkEligibility() {
   console.log(`  updated in last 24h:      ${updated24h}`);
   console.log(`Current UTC hour:           ${currentHour}`);
   console.log(`  schedules with this hour: ${dueThisHour}`);
-  console.log(`  eligible right now:       ${eligibleNow}`);
+  console.log(`  eligible right now:       ${eligibleNow}   (dailyUpdateHour <= ${currentHour}, not yet done today)`);
+  console.log(`  slot not reached yet:     ${notYetDueToday}   (unreachable by cron until their hour, even if broken)`);
 
   // Hour distribution
   const dist = await UserUpdateSchedule.aggregate([
@@ -528,6 +540,101 @@ async function checkStep2Cursors() {
   }
 }
 
+/**
+ * The two signals that cost a multi-hour forensic session on 2026-08-06, neither of
+ * which any other section surfaces:
+ *
+ *   (a) HUNG JOBS — a phase stuck `active` far past any legitimate runtime. Until the
+ *       lock-extension ceiling landed, worker.js renewed such a job's lock forever, so
+ *       BullMQ never reclaimed it. Because phase job ids are deterministic and BullMQ
+ *       silently drops an add whose id already exists, one stuck job then swallows every
+ *       later attempt to run that phase — including a manual re-drive.
+ *
+ *   (b) FROZEN PIPELINES — DataFetchTracking left at 'started' because the chain never
+ *       reached finalize. Every reader of that collection wants completed/partial, so the
+ *       dashboard's date range silently stops advancing while all per-day data checks
+ *       stay green. This is what a user notices as "data only up to <date>".
+ */
+async function checkStalledPipelines() {
+  section('9. HUNG JOBS & FROZEN PIPELINES');
+
+  // ── (a) hung active jobs ──
+  const { getQueue } = require('../Services/BackgroundJobs/queue.js');
+  const HUNG_MIN = 180; // 3h — matches worker.js MAX_LOCK_EXTENSION_MS default
+  try {
+    const active = await getQueue().getJobs(['active'], 0, 200);
+    const now = Date.now();
+    const withAge = active
+      .filter(Boolean)
+      .map((j) => ({ id: j.id, runMin: Math.round((now - (j.processedOn || j.timestamp)) / 60000) }))
+      .filter((j) => !FILTER_USER_ID || String(j.id).includes(FILTER_USER_ID))
+      .sort((a, b) => b.runMin - a.runMin);
+
+    const hung = withAge.filter((j) => j.runMin >= HUNG_MIN);
+    console.log(`Active jobs${FILTER_USER_ID ? ' (this user)' : ''}: ${withAge.length}   |   running >= ${HUNG_MIN}min: ${hung.length}`);
+    if (active.length === 0) {
+      // BullMQ deliberately uses LOCAL Redis (see config/queueRedisConn.js), so running
+      // this from a laptop inspects the laptop's Redis, not production's, and reports a
+      // convincing-looking empty queue. The frozen-pipeline half below reads MongoDB and
+      // is accurate from anywhere; this half is only meaningful ON THE SERVER.
+      console.log('  (queue is empty — if you are not running this ON the server, this half is meaningless: BullMQ uses LOCAL Redis)');
+    }
+    for (const j of hung) {
+      console.log(`  HUNG  ${String(j.runMin).padStart(5)}min  ${j.id}`);
+      findings.push(`Job ${j.id} has been active ${j.runMin}min — a hung phase. Its deterministic job id also BLOCKS every new attempt at that phase (BullMQ drops duplicate ids silently).`);
+    }
+    if (!hung.length && withAge.length) {
+      const slowest = withAge[0];
+      console.log(`  (slowest active job: ${slowest.runMin}min — ${slowest.id})`);
+    }
+  } catch (err) {
+    console.log(`  Could not read the queue: ${err.message}`);
+  }
+
+  // ── (b) frozen pipelines ──
+  const DataFetchTracking = require('../models/system/DataFetchTrackingModel.js');
+  const User = require('../models/user-auth/userModel.js');
+  const STALL_H = parseInt(process.env.PIPELINE_STALL_MAX_AGE_HOURS || '9', 10);
+  const cutoff = new Date(Date.now() - STALL_H * 3600 * 1000);
+
+  const match = { status: 'started', updatedAt: { $lt: cutoff } };
+  if (FILTER_USER_ID) match.User = new mongoose.Types.ObjectId(FILTER_USER_ID);
+
+  const candidates = await DataFetchTracking.aggregate([
+    { $match: match },
+    { $group: { _id: { User: '$User', country: '$country', region: '$region' }, newest: { $max: '$updatedAt' }, n: { $sum: 1 } } },
+    { $sort: { newest: -1 } },
+  ]);
+
+  // Only ACTIVE accounts matter. Churned accounts leave 'started' docs behind forever and
+  // are pure noise — every reader already ignores them.
+  const activeUsers = await User.find(
+    { isVerified: true, $or: [{ packageType: 'PRO' }, { isAgencyClient: true }] },
+    { _id: 1 }
+  ).lean();
+  const activeIds = new Set(activeUsers.map((u) => String(u._id)));
+
+  let frozen = 0;
+  let inactive = 0;
+  let selfHealed = 0;
+  for (const c of candidates) {
+    if (!activeIds.has(String(c._id.User))) { inactive++; continue; }
+    const newer = await DataFetchTracking.findOne({
+      User: c._id.User, country: c._id.country, region: c._id.region,
+      status: { $in: ['completed', 'partial'] },
+      fetchedAt: { $gt: c.newest },
+    }).select('_id').lean();
+    if (newer) { selfHealed++; continue; }
+
+    frozen++;
+    console.log(`  FROZEN  ${String(c._id.User)} ${c._id.country}-${c._id.region}  stuck ${hAgo(c.newest)}  (${c.n} 'started' doc(s))`);
+    findings.push(`Pipeline FROZEN for ${c._id.User} ${c._id.country}-${c._id.region} — stuck at 'started' for ${hAgo(c.newest)}, so the dashboard date range is pinned at the last completed run. Per-day data checks will still look healthy.`);
+  }
+
+  console.log(`Stuck 'started' docs older than ${STALL_H}h: ${candidates.length} account(s) — frozen: ${frozen}, already recovered: ${selfHealed}, inactive/churned (ignored): ${inactive}`);
+  if (!frozen) console.log('  No active account has a frozen pipeline.');
+}
+
 async function main() {
   await mongoose.connect(MONGODB_URI);
   console.log(`[diag] Connected to ${dbConsts.dbName || MONGODB_URI}`);
@@ -541,6 +648,7 @@ async function main() {
   await checkAsyncReportRequests();
   await checkStep2Cursors();
   await checkFinanceRetryBackoff();
+  await checkStalledPipelines();
 
   section('ROOT-CAUSE SUMMARY');
   if (findings.length === 0) {

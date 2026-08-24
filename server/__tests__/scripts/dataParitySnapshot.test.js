@@ -34,6 +34,57 @@ describe('dataParitySnapshot — collection registry', () => {
         }
     });
 
+    // The daily pipeline rebuilds sellerAccount[].products wholesale on every run, and a regression
+    // there (issue counts reset, products dropped) was invisible to every other entry — the same
+    // false-pass class this file exists to prevent.
+    test('seller products are registered, expanded per product', () => {
+        const entry = byName().get('SellerProducts');
+
+        expect(entry).toBeDefined();
+        expect(typeof entry.expand).toBe('function');
+        // Country/region live on the nested account, so the document filter is user-only.
+        expect(entry.filter('u1', 'US', 'NA')).toEqual({ User: 'u1' });
+    });
+
+    test('SellerProducts expands to one entry per product, scoped to the requested marketplace', () => {
+        const entry = byName().get('SellerProducts');
+        const doc = {
+            sellerAccount: [
+                { country: 'US', region: 'NA', products: [{ asin: 'B1', sku: 'S1' }, { asin: 'B2', sku: 'S2' }] },
+                { country: 'UK', region: 'EU', products: [{ asin: 'B9', sku: 'S9' }] },
+            ],
+        };
+
+        const out = entry.expand(doc, 'u1', 'US', 'NA');
+
+        expect(out).toHaveLength(2);
+        expect(out.map((p) => p.sku)).toEqual(['S1', 'S2']);
+        expect(out.map((p) => entry.keyOf(p))).toEqual(['US|NA|B1|S1', 'US|NA|B2|S2']);
+    });
+
+    test('SellerProducts expansion drops TotatProducts, which changes on every run by design', () => {
+        // If that array reached the hash, every comparison would report a mismatch that is not real.
+        const entry = byName().get('SellerProducts');
+        const doc = {
+            sellerAccount: [{
+                country: 'US', region: 'NA',
+                TotatProducts: [{ NumberOfProducts: 1 }, { NumberOfProducts: 2 }],
+                products: [{ asin: 'B1', sku: 'S1' }],
+            }],
+        };
+
+        const out = entry.expand(doc, 'u1', 'US', 'NA');
+
+        expect(out).toHaveLength(1);
+        expect(out[0]).not.toHaveProperty('TotatProducts');
+    });
+
+    test('SellerProducts expansion tolerates an account with no products', () => {
+        const entry = byName().get('SellerProducts');
+        expect(entry.expand({ sellerAccount: [{ country: 'US', region: 'NA' }] }, 'u1', 'US', 'NA')).toEqual([]);
+        expect(entry.expand({}, 'u1', 'US', 'NA')).toEqual([]);
+    });
+
     test('every entry loaded its model — a bad path is skipped with a warning, silently reducing coverage', () => {
         for (const c of buildCollections()) {
             expect(c.model).toBeDefined();

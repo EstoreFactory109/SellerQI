@@ -8,6 +8,17 @@ const { getAccessToken, resolveMarketplaceAndRegion } = require('./Expences.js')
 // ─────────────────────────────────────────────
 // HTTP HELPER
 // ─────────────────────────────────────────────
+// Mirrors Expences.js's httpsRequestOnce — no default timeout on a raw https.request, so a
+// connection that never responds hangs forever. This is called once per ASIN in a sequential
+// loop (syncAsinRelationships), so a single hang here freezes every ASIN after it too, and
+// because the caller (runFinanceSyncTail) is awaited from inside a scheduled phase, that
+// froze the entire daily pipeline with the job's lock kept alive by the keep-alive timer —
+// no error, no log line, nothing for BullMQ's stalled-job detection to reclaim.
+const ASIN_RELATIONSHIP_REQUEST_TIMEOUT_MS = Math.max(
+  1000,
+  parseInt(process.env.ASIN_RELATIONSHIP_REQUEST_TIMEOUT_MS || '30000', 10) || 30000
+);
+
 function httpsRequest(options) {
   return new Promise((resolve, reject) => {
     const req = https.request(options, (res) => {
@@ -18,6 +29,10 @@ function httpsRequest(options) {
         try { resolve({ statusCode: res.statusCode, body: JSON.parse(body) }); }
         catch { resolve({ statusCode: res.statusCode, body }); }
       });
+      res.on('error', reject);
+    });
+    req.setTimeout(ASIN_RELATIONSHIP_REQUEST_TIMEOUT_MS, () => {
+      req.destroy(Object.assign(new Error(`request timed out after ${ASIN_RELATIONSHIP_REQUEST_TIMEOUT_MS}ms`), { code: 'ETIMEDOUT' }));
     });
     req.on('error', reject);
     req.end();

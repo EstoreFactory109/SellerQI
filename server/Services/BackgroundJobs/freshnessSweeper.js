@@ -102,13 +102,55 @@ const STALE_SESSION_MAX_AGE_HOURS = parseInt(process.env.STALE_SESSION_MAX_AGE_H
 // enormous write. At the default 3h cadence this drains ~16k/day.
 const STALE_SESSION_MAX_PER_TICK = parseInt(process.env.STALE_SESSION_MAX_PER_TICK || '2000', 10);
 
+// ── Stalled daily-pipeline sweep ─────────────────────────────────────────────
+// BACKSTOP for "the phase chain stopped walking and nothing noticed".
+//
+// DataFetchTracking is only ever closed by sched_finalize, so a chain that stops
+// before finalize leaves its doc pinned at 'started' forever. Every reader of that
+// collection selects status:{$in:['completed','partial']} — including the frontend
+// Profitability calendar bootstrap (FinanceDashboardController.getFinanceDateRange) —
+// so the dashboard silently freezes at the last GOOD day while the finance/ads sweeps
+// above keep the underlying per-day data current. That combination is what makes it so
+// hard to spot: every per-day health check is green.
+//
+// Observed in production 2026-08-06 (two days of "data only up to Aug 3"): the CAUSE
+// there was a phase that HUNG — sched_ads sat `active` for 7.8h with attempts:0 while
+// worker.js's lock-extension timer kept renewing its lock, so BullMQ never reclaimed it
+// as stalled. Because phase job ids are deterministic and BullMQ silently drops an add
+// whose id already exists, that one stuck job then swallowed every later attempt to run
+// the phase, including a manual re-drive. That specific cause is fixed at the source by
+// MAX_LOCK_EXTENSION_MS in worker.js/integrationWorker.js — past the ceiling we stop
+// renewing, the job is reclaimed, and it fails loudly instead of hanging silently.
+//
+// This sweep is deliberately NOT a second copy of that fix. It is the catch-all for the
+// same SYMPTOM arriving by some other route — the phase hand-off is a plain queue.add()
+// from inside the processor (worker.js), so a process death in that gap would end the
+// chain just as silently, and future phases can hang in ways the ceiling does not cover.
+// Nothing else watches the master chain: the sweeps above recover missing ADS and
+// FINANCE days, but neither notices that the pipeline itself stopped walking.
+const PIPELINE_STALL_SWEEP_ENABLED = process.env.PIPELINE_STALL_SWEEP_DISABLED !== 'true';
+// Must sit ABOVE producer.js's MAX_SCHEDULED_JOB_AGE (8h). Below it,
+// enqueueScheduledAccountJob refuses while the orphaned phase job is still
+// 'active'/'waiting'; above it, the producer removes that orphan itself and
+// proceeds — so we let it clear the way rather than fighting it.
+const PIPELINE_STALL_MAX_AGE_HOURS = Math.max(9, parseInt(process.env.PIPELINE_STALL_MAX_AGE_HOURS || '9', 10) || 9);
+// Liveness guard. getAllPhaseJobIds does NOT enumerate the `-pollN` ids the ads and
+// finance phases self-reschedule under, so the producer's own dedup is blind to a
+// live poll chain. A healthy ads phase alone runs 40-50 min. If ANY JobStatus row
+// for the account moved this recently, something is still walking — leave it alone.
+const PIPELINE_STALL_QUIET_MINUTES = Math.max(15, parseInt(process.env.PIPELINE_STALL_QUIET_MINUTES || '60', 10) || 60);
+// Each recovery re-runs the FULL pipeline (~40-60 min of Amazon API work), so this
+// is a blast-radius cap, not a throughput knob: it stops a systemic outage from
+// fanning out into one simultaneous re-run per account. Truncation is logged.
+const PIPELINE_STALL_MAX_RECOVERIES_PER_TICK = Math.max(1, parseInt(process.env.PIPELINE_STALL_MAX_RECOVERIES_PER_TICK || '5', 10) || 5);
+
 // Job options for catch-up jobs.
 const CATCHUP_JOB_OPTS = {
     attempts: 3,
     backoff: { type: 'exponential', delay: 60_000 },
-    // 2-hour timeout matches the worker's normal phase timeout. Ads async
-    // reports usually finish in 30-45 minutes per call.
-    timeout: 2 * 60 * 60 * 1000,
+    // No `timeout`: it is a no-op since BullMQ v4 (see queue.js). Ads async reports
+    // usually finish in 30-45 min per call; anything that hangs far past that is caught
+    // by the lock-extension ceiling in worker.js, not by a per-job option.
     // Keep failed jobs around for a week so the sweeper sees them via
     // queue.getJob(jobId) and doesn't re-enqueue every 2 hours. After a week,
     // failed jobs are purged; if the date is still missing then, sweeper will
@@ -801,11 +843,188 @@ async function sweepStaleSessions() {
     return { enabled: true, closed: res.modifiedCount, remaining };
 }
 
+/**
+ * Find daily pipelines that stopped walking mid-chain, and re-drive them.
+ *
+ * See the PIPELINE_STALL_* block above for why this class of failure is invisible
+ * everywhere else. Detection requires ALL of:
+ *   1. a DataFetchTracking doc still at 'started', older than the max age;
+ *   2. no newer completed/partial doc for the same (User, country, region) — i.e.
+ *      no later run already fixed it;
+ *   3. the account is active/eligible (keeps churned accounts out — there are a
+ *      dozen ancient 'started' docs belonging to closed accounts);
+ *   4. shouldAttemptAccountUpdate() says eligible — so 'done' accounts are not
+ *      re-run and 'capped' accounts still respect MAX_DAILY_ATTEMPTS, the valve
+ *      that stops a permanently-broken account burning SP-API quota;
+ *   5. nothing has touched the account's JobStatus rows recently (liveness).
+ *
+ * ORDERING IS THE DESIGN: the stuck doc is closed only AFTER a verified enqueue.
+ * That makes closing it the dedup mechanism, with no extra state to track —
+ *   enqueued  -> doc closed -> not re-detected; the new run's fresh 'started' doc
+ *                must itself age past the threshold before it could qualify.
+ *   blocked   -> doc LEFT OPEN -> retried next tick, by which time the orphaned
+ *                phase job has aged past the producer's 8h rule.
+ * Closing first would permanently lose the signal whenever the enqueue was blocked
+ * — recreating the exact silent freeze this exists to end.
+ *
+ * Idempotent and safe to run repeatedly.
+ */
+async function sweepStalledPipelines() {
+    const summary = {
+        enabled: true, scanned: 0, frozen: 0, recovered: 0, blocked: 0,
+        skippedInactive: 0, skippedDone: 0, skippedCapped: 0, skippedLive: 0,
+        cappedByTick: false, errors: 0,
+    };
+    if (!PIPELINE_STALL_SWEEP_ENABLED) return { ...summary, enabled: false };
+
+    const DataFetchTracking = require('../../models/system/DataFetchTrackingModel.js');
+    const JobStatus = require('../../models/system/JobStatusModel.js');
+    const { UserSchedulingService } = require('./UserSchedulingService.js');
+    const { enqueueScheduledAccountJob } = require('./producer.js');
+
+    const cutoff = new Date(Date.now() - PIPELINE_STALL_MAX_AGE_HOURS * 60 * 60 * 1000);
+
+    // Collapse to one candidate per (User, country, region). `newest` is the most
+    // recent stuck doc; older ones for the same triple are closed alongside it.
+    const candidates = await DataFetchTracking.aggregate([
+        { $match: { status: 'started', updatedAt: { $lt: cutoff } } },
+        {
+            $group: {
+                _id: { User: '$User', country: '$country', region: '$region' },
+                newest: { $max: '$updatedAt' },
+                ids: { $push: '$_id' },
+            },
+        },
+    ]);
+    summary.scanned = candidates.length;
+    if (!candidates.length) return summary;
+
+    // Same scope as the daily pipeline. null = "no filter" (documented fail-safe),
+    // which for THIS sweep would mean re-running churned accounts — so unlike the
+    // other sweeps, a null set is treated as "skip", not "process all".
+    const activeUserIds = await getActiveUserIdSet();
+    const quietBefore = new Date(Date.now() - PIPELINE_STALL_QUIET_MINUTES * 60 * 1000);
+
+    for (const cand of candidates) {
+        const userId = String(cand._id.User);
+        const { country, region } = cand._id;
+        if (!country || !region) continue;
+
+        try {
+            if (!activeUserIds || !activeUserIds.has(userId)) { summary.skippedInactive++; continue; }
+
+            // A later run already produced usable data — this doc is just litter.
+            const newerUsable = await DataFetchTracking.findOne({
+                User: cand._id.User, country, region,
+                status: { $in: ['completed', 'partial'] },
+                fetchedAt: { $gt: cand.newest },
+            }).select('_id').lean();
+            if (newerUsable) continue;
+
+            summary.frozen++;
+
+            const gate = await UserSchedulingService.shouldAttemptAccountUpdate(userId, country, region);
+            if (!gate.eligible) {
+                if (gate.reason === 'done') summary.skippedDone++;
+                else if (gate.reason === 'capped') summary.skippedCapped++;
+                else summary.skippedInactive++;
+                continue;
+            }
+
+            // Liveness. JobStatus rows are UPSERTED under a deterministic jobId
+            // (unique index), never appended, so `updatedAt` is a true per-account
+            // "something moved" signal — and `createdAt` is meaningless here (rows
+            // carry the date they were FIRST created, often months ago).
+            //
+            // This is what stops the sweep fighting a long-but-healthy run: a phase
+            // legitimately mid-flight keeps its JobStatus row warm. It also covers the
+            // ads/finance `-pollN` job ids, which getAllPhaseJobIds does not enumerate,
+            // so producer.js's own dedup is blind to them.
+            const live = await JobStatus.findOne({
+                jobId: { $regex: `^scheduled-${userId}-${country}-${region}` },
+                updatedAt: { $gt: quietBefore },
+            }).select('_id').lean();
+            if (live) { summary.skippedLive++; continue; }
+
+            if (summary.recovered >= PIPELINE_STALL_MAX_RECOVERIES_PER_TICK) {
+                summary.cappedByTick = true;
+                continue;
+            }
+
+            const result = await enqueueScheduledAccountJob(userId, country, region);
+            if (!result || !result.success) {
+                // Expected while the orphaned phase job is still inside the
+                // producer's 8h window. Leave the doc open; next tick retries.
+                summary.blocked++;
+                logger.warn(
+                    `[FreshnessSweeper] Stalled pipeline for ${userId} ${country}-${region} could not be re-enqueued yet — leaving it open for the next tick`,
+                    { message: result?.message, state: result?.state, jobId: result?.jobId }
+                );
+                continue;
+            }
+
+            // producer.js swallows a failed job.remove() and then queue.add()s the
+            // same jobId — BullMQ returns the PRE-EXISTING job and the producer
+            // still reports success:true. So confirm a fresh job actually exists.
+            const initJobId = `scheduled-${userId}-${country}-${region}-${scheduledPhases.PHASES.INIT}`;
+            let verified = false;
+            try {
+                const job = await getQueue().getJob(initJobId);
+                verified = !!job && (Date.now() - job.timestamp) < PIPELINE_STALL_MAX_AGE_HOURS * 60 * 60 * 1000;
+            } catch (verifyErr) {
+                logger.warn(`[FreshnessSweeper] Could not verify re-enqueued job ${initJobId}: ${verifyErr.message}`);
+            }
+            if (!verified) {
+                summary.blocked++;
+                logger.warn(`[FreshnessSweeper] Re-enqueue for ${userId} ${country}-${region} reported success but no fresh ${initJobId} is queued — leaving the tracking doc open`);
+                continue;
+            }
+
+            // Only now: close every stuck doc for this account. The status re-filter
+            // is a CAS guard so a run that legitimately finalizes between the read
+            // and this write is never clobbered.
+            //
+            // 'failed', never 'partial': all ten readers of this collection accept
+            // 'partial', which would promote a half-fetched dataRange to the head of
+            // the calendar query. 'failed' keeps it correctly invisible.
+            await DataFetchTracking.updateMany(
+                { _id: { $in: cand.ids }, status: 'started' },
+                {
+                    $set: {
+                        status: 'failed',
+                        errorMessage: 'stalled-pipeline-autorecovered',
+                        autoClosedStale: true,
+                        autoClosedAt: new Date(),
+                    },
+                }
+            );
+
+            summary.recovered++;
+            logger.warn(
+                `[FreshnessSweeper] Re-drove a STALLED daily pipeline for ${userId} ${country}-${region} (frozen since ${cand.newest.toISOString()})`,
+                { jobId: result.jobId, closedDocs: cand.ids.length }
+            );
+        } catch (err) {
+            summary.errors++;
+            logger.error(`[FreshnessSweeper] Stalled-pipeline recovery failed for ${userId} ${country}-${region}`, { error: err?.message, stack: err?.stack });
+        }
+    }
+
+    if (summary.cappedByTick) {
+        logger.warn(
+            `[FreshnessSweeper] Stalled-pipeline recoveries hit the per-tick cap (${PIPELINE_STALL_MAX_RECOVERIES_PER_TICK}); the rest are deferred to the next tick — this tick did NOT cover everything frozen.`,
+            { frozen: summary.frozen, recovered: summary.recovered }
+        );
+    }
+    return summary;
+}
+
 module.exports = {
     sweep,
     sweepFinance,
     sweepFinanceDeepResync,
     sweepStaleSessions,
+    sweepStalledPipelines,
     findMissingDatesForAccount,
     findBrokenFinanceDatesForAccount,
     buildCatchupJobId,
@@ -816,4 +1035,6 @@ module.exports = {
     MAX_ENQUEUES_PER_TICK,
     FINANCE_LOOKBACK_DAYS,
     FINANCE_DEEP_RESYNC_DAYS,
+    PIPELINE_STALL_MAX_AGE_HOURS,
+    PIPELINE_STALL_MAX_RECOVERIES_PER_TICK,
 };

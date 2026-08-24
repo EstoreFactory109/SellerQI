@@ -13,6 +13,13 @@
 const axios = require('axios');
 const logger = require('../../utils/Logger.js');
 
+// axios has no default timeout — a socket that connects but never responds hangs the
+// caller forever, with nothing for BullMQ's stalled-job detection to reclaim (a keep-alive
+// timer just kept renewing the lock). This is a status-check GET, not a download, so it
+// should return in well under a second normally; 30s matches FinanceService.js's own
+// httpsRequest default for the same class of call.
+const SP_API_STATUS_TIMEOUT_MS = 30000;
+
 /**
  * Pure mapping of Amazon's SP-API `processingStatus` to the engine's adapter result.
  * Kept separate from the HTTP call so it is trivially unit-testable.
@@ -41,7 +48,7 @@ function mapSpApiStatus(status, reportDocumentId = null) {
 async function checkSpApiStatusOnce(accessToken, reportId, baseuri) {
     const response = await axios.get(
         `https://${baseuri}/reports/2021-06-30/reports/${reportId}`,
-        { headers: { 'x-amz-access-token': accessToken } }
+        { headers: { 'x-amz-access-token': accessToken }, timeout: SP_API_STATUS_TIMEOUT_MS }
     );
     return mapSpApiStatus(response.data.processingStatus, response.data.reportDocumentId || null);
 }
@@ -50,7 +57,7 @@ async function checkSpApiStatusOnce(accessToken, reportId, baseuri) {
 async function getSpApiDocumentUrl(accessToken, reportDocumentId, baseuri) {
     const response = await axios.get(
         `https://${baseuri}/reports/2021-06-30/documents/${reportDocumentId}`,
-        { headers: { 'x-amz-access-token': accessToken } }
+        { headers: { 'x-amz-access-token': accessToken }, timeout: SP_API_STATUS_TIMEOUT_MS }
     );
     if (!response.data || !response.data.url) throw new Error('No valid report URL found');
     return response.data.url;
