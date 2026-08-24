@@ -15,6 +15,7 @@ import { fetchPPCKPISummary, selectPPCKPISummary } from '../../redux/slices/PPCC
 import { parseLocalDate } from '../../utils/dateUtils.js'
 import { shouldUseCalendarDateRange } from '../../utils/totalSalesFilterUrl.js'
 import { useDashboardData } from '../../hooks/usePageData.js'
+import { useTopProducts } from '../../hooks/useTopProducts.js'
 import { devLog } from '../../utils/devLogger.js'
 import axiosInstance from '../../config/axios.config.js'
 import DownloadReport from '../../Components/DownloadReport/DownloadReport.jsx'
@@ -247,6 +248,10 @@ const Dashboard = () => {
   // cached server-side, so this is a single cheap GET, no LLM call on page load.
   const [topOpportunities, setTopOpportunities] = useState(null);
   const [topOpportunitiesLoading, setTopOpportunitiesLoading] = useState(true);
+
+  // The product-level view of the same tasks, for the "QMate noticed" card.
+  const { products: topProducts, loading: topProductsLoading } = useTopProducts();
+  const topProduct = topProducts.length > 0 ? topProducts[0] : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -549,23 +554,35 @@ const Dashboard = () => {
   if (acosStatus !== STATUS.GOOD) attentionItems.push({ label: 'wasted ad spend', status: acosStatus });
   if (healthPillStatus !== STATUS.GOOD) attentionItems.push({ label: 'account health', status: healthPillStatus });
 
-  // AI-ranked opportunities take over "Est. recoverable" when available — this is
-  // the actual dollar figure the AI selections were built from, not a client-side
-  // approximation. Falls back to the old heuristic (ads waste + reimbursements)
-  // for accounts that haven't been synced since this feature shipped.
+  // AI-ranked opportunities drive this figure when available. Falls back to the old
+  // heuristic (ads waste + reimbursements) for accounts not synced since it shipped.
   const hasAiOpportunities = Array.isArray(topOpportunities?.opportunities) && topOpportunities.opportunities.length > 0;
+  // The ACCOUNT-wide, de-duplicated profit figure — not the sum of the 5-6 shown
+  // (a subset), and not a sum of issue groups (which double-counts, because a
+  // product's loss already contains its wasted ad spend). Older stored records lack
+  // the field, so fall back to what they do have.
   const recoverableAmount = hasAiOpportunities
-    ? topOpportunities.totalEstimatedRecovery
+    ? (topOpportunities.potentialProfitImpact
+        || topOpportunities.accountRecoverableAmount
+        || topOpportunities.totalEstimatedRecovery)
     : moneyWastedInAds + expectedReimbursement;
+  // Capital locked in unsellable stock — a different quantity, shown separately so
+  // it can never inflate a profit figure.
+  const capitalTiedUp = hasAiOpportunities ? (topOpportunities.capitalTiedUp || 0) : 0;
   const verdictDataReady = isPhase2Complete && isPhase3Complete && !reimbursementLoading && !topOpportunitiesLoading;
 
   // Badge/route/"start with" phrase per opportunity category — same destinations the
   // old category rows below already used, so "See issues" behaves identically either way.
+  // Opportunities are groups of TASKS (see TaskOpportunityGroupsService), so every
+  // category the Tasks page can carry needs an entry here — including ranking and
+  // account health, which this card was previously blind to.
   const OPPORTUNITY_CATEGORY_META = {
-    profitability: { badge: 'Profitability', ctaLabel: 'Review profitability', route: '/seller-central-checker/profitibility-dashboard', startWithPhrase: 'your money-losing products' },
-    sponsoredAds: { badge: 'Sponsored Ads', ctaLabel: 'Review ads', route: '/seller-central-checker/ppc-dashboard', startWithPhrase: 'your ad waste' },
-    inventory: { badge: 'Inventory', ctaLabel: 'See issues', route: '/seller-central-checker/issues?tab=category&filter=Inventory', startWithPhrase: 'your inventory issues' },
-    conversion: { badge: 'Conversion', ctaLabel: 'See issues', route: '/seller-central-checker/issues?tab=category&filter=Conversion', startWithPhrase: 'your Buy Box losses' },
+    profitability: { badge: 'Profitability', startWithPhrase: 'your money-losing products' },
+    sponsoredAds: { badge: 'Sponsored Ads', startWithPhrase: 'your ad waste' },
+    inventory: { badge: 'Inventory', startWithPhrase: 'your inventory issues' },
+    conversion: { badge: 'Conversion', startWithPhrase: 'your Buy Box losses' },
+    ranking: { badge: 'Ranking', startWithPhrase: 'your listing quality issues' },
+    account: { badge: 'Account Health', startWithPhrase: 'your account health' },
   };
 
   // The AI already ranked opportunities by priority — its #1 pick drives "Start with...".
@@ -594,7 +611,7 @@ const Dashboard = () => {
   // NOT re-sorted, unlike the heuristic fallback below).
   const aiFixCandidates = hasAiOpportunities
     ? topOpportunities.opportunities.map((o) => {
-        const meta = OPPORTUNITY_CATEGORY_META[o.category] || { badge: o.category, ctaLabel: 'See issues', route: '/seller-central-checker/issues' };
+        const meta = OPPORTUNITY_CATEGORY_META[o.category] || { badge: o.category };
         const hasAmount = (o.amount || 0) > 0;
         return {
           key: o.candidateId,
@@ -604,8 +621,12 @@ const Dashboard = () => {
           why: o.why || o.action,
           value: hasAmount ? formatFullCurrency(o.amount) : (o.count || 0).toLocaleString(),
           valueLabel: hasAmount ? (o.confidence === 'estimated' ? 'est. recoverable' : 'recoverable') : (o.isGrowthOpportunity ? 'growth opportunity' : 'issues open'),
-          ctaLabel: meta.ctaLabel,
-          onCta: () => navigate(meta.route),
+          // Land on the exact task rows that make up this figure, so the seller sees
+          // the same problem broken down rather than a differently-scoped page.
+          ctaLabel: 'See these tasks',
+          onCta: () => navigate(
+            `/seller-central-checker/tasks?category=${encodeURIComponent(o.category)}&type=${encodeURIComponent(o.issueType)}`
+          ),
         };
       })
     : [];
@@ -821,7 +842,7 @@ const Dashboard = () => {
                       <>
                         {' '}and about{' '}
                         <span style={{ fontWeight: 600 }}>{formatFullCurrency(recoverableAmount)}/mo</span>
-                        {' '}is recoverable
+                        {' '}of profit is in play
                       </>
                     )}
                     {'. '}
@@ -837,7 +858,7 @@ const Dashboard = () => {
                       <>
                         {' '}and about{' '}
                         <span style={{ fontWeight: 600 }}>{formatFullCurrency(recoverableAmount)}</span>
-                        {' '}may be recoverable this period.
+                        {' '}of profit may be in play this period.
                       </>
                     )}
                   </>
@@ -1006,12 +1027,29 @@ const Dashboard = () => {
           <div ref={topFixesSectionRef} className='rounded-2xl border overflow-hidden mb-[22px]' style={{ background: COLORS.surface, borderColor: COLORS.border }}>
             <div className='flex items-center gap-4 px-7 py-5 border-b flex-wrap' style={{ borderColor: COLORS.border }}>
               <div className='flex-1 min-w-[240px]'>
-                <h2 className='m-0 text-xl font-semibold' style={{ color: COLORS.textPrimary }}>Top things to fix</h2>
+                <div className='flex items-center gap-2'>
+                  <h2 className='m-0 text-xl font-semibold' style={{ color: COLORS.textPrimary }}>Top things to fix</h2>
+                  <button
+                    type='button'
+                    onClick={() => navigate('/seller-central-checker/qmate')}
+                    className='flex items-center gap-1 pl-1 pr-2 py-0.5 rounded-full text-xs font-semibold border transition-colors'
+                    style={{ background: 'rgba(59,130,246,.12)', borderColor: 'rgba(59,130,246,.35)', color: '#7EA8F8' }}
+                    title='Ask QMate about these fixes'
+                  >
+                    <span className='w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold' style={{ background: COLORS.accent, color: '#061021' }}>Q</span>
+                    QMate
+                  </button>
+                </div>
                 <p className='m-0 mt-1 text-sm' style={{ color: COLORS.textSecondary }}>Ordered by estimated dollar impact — the top one is worth more than the rest combined.</p>
               </div>
               <div className='text-right'>
-                <div className='text-xs font-semibold uppercase tracking-wide' style={{ color: COLORS.textMuted }}>Est. recoverable</div>
+                <div className='text-xs font-semibold uppercase tracking-wide' style={{ color: COLORS.textMuted }}>Potential profit impact</div>
                 <div className='text-xl font-bold tabular-nums' style={{ color: getStatusConfig(STATUS.GOOD).color }}>{formatFullCurrency(recoverableAmount)}</div>
+                {capitalTiedUp > 0 && (
+                  <div className='text-[11px] mt-0.5' style={{ color: COLORS.textMuted }}>
+                    + {formatFullCurrency(capitalTiedUp)} capital tied up
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1119,9 +1157,10 @@ const Dashboard = () => {
                 )}
               </motion.div>
 
-              {/* "QMate noticed" — static placeholder matching the mock exactly; there's no real
-                  session/conversion-anomaly detection wired up yet, so this isn't live data.
-                  "Ask about this" still really opens QMate. */}
+              {/* "QMate noticed" — the single product costing this seller the most,
+                  from the same task data as "Top things to fix" and the Tasks page
+                  (see TaskOpportunityGroupsService). This card previously showed every
+                  seller the same invented ASIN and percentages. */}
               <motion.div
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -1134,18 +1173,50 @@ const Dashboard = () => {
                     <div className='w-[22px] h-[22px] rounded-md flex items-center justify-center text-xs font-bold' style={{ background: COLORS.accent, color: '#061021' }}>Q</div>
                     <div className='text-sm font-semibold' style={{ color: COLORS.textPrimary }}>QMate noticed</div>
                   </div>
-                  <p className='m-0 text-sm' style={{ color: COLORS.textSecondary }}>
-                    Sessions on <b style={{ color: COLORS.textPrimary }}>B07XYZ</b> are up 22% but conversion fell 14.1% → 8.3%. Bullet 3 was edited Apr 9 and removed your top indexing keywords.
-                  </p>
+
+                  {topProductsLoading ? (
+                    <div className='h-16 rounded-lg animate-pulse' style={{ background: 'rgba(255,255,255,.04)' }} />
+                  ) : topProduct ? (
+                    <p className='m-0 text-sm' style={{ color: COLORS.textSecondary }}>
+                      <b style={{ color: COLORS.textPrimary }}>{topProduct.productName || topProduct.asin}</b>
+                      {(topProduct.profitImpact || 0) > 0 && (
+                        <>
+                          {' '}has about{' '}
+                          <b style={{ color: getStatusConfig(STATUS.GOOD).color }}>
+                            {formatFullCurrency(topProduct.profitImpact)}{topProduct.amountIsEstimated ? '*' : ''}
+                          </b>
+                          {' '}of profit in play.
+                        </>
+                      )}
+                      {topProduct.why ? ` ${topProduct.why}` : ''}
+                    </p>
+                  ) : (
+                    <p className='m-0 text-sm' style={{ color: COLORS.textSecondary }}>
+                      No single product stands out as needing attention right now.
+                    </p>
+                  )}
                 </div>
-                <button
-                  type='button'
-                  onClick={() => navigate('/seller-central-checker/qmate')}
-                  className='w-full py-2.5 mt-3 rounded-lg text-sm font-semibold border'
-                  style={{ background: 'rgba(59,130,246,.12)', borderColor: 'rgba(59,130,246,.4)', color: '#7EA8F8' }}
-                >
-                  Ask about this →
-                </button>
+
+                <div className='flex gap-2 mt-3'>
+                  {topProduct && (
+                    <button
+                      type='button'
+                      onClick={() => navigate(`/seller-central-checker/tasks?asin=${encodeURIComponent(topProduct.asin)}`)}
+                      className='flex-1 py-2.5 rounded-lg text-sm font-semibold border'
+                      style={{ background: 'rgba(59,130,246,.12)', borderColor: 'rgba(59,130,246,.4)', color: '#7EA8F8' }}
+                    >
+                      Fix this product →
+                    </button>
+                  )}
+                  <button
+                    type='button'
+                    onClick={() => navigate('/seller-central-checker/qmate')}
+                    className={`${topProduct ? '' : 'w-full '}py-2.5 px-3 rounded-lg text-sm font-semibold border`}
+                    style={{ background: 'transparent', borderColor: COLORS.border, color: COLORS.textSecondary }}
+                  >
+                    Ask QMate
+                  </button>
+                </div>
               </motion.div>
             </div>
           </div>

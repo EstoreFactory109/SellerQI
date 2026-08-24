@@ -6,15 +6,35 @@ const logger = require("../../utils/Logger");
  */
 class CogsService {
   /**
-   * Get COGS data for a user and marketplace
+   * Get COGS data for a user and marketplace.
+   *
+   * Accepts EITHER key that identifies a marketplace in this codebase, because
+   * the write and read paths historically disagree:
+   *   - CogsController saves keyed on `sellerAccount.countryCode`, which
+   *     actually holds a CURRENCY code ('AUD', 'INR', 'GBP', 'USD') despite
+   *     the field name.
+   *   - Analyse.js and QMateService read with the real marketplace COUNTRY
+   *     code ('AU', 'IN', 'UK', 'US').
+   * Matching only one of them silently returned {} for every calculation-side
+   * caller, which zeroed out every COGS-derived recoverable amount
+   * (unfulfillable + stranded inventory). Matching both is unambiguous by
+   * construction: country codes are 2 chars and currency codes are 3, so the
+   * two key spaces can never collide.
+   *
    * @param {string} userId - User ID
-   * @param {string} countryCode - Country code (e.g., 'US', 'UK', 'DE')
+   * @param {string} marketplaceKey - Marketplace country code ('US', 'AU') or
+   *   the currency-style code stored as `countryCode` ('USD', 'AUD')
    * @returns {Object} - COGS data with entries as an object keyed by ASIN
    */
-  static async getCogs(userId, countryCode) {
+  static async getCogs(userId, marketplaceKey) {
     try {
-      const cogsData = await Cogs.findOne({ userId, countryCode });
-      
+      const cogsData = marketplaceKey
+        ? await Cogs.findOne({
+            userId,
+            $or: [{ country: marketplaceKey }, { countryCode: marketplaceKey }],
+          })
+        : null;
+
       if (!cogsData) {
         return {
           success: true,

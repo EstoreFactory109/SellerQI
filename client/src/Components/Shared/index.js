@@ -5,4 +5,5 @@ export { default as KPICard } from './KPICard.jsx';
 export { default as VerdictBanner } from './VerdictBanner.jsx';
 export { default as HealthGauge } from './HealthGauge.jsx';
 export { default as ActionCard } from './ActionCard.jsx';
+export { default as ProductsToFixList } from './ProductsToFixList.jsx';
 export * from './tokens.js';

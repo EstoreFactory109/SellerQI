@@ -4,13 +4,18 @@
  * Picks the top 5-6 money-recovery actions for an account using the OpenAI API.
  *
  * The token problem, and how this avoids it:
- * A real account can have 7,000+ issues. Sending them all would be ~500k tokens
- * per call. Instead, OpportunityRankingService first collapses them into ~12
+ * A real account can have 7,000+ tasks. Sending them all would be ~500k tokens
+ * per call. Instead, TaskOpportunityGroupsService first collapses them into ~12
  * ranked "opportunity groups" (~1.2k tokens), and only that shortlist goes to
  * the model. The model never searches for the expensive issues — our own code
  * already computed the dollars (see RecoverableAmountUtils.js). The model only
  * does the part it's genuinely good at: choosing which few to do first, in what
  * order, and explaining why.
+ *
+ * Candidates are grouped TASKS, deliberately: the Tasks page renders the very
+ * same tasks individually, so a group's total is exactly the sum of the rows a
+ * seller sees there, and the two pages can never rank or count things
+ * differently. See TaskOpportunityGroupsService for why that matters.
  *
  * This mirrors the established pattern in this codebase — deterministic compute,
  * LLM narrates (see AdvisoryEngine.js and the five engine narrators).
@@ -22,7 +27,7 @@
 const OpenAI = require('openai');
 const logger = require('../../utils/Logger.js');
 const TopOpportunities = require('../../models/system/TopOpportunitiesModel.js');
-const OpportunityRankingService = require('../Calculations/OpportunityRankingService.js');
+const TaskOpportunityGroupsService = require('../Calculations/TaskOpportunityGroupsService.js');
 const { getCurrencyCode, formatMoneyForProse } = require('../../utils/marketplaceCurrency.js');
 
 // Matches the five existing narrators (gpt-4o-mini). The prompt is tiny and runs
@@ -72,7 +77,7 @@ STRICT RULES:
 2a. CURRENCY: the amounts are in the currency given as "currencyCode" in the input — they are NOT necessarily US dollars. Do NOT write any currency symbol ($, £, €, ¥) or currency code in your text. Describe impact in words ("recovers the most", "a significant amount") and let the app render the figure. If you must reference a number, write it bare with no symbol.
 3. Dollars matter most, but not blindly:
    - Prefer confidence "measured" over "estimated" when amounts are close.
-   - An item flagged isGrowthOpportunity has zero recoverable value — it may be included only if it is genuinely valuable, and never above an item with a real recoverable amount.
+   - Any item whose recoverableAmount is 0 (including anything flagged isGrowthOpportunity) may be included only if it is genuinely valuable, and NEVER above an item with a real recoverable amount. Some zero-value items are still urgent — an account-health problem can stop all sales — so rank those first among the zero-value ones, using impactSeverity as your guide.
 4. Think about ORDER and OVERLAP. If one fix should happen before another (e.g. stop wasting ad spend on a product that already loses money per unit), say so in doFirstBecause. If two candidates affect the same products, list the other's candidateId in overlapsWith.
 5. "why" must be one or two plain-language sentences a non-technical seller understands. No jargon, no hedging.
 6. "action" must be a concrete next step the seller can actually do.
@@ -93,7 +98,10 @@ function buildPromptPayload(candidates) {
         recoverableAmount: c.totalAmount,
         confidence: c.confidence,
         isGrowthOpportunity: c.isGrowthOpportunity,
-        examples: c.topExamples.map(e => e.label).slice(0, 3)
+        // 0-100. Lets the model order the zero-value items sensibly (an account
+        // suspension outranks a title tweak) without ever placing them above money.
+        impactSeverity: c.impactWeight,
+        examples: (c.topExamples || []).map(e => e.label).slice(0, 3)
     }));
 }
 
@@ -183,7 +191,22 @@ function validateSelections(rawSelections, candidates, country = null) {
         }
     }
 
-    return valid;
+    // Structurally enforce money-before-no-money. The prompt asks for this, but a
+    // prompt is not a guarantee: a seller must never see a $0 item ranked above
+    // real recoverable cash. Within each side the model's judgement is preserved.
+    const withMoney = valid.filter(s => (s.amount || 0) > 0);
+    const withoutMoney = valid.filter(s => (s.amount || 0) <= 0);
+    if (withMoney.length && withoutMoney.length) {
+        const firstZeroBeforeMoney = valid.findIndex(s => (s.amount || 0) <= 0)
+            < valid.findLastIndex(s => (s.amount || 0) > 0);
+        if (firstZeroBeforeMoney) {
+            logger.warn('[TopOpportunities] Model ranked a zero-value item above real money; reordering', {
+                order: valid.map(s => `${s.candidateId}:${s.amount}`)
+            });
+        }
+    }
+
+    return [...withMoney, ...withoutMoney].map((s, idx) => ({ ...s, rank: idx + 1 }));
 }
 
 /**
@@ -264,24 +287,31 @@ async function selectWithAI(candidates, accountContext = {}, country = null) {
  * @param {string} region
  * @param {string} source - 'schedule' | 'integration' | 'manual' | 'api_fallback'
  */
-async function calculateAndStoreTopOpportunities(userId, country, region, source = 'schedule') {
+async function calculateAndStoreTopOpportunities(userId, country, region, source = 'schedule', options = {}) {
     const startTime = Date.now();
 
     try {
         // Cost backstop — bail out before any ranking work or OpenAI call if we
         // already generated recently. See MIN_REGENERATE_INTERVAL_HOURS.
-        if (!THROTTLE_EXEMPT_SOURCES.includes(source)) {
+        // `options.minIntervalHours` lets a caller widen or waive the window: the
+        // scheduler passes 0 when tasks were just rebuilt (the throttle's premise
+        // — that nothing changed — is false exactly then) and a multi-day value
+        // for its stale-view safety net.
+        const minIntervalHours = Number.isFinite(options.minIntervalHours)
+            ? options.minIntervalHours
+            : MIN_REGENERATE_INTERVAL_HOURS;
+        if (!THROTTLE_EXEMPT_SOURCES.includes(source) && minIntervalHours > 0) {
             const existing = await TopOpportunities.getForAccount(userId, country, region);
             if (existing?.generatedAt) {
                 const ageHours = (Date.now() - new Date(existing.generatedAt).getTime()) / 3600000;
-                if (ageHours < MIN_REGENERATE_INTERVAL_HOURS) {
+                if (ageHours < minIntervalHours) {
                     logger.info('[TopOpportunities] Skipping regeneration — generated recently', {
                         userId,
                         country,
                         region,
                         source,
                         ageHours: Math.round(ageHours * 10) / 10,
-                        minIntervalHours: MIN_REGENERATE_INTERVAL_HOURS
+                        minIntervalHours
                     });
                     return {
                         success: true,
@@ -293,13 +323,34 @@ async function calculateAndStoreTopOpportunities(userId, country, region, source
             }
         }
 
-        const ranked = await OpportunityRankingService.getRankedOpportunities(userId, country, region);
+        // Candidates come from the seller's TASKS, grouped by issue type — the same
+        // single source of truth the Tasks page renders individually. That is what
+        // makes a group's total exactly the sum of the task rows beneath it, and
+        // stops either surface from being blind to a category the other highlights.
+        const ranked = await TaskOpportunityGroupsService.getTaskOpportunityGroups(userId, country, region);
 
         if (!ranked.success) {
             return { success: false, error: ranked.error };
         }
 
-        const { candidates, issuesConsidered } = ranked;
+        const candidates = ranked.groups;
+        const issuesConsidered = ranked.tasksConsidered;
+
+        // The headline figures come from the per-ASIN rollup, never from summing the
+        // groups — see the comment on potentialProfitImpact below. Non-fatal: without
+        // them the record simply stores zeros rather than a wrong number.
+        let accountFigures = { potentialProfitImpact: 0, capitalTiedUp: 0 };
+        try {
+            const rollup = await TaskOpportunityGroupsService.getTopProductsToFix(userId, country, region);
+            if (rollup.success) {
+                accountFigures = {
+                    potentialProfitImpact: rollup.potentialProfitImpact || 0,
+                    capitalTiedUp: rollup.capitalTiedUp || 0
+                };
+            }
+        } catch (err) {
+            logger.warn('[TopOpportunities] could not compute account profit figures', { message: err.message });
+        }
 
         // Every `amount` below is in the marketplace's own currency, not always USD.
         const currencyCode = getCurrencyCode(country);
@@ -358,6 +409,12 @@ async function calculateAndStoreTopOpportunities(userId, country, region, source
             candidatesConsidered: candidates.length,
             issuesConsidered,
             totalEstimatedRecovery,
+            // Account-wide and de-duplicated PER ASIN. Deliberately not the sum of the
+            // groups above: a product's profit gap already contains its wasted ad
+            // spend, and that overlap crosses issue types, so only a per-ASIN pass can
+            // remove it. Computed by the same rollup the product views use.
+            potentialProfitImpact: accountFigures.potentialProfitImpact,
+            capitalTiedUp: accountFigures.capitalTiedUp,
             source,
             model,
             tokensUsed,

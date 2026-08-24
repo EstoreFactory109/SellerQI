@@ -32,7 +32,8 @@ import {
 import { formatCurrencyWithLocale } from '../../utils/currencyUtils.js';
 import { SkeletonTableBody } from '../../Components/Skeleton/PageSkeletons.jsx';
 import AmazonFbaInventoryCell from '../../Components/Products/AmazonFbaInventoryCell.jsx';
-import { COLORS, KPICard, STATUS } from '../../Components/Shared/index.js';
+import { COLORS, KPICard, STATUS, ProductsToFixList } from '../../Components/Shared/index.js';
+import { useTopProducts } from '../../hooks/useTopProducts.js';
 
 // Exactly 6 columns: 4 fixed (ASIN/SKU, Name, Issues or Recommendation, View) + 2 chosen from dropdown.
 // Product tabs: pick 2 from this list to fill columns 5 and 6.
@@ -194,7 +195,8 @@ const YourProducts = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState('active');
+  // Opens on the ranked list — "where do I start" before the raw inventory.
+  const [activeTab, setActiveTab] = useState('topProductsToFix');
   const [sortConfig, setSortConfig] = useState({ key: 'title', direction: 'asc' });
   const [loadingMore, setLoadingMore] = useState(false);
   const itemsPerPage = 20;
@@ -248,6 +250,14 @@ const YourProducts = () => {
   const currentCountry = useSelector((state) => state.currency?.country) || '';
   const currentRegion = useSelector((state) => state.currency?.region) || '';
   const currency = useSelector((state) => state.currency?.currency) || '$';
+
+  // Products ranked by profit impact — same task source as the Dashboard's
+  // "Top things to fix" and the Tasks page, so the surfaces cannot disagree.
+  const {
+    products: topProducts,
+    loading: topProductsLoading,
+    capitalTiedUp: topProductsCapital
+  } = useTopProducts();
 
   // Optimization tab: V3 self-contained endpoint (backend generates recommendations)
   const v3Optimization = useSelector((state) => state.pageData?.yourProductsV3?.optimization);
@@ -768,7 +778,9 @@ const YourProducts = () => {
           </div>
         </div>
 
-        {/* Search and Filters */}
+        {/* Search and Filters — hidden on the ranked list, which isn't searchable;
+            an inert search box reads as broken. */}
+        {activeTab !== 'topProductsToFix' && (
         <div className="rounded-2xl border p-2.5 mb-3" style={{ background: COLORS.surface, borderColor: COLORS.border }}>
           <div className="flex flex-col md:flex-row gap-2 md:items-center">
             <div className="relative flex-1">
@@ -862,10 +874,16 @@ const YourProducts = () => {
             )}
           </div>
         </div>
+        )}
 
         {/* Tabs — same data/logic as before, restyled to the mock's underline + count-pill style */}
         <div className="flex gap-1.5 overflow-x-auto mb-4" style={{ borderBottom: `1px solid ${COLORS.border}` }}>
           {[
+            // First, and the tab the page opens on: ranked by profit impact from the
+            // same task data the Dashboard and Tasks page use, so it cannot disagree
+            // with them. No count badge — it is a capped top-N, not a total, and a
+            // number here would read as "only N products need fixing".
+            { key: 'topProductsToFix', label: 'Top Products to Fix', count: null },
             { key: 'active', label: 'Sellable Products', count: summary.activeProducts || 0 },
             { key: 'optimization', label: 'Optimization', count: null },
             { key: 'withoutAPlus', label: 'Without A+', count: summary.productsWithoutAPlus || 0 },
@@ -894,6 +912,47 @@ const YourProducts = () => {
           ))}
         </div>
 
+        {/* Top Products to Fix — its own tab rather than a table of products, because
+            it answers a different question: not "what do I have" but "where do I
+            start". Same task data as the Dashboard and the Tasks page. */}
+        {activeTab === 'topProductsToFix' ? (
+          <div className="rounded-2xl border" style={{ background: COLORS.surface, borderColor: COLORS.border }}>
+            <div className="px-[18px] py-3" style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+              <div className="flex items-center gap-2 mb-1">
+                <h2 className="m-0 text-[15px] font-semibold" style={{ color: COLORS.textPrimary }}>Top products to fix</h2>
+                <button
+                  type="button"
+                  onClick={() => navigate('/seller-central-checker/qmate')}
+                  className="flex items-center gap-1 pl-1 pr-2 py-0.5 rounded-full text-xs font-semibold border transition-colors"
+                  style={{ background: 'rgba(59,130,246,.12)', borderColor: 'rgba(59,130,246,.35)', color: '#7EA8F8' }}
+                  title="Ask QMate about these products"
+                >
+                  <span className="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold" style={{ background: COLORS.accent, color: '#061021' }}>Q</span>
+                  QMate
+                </button>
+              </div>
+              <p className="m-0 text-[13px]" style={{ color: COLORS.textSecondary }}>
+                Ranked by the profit you would gain by fixing each product — across pricing, ads,
+                inventory, listing quality and conversion. Click a product to see its open tasks.
+              </p>
+            </div>
+            <div className="p-[18px]">
+              <ProductsToFixList
+                products={topProducts}
+                currency={currency}
+                loading={topProductsLoading}
+              />
+              {topProductsCapital > 0 && (
+                <p className="m-0 mt-3 text-[11px]" style={{ color: COLORS.textMuted }}>
+                  A further {formatCurrencyWithLocale(topProductsCapital, currency)} is capital locked
+                  in unsellable stock — shown per product, but not counted as profit. Amounts marked *
+                  include advertising spend attributed by campaign rather than measured per product.
+                </p>
+              )}
+            </div>
+          </div>
+        ) : (
+        <>
         {/* Products Table */}
         <div className="rounded-2xl border relative" style={{ background: COLORS.surface, borderColor: COLORS.border, overflowX: 'hidden', overflowY: 'visible', overflow: 'visible' }}>
           <div className="px-[18px] py-3 text-[13px]" style={{ borderBottom: `1px solid ${COLORS.border}`, color: COLORS.textSecondary }}>
@@ -1515,6 +1574,8 @@ const YourProducts = () => {
             </div>
           )}
         </div>
+        </>
+        )}
       </div>
     </div>
   );

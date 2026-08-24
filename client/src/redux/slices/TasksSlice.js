@@ -11,8 +11,10 @@ export const fetchTasks = createAsyncThunk(
       });
       
       if (response.status === 200 && response.data?.data) {
-        const { tasks = [], taskRenewalDate = null } = response.data.data;
-        return { tasks, taskRenewalDate };
+        // `groups` carries the issue-type aggregates the Dashboard reports, so a
+        // task row can show its standing inside the same figure.
+        const { tasks = [], groups = [], taskRenewalDate = null } = response.data.data;
+        return { tasks, groups, taskRenewalDate };
       } else {
         return rejectWithValue('Failed to fetch tasks data');
       }
@@ -46,6 +48,7 @@ export const updateTaskStatus = createAsyncThunk(
 
 const initialState = {
   tasks: [],
+  groups: [],
   taskRenewalDate: null,
   loading: false,
   error: null,
@@ -88,8 +91,9 @@ const TasksSlice = createSlice({
       })
       .addCase(fetchTasks.fulfilled, (state, action) => {
         state.loading = false;
-        const { tasks = [], taskRenewalDate = null } = action.payload;
+        const { tasks = [], groups = [], taskRenewalDate = null } = action.payload;
         state.tasks = tasks;
+        state.groups = groups;
         state.taskRenewalDate = taskRenewalDate;
         state.lastFetched = Date.now();
         state.error = null;

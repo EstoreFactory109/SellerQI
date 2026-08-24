@@ -12,8 +12,17 @@ const SUGGESTIONS = [
   'Any wasted ad spend I should fix?',
 ];
 
-/** Slide-in "Ask QMate" chat drawer — opens in place instead of navigating to the full QMate page. */
-const QMatePanel = ({ isOpen, onClose }) => {
+/**
+ * Slide-in "Ask QMate" chat drawer — opens in place instead of navigating to the
+ * full QMate page.
+ *
+ * @param {boolean} isOpen
+ * @param {Function} onClose
+ * @param {string|null} [initialQuestion] - asked automatically on open, so an
+ *   "Ask QMate" tag on a specific row lands the seller on an answer rather than an
+ *   empty box. Matches the existing suggestion chips, which also send on click.
+ */
+const QMatePanel = ({ isOpen, onClose, initialQuestion = null }) => {
   const navigate = useNavigate();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -78,6 +87,23 @@ const QMatePanel = ({ isOpen, onClose }) => {
     e.preventDefault();
     sendMessage(input);
   };
+
+  // Ask the row's question once per open. Guarded on the question itself rather
+  // than on isOpen alone, so reopening the drawer manually doesn't re-ask, and
+  // asking about a second row while open does.
+  const askedRef = useRef(null);
+  useEffect(() => {
+    if (!isOpen) {
+      askedRef.current = null;
+      return;
+    }
+    if (initialQuestion && askedRef.current !== initialQuestion) {
+      askedRef.current = initialQuestion;
+      sendMessage(initialQuestion);
+    }
+    // sendMessage is stable enough here; re-running on it would double-send.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, initialQuestion]);
 
   const goToFullChat = () => {
     onClose();

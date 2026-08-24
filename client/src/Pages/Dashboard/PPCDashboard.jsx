@@ -61,6 +61,7 @@ import { COLORS, InfoTooltip } from '../../Components/Shared/index.js';
 
 import { parseLocalDate } from '../../utils/dateUtils.js';
 import { shouldUseCalendarDateRange } from '../../utils/totalSalesFilterUrl.js';
+import { getAdsPerformanceVerdict } from '../../utils/adsPerformanceVerdict.js';
 import { usePPCData } from '../../hooks/usePageData.js';
 import { fetchDashboardPhase1 } from '../../redux/slices/PageDataSlice.js';
 import { PageSkeleton, CampaignAnalysisSkeleton } from '../../Components/Skeleton/PageSkeletons.jsx';
@@ -1690,24 +1691,29 @@ const PPCDashboard = () => {
     }
   }, [tabs, visibleTabIds, selectedTab]);
 
-  // Check scroll buttons on mount and when tabs change
+  // Check scroll buttons on mount and whenever the tab row's own size changes.
+  //
+  // A one-shot setTimeout(0) measurement (the previous approach) reads scrollWidth
+  // before the custom webfont has swapped in. The fallback system font is narrower,
+  // so that single check can find no overflow, permanently leave showRightArrow
+  // false, and never re-measure — no 'resize' event fires just because a font swap
+  // reflowed some text. A ResizeObserver on the container itself re-checks on every
+  // width-affecting change (font load, tab counts arriving, viewport resize), so the
+  // arrows track reality instead of a snapshot from one early tick.
   useEffect(() => {
-    // Use setTimeout to ensure DOM is updated
-    const timer = setTimeout(() => {
-      checkScrollButtons();
-    }, 0);
-    
     const container = tabsContainerRef.current;
-    if (container) {
-      container.addEventListener('scroll', checkScrollButtons);
-      window.addEventListener('resize', checkScrollButtons);
-      return () => {
-        clearTimeout(timer);
-        container.removeEventListener('scroll', checkScrollButtons);
-        window.removeEventListener('resize', checkScrollButtons);
-      };
-    }
-    return () => clearTimeout(timer);
+    if (!container) return undefined;
+
+    checkScrollButtons();
+    container.addEventListener('scroll', checkScrollButtons);
+
+    const resizeObserver = new ResizeObserver(() => checkScrollButtons());
+    resizeObserver.observe(container);
+
+    return () => {
+      container.removeEventListener('scroll', checkScrollButtons);
+      resizeObserver.disconnect();
+    };
   }, [tabs.length]); // Only depend on tabs length, not the tabs array itself
   
   // Create a mapping from original tab ID to filtered tab index
@@ -2197,17 +2203,35 @@ const PPCDashboard = () => {
       {/* Main Content - Scrollable */}
       <div className='overflow-y-auto' style={{ height: 'calc(100vh - 72px)', scrollBehavior: 'smooth' }}>
         <div className='px-2 lg:px-3 py-1.5 pb-1'>
-          {/* Ads performance banner — real ROAS + real wasted-spend total, only shown once there's real ad spend */}
-          {!ppcKPISummaryLoading && kpiData.spend > 0 && (
+          {/* Ads performance banner — real ROAS + real wasted-spend total, only shown once there's real ad spend.
+              ROAS is ad-attributed SALES divided by ad SPEND — it has no product cost (COGS, referral/FBA fees)
+              in it, so it cannot tell us whether ads are actually profitable. ROAS >= 1 only means ad-attributed
+              revenue covers ad spend; a seller whose margin is thinner than their ACoS is still losing money on
+              every ad-driven sale despite a healthy-looking ROAS. This banner used to render that case as
+              "profitable overall" in green, which overstated it. ROAS < 1 has no such ambiguity — sales not even
+              covering spend is a real loss regardless of margin — so that branch keeps its literal reading. */}
+          {!ppcKPISummaryLoading && kpiData.spend > 0 && (() => {
+            const adsVerdict = getAdsPerformanceVerdict(kpiData.roas);
+            const accentColor = COLORS[adsVerdict.accentColorKey];
+            return (
             <div
               className="relative overflow-hidden flex items-center gap-5 flex-wrap mb-2"
-              style={{ border: '1px solid rgba(34,197,94,.25)', borderRadius: '14px', background: `linear-gradient(90deg, rgba(34,197,94,.09), transparent 58%), ${COLORS.surface}`, padding: '16px 18px' }}
+              style={{
+                border: `1px solid ${adsVerdict.coversSpend ? 'rgba(34,197,94,.25)' : 'rgba(239,68,68,.3)'}`,
+                borderRadius: '14px',
+                background: `linear-gradient(90deg, ${adsVerdict.coversSpend ? 'rgba(34,197,94,.09)' : 'rgba(239,68,68,.09)'}, transparent 58%), ${COLORS.surface}`,
+                padding: '16px 18px'
+              }}
             >
-              <div className="absolute left-0 top-0 bottom-0" style={{ width: '3px', background: COLORS.good }} />
+              <div className="absolute left-0 top-0 bottom-0" style={{ width: '3px', background: accentColor }} />
               <p className="flex-1 min-w-0" style={{ margin: 0, fontSize: '15px', lineHeight: '24px', fontWeight: 500, color: COLORS.textPrimary }}>
-                Your ads are {kpiData.roas >= 1 ? 'profitable overall' : 'running at a loss'} — every <span style={{ fontWeight: 600 }}>$1 returns {kpiData.roas.toFixed(2)}</span>.
+                {adsVerdict.coversSpend ? (
+                  <>Every $1 of ad spend returns <span style={{ fontWeight: 600 }}>${kpiData.roas.toFixed(2)}</span> in sales <span style={{ color: COLORS.textSecondary, fontWeight: 400 }}>(before product costs)</span>.</>
+                ) : (
+                  <>Your ads are running at a loss — every $1 spent returns only <span style={{ fontWeight: 600 }}>${kpiData.roas.toFixed(2)}</span> in sales.</>
+                )}
                 {kpiData.wastedSpend > 0 && (
-                  <> But <span style={{ color: '#F87171', fontWeight: 600 }}>{formatCurrencyWithLocale(kpiData.wastedSpend, currency)}</span> went to search terms that never sold anything.</>
+                  <> But <span style={{ color: '#F87171', fontWeight: 600 }}>{formatCurrencyWithLocale(kpiData.wastedSpend, currency)}</span> went to keywords that never sold anything.</>
                 )}
               </p>
               {kpiData.wastedSpend > 0 && (
@@ -2224,7 +2248,8 @@ const PPCDashboard = () => {
                 </button>
               )}
             </div>
-          )}
+            );
+          })()}
 
           {/* KPI Cards - skeleton when summary loading */}
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '10px' }}>
@@ -2434,10 +2459,15 @@ const PPCDashboard = () => {
                     )}
                   </div>
 
-                  {/* Tabs Container — wraps onto a second row instead of scrolling when it doesn't fit */}
+                  {/* Tabs Container — a single scrollable row. The left/right arrow buttons above
+                      (checkScrollButtons, scrollTabsLeft/Right) measure scrollWidth vs clientWidth
+                      and call container.scrollBy — that only does anything when the row can overflow
+                      horizontally. flex-wrap previously let it wrap onto a second row instead, which
+                      silently made those arrows a no-op and pushed a tab (often "Auto Campaign
+                      Insights") onto its own line below the rest. */}
                   <div
                     ref={tabsContainerRef}
-                    className="flex flex-wrap gap-x-6 gap-y-2"
+                    className="flex flex-nowrap items-center gap-x-6 overflow-x-auto scrollbar-hide"
                   >
                     {tabs.map((tab) => (
                       <div

@@ -103,6 +103,7 @@ const { storeProductIssuesFromDashboardData } = require('../Calculations/Product
 // Top Opportunities (AI-ranked money recovery) — so a brand-new account gets the real
 // AI-selected top 5-6 immediately, instead of waiting for the Sunday job.
 const { calculateAndStoreTopOpportunities } = require('../AI/TopOpportunitiesService.js');
+const { calculateAndStoreTopProducts } = require('../AI/TopProductsService.js');
 
 class Integration {
     /**
@@ -2360,7 +2361,7 @@ class Integration {
             // paths too, and we don't want a repeatedly-failing account to keep paying
             // for OpenAI calls over data the failed fetch left incomplete.
             if (!runAiRanking) {
-                logger.info("Skipping top opportunities (runAiRanking=false — integration did not succeed)", {
+                logger.info("Skipping AI ranking (runAiRanking=false — integration did not succeed)", {
                     userId,
                     country,
                     region
@@ -2396,6 +2397,48 @@ class Integration {
                     // Don't fail the entire process if the AI ranking fails
                     logger.error("Error storing top opportunities", {
                         error: topOpportunitiesError.message,
+                        userId,
+                        country,
+                        region
+                    });
+                }
+
+                // The product-level view of the same tasks. Runs right after the
+                // issue-level one so both snapshots describe the same task state —
+                // and so a brand-new account gets the AI-narrated version on its
+                // FIRST fetch rather than falling back to template copy until the
+                // next scheduled run.
+                try {
+                    const topProductsResult = await calculateAndStoreTopProducts(
+                        userId,
+                        country,
+                        region,
+                        'integration'
+                    );
+
+                    if (topProductsResult.success) {
+                        logger.info("Top products stored successfully", {
+                            userId,
+                            country,
+                            region,
+                            selected: topProductsResult.data?.products?.length || 0,
+                            potentialProfitImpact: topProductsResult.data?.potentialProfitImpact,
+                            capitalTiedUp: topProductsResult.data?.capitalTiedUp,
+                            usedFallback: topProductsResult.data?.usedFallback,
+                            skippedByThrottle: topProductsResult.skippedByThrottle || false
+                        });
+                    } else {
+                        logger.warn("Failed to store top products", {
+                            userId,
+                            country,
+                            region,
+                            error: topProductsResult.error
+                        });
+                    }
+                } catch (topProductsError) {
+                    // Same rule: never fail the integration over the AI step.
+                    logger.error("Error storing top products", {
+                        error: topProductsError.message,
                         userId,
                         country,
                         region

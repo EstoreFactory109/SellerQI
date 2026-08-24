@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { useSelector, useDispatch } from 'react-redux';
+import { useSearchParams } from 'react-router-dom';
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -12,16 +13,26 @@ import {
 import { fetchTasks, updateTaskStatus } from '../../redux/slices/TasksSlice.js';
 import { TasksPageSkeleton } from '../../Components/Skeleton/PageSkeletons.jsx';
 import { COLORS } from '../../Components/Shared/index.js';
+import { formatCurrencyWithLocale } from '../../utils/currencyUtils.js';
+import {
+  BUCKET,
+  BUCKET_ORDER,
+  BUCKET_LABELS,
+  BUCKET_SUBTITLES,
+  selectBuckets,
+  formatEffort,
+  groupKeyForTask,
+  indexGroups
+} from '../../utils/taskBuckets.js';
 
 // Helper function to escape special regex characters in currency symbol
 const escapeRegex = (str) => {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 };
 
-// Real severity tiers only - 'low' simply won't render unless getSeverityFromCategory
-// ever actually produces it, so this never shows a permanently-empty fake group.
-const SEVERITY_ORDER = ['high', 'medium', 'low'];
-const SEVERITY_LABELS = { high: 'High priority', medium: 'Medium priority', low: 'Low priority' };
+// Tasks are grouped by what's worth doing, not by which category they came from.
+// Ordering/capping lives in utils/taskBuckets.js; the effort and impact data it
+// sorts on is computed server-side by TaskPrioritizationService.
 
 // Common currency symbols to detect in messages
 // Order matters: longer symbols first to avoid partial matches (e.g., "C$" before "$")
@@ -192,11 +203,30 @@ const FormattedHowToSolve = ({ text }) => {
 export default function Tasks() {
   const dispatch = useDispatch();
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterCategory, setFilterCategory] = useState('all');
+  // Deep-link support: the Dashboard's "Top things to fix" links here with
+  // ?category=&type= so a seller lands on the individual rows that make up the
+  // figure they just clicked, instead of the unfiltered list.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const linkedCategory = searchParams.get('category');
+  const linkedType = searchParams.get('type');
+  // Set when arriving from a "top products to fix" row — shows just that product's issues.
+  const linkedAsin = searchParams.get('asin');
+
+  const [filterCategory, setFilterCategory] = useState(linkedCategory || 'all');
+  const [filterType, setFilterType] = useState(linkedType || null);
+  const [filterAsin, setFilterAsin] = useState(linkedAsin || null);
   const [filterStatus, setFilterStatus] = useState('all');
   const [selectedTaskIds, setSelectedTaskIds] = useState(() => new Set());
-  const [expandedGroups, setExpandedGroups] = useState({ high: true, medium: true, low: true });
-  const [groupDisplayLimits, setGroupDisplayLimits] = useState({ high: 10, medium: 10, low: 10 });
+  const [expandedGroups, setExpandedGroups] = useState({
+    [BUCKET.HIGH_IMPACT]: true,
+    [BUCKET.QUICK_WINS]: true,
+    [BUCKET.EVERYTHING_ELSE]: false
+  });
+  const [groupDisplayLimits, setGroupDisplayLimits] = useState({
+    [BUCKET.HIGH_IMPACT]: 10,
+    [BUCKET.QUICK_WINS]: 10,
+    [BUCKET.EVERYTHING_ELSE]: 10
+  });
   const GROUP_PAGE_SIZE = 10;
 
   // Get tasks data from Redux store
@@ -205,6 +235,9 @@ export default function Tasks() {
   const loading = useSelector(state => state.tasks?.loading || false);
   const error = useSelector(state => state.tasks?.error);
   const completedTasksArray = useSelector(state => state.tasks?.completedTasks || []);
+  // Issue-type aggregates, identical to what the Dashboard's "Top things to fix"
+  // reports — used to show a task's standing inside that same figure.
+  const taskGroups = useSelector(state => state.tasks?.groups || []);
   
   // Convert array to Set for easier checking
   const completedTasks = useMemo(() => new Set(completedTasksArray), [completedTasksArray]);
@@ -220,23 +253,6 @@ export default function Tasks() {
 
 
 
-  // Get severity based on error category
-  const getSeverityFromCategory = (category) => {
-    switch (category?.toLowerCase()) {
-      case 'ranking':
-        return 'medium';
-      case 'conversion':
-        return 'medium';
-      case 'inventory':
-        return 'high';
-      case 'profitability':
-        return 'high';
-      case 'sponsoredads':
-        return 'medium';
-      default:
-        return 'medium';
-    }
-  };
 
   // Fetch tasks data from Redux (only if not already loaded)
   useEffect(() => {
@@ -295,12 +311,17 @@ export default function Tasks() {
         asin: task.asin,
         sku: sku,
         errorCategory: task.errorCategory,
+        errorType: task.errorType,
         error: task.error,
         howToSolve: task.solution,
-        severity: getSeverityFromCategory(task.errorCategory),
         status: task.status,
-        sales: 0,
-        errorCount: 1
+        amount: task.amount || 0,
+        amountIsEstimated: !!task.amountIsEstimated,
+        // Effort/impact come from the server (TaskPrioritizationService) and drive
+        // the bucketing below.
+        effortMinutes: task.effortMinutes,
+        impactWeight: task.impactWeight,
+        isQuickWin: !!task.isQuickWin
       };
     });
   }, [tasks, productDetailsMap]);
@@ -347,22 +368,76 @@ export default function Tasks() {
       );
     }
 
-    return filtered;
-  }, [transformedTasks, searchQuery, filterCategory, filterStatus, completedTasks]);
+    // Narrows to one issue type when arriving from a Dashboard opportunity. Applied
+    // only if it actually matches something — a stale link (an opportunity stored
+    // under an older issueType name) then degrades to the category view instead of
+    // stranding the seller on an empty page.
+    if (filterType) {
+      const ofType = filtered.filter(item => groupKeyForTask(item).endsWith(`:${filterType}`));
+      if (ofType.length > 0) filtered = ofType;
+    }
 
-  // Group by real severity (high/medium - the categorization never produces 'low' today,
-  // so that group simply won't render unless a task with that severity actually exists).
-  const severitiesPresent = useMemo(
-    () => new Set(transformedTasks.map(t => t.severity)),
-    [transformedTasks]
+    // Narrows to one product when arriving from a "top products to fix" row. Same
+    // degrade-rather-than-strand rule.
+    if (filterAsin) {
+      const ofAsin = filtered.filter(item => item.asin === filterAsin);
+      if (ofAsin.length > 0) filtered = ofAsin;
+    }
+
+    return filtered;
+  }, [transformedTasks, searchQuery, filterCategory, filterType, filterAsin, filterStatus, completedTasks]);
+
+  // True only when the deep-linked type really narrowed the list, so the banner
+  // can't claim a filter that isn't in effect.
+  const linkedTypeMatched = useMemo(
+    () => !!filterType && transformedTasks.some(item => groupKeyForTask(item).endsWith(`:${filterType}`)),
+    [filterType, transformedTasks]
   );
-  const groupedTasks = useMemo(() => {
-    const groups = { high: [], medium: [], low: [] };
-    filteredAndSortedData.forEach(item => {
-      (groups[item.severity] || groups.medium).push(item);
-    });
-    return groups;
-  }, [filteredAndSortedData]);
+
+  const linkedAsinMatched = useMemo(
+    () => !!filterAsin && transformedTasks.some(item => item.asin === filterAsin),
+    [filterAsin, transformedTasks]
+  );
+
+  // Clears whichever deep-link narrowing is active and drops it from the URL.
+  const clearDeepLink = () => {
+    setFilterType(null);
+    setFilterAsin(null);
+    setFilterCategory('all');
+    const next = new URLSearchParams(searchParams);
+    next.delete('category');
+    next.delete('type');
+    next.delete('asin');
+    setSearchParams(next, { replace: true });
+  };
+
+  // High impact / Quick wins / Everything else. Computed from the FILTERED list so
+  // narrowing to one section re-buckets within that section, and from completedTasks
+  // so a ticked-off task doesn't hold a "do this first" slot.
+  const groupedTasks = useMemo(
+    () => selectBuckets(filteredAndSortedData, { completedTaskIds: completedTasks }),
+    [filteredAndSortedData, completedTasks]
+  );
+
+  // An empty bucket is hidden rather than rendered as a permanently-empty group.
+  const bucketsPresent = useMemo(
+    () => new Set(BUCKET_ORDER.filter(id => (groupedTasks[id] || []).length > 0)),
+    [groupedTasks]
+  );
+
+  const groupsById = useMemo(() => indexGroups(taskGroups), [taskGroups]);
+
+  // "1 of 93 keywords spending money with zero sales · A$187.41 total" — shown on
+  // highlighted rows so a A$26.37 task reads as part of the Dashboard's A$187.41,
+  // rather than looking like the two pages disagree.
+  const getGroupContext = (item) => {
+    const group = groupsById.get(groupKeyForTask(item));
+    if (!group || group.count <= 1) return null;
+    const money = group.totalAmount > 0
+      ? ` · ${formatCurrencyWithLocale(group.totalAmount, currency)} total`
+      : '';
+    return `1 of ${group.count} · ${group.title}${money}`;
+  };
 
   const toggleGroup = (groupId) => {
     setExpandedGroups(prev => ({ ...prev, [groupId]: !prev[groupId] }));
@@ -400,7 +475,7 @@ export default function Tasks() {
   };
 
   const exportRowsToCSV = (rows, filenameSuffix) => {
-    const headers = ['Product', 'ASIN', 'Error Category', 'Error', 'How To Solve', 'Status'];
+    const headers = ['Product', 'ASIN', 'Error Category', 'Error', 'How To Solve', 'Amount', 'Estimated', 'Status'];
     const csvContent = [
       headers.join(','),
       ...rows.map(item => [
@@ -409,6 +484,10 @@ export default function Tasks() {
         item.errorCategory,
         `"${item.error.replace(/"/g, '""')}"`, // Escape quotes in error message
         `"${item.howToSolve.replace(/"/g, '""')}"`, // Escape quotes in how to solve
+        item.amount > 0 ? `"${formatCurrencyWithLocale(item.amount, currency)}"` : '', // Quoted - locale formatting adds commas
+        // The on-screen amount carries a '*' when it's an estimate; keep that
+        // caveat in the export rather than losing it on download.
+        item.amount > 0 && item.amountIsEstimated ? 'Yes' : '',
         completedTasks.has(item.taskId) ? 'Completed' : 'Pending'
       ].join(','))
     ].join('\n');
@@ -440,13 +519,11 @@ export default function Tasks() {
     dispatch(fetchTasks());
   };
 
-  const getSeverityColor = (severity) => {
-    switch (severity.toLowerCase()) {
-      case 'high':
+  const getBucketColor = (bucketId) => {
+    switch (bucketId) {
+      case BUCKET.HIGH_IMPACT:
         return { color: '#f87171', background: 'rgba(239, 68, 68, 0.2)', border: 'rgba(239, 68, 68, 0.3)' };
-      case 'medium':
-        return { color: '#fbbf24', background: 'rgba(251, 191, 36, 0.2)', border: 'rgba(251, 191, 36, 0.3)' };
-      case 'low':
+      case BUCKET.QUICK_WINS:
         return { color: '#22c55e', background: 'rgba(34, 197, 94, 0.2)', border: 'rgba(34, 197, 94, 0.3)' };
       default:
         return { color: '#9ca3af', background: 'rgba(156, 163, 175, 0.2)', border: 'rgba(156, 163, 175, 0.3)' };
@@ -570,6 +647,38 @@ export default function Tasks() {
         </div>
       </div>
 
+      {/* Arrived from a Dashboard opportunity or a "top products to fix" row —
+          make the narrowing visible and undoable. */}
+      {(linkedTypeMatched || linkedAsinMatched) && (
+        <div
+          className="flex items-center gap-2 flex-wrap mb-3 px-3.5 py-2.5 rounded-xl border text-[13px]"
+          style={{ borderColor: COLORS.border, background: 'rgba(59,130,246,.07)', color: COLORS.textSecondary }}
+        >
+          <span>
+            {linkedAsinMatched ? (
+              <>
+                Showing only <strong style={{ color: COLORS.textPrimary }}>{filterAsin}</strong>
+                {' '}— every open issue on that product.
+              </>
+            ) : (
+              <>
+                Showing only <strong style={{ color: COLORS.textPrimary }}>
+                  {groupsById.get(`${filterCategory}:${filterType}`)?.title || filterType}
+                </strong> — the tasks behind that dashboard figure.
+              </>
+            )}
+          </span>
+          <button
+            type="button"
+            onClick={clearDeepLink}
+            className="px-2.5 py-1 rounded-lg text-xs border transition-colors"
+            style={{ borderColor: COLORS.borderStrong, color: COLORS.textSecondary, background: 'transparent' }}
+          >
+            Show all tasks
+          </button>
+        </div>
+      )}
+
       {/* Category filter - pill tabs, categories derived from real task data */}
       <div className="flex gap-1.5 flex-wrap mb-3">
         {categories.map(category => {
@@ -578,7 +687,7 @@ export default function Tasks() {
             <button
               key={category}
               type="button"
-              onClick={() => setFilterCategory(category)}
+              onClick={() => { setFilterCategory(category); setFilterType(null); setFilterAsin(null); }}
               className="px-[13px] py-[7px] rounded-full text-xs font-medium border transition-colors"
               style={{
                 borderColor: isOn ? COLORS.accent : COLORS.border,
@@ -655,16 +764,18 @@ export default function Tasks() {
         </span>
       </div>
 
-      {/* Priority groups - real severity field, previously computed but unused */}
+      {/* High impact / Quick wins / Everything else */}
       <div className="flex flex-col gap-3.5">
-        {SEVERITY_ORDER.filter(id => severitiesPresent.has(id)).map(groupId => {
+        {BUCKET_ORDER.filter(id => bucketsPresent.has(id)).map(groupId => {
           const items = groupedTasks[groupId] || [];
           const isOpen = expandedGroups[groupId];
           const displayLimit = groupDisplayLimits[groupId];
           const visibleItems = items.slice(0, displayLimit);
           const remaining = items.length - visibleItems.length;
           const pendingInGroup = items.filter(i => !completedTasks.has(i.taskId)).length;
-          const sc = getSeverityColor(groupId);
+          const recoverableInGroup = items.reduce((sum, i) => sum + (i.amount || 0), 0);
+          const sc = getBucketColor(groupId);
+          const subtitle = BUCKET_SUBTITLES[groupId];
 
           return (
             <div key={groupId} className="rounded-2xl border overflow-hidden" style={{ borderColor: COLORS.border, background: COLORS.surface }}>
@@ -675,9 +786,17 @@ export default function Tasks() {
                   className="flex items-center gap-3 flex-1 min-w-0 text-left"
                 >
                   <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background: sc.color }} />
-                  <span className="text-base font-semibold" style={{ color: COLORS.textPrimary }}>{SEVERITY_LABELS[groupId]}</span>
+                  <span className="text-base font-semibold" style={{ color: COLORS.textPrimary }}>{BUCKET_LABELS[groupId]}</span>
                   <span className="px-2 py-0.5 rounded-full text-[11px] font-bold flex-shrink-0" style={{ background: sc.background, color: sc.color }}>{items.length}</span>
+                  {subtitle && (
+                    <span className="text-[12px] flex-shrink-0" style={{ color: COLORS.textMuted }}>{subtitle}</span>
+                  )}
                   <span className="flex-1" />
+                  {recoverableInGroup > 0 && (
+                    <span className="text-[13px] font-semibold flex-shrink-0" style={{ color: COLORS.good }}>
+                      {formatCurrencyWithLocale(recoverableInGroup, currency)} recoverable
+                    </span>
+                  )}
                   <span className="text-[13px] flex-shrink-0" style={{ color: COLORS.textSecondary }}>{pendingInGroup} pending</span>
                   <ChevronRight size={16} style={{ color: COLORS.textMuted, transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s', flexShrink: 0 }} />
                 </button>
@@ -756,8 +875,23 @@ export default function Tasks() {
                           <span style={{ color: COLORS.textMuted }}>How to fix — </span>
                           <FormattedHowToSolve text={item.howToSolve} />
                         </div>
+                        {groupId !== BUCKET.EVERYTHING_ELSE && getGroupContext(item) && (
+                          <div className="text-[11px] mt-1.5" style={{ color: COLORS.textMuted }}>
+                            {getGroupContext(item)}
+                          </div>
+                        )}
                       </div>
-                      <div className="flex-none text-right">
+                      <div className="flex-none text-right flex flex-col items-end gap-1.5">
+                        {item.amount > 0 && (
+                          <span className="text-sm font-bold tabular-nums whitespace-nowrap" style={{ color: COLORS.good }}>
+                            {formatCurrencyWithLocale(item.amount, currency)}{item.amountIsEstimated ? '*' : ''}
+                          </span>
+                        )}
+                        {formatEffort(item.effortMinutes) && (
+                          <span className="text-[11px] whitespace-nowrap" style={{ color: COLORS.textMuted }}>
+                            {formatEffort(item.effortMinutes)}
+                          </span>
+                        )}
                         <span
                           className="inline-block text-[11px] font-semibold px-2 py-1 rounded-full whitespace-nowrap"
                           style={completedTasks.has(item.taskId)

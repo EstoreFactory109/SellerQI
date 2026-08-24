@@ -22,7 +22,7 @@ const AsinWiseSalesRun = require('../../models/finance/AsinWiseSalesRunModel.js'
 const AsinWiseSalesItem = require('../../models/finance/AsinWiseSalesItemModel.js');
 const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
 const DataFetchTracking = require('../../models/system/DataFetchTrackingModel.js');
-const { computeProfitabilityAmount, computeSponsoredAdsAmount, computeBuyBoxBenchmark, computeBuyBoxLostRevenueAmount } = require('./RecoverableAmountUtils.js');
+const { computeProfitabilityAmount, computeSponsoredAdsAmount, computeBuyBoxBenchmark, computeBuyBoxLostRevenueAmount, computeBuyBoxProfitImpact } = require('./RecoverableAmountUtils.js');
 
 // Chunk size for yielding to event loop during large data processing
 const YIELD_CHUNK_SIZE = 500;
@@ -630,6 +630,10 @@ const calculateSponsoredAdsErrors = (
                 const existing = aggregatedKeywordsMap.get(uniqueKey);
                 existing.cost += parseFloat(keyword.cost) || 0;
                 existing.attributedSales30d += parseFloat(keyword.attributedSales30d) || 0;
+                // clicks/impressions are aggregated too, so the task text can state
+                // the real click count instead of a hardcoded-looking 0.
+                existing.clicks += parseInt(keyword.clicks, 10) || 0;
+                existing.impressions += parseInt(keyword.impressions, 10) || 0;
             } else {
                 aggregatedKeywordsMap.set(uniqueKey, {
                     keyword: keyword.keyword,
@@ -639,7 +643,9 @@ const calculateSponsoredAdsErrors = (
                     adGroupName: keyword.adGroupName,
                     adGroupId: keyword.adGroupId,
                     cost: parseFloat(keyword.cost) || 0,
-                    attributedSales30d: parseFloat(keyword.attributedSales30d) || 0
+                    attributedSales30d: parseFloat(keyword.attributedSales30d) || 0,
+                    clicks: parseInt(keyword.clicks, 10) || 0,
+                    impressions: parseInt(keyword.impressions, 10) || 0
                 });
             }
         });
@@ -661,6 +667,8 @@ const calculateSponsoredAdsErrors = (
                 adGroupName: keyword.adGroupName,
                 spend: keyword.cost,
                 sales: keyword.attributedSales30d,
+                clicks: keyword.clicks,
+                impressions: keyword.impressions,
                 errorType: 'wasted_spend_keyword',
                 source: 'keyword',
                 amount
@@ -1021,13 +1029,19 @@ const analyseData = async (data, userId = null) => {
         });
     }
 
-    // Sum recoverable $ across inventory error records (unfulfillable, LTSF, stranded)
+    // Inventory splits into two DIFFERENT quantities, which must not be added:
+    //  - LTSF is real storage fees already charged -> a profit cost
+    //  - unfulfillable/stranded stock value is capital locked up -> not profit
+    // Mixing them let a single ASIN's $7,902 of dead stock outrank every genuine
+    // profit issue by 62x. See RecoverableAmountUtils for the full reasoning.
     let totalInventoryRecoverableAmount = 0;
+    let totalInventoryCapitalAmount = 0;
     inventoryPlanningMap.forEach(item => {
-        totalInventoryRecoverableAmount += (item.longTermStorageFees?.amount || 0) + (item.unfulfillable?.amount || 0);
+        totalInventoryRecoverableAmount += item.longTermStorageFees?.amount || 0;
+        totalInventoryCapitalAmount += item.unfulfillable?.capitalAmount || 0;
     });
     strandedInventoryMap.forEach(item => {
-        totalInventoryRecoverableAmount += item.amount || 0;
+        totalInventoryCapitalAmount += item.capitalAmount || 0;
     });
     const inboundNonComplianceMap = new Map();
     if (activeInventoryAnalysis.inboundNonCompliance) {
@@ -1071,27 +1085,58 @@ const analyseData = async (data, userId = null) => {
         // used to estimate lost revenue for the ones that don't, without an external benchmark.
         const { benchmarkCVR, benchmarkPrice } = computeBuyBoxBenchmark(data.BuyBoxData.asinBuyBoxData);
 
+        // Per-ASIN margin, so lost REVENUE can be converted into the profit it
+        // actually represents. profitibilityData is computed earlier in this same
+        // function, so this needs no extra query.
+        const marginByAsin = new Map();
+        let totalGrossProfit = 0;
+        let totalSalesForMargin = 0;
+        (Array.isArray(profitibilityData) ? profitibilityData : []).forEach((row) => {
+            if (!row || !row.asin) return;
+            if (typeof row.profitMargin === 'number') marginByAsin.set(row.asin, row.profitMargin);
+            totalGrossProfit += row.grossProfit || 0;
+            totalSalesForMargin += row.sales || 0;
+        });
+        // Fallback for an ASIN with no sales history of its own.
+        const accountAverageMargin = totalSalesForMargin > 0
+            ? (totalGrossProfit / totalSalesForMargin) * 100
+            : 0;
+
         // Use MCP BuyBox data - filter products with buyBoxPercentage = 0
         productsWithOutBuyboxError = data.BuyBoxData.asinBuyBoxData
             .filter((p) => p && p.buyBoxPercentage === 0 && p.childAsin && activeProductSet.has(p.childAsin))
-            .map((p) => ({
-                asin: p.childAsin,
-                data: {
-                    status: "Error",
-                    asin: p.childAsin,
-                    buyBoxPercentage: p.buyBoxPercentage,
-                    pageViews: p.pageViews,
+            .map((p) => {
+                const lostRevenueAmount = computeBuyBoxLostRevenueAmount({
                     sessions: p.sessions,
-                    amount: computeBuyBoxLostRevenueAmount({
+                    actualRevenue: p.sales?.amount || 0,
+                    benchmarkCVR,
+                    benchmarkPrice
+                });
+                const profitMargin = marginByAsin.has(p.childAsin)
+                    ? marginByAsin.get(p.childAsin)
+                    : accountAverageMargin;
+
+                return {
+                    asin: p.childAsin,
+                    data: {
+                        status: "Error",
+                        asin: p.childAsin,
+                        buyBoxPercentage: p.buyBoxPercentage,
+                        pageViews: p.pageViews,
                         sessions: p.sessions,
-                        actualRevenue: p.sales?.amount || 0,
-                        benchmarkCVR,
-                        benchmarkPrice
-                    }),
-                    amountIsEstimated: true,
-                    estimatedFromSingleDaySnapshot: true
-                }
-            }));
+                        // Raw revenue kept for display — it's the more intuitive figure
+                        // ("you're missing ~$X of sales") even though it is not profit.
+                        lostRevenueAmount,
+                        profitMarginUsed: profitMargin,
+                        // `amount` is profit-equivalent, because that is what gets ranked
+                        // against real cash losses elsewhere. Counting full revenue here
+                        // overstated Buy Box roughly tenfold.
+                        amount: computeBuyBoxProfitImpact({ lostRevenue: lostRevenueAmount, profitMargin }),
+                        amountIsEstimated: true,
+                        estimatedFromSingleDaySnapshot: true
+                    }
+                };
+            });
         logger.info("Using MCP BuyBox data for products without buybox", {
             count: productsWithOutBuyboxError.length,
             totalProducts: data.BuyBoxData.totalProducts,
@@ -1648,6 +1693,8 @@ const analyseData = async (data, userId = null) => {
         totalProfitabilityRecoverableAmount: profitabilityErrorsData.totalAmount || 0,
         totalSponsoredAdsRecoverableAmount: sponsoredAdsErrorsData.totalAmount || 0,
         totalInventoryRecoverableAmount: totalInventoryRecoverableAmount || 0,
+        // Capital locked in unsellable stock — reported separately from profit.
+        totalInventoryCapitalAmount: totalInventoryCapitalAmount || 0,
         totalConversionRecoverableAmount: totalConversionRecoverableAmount || 0,
         ProductWiseSponsoredAds: activeProductWiseSponsoredAds,
         profitabilityErrorDetails: profitabilityErrorsData.errorDetails,
@@ -1708,10 +1755,11 @@ const analyseData = async (data, userId = null) => {
     logger.info(`Dashboard data processed successfully with ${activeProducts.length} active products`);
     
     // Call CreateTask service if userId is provided
+    let tasksRebuilt = false;
     if (userId) {
         try {
             logger.info(`Creating tasks for user: ${userId}`);
-            await CreateTaskService.createTasksFromCalculateServiceData(userId, {
+            const taskResult = await CreateTaskService.createTasksFromCalculateServiceData(userId, {
                 rankingProductWiseErrors: rankingProductWiseErrors,
                 conversionProductWiseErrors: conversionProductWiseErrors,
                 inventoryProductWiseErrors: inventoryProductWiseErrors,
@@ -1720,7 +1768,10 @@ const analyseData = async (data, userId = null) => {
                 AccountErrors: data.AccountData?.accountHealth || {},
                 TotalProducts: TotalProducts
             });
-            logger.info(`Tasks created successfully for user: ${userId}`);
+            // Only a full rebuild changes what the derived AI views summarise; stays
+            // false if task creation threw, so a failed build never triggers them.
+            tasksRebuilt = taskResult?.tasksRebuilt === true;
+            logger.info(`Tasks created successfully for user: ${userId}`, { tasksRebuilt });
         } catch (error) {
             logger.error("Error creating tasks:", {
                 message: error.message,
@@ -1734,7 +1785,7 @@ const analyseData = async (data, userId = null) => {
     const totalCalcTime = Date.now() - calcStartTime;
     logger.info(`[PERF] DashboardCalculation TOTAL time: ${totalCalcTime}ms`);
     logger.info("=== DashboardCalculation: Returning dashboard data ===");
-    return { dashboardData };
+    return { dashboardData, tasksRebuilt };
 };
 
 module.exports = {

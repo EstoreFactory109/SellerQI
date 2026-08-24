@@ -60,16 +60,17 @@ const SUNDAY_FUNCTIONS = {
         isCalculationService: true,
         runOrder: 101 // Runs after productIssues
     },
-    // AI-selected top 5-6 money-recovery actions. Must run AFTER issuesData so the
-    // issue arrays (and their recoverable $ amounts) it reads are fresh.
-    'topOpportunities': {
-        service: require('../AI/TopOpportunitiesService.js'),
-        functionName: 'calculateAndStoreTopOpportunities',
-        description: 'Top Opportunities (AI-ranked money recovery)',
-        apiDataKey: 'topOpportunities',
-        isCalculationService: true,
-        runOrder: 102 // Runs after issuesData
-    }
+    // ── The two AI views are NOT registered here, deliberately ──
+    // Both derive from TaskItem, and tasks are refreshed by addNewAccountHistory,
+    // which runs AFTER fetchScheduledApiData completes. A batch-5 service would
+    // therefore narrate the previous cycle's tasks. They are invoked directly after
+    // ScheduledIntegration.addNewAccountHistory instead, matching the order
+    // Integration.addNewAccountHistory already uses.
+    //
+    // Note they are not on a weekday schedule at all: they fire when a task REBUILD
+    // happens, since task renewal is a rolling per-account 7-day timer rather than a
+    // fixed day. Registering them here — on any day — would reintroduce the mismatch
+    // between a view and the tasks it describes. See the call site for the full note.
 };
 
 // Monday, Wednesday, Friday (3x/week) - Non-ads services that don't need daily freshness.

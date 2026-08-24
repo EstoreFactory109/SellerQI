@@ -60,9 +60,18 @@ const topOpportunitiesSchema = new mongoose.Schema({
     // at N issues and picked 6" message, and to evidence the token saving
     issuesConsidered: { type: Number, default: 0 },
 
-    // Naive sum of the selected amounts. Can double-count across groups and
-    // mixes measured with estimated figures — label it as an estimate in the UI.
+    // Naive sum of the SELECTED amounts only — a subset by definition. Do not use
+    // this for a headline like "Est. recoverable"; use accountRecoverableAmount.
     totalEstimatedRecovery: { type: Number, default: 0 },
+
+    // The account's whole POTENTIAL PROFIT IMPACT, de-duplicated per ASIN and shared
+    // with TopProducts so the Dashboard, Tasks page and product views cannot show a
+    // seller different totals. Not a sum of the groups above: a product's profit gap
+    // already contains its wasted ad spend, and that overlap crosses issue types.
+    potentialProfitImpact: { type: Number, default: 0 },
+
+    // Capital locked in unsellable stock — a different quantity, never added to profit.
+    capitalTiedUp: { type: Number, default: 0 },
 
     generatedAt: { type: Date, default: Date.now },
     source: {
@@ -100,6 +109,8 @@ topOpportunitiesSchema.statics.upsertForAccount = async function (userId, countr
                 candidatesConsidered: payload.candidatesConsidered || 0,
                 issuesConsidered: payload.issuesConsidered || 0,
                 totalEstimatedRecovery: payload.totalEstimatedRecovery || 0,
+                potentialProfitImpact: payload.potentialProfitImpact || 0,
+                capitalTiedUp: payload.capitalTiedUp || 0,
                 generatedAt: new Date(),
                 source: payload.source || 'schedule',
                 model: payload.model || '',
