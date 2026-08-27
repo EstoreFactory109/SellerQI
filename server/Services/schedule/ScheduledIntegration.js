@@ -2420,7 +2420,11 @@ class ScheduledIntegration {
                 const { getDefaultReportDateRange } = require('../../utils/reportDateRange.js');
                 const trackingRange = getDefaultReportDateRange(30);
                 try {
-                    const entry = await DataFetchTrackingService.startTracking(userId, Country, Region, { startDate: trackingRange.startDate, endDate: trackingRange.endDate }, sessionId);
+                    // startTrackingForRun, NOT startTracking: BullMQ re-runs a job whose lock
+                    // lapses (lockDuration 20min, maxStalledCount 3), so this line can execute up
+                    // to four times for ONE run. The plain create has no dedup, so each execution
+                    // used to leave another orphaned `started` doc behind.
+                    const entry = await DataFetchTrackingService.startTrackingForRun(userId, Country, Region, { startDate: trackingRange.startDate, endDate: trackingRange.endDate }, sessionId);
                     trackingEntryId = entry._id.toString();
                     logger.info('[ScheduledIntegration:InitPhase] Calendar tracking started', { trackingId: trackingEntryId, dayName: dayNames[dayOfWeek], dataRange: trackingRange });
                 } catch (te) {
@@ -2488,7 +2492,19 @@ class ScheduledIntegration {
         } catch (error) {
             logger.error(`[ScheduledIntegration:InitPhase] Failed for user ${userId}:`, error);
             if (loggingHelper) { loggingHelper.logFunctionError('ScheduledIntegration.InitPhase', error); await loggingHelper.endSession('failed'); }
-            return { success: false, error: error.message, statusCode: 500 };
+            // Carry trackingEntryId even on failure. It is created above, but used to be returned
+            // ONLY inside the success path's dataForNextPhase — so a throw after creation (e.g. in
+            // fetchMerchantListings, runFbaInventorySyncForMarketplace or writeSlice) lost the id
+            // for good. The worker still advances the chain on failure by design, so the pipeline
+            // reached sched_finalize looking entirely normal while `phaseData.trackingEntryId` was
+            // undefined; finalize's `if (trackingEntryId)` guard then skipped its whole closing
+            // block and the doc was orphaned from birth, silently. Nothing logged it.
+            return {
+                success: false,
+                error: error.message,
+                statusCode: 500,
+                dataForNextPhase: { trackingEntryId, sessionId }
+            };
         }
     }
 
@@ -4143,9 +4159,19 @@ class ScheduledIntegration {
                     if (failed.length === 0 && successful.length > 0) {
                         await DataFetchTrackingService.completeTracking(trackingEntryId);
                     } else if (failed.length > 0 && successful.length > 0) {
+                        // Compare-and-set on `status: 'started'`, matching markCompleted/markFailed.
+                        // A read-modify-write here would resurrect a doc that a supersede or the
+                        // stalled sweep had already closed, producing a `partial` row still
+                        // carrying `autoClosedStale: true`.
                         const DataFetchTracking = require('../../models/system/DataFetchTrackingModel');
-                        const entry = await DataFetchTracking.findById(trackingEntryId);
-                        if (entry) { entry.status = 'partial'; entry.errorMessage = `Partial: ${failed.length}/${totalServices} failed`; await entry.save(); }
+                        const updated = await DataFetchTracking.findOneAndUpdate(
+                            { _id: trackingEntryId, status: 'started' },
+                            { $set: { status: 'partial', errorMessage: `Partial: ${failed.length}/${totalServices} failed` } },
+                            { new: true }
+                        );
+                        if (!updated) {
+                            logger.warn('[ScheduledIntegration:FinalizePhase] Tracking entry already closed by someone else; leaving it alone', { trackingEntryId });
+                        }
                     } else {
                         await DataFetchTrackingService.failTracking(trackingEntryId, 'All services failed');
                     }

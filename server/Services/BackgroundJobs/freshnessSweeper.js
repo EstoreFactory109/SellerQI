@@ -1129,12 +1129,14 @@ async function sweepStalledPipelines() {
             // legitimately mid-flight keeps its JobStatus row warm. It also covers the
             // ads/finance `-pollN` job ids, which getAllPhaseJobIds does not enumerate.
             //
-            // producer.js used to be blind to exactly those ids, which is how it started a
-            // second run on top of a live one: 100 of 334 runs on the 10 async-engine accounts
-            // were marked stalled over 14 days, against 0 of 2,056 elsewhere. It now runs this
-            // SAME prefix query — see producer.hasLiveAccountPhase. Keep the two windows equal
-            // (PIPELINE_STALL_QUIET_MINUTES here, HEARTBEAT_STALE_MS there, both 60 min) or one
-            // will re-drive an account the other still considers alive.
+            // NOT the same check producer.hasLiveAccountPhase runs — an earlier comment here
+            // claimed it was, and that was wrong in both directions. This query has no `status`
+            // filter, so ANY recent row counts, including a terminal one; that is right HERE
+            // (this sweep only touches docs already frozen 9h, so being conservative costs
+            // nothing) but would be wrong in the producer, where it would block an account for an
+            // hour after a SUCCESSFUL finish. The producer instead asks BullMQ directly whether
+            // work is pending, which is the only signal that distinguishes "in flight" from
+            // "recently touched" — see producer.hasLiveAccountPhase.
             const live = await JobStatus.findOne({
                 jobId: { $regex: `^scheduled-${userId}-${country}-${region}` },
                 updatedAt: { $gt: quietBefore },
