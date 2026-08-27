@@ -19,14 +19,15 @@ const logger = require('../../utils/Logger');
  * 
  * Note: No servicesRan parameter - all calendar-affecting services run together on Mon/Wed/Fri
  */
-async function startTracking(userId, country, region, dataRange, sessionId = null) {
+async function startTracking(userId, country, region, dataRange, sessionId = null, producedBy = undefined) {
     try {
         const trackingEntry = await DataFetchTracking.createTrackingEntry(
             userId,
             country,
             region,
             dataRange,
-            sessionId
+            sessionId,
+            producedBy
         );
         
         logger.info('[DataFetchTracking] Started tracking data fetch', {
@@ -52,6 +53,84 @@ async function startTracking(userId, country, region, dataRange, sessionId = nul
     }
 }
 
+// Marks docs opened by the scheduled pipeline's `sched_init`, so the supersede sweep below only
+// ever closes docs it owns. See the `producedBy` field comment on the model for why that matters.
+const SCHEDULED_OWNER = 'sched_init';
+
+/**
+ * Open a tracking doc for a scheduled run, closing any the previous run abandoned.
+ *
+ * WHY THIS EXISTS. `createTrackingEntry` is a bare `new this({...}).save()` — no upsert, no dedup,
+ * and both compound indexes on the collection are non-unique. So every execution of `sched_init`
+ * created another `started` doc and simply walked away from the last one.
+ *
+ * That is not a rare path. worker.js runs BullMQ with `lockDuration: 20min` and
+ * `maxStalledCount: 3`, so a worker death, a blocked event loop or a hit lock-extension ceiling
+ * makes BullMQ re-run the SAME `sched_init` up to four times, ~20 minutes apart. Every execution
+ * left another doc open, and ~9h later sweepStalledPipelines relabelled all of them
+ * `stalled-pipeline-autorecovered` — which is the number that gets read as "stuck at calc_review".
+ * Observed verbatim on one production account: 06:01:02 / 06:21:06 / 06:41:11 / 07:01:17. BullMQ's
+ * retry never goes through the producer, so no producer-side dedup can see any of it.
+ *
+ * WHY CLOSE-AND-CREATE RATHER THAN REUSE. Reusing the open doc looks tidier and is wrong twice
+ * over. Nothing distinguishes "BullMQ retried this job" from "the next hourly run started over a
+ * dead one" at this layer, and reusing in the second case leaves `fetchedAt` pinned to the earlier,
+ * abandoned attempt — misreporting when the data was actually gathered, which is the one question
+ * this collection exists to answer. Creating a fresh doc keeps `fetchedAt` honest and still leaves
+ * exactly one open doc per account, which is the whole point.
+ *
+ * SCOPED BY `producedBy` ON PURPOSE. Five code paths write this collection, and the onboarding
+ * integration pipeline runs on a SEPARATE BullMQ queue that the scheduled producer's liveness
+ * check cannot see. An unscoped sweep would close a live onboarding run's doc out from under it
+ * and the two pipelines would overwrite each other's outcome. Docs predating this field have no
+ * `producedBy`, so they are left for the 9h sweep rather than being adopted here.
+ *
+ * @returns {Promise<Object>} the newly created tracking entry
+ */
+async function startTrackingForRun(userId, country, region, dataRange, sessionId = null) {
+    try {
+        const abandoned = await DataFetchTracking.find({
+            User: userId,
+            country,
+            region,
+            status: 'started',
+            producedBy: SCHEDULED_OWNER,
+        }).select('_id').lean();
+
+        if (abandoned.length) {
+            await supersedeDocs(abandoned.map(d => d._id));
+            logger.info('[DataFetchTracking] Closed abandoned tracking entries before starting a new run', {
+                userId, country, region, count: abandoned.length,
+            });
+        }
+    } catch (error) {
+        // Non-fatal: fall through and open the new doc anyway. Leaving a stale doc open is a
+        // reporting problem; refusing to start a run is a customer one.
+        logger.warn('[DataFetchTracking] Could not close open tracking entries; opening a new one anyway', {
+            userId, country, region, error: error.message,
+        });
+    }
+
+    return startTracking(userId, country, region, dataRange, sessionId, SCHEDULED_OWNER);
+}
+
+/** Close abandoned `started` docs. The status re-filter is a CAS guard so a doc that legitimately
+ *  finalizes between the read and this write is never clobbered. */
+async function supersedeDocs(ids) {
+    if (!ids || !ids.length) return;
+    await DataFetchTracking.updateMany(
+        { _id: { $in: ids }, status: 'started' },
+        {
+            $set: {
+                status: 'failed',
+                errorMessage: 'superseded-by-newer-run',
+                autoClosedStale: true,
+                autoClosedAt: new Date(),
+            },
+        }
+    );
+}
+
 /**
  * Mark a tracking entry as completed
  * @param {string} trackingId - The tracking entry ID
@@ -64,8 +143,17 @@ async function completeTracking(trackingId) {
             throw new Error(`Tracking entry not found: ${trackingId}`);
         }
         
-        await trackingEntry.markCompleted();
-        
+        // null = the doc was no longer `started`, i.e. something else already closed it (a
+        // supersede, or the stalled sweep). Not an error — but worth seeing, because a run
+        // finishing against a doc it no longer owns means two chains overlapped.
+        const updated = await trackingEntry.markCompleted();
+        if (!updated) {
+            logger.warn('[DataFetchTracking] Tracking entry was already closed by someone else; leaving it alone', {
+                trackingId, status: trackingEntry.status, errorMessage: trackingEntry.errorMessage,
+            });
+            return trackingEntry;
+        }
+
         logger.info('[DataFetchTracking] Completed tracking data fetch', {
             trackingId,
             userId: trackingEntry.User,
@@ -98,8 +186,16 @@ async function failTracking(trackingId, errorMessage) {
             throw new Error(`Tracking entry not found: ${trackingId}`);
         }
         
-        await trackingEntry.markFailed(errorMessage);
-        
+        // null = already closed by someone else. See completeTracking for why this is a warn, not
+        // an error.
+        const updated = await trackingEntry.markFailed(errorMessage);
+        if (!updated) {
+            logger.warn('[DataFetchTracking] Tracking entry was already closed by someone else; leaving it alone', {
+                trackingId, status: trackingEntry.status, attemptedError: errorMessage,
+            });
+            return trackingEntry;
+        }
+
         logger.info('[DataFetchTracking] Failed tracking data fetch', {
             trackingId,
             userId: trackingEntry.User,
@@ -206,6 +302,8 @@ async function getMostRecentFetch(userId, country, region) {
 
 module.exports = {
     startTracking,
+    startTrackingForRun,
+    SCHEDULED_OWNER,
     completeTracking,
     failTracking,
     getLatestFetch,

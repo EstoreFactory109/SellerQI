@@ -128,6 +128,36 @@ const dataFetchTrackingSchema = new mongoose.Schema({
     sessionId: {
         type: String,
         index: true
+    },
+    // Set when a doc is closed by something OTHER than its own pipeline: freshnessSweeper's
+    // stalled-pipeline sweep, or DataFetchTrackingService superseding an abandoned run.
+    //
+    // These must be declared. Both writers already set them, but this schema is strict (no
+    // `strict: false` here, no global override), so Mongoose was silently dropping both and they
+    // never reached Mongo at all. Not theoretical: a production query filtering on `autoClosedAt`
+    // returned zero rows for a window that definitely contained closures. The sweeper's unit test
+    // asserts the update OBJECT rather than what Mongo receives, so it could not have caught this.
+    autoClosedStale: {
+        type: Boolean,
+        default: undefined
+    },
+    autoClosedAt: {
+        type: Date,
+        default: undefined
+    },
+    // Which pipeline opened this doc. FIVE different code paths create entries here — the
+    // scheduled pipeline's `sched_init`, the onboarding integration's `init` (a SEPARATE BullMQ
+    // queue, so the scheduled producer's liveness check cannot see it), two legacy monolithic
+    // runners, and a backfill script — and they can all be open for the same
+    // (User, country, region) at once.
+    //
+    // Without this, the scheduled pipeline's supersede sweep would close a live onboarding run's
+    // doc, and whichever pipeline finished last would overwrite the other's outcome. Anything that
+    // closes docs it did not open MUST filter on this.
+    producedBy: {
+        type: String,
+        default: undefined,
+        index: true
     }
 }, {
     timestamps: true,
@@ -182,7 +212,7 @@ dataFetchTrackingSchema.statics.getFetchHistory = function(userId, country, regi
 
 // Static method to create a new tracking entry
 // Note: No servicesRan parameter - all calendar-affecting services run on Mon/Wed/Fri
-dataFetchTrackingSchema.statics.createTrackingEntry = async function(userId, country, region, dataRange, sessionId = null) {
+dataFetchTrackingSchema.statics.createTrackingEntry = async function(userId, country, region, dataRange, sessionId = null, producedBy = undefined) {
     const mongoose = require('mongoose');
     const now = new Date();
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -209,23 +239,43 @@ dataFetchTrackingSchema.statics.createTrackingEntry = async function(userId, cou
             endDate: dataRange.endDate
         },
         status: 'started',
-        sessionId: sessionId
+        sessionId: sessionId,
+        producedBy: producedBy
     });
-    
+
     return await entry.save();
 };
 
 // Instance method to mark as completed
+// COMPARE-AND-SET on `status: 'started'`, not a blind write.
+//
+// A doc can be closed by someone other than its own pipeline — freshnessSweeper's stalled sweep, or
+// DataFetchTrackingService superseding an abandoned run. Without the guard, a late finalize would
+// resurrect a doc already closed as `superseded-by-newer-run`, leaving a row that is `completed`
+// while still carrying `autoClosedStale: true` and a supersede errorMessage, and leaving the run
+// that actually superseded it open forever.
+//
+// That is reachable: BullMQ's stalled-reclaim can run a second `sched_init` while the first is
+// still alive, and both chains then race on the same deterministic phase ids.
+//
+// Returns the updated doc, or null when the doc was already closed — callers treat null as "someone
+// else finished this", not as an error.
 dataFetchTrackingSchema.methods.markCompleted = async function() {
-    this.status = 'completed';
-    return await this.save();
+    return await this.constructor.findOneAndUpdate(
+        { _id: this._id, status: 'started' },
+        { $set: { status: 'completed' } },
+        { new: true }
+    );
 };
 
 // Instance method to mark as failed
+/** Same compare-and-set as markCompleted — see the comment there. */
 dataFetchTrackingSchema.methods.markFailed = async function(errorMessage) {
-    this.status = 'failed';
-    this.errorMessage = errorMessage;
-    return await this.save();
+    return await this.constructor.findOneAndUpdate(
+        { _id: this._id, status: 'started' },
+        { $set: { status: 'failed', errorMessage: errorMessage } },
+        { new: true }
+    );
 };
 
 const DataFetchTracking = mongoose.model('DataFetchTracking', dataFetchTrackingSchema);
