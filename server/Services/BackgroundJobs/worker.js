@@ -33,6 +33,8 @@ const { ScheduledIntegration } = require('../schedule/ScheduledIntegration.js');
 const scheduledPhases = require('./scheduledPhases.js');
 const { runWithLockExtension: runWithLockExtensionShared, resolveCeiling } = require('./lockExtension.js');
 const v8 = require('v8');
+const fs = require('fs');
+const path = require('path');
 
 // Worker configuration
 const WORKER_CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || '3', 10); // Process 3 jobs concurrently
@@ -53,19 +55,80 @@ const WORKER_NAME = envWorkerName || pidBasedName;
 // available — RSS climbing with uptime — pointed at a memory leak which turned out not to be the
 // cause of the symptom under investigation. Absence of evidence read as evidence.
 //
+// WHY logger IS NOT ENOUGH HERE, and why the first version of this was useless.
+//
+// The handlers below shipped, and then this process exited with code 1 roughly 340 times across
+// six instances in 46 hours WITHOUT RECORDING A SINGLE REASON. Both places a reason could land are
+// incapable of holding it:
+//
+//   1. `logger.error` writes via console.error -> process.stderr, which under PM2
+//      `exec_mode: 'cluster'` is an IPC pipe. Node documents pipe writes as synchronous on Linux
+//      (asynchronous on macOS), so this is a real hazard for a dev box and a *possible* one in
+//      production rather than a proven loss — measured, not assumed. The short pre-exit delay
+//      below costs nothing and removes the doubt.
+//   2. Logger's file mirror (server/logs.txt) defaults to OFF when NODE_ENV=production, which the
+//      ecosystem file sets. That file's last entry is two months old.
+//
+// So: write the reason SYNCHRONOUSLY with appendFileSync — which survives process.exit — before
+// touching the logger, and only then exit, after a short delay so the pipe can drain too.
+const FATAL_LOG_PATH = path.join(__dirname, '..', '..', '..', 'logs', 'worker-fatal.log');
+const FATAL_EXIT_DELAY_MS = Math.max(0, parseInt(process.env.WORKER_FATAL_EXIT_DELAY_MS || '250', 10) || 250);
+
+// Set by recordFatal so the exit hook below can tell "we know why" from "it just vanished".
+let fatalReasonRecorded = false;
+
+/** Record a fatal reason somewhere it cannot be lost. Must never throw — it runs on the way out. */
+function recordFatal(kind, detail) {
+    fatalReasonRecorded = true;
+    const text = detail && detail.stack ? detail.stack : String(detail);
+    const line = `[${new Date().toISOString()}] [${WORKER_NAME}] ${kind}: ${text}\n`;
+    try {
+        fs.mkdirSync(path.dirname(FATAL_LOG_PATH), { recursive: true });
+        fs.appendFileSync(FATAL_LOG_PATH, line);
+    } catch (_) { /* a failure here must not mask the original fault */ }
+    try { logger.error(`[Worker:${WORKER_NAME}] ${kind}`, detail); } catch (_) {}
+}
+
+/**
+ * Exit, but give the async stderr pipe a chance to drain first.
+ *
+ * The timer is deliberately NOT unref'd: holding the loop open for a moment is the entire point.
+ * `process.exitCode` is set as well, so the right code is still used if the process happens to end
+ * on its own before the timer fires.
+ */
+function exitAfterFlush(code) {
+    process.exitCode = code;
+    setTimeout(() => process.exit(code), FATAL_EXIT_DELAY_MS);
+}
+
+// THE BACKSTOP, and the one that finally answers "why did it exit?".
+//
+// `exit` fires for EVERY termination that runs JS at all — an explicit process.exit anywhere in the
+// dependency tree, a natural exit because the event loop drained, a rethrow, a signal handled
+// elsewhere. Only SIGKILL and a hard abort skip it. So if the fleet keeps churning and this hook
+// records nothing, the process is being killed outright and the search moves outside Node entirely.
+// Either answer is progress; previously both looked identical.
+//
+// Only synchronous work is allowed here, which is exactly why recordFatal uses appendFileSync.
+process.on('exit', (code) => {
+    if (code === 0 && !fatalReasonRecorded) return;   // ordinary clean stop, nothing to explain
+    if (fatalReasonRecorded) return;                  // already written by a more specific handler
+    recordFatal('UNEXPLAINED exit', `code=${code}, uptime=${(process.uptime() / 60).toFixed(1)}min, rssMB=${Math.round(process.memoryUsage().rss / 1048576)}`);
+});
+
 // Registered at MODULE TOP LEVEL on purpose, so a failure during startup is covered too.
 process.on('uncaughtException', (err) => {
-    // Pass the Error as an ARGUMENT — utils/Logger renders a top-level Error as its stack.
-    logger.error(`[Worker:${WORKER_NAME}] FATAL uncaughtException — exiting`, err);
+    recordFatal('FATAL uncaughtException', err);
     // Non-zero so PM2 treats this as a crash and restarts, rather than as a clean stop.
-    process.exit(1);
+    exitAfterFlush(1);
 });
 
 process.on('unhandledRejection', (reason) => {
     const err = reason instanceof Error ? reason : new Error(`Non-Error rejection: ${String(reason)}`);
-    logger.error(`[Worker:${WORKER_NAME}] FATAL unhandledRejection — exiting`, err);
-    process.exit(1);
+    recordFatal('FATAL unhandledRejection', err);
+    exitAfterFlush(1);
 });
+
 
 /**
  * Periodic heap/RSS sample.
@@ -710,13 +773,16 @@ async function startWorker() {
         }
         isShuttingDown = true;
 
+        // Recorded synchronously as well as logged: this is the line that tells a deliberate
+        // restart apart from a crash, and stdout is the one place it cannot survive an exit.
+        recordFatal(`SIGNAL ${signal} received`, 'graceful shutdown requested');
         logger.info(`[Worker:${WORKER_NAME}] Received ${signal}, closing worker gracefully (max ${SHUTDOWN_GRACE_MS / 60000} min)...`);
 
         let hasExited = false;
         const forceExit = () => {
             if (!hasExited) {
                 hasExited = true;
-                logger.warn(`[Worker:${WORKER_NAME}] Shutdown timeout reached - forcing exit. Active job will be retried after lock expiry.`);
+                recordFatal('FATAL shutdown timeout', 'forcing exit; active job will be retried after lock expiry');
                 process.exit(1);
             }
         };
@@ -738,7 +804,7 @@ async function startWorker() {
                 clearTimeout(shutdownTimeout);
                 if (!hasExited) {
                     hasExited = true;
-                    logger.error(`[Worker:${WORKER_NAME}] Error during graceful shutdown:`, err.message);
+                    recordFatal('FATAL graceful-shutdown error', err);
                     process.exit(1);
                 }
             });
@@ -760,7 +826,7 @@ startWorker()
         module.exports = { worker };
     })
     .catch((error) => {
-        logger.error(`[Worker:${WORKER_NAME}] Failed to start worker:`, error);
-        process.exit(1);
+        recordFatal('FATAL startup failure', error);
+        exitAfterFlush(1);
     });
 
