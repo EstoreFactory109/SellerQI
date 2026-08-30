@@ -39,6 +39,24 @@ function safeDate(timestamp) {
   return isNaN(d.getTime()) ? null : d;
 }
 
+// API 2025-03-31.basil moved current_period_start/end from the Subscription onto its
+// items; stripe-node 18.x pins a Basil version, so a retrieved subscription exposes them
+// only on the items. Read items first, fall back to the legacy top-level fields.
+function getSubscriptionPeriod(subscription) {
+  if (!subscription) return { start: null, end: null };
+  const itemPeriods = (subscription.items?.data || [])
+    .map((item) => ({ start: item.current_period_start, end: item.current_period_end }))
+    .filter((p) => typeof p.end === 'number');
+  if (itemPeriods.length) {
+    const furthest = itemPeriods.reduce((a, b) => (b.end > a.end ? b : a));
+    return { start: furthest.start ?? null, end: furthest.end ?? null };
+  }
+  return {
+    start: typeof subscription.current_period_start === 'number' ? subscription.current_period_start : null,
+    end: typeof subscription.current_period_end === 'number' ? subscription.current_period_end : null,
+  };
+}
+
 async function getCheckoutSessionIdForSubscription(stripeClient, customerId, subscriptionId) {
   try {
     const sessions = await stripeClient.checkout.sessions.list({
@@ -178,6 +196,7 @@ async function main() {
 
     const planType = planTypeFromSubscription(stripeSubscription);
     const isTrialing = stripeSubscription.status === 'trialing';
+    const subscriptionPeriod = getSubscriptionPeriod(stripeSubscription);
     const sessionId = await getCheckoutSessionIdForSubscription(stripe, customerId, stripeSubscription.id);
 
     const subscriptionData = {
@@ -191,10 +210,12 @@ async function main() {
       paymentStatus: isTrialing ? 'no_payment_required' : 'paid',
       amount: price.unit_amount,
       currency: price.currency,
-      currentPeriodStart: safeDate(stripeSubscription.current_period_start),
-      currentPeriodEnd: safeDate(stripeSubscription.current_period_end),
+      currentPeriodStart: safeDate(subscriptionPeriod.start),
+      currentPeriodEnd: safeDate(subscriptionPeriod.end),
       lastPaymentDate: isTrialing ? null : (existingSub?.lastPaymentDate || new Date()),
-      nextBillingDate: safeDate(stripeSubscription.trial_end || stripeSubscription.current_period_end),
+      // The period end already equals trial_end while trialing; trial_end must not be a
+      // fallback since it never clears once a trial has occurred (froze the renewal date).
+      nextBillingDate: safeDate(subscriptionPeriod.end),
       cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end || false,
       hasTrial: isTrialing,
       trialEndsAt: stripeSubscription.trial_end ? safeDate(stripeSubscription.trial_end) : null,
