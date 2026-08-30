@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { useTheme } from '../../../hooks/useTheme.js';
 import { Info, Currency, PieChart } from 'lucide-react';
 import Chart from "react-apexcharts";
 import { useSelector, useDispatch } from "react-redux";
@@ -41,6 +42,7 @@ const formatDateWithOrdinal = (dateString) => {
 };
 
 const TotalSales = () => {
+  const { theme } = useTheme();
   const dispatch = useDispatch();
   const calendarMode = useSelector(state => state.Dashboard.DashBoardInfo?.calendarMode);
   const startDate = useSelector(state => state.Dashboard.DashBoardInfo?.startDate);
@@ -404,7 +406,7 @@ const TotalSales = () => {
         },
         stroke: {
           width: 2,
-          colors: ['#161b22'],
+          colors: [theme === 'light' ? '#f7f9fc' : '#161b22'],
         },
         responsive: [{
           breakpoint: 768,
@@ -414,7 +416,7 @@ const TotalSales = () => {
         }],
       },
     };
-  }, [visibleSlices, grossProfitRaw]);
+  }, [visibleSlices, grossProfitRaw, theme]);
 
   const displayDates = useMemo(() => {
     if (effectiveFinanceDates.ready) {
@@ -552,9 +554,9 @@ const TotalSales = () => {
                     {hoveredSlice === index && hasBreakdown && (
                       <div
                         className={`absolute right-0 z-50 w-56 rounded-lg shadow-xl overflow-hidden ${dropdownAbove ? 'bottom-full mb-1' : 'top-full mt-1'}`}
-                        style={{ background: '#161b22', border: '1px solid #30363d' }}
+                        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-dark)' }}
                       >
-                        <div className="px-3 py-2 border-b" style={{ borderColor: '#30363d' }}>
+                        <div className="px-3 py-2 border-b" style={{ borderColor: 'var(--border-dark)' }}>
                           <p className="text-[11px] font-semibold text-gray-300 uppercase tracking-wide">{slice.label} Breakdown</p>
                         </div>
                         <div className="p-2 max-h-48 overflow-y-auto">
