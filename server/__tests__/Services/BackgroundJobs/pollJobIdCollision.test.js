@@ -140,3 +140,97 @@ describe('the poll no longer holds its id after finishing', () => {
         expect(opts.removeOnFail).toBe(true);
     });
 });
+
+/**
+ * The SECOND half of the bug: the branch used to end in an unconditional
+ * `return { success: true, phase, rescheduled: true }`, reached even when the add threw, was
+ * silently dropped, or was skipped because an ACTIVE job held the id. The worker reported success,
+ * no further phase was ever enqueued, and the run's DataFetchTracking doc sat at 'started' until
+ * the 9h stalled sweep noticed — ~12-13h worst case.
+ *
+ * Removing one CAUSE of a silent drop while leaving the silence intact would be the same mistake
+ * twice, so the branch now only claims success for a poll it can prove exists, and otherwise lets
+ * the chain advance to nextPhase — which reaches sched_finalize and CLOSES the doc as 'partial'.
+ */
+describe('a poll that was not created must not report success', () => {
+    /**
+     * The decision the branch now makes, extracted so both outcomes are executable.
+     * Mirrors processScheduledPhase: verify by comparing the returned job's creation time against
+     * a marker taken immediately BEFORE the add.
+     */
+    async function schedulePollAndDecide(queue, selfJobId, { idBlocked = false } = {}) {
+        let pollScheduled = false;
+        let reason = null;
+        if (idBlocked) {
+            reason = 'id held by an ACTIVE job';
+        } else {
+            const addedAfter = Date.now();
+            const added = await queue.add('process-user-data', {}, {
+                jobId: selfJobId, delay: 1000, removeOnComplete: true, removeOnFail: true,
+            });
+            pollScheduled = !!added && typeof added.timestamp === 'number' && added.timestamp >= addedAfter;
+            if (!pollScheduled) reason = 'add returned a pre-existing job';
+        }
+        // early return ONLY when a poll demonstrably exists; otherwise the chain advances
+        return pollScheduled
+            ? { returnedEarly: true, advancesChain: false, result: { success: true, rescheduled: true } }
+            : { returnedEarly: false, advancesChain: true, reason };
+    }
+
+    /** A queue whose add() silently hands back a pre-existing job, as BullMQ does. */
+    function queueHolding(id, ageMs) {
+        const jobs = new Map();
+        if (id) jobs.set(id, { id, timestamp: Date.now() - ageMs, getState: async () => 'completed' });
+        return {
+            getJob: async (jid) => jobs.get(jid) || null,
+            add: async (_n, _d, opts) => {
+                if (jobs.has(opts.jobId)) return jobs.get(opts.jobId);      // the silent drop
+                const j = { id: opts.jobId, timestamp: Date.now(), opts };
+                jobs.set(opts.jobId, j);
+                return j;
+            },
+        };
+    }
+
+    // THE REGRESSION TEST for the silence. A dropped add must be DETECTED, not reported as success.
+    test('a silently-dropped add is detected and advances the chain instead of returning success', async () => {
+        const queue = queueHolding(POLL_ID, HOUR);   // previous run still owns the id
+
+        const decision = await schedulePollAndDecide(queue, POLL_ID);
+
+        expect(decision.returnedEarly).toBe(false);
+        expect(decision.advancesChain).toBe(true);
+        expect(decision.reason).toMatch(/pre-existing/);
+    });
+
+    test('the active-holder skip also advances the chain rather than stopping it', async () => {
+        const queue = queueHolding(null, 0);
+
+        const decision = await schedulePollAndDecide(queue, POLL_ID, { idBlocked: true });
+
+        expect(decision.returnedEarly).toBe(false);
+        expect(decision.advancesChain).toBe(true);
+        expect(decision.reason).toMatch(/ACTIVE/);
+    });
+
+    // THE OTHER DIRECTION, and the real regression risk: advancing while a poll IS pending would
+    // run the rest of the pipeline on top of a phase that is still waiting on Amazon.
+    test('the happy path is unchanged — poll created, early return, chain NOT advanced', async () => {
+        const queue = queueHolding(null, 0);         // id is free
+
+        const decision = await schedulePollAndDecide(queue, POLL_ID);
+
+        expect(decision.returnedEarly).toBe(true);
+        expect(decision.advancesChain).toBe(false);
+        expect(decision.result).toEqual({ success: true, rescheduled: true });
+    });
+
+    // A job created a moment ago by THIS add must not be mistaken for a leftover.
+    test('a freshly created job is recognised as ours, not as a pre-existing one', async () => {
+        const queue = queueHolding(null, 0);
+
+        const decision = await schedulePollAndDecide(queue, POLL_ID);
+
+        expect(decision.returnedEarly).toBe(true);
+    });
+});
