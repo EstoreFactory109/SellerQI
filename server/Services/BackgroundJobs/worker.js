@@ -476,11 +476,55 @@ async function processScheduledPhase(job) {
             const selfJobData = scheduledPhases.createNextPhaseJobData(phase, job.data, phaseOutcome);
             const selfJobId = `${scheduledPhases.generatePhaseJobId(effectiveParentJobId, phase)}-poll${pollAttempt}`;
             const queue = getQueue();
-            await queue.add('process-user-data', selfJobData, {
+
+            // A poll id is deterministic per (account, phase, attempt) but NOT per run, and BullMQ
+            // SILENTLY IGNORES an add whose jobId already exists — it returns the pre-existing job
+            // and creates nothing. Completed jobs linger for `removeOnComplete.age` (2h, see
+            // queue.js), so on an hourly account the PREVIOUS run's finished poll still owns this
+            // id when the next run reaches the same phase. The add evaporates and the chain simply
+            // stops: no next phase, no poll, no error.
+            //
+            // Measured on 6a57b823 (a PRO customer, repeatedly "stalled"): sched_finance finished
+            // 2026-08-30T23:12:58 asking for poll1; poll1 still belonged to the 22:12 run one hour
+            // earlier; the add vanished and the pipeline sat frozen for 9.5h until the stalled
+            // sweep noticed. Its finance chain burns 8+ polls per run, so it collided every time.
+            //
+            // Clear the id first. An ACTIVE job is left alone and the poll is skipped: that means
+            // another run is genuinely executing this same poll right now, and removing it would
+            // destroy live work — the chain stopping is the lesser harm, and the log below makes
+            // it visible rather than silent.
+            let idBlocked = false;
+            try {
+                const existing = await queue.getJob(selfJobId);
+                if (existing) {
+                    const st = await existing.getState().catch(() => 'unknown');
+                    if (st === 'active') {
+                        idBlocked = true;
+                        logger.error(
+                            `[Worker:${WORKER_NAME}] Poll id ${selfJobId} is held by an ACTIVE job — another run is executing this phase. Not rescheduling; this chain stops here.`,
+                            { userId, phase, pollAttempt }
+                        );
+                    } else {
+                        await existing.remove();
+                        logger.info(`[Worker:${WORKER_NAME}] Cleared stale poll job ${selfJobId} (state: ${st}) before re-adding`);
+                    }
+                }
+            } catch (clearErr) {
+                // Fall through and attempt the add anyway — worst case it is dropped, which is
+                // exactly today's behaviour, so this can only improve on it.
+                logger.warn(`[Worker:${WORKER_NAME}] Could not clear poll id ${selfJobId}: ${clearErr.message}`);
+            }
+
+            if (!idBlocked) await queue.add('process-user-data', selfJobData, {
                 jobId: selfJobId,
                 delay: phaseOutcome.reschedule.delayMs,
                 attempts: 3,
-                backoff: { type: 'exponential', delay: 60000 }
+                backoff: { type: 'exponential', delay: 60000 },
+                // A poll is an ephemeral self-reschedule, not a record worth keeping. Holding the
+                // id after it finishes is precisely what broke the next run, so free it at once.
+                // The JobStatus row is the durable audit trail for these.
+                removeOnComplete: true,
+                removeOnFail: true
                 // `timeout` intentionally absent — a no-op since BullMQ v4; see queue.js.
             });
             logger.info(
