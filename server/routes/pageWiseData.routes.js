@@ -21,6 +21,7 @@ const {
     getTop4ProductsOptimized,
     getTopPriorityProductsToFix,
     getTopOpportunities,
+    getTopProducts,
     getProfitabilityData,
     getProfitabilitySummary,
     getPPCData,
@@ -150,6 +151,13 @@ router.get('/top-priority-products', auth, getLocation, analyseDataCache(3600, '
 // pre-ranked shortlist. Reads the weekly pre-computed result — no OpenAI call here.
 // Cache TTL: 1 hour
 router.get('/top-opportunities', auth, getLocation, analyseDataCache(3600, 'top-opportunities'), getTopOpportunities);
+
+// ===== TOP PRODUCTS TO FIX (AI-narrated, product-level) =====
+// The same tasks as /top-opportunities and the Tasks page, grouped by ASIN instead
+// of by issue type, so "which product should I fix" and "which problem is biggest"
+// can never disagree. Reads the pre-computed result — no OpenAI call here.
+// Cache TTL: 1 hour
+router.get('/top-products', auth, getLocation, analyseDataCache(3600, 'top-products'), getTopProducts);
 
 // ===== MULTI-PHASE DASHBOARD (Progressive Loading) =====
 // Phase 1: Instant (~50ms) - precomputed error counts, product counts, date range

@@ -1,11 +1,12 @@
 import { Outlet, useLocation } from 'react-router-dom'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import TopNav from '../Components/Navigation/TopNav'
 import LeftNavSection from '../Components/Navigation/LeftNavSection'
 import LeftNavSectionForTablet from '../Components/Navigation/LeftNavSectionForTablet'
 import TrialBanner from '../Components/TrialBanner/TrialBanner'
 import ErrorBoundary from '../Components/ErrorBoundary/ErrorBoundary'
 import QMatePanel from '../Components/QMate/QMatePanel.jsx'
+import { QMateContext } from '../contexts/QMateContext.js'
 import { COLORS } from '../Components/Shared/index.js'
 
 const MainPagesLayout = () => {
@@ -13,7 +14,23 @@ const MainPagesLayout = () => {
   const scrollContainerRef = useRef(null)
   const [showArrivalFlash, setShowArrivalFlash] = useState(false)
   const [qmatePanelOpen, setQmatePanelOpen] = useState(false)
+  // A question a page asked us to open QMate with (see QMateContext). Cleared on
+  // close so reopening the drawer manually doesn't re-ask the last question.
+  const [qmateQuestion, setQmateQuestion] = useState(null)
   const onQMatePage = location.pathname.includes('qmate')
+
+  // Given to every page below via context so a single row can ask about itself.
+  const qmateValue = useMemo(() => ({
+    askQMate: (question) => {
+      setQmateQuestion(typeof question === 'string' && question.trim() ? question.trim() : null)
+      setQmatePanelOpen(true)
+    }
+  }), [])
+
+  const closeQMate = () => {
+    setQmatePanelOpen(false)
+    setQmateQuestion(null)
+  }
 
   // Reset scroll position when route changes
   useEffect(() => {
@@ -84,7 +101,9 @@ const MainPagesLayout = () => {
                 )}
                 <div className={onQMatePage ? 'flex-1 min-h-0 flex flex-col lg:pt-0 pt-[8vh] pb-0' : 'lg:pt-0 pt-[8vh] pb-0'}>
                     <ErrorBoundary resetKey={location.pathname} title="Page Error" message="Something went wrong loading this page. Try navigating again or refreshing.">
-                        <Outlet/>
+                        <QMateContext.Provider value={qmateValue}>
+                            <Outlet/>
+                        </QMateContext.Provider>
                     </ErrorBoundary>
                 </div>
             </div>
@@ -119,7 +138,7 @@ const MainPagesLayout = () => {
             </button>
         )}
 
-        <QMatePanel isOpen={qmatePanelOpen} onClose={() => setQmatePanelOpen(false)} />
+        <QMatePanel isOpen={qmatePanelOpen} onClose={closeQMate} initialQuestion={qmateQuestion} />
     </div>
   )
 }

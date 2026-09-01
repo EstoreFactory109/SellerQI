@@ -28,7 +28,8 @@ import {
 import { setDashboardDateRange } from '../../redux/slices/DashboardSlice.js';
 import { fetchCogs } from '../../redux/slices/cogsSlice.js';
 import { computeTotalCogs } from '../../utils/cogsCalculations.js';
-import { COLORS } from '../../Components/Shared/index.js';
+import { COLORS, ProductsToFixList } from '../../Components/Shared/index.js';
+import { useTopProducts } from '../../hooks/useTopProducts.js';
 
 // Helper function to get actual end date (yesterday due to 24-hour data delay)
 const getActualEndDate = () => {
@@ -155,6 +156,15 @@ const ProfitabilityDashboard = () => {
   
   // Get currency from Redux
   const currency = useSelector(state => state.currency?.currency) || '$';
+
+  // Products ranked by recoverable money — same task source as the Dashboard's
+  // "Top things to fix" and the Tasks page, so the three cannot disagree.
+  const {
+    products: topProducts,
+    loading: topProductsLoading,
+    unattributedAmount: topProductsUnattributed,
+    capitalTiedUp: topProductsCapital
+  } = useTopProducts();
 
   // Finance dashboard + PPC graph (primary data for KPIs, chart, table) — independent of main dashboard
   useEffect(() => {
@@ -1427,6 +1437,20 @@ const ProfitabilityDashboard = () => {
                   >
                     Issues & suggestions
                   </button>
+                  {/* Product-level view of every category's recoverable money, not just
+                      profitability issues. Same source as the Dashboard and Tasks page. */}
+                  <button
+                    type="button"
+                    onClick={() => setProfitabilityTab('products')}
+                    className="px-4 py-2.5 text-sm font-medium transition-colors"
+                    style={{
+                      color: profitabilityTab === 'products' ? COLORS.textPrimary : COLORS.textSecondary,
+                      borderBottom: profitabilityTab === 'products' ? `2px solid ${COLORS.accent}` : '2px solid transparent',
+                      marginBottom: '-1px',
+                    }}
+                  >
+                    Products to fix
+                  </button>
                 </div>
                 <div className="p-0">
                   {profitabilityTab === 'table' && (
@@ -1452,6 +1476,33 @@ const ProfitabilityDashboard = () => {
                         tabsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                       }}
                     />
+                  )}
+                  {profitabilityTab === 'products' && (
+                    <div className="p-4">
+                      <p className="m-0 mb-3 text-[13px]" style={{ color: COLORS.textSecondary }}>
+                        Ranked by the profit you would gain by fixing each product — across
+                        pricing, ads, inventory, listing quality and conversion.
+                        {topProductsCapital > 0 && (
+                          <> A further {formatCurrencyWithLocale(topProductsCapital, currency)} is
+                          capital locked in unsellable stock, which is shown per product but not
+                          counted as profit.</>
+                        )}
+                      </p>
+                      <ProductsToFixList
+                        products={topProducts}
+                        currency={currency}
+                        loading={topProductsLoading}
+                      />
+                      {topProductsUnattributed > 0 && (
+                        <p className="m-0 mt-3 text-[11px]" style={{ color: COLORS.textMuted }}>
+                          {formatCurrencyWithLocale(topProductsUnattributed, currency)} of ad waste
+                          could not be traced to a specific product. Amounts marked * include
+                          advertising spend attributed by campaign rather than measured per product,
+                          and a product's wasted ad spend is already inside its profit figure rather
+                          than added to it.
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>

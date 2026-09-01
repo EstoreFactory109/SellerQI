@@ -21,7 +21,7 @@ const FinanceEngine = require('./FinanceEngine.js');
 const AdsEngine = require('./AdsEngine.js');
 const FinanceDashboardReadService = require('../../../Finance/FinanceDashboardReadService.js');
 const PPCCampaignAnalysisService = require('../../../Calculations/PPCCampaignAnalysisService.js');
-const OpportunityRankingService = require('../../../Calculations/OpportunityRankingService.js');
+const TaskOpportunityGroupsService = require('../../../Calculations/TaskOpportunityGroupsService.js');
 const DataFetchTracking = require('../../../../models/system/DataFetchTrackingModel.js');
 
 // ── SECTION 2 — Detection ──
@@ -357,8 +357,8 @@ function severityForAmount(amount) {
 }
 
 /**
- * Map OpportunityRankingService candidates into this engine's issue shape.
- * @param {Array<Object>} candidates - OpportunityRankingService candidates
+ * Map task-derived opportunity groups into this engine's issue shape.
+ * @param {Array<Object>} candidates - TaskOpportunityGroupsService groups
  * @returns {Array<Object>}
  */
 function mapStoredOpportunitiesToIssues(candidates) {
@@ -383,7 +383,7 @@ function mapStoredOpportunitiesToIssues(candidates) {
  * @param {Object|null} finance
  * @param {Object|null} ads
  * @param {Object} crossDomain
- * @param {Array<Object>} storedCandidates - OpportunityRankingService candidates
+ * @param {Array<Object>} storedCandidates - TaskOpportunityGroupsService groups
  * @returns {Array<Object>}
  */
 function rankAllIssuesEnriched(finance, ads, crossDomain, storedCandidates = []) {
@@ -677,10 +677,10 @@ async function handleStrategyQuery(interpretation, userContext, requestDateRange
     // Non-fatal — a failure here just means we fall back to finance + ads only.
     let storedCandidates = [];
     try {
-      const ranked = await OpportunityRankingService.getRankedOpportunities(
+      const ranked = await TaskOpportunityGroupsService.getTaskOpportunityGroups(
         userContext.userId, userContext.country, userContext.region
       );
-      if (ranked.success) storedCandidates = ranked.candidates;
+      if (ranked.success) storedCandidates = ranked.groups;
     } catch (err) {
       logger.warn('[GeneralStrategyEngine] stored opportunity enrichment failed', { message: err.message });
     }

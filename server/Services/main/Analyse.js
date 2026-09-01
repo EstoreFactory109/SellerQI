@@ -53,6 +53,7 @@ const CogsService = require('../Finance/CogsService.js');
 // const FBAFeesModel = require('../../models/finance/FBAFees.js');
 const adsKeywordsPerformanceModel = require('../../models/amazon-ads/adsKeywordsPerformanceModel.js');
 const { loadLatestSnapshotDoc, loadKeywordSnapshot } = require('../../utils/ppcSnapshotLoader.js');
+const { buildLtsfAmountMap } = require('../Calculations/RecoverableAmountUtils.js');
 const GetOrderDataModel = require('../../models/products/OrderAndRevenueModel.js');
 const WeeklyFinanceModel = require('../../models/finance/WeekLyFinanceModel.js');
 const userModel = require('../../models/user-auth/userModel.js');
@@ -1141,15 +1142,10 @@ class AnalyseService {
 
         // Real long-term storage fee $ per ASIN from the GET_FBA_FULFILLMENT_LONGTERM_STORAGE_FEE_CHARGES_DATA
         // sync, summed across rows (multiple aging buckets can appear per ASIN per snapshot).
-        // Empty map (amount = 0) for accounts where that sync hasn't run yet.
-        const ltsfAmountMap = {};
-        if (allData.ltsfData && Array.isArray(allData.ltsfData.data)) {
-            allData.ltsfData.data.forEach(row => {
-                if (row && row.asin) {
-                    ltsfAmountMap[row.asin] = (ltsfAmountMap[row.asin] || 0) + (parseFloat(row.amount) || 0);
-                }
-            });
-        }
+        // Empty map (amount = 0) when that sync hasn't run yet OR when the newest
+        // snapshot is too old to describe the seller's position today — see
+        // buildLtsfAmountMap for why the age guard is required.
+        const ltsfAmountMap = buildLtsfAmountMap(allData.ltsfData);
 
         // Total FBA quantity per ASIN — used as a proxy for "stranded units"
         // since the Stranded Inventory report has no quantity field of its own.

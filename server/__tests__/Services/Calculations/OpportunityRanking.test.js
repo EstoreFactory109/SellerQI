@@ -416,7 +416,9 @@ describe('TopOpportunitiesService', () => {
   // and each run would otherwise mean another paid OpenAI call.
   describe('regeneration throttle', () => {
     const TopOpportunities = require('../../../models/system/TopOpportunitiesModel.js');
-    const RankingService = require('../../../Services/Calculations/OpportunityRankingService.js');
+    // Candidates come from grouped TASKS, so the Dashboard and the Tasks page
+    // cannot rank or count the same problems differently.
+    const GroupsService = require('../../../Services/Calculations/TaskOpportunityGroupsService.js');
     const { MIN_REGENERATE_INTERVAL_HOURS } = TopOpportunitiesService;
 
     const hoursAgo = (h) => new Date(Date.now() - h * 3600000);
@@ -425,8 +427,8 @@ describe('TopOpportunitiesService', () => {
 
     beforeEach(() => {
       getForAccountSpy = jest.spyOn(TopOpportunities, 'getForAccount');
-      // If the throttle works, ranking must never be reached.
-      rankingSpy = jest.spyOn(RankingService, 'getRankedOpportunities')
+      // If the throttle works, grouping must never be reached.
+      rankingSpy = jest.spyOn(GroupsService, 'getTaskOpportunityGroups')
         .mockResolvedValue({ success: false, error: 'should not be called' });
     });
 
@@ -453,7 +455,7 @@ describe('TopOpportunitiesService', () => {
 
       const result = await TopOpportunitiesService.calculateAndStoreTopOpportunities('u1', 'AU', 'FE', 'schedule');
 
-      // Ranking was attempted (our mock then fails it) — proving the throttle let it through.
+      // Grouping was attempted (our mock then fails it) — proving the throttle let it through.
       expect(rankingSpy).toHaveBeenCalled();
       expect(result.skippedByThrottle).toBeUndefined();
     });
@@ -482,6 +484,58 @@ describe('TopOpportunitiesService', () => {
       await TopOpportunitiesService.calculateAndStoreTopOpportunities('u1', 'AU', 'FE', 'schedule');
 
       expect(rankingSpy).toHaveBeenCalled();
+    });
+
+    // The scheduler drives the throttle window rather than accepting the default,
+    // because it knows something the service cannot: whether the tasks underneath
+    // were just rebuilt. Both directions matter.
+    describe('caller-supplied minIntervalHours', () => {
+      it('regenerates despite a fresh record when passed 0 (tasks were just rebuilt)', async () => {
+        getForAccountSpy.mockResolvedValue({ generatedAt: hoursAgo(0.1) });
+
+        const result = await TopOpportunitiesService.calculateAndStoreTopOpportunities(
+          'u1', 'AU', 'FE', 'schedule', { minIntervalHours: 0 }
+        );
+
+        // Renewal invalidates the throttle's premise, so it must not short-circuit.
+        expect(rankingSpy).toHaveBeenCalled();
+        expect(result.skippedByThrottle).toBeUndefined();
+        // With the window waived there is no reason to read the stored record.
+        expect(getForAccountSpy).not.toHaveBeenCalled();
+      });
+
+      it('skips a record younger than a widened window (Sunday stale-view net)', async () => {
+        // Older than the 6h default — would regenerate normally — but the Sunday
+        // sweep must leave it alone, or every account generates twice a week.
+        const existing = { opportunities: [{ rank: 1 }], generatedAt: hoursAgo(48) };
+        getForAccountSpy.mockResolvedValue(existing);
+
+        const result = await TopOpportunitiesService.calculateAndStoreTopOpportunities(
+          'u1', 'AU', 'FE', 'schedule', { minIntervalHours: 24 * 6 }
+        );
+
+        expect(result.skippedByThrottle).toBe(true);
+        expect(rankingSpy).not.toHaveBeenCalled();
+      });
+
+      it('regenerates a genuinely stale view under the widened window', async () => {
+        // An account whose weekly rebuild stopped landing: the net has to catch it.
+        getForAccountSpy.mockResolvedValue({ generatedAt: hoursAgo(24 * 9) });
+
+        await TopOpportunitiesService.calculateAndStoreTopOpportunities(
+          'u1', 'AU', 'FE', 'schedule', { minIntervalHours: 24 * 6 }
+        );
+
+        expect(rankingSpy).toHaveBeenCalled();
+      });
+
+      it('falls back to the default window when no option is given', async () => {
+        getForAccountSpy.mockResolvedValue({ generatedAt: hoursAgo(1) });
+
+        const result = await TopOpportunitiesService.calculateAndStoreTopOpportunities('u1', 'AU', 'FE', 'schedule', {});
+
+        expect(result.skippedByThrottle).toBe(true);
+      });
     });
   });
 });

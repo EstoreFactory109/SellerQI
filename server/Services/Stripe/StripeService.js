@@ -21,11 +21,38 @@ class StripeService {
         if (!timestamp || typeof timestamp !== 'number' || isNaN(timestamp)) {
             return null;
         }
-        
+
         const date = new Date(timestamp * 1000);
         const isValidDate = !isNaN(date.getTime());
-        
+
         return isValidDate ? date : null;
+    }
+
+    /**
+     * Read the current billing period off a Stripe Subscription, across API versions.
+     * As of API 2025-03-31.basil, current_period_start/end were REMOVED from the
+     * Subscription object and moved onto its items. stripe-node 18.x pins
+     * 2025-08-27.basil, so anything fetched through the SDK (including an expanded
+     * `session.subscription`) exposes them ONLY on the items - reading the top level
+     * alone silently yields undefined, which stored a null renewal date at signup.
+     * Mirrors StripeWebhookService.getSubscriptionPeriod.
+     */
+    getSubscriptionPeriod(subscription) {
+        if (!subscription) return { start: null, end: null };
+
+        const itemPeriods = (subscription.items?.data || [])
+            .map((item) => ({ start: item.current_period_start, end: item.current_period_end }))
+            .filter((p) => typeof p.end === 'number');
+
+        if (itemPeriods.length) {
+            const furthest = itemPeriods.reduce((a, b) => (b.end > a.end ? b : a));
+            return { start: furthest.start ?? null, end: furthest.end ?? null };
+        }
+
+        return {
+            start: typeof subscription.current_period_start === 'number' ? subscription.current_period_start : null,
+            end: typeof subscription.current_period_end === 'number' ? subscription.current_period_end : null,
+        };
     }
 
     /**
@@ -361,7 +388,8 @@ class StripeService {
 
             // Check if subscription is in trial period (Stripe native trial)
             const isTrialing = stripeSubscription.status === 'trialing';
-            logger.info(`Subscription details: status=${stripeSubscription.status}, isTrialing=${isTrialing}, period_start=${stripeSubscription.current_period_start}, period_end=${stripeSubscription.current_period_end}, trial_end=${stripeSubscription.trial_end || 'N/A'}`);
+            const period = this.getSubscriptionPeriod(stripeSubscription);
+            logger.info(`Subscription details: status=${stripeSubscription.status}, isTrialing=${isTrialing}, period_start=${period.start}, period_end=${period.end}, trial_end=${stripeSubscription.trial_end || 'N/A'}`);
             
             // Update subscription in our database
             const subscriptionData = {
@@ -374,10 +402,14 @@ class StripeService {
                 paymentStatus: isTrialing ? 'no_payment_required' : 'paid',
                 amount: priceItem.price.unit_amount,
                 currency: priceItem.price.currency,
-                currentPeriodStart: this.safeDate(stripeSubscription.current_period_start),
-                currentPeriodEnd: this.safeDate(stripeSubscription.current_period_end),
+                currentPeriodStart: this.safeDate(period.start),
+                currentPeriodEnd: this.safeDate(period.end),
                 lastPaymentDate: isTrialing ? null : new Date(), // No payment date during trial
-                nextBillingDate: this.safeDate(stripeSubscription.trial_end || stripeSubscription.current_period_end),
+                // Stripe sets the period end == trial_end while trialing, so the period end
+                // alone is correct in both cases. trial_end must NOT be used as a fallback:
+                // it never clears back to null once a trial has occurred, which previously
+                // froze nextBillingDate at the trial date for the life of the subscription.
+                nextBillingDate: this.safeDate(period.end),
             };
 
             // Validate subscription data before saving

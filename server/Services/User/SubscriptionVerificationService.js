@@ -142,9 +142,20 @@ class SubscriptionVerificationService {
                 subscriptionDetails: {
                     id: stripeSubscription.id,
                     status: stripeSubscription.status,
-                    currentPeriodEnd: stripeSubscription.current_period_end 
-                        ? new Date(stripeSubscription.current_period_end * 1000) 
-                        : null,
+                    // API 2025-03-31.basil moved current_period_* from the Subscription onto
+                    // its items; stripe-node 18.x pins a Basil version, so the top-level field
+                    // is undefined here and this date silently never refreshed. Read items first.
+                    currentPeriodEnd: (() => {
+                        const itemEnds = (stripeSubscription.items?.data || [])
+                            .map((item) => item.current_period_end)
+                            .filter((end) => typeof end === 'number');
+                        const end = itemEnds.length
+                            ? Math.max(...itemEnds)
+                            : (typeof stripeSubscription.current_period_end === 'number'
+                                ? stripeSubscription.current_period_end
+                                : null);
+                        return end ? new Date(end * 1000) : null;
+                    })(),
                     cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end,
                     canceledAt: stripeSubscription.canceled_at 
                         ? new Date(stripeSubscription.canceled_at * 1000) 
