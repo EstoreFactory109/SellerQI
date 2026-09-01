@@ -70,14 +70,14 @@
  *             netProfit, profitMargin, errorType and ads fields the fixes
  *             changed (stored details currently have no `clicks`, and
  *             low-margin rows still land under the generic type).
- *   products  Seller.sellerAccount.products.issueCount. Called out separately
- *             and NOT run by default: it is a derived field, but it lives on
- *             the Seller document alongside Amazon's own product facts, so it
- *             is the one stage that writes into a collection holding source
- *             data. It touches issueCount / issueCountUpdatedAt and nothing
- *             else.
- *   ai        TopOpportunities + TopProducts, the two stored AI views. Opt-in
- *             because each marketplace costs a pair of OpenAI calls.
+ *   products  Seller.sellerAccount.products.issueCount — the per-product issue
+ *             badge. Worth knowing: this is the one stage that writes into a
+ *             collection that also holds Amazon's own product facts. It sets
+ *             issueCount / issueCountUpdatedAt and nothing else; asin, sku,
+ *             price, status, quantity and itemName are left exactly as found.
+ *   ai        TopOpportunities + TopProducts, the two stored AI views. This is
+ *             the only stage with a bill attached: a pair of OpenAI calls per
+ *             marketplace (~480 across the current 241 marketplaces).
  *
  * Surfaces that need NO migration, because they compute live per request and so
  * are already correct the moment the code and the tasks are: the Dashboard's
@@ -85,7 +85,10 @@
  * Your Products tabs, the PPC Campaign Audit figures, and QMate's answers
  * (GeneralStrategyEngine persists nothing — it reads tasks at question time).
  *
- * Default stages are `tasks,issues`: everything that is both stale and free.
+ * All four run by default, so one pass leaves every stored surface consistent
+ * with the others. Narrow it with --stages when you want less — e.g.
+ * --stages=tasks,issues skips the stage that writes outside the task/issue
+ * collections and the one that costs money.
  *
  * SCOPE
  * -----
@@ -110,15 +113,15 @@
  *   node server/scripts/migrateRecomputeDerivedTaskData.js --apply --user-id=<id>
  *   node server/scripts/migrateRecomputeDerivedTaskData.js --apply --limit=20
  *
- *   # pick stages explicitly
+ *   # narrow the stages (all four run by default)
  *   node server/scripts/migrateRecomputeDerivedTaskData.js --apply --stages=tasks
- *   node server/scripts/migrateRecomputeDerivedTaskData.js --apply --stages=tasks,issues,products,ai
+ *   node server/scripts/migrateRecomputeDerivedTaskData.js --apply --stages=tasks,issues
  *
  * FLAGS
  *   --apply            perform writes (default: report only)
  *   --verify           in report mode, rehearse the recompute read-only
- *   --stages=<list>    comma-separated: tasks,issues,products,ai
- *                      (default tasks,issues — see the stage table above)
+ *   --stages=<list>    comma-separated subset of tasks,issues,products,ai
+ *                      (default: all four — see the stage table above)
  *   --user-id=<id>     restrict to one user
  *   --limit=<n>        process at most n users
  *   --concurrency=<n>  users in parallel (default 1 — Analyse is memory-heavy)
@@ -127,11 +130,10 @@
  *   --state=<path>     resume checkpoint file (default: alongside this script)
  *   --force            ignore the checkpoint and reprocess everything
  *
- * ON THE ai STAGE: the views regenerate on their own at each account's next
- * task rebuild, which this migration schedules a week out. Leaving it off
- * therefore costs nothing in correctness (an account with no stored view simply
- * has none until then); including it makes the views current immediately, for
- * the price of an OpenAI call pair per marketplace.
+ * ON THE ai STAGE: it runs by default so the stored views describe the tasks
+ * this migration just rebuilt, rather than trailing them. If you would rather
+ * not pay for that, --stages=tasks,issues,products skips it and each account
+ * regenerates its own views for free at its next weekly task rebuild.
  */
 
 const path = require('path');
@@ -160,7 +162,7 @@ function hasFlag(name) {
 const APPLY = hasFlag('apply');
 const VERIFY = hasFlag('verify');
 const VALID_STAGES = ['tasks', 'issues', 'products', 'ai'];
-const STAGES = (getArg('stages') || 'tasks,issues')
+const STAGES = (getArg('stages') || VALID_STAGES.join(','))
     .split(',')
     .map((x) => x.trim())
     .filter(Boolean);
