@@ -122,7 +122,7 @@
  *   --verify           in report mode, rehearse the recompute read-only
  *   --stages=<list>    comma-separated subset of tasks,issues,products,ai
  *                      (default: all four — see the stage table above)
- *   --user-id=<id>     restrict to one user
+ *   --user-id=<id>     restrict to one user, or a comma-separated list of users
  *   --limit=<n>        process at most n users
  *   --concurrency=<n>  users in parallel (default 1 — Analyse is memory-heavy)
  *   --timeout=<sec>    per-account ceiling (default 900) so one account cannot
@@ -173,7 +173,10 @@ if (badStage) {
 }
 const wants = (stage) => STAGES.includes(stage);
 const FORCE = hasFlag('force');
-const ONLY_USER = getArg('user-id');
+const ONLY_USERS = (getArg('user-id') || '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
 const LIMIT = getArg('limit') ? parseInt(getArg('limit'), 10) : null;
 const CONCURRENCY = Math.max(1, parseInt(getArg('concurrency') || '1', 10) || 1);
 const TIMEOUT_MS = Math.max(60, parseInt(getArg('timeout') || '900', 10) || 900) * 1000;
@@ -467,7 +470,7 @@ async function main() {
         }))
         .filter((a) => a.marketplaces.length > 0);
 
-    if (ONLY_USER) accounts = accounts.filter((a) => a.userId === ONLY_USER);
+    if (ONLY_USERS.length > 0) accounts = accounts.filter((a) => ONLY_USERS.includes(a.userId));
 
     const state = loadState();
     const doneSet = new Set(state.done);
