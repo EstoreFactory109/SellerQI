@@ -56,6 +56,37 @@
  * then only add tasks unique to them. Forcing a rebuild per marketplace would
  * make the last one processed wipe the others.
  *
+ * WHAT GETS RECOMPUTED (stages)
+ * -----------------------------
+ * The corrections touch more than tasks, because several surfaces persist their
+ * own copy of the same computed numbers:
+ *
+ *   tasks     TaskItem + Task.taskRenewalDate — the Tasks page, and everything
+ *             derived from it (Dashboard top fixes, Top Products to Fix, and
+ *             QMate's strategy answers, which read tasks live).
+ *   issues    IssuesDataChunks + IssueSummary — the Issues pages. These store
+ *             profitabilityErrorDetails / sponsoredAdsErrorDetails /
+ *             conversion / inventory error arrays, which carry the same
+ *             netProfit, profitMargin, errorType and ads fields the fixes
+ *             changed (stored details currently have no `clicks`, and
+ *             low-margin rows still land under the generic type).
+ *   products  Seller.sellerAccount.products.issueCount. Called out separately
+ *             and NOT run by default: it is a derived field, but it lives on
+ *             the Seller document alongside Amazon's own product facts, so it
+ *             is the one stage that writes into a collection holding source
+ *             data. It touches issueCount / issueCountUpdatedAt and nothing
+ *             else.
+ *   ai        TopOpportunities + TopProducts, the two stored AI views. Opt-in
+ *             because each marketplace costs a pair of OpenAI calls.
+ *
+ * Surfaces that need NO migration, because they compute live per request and so
+ * are already correct the moment the code and the tasks are: the Dashboard's
+ * High-impact / Quick-wins bucketing, the per-ASIN sales fallback on the
+ * Your Products tabs, the PPC Campaign Audit figures, and QMate's answers
+ * (GeneralStrategyEngine persists nothing — it reads tasks at question time).
+ *
+ * Default stages are `tasks,issues`: everything that is both stale and free.
+ *
  * SCOPE
  * -----
  * Accounts are enumerated from Seller.sellerAccount, because recomputing needs a
@@ -75,16 +106,19 @@
  *   # do it
  *   node server/scripts/migrateRecomputeDerivedTaskData.js --apply
  *
- *   # one account, or a slice, or with the AI views regenerated too
+ *   # one account, or a slice
  *   node server/scripts/migrateRecomputeDerivedTaskData.js --apply --user-id=<id>
  *   node server/scripts/migrateRecomputeDerivedTaskData.js --apply --limit=20
- *   node server/scripts/migrateRecomputeDerivedTaskData.js --apply --ai
+ *
+ *   # pick stages explicitly
+ *   node server/scripts/migrateRecomputeDerivedTaskData.js --apply --stages=tasks
+ *   node server/scripts/migrateRecomputeDerivedTaskData.js --apply --stages=tasks,issues,products,ai
  *
  * FLAGS
  *   --apply            perform writes (default: report only)
  *   --verify           in report mode, rehearse the recompute read-only
- *   --ai               also regenerate the two stored AI views (COSTS OpenAI —
- *                      2 calls per marketplace; off by default, see note below)
+ *   --stages=<list>    comma-separated: tasks,issues,products,ai
+ *                      (default tasks,issues — see the stage table above)
  *   --user-id=<id>     restrict to one user
  *   --limit=<n>        process at most n users
  *   --concurrency=<n>  users in parallel (default 1 — Analyse is memory-heavy)
@@ -93,11 +127,11 @@
  *   --state=<path>     resume checkpoint file (default: alongside this script)
  *   --force            ignore the checkpoint and reprocess everything
  *
- * ON --ai: the views regenerate on their own at each account's next task
- * rebuild, which this migration schedules a week out. Skipping --ai therefore
- * costs nothing in correctness (an account with no stored view simply has none
- * until then); passing it makes the views current immediately, for the price of
- * an OpenAI call pair per marketplace.
+ * ON THE ai STAGE: the views regenerate on their own at each account's next
+ * task rebuild, which this migration schedules a week out. Leaving it off
+ * therefore costs nothing in correctness (an account with no stored view simply
+ * has none until then); including it makes the views current immediately, for
+ * the price of an OpenAI call pair per marketplace.
  */
 
 const path = require('path');
@@ -125,7 +159,17 @@ function hasFlag(name) {
 
 const APPLY = hasFlag('apply');
 const VERIFY = hasFlag('verify');
-const WITH_AI = hasFlag('ai');
+const VALID_STAGES = ['tasks', 'issues', 'products', 'ai'];
+const STAGES = (getArg('stages') || 'tasks,issues')
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
+const badStage = STAGES.find((x) => !VALID_STAGES.includes(x));
+if (badStage) {
+    console.error(`Unknown stage "${badStage}". Valid: ${VALID_STAGES.join(', ')}`);
+    process.exit(2);
+}
+const wants = (stage) => STAGES.includes(stage);
 const FORCE = hasFlag('force');
 const ONLY_USER = getArg('user-id');
 const LIMIT = getArg('limit') ? parseInt(getArg('limit'), 10) : null;
@@ -220,8 +264,12 @@ async function forceRebuildBranch(userId) {
     await Task.updateOne({ userId }, { $set: { taskRenewalDate: past } });
 }
 
-/** Recompute one marketplace. Writes tasks only when `persist` is true. */
-async function recomputeMarketplace(userId, country, region, persist) {
+/**
+ * Recompute one marketplace and hand back the dashboardData.
+ * Tasks are written only when `persistTasks` is true; passing null as the
+ * userId is what makes a read-only rehearsal possible.
+ */
+async function recomputeMarketplace(userId, country, region, persistTasks) {
     const { AnalyseService } = require('../Services/main/Analyse.js');
     const { analyseData } = require('../Services/Calculations/DashboardCalculation.js');
 
@@ -231,9 +279,50 @@ async function recomputeMarketplace(userId, country, region, persist) {
     }
     // Passing null as the userId computes everything and writes nothing — that is
     // what makes --verify a real rehearsal rather than a guess.
-    const result = await analyseData(analysed.message, persist ? userId : null);
+    const result = await analyseData(analysed.message, persistTasks ? userId : null);
     if (!result || !result.dashboardData) throw new Error('analyseData produced no dashboardData');
     return result;
+}
+
+/**
+ * Rewrite the Issues-page artifacts from an already-computed dashboardData.
+ *
+ * Each of these services also has a calculateAndStoreX() that re-runs Analyse
+ * itself; reusing the dashboardData we already have keeps it at one Analyse per
+ * marketplace instead of four, and guarantees every surface is written from one
+ * consistent computation rather than four separate ones.
+ */
+async function storeIssueArtifacts(userId, country, region, dashboardData) {
+    const out = [];
+
+    if (wants('issues')) {
+        const { storeIssuesDataFromDashboard } = require('../Services/Calculations/IssuesDataService.js');
+        const { storeIssueSummaryFromDashboardData } = require('../Services/Calculations/IssueSummaryService.js');
+        for (const step of [
+            { name: 'issuesData', run: storeIssuesDataFromDashboard },
+            { name: 'issueSummary', run: storeIssueSummaryFromDashboardData }
+        ]) {
+            try {
+                const r = await step.run(userId, country, region, dashboardData, 'migration');
+                out.push(`${step.name}=${r && r.success === false ? 'failed' : 'ok'}`);
+            } catch (e) {
+                out.push(`${step.name}=error(${e.message})`);
+            }
+        }
+    }
+
+    // Separate stage: this one writes issueCount onto the Seller document.
+    if (wants('products')) {
+        const { storeProductIssuesFromDashboardData } = require('../Services/Calculations/ProductIssuesService.js');
+        try {
+            const r = await storeProductIssuesFromDashboardData(userId, country, region, dashboardData, 'migration');
+            out.push(`productIssues=${r && r.success === false ? 'failed' : 'ok'}`);
+        } catch (e) {
+            out.push(`productIssues=error(${e.message})`);
+        }
+    }
+
+    return out.join(' ');
 }
 
 async function regenerateAiViews(userId, country, region) {
@@ -290,24 +379,30 @@ async function processUser(account, index, total) {
         return { userId, ok: true, skipped: 'report-only' };
     }
 
-    const progress = await captureProgress(userId);
+    const doTasks = wants('tasks');
+    const progress = doTasks ? await captureProgress(userId) : [];
     if (progress.length > 0) log(`${label}   preserving ${progress.length} seller-set task status(es)`);
 
-    // Only the first marketplace rebuilds; the rest add, mirroring production.
-    await forceRebuildBranch(userId);
-    for (let i = 0; i < marketplaces.length; i++) {
-        const m = marketplaces[i];
-        await withTimeout(
-            recomputeMarketplace(userId, m.country, m.region, true),
+    // Only the first marketplace rebuilds tasks; the rest add, mirroring production.
+    if (doTasks) await forceRebuildBranch(userId);
+
+    for (const m of marketplaces) {
+        const result = await withTimeout(
+            recomputeMarketplace(userId, m.country, m.region, doTasks),
             TIMEOUT_MS,
             `recompute ${m.country}-${m.region}`
         );
+        // Reuses the dashboardData just computed — no second Analyse.
+        const stored = await storeIssueArtifacts(userId, m.country, m.region, result.dashboardData);
+        if (stored) log(`${label}   ${m.country}-${m.region}: ${stored}`);
     }
 
-    const restored = await restoreProgress(progress);
-    if (progress.length > 0) log(`${label}   restored ${restored} task status(es)`);
+    if (doTasks) {
+        const restored = await restoreProgress(progress);
+        if (progress.length > 0) log(`${label}   restored ${restored} task status(es)`);
+    }
 
-    if (WITH_AI) {
+    if (wants('ai')) {
         for (const m of marketplaces) {
             const r = await regenerateAiViews(userId, m.country, m.region);
             log(`${label}   ai ${m.country}-${m.region}: ${r}`);
@@ -343,7 +438,7 @@ async function main() {
 
     log('='.repeat(78));
     log(`Recompute derived task data — ${APPLY ? 'APPLY (writing)' : 'REPORT ONLY (no writes)'}`);
-    log(`concurrency=${CONCURRENCY} timeout=${TIMEOUT_MS / 1000}s ai=${WITH_AI ? 'on' : 'off'}`);
+    log(`stages=${STAGES.join(',')} concurrency=${CONCURRENCY} timeout=${TIMEOUT_MS / 1000}s`);
     log('='.repeat(78));
 
     // One entry per user, carrying that user's marketplaces in a stable order.
