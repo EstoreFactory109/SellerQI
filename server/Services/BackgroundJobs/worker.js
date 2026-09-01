@@ -32,6 +32,7 @@ const { connectRedis } = require('../../config/redisConn.js');
 const { ScheduledIntegration } = require('../schedule/ScheduledIntegration.js');
 const scheduledPhases = require('./scheduledPhases.js');
 const { runWithLockExtension: runWithLockExtensionShared, resolveCeiling } = require('./lockExtension.js');
+const { closeOutAbandonedRun } = require('./abandonedRunRecovery.js');
 const v8 = require('v8');
 const fs = require('fs');
 const path = require('path');
@@ -849,6 +850,9 @@ async function startWorker() {
         } catch (sessErr) {
             logger.warn(`[Worker:${WORKER_NAME}] Could not close session for failed job ${job?.id}: ${sessErr.message}`);
         }
+
+        // ...and then actually END THE RUN. See abandonedRunRecovery.js.
+        await closeOutAbandonedRun(job, err, { updateJobStatus, workerName: WORKER_NAME });
     });
 
     worker.on('error', (err) => {
