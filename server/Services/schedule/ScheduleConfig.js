@@ -20,28 +20,21 @@ const SUNDAY_FUNCTIONS = {
         requiresAdsToken: true,
         apiDataKey: 'keywordRecommendations'
     },
-    // ── 'ltsfData' (Long-Term Storage Fee Charges) is DELIBERATELY NOT REGISTERED ──
-    // The sync exists at Services/Sp_API/GET_FBA_FULFILLMENT_LONGTERM_STORAGE_FEE_CHARGES_DATA.js
-    // and its report TYPE is verified, but its TSV column mapping has never been
-    // checked against a live response — no public source documents this report's
-    // headers. Running it unverified would silently store $0 long-term storage
-    // fees and burn a weekly report-quota slot for nothing.
-    //
-    // To enable:
-    //   1. node server/scripts/discoverLtsfReportHeaders.js --user-id=<id> --country=<CC> --region=<RR>
-    //   2. Correct the findField() candidate lists in the sync file to the real headers
-    //   3. Restore the entry below, and re-add 'ltsfData' to the batch-routing list
-    //      and _SLICE_CATEGORY_MAP.inventory in ScheduledIntegration.js
-    //
-    // 'ltsfData': {
-    //     service: require('../Sp_API/GET_FBA_FULFILLMENT_LONGTERM_STORAGE_FEE_CHARGES_DATA.js'),
-    //     functionName: null, // Default export, use service directly
-    //     description: 'Long-Term Storage Fee Charges',
-    //     requiresAccessToken: true,
-    //     apiDataKey: 'ltsfData',
-    //     isDefaultExport: true
-    // },
-
+    // Listing items for ACTIVE SKUs (one GET per SKU).
+    // Weekly rather than daily: this endpoint supplies `has_b2b_pricing` and the
+    // backend generic_keyword, both of which are listing configuration that rarely
+    // changes, and a daily run would cost ~1 call per active SKU per account per day.
+    // NOTE: this entry is NOT dispatched through the promise registry — it is handled
+    // inline in ScheduledIntegration.fetchScheduledApiData (it needs paired sku/asin
+    // arrays and persists its own results). The entry exists so the inline block knows
+    // today is a day it should run. It is assigned to batch 4 (sched_batch_4).
+    'GetListingItem': {
+        service: require('../Sp_API/GetListingItemsIssues.js'),
+        functionName: 'GetListingItem',
+        description: 'Listing Items (Active SKUs)',
+        requiresAccessToken: true,
+        apiDataKey: 'listingItems'
+    },
     // Issue calculation - runs after productReview to update issue counts
     // This calculates/updates IssueSummary and per-product issueCount
     'issueSummary': {

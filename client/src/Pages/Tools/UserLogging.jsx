@@ -28,6 +28,9 @@ import {
 } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 import PipelineProgress from '../../Components/Monitoring/PipelineProgress.jsx';
+// One formatter, shared with the progress widget above the table. It was previously a local copy
+// here, which is how the widget came to render the same instant in a different format.
+import { formatUtcTimestamp } from '../../utils/dateUtils';
 
 const UserLogging = () => {
   // Authentication check - using same logic as TopNav switch account button
@@ -328,17 +331,9 @@ const UserLogging = () => {
     return `${seconds}s`;
   };
 
-  const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    // Format as UTC to show exact server time
-    const day = String(date.getUTCDate()).padStart(2, '0');
-    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-    const year = date.getUTCFullYear();
-    const hours = String(date.getUTCHours()).padStart(2, '0');
-    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
-    const seconds = String(date.getUTCSeconds()).padStart(2, '0');
-    return `${day}/${month}/${year}, ${hours}:${minutes}:${seconds} UTC`;
-  };
+  // Delegates to the shared formatter so this page and the progress widget above it can never
+  // disagree about how an instant is written. Same UTC output as the previous local copy.
+  const formatDate = (dateString) => formatUtcTimestamp(dateString);
 
   const getStatusColor = (status) => {
     switch (status) {

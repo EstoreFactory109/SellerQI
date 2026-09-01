@@ -23,6 +23,7 @@
 
 const AdsKeywords = require('../../models/amazon-ads/adsKeywordsPerformanceModel.js');
 const SearchTerms = require('../../models/amazon-ads/SearchTermsModel.js');
+const DateWiseSpends = require('../../models/amazon-ads/GetDateWisePPCspendModel.js');
 const { shiftMetricDateKey } = require('../../utils/metricDateKey.js');
 
 const USER = '6a57b823571ceb9266953c30';
@@ -63,6 +64,11 @@ const runKeywords = (model, options) =>
     AdsKeywords.schema.statics.findMergedKeywordsData.call(model, USER, 'US', 'NA', options);
 const runSearchTerms = (model, options) =>
     SearchTerms.schema.statics.findMergedSearchTermData.call(model, USER, 'US', 'NA', options);
+// Third member of the family, migrated later: it used to be one document per RUN holding the
+// whole 31-day report, which for the largest account hit 13.16MB and then failed every write
+// past the driver's 17MB serialization buffer. Same windowing contract as the two above.
+const runDateWise = (model, options) =>
+    DateWiseSpends.schema.statics.findMergedDateWiseSpends.call(model, USER, 'US', 'NA', options);
 
 describe('shiftMetricDateKey', () => {
     test('shifts back across a month boundary in UTC', () => {
@@ -83,6 +89,7 @@ describe('shiftMetricDateKey', () => {
 describe.each([
     ['findMergedKeywordsData', runKeywords, 'keywordsData'],
     ['findMergedSearchTermData', runSearchTerms, 'searchTermData'],
+    ['findMergedDateWiseSpends', runDateWise, 'dateWisePPCSpends'],
 ])('%s', (_name, run, payloadField) => {
     // THE REGRESSION TEST. Against the pre-fix code this fails: `{}` and `{lookbackDays}` both
     // produced a query with no metricDate range, so every day ever stored was loaded.

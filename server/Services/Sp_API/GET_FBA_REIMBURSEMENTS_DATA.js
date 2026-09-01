@@ -5,7 +5,7 @@ const gunzip = promisify(zlib.gunzip);
 const { parseAsync, yieldToEventLoop } = require('../../utils/asyncCsvParser');
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
-const FBAReimbursements = require('../../models/finance/FBAReimbursementsModel');
+const { saveFBAReimbursementsData } = require('../Finance/FBAReimbursementsService.js');
 const { getReportOptions, normalizeHeaders } = require('../../utils/ReportHeaderMapping');
 
 /**
@@ -252,14 +252,13 @@ async function _processReimbursementsDocument(accessToken, reportDocumentId, bas
         });
 
         try {
-            const fbaReimbursementsRecord = await FBAReimbursements.create({
-                User: userId,
-                country: country,
-                region: region,
-                data: mappedData
-            });
+            // One document per row instead of the whole report in one — see
+            // Services/Finance/FBAReimbursementsService.js. The embedded-array write is the same
+            // shape that reached 14.91MB on ledger detail; this one failed for the largest account
+            // on 2026-08-15. `recordId` is now the fetch's batchId.
+            const saveResult = await saveFBAReimbursementsData(userId, country, region, mappedData);
 
-            if (!fbaReimbursementsRecord) {
+            if (!saveResult || saveResult.success !== true) {
                 logger.error("[GET_FBA_REIMBURSEMENTS_DATA] Failed to save FBA reimbursements data to database");
                 throw new ApiError(500, "Failed to save data to database");
             }
@@ -270,7 +269,7 @@ async function _processReimbursementsDocument(accessToken, reportDocumentId, bas
                 success: true,
                 message: "Report fetched and saved successfully",
                 data: mappedData,
-                recordId: fbaReimbursementsRecord._id,
+                recordId: saveResult.recordId,
                 totalRecords: mappedData.length
             };
         } catch (dbError) {

@@ -14,6 +14,15 @@ jest.mock('axios');
 jest.mock('../../../models/amazon-ads/adsgroupModel.js', () => ({
     findOneAndUpdate: jest.fn(),
 }));
+// The snapshot is now written through persistChunkedSnapshot, which ALWAYS clears stale
+// overflow chunks first, making AdsGroupChunk a real collaborator of this service. Left
+// unmocked, `deleteMany` buffers against a connection that does not exist in unit tests and
+// every case here times out. Assertions below are unchanged: these fixtures are far under
+// SNAPSHOT_CHUNK_SIZE, so the write still takes the inline `findOneAndUpdate` path.
+jest.mock('../../../models/amazon-ads/adsGroupChunkModel.js', () => ({
+    deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }),
+    updateOne: jest.fn().mockResolvedValue({}),
+}));
 // Chunk pacing exists to avoid 429s in production; zero it so tests don't sleep (52 chunks at the
 // 250ms default would be ~13s, past the 10s per-test timeout). Must be set before the require
 // below, since the value is read into a module-level const at load time. Restored in afterAll so

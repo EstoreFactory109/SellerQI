@@ -21,7 +21,10 @@
  *                                   finalize. Those leave DataFetchTracking pinned at
  *                                   'started', which freezes the dashboard's date range
  *                                   while every per-day data check still looks green.
- *   5. `sweepFinanceDeepResync()` — 30-day re-fetch for late cancellations. HEAVY, so
+ *   5. `sweepDocumentSizes()`     — read-only warning for seller documents approaching
+ *                                   MongoDB's hard 16MB per-document limit. Needs a full
+ *                                   scan, so hour-gated to DOC_SIZE_HOUR (once daily).
+ *   6. `sweepFinanceDeepResync()` — 30-day re-fetch for late cancellations. HEAVY, so
  *                                   hour-gated to DEEP_RESYNC_HOUR (once daily).
  *
  * Safety
@@ -36,7 +39,8 @@
  *   - Don't start the `freshness-sweeper` PM2 app, OR set
  *     `FRESHNESS_SWEEPER_DISABLED=true` in env. Nothing else changes.
  *   - Individual sweeps can be disabled on their own:
- *     `STALE_SESSION_SWEEP_DISABLED=true`, `PIPELINE_STALL_SWEEP_DISABLED=true`.
+ *     `STALE_SESSION_SWEEP_DISABLED=true`, `PIPELINE_STALL_SWEEP_DISABLED=true`,
+ *     `DOC_SIZE_SWEEP_DISABLED=true`.
  *
  * Run via PM2:
  *   pm2 start ecosystem.config.js --only freshness-sweeper
@@ -62,6 +66,12 @@ const SWEEP_INTERVAL_CRON = process.env.FRESHNESS_SWEEPER_CRON || '0 */3 * * *';
 // caused it to re-run ~8×/day). The ads + finance-reconciliation sweeps still
 // run EVERY tick; only the deep re-sync is gated. Default 0 (the 00:00 UTC tick).
 const DEEP_RESYNC_HOUR = parseInt(process.env.FRESHNESS_DEEP_RESYNC_HOUR || '0', 10);
+
+// The seller document-size check must read every seller document to size it
+// (`$bsonSize` cannot use an index), so it is gated to one tick per day for the same
+// reason as the deep re-sync. Read-only — it logs and does nothing else. Default 3
+// (the 03:00 UTC tick) so it doesn't share a tick with the deep re-sync.
+const DOC_SIZE_HOUR = parseInt(process.env.FRESHNESS_DOC_SIZE_HOUR || '3', 10);
 
 // Lock TTL — slightly shorter than the cron interval so a missed release
 // auto-expires before the next tick.
@@ -108,7 +118,7 @@ async function releaseSweepLock(lockKey) {
 
 function setupSweeperCron() {
     const cron = require('node-cron');
-    const { sweep, sweepFinance, sweepFinanceDeepResync, sweepStaleSessions, sweepStalledPipelines } = require('./freshnessSweeper.js');
+    const { sweep, sweepFinance, sweepFinanceDeepResync, sweepStaleSessions, sweepStalledPipelines, sweepDocumentSizes } = require('./freshnessSweeper.js');
 
     const job = cron.schedule(SWEEP_INTERVAL_CRON, async () => {
         const lockKey = 'freshness-sweeper-tick';
@@ -157,6 +167,15 @@ function setupSweeperCron() {
             // primary control (independent of BullMQ job retention). Isolated try
             // so it can't block the other two sweeps.
             const nowHourUtc = new Date().getUTCHours();
+            // Seller document-size warning — read-only, once a day (see DOC_SIZE_HOUR).
+            if (nowHourUtc === DOC_SIZE_HOUR) {
+                try {
+                    const sizeSummary = await sweepDocumentSizes();
+                    logger.info('[FreshnessSweeperStandalone] Document-size sweep complete', sizeSummary);
+                } catch (sizeErr) {
+                    logger.error('[FreshnessSweeperStandalone] Document-size sweep failed', { error: sizeErr?.message, stack: sizeErr?.stack });
+                }
+            }
             if (nowHourUtc === DEEP_RESYNC_HOUR) {
                 try {
                     const deepSummary = await sweepFinanceDeepResync();

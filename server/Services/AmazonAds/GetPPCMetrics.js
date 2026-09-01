@@ -1302,17 +1302,109 @@ async function checkPpcReportStatusOnce(reportId, accessToken, profileId, region
     return 'PROCESSING'; // PENDING/PROCESSING → re-checked next tick
 }
 
-// Download + process ONE campaign type's report (no save).
-async function finalizePpcReport(handle, accessToken, profileId, campaignType) {
+/**
+ * Download, process, and PERSIST one campaign type's report.
+ *
+ * WHY THIS SAVES INSTEAD OF RETURNING THE DATA. This used to return
+ * `{ empty, result: metrics }`, and the engine stashed `result` on the AsyncReportRequest row so
+ * a later `saveFromRows` could combine SP/SB/SD. `metrics.campaigns` holds one entry per campaign
+ * PER DAY across the whole 31-day window, so that row grew without bound: measured 2026-08-21,
+ * ppcMetricsAggregated rows reached 10.00MB and the write then failed outright with
+ * ERR_OUT_OF_RANGE past MongoDB's 16MB ceiling — discarding the report it had just fetched, on
+ * every run, for the largest account.
+ *
+ * Saving per type here is safe because the per-day merge already supports partial writes:
+ * `mergeDailyMetricsDoc` preserves the campaign types NOT named in `usableTypes`, and recomputes
+ * `summary` from the MERGED breakdown, so three single-type saves compose into the same document
+ * three combined ones did.
+ */
+async function finalizePpcReport(handle, accessToken, profileId, campaignType, { userId, country, region } = {}) {
     const reportData = await downloadReportData(handle.location, accessToken, profileId, null);
     const metrics = await processReportData(reportData, campaignType);
     const empty = !metrics || ((metrics.campaigns || []).length === 0 && Object.keys(metrics.dateWiseData || {}).length === 0);
-    return { empty, result: metrics };
+
+    // Persist this type alone. `usable: true` because the report ran: an empty result is a real
+    // measured zero for this type, which is exactly what NO_DATA means downstream.
+    if (userId && country && region) {
+        await savePpcMetricsFromResults(userId, country, region, profileId, [
+            { campaignType, metrics: metrics || ZERO_METRICS, usable: true },
+        ]);
+    }
+
+    // No `result`: the engine deliberately persists nothing but status. See asyncReportEngine.js.
+    return { empty };
+}
+
+/**
+ * Write measured zeros for campaign types whose report ran but produced nothing.
+ *
+ * WHY THIS IS SEPARATE. A type can reach NO_DATA without `finalize` ever running — `submit`
+ * returning null (e.g. the type is not enabled on the account) makes the engine mark the row
+ * NO_DATA directly. Before this change `saveFromRows` covered that case, because it saw every
+ * row's status at the end and wrote zeros for the measured-but-empty types. With saving moved
+ * into finalize, those types would instead keep their previously-stored figures forever — the
+ * precise bug the FAILED-vs-NO_DATA distinction was introduced to fix. So the zeroing survives
+ * here, needing only statuses and the report window, never the report data.
+ *
+ * Scoped to days that ALREADY have a document, which is the same set the combined save used to
+ * touch (the days the successful types supplied). It never invents a day.
+ */
+async function zeroUnmeasuredTypesForWindow(userIdStr, country, region, campaignTypes, window) {
+    if (!campaignTypes.length || !window?.startDate || !window?.endDate) return { documentsSaved: 0 };
+
+    const existing = await PPCMetrics.find({
+        userId: String(userIdStr),
+        country,
+        region,
+        metricDate: { $gte: window.startDate, $lte: window.endDate },
+    }).lean();
+    if (!existing.length) return { documentsSaved: 0 };
+
+    const ZERO_BREAKDOWN = { sales: 0, spend: 0, impressions: 0, clicks: 0, acos: 0, unitsSoldClicks1d: 0 };
+    const mappedTypes = campaignTypes.map((t) => CAMPAIGN_TYPE_MAP[t]).filter(Boolean);
+    let documentsSaved = 0;
+
+    for (const doc of existing) {
+        const breakdown = { ...(doc.campaignTypeBreakdown || {}) };
+        let changed = false;
+        for (const mapped of mappedTypes) {
+            const prior = breakdown[mapped];
+            // Already zero => nothing to write. Avoids rewriting every day on every run.
+            if (prior && (prior.sales || prior.spend || prior.impressions || prior.clicks || prior.unitsSoldClicks1d)) {
+                breakdown[mapped] = { ...ZERO_BREAKDOWN };
+                changed = true;
+            }
+        }
+        if (!changed) continue;
+
+        const summaries = { ...(doc.campaignSummaries || {}) };
+        for (const mapped of mappedTypes) summaries[mapped] = [];
+
+        await PPCMetrics.upsertMetricsForDate(String(userIdStr), country, region, doc.metricDate, {
+            profileId: doc.profileId,
+            dateRange: doc.dateRange || { startDate: doc.metricDate, endDate: doc.metricDate },
+            campaignTypeBreakdown: breakdown,
+            campaignSummaries: summaries,
+            // Recomputed from the zeroed breakdown, same rule as mergeDailyMetricsDoc.
+            summary: summariseBreakdown(breakdown),
+            processedCampaignTypes: (doc.processedCampaignTypes || []).filter((t) => !campaignTypes.includes(t)),
+            dateWiseMetrics: [],
+        });
+        documentsSaved += 1;
+    }
+
+    if (documentsSaved > 0) {
+        logger.info(
+            `[GetPPCMetrics] Zeroed [${campaignTypes.join(', ')}] across ${documentsSaved} day(s) for ` +
+            `${country}-${region}: the report(s) ran and returned no spend.`
+        );
+    }
+    return { documentsSaved };
 }
 
 // Build one asyncReportEngine spec per campaign type. Each spec is a closure that
 // binds the fresh per-tick access token (so no in-process token-refresh loop needed).
-function buildPpcMetricsSpecs({ accessToken, profileId, region, marketplaceId = '', startDate = null, endDate = null }) {
+function buildPpcMetricsSpecs({ userId, country, accessToken, profileId, region, marketplaceId = '', startDate = null, endDate = null }) {
     const range = (startDate && endDate) ? { startDate, endDate } : _ppcDefaultDateRange();
     return Object.keys(CAMPAIGN_TYPES).map((campaignType) => ({
         service: 'ppcMetricsAggregated',
@@ -1334,7 +1426,7 @@ function buildPpcMetricsSpecs({ accessToken, profileId, region, marketplaceId = 
         checkStatusOnce: (reportId) => checkPpcReportStatusOnce(reportId, accessToken, profileId, region),
         finalize: async (handle) => {
             try {
-                return await finalizePpcReport(handle, accessToken, profileId, campaignType);
+                return await finalizePpcReport(handle, accessToken, profileId, campaignType, { userId, country, region });
             } catch (err) {
                 if (isAuthRevokedError(err)) err.authRevoked = true;
                 throw err;
@@ -1367,18 +1459,37 @@ async function savePpcMetricsFromResults(userId, country, region, profileId, per
     return { documentsSaved };
 }
 
-// Uniform adapter contract used by the ADS phase registry (see executeScheduledAdsPhaseAsync).
-// saveFromRows: combine the SUBMITTED→DONE rows for this service and persist once.
+/**
+ * Uniform adapter contract used by the ADS phase registry (see executeScheduledAdsPhaseAsync).
+ *
+ * This no longer saves report data — each report persists itself in `finalize`, so by the time
+ * this runs every DONE type is already stored. What is left is the one case finalize cannot
+ * cover: a type that reached NO_DATA WITHOUT finalize running (`submit` returned null because
+ * the type is not enabled on the account). Its stored figures must be zeroed, or an account that
+ * stops running Sponsored Brands would keep showing its old Sponsored Brands numbers forever.
+ *
+ * FAILED is deliberately excluded: a failure means we do not know the true value, so the stored
+ * figures are preserved rather than zeroed. Collapsing NO_DATA and FAILED together is the exact
+ * bug that used to let a failed report wipe real data.
+ *
+ * Reads only `status` and `params` — never report data, which is why nothing has to be stashed on
+ * the tracking row any more.
+ */
 async function savePpcMetricsFromRows(userId, country, region, profileId, rows) {
-    const perTypeResults = rows.map((r) => ({
-        campaignType: r.params?.campaignType,
-        metrics: r.status === 'DONE' ? r.result : null,
-        // NO_DATA means the report ran and this account genuinely has no spend of that type — a real
-        // zero, safe to write. FAILED means we do not know, so the stored figures must be preserved.
-        // Collapsing both into `!metrics` (as this used to) is what lets a failed type zero real data.
-        usable: r.status === 'DONE' || r.status === 'NO_DATA',
-    }));
-    return savePpcMetricsFromResults(userId, country, region, profileId, perTypeResults);
+    const noDataTypes = (rows || [])
+        .filter((r) => r.status === 'NO_DATA')
+        .map((r) => r.params?.campaignType)
+        .filter(Boolean);
+
+    if (noDataTypes.length === 0) return { documentsSaved: 0 };
+
+    // Every row of a run carries the same window; take it from the first row that has one.
+    const withWindow = (rows || []).find((r) => r.params?.startDate && r.params?.endDate);
+    const window = withWindow
+        ? { startDate: withWindow.params.startDate, endDate: withWindow.params.endDate }
+        : null;
+
+    return zeroUnmeasuredTypesForWindow(userId, country, region, noDataTypes, window);
 }
 
 module.exports = {
@@ -1388,6 +1499,7 @@ module.exports = {
     // P8 async adapters (see block above)
     buildPpcMetricsSpecs,
     savePpcMetricsFromResults,
+    zeroUnmeasuredTypesForWindow,
     // The async path's only route to Mongo for this service, so it is worth driving directly in tests
     // rather than only through the adsAsync registry object below.
     savePpcMetricsFromRows,

@@ -20,7 +20,7 @@
  */
 
 const logger = require('../../utils/Logger.js');
-const FBAReimbursements = require('../../models/finance/FBAReimbursementsModel.js');
+const { getFBAReimbursementsData } = require('../Finance/FBAReimbursementsService.js');
 const mongoose = require('mongoose');
 
 // Import calculation functions for recoverable reimbursements (matches dashboard)
@@ -48,8 +48,9 @@ async function getReimbursementSummary(userId, country, region) {
             ? new mongoose.Types.ObjectId(userId) 
             : userId;
         
-        const reimbursementData = await FBAReimbursements.findOne({ User: userObjectId, country, region })
-            .sort({ createdAt: -1 }).lean();
+        // Newest batch from the item collection, shaped like the legacy document — see
+        // Services/Finance/FBAReimbursementsService.js.
+        const reimbursementData = await getFBAReimbursementsData(userObjectId, country, region);
         
         if (!reimbursementData || !reimbursementData.data?.length) {
             return {
@@ -180,8 +181,9 @@ async function getLostInventoryAnalysis(userId, country, region) {
             ? new mongoose.Types.ObjectId(userId) 
             : userId;
         
-        const reimbursementData = await FBAReimbursements.findOne({ User: userObjectId, country, region })
-            .sort({ createdAt: -1 }).lean();
+        // Newest batch from the item collection, shaped like the legacy document — see
+        // Services/Finance/FBAReimbursementsService.js.
+        const reimbursementData = await getFBAReimbursementsData(userObjectId, country, region);
         
         if (!reimbursementData || !reimbursementData.data?.length) {
             return {
@@ -280,8 +282,9 @@ async function getCustomerReturnAnalysis(userId, country, region) {
             ? new mongoose.Types.ObjectId(userId) 
             : userId;
         
-        const reimbursementData = await FBAReimbursements.findOne({ User: userObjectId, country, region })
-            .sort({ createdAt: -1 }).lean();
+        // Newest batch from the item collection, shaped like the legacy document — see
+        // Services/Finance/FBAReimbursementsService.js.
+        const reimbursementData = await getFBAReimbursementsData(userObjectId, country, region);
         
         if (!reimbursementData || !reimbursementData.data?.length) {
             return {
@@ -393,8 +396,9 @@ async function getReimbursementTrends(userId, country, region) {
             ? new mongoose.Types.ObjectId(userId) 
             : userId;
         
-        const reimbursementData = await FBAReimbursements.findOne({ User: userObjectId, country, region })
-            .sort({ createdAt: -1 }).lean();
+        // Newest batch from the item collection, shaped like the legacy document — see
+        // Services/Finance/FBAReimbursementsService.js.
+        const reimbursementData = await getFBAReimbursementsData(userObjectId, country, region);
         
         if (!reimbursementData || !reimbursementData.data?.length) {
             return {

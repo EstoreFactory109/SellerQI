@@ -454,19 +454,18 @@ const loginUser = asyncHandler(async (req, res) => {
             });
 
             if (verificationResult.shouldDowngrade) {
-                // Safe to downgrade - no active subscription with payment gateway
+                // Keep user as PRO - application is now free for all PRO users
+                // No downgrade to LITE anymore
                 await UserModel.findByIdAndUpdate(checkUserIfExists._id, {
                     isInTrialPeriod: false,
-                    packageType: 'LITE',
-                    subscriptionStatus: 'inactive'
+                    subscriptionStatus: 'active'
                 });
 
                 // Update the local user object for the response
                 checkUserIfExists.isInTrialPeriod = false;
-                checkUserIfExists.packageType = 'LITE';
-                checkUserIfExists.subscriptionStatus = 'inactive';
+                checkUserIfExists.subscriptionStatus = 'active';
 
-                logger.info(`User ${checkUserIfExists._id} trial expired and no active subscription found. Downgraded to LITE plan.`);
+                logger.info(`User ${checkUserIfExists._id} trial expired. Keeping as PRO user (free access enabled).`);
             } else if (verificationResult.hasActiveSubscription) {
                 // DON'T downgrade - user has an active subscription with the payment gateway
                 // Sync the subscription status from the gateway
@@ -1081,19 +1080,18 @@ const googleLoginUser = asyncHandler(async (req, res) => {
                 });
 
                 if (verificationResult.shouldDowngrade) {
-                    // Safe to downgrade - no active subscription with payment gateway
+                    // Keep user as PRO - application is now free for all PRO users
+                    // No downgrade to LITE anymore
                     await UserModel.findByIdAndUpdate(checkUserIfExists._id, {
                         isInTrialPeriod: false,
-                        packageType: 'LITE',
-                        subscriptionStatus: 'inactive'
+                        subscriptionStatus: 'active'
                     });
 
                     // Update the local user object for the response
                     checkUserIfExists.isInTrialPeriod = false;
-                    checkUserIfExists.packageType = 'LITE';
-                    checkUserIfExists.subscriptionStatus = 'inactive';
+                    checkUserIfExists.subscriptionStatus = 'active';
 
-                    logger.info(`User ${checkUserIfExists._id} trial expired and no active subscription found (Google login). Downgraded to LITE plan.`);
+                    logger.info(`User ${checkUserIfExists._id} trial expired. Keeping as PRO user (free access enabled).`);
                 } else if (verificationResult.hasActiveSubscription) {
                     // DON'T downgrade - user has an active subscription with the payment gateway
                     // Sync the subscription status from the gateway

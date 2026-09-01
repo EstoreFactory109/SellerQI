@@ -95,7 +95,7 @@ const userSchema = new mongoose.Schema(
         type:String,
         required:true,
         enum: ["LITE", "PRO", "AGENCY"],
-        default:"LITE"
+        default:"PRO"
       },
       agencyName: {
         type: String,

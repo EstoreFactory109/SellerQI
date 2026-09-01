@@ -18,6 +18,21 @@ const adsgroupSchema = new mongoose.Schema({
         required: false,
         index: true
     },
+    /**
+     * When true, this snapshot exceeded the inline threshold, so `adsGroupData` here is
+     * empty and the full set lives in the AdsGroupChunk collection (`totalChunks`
+     * documents). `loadLatestSnapshotDoc` reassembles transparently. Defaults to false →
+     * legacy inline behaviour, unchanged. See utils/snapshotChunkStore.js.
+     */
+    isChunked: {
+        type: Boolean,
+        default: false
+    },
+    /** Number of AdsGroupChunk documents for this snapshot (1 when inline). */
+    totalChunks: {
+        type: Number,
+        default: 1
+    },
     adsGroupData:[{
         adGroupId: {
             type: String,

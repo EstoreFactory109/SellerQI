@@ -5,7 +5,7 @@ const { generateAdsAccessToken } = require('./GenerateToken');
 const gunzip = promisify(zlib.gunzip);
 const userModel = require('../../models/user-auth/userModel.js');
 // Use service layer for saving data (handles 16MB limit with separate collection)
-const { saveProductWiseSponsoredAdsData } = require('../amazon-ads/ProductWiseSponsoredAdsService.js');
+const { saveProductWiseSponsoredAdsData, clearAdTypesForWindow } = require('../amazon-ads/ProductWiseSponsoredAdsService.js');
 const { resolveReportDateRange } = require('../../utils/reportDateRange.js');
 // Single canonical definition, exported from GetPPCMetrics — see the note on its export. Duplicating
 // it here would let the two copies drift into a false alarm or a missed revocation.
@@ -533,7 +533,7 @@ async function checkProductWiseStatusOnce(reportId, accessToken, profileId, regi
     return 'PROCESSING';
 }
 
-function buildProductWiseSpecs({ accessToken, profileId, region, marketplaceId = '', startDate: sd = null, endDate: ed = null }) {
+function buildProductWiseSpecs({ userId, country, accessToken, profileId, region, marketplaceId = '', startDate: sd = null, endDate: ed = null }) {
     const { startDate, endDate } = resolveReportDateRange(sd && ed ? { startDate: sd, endDate: ed } : {});
     return ['SP', 'SD'].map((adType) => {
         const config = REPORT_CONFIGS[adType];
@@ -554,11 +554,52 @@ function buildProductWiseSpecs({ accessToken, profileId, region, marketplaceId =
                 }
             },
             checkStatusOnce: (reportId) => checkProductWiseStatusOnce(reportId, accessToken, profileId, region),
+            /**
+             * Download, map, and PERSIST this ad type's rows.
+             *
+             * WHY THIS SAVES INSTEAD OF RETURNING THE DATA. This used to return
+             * `{ empty, result: mapped }` and the engine stashed `result` on the
+             * AsyncReportRequest row so `saveFromRows` could combine SP+SD. `mapped` is one row
+             * per (date × ASIN × campaign × adGroup) across 31 days, so that row grew without
+             * bound: measured 2026-08-21 it reached 15.13MB, and past MongoDB's 16MB ceiling the
+             * write threw ERR_OUT_OF_RANGE — discarding the report it had just downloaded, every
+             * run, for the largest account.
+             *
+             * Saving per ad type is safe because the service's write is already adType-scoped: it
+             * deletes only `usableAdTypes` and ADOPTS the other type's existing rows into the new
+             * batch (ProductWiseSponsoredAdsService). So SP saving, then SD saving, composes into
+             * one batch holding both — which is what a single combined save produced.
+             *
+             * `preserveDateRange` closes the one gap in that: adoption is normally scoped to the
+             * dates present in THIS save, so a day the other ad type has but this one does not
+             * would be left behind in the previous batch and become invisible to the
+             * newest-batch readers. Passing the report window makes adoption cover every day the
+             * run could have touched.
+             */
             finalize: async (handle) => {
                 try {
-                    const rawRows = await downloadReport(handle.location, accessToken, null);
-                    const mapped = Array.isArray(rawRows) ? rawRows.map(config.mapRow) : [];
-                    return { empty: mapped.length === 0, result: mapped };
+                    let rawRows = await downloadReport(handle.location, accessToken, null);
+                    // Map in chunks with an event-loop yield, mirroring the inline path: a bare
+                    // `rawRows.map(...)` holds the raw and mapped arrays at once and blocks the
+                    // loop, which starves the BullMQ lock heartbeat on a large report.
+                    const mapped = [];
+                    const CHUNK_SIZE = 500;
+                    for (let i = 0; i < (rawRows?.length || 0); i += CHUNK_SIZE) {
+                        const chunk = rawRows.slice(i, i + CHUNK_SIZE);
+                        for (const item of chunk) mapped.push(config.mapRow(item));
+                        if (i + CHUNK_SIZE < rawRows.length) {
+                            await new Promise((resolve) => setImmediate(resolve));
+                        }
+                    }
+                    rawRows = null; // free the raw report once mapped
+
+                    if (mapped.length > 0 && userId && country) {
+                        await saveProductWiseSponsoredAdsData(userId, country, region, mapped, {
+                            usableAdTypes: [adType],
+                            preserveDateRange: { startDate, endDate },
+                        });
+                    }
+                    return { empty: mapped.length === 0 };
                 } catch (err) {
                     if (isAuthRevokedError(err)) err.authRevoked = true;
                     throw err;
@@ -568,26 +609,37 @@ function buildProductWiseSpecs({ accessToken, profileId, region, marketplaceId =
     });
 }
 
-// Merge all campaign types' mapped rows (read back from DONE rows) and save once.
+/**
+ * Uniform adapter contract used by the ADS phase registry.
+ *
+ * This no longer saves report data — each ad type persists itself in `finalize`, so every DONE
+ * type is already stored by the time this runs. What is left is the case finalize cannot cover: an
+ * ad type that reached NO_DATA WITHOUT finalize running (`submit` returned null, e.g. the type is
+ * not enabled). Its previously-stored rows have to go, or an account that stops running Sponsored
+ * Display would keep showing its old Sponsored Display spend forever.
+ *
+ * FAILED is deliberately excluded — a failure means we do not know, so stored rows are preserved.
+ *
+ * Reads only `status` and `params`; never report data, which is why nothing is stashed on the
+ * tracking row any more.
+ */
 async function saveProductWiseFromRows(userId, country, region, profileId, rows) {
-    const allData = rows
-        .filter((r) => r.status === 'DONE' && Array.isArray(r.result))
-        .flatMap((r) => r.result);
-
-    // Which ad types actually got MEASURED. NO_DATA means the report ran and this account genuinely
-    // has no spend of that type — safe to clear its rows. FAILED means we do not know, so its stored
-    // rows must be preserved rather than deleted by the date-scoped wipe inside the service.
-    const usableAdTypes = rows
-        .filter((r) => r.status === 'DONE' || r.status === 'NO_DATA')
+    const noDataAdTypes = (rows || [])
+        .filter((r) => r.status === 'NO_DATA')
         .map((r) => r.params?.adType)
         .filter(Boolean);
 
-    // Nothing measured at all: touch nothing. The phase reports success:false from the row statuses.
-    if (usableAdTypes.length === 0) return { documentsSaved: 0 };
-    if (allData.length === 0) return { documentsSaved: 0 };
+    if (noDataAdTypes.length === 0) return { documentsSaved: 0 };
 
-    const saveResult = await saveProductWiseSponsoredAdsData(userId, country, region, allData, { usableAdTypes });
-    return { documentsSaved: saveResult?.itemCount || 0 };
+    // Every row of a run carries the same window; take it from the first that has one.
+    const withWindow = (rows || []).find((r) => r.params?.startDate && r.params?.endDate);
+    if (!withWindow) return { documentsSaved: 0 };
+
+    const cleared = await clearAdTypesForWindow(userId, country, region, noDataAdTypes, {
+        startDate: withWindow.params.startDate,
+        endDate: withWindow.params.endDate,
+    });
+    return { documentsSaved: 0, clearedRows: cleared };
 }
 
 module.exports = {

@@ -38,13 +38,15 @@ async function startDeleteUserWorker() {
     const worker = new Worker(
         DELETE_USER_QUEUE_NAME,
         async (job) => {
-            const { userId } = job.data;
+            // includeBillingHistory is absent on jobs enqueued before this option
+            // existed, and on the six-month cleanup path — both mean "keep billing".
+            const { userId, includeBillingHistory = false } = job.data;
             const start = Date.now();
 
-            logger.info(`[DeleteUserWorker:${WORKER_NAME}] Starting purge job ${job.id} for user ${userId}`);
+            logger.info(`[DeleteUserWorker:${WORKER_NAME}] Starting purge job ${job.id} for user ${userId}`, { includeBillingHistory });
 
             try {
-                const result = await purgeAllUserData(userId);
+                const result = await purgeAllUserData(userId, { includeBillingHistory });
                 const duration = Date.now() - start;
                 logger.info(`[DeleteUserWorker:${WORKER_NAME}] Purge job ${job.id} completed for user ${userId}`, {
                     duration,

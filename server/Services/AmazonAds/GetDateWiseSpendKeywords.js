@@ -5,6 +5,7 @@ const { generateAdsAccessToken } = require('./GenerateToken');
 const gunzip = promisify(zlib.gunzip);
 const GetDateWisePPCspendModel = require('../../models/amazon-ads/GetDateWisePPCspendModel.js');
 const { resolveReportDateRange } = require('../../utils/reportDateRange.js');
+const { toYyyyMmDd, getYesterdayMetricDateUtc } = require('../../utils/metricDateKey.js');
 const logger = require('../../utils/Logger');
 
 // Base URIs for different regions
@@ -245,6 +246,86 @@ async function checkReportStatus(reportId, accessToken, profileId, region, userI
     }
 }
 
+/**
+ * Normalize one raw report row to the shape the schema declares.
+ *
+ * WHY THIS EXISTS. `downloadReportData` did no coercion at all — every cast was left to
+ * Mongoose. That was survivable under `.create()` without validators, but the per-day
+ * upsert runs with `runValidators: true`, and every field except `sales14d` is `required`.
+ * Amazon sends `campaignId` as a NUMBER and `sales7d`/`sales14d` as numbers while the
+ * schema wants Strings, so without this a valid report would fail validation.
+ *
+ * Returns null for a row with no usable date — such a row cannot be filed under a day.
+ * Mirrors mapKeywordPerformanceRow in GetWastedSpendKeywords.js.
+ */
+function mapDateWiseSpendRow(item) {
+    if (!item) return null;
+    const day = toYyyyMmDd(item.date) || (item.date ? String(item.date).substring(0, 10) : null);
+    if (!day) return null;
+    return {
+        date: day,
+        cost: Number(item.cost) || 0,
+        campaignId: item.campaignId == null ? '' : String(item.campaignId),
+        campaignName: item.campaignName == null ? '' : String(item.campaignName),
+        clicks: Number(item.clicks) || 0,
+        impressions: Number(item.impressions) || 0,
+        sales7d: String(item.sales7d ?? 0),
+        sales14d: String(item.sales14d ?? 0),
+    };
+}
+
+/**
+ * Group the report by calendar day and upsert one document per day.
+ *
+ * Replaces the old single `.create()` of the entire 31-day report, which for the largest
+ * account produced a 13MB document and then failed outright past the driver's 17MB
+ * serialization buffer. Shared by the inline and async paths so they cannot drift.
+ *
+ * A zero-row report still writes an empty document for yesterday, so freshness tracking
+ * advances instead of looking stalled (same as GetSearchKeywords).
+ *
+ * @returns {Promise<Array>} the merged rows, so callers keep their existing response shape
+ */
+async function persistDateWiseSpendsPerDay(userId, country, region, reportContent) {
+    if (!Array.isArray(reportContent) || reportContent.length === 0) {
+        await GetDateWisePPCspendModel.upsertDateWiseSpendsForDate(
+            userId, country, region, getYesterdayMetricDateUtc(), []
+        );
+        return GetDateWisePPCspendModel.findMergedDateWiseSpends(userId, country, region, {});
+    }
+
+    const byDay = new Map();
+    let skipped = 0;
+    for (const raw of reportContent) {
+        const row = mapDateWiseSpendRow(raw);
+        if (!row) { skipped++; continue; }
+        if (!byDay.has(row.date)) byDay.set(row.date, []);
+        byDay.get(row.date).push(row);
+    }
+
+    if (byDay.size === 0) {
+        logger.warn('[GetDateWiseSpendKeywords] every report row lacked a usable date', {
+            userId, country, region, rows: reportContent.length
+        });
+        await GetDateWisePPCspendModel.upsertDateWiseSpendsForDate(
+            userId, country, region, getYesterdayMetricDateUtc(), []
+        );
+        return GetDateWisePPCspendModel.findMergedDateWiseSpends(userId, country, region, {});
+    }
+
+    // Sequential on purpose: one await per day keeps the event loop (and the BullMQ
+    // lock-renewal heartbeat) breathing on an account with tens of thousands of rows.
+    for (const [metricDate, rows] of byDay) {
+        await GetDateWisePPCspendModel.upsertDateWiseSpendsForDate(userId, country, region, metricDate, rows);
+    }
+
+    const merged = await GetDateWisePPCspendModel.findMergedDateWiseSpends(userId, country, region, {});
+    logger.info(`✅ Date-wise PPC spend saved per day (${byDay.size} day(s)); merged rows: ${merged.length}`, {
+        userId, country, region, skippedRows: skipped
+    });
+    return merged;
+}
+
 async function downloadReportData(location, accessToken, profileId, tokenRefreshCallback = null) {
     let currentAccessToken = accessToken;
     let hasRetried = false;
@@ -382,22 +463,19 @@ async function getPPCSpendsDateWise(accessToken, profileId, userId, country, reg
             // Download and parse the report data (with token refresh support)
             const reportContent = await downloadReportData(reportStatus.location, downloadToken, profileId, tokenRefreshCallback);
 
-            const createProductWiseSponsoredAdsData = await GetDateWisePPCspendModel.create({
-                userId: userId,
-                country: country,
-                region: region,
-                dateWisePPCSpends: reportContent
-            })
-            if(!createProductWiseSponsoredAdsData){
-                return {
-                    success: false,
-                    message: "Error in creating product wise sponsored ads data",
-                };
-            }
+            // Per-day upserts instead of one `.create()` of the whole 31-day report — see
+            // persistDateWiseSpendsPerDay and the model header for why.
+            const merged = await persistDateWiseSpendsPerDay(userId, country, region, reportContent);
+
             return {
                 success: true,
                 message: "Product wise sponsored ads data fetched successfully",
-                data: createProductWiseSponsoredAdsData
+                data: {
+                    userId,
+                    country,
+                    region,
+                    dateWisePPCSpends: merged
+                }
             };
         } else {
             logger.error('[GetDateWiseSpendKeywords] Report generation failed:', reportStatus.error);
@@ -422,7 +500,7 @@ async function getPPCSpendsDateWise(accessToken, profileId, userId, country, reg
 
 // ============================================================================
 // P8: Non-blocking (async) adapters. Inline getPPCSpendsDateWise() above is the UNCHANGED
-// fallback. Single report → self-contained finalize (download + GetDateWisePPCspendModel.create,
+// fallback. Single report → self-contained finalize (download + per-day upserts,
 // identical to the inline path lines ~383-390). Amazon-facing → validate in staging.
 // ============================================================================
 
@@ -455,11 +533,11 @@ function buildDateWiseSpecs({ userId, country, region, accessToken, profileId, m
             return (r && r.reportId) ? r.reportId : null;
         },
         checkStatusOnce: (reportId) => checkDateWiseStatusOnce(reportId, accessToken, profileId, region),
-        // Self-contained: download + create the date-wise doc (same as inline path).
+        // Self-contained: download + per-day upserts (same as inline path).
         finalize: async (handle) => {
             const reportContent = await downloadReportData(handle.location, accessToken, profileId, null);
-            await GetDateWisePPCspendModel.create({ userId, country, region, dateWisePPCSpends: reportContent });
-            return { empty: !reportContent };
+            await persistDateWiseSpendsPerDay(userId, country, region, reportContent);
+            return { empty: !Array.isArray(reportContent) || reportContent.length === 0 };
         },
     }];
 }
@@ -471,4 +549,8 @@ module.exports = {
         buildSpecs: buildDateWiseSpecs,
         saveFromRows: async () => ({ documentsSaved: 0 }), // finalize already saves per report
     },
+    // Exported for tests: the normalizer is what makes `runValidators: true` on the per-day
+    // upsert safe, and the grouping is what keeps documents under the 16MB ceiling.
+    mapDateWiseSpendRow,
+    persistDateWiseSpendsPerDay,
 };

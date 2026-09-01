@@ -14,6 +14,7 @@ const ProductWiseSponsoredAdsData = require('../../models/amazon-ads/ProductWise
 const ProductWiseSponsoredAdsItem = require('../../models/amazon-ads/ProductWiseSponsoredAdsItemModel');
 const logger = require('../../utils/Logger');
 const { getRedisClient } = require('../../config/redisConn');
+const { insertManyChunked } = require('../../utils/chunkedInsert');
 
 // Every ad type this collection stores, i.e. what "we measured everything" means. Mirrors the enum on
 // ProductWiseSponsoredAdsItemModel.adType (:50-56); keep them in step.
@@ -41,6 +42,17 @@ async function saveProductWiseSponsoredAdsData(userId, country, region, sponsore
         const usableAdTypes = Array.isArray(options.usableAdTypes) && options.usableAdTypes.length
             ? options.usableAdTypes
             : ALL_AD_TYPES;
+
+        // Optional window for the ADOPTION step below. Adoption is otherwise scoped to the dates
+        // present in THIS save, which is right for a combined save but not for a per-ad-type one:
+        // a day the other ad type has and this one does not would be left in the previous batch
+        // and go invisible to every newest-batch reader. Callers that save one ad type at a time
+        // (the async finalize path) pass the report window so adoption covers every day the run
+        // could have touched. Absent => previous behaviour exactly.
+        const preserveDateRange = options.preserveDateRange &&
+            options.preserveDateRange.startDate && options.preserveDateRange.endDate
+            ? options.preserveDateRange
+            : null;
 
         if (!userId) {
             throw new Error('User ID is required');
@@ -130,7 +142,9 @@ async function saveProductWiseSponsoredAdsData(userId, country, region, sponsore
             date: { $in: distinctDates },
         });
 
-        const insertResult = await ProductWiseSponsoredAdsItem.insertMany(itemsToInsert, { ordered: false });
+        // Chunked to bound peak memory. Every document is still hydrated, so what lands in Mongo is
+        // byte-identical — see utils/chunkedInsert.js for why this is NOT `{ lean: true }`.
+        const insertedCountFromChunks = await insertManyChunked(ProductWiseSponsoredAdsItem, itemsToInsert, { ordered: false });
 
         // Scoping the delete is necessary but NOT sufficient, and this is the subtle half.
         // `findLatestByUserCountryRegion` reads only the NEWEST batchId
@@ -141,14 +155,18 @@ async function saveProductWiseSponsoredAdsData(userId, country, region, sponsore
         // Adopting them into this batch keeps them both visible and alive. `createdAt` is untouched,
         // so the newest-batch sort and deleteOldBatches' ranking still resolve correctly.
         const preservedAdTypes = ALL_AD_TYPES.filter((t) => !usableAdTypes.includes(t));
-        if (preservedAdTypes.length && distinctDates.length) {
+        if (preservedAdTypes.length && (distinctDates.length || preserveDateRange)) {
+            // `date` is a YYYY-MM-DD string, so a lexicographic range is a calendar range.
+            const adoptDateFilter = preserveDateRange
+                ? { $gte: preserveDateRange.startDate, $lte: preserveDateRange.endDate }
+                : { $in: distinctDates };
             const adopted = await ProductWiseSponsoredAdsItem.updateMany(
                 {
                     userId: userObjectId,
                     country,
                     region,
                     adType: { $in: preservedAdTypes },
-                    date: { $in: distinctDates },
+                    date: adoptDateFilter,
                 },
                 { $set: { batchId } }
             );
@@ -159,7 +177,7 @@ async function saveProductWiseSponsoredAdsData(userId, country, region, sponsore
                 `${distinctDates.length} date(s) rather than deleting them.`
             );
         }
-        const insertedCount = Array.isArray(insertResult) ? insertResult.length : itemsToInsert.length;
+        const insertedCount = insertedCountFromChunks;
 
         if (insertedCount === 0) {
             throw new Error('insertMany returned 0 documents — check schema validation');
@@ -544,10 +562,59 @@ async function invalidateAdsSpendCache(userId, country, region) {
     }
 }
 
+/**
+ * Delete stored rows for ad types whose report ran and returned nothing.
+ *
+ * Needed because saving moved into the async `finalize`, which only ever runs for a report that
+ * produced data. An ad type that reaches NO_DATA without a finalize (its `submit` returned null
+ * because the type is not enabled on the account) would otherwise keep its previously-stored rows
+ * indefinitely — so an account that stops running Sponsored Display would keep showing old
+ * Sponsored Display spend. Previously the combined save covered this via its adType-scoped delete.
+ *
+ * FAILED types must NOT be passed here: a failure means the true value is unknown, so stored rows
+ * are preserved. Only NO_DATA is a measured zero.
+ *
+ * @param {{startDate: string, endDate: string}} window YYYY-MM-DD, inclusive
+ * @returns {Promise<number>} rows deleted
+ */
+async function clearAdTypesForWindow(userId, country, region, adTypes, window) {
+    if (!userId || !country || !region) return 0;
+    if (!Array.isArray(adTypes) || adTypes.length === 0) return 0;
+    if (!window?.startDate || !window?.endDate) return 0;
+
+    let userObjectId;
+    try {
+        userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+    } catch (err) {
+        throw new Error(`Invalid User ID format: ${userId}`);
+    }
+
+    const res = await ProductWiseSponsoredAdsItem.deleteMany({
+        userId: userObjectId,
+        country,
+        region,
+        adType: { $in: adTypes },
+        // `date` is a YYYY-MM-DD string, so a lexicographic range is a calendar range.
+        date: { $gte: window.startDate, $lte: window.endDate },
+    });
+
+    const deleted = res?.deletedCount || 0;
+    if (deleted > 0) {
+        logger.info(
+            `[ProductWiseSponsoredAds] Cleared ${deleted} row(s) for [${adTypes.join('/')}] in ` +
+            `${window.startDate}..${window.endDate} (${country}-${region}): report(s) ran with no spend.`
+        );
+        // Those rows fed the cached per-ASIN spend rollup.
+        await invalidateAdsSpendCache(userId, country, region);
+    }
+    return deleted;
+}
+
 module.exports = {
     saveProductWiseSponsoredAdsData,
     getProductWiseSponsoredAdsData,
     deleteProductWiseSponsoredAdsData,
     getAdsSpendByAsin,
-    invalidateAdsSpendCache
+    invalidateAdsSpendCache,
+    clearAdTypesForWindow
 };

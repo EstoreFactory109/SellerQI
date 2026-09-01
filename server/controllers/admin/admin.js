@@ -1081,21 +1081,27 @@ const deleteUser = asyncHandler(async (req, res) => {
             return res.status(400).json(new ApiResponse(400, "", "Cannot delete your own account"));
         }
 
-        // Use the delete service to remove seller documents and operational data.
-        // The User document itself is retained for audit/history.
-        const result = await deleteUserById(userId);
-
-        logger.info(`SuperAdmin ${adminId} purged user ${userId}`);
-
-        // Enqueue full data purge in background (independent queue; does not affect existing flows)
+        // An admin's manual delete removes everything: operational data, billing
+        // history, and the account itself. The automated six-month inactivity cleanup
+        // is the softer path — it keeps the User document and the billing history.
+        // See deleteUserService.js and fullUserDataPurgeService.js.
+        //
+        // The purge job is queued BEFORE anything is removed. Once the User document
+        // is gone there is nothing left to look the account up by, so if the queue is
+        // unreachable we fail the request rather than strand the user's rows across
+        // ~80 collections with no way to find them again.
         try {
-            await enqueueFullUserDataPurge(userId);
+            await enqueueFullUserDataPurge(userId, { includeBillingHistory: true });
         } catch (enqueueErr) {
             logger.error(`[deleteUser] Failed to enqueue full user data purge for ${userId}:`, enqueueErr);
-            // Do not fail the request; seller documents are already deleted
+            return res.status(503).json(new ApiResponse(503, "", "Could not start the data purge, so nothing was deleted. Please try again."));
         }
 
-        return res.status(200).json(new ApiResponse(200, result.data, "Seller documents and operational data removed. User account retained for record-keeping. Remaining data will be removed in the background."));
+        const result = await deleteUserById(userId, { hardDelete: true });
+
+        logger.info(`SuperAdmin ${adminId} hard-deleted user ${userId}`);
+
+        return res.status(200).json(new ApiResponse(200, result.data, "User account removed. Remaining data, including billing history, is being removed in the background."));
 
     } catch (error) {
         // Handle ApiError instances

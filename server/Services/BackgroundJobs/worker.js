@@ -32,6 +32,10 @@ const { connectRedis } = require('../../config/redisConn.js');
 const { ScheduledIntegration } = require('../schedule/ScheduledIntegration.js');
 const scheduledPhases = require('./scheduledPhases.js');
 const { runWithLockExtension: runWithLockExtensionShared, resolveCeiling } = require('./lockExtension.js');
+const { closeOutAbandonedRun } = require('./abandonedRunRecovery.js');
+const v8 = require('v8');
+const fs = require('fs');
+const path = require('path');
 
 // Worker configuration
 const WORKER_CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || '3', 10); // Process 3 jobs concurrently
@@ -40,11 +44,164 @@ const envWorkerName = process.env.WORKER_NAME;
 const pidBasedName = `worker-${process.pid}`;
 const WORKER_NAME = envWorkerName || pidBasedName;
 
+// ── Crash visibility ─────────────────────────────────────────────────────────
+//
+// WHY THIS EXISTS. This process had ONLY SIGTERM/SIGINT handlers, and even those were registered
+// inside startWorker() — i.e. after the Mongo/Redis connect. Every other way a worker can die left
+// the app log completely silent: a V8 heap OOM, an unhandled rejection, an uncaught throw and a
+// kernel SIGKILL were all indistinguishable, because none of them wrote anything at all.
+//
+// That silence cost real diagnostic time. A `sched_calc_review` job died mid-phase leaving its
+// JobStatus row pinned at 'running' with no terminal status and no heartbeat, and the only evidence
+// available — RSS climbing with uptime — pointed at a memory leak which turned out not to be the
+// cause of the symptom under investigation. Absence of evidence read as evidence.
+//
+// WHY logger IS NOT ENOUGH HERE, and why the first version of this was useless.
+//
+// The handlers below shipped, and then this process exited with code 1 roughly 340 times across
+// six instances in 46 hours WITHOUT RECORDING A SINGLE REASON. Both places a reason could land are
+// incapable of holding it:
+//
+//   1. `logger.error` writes via console.error -> process.stderr, which under PM2
+//      `exec_mode: 'cluster'` is an IPC pipe. Node documents pipe writes as synchronous on Linux
+//      (asynchronous on macOS), so this is a real hazard for a dev box and a *possible* one in
+//      production rather than a proven loss — measured, not assumed. The short pre-exit delay
+//      below costs nothing and removes the doubt.
+//   2. Logger's file mirror (server/logs.txt) defaults to OFF when NODE_ENV=production, which the
+//      ecosystem file sets. That file's last entry is two months old.
+//
+// So: write the reason SYNCHRONOUSLY with appendFileSync — which survives process.exit — before
+// touching the logger, and only then exit, after a short delay so the pipe can drain too.
+const FATAL_LOG_PATH = path.join(__dirname, '..', '..', '..', 'logs', 'worker-fatal.log');
+const FATAL_EXIT_DELAY_MS = Math.max(0, parseInt(process.env.WORKER_FATAL_EXIT_DELAY_MS || '250', 10) || 250);
+
+// Set by recordFatal so the exit hook below can tell "we know why" from "it just vanished".
+let fatalReasonRecorded = false;
+
+/** Record a fatal reason somewhere it cannot be lost. Must never throw — it runs on the way out. */
+function recordFatal(kind, detail) {
+    fatalReasonRecorded = true;
+    const text = detail && detail.stack ? detail.stack : String(detail);
+    const line = `[${new Date().toISOString()}] [${WORKER_NAME}] ${kind}: ${text}\n`;
+    try {
+        fs.mkdirSync(path.dirname(FATAL_LOG_PATH), { recursive: true });
+        fs.appendFileSync(FATAL_LOG_PATH, line);
+    } catch (_) { /* a failure here must not mask the original fault */ }
+    try { logger.error(`[Worker:${WORKER_NAME}] ${kind}`, detail); } catch (_) {}
+}
+
+/**
+ * Exit, but give the async stderr pipe a chance to drain first.
+ *
+ * The timer is deliberately NOT unref'd: holding the loop open for a moment is the entire point.
+ * `process.exitCode` is set as well, so the right code is still used if the process happens to end
+ * on its own before the timer fires.
+ */
+function exitAfterFlush(code) {
+    process.exitCode = code;
+    setTimeout(() => process.exit(code), FATAL_EXIT_DELAY_MS);
+}
+
+// THE BACKSTOP, and the one that finally answers "why did it exit?".
+//
+// `exit` fires for EVERY termination that runs JS at all — an explicit process.exit anywhere in the
+// dependency tree, a natural exit because the event loop drained, a rethrow, a signal handled
+// elsewhere. Only SIGKILL and a hard abort skip it. So if the fleet keeps churning and this hook
+// records nothing, the process is being killed outright and the search moves outside Node entirely.
+// Either answer is progress; previously both looked identical.
+//
+// Only synchronous work is allowed here, which is exactly why recordFatal uses appendFileSync.
+process.on('exit', (code) => {
+    if (code === 0 && !fatalReasonRecorded) return;   // ordinary clean stop, nothing to explain
+    if (fatalReasonRecorded) return;                  // already written by a more specific handler
+    recordFatal('UNEXPLAINED exit', `code=${code}, uptime=${(process.uptime() / 60).toFixed(1)}min, rssMB=${Math.round(process.memoryUsage().rss / 1048576)}`);
+});
+
+// Registered at MODULE TOP LEVEL on purpose, so a failure during startup is covered too.
+process.on('uncaughtException', (err) => {
+    recordFatal('FATAL uncaughtException', err);
+    // Non-zero so PM2 treats this as a crash and restarts, rather than as a clean stop.
+    exitAfterFlush(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+    const err = reason instanceof Error ? reason : new Error(`Non-Error rejection: ${String(reason)}`);
+    recordFatal('FATAL unhandledRejection', err);
+    exitAfterFlush(1);
+});
+
+
+/**
+ * Periodic heap/RSS sample.
+ *
+ * Nothing in this repo read `v8` before, so "is RSS growth actually HEAP growth?" was unanswerable —
+ * and that is the question separating a real leak from native retention or fragmentation. PM2's
+ * `mem` column is RSS, while the OOM ceiling (--max-old-space-size) applies to the heap, so reading
+ * one without the other is how a wrong conclusion gets reached confidently.
+ *
+ * `external`/`arrayBuffers` are included deliberately: native allocations (e.g. zlib contexts) show
+ * up there and in RSS but NOT in used_heap_size, which is exactly the divergence to watch for.
+ *
+ * `.unref()` so this timer can never hold the process open during shutdown.
+ */
+const HEAP_LOG_INTERVAL_MS = Math.max(
+    60 * 1000,
+    parseInt(process.env.WORKER_HEAP_LOG_INTERVAL_MS || String(5 * 60 * 1000), 10) || 5 * 60 * 1000
+);
+const heapLogTimer = setInterval(() => {
+    try {
+        const h = v8.getHeapStatistics();
+        const m = process.memoryUsage();
+        const mb = (n) => Math.round((n || 0) / 1048576);
+        logger.info(
+            `[Worker:${WORKER_NAME}] heap usedMB=${mb(h.used_heap_size)} totalMB=${mb(h.total_heap_size)} ` +
+            `limitMB=${mb(h.heap_size_limit)} rssMB=${mb(m.rss)} externalMB=${mb(m.external)} ` +
+            `arrayBuffersMB=${mb(m.arrayBuffers)} uptimeH=${(process.uptime() / 3600).toFixed(1)}`
+        );
+    } catch (err) {
+        logger.warn(`[Worker:${WORKER_NAME}] heap sample failed: ${err.message}`);
+    }
+}, HEAP_LOG_INTERVAL_MS);
+heapLogTimer.unref();
+
 // Lock configuration for long-running jobs (prevents stalling)
-// These settings match integrationWorker.js for consistency
-const LOCK_DURATION = 2 * 60 * 60 * 1000; // 2 hours - job lock duration
-const LOCK_EXTENSION_INTERVAL = 15 * 60 * 1000; // Extend lock every 15 minutes
-const LOCK_EXTENSION_AMOUNT = 60 * 60 * 1000; // Extend by 1 hour each time
+// These settings match integrationWorker.js for consistency — keep the two in step.
+//
+// WHY THESE NUMBERS CHANGED. When a worker process dies, its jobs stay `active` and keep holding
+// their concurrency slot until the Redis lock lapses. Measured in production: 36 jobs reported
+// active against 18 real slots — roughly HALF the queue's apparent capacity was phantom, held by
+// workers that no longer existed.
+//
+// The old values made that window enormous. The lock only shrinks to LOCK_EXTENSION_AMOUNT after
+// the FIRST renewal, so a worker dying inside its first 15 minutes left the job pinned for the full
+// 2h LOCK_DURATION. That initial-lock hole is precisely why all three constants move together:
+// reducing the extension alone would not have closed it.
+//
+// COUNTER-INTUITIVELY THIS IS SAFER THAN BEFORE, not riskier. The hazard is a lock lapsing while a
+// job is genuinely running, because BullMQ then RE-RUNS it — and sched_calc_review sends review
+// requests, so a spurious re-run risks duplicate requests to real sellers. What guards against that
+// is how many consecutive renewals may fail, not the absolute numbers:
+//
+//   before: renew every 15min, extend to 60min -> tolerates 3 missed renewals, reclaim <=60min (2h if early)
+//   after:  renew every  2min, extend to 20min -> tolerates 9 missed renewals, reclaim <=20min
+//
+// Fault tolerance triples while reclaim latency drops threefold. Cost is trivial: ~9 extendLock
+// calls/min across 18 concurrent jobs, plus the JobStatus heartbeat that piggybacks the same timer.
+//
+// Env-overridable so the old timing can be restored without a deploy. INVARIANT to preserve:
+// LOCK_EXTENSION_INTERVAL must stay well below BOTH LOCK_DURATION and LOCK_EXTENSION_AMOUNT.
+const LOCK_DURATION = Math.max(
+    5 * 60 * 1000,
+    parseInt(process.env.WORKER_LOCK_DURATION_MS || String(20 * 60 * 1000), 10) || 20 * 60 * 1000
+); // initial lock granted when a job is picked up
+const LOCK_EXTENSION_INTERVAL = Math.max(
+    30 * 1000,
+    parseInt(process.env.WORKER_LOCK_EXTENSION_INTERVAL_MS || String(2 * 60 * 1000), 10) || 2 * 60 * 1000
+); // how often the keep-alive fires
+const LOCK_EXTENSION_AMOUNT = Math.max(
+    5 * 60 * 1000,
+    parseInt(process.env.WORKER_LOCK_EXTENSION_AMOUNT_MS || String(20 * 60 * 1000), 10) || 20 * 60 * 1000
+); // how far out each renewal pushes the lock
 // Hard ceiling on how long ONE job may hold its slot. See lockExtension.js for the full
 // reasoning — in short, this is the only working timeout in the queue, because a job-level
 // `timeout` option has been a no-op since BullMQ v4 dropped it.
@@ -269,7 +426,9 @@ async function processScheduledPhase(job) {
         };
     }
 
-    const phaseSucceeded = phaseOutcome.success === true;
+    // `let`, not `const`: the poll-reschedule branch below can conclude the phase did NOT
+    // succeed after all — it asked to be polled again and no poll could be created.
+    let phaseSucceeded = phaseOutcome.success === true;
     const duration = Date.now() - jobStartTime;
     const nextPhase = scheduledPhases.getNextPhase(phase);
 
@@ -316,40 +475,137 @@ async function processScheduledPhase(job) {
     // to be rescheduled (all reports terminal).
     if (phaseSucceeded && phaseOutcome.reschedule && phaseOutcome.reschedule.delayMs > 0) {
         const pollAttempt = phaseOutcome.reschedule.pollAttempt || 1;
+        // Only a poll that DEMONSTRABLY exists lets this branch claim success and return early.
+        // Every route that fails to create one — the active-holder skip, a thrown add, and a
+        // silent duplicate-id drop — leaves this false, and the chain advances instead of ending.
+        let pollScheduled = false;
+        let pollFailureReason = null;
         try {
             const selfJobData = scheduledPhases.createNextPhaseJobData(phase, job.data, phaseOutcome);
             const selfJobId = `${scheduledPhases.generatePhaseJobId(effectiveParentJobId, phase)}-poll${pollAttempt}`;
             const queue = getQueue();
-            await queue.add('process-user-data', selfJobData, {
-                jobId: selfJobId,
-                delay: phaseOutcome.reschedule.delayMs,
-                attempts: 3,
-                backoff: { type: 'exponential', delay: 60000 }
-                // `timeout` intentionally absent — a no-op since BullMQ v4; see queue.js.
-            });
-            logger.info(
-                `[Worker:${WORKER_NAME}] Scheduled phase ${phase} not done — rescheduled poll ${pollAttempt} in ${phaseOutcome.reschedule.delayMs}ms`,
-                { userId, selfJobId, duration }
-            );
+
+            // A poll id is deterministic per (account, phase, attempt) but NOT per run, and BullMQ
+            // SILENTLY IGNORES an add whose jobId already exists — it returns the pre-existing job
+            // and creates nothing. Completed jobs linger for `removeOnComplete.age` (2h, see
+            // queue.js), so on an hourly account the PREVIOUS run's finished poll still owns this
+            // id when the next run reaches the same phase. The add evaporates and the chain simply
+            // stops: no next phase, no poll, no error.
+            //
+            // Measured on 6a57b823 (a PRO customer, repeatedly "stalled"): sched_finance finished
+            // 2026-08-30T23:12:58 asking for poll1; poll1 still belonged to the 22:12 run one hour
+            // earlier; the add vanished and the pipeline sat frozen for 9.5h until the stalled
+            // sweep noticed. Its finance chain burns 8+ polls per run, so it collided every time.
+            //
+            // Clear the id first. An ACTIVE job is left alone and the poll is skipped: that means
+            // another run is genuinely executing this same poll right now, and removing it would
+            // destroy live work — the chain stopping is the lesser harm, and the log below makes
+            // it visible rather than silent.
+            let idBlocked = false;
+            try {
+                const existing = await queue.getJob(selfJobId);
+                if (existing) {
+                    const st = await existing.getState().catch(() => 'unknown');
+                    if (st === 'active') {
+                        idBlocked = true;
+                        logger.error(
+                            `[Worker:${WORKER_NAME}] Poll id ${selfJobId} is held by an ACTIVE job — another run is executing this phase. Not rescheduling; this chain stops here.`,
+                            { userId, phase, pollAttempt }
+                        );
+                    } else {
+                        await existing.remove();
+                        logger.info(`[Worker:${WORKER_NAME}] Cleared stale poll job ${selfJobId} (state: ${st}) before re-adding`);
+                    }
+                }
+            } catch (clearErr) {
+                // Fall through and attempt the add anyway — worst case it is dropped, which is
+                // exactly today's behaviour, so this can only improve on it.
+                logger.warn(`[Worker:${WORKER_NAME}] Could not clear poll id ${selfJobId}: ${clearErr.message}`);
+            }
+
+            if (idBlocked) {
+                pollFailureReason = 'id held by an ACTIVE job';
+            } else {
+                // VERIFY THE ADD ACTUALLY CREATED SOMETHING. On a duplicate id BullMQ returns the
+                // PRE-EXISTING job rather than throwing, and that job carries its own original
+                // creation time — so a timestamp taken immediately before the add separates "mine"
+                // from "the one that was already there". No extra round-trip.
+                //
+                // freshnessSweeper does the same check by age (< PIPELINE_STALL_MAX_AGE_HOURS, 9h);
+                // that bound is far too loose here, where the id is recycled every 2h, and would
+                // happily accept the previous run's job as proof of success.
+                const addedAfter = Date.now();
+                const added = await queue.add('process-user-data', selfJobData, {
+                    jobId: selfJobId,
+                    delay: phaseOutcome.reschedule.delayMs,
+                    attempts: 3,
+                    backoff: { type: 'exponential', delay: 60000 },
+                    // A poll is an ephemeral self-reschedule, not a record worth keeping. Holding
+                    // the id after it finishes is precisely what broke the next run, so free it at
+                    // once. The JobStatus row is the durable audit trail for these.
+                    removeOnComplete: true,
+                    removeOnFail: true
+                    // `timeout` intentionally absent — a no-op since BullMQ v4; see queue.js.
+                });
+
+                pollScheduled = !!added && typeof added.timestamp === 'number' && added.timestamp >= addedAfter;
+                if (!pollScheduled) {
+                    pollFailureReason = added
+                        ? `add returned a pre-existing job (created ${new Date(added.timestamp).toISOString()})`
+                        : 'add returned nothing';
+                }
+            }
+
+            if (pollScheduled) {
+                logger.info(
+                    `[Worker:${WORKER_NAME}] Scheduled phase ${phase} not done — rescheduled poll ${pollAttempt} in ${phaseOutcome.reschedule.delayMs}ms`,
+                    { userId, selfJobId, duration }
+                );
+            }
         } catch (enqueueError) {
+            pollFailureReason = `add threw: ${enqueueError.message}`;
             logger.error(
                 `[Worker:${WORKER_NAME}] Failed to reschedule phase ${phase} for user ${userId}:`,
                 enqueueError
             );
-            // Non-fatal: the reconciliation sweep re-checks stuck SUBMITTED reports.
         }
-        try {
-            await updateJobStatus(job.id, userId, 'completed', {
-                completedAt: new Date().toISOString(),
-                duration,
-                attemptNumber: job.attemptsMade + 1,
-                maxAttempts: job.opts.attempts,
-                metadata: { country, region, phase, rescheduled: true, pollAttempt, parentJobId: effectiveParentJobId }
-            });
-        } catch (statusError) {
-            logger.warn(`[Worker:${WORKER_NAME}] Could not update job status for rescheduled phase ${phase}: ${statusError.message}`);
+        if (pollScheduled) {
+            try {
+                await updateJobStatus(job.id, userId, 'completed', {
+                    completedAt: new Date().toISOString(),
+                    duration,
+                    attemptNumber: job.attemptsMade + 1,
+                    maxAttempts: job.opts.attempts,
+                    metadata: { country, region, phase, rescheduled: true, pollAttempt, parentJobId: effectiveParentJobId }
+                });
+            } catch (statusError) {
+                logger.warn(`[Worker:${WORKER_NAME}] Could not update job status for rescheduled phase ${phase}: ${statusError.message}`);
+            }
+            return { success: true, phase, rescheduled: true, pollAttempt };
         }
-        return { success: true, phase, rescheduled: true, pollAttempt };
+
+        // NO POLL WAS CREATED. Returning success here — which is what this branch used to do
+        // unconditionally — is how a run silently evaporated: the worker reported success, no
+        // further phase was ever enqueued, and the DataFetchTracking doc sat at 'started' until
+        // the 9h stalled sweep noticed. Worst case measured: ~12-13h frozen.
+        //
+        // So stop polling and let the chain advance instead. sched_finalize then runs and CLOSES
+        // the doc as 'partial', the seller keeps whatever data did arrive, and the next hourly run
+        // retries — one hour instead of twelve. Amazon reports left parked are already the
+        // reconciliation sweep's job, which the catch above has always relied on.
+        //
+        // This is the pipeline's own stated policy (see the header of this function): a phase that
+        // does not succeed is recorded, and the chain continues regardless.
+        logger.error(
+            `[Worker:${WORKER_NAME}] Could not reschedule poll ${pollAttempt} for phase ${phase} — giving up on polling and advancing the pipeline so the run can close`,
+            { userId, country, region, phase, pollAttempt, parentJobId: effectiveParentJobId, reason: pollFailureReason }
+        );
+        phaseOutcome = {
+            ...phaseOutcome,
+            success: false,
+            error: `Could not reschedule poll ${pollAttempt}: ${pollFailureReason}`
+        };
+        phaseSucceeded = false;
     }
 
     if (nextPhase) {
@@ -594,6 +850,9 @@ async function startWorker() {
         } catch (sessErr) {
             logger.warn(`[Worker:${WORKER_NAME}] Could not close session for failed job ${job?.id}: ${sessErr.message}`);
         }
+
+        // ...and then actually END THE RUN. See abandonedRunRecovery.js.
+        await closeOutAbandonedRun(job, err, { updateJobStatus, workerName: WORKER_NAME });
     });
 
     worker.on('error', (err) => {
@@ -617,13 +876,16 @@ async function startWorker() {
         }
         isShuttingDown = true;
 
+        // Recorded synchronously as well as logged: this is the line that tells a deliberate
+        // restart apart from a crash, and stdout is the one place it cannot survive an exit.
+        recordFatal(`SIGNAL ${signal} received`, 'graceful shutdown requested');
         logger.info(`[Worker:${WORKER_NAME}] Received ${signal}, closing worker gracefully (max ${SHUTDOWN_GRACE_MS / 60000} min)...`);
 
         let hasExited = false;
         const forceExit = () => {
             if (!hasExited) {
                 hasExited = true;
-                logger.warn(`[Worker:${WORKER_NAME}] Shutdown timeout reached - forcing exit. Active job will be retried after lock expiry.`);
+                recordFatal('FATAL shutdown timeout', 'forcing exit; active job will be retried after lock expiry');
                 process.exit(1);
             }
         };
@@ -645,7 +907,7 @@ async function startWorker() {
                 clearTimeout(shutdownTimeout);
                 if (!hasExited) {
                     hasExited = true;
-                    logger.error(`[Worker:${WORKER_NAME}] Error during graceful shutdown:`, err.message);
+                    recordFatal('FATAL graceful-shutdown error', err);
                     process.exit(1);
                 }
             });
@@ -667,7 +929,7 @@ startWorker()
         module.exports = { worker };
     })
     .catch((error) => {
-        logger.error(`[Worker:${WORKER_NAME}] Failed to start worker:`, error);
-        process.exit(1);
+        recordFatal('FATAL startup failure', error);
+        exitAfterFlush(1);
     });
 

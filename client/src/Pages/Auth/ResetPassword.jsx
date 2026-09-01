@@ -4,6 +4,8 @@ import { Lock, Eye, EyeOff, Shield, Key, CheckCircle, ArrowRight, Loader2 } from
 import { useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
 import RingLoader from "react-spinners/RingLoader";
+import PasswordCriteriaList from '../../Components/Shared/PasswordCriteriaList.jsx';
+import { isPasswordValid, passwordErrorMessage, extractServerError } from '../../utils/passwordCriteria.js';
 
 const ResetPassword = () => {
     const [showNewPassword, setShowNewPassword] = useState(false);
@@ -18,6 +20,9 @@ const ResetPassword = () => {
     const [resetCode, setResetCode] = useState("");
     const navigate = useNavigate();
     const { code } = useParams();
+
+    // Something typed, but not yet meeting every rule — keeps the field red as they go.
+    const passwordIncomplete = !!newPassword && !isPasswordValid(newPassword);
 
     useEffect(() => {
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -77,12 +82,11 @@ const ResetPassword = () => {
 
     const validateForm = () => {
         const newErrors = {};
-        const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
         
         if (!newPassword) {
             newErrors.newPassword = 'New password is required';
-        } else if (!passwordRegex.test(newPassword)) {
-            newErrors.newPassword = 'Password must be at least 8 characters with a letter, number, and special character';
+        } else if (!isPasswordValid(newPassword)) {
+            newErrors.newPassword = passwordErrorMessage(newPassword);
         }
         
         if (!confirmPassword) {
@@ -125,7 +129,9 @@ const ResetPassword = () => {
                 }, 3000);
             }
         } catch (error) {
-            setErrorMessage(error.response?.data?.message || "Failed to reset password. Please try again.");
+            // Reads the validator's `errors[]` too, not just `message`, so a rejection
+            // says what was actually wrong instead of the generic fallback.
+            setErrorMessage(extractServerError(error, "Failed to reset password. Please try again."));
         } finally {
             setLoading(false);
         }
@@ -270,9 +276,11 @@ const ResetPassword = () => {
                                         onChange={handleChange}
                                         onFocus={() => handleFocus('newPassword')}
                                         className={`w-full pl-12 pr-12 py-4 border-2 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-300 bg-[#21262d] text-gray-100 placeholder-gray-500 ${
-                                            errors.newPassword || errors.mismatch
-                                                ? 'border-red-500 bg-red-500/10' 
-                                                : 'border-[#30363d] hover:border-gray-500'
+                                            errors.newPassword || errors.mismatch || passwordIncomplete
+                                                ? 'border-red-500 bg-red-500/10'
+                                                : newPassword
+                                                    ? 'border-green-500/60'
+                                                    : 'border-[#30363d] hover:border-gray-500'
                                         }`}
                                         placeholder="Enter your new password"
                                     />
@@ -284,9 +292,7 @@ const ResetPassword = () => {
                                         {showNewPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                                     </button>
                                 </div>
-                                {errors.newPassword && (
-                                    <p className="text-red-400 text-xs mt-2">{errors.newPassword}</p>
-                                )}
+                                <PasswordCriteriaList value={newPassword} error={errors.newPassword} />
                             </div>
 
                             {/* Confirm Password Field */}

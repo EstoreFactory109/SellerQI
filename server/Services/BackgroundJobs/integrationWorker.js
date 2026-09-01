@@ -38,9 +38,24 @@ const INTEGRATION_WORKER_CONCURRENCY = parseInt(process.env.INTEGRATION_WORKER_C
 const WORKER_NAME = process.env.INTEGRATION_WORKER_NAME || `integration-worker-${process.pid}`;
 
 // Lock configuration — phases for large catalogs can take hours.
-const LOCK_DURATION = 2 * 60 * 60 * 1000;
-const LOCK_EXTENSION_INTERVAL = 15 * 60 * 1000;
-const LOCK_EXTENSION_AMOUNT = 60 * 60 * 1000;
+//
+// Deliberately kept in step with worker.js, which carries the full reasoning: a dead worker holds
+// its concurrency slot until the lock lapses, and the old 2h initial lock / 60min extension meant
+// roughly half the queue's apparent capacity could be phantom. Renewing every 2min and extending to
+// 20min tolerates MORE consecutive missed renewals (9 vs 3) while reclaiming three times faster.
+// Env-overridable, and sharing the same env vars as worker.js so the two cannot drift apart.
+const LOCK_DURATION = Math.max(
+    5 * 60 * 1000,
+    parseInt(process.env.WORKER_LOCK_DURATION_MS || String(20 * 60 * 1000), 10) || 20 * 60 * 1000
+);
+const LOCK_EXTENSION_INTERVAL = Math.max(
+    30 * 1000,
+    parseInt(process.env.WORKER_LOCK_EXTENSION_INTERVAL_MS || String(2 * 60 * 1000), 10) || 2 * 60 * 1000
+);
+const LOCK_EXTENSION_AMOUNT = Math.max(
+    5 * 60 * 1000,
+    parseInt(process.env.WORKER_LOCK_EXTENSION_AMOUNT_MS || String(20 * 60 * 1000), 10) || 20 * 60 * 1000
+);
 // Hard ceiling on a single phase — the queue's only working timeout (see
 // runWithLockExtension below, and the fuller note in worker.js). Defaults higher than
 // the scheduled worker's because first-time onboarding genuinely fetches more: it walks
