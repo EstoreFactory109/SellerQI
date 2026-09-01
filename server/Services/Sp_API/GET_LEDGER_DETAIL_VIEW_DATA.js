@@ -5,7 +5,7 @@ const gunzip = promisify(zlib.gunzip);
 const { parseAsync, yieldToEventLoop } = require('../../utils/asyncCsvParser');
 const logger = require("../../utils/Logger");
 const { ApiError } = require('../../utils/ApiError');
-const LedgerDetailView = require('../../models/finance/LedgerDetailViewModel');
+const { saveLedgerDetailViewData } = require('../Finance/LedgerDetailViewService.js');
 const { getReportOptions, normalizeHeaders } = require('../../utils/ReportHeaderMapping');
 
 /**
@@ -251,14 +251,13 @@ async function _processLedgerDetailDocument(accessToken, reportDocumentId, baseu
         });
 
         try {
-            const ledgerDetailRecord = await LedgerDetailView.create({
-                User: userId,
-                country: country,
-                region: region,
-                data: mappedData
-            });
+            // One document per row instead of the whole report in one — see
+            // Services/Finance/LedgerDetailViewService.js. The embedded-array write reached
+            // 14.91MB / 32,175 rows in production and failed outright past MongoDB's 16MB ceiling.
+            // `recordId` is now the fetch's batchId, which is its stable identifier.
+            const saveResult = await saveLedgerDetailViewData(userId, country, region, mappedData);
 
-            if (!ledgerDetailRecord) {
+            if (!saveResult || saveResult.success !== true) {
                 logger.error("[GET_LEDGER_DETAIL_VIEW_DATA] Failed to save ledger detail data to database");
                 throw new ApiError(500, "Failed to save data to database");
             }
@@ -269,7 +268,7 @@ async function _processLedgerDetailDocument(accessToken, reportDocumentId, baseu
                 success: true,
                 message: "Report fetched and saved successfully",
                 data: mappedData,
-                recordId: ledgerDetailRecord._id,
+                recordId: saveResult.recordId,
                 totalRecords: mappedData.length
             };
         } catch (dbError) {

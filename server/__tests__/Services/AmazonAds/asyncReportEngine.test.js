@@ -30,9 +30,15 @@ function makeFakeModel() {
             return String(doc[k]) === String(v);
         });
 
+    // Every projection the engine passes to find(), so a test can assert the legacy `result` blob
+    // is excluded from the poll-tick reads.
+    const findProjections = [];
+
     return {
         _docs: docs,
-        find(filter) {
+        _findProjections: findProjections,
+        find(filter, projection) {
+            findProjections.push(projection);
             return { lean: async () => docs.filter(d => matches(d, filter)).map(d => ({ ...d })) };
         },
         async updateOne(filter, update, opts = {}) {
@@ -158,14 +164,41 @@ describe('asyncReportEngine — POLL stage', () => {
         expect(res.summary).toMatchObject({ total: 1, done: 1, noData: 0, failed: 0 });
     });
 
-    it('stashes finalize().result on the row so the phase can combine reports before saving', async () => {
+    // THE REGRESSION TEST — inverted from what it used to assert.
+    //
+    // The engine used to stash `finalize().result` on the row so a later `saveFromRows` could
+    // combine SP/SB/SD before saving. That made the tracking row carry an entire 31-day report:
+    // measured in production 2026-08-21, ppcSpendsBySKU rows reached 15.13MB and
+    // ppcMetricsAggregated 10.00MB — together 233.5MB of the collection's 233.9MB. Past MongoDB's
+    // 16MB ceiling the `updateOne` threw ERR_OUT_OF_RANGE, the catch marked the row FAILED, and so
+    // the mechanism meant to let the phase combine reports was instead destroying the report it had
+    // just downloaded, on every run, for the largest account.
+    //
+    // Adapters now persist their own output inside `finalize`. A returned `result` must never reach
+    // the row — silently accepting one is exactly how the blob crept in.
+    it('does NOT persist finalize().result — a report must never be stashed on the row', async () => {
         const Model = makeFakeModel();
         await seed(Model, 'svcA', 'rep-A');
         const metrics = { totalSpend: 12.5, campaigns: [{ id: 'c1' }] };
         const specs = [specFor('svcA', { submit: jest.fn(), checkStatusOnce: async () => ({ ready: true, handle: {} }), finalize: async () => ({ empty: false, result: metrics }) })];
         await runAsyncAdsReports({ ...ACCT, specs, Model });
         expect(Model._docs[0].status).toBe('DONE');
-        expect(Model._docs[0].result).toEqual(metrics);
+        expect(Model._docs[0].result).toBeUndefined();
+    });
+
+    // These reads run on every poll tick (~15 min per account per phase). Historical rows keep
+    // their legacy blob until the model's 30-day TTL clears them, so without a projection each
+    // tick would pull multi-MB payloads into the worker heap for data no caller uses — and worker
+    // memory is the known reason the largest accounts cannot finish a daily cycle.
+    it('excludes the legacy result blob from every row read', async () => {
+        const Model = makeFakeModel();
+        await seed(Model, 'svcA', 'rep-A');
+        const specs = [specFor('svcA', { submit: jest.fn(), checkStatusOnce: async () => 'PROCESSING' })];
+        await runAsyncAdsReports({ ...ACCT, specs, Model });
+        expect(Model._findProjections.length).toBeGreaterThan(0);
+        for (const projection of Model._findProjections) {
+            expect(projection).toEqual({ result: 0 });
+        }
     });
 
     it('ready but empty report → NO_DATA', async () => {

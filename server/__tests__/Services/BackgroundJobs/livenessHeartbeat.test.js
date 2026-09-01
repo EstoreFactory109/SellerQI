@@ -157,19 +157,39 @@ describe('producer — removing an old job only when it is not demonstrably aliv
         jest.doMock('../../../Services/BackgroundJobs/queue.js', () => ({
             getQueue: () => ({
                 getJob: async (id) => (id === job.id ? job : null),
+                // Deliberately empty, and deliberately PRESENT. These tests are about the
+                // deterministic-phase-id removal loop — "is THIS job dead enough to delete?" —
+                // which is a different decision from "does this account have any work pending",
+                // a queue scan covered in producerLiveness.test.js. Omit this and that scan
+                // throws, gets swallowed by its own fail-open catch, and every assertion below
+                // still passes while silently exercising none of it.
+                getRanges: async () => [],
                 add: async (_name, _data, opts) => ({ id: opts.jobId }),
             }),
         }));
         jest.doMock('../../../utils/Logger.js', () => ({
             info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn(),
         }));
+        // This mock APPLIES the query rather than returning a canned row. `hasRecentHeartbeat`
+        // does findOne({ jobId }) and filters status/age in JS, so a mock that ignored the query
+        // would hand it rows Mongo would never return and every assertion below about "heartbeat
+        // went cold" or "not running" would silently stop testing anything.
+        //
+        // JobStatus is now the ONLY thing this file's producer path reads — the account-level
+        // "is work pending" check moved off JobStatus entirely and onto a BullMQ scan, because a
+        // row's status could not distinguish an async phase parked in a delayed poll from one that
+        // had genuinely finished. See producerLiveness.test.js.
         jest.doMock('../../../models/system/JobStatusModel.js', () => ({
-            findOne: () => ({
+            findOne: (query = {}) => ({
                 select: () => ({
-                    lean: async () => (rowMissing ? null : {
-                        status,
-                        updatedAt: new Date(Date.now() - heartbeatAgeMs),
-                    }),
+                    lean: async () => {
+                        if (rowMissing) return null;
+                        const row = { jobId: job.id, status, updatedAt: new Date(Date.now() - heartbeatAgeMs) };
+                        if (query.status && query.status !== row.status) return null;
+                        if (query.updatedAt?.$gt && !(row.updatedAt > query.updatedAt.$gt)) return null;
+                        if (query.jobId?.$regex && !new RegExp(query.jobId.$regex).test(row.jobId)) return null;
+                        return row;
+                    },
                 }),
             }),
         }));

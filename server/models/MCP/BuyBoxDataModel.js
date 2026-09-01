@@ -1,4 +1,16 @@
 const mongoose = require('mongoose');
+const { marketplaceConfig } = require('../../controllers/config/config.js');
+
+/**
+ * Countries this model accepts, derived from the SP-API marketplace table rather than
+ * hand-listed — see the same constant in DataFetchTrackingModel for the full rationale.
+ *
+ * This is the enum that PROVED the drift: production logs carry 63
+ * `BuyBoxData validation failed: country: 'BR' is not a valid enum value for path
+ * 'country'` errors, each one a fetched-but-discarded day of BuyBox data for a Brazilian
+ * seller. `marketplaceConfig` lists 23 countries; this literal listed 15.
+ */
+const SUPPORTED_COUNTRIES = Object.keys(marketplaceConfig);
 
 // Schema for ASIN-wise buybox data
 const asinBuyBoxSchema = new mongoose.Schema({
@@ -75,7 +87,7 @@ const buyBoxDataSchema = new mongoose.Schema({
     country: {
         type: String,
         required: true,
-        enum: ['US', 'CA', 'MX', 'UK', 'DE', 'FR', 'IT', 'ES', 'JP', 'AU', 'IN', 'SG', 'SA', 'ZA', 'BE'],
+        enum: SUPPORTED_COUNTRIES,
         index: true
     },
     dateRange: {

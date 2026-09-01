@@ -99,12 +99,29 @@ function downloadReportContent(url, opts = {}) {
         let overallTimer = null;
         let idleTimer = null;
         let request = null;
+        // Hoisted so cleanup() can reach it. The gunzip stream is created inside the response
+        // handler below, i.e. in a scope the settle functions cannot see — which is precisely why
+        // it was never destroyed.
+        let inflateStream = null;
 
         function cleanup() {
             if (overallTimer) clearTimeout(overallTimer);
             if (idleTimer) clearTimeout(idleTimer);
             overallTimer = null;
             idleTimer = null;
+            // Release the zlib context.
+            //
+            // WHY THIS MATTERS MORE THAN IT LOOKS. A gunzip stream holds a NATIVE zlib context and
+            // buffer pool. Those live in RSS but NOT in the V8 heap, so they exert almost no GC
+            // pressure and are never collected on their own — the process simply grows. This fires
+            // on every gzipped SP-API/Ads report download, of which a pipeline does many.
+            //
+            // It is also the only mechanism found that explains RSS climbing with uptime while the
+            // heap stays healthy, which is the divergence that made a memory leak look likely.
+            // Called from cleanup() so every settle path (success, failure, timeout) is covered
+            // exactly once — same shape as request.destroy() below.
+            try { if (inflateStream) inflateStream.destroy(); } catch (_) { /* already gone */ }
+            inflateStream = null;
         }
 
         function fail(err) {
@@ -199,6 +216,9 @@ function downloadReportContent(url, opts = {}) {
 
             const stream = isGzip ? res.pipe(zlib.createGunzip()) : res;
             if (isGzip) {
+                // Record it so cleanup() can destroy the native zlib context on every settle path.
+                // Only when we actually created one — `res` is destroyed via request.destroy().
+                inflateStream = stream;
                 // A corrupt/truncated gzip surfaces here rather than as short output.
                 stream.on('error', (err) => fail(new Error(`[${label}] gunzip failed: ${err.message}`)));
             }

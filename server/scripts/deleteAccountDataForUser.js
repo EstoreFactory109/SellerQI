@@ -40,6 +40,9 @@ const Campaign = require('../models/amazon-ads/CampaignModel.js');
 const SearchTerms = require('../models/amazon-ads/SearchTermsModel.js');
 const Keyword = require('../models/amazon-ads/keywordModel.js');
 const KeywordChunk = require('../models/amazon-ads/keywordChunkModel.js');
+const NegativeKeywordChunk = require('../models/amazon-ads/negativeKeywordChunkModel.js');
+const CampaignChunk = require('../models/amazon-ads/campaignChunkModel.js');
+const AdsGroupChunk = require('../models/amazon-ads/adsGroupChunkModel.js');
 const KeywordTracking = require('../models/amazon-ads/KeywordTrackingModel.js');
 const ProductWiseSponsoredAdsData = require('../models/amazon-ads/ProductWiseSponseredAdsModel.js');
 const ProductWiseSponsoredAdsItem = require('../models/amazon-ads/ProductWiseSponsoredAdsItemModel.js');
@@ -59,6 +62,8 @@ const ProductWiseFinancial = require('../models/finance/ProductWiseFinancialMode
 const WeekLyFinance = require('../models/finance/WeekLyFinanceModel.js');
 const LedgerSummaryView = require('../models/finance/LedgerSummaryViewModel.js');
 const LedgerSummaryViewItem = require('../models/finance/LedgerSummaryViewItemModel.js');
+const LedgerDetailViewItem = require('../models/finance/LedgerDetailViewItemModel.js');
+const FBAReimbursementsItem = require('../models/finance/FBAReimbursementsItemModel.js');
 const LedgerDetailView = require('../models/finance/LedgerDetailViewModel.js');
 const FBAReimbursements = require('../models/finance/FBAReimbursementsModel.js');
 const LongTermStorageFees = require('../models/finance/LongTermStorageFeesModel.js');
@@ -196,6 +201,9 @@ const USER_ID_TARGETS = [
   { label: 'SearchTerms', model: SearchTerms },
   { label: 'Keyword', model: Keyword },
   { label: 'KeywordChunk', model: KeywordChunk },
+  { label: 'NegativeKeywordChunk', model: NegativeKeywordChunk },
+  { label: 'CampaignChunk', model: CampaignChunk },
+  { label: 'AdsGroupChunk', model: AdsGroupChunk },
   { label: 'KeywordTracking', model: KeywordTracking },
   { label: 'ProductWiseSponsoredAdsData', model: ProductWiseSponsoredAdsData },
   { label: 'ProductWiseSponsoredAdsItem', model: ProductWiseSponsoredAdsItem },
@@ -255,7 +263,9 @@ const USER_TARGETS = [
   { label: 'LedgerSummaryView', model: LedgerSummaryView },
   { label: 'LedgerSummaryViewItem', model: LedgerSummaryViewItem },
   { label: 'LedgerDetailView', model: LedgerDetailView },
+  { label: 'LedgerDetailViewItem', model: LedgerDetailViewItem },
   { label: 'FBAReimbursements', model: FBAReimbursements },
+  { label: 'FBAReimbursementsItem', model: FBAReimbursementsItem },
   { label: 'LongTermStorageFees', model: LongTermStorageFees },
   { label: 'WeekLyFinance', model: WeekLyFinance },
   { label: 'DataFetchTracking', model: DataFetchTracking },

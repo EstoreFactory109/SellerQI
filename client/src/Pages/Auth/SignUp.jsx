@@ -24,6 +24,8 @@ import { detectCountry } from '../../utils/countryDetection.js';
 import axiosInstance from '../../config/axios.config.js';
 import { devLog } from '../../utils/devLogger.js';
 import PhoneRequiredModal from '../../Components/PhoneUpdate/PhoneRequiredModal.jsx';
+import PasswordCriteriaList from '../../Components/Shared/PasswordCriteriaList.jsx';
+import { isPasswordValid, passwordErrorMessage, extractServerError } from '../../utils/passwordCriteria.js';
 
 // Helper function to get country flag from ISO code
 const getCountryFlag = (isoCode) => {
@@ -65,6 +67,9 @@ const SignUp = () => {
   const [pendingGoogleSignup, setPendingGoogleSignup] = useState(null);
   const navigate = useNavigate();
   const dispatch = useDispatch();
+
+  // Something typed, but not yet meeting every rule — keeps the field red as they go.
+  const passwordIncomplete = !!formData.password && !isPasswordValid(formData.password);
 
   // Continue the Google signup flow once the phone modal is saved or skipped.
   // Takes the routing explicitly so it can also be called straight away, without
@@ -192,7 +197,6 @@ const SignUp = () => {
     let newErrors = {};
     const nameRegex = /^[A-Za-z]{2,}$/;
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
 
     if (!nameRegex.test(formData.firstname)) {
       newErrors.firstname = 'Enter a valid first name (only letters, min 2 characters)';
@@ -222,8 +226,8 @@ const SignUp = () => {
     
     if (!formData.password) {
       newErrors.password = 'Password is required';
-    } else if (!passwordRegex.test(formData.password)) {
-      newErrors.password = 'Password must be at least 8 characters, with a letter, a number, and a special character';
+    } else if (!isPasswordValid(formData.password)) {
+      newErrors.password = passwordErrorMessage(formData.password);
     }
     
     if (!termsAccepted) {
@@ -282,7 +286,7 @@ const SignUp = () => {
       }
     } catch (error) {
       setLoading(false);
-      setErrorMessage(error.response?.data?.message);
+      setErrorMessage(extractServerError(error));
     }
   };
 
@@ -595,7 +599,11 @@ const SignUp = () => {
                      onChange={handleChange}
                      onFocus={handleFocus}
                      className={`w-full pl-10 pr-12 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300 text-gray-100 ${
-                       errors.password ? 'border-red-500 bg-red-500/10' : 'border-[#30363d] bg-[#21262d] hover:border-gray-500'
+                       errors.password || passwordIncomplete
+                         ? 'border-red-500 bg-red-500/10'
+                         : formData.password
+                           ? 'border-green-500/60 bg-[#21262d]'
+                           : 'border-[#30363d] bg-[#21262d] hover:border-gray-500'
                      }`}
                      placeholder="Create a password"
                    />
@@ -607,18 +615,7 @@ const SignUp = () => {
                     {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
                 </div>
-                {errors.password && (
-                  <motion.p
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="text-red-400 text-xs mt-1"
-                  >
-                    {errors.password}
-                  </motion.p>
-                )}
-                                 <p className="text-xs text-gray-500 mt-0.5">
-                   Min 8 chars with letters, numbers & symbols
-                 </p>
+                <PasswordCriteriaList value={formData.password} error={errors.password} />
               </div>
 
               {/* Terms Checkbox */}

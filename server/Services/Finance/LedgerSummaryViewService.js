@@ -13,6 +13,7 @@ const mongoose = require('mongoose');
 const LedgerSummaryView = require('../../models/finance/LedgerSummaryViewModel');
 const LedgerSummaryViewItem = require('../../models/finance/LedgerSummaryViewItemModel');
 const logger = require('../../utils/Logger');
+const { insertManyChunked } = require('../../utils/chunkedInsert');
 
 /**
  * Save Ledger Summary View data to database
@@ -94,8 +95,9 @@ async function saveLedgerSummaryViewData(userId, country, region, dataArray) {
             store: item.store || ''
         }));
 
-        // Use insertMany with ordered:false for better performance
-        await LedgerSummaryViewItem.insertMany(itemsToInsert, { ordered: false });
+        // Chunked to bound peak memory; documents are still hydrated so the stored rows are
+        // unchanged. See utils/chunkedInsert.js for why this is not `{ lean: true }`.
+        await insertManyChunked(LedgerSummaryViewItem, itemsToInsert, { ordered: false });
 
         logger.info('Ledger Summary View data saved successfully', {
             userId: userObjectId.toString(),
