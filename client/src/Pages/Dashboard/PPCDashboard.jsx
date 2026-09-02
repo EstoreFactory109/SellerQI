@@ -2151,12 +2151,12 @@ const PPCDashboard = () => {
   return (
     <div className='min-h-screen w-full overflow-x-hidden' style={{ background: COLORS.bgBase }}>
       {/* Bidbison Ads Automation Banner */}
-      <div className='w-full px-4 py-5 shadow-lg' style={{ background: '#3B82F6' }}>
+      <div className='w-full px-4 py-5 shadow-lg' style={{ background: '#1e3a8a' }}>
         <div className='max-w-6xl mx-auto flex items-center justify-between gap-4 flex-wrap'>
           <div className='flex-1 min-w-0'>
             <div className='flex items-center gap-3 mb-2'>
               <div className='text-2xl'>⚡</div>
-              <h2 className='text-lg font-bold text-white'>Supercharge Your PPC Campaigns</h2>
+              <h2 className='text-lg font-bold text-white'>Supercharge your ads ppc with ai automation</h2>
             </div>
             <p className='text-blue-100 text-sm'>For ads automation please subscribe to Bidbison — Save hours managing campaigns with intelligent automation & AI-powered insights</p>
           </div>
