@@ -2426,6 +2426,14 @@ const PPCDashboard = () => {
                   <h3 className="text-sm font-semibold" style={{ color: COLORS.textPrimary }}>Campaign Analysis</h3>
                   <p className="text-xs mt-0.5" style={{ color: COLORS.textSecondary }}>Detailed insights across different campaign aspects</p>
                 </div>
+                <button
+                  onClick={() => window.open('https://bidbison.com/', '_blank')}
+                  className="ml-4 px-3 py-1.5 rounded text-xs font-semibold whitespace-nowrap transition-all"
+                  style={{ background: 'linear-gradient(135deg, #3B82F6, #8B5CF6)', color: 'white', border: 'none', cursor: 'pointer' }}
+                  title="Subscribe to Bidbison for advanced ads automation"
+                >
+                  Subscribe to Bidbison
+                </button>
               </div>
 
               {/* Tabs - Only show tabs with data */}
