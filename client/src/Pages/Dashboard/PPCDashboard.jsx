@@ -2156,7 +2156,7 @@ const PPCDashboard = () => {
           <div className='flex-1 min-w-0'>
             <div className='flex items-center gap-3 mb-2'>
               <div className='text-2xl'>⚡</div>
-              <h2 className='text-lg font-bold text-white'>Supercharge your ads ppc with ai automation</h2>
+              <h2 className='text-lg font-bold text-white'>Supercharge your ads ppc with Ai Automation</h2>
             </div>
             <p className='text-blue-100 text-sm'>For ads automation please subscribe to Bidbison — Save hours managing campaigns with intelligent automation & AI-powered insights</p>
           </div>
