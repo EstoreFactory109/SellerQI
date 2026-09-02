@@ -13,6 +13,14 @@ const { downloadReportContent, isUnusableReportPayload } = require('../../utils/
 const { checkSpApiStatusOnce } = require('./spApiReportAdapter.js');
 const { financeStep2SlicingEnabledFor } = require('../../utils/asyncFinanceGate.js');
 const { tagHop, HOP_NAMES } = require('../../utils/errorContext.js');
+const {
+  toMarketplaceDateStr,
+  marketplaceDayWindowISO,
+  marketplaceTodayStr,
+  marketplaceYesterdayStr,
+  getMarketplaceTimezone,
+} = require('../../utils/marketplaceTimezone.js');
+const { itemSalesForRow, warnIfRateLooksWrong } = require('../../utils/marketplaceTax.js');
 
 // ★ VERSION — check this in logs to confirm deployment
 const FINANCE_SERVICE_VERSION = 'v3.1-sellerboard-match-20260506';
@@ -106,7 +114,19 @@ const FINANCE_MAX_DATE_RETRIES = Math.max(2, financeEnvInt('FINANCE_MAX_DATE_RET
 // changes nothing about how rows are parsed or how sales/expenses are computed.
 const EMPTY_REPORT_RETRIES = 2;
 const EMPTY_REPORT_RETRY_DELAY_MS = 20000;
-const PACIFIC_OFFSET_HOURS = 7;
+
+// ── Day bucketing is MARKETPLACE-LOCAL ───────────────────────────────────────
+// There used to be a `const PACIFIC_OFFSET_HOURS = 7` here, applied to every account
+// regardless of marketplace. It was wrong twice: non-Pacific marketplaces were skewed by
+// the whole timezone gap (an AU seller's day was shifted 17 hours, under-reporting daily
+// sales against Seller Central), and even US accounts were an hour out for the ~5 months
+// a year Pacific is UTC-8 rather than UTC-7.
+//
+// Day keys now come from utils/marketplaceTimezone.js, which resolves each country to an
+// IANA zone so DST is handled by the tz database. For US in summer this is a byte-for-byte
+// no-op (pinned by a test), which is why it was safe to ship to all accounts at once.
+//
+// Do NOT reintroduce a numeric offset constant here — that is the bug, not the fix.
 
 // ─────────────────────────────────────────────
 // TOKEN MANAGER — auto-renew SP-API access tokens
@@ -298,6 +318,12 @@ const COUNTRY_TO_SALES_CHANNEL = {
   JP: 'Amazon.co.jp',
   AU: 'Amazon.com.au',
   SG: 'Amazon.sg',
+  // IE and ZA were missing here while being fully supported at connect time
+  // (see marketplaceConfig in controllers/config/config.js). Because the filter below is
+  // `if (salesChannel && ...)`, a missing entry made `salesChannel` undefined and skipped
+  // channel filtering ENTIRELY for those markets rather than erroring.
+  IE: 'Amazon.ie',
+  ZA: 'Amazon.co.za',
 };
 
 // ─────────────────────────────────────────────
@@ -795,12 +821,16 @@ function enumerateDateChunks(startDate, endDate, chunkDays) {
   return chunks;
 }
 
-function toPacificDateStr(dateInput) {
-  if (!dateInput) return null;
-  const d = dateInput instanceof Date ? dateInput : new Date(dateInput);
-  if (isNaN(d.getTime())) return null;
-  const pacificMs = d.getTime() - (PACIFIC_OFFSET_HOURS * 60 * 60 * 1000);
-  return new Date(pacificMs).toISOString().substring(0, 10);
+/**
+ * A UTC instant → the day key stored on DailySkuFinance / DailyOverheadFinance,
+ * in the MARKETPLACE's local calendar (see the note beside EMPTY_REPORT_RETRIES).
+ *
+ * `country` is required in practice: omitting it falls back to Pacific and logs a warning,
+ * which reproduces the old (wrong-for-most-marketplaces) behaviour rather than throwing
+ * inside the money path.
+ */
+function toMarketplaceDayKey(dateInput, country) {
+  return toMarketplaceDateStr(dateInput, country);
 }
 
 function internalRegionFromModel(regionModel) {
@@ -1014,19 +1044,32 @@ async function getReportDocumentUrl(tokenManager, baseUrl, reportDocumentId) {
 /**
  * The ONLY Sales-Report columns any consumer reads.
  *
- * The report carries ~50 columns; these ten are the complete set actually used —
+ * The report carries ~50 columns; these twelve are the complete set actually used —
  * `parseSalesReportRows` (order-status, sales-channel, item-price, purchase-date,
- * amazon-order-id, sku, asin, currency, product-name, quantity) and the pending-count fold
- * (order-status, purchase-date). Keeping the other ~40 meant allocating roughly five times the
- * strings and object slots we ever look at, per row, for 24-45k rows per chunk.
+ * amazon-order-id, sku, asin, currency, product-name, quantity), the tax-inclusive sales
+ * reconciliation in utils/marketplaceTax.js (item-tax, item-promotion-discount — see below), and
+ * the pending-count fold (order-status, purchase-date). Keeping the other ~38 meant allocating
+ * roughly five times the strings and object slots we ever look at, per row, for 24-45k rows per
+ * chunk.
+ *
+ * ⚠️ item-tax and item-promotion-discount were ADDED after this allow-list first shipped. Their
+ * absence is a real production incident this comment exists to prevent a repeat of: the allow-list
+ * predates utils/marketplaceTax.js, so for every account, on every sync, `itemSalesForRow` silently
+ * read `undefined` for both fields — indistinguishable from "Amazon isn't sending tax data" unless
+ * you happen to check this Set. It was chased for several turns as an Amazon-side data problem
+ * before being traced here.
  *
  * Adding a column here is the supported way to consume a new field — it must be added here
- * FIRST or the field will read as undefined downstream.
+ * FIRST or the field will read as undefined downstream. If you add a field anywhere that reads
+ * `row['some-column']` on a Sales Report row, grep this Set before assuming Amazon stopped
+ * sending it.
  */
 const SALES_REPORT_COLUMNS = new Set([
   'order-status',
   'sales-channel',
   'item-price',
+  'item-tax',
+  'item-promotion-discount',
   'purchase-date',
   'amazon-order-id',
   'sku',
@@ -1202,13 +1245,26 @@ function parseSalesReportRows(reportRows, country) {
   let totalItems = 0;
   const salesChannel = country ? COUNTRY_TO_SALES_CHANNEL[country.toUpperCase()] : null;
   let skippedChannel = 0;
+
+  // ── Match Seller Central's "ordered product sales" ────────────────────────
+  // A raw sum of `item-price` overstates sales in tax-inclusive marketplaces whenever a
+  // promotion applies: `item-price` holds the undiscounted tax-inclusive price while the tax
+  // actually charged (`item-tax`) is computed on the discounted amount. The difference is tax that
+  // was never collected, and it is what put this AU account 25.07 above Seller Central on
+  // 2026-07-12. See utils/marketplaceTax.js for the derivation and validation.
+  //
+  // The correction is a pure function of each ROW — never of this batch. An earlier version
+  // inferred the rate from the batch median and so produced different totals for the same day
+  // depending on how the sync happened to be chunked. Do not reintroduce a batch-derived rate.
+  warnIfRateLooksWrong(reportRows, country);
+
   for (const row of reportRows) {
     if ((row['order-status'] || '').toLowerCase() === 'cancelled') continue;
     if ((row['sales-channel'] || '').toLowerCase() === 'non-amazon') continue;
     // Filter by marketplace when country is specified (NA region returns US+CA+MX+BR mixed)
     if (salesChannel && row['sales-channel'] !== salesChannel) { skippedChannel++; continue; }
-    const price = parseFloat(row['item-price']) || 0;
-    const pacificDate = toPacificDateStr(row['purchase-date']);
+    const price = itemSalesForRow(row, country);
+    const pacificDate = toMarketplaceDayKey(row['purchase-date'], country);
     if (!pacificDate) continue;
     const orderId = row['amazon-order-id'] || '';
     if (!orderId) continue;
@@ -1232,16 +1288,69 @@ function parseSalesReportRows(reportRows, country) {
 }
 
 /**
- * One pass producing everything the caller needs from the Sales Report rows:
- * the order×SKU map, the per-date pending count, and the row count.
+ * Which days this run may DELETE before reinserting.
  *
- * WHY: these were two separate loops over `reportRows` (parseSalesReportRows, then an inline
- * pending-count loop), and the array had to stay alive for both. Folding them lets the caller
- * release the rows immediately afterwards — before the Finance API walk, which is 1000+ pages
- * and tens of minutes. That release is the actual memory win; this fold is what makes it legal.
+ * Two kinds of day qualify:
+ *   1. Days that produced fresh buckets — the normal case.
+ *   2. Days the report positively COVERED but which produced no bucket at all. Seeing any row for
+ *      a day (even a cancelled one) proves the report covers it, so "nothing survived the filters"
+ *      genuinely means $0. Without this, a day whose only order was later cancelled kept its stale
+ *      value forever: a real US account read 20.73 for 2026-07-11 against Seller Central's 0.00,
+ *      because the report returned just one `Cancelled` row, which is correctly dropped, so the
+ *      day produced no bucket and was never cleared.
+ *
+ * A day the report says NOTHING about is deliberately absent — that is the aged-out case that once
+ * wiped a settled May 28 to $0, and it must keep its existing data.
+ *
+ * Everything is clamped to [startDate, endDate] so `datesToClear ⊆ requested range` holds. That
+ * invariant is what stops one chunk's clear from deleting a neighbouring chunk's fresh rows.
+ *
+ * Accepts EITHER `daysSeen` (a pre-computed Set of day-keys — what `foldSalesReportRows` produces
+ * as a side effect of its single pass, so the caller need not keep the raw rows alive until persist
+ * time) OR `reportRows` directly (recomputes the set; used by callers/tests that only have rows).
+ *
+ * @returns {{datesToClear: string[], zeroedDays: string[]}}
+ */
+function resolveDatesToClear({ reportRows, daysSeen, country, startDate, endDate, bucketDates }) {
+  const datesToClear = new Set(bucketDates || []);
+  const zeroedDays = new Set();
+  const seen = daysSeen || collectDaysSeen(reportRows || [], country);
+  for (const d of seen) {
+    if (!d || d < startDate || d > endDate || datesToClear.has(d)) continue;
+    datesToClear.add(d);
+    zeroedDays.add(d);
+  }
+  return { datesToClear: [...datesToClear], zeroedDays: [...zeroedDays].sort() };
+}
+
+/** Every marketplace-local day key seen across `reportRows`, unfiltered by status or channel. */
+function collectDaysSeen(reportRows, country) {
+  const out = new Set();
+  for (const row of reportRows) {
+    const d = toMarketplaceDayKey(row['purchase-date'], country);
+    if (d) out.add(d);
+  }
+  return out;
+}
+
+/**
+ * One pass producing everything the caller needs from the Sales Report rows:
+ * the order×SKU map, the per-date pending count, the set of days the report covers at all
+ * (`daysSeen` — see `resolveDatesToClear`), and the row count.
+ *
+ * WHY: these were separate loops over `reportRows` (parseSalesReportRows, an inline pending-count
+ * loop, and — once `resolveDatesToClear` existed — a third pass over the same rows again at persist
+ * time), and the array had to stay alive for all of them. Folding them into one pass lets the
+ * caller release the rows immediately afterwards — before the Finance API walk, which is 1000+
+ * pages and tens of minutes. That release is the actual memory win; this fold is what makes it
+ * legal, INCLUDING for `resolveDatesToClear`, which would otherwise need the raw rows again long
+ * after they should have been freed.
  *
  * `parseSalesReportRows` is deliberately kept exported and untouched: it is the reference
- * implementation the equivalence test asserts this function against.
+ * implementation the equivalence test asserts this function's sales half against. Its bucketing
+ * (`toMarketplaceDayKey`) and tax reconciliation (`itemSalesForRow`) are mirrored here exactly —
+ * see their own docs (utils/marketplaceTimezone.js, utils/marketplaceTax.js) for why a plain
+ * Pacific offset or a raw `item-price` sum would misstate money.
  *
  * ── THE ASYMMETRY, DO NOT "TIDY" IT ──
  * The pending count is taken BEFORE the sales filters and is NOT subject to them. That is not an
@@ -1251,31 +1360,40 @@ function parseSalesReportRows(reportRows, country) {
  * here. Moving the pending check below the filters would silently under-count and let days settle
  * early at $0. ('cancelled' cannot also start with 'pending', so that filter is immaterial to the
  * count; the sales-channel ones are not.)
+ *
+ * `daysSeen`, by contrast, MUST be unfiltered by everything (including 'cancelled') — that is the
+ * whole point of `resolveDatesToClear`'s day-2 case: a cancelled-only day still needs clearing.
  */
 function foldSalesReportRows(reportRows, country) {
   const orderMap = new Map();
   const pendingCountByDate = new Map();
+  const daysSeen = new Set();
   let totalItems = 0;
   let rowCount = 0;
   const salesChannel = country ? COUNTRY_TO_SALES_CHANNEL[country.toUpperCase()] : null;
   let skippedChannel = 0;
 
+  // Same rationale as parseSalesReportRows: the correction is a pure function of each row, never
+  // of this batch — see utils/marketplaceTax.js for why a batch-derived rate was chunk-unstable.
+  warnIfRateLooksWrong(reportRows, country);
+
   for (const row of reportRows) {
     rowCount++;
     const status = (row['order-status'] || '').toLowerCase();
+    const marketplaceDate = toMarketplaceDayKey(row['purchase-date'], country);
+    if (marketplaceDate) daysSeen.add(marketplaceDate);
 
     // ── pending pass — unfiltered by design (see note above) ──
     if (status.startsWith('pending')) {
-      const d = toPacificDateStr(row['purchase-date']);
-      if (d) pendingCountByDate.set(d, (pendingCountByDate.get(d) || 0) + 1);
+      if (marketplaceDate) pendingCountByDate.set(marketplaceDate, (pendingCountByDate.get(marketplaceDate) || 0) + 1);
     }
 
     // ── sales pass — same filters, same order, as parseSalesReportRows ──
     if (status === 'cancelled') continue;
     if ((row['sales-channel'] || '').toLowerCase() === 'non-amazon') continue;
     if (salesChannel && row['sales-channel'] !== salesChannel) { skippedChannel++; continue; }
-    const price = parseFloat(row['item-price']) || 0;
-    const pacificDate = toPacificDateStr(row['purchase-date']);
+    const price = itemSalesForRow(row, country);
+    const pacificDate = marketplaceDate;
     if (!pacificDate) continue;
     const orderId = row['amazon-order-id'] || '';
     if (!orderId) continue;
@@ -1296,7 +1414,7 @@ function foldSalesReportRows(reportRows, country) {
 
   if (skippedChannel > 0) logger.debug(`[SalesReport] Skipped ${skippedChannel} rows from other marketplaces (filtering for ${salesChannel})`);
   logger.info(`[SalesReport] Valid orders: ${orderMap.size}, order-items (order×SKU): ${totalItems}`);
-  return { salesOrderMap: orderMap, pendingCountByDate, rowCount };
+  return { salesOrderMap: orderMap, pendingCountByDate, daysSeen, rowCount };
 }
 
 // ═══════════════════════════════════════════════
@@ -1613,11 +1731,21 @@ function createEmptyBucket(sku, asin, date) {
 // ═══════════════════════════════════════════════
 // BUILD OVERHEAD BUCKETS
 // ═══════════════════════════════════════════════
-function buildOverheadBuckets(overheadExpenses, overheadRevenue, rangeStart, rangeEnd) {
+/**
+ * @param {string} [country] Marketplace country, for local-calendar day keys. Optional so the
+ *   existing positional callers/tests keep working; omitting it falls back to Pacific.
+ *
+ * Note on the `|| postedDateStr` fallbacks below: `postedDateStr` is a UTC-derived key, so it
+ * would mix conventions — but Expences.js only ever sets it when `postedDate` is truthy
+ * (`postedDate ? formatDateYYYYMMDD(postedDate) : ""`, Expences.js:758/1024/1065), and a truthy
+ * Date always converts, so the fallback is unreachable in production. It is retained only
+ * because unit-test fixtures construct rows with `postedDate: null` plus a `postedDateStr`.
+ */
+function buildOverheadBuckets(overheadExpenses, overheadRevenue, rangeStart, rangeEnd, country) {
   const overheadBuckets = new Map();
 
   for (const e of overheadExpenses) {
-    const date = toPacificDateStr(e.postedDate) || e.postedDateStr || 'Unknown';
+    const date = toMarketplaceDayKey(e.postedDate, country) || e.postedDateStr || 'Unknown';
     if (rangeStart && rangeEnd && (date < rangeStart || date > rangeEnd)) continue;
     if (!OVERHEAD_CATEGORIES.has(e.category) && e.sku !== 'N/A') continue;
     const key = `${e.category}||${date}`;
@@ -1628,7 +1756,7 @@ function buildOverheadBuckets(overheadExpenses, overheadRevenue, rangeStart, ran
 
   for (const r of overheadRevenue) {
     if (!OVERHEAD_CATEGORIES.has(r.category)) continue;
-    const date = toPacificDateStr(r.postedDate) || r.postedDateStr || 'Unknown';
+    const date = toMarketplaceDayKey(r.postedDate, country) || r.postedDateStr || 'Unknown';
     // ★ Range-filter revenue exactly as the expense loop above does. Omitting this let an
     //   out-of-window date into `overheadBuckets` and therefore into `datesToClear`, whose
     //   deleteMany covers DailySkuFinance too — so a bucket for a date outside the requested
@@ -1724,32 +1852,39 @@ async function persistDailyBuckets({ userId, country, regionModel, marketplaceId
 // ═══════════════════════════════════════════════
 // STEP 1: FETCH NEW SALES + EXPENSES
 //
-// ★ KEY FIX: Date assignment now matches Sellerboard exactly:
+// ★ KEY FIX: Date assignment matches Sellerboard exactly:
 //
-//   Shipment expenses → placed on the order's PURCHASE DATE (Pacific)
+//   Shipment expenses → placed on the order's PURCHASE DATE
 //                       by joining Finance API orderId to Sales Report
 //
-//   Refund expenses   → placed on the refund's POSTED DATE (Pacific)
+//   Refund expenses   → placed on the refund's POSTED DATE
 //                       NOT on the original order's purchase date
 //
-//   Reimbursement     → placed on POSTED DATE (Pacific)
-//   ServiceFee        → placed on POSTED DATE (Pacific)
-//   Adjustment        → placed on POSTED DATE (Pacific)
+//   Reimbursement     → placed on POSTED DATE
+//   ServiceFee        → placed on POSTED DATE
+//   Adjustment        → placed on POSTED DATE
 //
-// This is confirmed by matching real data against Sellerboard's
-// actual per-day numbers (10/10 days exact match for FBA fees,
-// Commission, Refund cost, and Reimbursements).
+// This was confirmed by matching real data against Sellerboard's actual per-day numbers
+// (10/10 days exact match for FBA fees, Commission, Refund cost, and Reimbursements).
+//
+// ⚠️ Those days used to be Pacific days for every account; they are now the MARKETPLACE's
+// local days. For a US account that is the same thing in summer, so the Sellerboard match is
+// preserved if (as seems likely) it was validated on a US account — but the original commit
+// does not record which marketplace was used, so treat non-US refund/reimbursement DAY
+// PLACEMENT as unconfirmed until spot-checked against Seller Central. The sales figure
+// itself does not depend on this.
 // ═══════════════════════════════════════════════
 /**
- * Pacific-day boundaries for the Sales Report, as the ISO instants Amazon expects.
+ * Marketplace-local day boundaries for the Sales Report, as the ISO instants Amazon expects.
  * Extracted so the inline path and the async adapter request a byte-identical window.
+ *
+ * MUST stay in lockstep with `toMarketplaceDayKey`: this decides which orders Amazon returns,
+ * that decides which day they are filed under. If they disagree, the fetched window will not
+ * cover the days we then bucket into and days come back partially filled.
  */
-function salesReportWindowISO(startDate, endDate) {
-  const salesStartISO = `${startDate}T${String(PACIFIC_OFFSET_HOURS).padStart(2, '0')}:00:00.000Z`;
-  const endDateObj = new Date(`${endDate}T00:00:00.000Z`);
-  endDateObj.setUTCDate(endDateObj.getUTCDate() + 1);
-  const salesEndISO = `${formatDateUTC(endDateObj)}T${String(PACIFIC_OFFSET_HOURS - 1).padStart(2, '0')}:59:59.999Z`;
-  return { salesStartISO, salesEndISO };
+function salesReportWindowISO(startDate, endDate, country) {
+  const { startISO, endISO } = marketplaceDayWindowISO(startDate, endDate, country);
+  return { salesStartISO: startISO, salesEndISO: endISO };
 }
 
 /**
@@ -1766,10 +1901,10 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
   // chaining step1 → step2), reuse it so we don't lose lifetime tracking.
   const tokenManager = inheritedTokenManager || createTokenManager({ accessToken, refreshToken, clientId, clientSecret });
 
-  // ── Sales Report (Pacific Time boundaries) ──
-  const { salesStartISO, salesEndISO } = salesReportWindowISO(startDate, endDate);
+  // ── Sales Report (marketplace-local day boundaries) ──
+  const { salesStartISO, salesEndISO } = salesReportWindowISO(startDate, endDate, country);
 
-  logger.info(`[Step1] Sales Report: ${startDate} → ${endDate} (Pacific)`);
+  logger.info(`[Step1] Sales Report: ${startDate} → ${endDate} (${country} local)`);
   // Handed over in a holder so processSalesReportRows can release the rows once it has folded
   // them — before the Finance API walk. Holding them in a local `const` here instead would keep
   // the array alive for this whole frame no matter what the callee does with its parameter.
@@ -1796,19 +1931,23 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
   const { baseUrl, marketplaceId } = resolveMarketplaceAndRegion(country.toUpperCase(), regionInternal);
 
   // ── Fold the report rows, then LET THEM GO ──
-  // Everything downstream needs is produced here: the order×SKU map, the per-day pending count
-  // (see foldSalesReportRows for why that one is unfiltered), and the row count.
+  // Everything downstream needs is produced here: the order×SKU map (with the marketplace-local
+  // bucketing and tax reconciliation `parseSalesReportRows` also applies), the per-day pending
+  // count (see foldSalesReportRows for why that one is unfiltered), `daysSeen` (every day the
+  // report covers at all — feeds `resolveDatesToClear` at persist time, further down, so that call
+  // does not need the raw rows again), and the row count.
   //
   // Releasing matters because of what comes next: the Finance API walk below is 1000+ paginated
   // calls over tens of minutes, and it used to run with the entire row array — 24-45k rows of
-  // ~50 fields each — still pinned, purely so `reportRows.length` could be read at the end.
+  // ~50 fields each — still pinned, purely so `reportRows.length` could be read at the end (and,
+  // later, so a persist-time re-scan of the rows could compute which days to clear).
   //
   // Callers pass `reportRowsHolder` ({ rows }) so the release actually frees something: nulling a
   // plain parameter would not, because the caller's own binding keeps the array alive. `reportRows`
   // is still accepted directly for tests and for the empty/no-data path, where there is nothing
   // worth releasing.
   const rowsIn = reportRowsHolder ? reportRowsHolder.rows : reportRows;
-  const { salesOrderMap, pendingCountByDate, rowCount: reportRowCount } =
+  const { salesOrderMap, pendingCountByDate, daysSeen, rowCount: reportRowCount } =
     foldSalesReportRows(rowsIn || [], country);
   if (reportRowsHolder) reportRowsHolder.rows = null;
 
@@ -2082,11 +2221,11 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
   }
 
   // ═══════════════════════════════════════════════
-  // ★ FIX: Place Refund/Reimbursement/ServiceFee expenses on POSTED DATE (Pacific)
+  // ★ FIX: Place Refund/Reimbursement/ServiceFee expenses on POSTED DATE
   //
   // These transactions have an orderId but they should NOT go to the
   // original order's purchase date. Sellerboard places them on the day
-  // the refund/reimbursement was processed (postedDate → Pacific).
+  // the refund/reimbursement was processed (postedDate → marketplace-local day).
   //
   // For REFUND transactions specifically, reversed fees (Commission,
   // Promotions) must be remapped to refund-specific fields so they
@@ -2095,7 +2234,7 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
   // ═══════════════════════════════════════════════
   let postedDateExpenseCount = 0;
   for (const e of postedDateExpenses) {
-    const pacificDate = toPacificDateStr(e.postedDate) || e.postedDateStr;
+    const pacificDate = toMarketplaceDayKey(e.postedDate, country) || e.postedDateStr;
     if (!pacificDate) continue;
     // Only include if the date falls within our display range
     if (pacificDate < startDate || pacificDate > endDate) continue;
@@ -2150,7 +2289,7 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
   let postedDateRevenueCount = 0;
   let postedDateRevenueSkipped = 0;
   for (const r of postedDateRevenue) {
-    const pacificDate = toPacificDateStr(r.postedDate) || r.postedDateStr;
+    const pacificDate = toMarketplaceDayKey(r.postedDate, country) || r.postedDateStr;
     if (!pacificDate) continue;
     if (pacificDate < startDate || pacificDate > endDate) {
       postedDateRevenueSkipped++;
@@ -2222,7 +2361,7 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
   }
 
   // Build overhead
-  const overheadBuckets = buildOverheadBuckets(overheadExpenses, overheadRevenue, startDate, endDate);
+  const overheadBuckets = buildOverheadBuckets(overheadExpenses, overheadRevenue, startDate, endDate, country);
 
   // ── Persist ──
   // ★ CRITICAL SAFETY (data-loss fix): datesToClear is ONLY the dates for which
@@ -2242,9 +2381,18 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
   //       partial cancellations, still apply — that day still has a bucket).
   //     - A day the report returned nothing for → left exactly as it was; its
   //       existing good data is preserved. A re-fetch can never zero it.
-  //   Trade-off: a day whose orders were ALL cancelled after the fact keeps its
-  //   prior (stale) value instead of dropping to $0. That is rare and FAR less
-  //   harmful than destroying confirmed historical data.
+  //
+  //   ★ PLUS days the report positively COVERED but which produced no buckets. That is a
+  //   different situation from "the report returned nothing", and conflating the two left a
+  //   real account reading 20.73 for 2026-07-11 where Seller Central said 0.00: its single
+  //   order was cancelled after we first recorded it, the report now returns just that one
+  //   `Cancelled` row, `parseSalesReportRows` (correctly) drops it, and so the day produced no
+  //   bucket and was never cleared — freezing the stale estimate indefinitely.
+  //
+  //   Seeing ANY row for a day (even a cancelled one) is positive evidence that the report does
+  //   cover it, so "no surviving rows" genuinely means $0 rather than "we were told nothing".
+  //   The aged-out case that wiped May 28 returns NO rows for the day at all and is still
+  //   preserved, as is the wholly-empty report handled below.
   const allDates = new Set();
   for (const b of skuBuckets.values()) allDates.add(b.date);
   for (const b of overheadBuckets.values()) allDates.add(b.date);
@@ -2256,7 +2404,17 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
     logger.warn(`[Step1] Sales Report produced no buckets for ${startDate}→${endDate} (reportRows=${reportRowCount}). Clearing nothing — existing data for these days is preserved (re-fetch of aged-out days must never zero them).`);
   }
 
-  const saved = await persistDailyBuckets({ userId, country: country.toUpperCase(), regionModel, marketplaceId, skuBuckets, overheadBuckets, datesToClear: [...allDates] });
+  // `daysSeen` (not `reportRows`) — the raw rows are gone by now when this ran via the holder
+  // path (see the fold above); `daysSeen` is exactly what resolveDatesToClear needs and was
+  // computed before the release, in the same pass as everything else.
+  const { datesToClear, zeroedDays } = resolveDatesToClear({ daysSeen, country, startDate, endDate, bucketDates: allDates });
+  if (zeroedDays.length > 0) {
+    // Worth a log line: this is the path that takes a day DOWN to $0, so it should be visible if
+    // it ever fires unexpectedly.
+    logger.info(`[Step1] ${zeroedDays.join(', ')}: report covered these day(s) but no order survived the filters (e.g. all cancelled) — clearing them to $0 rather than leaving a stale value.`);
+  }
+
+  const saved = await persistDailyBuckets({ userId, country: country.toUpperCase(), regionModel, marketplaceId, skuBuckets, overheadBuckets, datesToClear: [...datesToClear] });
 
   // ── ★ FIX: Clear previously-pending orders that were resolved in this sync ──
   // Without this, Step 2 (backfillPendingExpenses) would find these same orders
@@ -2313,7 +2471,13 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
   const dateList = [];
   const dd = new Date(`${startDate}T00:00:00.000Z`);
   while (dd <= endD) { dateList.push(formatDateUTC(dd)); dd.setUTCDate(dd.getUTCDate() + 1); }
-  const todayPacificStr = new Date(Date.now() - PACIFIC_OFFSET_HOURS * 3600000).toISOString().substring(0, 10);
+  // "Today" must be in the SAME calendar as the day keys above, or the provisional age math
+  // drifts by a day for marketplaces far from Pacific.
+  const todayPacificStr = marketplaceTodayStr(country);
+  // Stamped on each day's sync log so a day bucketed on the OLD hardcoded-Pacific calendar
+  // (no value) is distinguishable from one bucketed marketplace-locally. See the field's comment
+  // in FinanceSyncLogModel.js for why identifying them exactly — not by date range — matters.
+  const bucketTimezone = getMarketplaceTimezone(country);
   for (const dateStr of dateList) {
     const hasFreshData = allDates.has(dateStr);
     const pendingForDay = pendingCountByDate.get(dateStr) || 0;
@@ -2326,7 +2490,7 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
       const isProvisional = pendingForDay > 0 && ageDays <= PROVISIONAL_SETTLE_DAYS;
       await FinanceSyncLog.findOneAndUpdate(
         { User: userObjectId, country: country.toUpperCase(), region: regionModel, date: dateStr },
-        { User: userObjectId, country: country.toUpperCase(), region: regionModel, marketplaceId, date: dateStr, fetchedAt: new Date(), status: 'success', provisional: isProvisional, pendingOrderCount: pendingForDay, expenseRowCount, revenueRowCount, skuCount: skuBuckets.size, error: '', consecutiveFailures: 0, nextRetryAfter: null, ...(syncRunId ? { syncRunId } : {}) },
+        { User: userObjectId, country: country.toUpperCase(), region: regionModel, marketplaceId, date: dateStr, fetchedAt: new Date(), status: 'success', provisional: isProvisional, pendingOrderCount: pendingForDay, expenseRowCount, revenueRowCount, skuCount: skuBuckets.size, error: '', consecutiveFailures: 0, nextRetryAfter: null, bucketTimezone, ...(syncRunId ? { syncRunId } : {}) },
         { upsert: true, new: true }
       );
     } else {
@@ -2341,7 +2505,7 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
       const provisionalForNew = ageDays <= PROVISIONAL_SETTLE_DAYS;
       await FinanceSyncLog.updateOne(
         { User: userObjectId, country: country.toUpperCase(), region: regionModel, date: dateStr },
-        { $setOnInsert: { User: userObjectId, country: country.toUpperCase(), region: regionModel, marketplaceId, date: dateStr, fetchedAt: new Date(), status: 'success', provisional: provisionalForNew, pendingOrderCount: 0, expenseRowCount: 0, revenueRowCount: 0, skuCount: 0, error: '', ...(syncRunId ? { syncRunId } : {}) } },
+        { $setOnInsert: { User: userObjectId, country: country.toUpperCase(), region: regionModel, marketplaceId, date: dateStr, fetchedAt: new Date(), status: 'success', provisional: provisionalForNew, pendingOrderCount: 0, expenseRowCount: 0, revenueRowCount: 0, skuCount: 0, error: '', bucketTimezone, ...(syncRunId ? { syncRunId } : {}) } },
         { upsert: true }
       );
     }
@@ -2407,10 +2571,9 @@ function resolveStep2Slice({ cursor, windowStart, windowEnd, sliceDays }) {
  *   MAX_PENDING_AGE_DAYS. Must be false on a sliced run that has not covered the whole window —
  *   a run that searched 1/8 of the range cannot conclude a fee does not exist.
  *
- * NOTE: `server/controllers/finance/FinanceDashboardController.js:673` holds a stale duplicate of
- * this function. It is unreachable (its route imports only the five read handlers and nothing else
- * imports that file), so it is deliberately left alone rather than kept in sync — see the
- * deprecation notice at the top of that file. It does NOT have the three correctness fixes below.
+ * NOTE: `server/controllers/finance/FinanceDashboardController.js` used to hold a stale duplicate
+ * of this function. That duplicate was deleted when day bucketing moved to marketplace-local, so
+ * this is now the single implementation. That file is read handlers only.
  */
 async function backfillPendingExpenses({ userId, country, regionModel, accessToken, refreshToken, clientId, clientSecret, tokenManager: inheritedTokenManager, allowExpiry = true, slicingEnabled = false }) {
   const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
@@ -2783,8 +2946,9 @@ async function syncFinanceData({ userId, country, regionModel, refreshToken, acc
   const tokenManager = createTokenManager({ accessToken, refreshToken, clientId, clientSecret });
 
   const now = new Date();
-  const yesterdayPacificMs = now.getTime() - (PACIFIC_OFFSET_HOURS * 60 * 60 * 1000) - (24 * 60 * 60 * 1000);
-  const yesterdayStr = new Date(yesterdayPacificMs).toISOString().substring(0, 10);
+  // Newest day Amazon has complete data for, in the MARKETPLACE's calendar — must match the
+  // calendar the day keys are written in, or the sync window can skip or re-fetch a day.
+  const yesterdayStr = marketplaceYesterdayStr(country, now);
 
   // Cursor = latest SETTLED (non-provisional) success day. Provisional days
   // (empty report / still-Pending orders) deliberately fall back inside the
@@ -3045,8 +3209,9 @@ async function planFinanceSync({
   chunkDays = FINANCE_REPORT_CHUNK_DAYS,
 }) {
   const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
-  const yesterdayStr = new Date(Date.now() - (PACIFIC_OFFSET_HOURS * 3600000) - 86400000)
-    .toISOString().substring(0, 10);
+  // Marketplace-local, matching syncFinanceData — see the docblock note above about a shifting
+  // yesterdayStr re-anchoring chunks and changing paramsKey.
+  const yesterdayStr = marketplaceYesterdayStr(country);
 
   let latestSyncDate = null;
   if (!(forceDates && forceDates.length === 2)) {
@@ -3085,13 +3250,14 @@ const financeSalesReportAsync = {
    * earlier one failed, the cursor would jump the gap and strand those days at $0 forever.
    *
    * `chunk` MUST come from a window frozen at submit time. Recomputing it on a poll tick that
-   * crosses Pacific midnight would shift the dates, change `paramsKey`, leave the persisted row
-   * with no matching spec, and make the engine skip it — rescheduling forever.
+   * crosses marketplace midnight would shift the dates, change `paramsKey`, leave the persisted
+   * row with no matching spec, and make the engine skip it — rescheduling forever.
    */
   buildSpecs({ userId, country, regionModel, tokenManager, chunk }) {
     const regionInternal = internalRegionFromModel(regionModel);
     const { baseUrl, marketplaceId } = resolveMarketplaceAndRegion(country.toUpperCase(), regionInternal);
-    const { salesStartISO, salesEndISO } = salesReportWindowISO(chunk.startDate, chunk.endDate);
+    // Same country-aware window as the inline path, so both request byte-identical bytes.
+    const { salesStartISO, salesEndISO } = salesReportWindowISO(chunk.startDate, chunk.endDate, country);
     const paramsKey = `${chunk.startDate}_${chunk.endDate}`;
     const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
 
@@ -3185,12 +3351,13 @@ module.exports = {
   getSyncStatus,
   // Helpers for testing
   parseSalesReportRows,
+  toMarketplaceDayKey,
+  resolveDatesToClear,
   // Exported for the equivalence tests. `parseSalesReportRows` is kept as the reference
   // implementation that `foldSalesReportRows` is asserted against — do not delete it as "dead".
   parseTsv,
   foldSalesReportRows,
   SALES_REPORT_COLUMNS,
-  toPacificDateStr,
   indexFinanceRowsByOrderId,
   buildOverheadBuckets,
   EXPENSE_CATEGORY_TO_FIELD,
@@ -3232,6 +3399,9 @@ module.exports = {
   // Async path: the shared halves of the inline fetch, plus the engine adapter that reuses them.
   submitSalesReport,
   downloadSalesReportRows,
+  // Submit → poll → download with the retry-on-empty loop, but WITHOUT any parse/persist.
+  // Exported so scripts/verifyMarketplaceBucketing.js can inspect a real report read-only.
+  fetchSalesReport,
   processSalesReportRows,
   salesReportWindowISO,
   enumerateDatesInclusive,

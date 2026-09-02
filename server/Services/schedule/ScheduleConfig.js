@@ -99,15 +99,6 @@ const MON_WED_FRI_FUNCTIONS = {
         requiresRefreshToken: true,
         apiDataKey: 'mcpEconomicsData'
     },
-    // Review Order Ingestion - fetches recent shipped orders + items from SP-API
-    'reviewOrderIngestion': {
-        service: require('../review/scheduledReviewIngestionProcessor.js'),
-        functionName: 'scheduledReviewIngestion',
-        description: 'Review Order Ingestion',
-        apiDataKey: 'reviewOrderIngestion',
-        isCalculationService: true,
-        runOrder: 97
-    },
 };
 
 // Previously Tue/Thu/Sat/Sun only — now empty since BuyBox moved to DAILY_FUNCTIONS
@@ -314,15 +305,6 @@ const DAILY_FUNCTIONS = {
         description: 'MCP BuyBox Data',
         requiresRefreshToken: true,
         apiDataKey: 'mcpBuyBoxData'
-    },
-    // Review Request Sender - checks eligibility + sends solicitations for unsent orders (5-30 day window)
-    'reviewRequestSender': {
-        service: require('../review/scheduledReviewRequestProcessor.js'),
-        functionName: 'scheduledReviewRequestSender',
-        description: 'Review Request Sender',
-        apiDataKey: 'reviewRequestSender',
-        isCalculationService: true,
-        runOrder: 98
     },
     // Unified Finance Sync - Sales Report + Finance API → DailySkuFinance,
     // DailyOverheadFinance, AsinRelationship, FinanceSyncLog. Runs daily so

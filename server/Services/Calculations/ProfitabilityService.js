@@ -916,7 +916,13 @@ const computeFullProfitabilityTableData = async (userId, country, region) => {
         
         const parentAsin = data.parentAsin || asin;
         const productInfo = productNameMap.get(asin) || {};
-        const adsSpend = adsSpendByAsin.get(asin) || 0;
+        // `.total`, not the entry itself. aggregateSpendByAsin returns
+        // Map<asin, { total, SP, SD }>, but this line treated it as a number, so
+        // `sales - adsSpend` produced NaN and `adsSpend.toFixed(2)` threw TypeError for every
+        // account that actually has ads rows. The shape changed under these two consumers and
+        // they were never updated. `?? 0` (not `|| 0`) so a genuine 0 total is preserved.
+        const adsSpendEntry = adsSpendByAsin.get(asin);
+        const adsSpend = (typeof adsSpendEntry === 'number' ? adsSpendEntry : adsSpendEntry?.total) ?? 0;
         const sales = data.sales || 0;
         const totalFees = data.totalFees || 0;
         const grossProfit = sales - adsSpend - totalFees;

@@ -211,7 +211,7 @@ async function saveProductWiseSponsoredAdsData(userId, country, region, sponsore
 
         // Invalidate the ads spend cache since we have new data
         try {
-            const cacheKey = `ads_spend_by_asin:${userObjectId.toString()}:${country}:${region}`;
+            const cacheKey = adsSpendCacheKey(userObjectId.toString(), country, region);
             const redis = getRedisClient();
             await redis.del(cacheKey);
             logger.debug('Invalidated ads spend cache after save', {
@@ -258,6 +258,18 @@ async function saveProductWiseSponsoredAdsData(userId, country, region, sponsore
  * @param {string} region - Region (NA, EU, FE)
  * @returns {Promise<Object|null>} Sponsored Ads data object with sponsoredAds array, or null if not found
  */
+
+// Cache key for the per-ASIN ad-spend map. VERSIONED, and built in one place.
+//
+// `v2` because the value shape changed from Map<asin, number> to Map<asin, {total, SP, SD}> without
+// the key changing, so the two consumers went on reading it as a number — `sales - adsSpend` became
+// NaN and `adsSpend.toFixed(2)` threw. The consumers are fixed to read `.total`; bumping the key
+// means the first hour after deploy does not serve the old shape out of Redis. Built here rather
+// than inlined because it was hand-written at three separate call sites.
+const ADS_SPEND_CACHE_VERSION = 'v2';
+const adsSpendCacheKey = (userIdStr, country, region) =>
+    `ads_spend_by_asin:${ADS_SPEND_CACHE_VERSION}:${userIdStr}:${country}:${region}`;
+
 async function getProductWiseSponsoredAdsData(userId, country, region) {
     try {
         if (!userId) {
@@ -272,59 +284,85 @@ async function getProductWiseSponsoredAdsData(userId, country, region) {
             throw new Error(`Invalid User ID format: ${userId}`);
         }
 
-        // First, try to get data from the new format (separate collection)
-        const { items: newFormatItems, createdAt, batchId } = await ProductWiseSponsoredAdsItem.findLatestByUserCountryRegion(
-            userObjectId,
-            country,
-            region
+        // NEW FORMAT — read by AGGREGATION, never by loading the batch.
+        //
+        // This used to be `findLatestByUserCountryRegion` -> `find({batchId}).lean()`, then a
+        // per-row `.map()` into a second 19-field array. For one PRO account that is 234,035 rows /
+        // 102 MB twice over against a 1536 MB heap, and the result was not slowness but a HANG:
+        // `fetchAllDataModels` never returned, nothing threw, and BullMQ stall-reclaimed the job
+        // every 20 minutes for over a week.
+        //
+        // Measured on that live batch — totals identical to the cent (spend 390069.62,
+        // sales 1767428.84, purchases 128082), and the distinct id sets identical:
+        //     raw                    234,035 rows  102.0 MB
+        //     asin x adType x date    71,835 rows    9.7 MB
+        //     campaign x date        100,934 rows   16.5 MB
+        //     distinct campaign/adGroup ids            863 ms
+        //
+        // A full consumer census drove the split. Every server consumer of `sponsoredAds` wants a
+        // per-ASIN or grand total; the ONLY readers of campaignId/adGroupId are the two
+        // `getCampaignAndAdGroupIds` helpers (which want distinct sets, nothing more), and the only
+        // reader of per-row campaign detail is the PPC dashboard's client-side rollup — which is a
+        // GROUP BY campaignId. `adGroupName` is read by nothing, anywhere.
+        const { batchId, createdAt } = await ProductWiseSponsoredAdsItem.findLatestBatchMeta(
+            userObjectId, country, region
         );
 
-        if (newFormatItems && newFormatItems.length > 0) {
-            logger.debug('Found Sponsored Ads data in new format (separate collection)', {
-                userId: userObjectId.toString(),
-                country,
-                region,
-                itemCount: newFormatItems.length
-            });
+        if (batchId) {
+            const [asinRows, campaignRollup, entityIds] = await Promise.all([
+                ProductWiseSponsoredAdsItem.aggregateBatchByAsinAdTypeDate(batchId),
+                ProductWiseSponsoredAdsItem.aggregateBatchByCampaignDate(batchId),
+                ProductWiseSponsoredAdsItem.distinctEntityIdsForBatch(batchId),
+            ]);
 
-            // Transform to match the old format structure
-            const sponsoredAds = newFormatItems.map((item) => {
-                const sales = Number(item.sales) || 0;
-                const purchases = Number(item.purchases) || 0;
-                const isSd = item.adType === 'SD';
+            if (asinRows.length > 0) {
+                logger.debug('Loaded Sponsored Ads data by aggregation', {
+                    userId: userObjectId.toString(), country, region,
+                    asinRows: asinRows.length, campaignRows: campaignRollup.length,
+                });
+
+                // Same field names the old per-row mapper produced, so every downstream consumer's
+                // arithmetic is untouched. The SP/SD split is reproduced exactly: SD rows carry
+                // their value in the 14-day fields and zero in the 7-day ones, and vice versa.
+                // ProductPerformanceService coalesces `sales || salesIn7Days || salesIn14Days ||
+                // salesIn30Days` PER ROW before summing, so getting this wrong would silently
+                // change per-ASIN sales.
+                const sponsoredAds = asinRows.map((r) => {
+                    const isSd = r.adType === 'SD';
+                    return {
+                        date: r.date,
+                        asin: r.asin,
+                        adType: r.adType,
+                        spend: r.spend,
+                        sales: r.sales,
+                        purchases: r.purchases,
+                        unitsSoldClicks: r.unitsSoldClicks,
+                        salesIn7Days: isSd ? 0 : r.sales,
+                        salesIn14Days: isSd ? r.sales : 0,
+                        salesIn30Days: r.sales,
+                        impressions: r.impressions,
+                        clicks: r.clicks,
+                        purchasedIn7Days: isSd ? 0 : r.purchases,
+                        purchasedIn14Days: isSd ? r.purchases : 0,
+                        purchasedIn30Days: r.purchases,
+                    };
+                });
+
                 return {
-                    date: item.date,
-                    asin: item.asin,
-                    adType: item.adType,
-                    spend: item.spend,
-                    sales,
-                    purchases,
-                    unitsSoldClicks: Number(item.unitsSoldClicks) || 0,
-                    salesIn7Days: isSd ? 0 : (item.salesIn7Days ?? sales),
-                    salesIn14Days: isSd ? (item.salesIn14Days ?? sales) : 0,
-                    salesIn30Days: item.salesIn30Days ?? sales,
-                    campaignId: item.campaignId,
-                    campaignName: item.campaignName,
-                    impressions: item.impressions,
-                    adGroupId: item.adGroupId,
-                    adGroupName: item.adGroupName || '',
-                    clicks: item.clicks,
-                    purchasedIn7Days: isSd ? 0 : (item.purchasedIn7Days ?? purchases),
-                    purchasedIn14Days: isSd ? (item.purchasedIn14Days ?? purchases) : 0,
-                    purchasedIn30Days: item.purchasedIn30Days ?? purchases,
+                    _id: batchId,
+                    userId: userObjectId,
+                    country,
+                    region,
+                    sponsoredAds,
+                    // Per-campaign-per-day totals: what the PPC dashboard rebuilds client-side.
+                    campaignRollup,
+                    // Distinct sets for getCampaignAndAdGroupIds, which previously walked every row.
+                    campaignIds: entityIds.campaignIds,
+                    adGroupIds: entityIds.adGroupIds,
+                    createdAt,
+                    updatedAt: createdAt
                 };
-            });
-
-            // Return in the same format as old format
-            return {
-                _id: batchId,
-                userId: userObjectId,
-                country,
-                region,
-                sponsoredAds,
-                createdAt,
-                updatedAt: createdAt
-            };
+            }
         }
 
         // Fallback: Try to get data from old format (embedded array in single document)
@@ -445,7 +483,7 @@ async function getAdsSpendByAsin(userId, country, region) {
         }
 
         const userIdStr = userObjectId.toString();
-        const cacheKey = `ads_spend_by_asin:${userIdStr}:${country}:${region}`;
+        const cacheKey = adsSpendCacheKey(userIdStr, country, region);
         const CACHE_TTL = 3600; // 1 hour cache
 
         // Try to get from Redis cache first
@@ -542,7 +580,7 @@ async function getAdsSpendByAsin(userId, country, region) {
 async function invalidateAdsSpendCache(userId, country, region) {
     try {
         const userIdStr = typeof userId === 'string' ? userId : userId.toString();
-        const cacheKey = `ads_spend_by_asin:${userIdStr}:${country}:${region}`;
+        const cacheKey = adsSpendCacheKey(userIdStr, country, region);
         
         const redis = getRedisClient();
         await redis.del(cacheKey);

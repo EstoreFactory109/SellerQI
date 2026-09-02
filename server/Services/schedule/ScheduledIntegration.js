@@ -37,6 +37,7 @@ const { runFbaInventorySyncForMarketplace } = require('../Sp_API/FbaInventorySto
 // Incremental dashboard slice writes — additive, non-fatal (see DashboardSliceService).
 const dashboardSliceService = require('../dashboard/DashboardSliceService.js');
 const { financeAsyncEnabledFor, adsAsyncEnabledFor } = require('../../utils/asyncFinanceGate.js');
+const { marketplaceTodayStr, marketplaceYesterdayStr } = require('../../utils/marketplaceTimezone.js');
 const { SLICE_KEYS } = dashboardSliceService;
 
 class ScheduledIntegration {
@@ -949,6 +950,10 @@ class ScheduledIntegration {
         const apiData = {};
 
         // Daily schedules fetch only yesterday's data (Pacific time, consistent with reportDateRange.js).
+        // ADS ONLY — used at the serviceFunction call sites below. Ads report ROWS are already
+        // grouped marketplace-locally by Amazon; this only picks which dates to request, so it
+        // stays Pacific. Finance day keys are marketplace-local (utils/marketplaceTimezone.js) —
+        // do not reuse this for anything finance.
         const PACIFIC_OFFSET_MS = 7 * 60 * 60 * 1000;
         const _nowPacific = new Date(Date.now() - PACIFIC_OFFSET_MS);
         const _yesterdayPacific = new Date(Date.UTC(
@@ -1043,13 +1048,63 @@ class ScheduledIntegration {
         const fifthBatchPromises = [];
         const fifthBatchServiceNames = [];
 
-        // Sixth batch: Review order ingestion (fetches orders + items into DB)
-        const sixthBatchPromises = [];
-        const sixthBatchServiceNames = [];
+        // COMPUTE ONCE. The three batch-5 calculation services (issueSummary, productIssues,
+        // issuesData) each used to run the FULL pipeline themselves — `AnalyseService.Analyse()`
+        // then `analyseData()` — and their promises are created eagerly below, so all three ran
+        // CONCURRENTLY. issueSummary keeps six integers out of that, productIssues keeps one array;
+        // only issuesData uses most of it.
+        //
+        // That is ~25 collection loads and one full DashboardCalculation, three times over. On
+        // 2026-09-01 it stopped being merely wasteful: one PRO account's newest sponsored-ads batch
+        // reached 234,035 rows / 102 MB (legitimate 30-day data), which is ~300-400 MB per copy as
+        // lean JS objects. Three concurrent copies plus the other 24 collections exceeded the
+        // 1536 MB heap cap, the worker GC-thrashed, `fetchAllDataModels` never returned, and BullMQ
+        // stall-reclaimed the job every 20 minutes forever. That account had not completed a run in
+        // over a week. ONE copy fits comfortably.
+        //
+        // Memoised rather than hoisted so it is computed only if a calculation service actually
+        // runs (batch 5 is skipped entirely by _batchFilter on most phases), and so all three
+        // observe the SAME object. This mirrors what Services/main/Integration.js already does on
+        // the onboarding path — "uses the already-calculated dashboardData to avoid re-fetching".
+        let sharedDashboardDataPromise = null;
+        const getSharedDashboardData = () => {
+            if (!sharedDashboardDataPromise) {
+                sharedDashboardDataPromise = (async () => {
+                    const { AnalyseService } = require('../main/Analyse.js');
+                    const { analyseData } = require('../Calculations/DashboardCalculation.js');
 
-        // Seventh batch: Review request sender (must run AFTER ingestion completes)
-        const seventhBatchPromises = [];
-        const seventhBatchServiceNames = [];
+                    const analyse = await AnalyseService.Analyse(userId, Country, Region);
+                    if (!analyse || analyse.status !== 200 || !analyse.message) {
+                        throw new Error(`Failed to get analyse data: status ${analyse?.status}`);
+                    }
+                    const calculationResult = await analyseData(analyse.message, userId);
+                    if (!calculationResult?.dashboardData) {
+                        throw new Error('Failed to calculate dashboard data');
+                    }
+                    return calculationResult.dashboardData;
+                })();
+            }
+            return sharedDashboardDataPromise;
+        };
+
+        // Each calculation service now only STORES from the shared result. All three storers take
+        // the same (userId, country, region, dashboardData, source) signature and are already
+        // exported; the onboarding path uses them the same way.
+        const CALCULATION_STORERS = {
+            issueSummary: (dd) => require('../Calculations/IssueSummaryService.js')
+                .storeIssueSummaryFromDashboardData(userId, Country, Region, dd, 'schedule'),
+            productIssues: (dd) => require('../Calculations/ProductIssuesService.js')
+                .storeProductIssuesFromDashboardData(userId, Country, Region, dd, 'schedule'),
+            issuesData: (dd) => require('../Calculations/IssuesDataService.js')
+                .storeIssuesDataFromDashboard(userId, Country, Region, dd, 'schedule'),
+        };
+
+        // Batches 6 and 7 (review order ingestion / review request sender) are gone. They now
+        // run in the standalone `review-worker` process — see reviewWorkerStandalone.js. They
+        // were never data-fetch or calculation work; they sat here only because they were
+        // flagged isCalculationService, and the sender's deliberate 5-15s per-order pacing
+        // held sched_finalize — and therefore the dashboard's date range — for over an hour on
+        // 8 accounts and 23.8h on one.
 
         // Helper function to determine batch number for a function key
         const getBatchNumber = (functionKey) => {
@@ -1064,8 +1119,8 @@ class ScheduledIntegration {
             // Batch 2: Restock Inventory, FBA Inventory Planning, Stranded Inventory, Inbound Non-Compliance, Product Reviews, Ads Keywords, Campaign Data, Reimbursement Data & Calculations
             if (['RestockinventoryData', 'fbaInventoryPlanningData', 'strandedInventoryData', 'inboundNonComplianceData', 'productReview', 'adsKeywords', 'campaignData',
                  'ledgerSummaryViewData', 'ledgerDetailViewData', 'fbaReimbursementsData',
-                 'calculateShipmentDiscrepancy', 'calculateLostInventoryReimbursement', 'calculateDamagedInventoryReimbursement', 
-                 'calculateDisposedInventoryReimbursement'].includes(functionKey)) {
+                 'calculateShipmentDiscrepancy', 'calculateLostInventoryReimbursement', 'calculateDamagedInventoryReimbursement',
+                 'calculateDisposedInventoryReimbursement', 'ltsfData'].includes(functionKey)) {
                 return 2;
             }
             // Batch 3: Shipment Data, Brand Data, Ad Groups Data, MCP SalesOnly, MCP BuyBox
@@ -1089,14 +1144,6 @@ class ScheduledIntegration {
             // These are marked with isCalculationService: true in ScheduleConfig
             if (['issueSummary', 'productIssues', 'issuesData'].includes(functionKey)) {
                 return 5;
-            }
-            // Batch 6: Review order ingestion (must complete before sender)
-            if (functionKey === 'reviewOrderIngestion') {
-                return 6;
-            }
-            // Batch 7: Review request sender (runs after ingestion finishes)
-            if (functionKey === 'reviewRequestSender') {
-                return 7;
             }
             // Default to batch 2 if function key is not recognized
             logger.warn(`Unknown function key for batch assignment: ${functionKey}, defaulting to batch 2`);
@@ -1153,14 +1200,6 @@ class ScheduledIntegration {
                 case 5:
                     fifthBatchPromises.push(promise);
                     fifthBatchServiceNames.push(description);
-                    break;
-                case 6:
-                    sixthBatchPromises.push(promise);
-                    sixthBatchServiceNames.push(description);
-                    break;
-                case 7:
-                    seventhBatchPromises.push(promise);
-                    seventhBatchServiceNames.push(description);
                     break;
             }
         };
@@ -1494,9 +1533,14 @@ class ScheduledIntegration {
                         );
                     }
                 } else if (functionConfig.isCalculationService) {
-                    // Calculation services (IssueSummary, ProductIssues)
-                    // These run after all API fetches complete and use (userId, country, region, source)
-                    promise = serviceFunction(userId, Country, Region, 'schedule');
+                    // Calculation services (issueSummary, productIssues, issuesData). They share ONE
+                    // computation — see getSharedDashboardData above for why. A key without a storer
+                    // falls back to the old self-contained call so an added service cannot silently
+                    // do nothing.
+                    const storer = CALCULATION_STORERS[functionKey];
+                    promise = storer
+                        ? getSharedDashboardData().then(storer)
+                        : serviceFunction(userId, Country, Region, 'schedule');
                 } else {
                     // Reimbursement functions (calculation only, no API call)
                     promise = serviceFunction(userId, Country, Region);
@@ -1731,74 +1775,6 @@ class ScheduledIntegration {
         }
         logger.info("Fifth Batch (Calculation Services) Ends");
 
-        // Sixth Batch: Review order ingestion (must finish before sender)
-        if (sixthBatchPromises.length > 0 && runBatch(6)) {
-            logger.info("Sixth Batch (Review Order Ingestion) Starts");
-            const sixthBatchResults = await Promise.allSettled(sixthBatchPromises);
-            let resultIndex = 0;
-
-            for (const serviceName of sixthBatchServiceNames) {
-                const functionKey = Object.keys(scheduledFunctions).find(key =>
-                    scheduledFunctions[key].description === serviceName
-                );
-                if (functionKey && resultIndex < sixthBatchResults.length) {
-                    const dataKey = scheduledFunctions[functionKey].apiDataKey || functionKey;
-                    if (!apiData[dataKey]) {
-                        const result = sixthBatchResults[resultIndex];
-                        if (result.status === 'fulfilled') {
-                            const value = result.value;
-                            if (value && typeof value === 'object' && 'success' in value) {
-                                apiData[dataKey] = value;
-                            } else if (value) {
-                                apiData[dataKey] = { success: true, data: value, error: null };
-                            } else {
-                                apiData[dataKey] = { success: false, data: null, error: 'Unknown error' };
-                            }
-                        } else {
-                            const errorMsg = result.reason?.message || 'Promise rejected';
-                            apiData[dataKey] = { success: false, data: null, error: errorMsg };
-                        }
-                    }
-                    resultIndex++;
-                }
-            }
-        }
-        logger.info("Sixth Batch (Review Order Ingestion) Ends");
-
-        // Seventh Batch: Review request sender (runs after ingestion completes)
-        if (seventhBatchPromises.length > 0 && runBatch(7)) {
-            logger.info("Seventh Batch (Review Request Sender) Starts");
-            const seventhBatchResults = await Promise.allSettled(seventhBatchPromises);
-            let resultIndex = 0;
-
-            for (const serviceName of seventhBatchServiceNames) {
-                const functionKey = Object.keys(scheduledFunctions).find(key =>
-                    scheduledFunctions[key].description === serviceName
-                );
-                if (functionKey && resultIndex < seventhBatchResults.length) {
-                    const dataKey = scheduledFunctions[functionKey].apiDataKey || functionKey;
-                    if (!apiData[dataKey]) {
-                        const result = seventhBatchResults[resultIndex];
-                        if (result.status === 'fulfilled') {
-                            const value = result.value;
-                            if (value && typeof value === 'object' && 'success' in value) {
-                                apiData[dataKey] = value;
-                            } else if (value) {
-                                apiData[dataKey] = { success: true, data: value, error: null };
-                            } else {
-                                apiData[dataKey] = { success: false, data: null, error: 'Unknown error' };
-                            }
-                        } else {
-                            const errorMsg = result.reason?.message || 'Promise rejected';
-                            apiData[dataKey] = { success: false, data: null, error: errorMsg };
-                        }
-                    }
-                    resultIndex++;
-                }
-            }
-        }
-        logger.info("Seventh Batch (Review Request Sender) Ends");
-
         // Listing items for ACTIVE SKUs — weekly (Sunday), inside batch 4.
         //
         // This used to be a stub that always assigned []. Two things were broken by that:
@@ -1850,17 +1826,27 @@ class ScheduledIntegration {
             // Use service layer that handles both old (embedded array) and new (separate collection) formats
             const storedSponsoredAdsData = await getProductWiseSponsoredAdsData(userId, Country, Region);
 
-            if (storedSponsoredAdsData && Array.isArray(storedSponsoredAdsData.sponsoredAds)) {
-                const campaignIds = new Set();
-                const adGroupIds = new Set();
+            if (storedSponsoredAdsData && (Array.isArray(storedSponsoredAdsData.campaignIds) || Array.isArray(storedSponsoredAdsData.sponsoredAds))) {
+                // Prefer the distinct sets the service now resolves with two `distinct` calls.
+                // These ids used to be scraped by walking every row of `sponsoredAds` — 234k
+                // iterations on a large account purely to build two Sets. The rows are now
+                // aggregated per (asin, adType, date) and no longer carry campaignId/adGroupId at
+                // all, so the row-scan below is the pre-aggregation fallback, not the main path.
+                if (Array.isArray(storedSponsoredAdsData.campaignIds)) {
+                    campaignIdArray = storedSponsoredAdsData.campaignIds;
+                    adGroupIdArray = storedSponsoredAdsData.adGroupIds || [];
+                } else {
+                    const campaignIds = new Set();
+                    const adGroupIds = new Set();
 
-                storedSponsoredAdsData.sponsoredAds.forEach(ad => {
-                    if (ad && ad.campaignId) campaignIds.add(ad.campaignId);
-                    if (ad && ad.adGroupId) adGroupIds.add(ad.adGroupId);
-                });
+                    storedSponsoredAdsData.sponsoredAds.forEach(ad => {
+                        if (ad && ad.campaignId) campaignIds.add(ad.campaignId);
+                        if (ad && ad.adGroupId) adGroupIds.add(ad.adGroupId);
+                    });
 
-                campaignIdArray = Array.from(campaignIds);
-                adGroupIdArray = Array.from(adGroupIds);
+                    campaignIdArray = Array.from(campaignIds);
+                    adGroupIdArray = Array.from(adGroupIds);
+                }
             } else if (ppcSpendsBySKU.success && ppcSpendsBySKU.data?.sponsoredAds) {
                 const campaignIds = new Set();
                 const adGroupIds = new Set();
@@ -2713,7 +2699,7 @@ class ScheduledIntegration {
         // Inventory slice (batch 2)
         inventory: [
             'RestockinventoryData', 'fbaInventoryPlanningData',
-            'strandedInventoryData', 'inboundNonComplianceData'
+            'strandedInventoryData', 'inboundNonComplianceData', 'ltsfData'
         ],
         // Performance slice (batch 1/2 — V2/V1 perf + reviews + ledger/reimbursement reads)
         performance: [
@@ -2729,7 +2715,7 @@ class ScheduledIntegration {
         // Keywords slice (batch 4)
         keywords: ['negativeKeywords', 'searchKeywords', 'keywordRecommendations'],
         // Issues slice (calc_review phase)
-        issues: ['issueSummary', 'productIssues', 'issuesData', 'reviewOrderIngestion', 'reviewRequestSender']
+        issues: ['issueSummary', 'productIssues', 'issuesData']
     };
 
     /**
@@ -3522,7 +3508,9 @@ class ScheduledIntegration {
             //    congests the seller's report queue.
             const emptyRetries = { ...(phaseData.financeEmptyRetries || {}) };
             if (row.status === 'NO_DATA' && (emptyRetries[paramsKey] || 0) < 1) {
-                const todayPac = new Date(Date.now() - 7 * 3600000).toISOString().substring(0, 10);
+                // Marketplace-local: the chunk dates being aged against are marketplace-local day
+                // keys, so "today" has to be too or the age is off by a day for distant markets.
+                const todayPac = marketplaceTodayStr(Country);
                 const ageDays = Math.round((new Date(`${todayPac}T00:00:00.000Z`) - new Date(`${chunk.startDate}T00:00:00.000Z`)) / 86400000);
                 if (ageDays <= PROVISIONAL_SETTLE_DAYS) {
                     emptyRetries[paramsKey] = (emptyRetries[paramsKey] || 0) + 1;
@@ -3765,7 +3753,7 @@ class ScheduledIntegration {
         try {
             const sorted = [...dates].sort();
             const forceStart = sorted[0];
-            // ★ Anchor the END of the re-fetch window to YESTERDAY (Pacific), not
+            // ★ Anchor the END of the re-fetch window to YESTERDAY (marketplace-local), not
             //   the latest broken day. Amazon's GET_FLAT_FILE_ALL_ORDERS_DATA_BY_
             //   ORDER_DATE report only returns an OLD order-date when the request
             //   window extends toward the present — a single-old-day window (e.g.
@@ -3774,9 +3762,10 @@ class ScheduledIntegration {
             //   yesterday makes the report return the old day's data, so the
             //   catch-up RESTORES it instead of fetching nothing. (Verified: a
             //   range fetch returns the day; a single-old-day fetch returns 0.)
-            const PACIFIC_OFFSET_MS = 7 * 60 * 60 * 1000;
-            const yesterdayPac = new Date(Date.now() - PACIFIC_OFFSET_MS - 24 * 60 * 60 * 1000)
-                .toISOString().substring(0, 10);
+            //
+            //   Marketplace-local rather than Pacific, so this agrees with the day keys
+            //   FinanceService writes and with the catch-up dates the sweeper produced.
+            const yesterdayPac = marketplaceYesterdayStr(Country);
             const latestBroken = sorted[sorted.length - 1];
             const forceEnd = latestBroken > yesterdayPac ? latestBroken : yesterdayPac;
 
