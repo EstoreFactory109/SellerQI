@@ -418,7 +418,7 @@ const TotalSales = ({ onGrossProfitChange } = {}) => {
           <div className="min-w-0">
             <h2 className="m-0 text-lg font-semibold" style={{ color: COLORS.textPrimary }}>Where your money goes</h2>
             <p className="m-0 mt-1 text-sm" style={{ color: COLORS.textSecondary }}>
-              {loading ? 'Loading your sales for this period…' : `Every dollar of the ${formatCurrencyWithLocale(totalSales, currency, 0)} you sold ${periodLabel}.`}
+              {loading ? 'Loading your sales for this period…' : `Every dollar of the ${formatCurrencyWithLocale(totalSales, currency, 2)} you sold ${periodLabel}.`}
             </p>
           </div>
           <InfoTooltip text="Total product sales from finance data (DailySkuFinance) for the selected date range." />
@@ -435,7 +435,7 @@ const TotalSales = ({ onGrossProfitChange } = {}) => {
             <div className="h-8 w-28 rounded animate-pulse mt-1 ml-auto" style={{ background: COLORS.border }} />
           ) : (
             <div className="text-2xl font-bold tabular-nums" style={{ color: grossProfitRaw >= 0 ? '#22C55E' : '#EF4444' }}>
-              {formatCurrencyWithLocale(grossProfitRaw, currency, 0)}
+              {formatCurrencyWithLocale(grossProfitRaw, currency, 2)}
             </div>
           )}
         </div>
@@ -472,7 +472,7 @@ const TotalSales = ({ onGrossProfitChange } = {}) => {
                     >
                       <div className="px-3 py-2 border-b" style={{ borderColor: COLORS.border }}>
                         <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.textSecondary }}>
-                          {slice.label} — {formatCurrencyWithLocale(slice.displayAmount, currency, 0)}
+                          {slice.label} — {formatCurrencyWithLocale(slice.displayAmount, currency, 2)}
                         </p>
                       </div>
                       <div className="p-2 max-h-48 overflow-y-auto">
@@ -504,7 +504,7 @@ const TotalSales = ({ onGrossProfitChange } = {}) => {
                   <span className="w-2.5 h-2.5 rounded-sm flex-none" style={{ background: sliceColors[index] }} />
                   <span className="text-sm flex-1 truncate" style={{ color: COLORS.textSecondary }}>{slice.label}</span>
                   <span className="text-sm font-semibold tabular-nums" style={{ color: COLORS.textPrimary }}>
-                    {formatCurrencyWithLocale(slice.displayAmount, currency, 0)}
+                    {formatCurrencyWithLocale(slice.displayAmount, currency, 2)}
                   </span>
                   <span className="text-xs w-9 text-right tabular-nums" style={{ color: COLORS.textMuted }}>{pct}%</span>
                 </div>
