@@ -488,7 +488,28 @@ class CreateTaskService {
                     status: TaskStatus.PENDING
                 });
             }
-            
+
+            // Brand Story error - use actual error data.
+            // This was counted on the Issues pages (RecommendationService,
+            // IssuesPaginationService) but generated no task, so the seller saw the
+            // issue in one place and had nothing to act on in another. Upstream only
+            // populates this key for products whose status is 'Error' (see
+            // brandStoryErrorMap in DashboardCalculation), same as its A+ sibling
+            // above, so presence alone is the right condition.
+            if (error.brandStoryErrorData) {
+                const errorData = error.brandStoryErrorData;
+                tasks.push({
+                    taskId: generateTaskId(),
+                    productName,
+                    asin,
+                    errorCategory: 'conversion',
+                    errorType: 'missing_brand_story',
+                    error: `Brand Story | Missing: ${errorData.Message || 'Your product listing has no Brand Story module. Without it you lose a prime placement for brand narrative and cross-selling your other products.'}`,
+                    solution: errorData.HowToSolve || errorData.HowTOSolve || 'Add a Brand Story module to your A+ Content. Use it to tell your brand\'s story, build trust, and cross-sell your catalogue — it appears above the A+ description on every enrolled listing and is available to Brand Registered sellers at no cost.',
+                    status: TaskStatus.PENDING
+                });
+            }
+
             // Image error - use actual error data
             if (error.imageResultErrorData) {
                 const errorData = error.imageResultErrorData;
@@ -939,10 +960,49 @@ class CreateTaskService {
             // reads as a slice of the dashboard's number, not a contradiction.
             const { groups } = buildGroupsFromTasks(tasks, { maxGroups: Infinity });
 
+            // Intern the rendered text before it goes over the wire.
+            //
+            // `error` and `solution` are ~62% of this response, and `solution` is
+            // massively repeated: on a 25,455-task account there were 73 distinct
+            // solution strings sent 25,455 times — 7.0 MB of payload for 23 KB of
+            // unique content (319x). Sending a dictionary plus an index per task
+            // cuts the response roughly 5x with no change to what the client
+            // displays or to bucketing (which never reads either field).
+            //
+            // Deduped by string identity, NOT by errorType: some solutions embed
+            // per-task specifics such as a search term, so the same type can carry
+            // several distinct strings (46 type keys vs 73 strings on that account).
+            const texts = [];
+            const textIndex = new Map();
+            const intern = (s) => {
+                if (typeof s !== 'string' || s === '') return undefined;
+                let i = textIndex.get(s);
+                if (i === undefined) {
+                    i = texts.length;
+                    texts.push(s);
+                    textIndex.set(s, i);
+                }
+                return i;
+            };
+            // productName is interned for the same reason: one product owns many
+            // tasks, so a 100-character title was repeated once per task (1.9 MB on
+            // the account above, for ~80 distinct titles).
+            const wireTasks = tasks.map((t) => {
+                const { error, solution, productName, userId: _uid, _id, __v, createdAt, updatedAt, ...rest } = t;
+                return {
+                    ...rest,
+                    errorIdx: intern(error),
+                    solutionIdx: intern(solution),
+                    productNameIdx: intern(productName)
+                };
+            });
+
             return {
                 userId,
                 taskRenewalDate: userTaskDocument?.taskRenewalDate || null,
-                tasks,
+                tasks: wireTasks,
+                // Dictionary for errorIdx / solutionIdx above.
+                texts,
                 groups,
                 taskCount: taskCounts.total,
                 pendingCount: taskCounts.pending,

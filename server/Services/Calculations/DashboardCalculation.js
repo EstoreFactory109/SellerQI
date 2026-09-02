@@ -793,7 +793,18 @@ const calculateSponsoredAdsErrors = (
  * @param {string} userId - User ID for task creation
  * @returns {Object} Calculated dashboard data
  */
-const analyseData = async (data, userId = null) => {
+/**
+ * @param {Object} data - the AnalyseService.Analyse() message
+ * @param {string|null} userId - needed both to write tasks and to read the
+ *   account's live per-ASIN finance. Pass it whenever you have it.
+ * @param {Object} [options]
+ * @param {boolean} [options.persistTasks=true] - set false to compute everything
+ *   and write nothing. Kept separate from `userId` so a read-only rehearsal still
+ *   gets real per-ASIN finance; nulling the userId to avoid writes would silently
+ *   compute profitability against zero sales.
+ */
+const analyseData = async (data, userId = null, options = {}) => {
+    const persistTasks = options.persistTasks !== false;
     const calcStartTime = Date.now();
     logger.info("[PERF] === DashboardCalculation: Processing data ===");
 
@@ -841,6 +852,37 @@ const analyseData = async (data, userId = null) => {
         userId ? getTop4ProductsByIssuesOptimized(userId, region, country) : Promise.resolve(null)
     ]);
     logger.info(`[PERF] getPpcSalesFromEconomics + getTop4ProductsByIssuesOptimized completed in ${Date.now() - stepStart}ms`);
+
+    // Per-ASIN sales/fees from the LIVE finance collection when EconomicsMetrics has
+    // none. EconomicsMetrics stopped being written in April 2026, so for almost every
+    // account the map above is empty — which made profitability read `sales: 0` for
+    // every product and report profitable products as "losing money on every sale,
+    // Revenue: $0.00". DailySkuFinance is what the Profitability page already reads.
+    //
+    // Only the per-ASIN map is substituted. Account-level totals (totalSales,
+    // totalPpcSpent) keep their existing sources so the dashboard headline figures
+    // are not moved by this.
+    if (userId && Object.keys(economicsData.asinPpcSales || {}).length === 0) {
+        try {
+            const { getAsinFinanceForWindow } = require('../Finance/AsinFinanceWindowService.js');
+            const liveAsinFinance = await getAsinFinanceForWindow(
+                userId, country, region, data.startDate, data.endDate
+            );
+            const liveCount = Object.keys(liveAsinFinance).length;
+            if (liveCount > 0) {
+                economicsData.asinPpcSales = liveAsinFinance;
+                logger.info('Per-ASIN finance sourced from DailySkuFinance (EconomicsMetrics empty)', {
+                    userId, country, region, asins: liveCount
+                });
+            }
+        } catch (financeError) {
+            // Leave the empty map rather than failing the dashboard; downstream
+            // already tolerates it (it is today's behaviour for every account).
+            logger.error('Could not source per-ASIN finance from DailySkuFinance', {
+                error: financeError.message, userId, country, region
+            });
+        }
+    }
     logger.info("EconomicsMetrics data extracted", {
         totalPpcSpent: economicsData.totalPpcSpent,
         totalSales: economicsData.totalSales,
@@ -1754,9 +1796,9 @@ const analyseData = async (data, userId = null) => {
 
     logger.info(`Dashboard data processed successfully with ${activeProducts.length} active products`);
     
-    // Call CreateTask service if userId is provided
+    // Call CreateTask service if userId is provided and writes are wanted
     let tasksRebuilt = false;
-    if (userId) {
+    if (userId && persistTasks) {
         try {
             logger.info(`Creating tasks for user: ${userId}`);
             const taskResult = await CreateTaskService.createTasksFromCalculateServiceData(userId, {

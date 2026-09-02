@@ -282,9 +282,11 @@ async function recomputeMarketplace(userId, country, region, persistTasks) {
     if (!analysed || analysed.status !== 200 || !analysed.message) {
         throw new Error(`Analyse returned status ${analysed && analysed.status}`);
     }
-    // Passing null as the userId computes everything and writes nothing — that is
-    // what makes --verify a real rehearsal rather than a guess.
-    const result = await analyseData(analysed.message, persistTasks ? userId : null);
+    // `persistTasks: false` computes everything and writes nothing — that is what
+    // makes --verify a real rehearsal. The userId is still passed, because it is
+    // also what lets analyseData read the account's live per-ASIN finance; nulling
+    // it to suppress writes would quietly compute profitability against zero sales.
+    const result = await analyseData(analysed.message, userId, { persistTasks });
     if (!result || !result.dashboardData) throw new Error('analyseData produced no dashboardData');
     return result;
 }
