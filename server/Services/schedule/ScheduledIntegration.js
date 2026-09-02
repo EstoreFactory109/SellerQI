@@ -1080,13 +1080,12 @@ class ScheduledIntegration {
                 .storeIssuesDataFromDashboard(userId, Country, Region, dd, 'schedule'),
         };
 
-        // Sixth batch: Review order ingestion (fetches orders + items into DB)
-        const sixthBatchPromises = [];
-        const sixthBatchServiceNames = [];
-
-        // Seventh batch: Review request sender (must run AFTER ingestion completes)
-        const seventhBatchPromises = [];
-        const seventhBatchServiceNames = [];
+        // Batches 6 and 7 (review order ingestion / review request sender) are gone. They now
+        // run in the standalone `review-worker` process — see reviewWorkerStandalone.js. They
+        // were never data-fetch or calculation work; they sat here only because they were
+        // flagged isCalculationService, and the sender's deliberate 5-15s per-order pacing
+        // held sched_finalize — and therefore the dashboard's date range — for over an hour on
+        // 8 accounts and 23.8h on one.
 
         // Helper function to determine batch number for a function key
         const getBatchNumber = (functionKey) => {
@@ -1126,14 +1125,6 @@ class ScheduledIntegration {
             // These are marked with isCalculationService: true in ScheduleConfig
             if (['issueSummary', 'productIssues', 'issuesData'].includes(functionKey)) {
                 return 5;
-            }
-            // Batch 6: Review order ingestion (must complete before sender)
-            if (functionKey === 'reviewOrderIngestion') {
-                return 6;
-            }
-            // Batch 7: Review request sender (runs after ingestion finishes)
-            if (functionKey === 'reviewRequestSender') {
-                return 7;
             }
             // Default to batch 2 if function key is not recognized
             logger.warn(`Unknown function key for batch assignment: ${functionKey}, defaulting to batch 2`);
@@ -1190,14 +1181,6 @@ class ScheduledIntegration {
                 case 5:
                     fifthBatchPromises.push(promise);
                     fifthBatchServiceNames.push(description);
-                    break;
-                case 6:
-                    sixthBatchPromises.push(promise);
-                    sixthBatchServiceNames.push(description);
-                    break;
-                case 7:
-                    seventhBatchPromises.push(promise);
-                    seventhBatchServiceNames.push(description);
                     break;
             }
         };
@@ -1772,74 +1755,6 @@ class ScheduledIntegration {
             }
         }
         logger.info("Fifth Batch (Calculation Services) Ends");
-
-        // Sixth Batch: Review order ingestion (must finish before sender)
-        if (sixthBatchPromises.length > 0 && runBatch(6)) {
-            logger.info("Sixth Batch (Review Order Ingestion) Starts");
-            const sixthBatchResults = await Promise.allSettled(sixthBatchPromises);
-            let resultIndex = 0;
-
-            for (const serviceName of sixthBatchServiceNames) {
-                const functionKey = Object.keys(scheduledFunctions).find(key =>
-                    scheduledFunctions[key].description === serviceName
-                );
-                if (functionKey && resultIndex < sixthBatchResults.length) {
-                    const dataKey = scheduledFunctions[functionKey].apiDataKey || functionKey;
-                    if (!apiData[dataKey]) {
-                        const result = sixthBatchResults[resultIndex];
-                        if (result.status === 'fulfilled') {
-                            const value = result.value;
-                            if (value && typeof value === 'object' && 'success' in value) {
-                                apiData[dataKey] = value;
-                            } else if (value) {
-                                apiData[dataKey] = { success: true, data: value, error: null };
-                            } else {
-                                apiData[dataKey] = { success: false, data: null, error: 'Unknown error' };
-                            }
-                        } else {
-                            const errorMsg = result.reason?.message || 'Promise rejected';
-                            apiData[dataKey] = { success: false, data: null, error: errorMsg };
-                        }
-                    }
-                    resultIndex++;
-                }
-            }
-        }
-        logger.info("Sixth Batch (Review Order Ingestion) Ends");
-
-        // Seventh Batch: Review request sender (runs after ingestion completes)
-        if (seventhBatchPromises.length > 0 && runBatch(7)) {
-            logger.info("Seventh Batch (Review Request Sender) Starts");
-            const seventhBatchResults = await Promise.allSettled(seventhBatchPromises);
-            let resultIndex = 0;
-
-            for (const serviceName of seventhBatchServiceNames) {
-                const functionKey = Object.keys(scheduledFunctions).find(key =>
-                    scheduledFunctions[key].description === serviceName
-                );
-                if (functionKey && resultIndex < seventhBatchResults.length) {
-                    const dataKey = scheduledFunctions[functionKey].apiDataKey || functionKey;
-                    if (!apiData[dataKey]) {
-                        const result = seventhBatchResults[resultIndex];
-                        if (result.status === 'fulfilled') {
-                            const value = result.value;
-                            if (value && typeof value === 'object' && 'success' in value) {
-                                apiData[dataKey] = value;
-                            } else if (value) {
-                                apiData[dataKey] = { success: true, data: value, error: null };
-                            } else {
-                                apiData[dataKey] = { success: false, data: null, error: 'Unknown error' };
-                            }
-                        } else {
-                            const errorMsg = result.reason?.message || 'Promise rejected';
-                            apiData[dataKey] = { success: false, data: null, error: errorMsg };
-                        }
-                    }
-                    resultIndex++;
-                }
-            }
-        }
-        logger.info("Seventh Batch (Review Request Sender) Ends");
 
         // Listing items for ACTIVE SKUs — weekly (Sunday), inside batch 4.
         //
@@ -2717,7 +2632,7 @@ class ScheduledIntegration {
         // Keywords slice (batch 4)
         keywords: ['negativeKeywords', 'searchKeywords', 'keywordRecommendations'],
         // Issues slice (calc_review phase)
-        issues: ['issueSummary', 'productIssues', 'issuesData', 'reviewOrderIngestion', 'reviewRequestSender']
+        issues: ['issueSummary', 'productIssues', 'issuesData']
     };
 
     /**

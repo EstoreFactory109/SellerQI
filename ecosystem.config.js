@@ -325,6 +325,66 @@ const config = {
             }
         },
         {
+            // Review Worker - Runs daily at 01:00 UTC (cron: 0 1 * * *)
+            //
+            // Runs review order ingestion (Mon/Wed/Fri) and review request sending (daily)
+            // for every eligible account. These used to run inside `sched_calc_review`, the
+            // last phase before `sched_finalize` — and `sched_finalize` is the only thing
+            // that closes the DataFetchTracking doc that publishes the dashboard's date
+            // range. The sender sleeps 5-15s per order by design, up to 400 orders a run, so
+            // it held that range hostage for over an hour on 8 accounts and 23.8h on one.
+            //
+            // ENABLED, and the two ScheduleConfig entries were removed in the SAME change —
+            // there must never be a window in which both the pipeline and this worker send,
+            // because that burns the single solicitation Amazon allows per order.
+            // Rollback is the mirror image: set REVIEW_WORKER_ENABLED=false and restore the
+            // two ScheduleConfig entries together.
+            //
+            // REVIEW_INGEST_STREAMING is passed through so ingestion runs in exactly the mode
+            // it does in the pipeline today. Changing that is a separate decision.
+            name: 'review-worker',
+            script: './server/Services/BackgroundJobs/reviewWorkerStandalone.js',
+            // Cap V8's heap BELOW max_memory_restart (768M). Without this V8 sizes
+            // old-space from total system RAM, so the heap ceiling exceeds the PM2 cap
+            // meant to contain it — and PM2's cap is a poll-based RSS check, so a fast
+            // allocation burst reaches the kernel OOM-killer before PM2 ever acts.
+            node_args: '--max-old-space-size=384',
+            instances: 1,
+            exec_mode: 'fork',
+            env: {
+                NODE_ENV: 'production',
+                TIMEZONE: process.env.TIMEZONE || 'UTC',
+                REVIEW_WORKER_CRON: process.env.REVIEW_WORKER_CRON || '0 1 * * *',
+                REVIEW_WORKER_ENABLED: process.env.REVIEW_WORKER_ENABLED || 'true',
+                REVIEW_INGEST_STREAMING: process.env.REVIEW_INGEST_STREAMING || 'false'
+            },
+            error_file: './logs/pm2-review-worker-error.log',
+            out_file: './logs/pm2-review-worker-out.log',
+            log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+            merge_logs: true,
+            autorestart: true,
+            max_restarts: 20,
+            min_uptime: '10s',
+            // 512M, the house size for a lightweight cron process (same as
+            // freshness-sweeper). Deliberately NOT larger: the committed budget is already
+            // 12.75 GB against the 12.8 GB that ecosystemMemoryCheck.test.js holds this
+            // config to for a 16 GB host, so there is ~50 MB of slack and the next app
+            // added here will have to reckon with that rather than discover it.
+            //
+            // That size is why REVIEW_WORKER_CONCURRENCY defaults to 3 rather than
+            // something larger — non-streaming ingestion buffers an account's whole order
+            // window in memory, so peak usage scales with how many accounts run at once.
+            max_memory_restart: '512M',
+            kill_timeout: 30 * 1000,
+            watch: false,
+            env_production: {
+                NODE_ENV: 'production'
+            },
+            env_development: {
+                NODE_ENV: 'development'
+            }
+        },
+        {
             // Freshness Sweeper (Layer B): ads catch-up for missing past PPC days.
             //
             // The daily ads phase only fetches yesterday. If a past day failed
