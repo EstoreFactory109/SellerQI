@@ -1903,7 +1903,7 @@ const PPCDashboard = () => {
       },
       {
         label: 'ACoS',
-        value: `${acos.toFixed(1)}%`,
+        value: `${acos.toFixed(2)}%`,
         icon: Gauge,
         valueColor: acos > 25 ? '#F87171' : undefined,
         caption: 'Healthy: under 25%',
@@ -1911,7 +1911,7 @@ const PPCDashboard = () => {
       },
       {
         label: 'TACoS',
-        value: `${tacos.toFixed(1)}%`,
+        value: `${tacos.toFixed(2)}%`,
         icon: Gauge,
         valueColor: tacos > 15 ? COLORS.watch : undefined,
         caption: 'Share of total sales driven by ads',
