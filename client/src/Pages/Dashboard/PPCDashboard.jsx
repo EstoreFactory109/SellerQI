@@ -1903,7 +1903,7 @@ const PPCDashboard = () => {
       },
       {
         label: 'ACoS',
-        value: `${acos.toFixed(1)}%`,
+        value: `${acos.toFixed(2)}%`,
         icon: Gauge,
         valueColor: acos > 25 ? '#F87171' : undefined,
         caption: 'Healthy: under 25%',
@@ -1911,7 +1911,7 @@ const PPCDashboard = () => {
       },
       {
         label: 'TACoS',
-        value: `${tacos.toFixed(1)}%`,
+        value: `${tacos.toFixed(2)}%`,
         icon: Gauge,
         valueColor: tacos > 15 ? COLORS.watch : undefined,
         caption: 'Share of total sales driven by ads',
@@ -2150,6 +2150,26 @@ const PPCDashboard = () => {
 
   return (
     <div className='min-h-screen w-full overflow-x-hidden' style={{ background: COLORS.bgBase }}>
+      {/* Bidbison Ads Automation Banner */}
+      <div className='w-full px-4 py-5 shadow-lg' style={{ background: '#1e3a8a' }}>
+        <div className='max-w-6xl mx-auto flex items-center justify-between gap-4 flex-wrap'>
+          <div className='flex-1 min-w-0'>
+            <div className='flex items-center gap-3 mb-2'>
+              <div className='text-2xl'>⚡</div>
+              <h2 className='text-lg font-bold text-white'>Supercharge your ads ppc with Ai Automation</h2>
+            </div>
+            <p className='text-blue-100 text-sm'>For ads automation please subscribe to Bidbison — Save hours managing campaigns with intelligent automation & AI-powered insights</p>
+          </div>
+          <button
+            onClick={() => window.open('https://bidbison.com/', '_blank')}
+            className='px-6 py-2.5 rounded-lg font-semibold text-sm whitespace-nowrap transition-all transform hover:scale-105 active:scale-95'
+            style={{ background: 'white', color: '#1e3a8a', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }}
+          >
+            Subscribe Now →
+          </button>
+        </div>
+      </div>
+
       {/* Header Section */}
       <div className='sticky top-0 z-40' style={{ background: COLORS.surface, borderBottom: `1px solid ${COLORS.border}` }}>
         <div className='px-2 lg:px-3 py-1.5'>
