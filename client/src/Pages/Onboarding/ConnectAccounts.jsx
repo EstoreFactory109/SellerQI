@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Store, 
-  TrendingUp, 
-  ArrowRight,
+import {
+  Store,
+  TrendingUp,
   Loader2,
   CheckCircle,
   ExternalLink
@@ -17,6 +16,11 @@ import { hasPremiumAccess } from '../../utils/subscriptionCheck.js';
 import { detectCountry } from '../../utils/countryDetection.js';
 import stripeService from '../../services/stripeService.js';
 import { devLog, devWarn } from '../../utils/devLogger.js';
+import OnboardingShell from '../../Components/Onboarding/OnboardingShell.jsx';
+import { COLORS } from '../../Components/Shared/index.js';
+
+// Matches the onboarding shell's inset panel shade.
+const PANEL_BG = '#10141C';
 
 // Marketplace configuration mapping
 const MARKETPLACE_CONFIG = {
@@ -932,224 +936,265 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
   // Show loading state while checking subscription
   if (checkingSubscription) {
     return (
-      <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center" style={{ background: COLORS.bgBase }}>
         <div className="flex flex-col items-center gap-4">
-          <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
-          <p className="text-white/70">Verifying subscription...</p>
+          <Loader2 className="w-8 h-8 animate-spin" style={{ color: COLORS.accent }} />
+          <p style={{ color: COLORS.textSecondary }}>Verifying subscription...</p>
         </div>
       </div>
     );
   }
 
+  // This page covers two wizard steps: Seller Central (2) until it's connected, then Amazon Ads (3).
+  const onAdsStep = isSpApiConnectedState && !checkingSpApi;
+
   return (
-    <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center">
-      {/* Form Section */}
-      <div className="relative w-full flex items-center justify-center px-4 py-4 lg:py-8">
-        <div className="w-full max-w-lg">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-            className="bg-[#161b22] rounded-2xl border border-[#30363d] shadow-xl p-6"
-          >
-            {/* Logo and Header */}
-            <div className="text-center mb-6">
-              <motion.div
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.5, delay: 0.1 }}
-                className="flex justify-center mb-4"
-              >
-                <img 
-                  src="https://res.cloudinary.com/ddoa960le/image/upload/v1749657303/Seller_QI_Logo_Final_1_1_tfybls.png" 
-                  alt="SellerQI Logo" 
-                  className="h-10 w-auto"
-                />
-              </motion.div>
-              <h1 className="text-xl lg:text-2xl font-bold text-white mb-2">
-                Connect Your Accounts
-              </h1>
-              <p className="text-white/70 text-sm">
-                Connect your Amazon accounts to start optimizing your business
-              </p>
-              {/* Display current marketplace if available */}
-              {marketplaceConfig && countryCode && (
-                <p className="text-sm text-white/60 mt-2">
-                  Marketplace: {countryCode.toUpperCase()} ({marketplaceConfig.region})
-                </p>
-              )}
-            </div>
-
-            {/* Connection Options */}
-            <div className="space-y-4">
-              {/* Seller Central Connection */}
-              <motion.div
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.5, delay: 0.2 }}
-                className="border border-[#30363d] rounded-xl p-6 hover:border-gray-500 hover:shadow-md transition-all duration-300"
-              >
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center">
-                    <Store className="w-6 h-6 text-white" />
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="text-lg font-semibold text-white">Amazon Seller Central</h3>
-                    <p className="text-sm text-white/70">Connect your seller account to access sales data, inventory, and performance metrics</p>
-                  </div>
-                </div>
-                <button
-                  onClick={handleConnectSellerCentral}
-                  disabled={sellerCentralLoading || !marketplaceConfig || isSellerCentralConnected}
-                  className={`w-full py-3 px-6 rounded-lg font-semibold transition-all duration-300 flex items-center justify-center gap-2 ${
-                    isSellerCentralConnected
-                      ? 'bg-blue-600 text-white cursor-not-allowed'
-                      : sellerCentralLoading || !marketplaceConfig
-                      ? 'bg-gray-600 text-white/60 cursor-not-allowed'
-                      : 'bg-blue-600 text-white hover:bg-blue-500'
-                  }`}
-                >
-                  {isSellerCentralConnected ? (
-                    <>
-                      <CheckCircle className="w-5 h-5" />
-                      Connected
-                    </>
-                  ) : sellerCentralLoading ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : (
-                    <>
-                      Connect Seller Central
-                      <ExternalLink className="w-5 h-5" />
-                    </>
-                  )}
-                </button>
-              </motion.div>
-
-              {/* Amazon Ads Connection */}
-              <motion.div
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.5, delay: 0.3 }}
-                className="border border-[#30363d] rounded-xl p-6 hover:border-gray-500 hover:shadow-md transition-all duration-300"
-              >
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center">
-                    <TrendingUp className="w-6 h-6 text-white" />
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="text-lg font-semibold text-white">Amazon Ads</h3>
-                    <p className="text-sm text-white/70">Connect your advertising account to optimize campaigns and track ad performance</p>
-                    {!isSpApiConnectedState && !checkingSpApi && (
-                      <p className="text-xs text-blue-300 mt-1 font-medium">
-                        ⚠️ Please connect Amazon Seller Central first
-                      </p>
-                    )}
-                  </div>
-                </div>
-                <button
-                  onClick={handleConnectAmazonAds}
-                  disabled={amazonAdsLoading || !marketplaceConfig || !isSpApiConnectedState || checkingSpApi}
-                  className={`w-full py-3 px-6 rounded-lg font-semibold transition-all duration-300 flex items-center justify-center gap-2 ${
-                    amazonAdsLoading || !marketplaceConfig || !isSpApiConnectedState || checkingSpApi
-                      ? 'bg-gray-600 text-white/60 cursor-not-allowed'
-                      : 'bg-blue-600 text-white hover:bg-blue-500'
-                  }`}
-                >
-                  {amazonAdsLoading ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : checkingSpApi ? (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                      Checking connection...
-                    </>
-                  ) : !isSpApiConnectedState ? (
-                    <>
-                      Connect SP-API First
-                    </>
-                  ) : (
-                    <>
-                      Connect Amazon Ads
-                      <ExternalLink className="w-5 h-5" />
-                    </>
-                  )}
-                </button>
-              </motion.div>
-            </div>
-
-            {/* Info Section */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.4 }}
-              className="mt-6 p-4 bg-blue-500/10 rounded-xl border border-blue-500/40"
-            >
-              <div className="flex items-start gap-3">
-                <CheckCircle className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" />
-                <div className="text-sm text-blue-300">
-                  <p className="font-medium mb-1">Secure Connection</p>
-                  <p className="text-blue-400">Your data is encrypted and securely stored. We connect directly to Amazon's secure systems and never store your login credentials.</p>
-                </div>
-              </div>
-            </motion.div>
-
-            {/* Waiting for Analysis Banner */}
-            {waitingForAnalysis && (
-              <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-blue-500/10 border border-blue-500/40 rounded-xl p-4 text-center mt-4"
-              >
-                <div className="flex items-center justify-center gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
-                  <p className="text-blue-300 text-sm font-medium">
-                    Starting analysis... Please wait
-                  </p>
-                </div>
-              </motion.div>
-            )}
-
-            {/* Navigation Links */}
-            <div className="flex items-center justify-start mt-6 pt-4 border-t border-[#30363d]">
-              <button
-                type="button"
-                onClick={navigateToLogin}
-                className="text-sm text-gray-400 hover:text-gray-300 font-medium hover:underline transition-colors"
-              >
-                Back to Login
-              </button>
-            </div>
-
-            {/* Success Message */}
-            <AnimatePresence>
-              {successMessage && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="bg-green-500/10 border border-green-500/40 rounded-xl p-4 text-center mt-4"
-                >
-                  <p className="text-green-300 text-sm">{successMessage}</p>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Error Message */}
-            <AnimatePresence>
-              {errorMessage && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="bg-red-500/10 border border-red-500/40 rounded-xl p-4 text-center mt-4"
-                >
-                  <p className="text-red-300 text-sm">{errorMessage}</p>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </motion.div>
+    <OnboardingShell currentStep={onAdsStep ? 3 : 2} doneSteps={onAdsStep ? [1, 2] : [1]}>
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
+        <div
+          className="inline-flex items-center gap-2"
+          style={{ padding: '5px 11px', borderRadius: 999, background: 'rgba(59,130,246,.12)', color: '#7EA8F8', fontSize: 12, fontWeight: 600, marginBottom: 16 }}
+        >
+          {onAdsStep ? 'Step 3 of 5 · About 40 seconds' : 'Step 2 of 5 · About 60 seconds'}
         </div>
-      </div>
-    </div>
+        <h1 style={{ margin: '0 0 8px', fontSize: 27, lineHeight: '34px', fontWeight: 600, letterSpacing: '-0.025em', color: COLORS.textPrimary }}>
+          {onAdsStep ? 'Connect Amazon Ads' : 'Connect your Amazon accounts'}
+        </h1>
+        <p style={{ margin: '0 0 22px', fontSize: 14, lineHeight: '22px', color: COLORS.textSecondary, maxWidth: '62ch' }}>
+          {onAdsStep
+            ? "Same one-click flow you just did, different Amazon service. Ad waste is where most sellers find their first real money — and it's the one thing we can't see through Seller Central."
+            : 'Seller Central first, then Amazon Ads. Both use Amazon’s own consent screen, so you never hand us a password.'}
+          {marketplaceConfig && countryCode && (
+            <>
+              {' '}Connecting <span style={{ color: COLORS.textPrimary, fontWeight: 500 }}>{countryCode.toUpperCase()}</span> ({marketplaceConfig.region}).
+            </>
+          )}
+        </p>
+
+        <div className="flex flex-col" style={{ gap: 12, marginBottom: 18 }}>
+          {/* Seller Central Connection */}
+          <div style={{ border: `1px solid ${isSellerCentralConnected ? 'rgba(34,197,94,.28)' : COLORS.border}`, borderRadius: 13, background: COLORS.surface, padding: 20 }}>
+            <div className="flex items-start gap-3.5" style={{ marginBottom: 14 }}>
+              <div
+                className="flex-none flex items-center justify-center"
+                style={{ width: 38, height: 38, borderRadius: 10, background: isSellerCentralConnected ? 'rgba(34,197,94,.14)' : 'rgba(59,130,246,.14)' }}
+              >
+                <Store className="w-5 h-5" style={{ color: isSellerCentralConnected ? COLORS.good : '#7EA8F8' }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 style={{ fontSize: 15, fontWeight: 600, color: COLORS.textPrimary, margin: 0 }}>Amazon Seller Central</h3>
+                  <span
+                    style={{
+                      padding: '1px 6px', borderRadius: 5, fontSize: 10, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase',
+                      background: 'rgba(239,68,68,.14)', color: '#F87171',
+                    }}
+                  >
+                    Required
+                  </span>
+                </div>
+                <p style={{ margin: '4px 0 0', fontSize: 13, lineHeight: '19px', color: COLORS.textSecondary }}>
+                  Sales, inventory, listings, FBA fees and account health. Without it every screen stays empty.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={handleConnectSellerCentral}
+              disabled={sellerCentralLoading || !marketplaceConfig || isSellerCentralConnected}
+              className="inline-flex items-center justify-center gap-2 transition-colors"
+              style={{
+                padding: '11px 18px',
+                border: 0,
+                borderRadius: 9,
+                fontSize: 13,
+                fontWeight: 600,
+                background: isSellerCentralConnected ? 'rgba(34,197,94,.14)' : (sellerCentralLoading || !marketplaceConfig) ? COLORS.surfaceElevated : COLORS.accent,
+                color: isSellerCentralConnected ? COLORS.good : (sellerCentralLoading || !marketplaceConfig) ? COLORS.textMuted : '#061021',
+                cursor: (sellerCentralLoading || !marketplaceConfig || isSellerCentralConnected) ? 'default' : 'pointer',
+              }}
+            >
+              {isSellerCentralConnected ? (
+                <>
+                  <CheckCircle className="w-4 h-4" />
+                  Connected
+                </>
+              ) : sellerCentralLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Opening Amazon…
+                </>
+              ) : (
+                <>
+                  Connect Seller Central
+                  <ExternalLink className="w-4 h-4" />
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Amazon Ads Connection */}
+          <div style={{ border: `1px solid ${COLORS.border}`, borderRadius: 13, background: COLORS.surface, padding: 20, opacity: isSpApiConnectedState || checkingSpApi ? 1 : 0.72 }}>
+            <div className="flex items-start gap-3.5" style={{ marginBottom: 14 }}>
+              <div
+                className="flex-none flex items-center justify-center"
+                style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(59,130,246,.14)' }}
+              >
+                <TrendingUp className="w-5 h-5" style={{ color: '#7EA8F8' }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 style={{ fontSize: 15, fontWeight: 600, color: COLORS.textPrimary, margin: 0 }}>Amazon Ads</h3>
+                  <span
+                    style={{
+                      padding: '1px 6px', borderRadius: 5, fontSize: 10, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase',
+                      background: 'rgba(59,130,246,.14)', color: '#7EA8F8',
+                    }}
+                  >
+                    Recommended
+                  </span>
+                </div>
+                <p style={{ margin: '4px 0 0', fontSize: 13, lineHeight: '19px', color: COLORS.textSecondary }}>
+                  Campaigns, keywords and search terms — where wasted spend hides.
+                </p>
+                {!isSpApiConnectedState && !checkingSpApi && (
+                  <p style={{ margin: '6px 0 0', fontSize: 12, fontWeight: 500, color: COLORS.watch }}>
+                    Connect Seller Central first — Amazon links the two accounts.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Real features that stay unavailable until Ads is connected */}
+            <div style={{ border: `1px solid ${COLORS.border}`, borderRadius: 10, background: PANEL_BG, padding: '14px 16px', marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.textPrimary, marginBottom: 10 }}>What stays locked without it</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: '8px 20px', fontSize: 13, lineHeight: '19px', color: COLORS.textSecondary }}>
+                {['Wasted spend keywords', 'Campaign audit and ACoS', 'Keyword opportunities', 'True net profit (ads are a cost)'].map((f) => (
+                  <div key={f} className="flex" style={{ gap: 9 }}>
+                    <span style={{ color: '#4C5566' }}>✕</span>{f}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 flex-wrap">
+              <button
+                onClick={handleConnectAmazonAds}
+                disabled={amazonAdsLoading || !marketplaceConfig || !isSpApiConnectedState || checkingSpApi}
+                className="inline-flex items-center justify-center gap-2 transition-colors"
+                style={{
+                  padding: '11px 18px',
+                  border: 0,
+                  borderRadius: 9,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  background: (amazonAdsLoading || !marketplaceConfig || !isSpApiConnectedState || checkingSpApi) ? COLORS.surfaceElevated : COLORS.accent,
+                  color: (amazonAdsLoading || !marketplaceConfig || !isSpApiConnectedState || checkingSpApi) ? COLORS.textMuted : '#061021',
+                  cursor: (amazonAdsLoading || !marketplaceConfig || !isSpApiConnectedState || checkingSpApi) ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {amazonAdsLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Opening Amazon…
+                  </>
+                ) : checkingSpApi ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Checking connection…
+                  </>
+                ) : !isSpApiConnectedState ? (
+                  'Connect Seller Central first'
+                ) : (
+                  <>
+                    Connect Amazon Ads
+                    <ExternalLink className="w-4 h-4" />
+                  </>
+                )}
+              </button>
+
+              {/* Skips the Ads step: starts the scan and moves on to the plan step.
+                  Only available once Seller Central is in, matching handleSkip's own guard. */}
+              {isSpApiConnectedState && !checkingSpApi && (
+                <button
+                  type="button"
+                  onClick={handleSkip}
+                  disabled={waitingForAnalysis || amazonAdsLoading}
+                  className="transition-colors"
+                  style={{
+                    padding: '11px 16px',
+                    border: `1px solid ${COLORS.border}`,
+                    borderRadius: 9,
+                    background: 'transparent',
+                    color: COLORS.textMuted,
+                    fontSize: 13,
+                    cursor: (waitingForAnalysis || amazonAdsLoading) ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Skip — I don&rsquo;t run ads
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ fontSize: 12, lineHeight: '18px', color: COLORS.textMuted }}>
+          Amazon handles the sign-in on its own site — we never see or store your password, and you can revoke access from Seller Central at any time.
+        </div>
+
+        {/* Waiting for Analysis Banner */}
+        {waitingForAnalysis && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex items-center justify-center gap-2"
+            style={{ marginTop: 16, padding: 14, borderRadius: 11, background: 'rgba(59,130,246,.1)', border: '1px solid rgba(59,130,246,.4)' }}
+          >
+            <Loader2 className="w-4 h-4 animate-spin" style={{ color: '#7EA8F8' }} />
+            <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: '#7EA8F8' }}>Starting analysis… Please wait</p>
+          </motion.div>
+        )}
+
+        {/* Success Message */}
+        <AnimatePresence>
+          {successMessage && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              style={{ marginTop: 16, padding: 14, borderRadius: 11, textAlign: 'center', background: 'rgba(34,197,94,.1)', border: '1px solid rgba(34,197,94,.4)' }}
+            >
+              <p style={{ margin: 0, fontSize: 13, color: COLORS.good }}>{successMessage}</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Error Message */}
+        <AnimatePresence>
+          {errorMessage && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              style={{ marginTop: 16, padding: 14, borderRadius: 11, textAlign: 'center', background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.4)' }}
+            >
+              <p style={{ margin: 0, fontSize: 13, color: '#F87171' }}>{errorMessage}</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Navigation Links */}
+        <div style={{ marginTop: 26, paddingTop: 20, borderTop: `1px solid ${COLORS.border}` }}>
+          <button
+            type="button"
+            onClick={navigateToLogin}
+            className="transition-colors hover:underline"
+            style={{ fontSize: 13, color: COLORS.textMuted, background: 'transparent', border: 0, cursor: 'pointer' }}
+          >
+            Back to Login
+          </button>
+        </div>
+      </motion.div>
+    </OnboardingShell>
   );
 };
 

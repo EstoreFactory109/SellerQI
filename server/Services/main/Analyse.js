@@ -46,10 +46,14 @@ const GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model = require('../../mod
 // Use service layer for StrandedInventoryUIData (handles 16MB limit)
 const { getStrandedInventoryUIData } = require('../inventory/StrandedInventoryUIDataService.js');
 const GET_FBA_INVENTORY_PLANNING_DATA_Model = require('../../models/inventory/GET_FBA_INVENTORY_PLANNING_DATA_Model.js');
+const LongTermStorageFeesModel = require('../../models/finance/LongTermStorageFeesModel.js');
+const FbaInventoryApiDetailModel = require('../../models/inventory/FbaInventoryApiDetailModel.js');
+const CogsService = require('../Finance/CogsService.js');
 // Deprecated: FBAFeesModel - replaced by EconomicsMetrics (MCP)
 // const FBAFeesModel = require('../../models/finance/FBAFees.js');
 const adsKeywordsPerformanceModel = require('../../models/amazon-ads/adsKeywordsPerformanceModel.js');
 const { loadLatestSnapshotDoc, loadKeywordSnapshot } = require('../../utils/ppcSnapshotLoader.js');
+const { buildLtsfAmountMap } = require('../Calculations/RecoverableAmountUtils.js');
 const GetOrderDataModel = require('../../models/products/OrderAndRevenueModel.js');
 const WeeklyFinanceModel = require('../../models/finance/WeekLyFinanceModel.js');
 const userModel = require('../../models/user-auth/userModel.js');
@@ -390,7 +394,10 @@ class AnalyseService {
             GetDateWisePPCspendData,
             AdsGroupData,
             keywordTrackingData,
-            ppcUnitsSoldData
+            ppcUnitsSoldData,
+            cogsData,
+            ltsfData,
+            fbaInventoryDetailData
         ] = await Promise.all([
             timedQuery('v2Data', () => V2_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
             timedQuery('v1Data', () => V1_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
@@ -438,7 +445,11 @@ class AnalyseService {
             ),
             timedQuery('adsGroup', () => loadLatestSnapshotDoc(AdsGroup, userId, country, region)),
             timedQuery('keywordTracking', () => KeywordTrackingModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()),
-            timedQuery('ppcUnitsSold', () => PPCUnitsSold.findLatestForUser(userId, country, region))
+            timedQuery('ppcUnitsSold', () => PPCUnitsSold.findLatestForUser(userId, country, region)),
+            // For threading a dollar `amount` onto Inventory error records (unfulfillable/stranded/LTSF)
+            timedQuery('cogsData', () => CogsService.getCogs(userId, country)),
+            timedQuery('ltsfData', () => LongTermStorageFeesModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
+            timedQuery('fbaInventoryDetailData', () => FbaInventoryApiDetailModel.find({ User: userId, country, region }).lean())
         ]);
         
         const fetchEndTime = Date.now();
@@ -553,7 +564,10 @@ class AnalyseService {
             GetDateWisePPCspendData,
             AdsGroupData,
             keywordTrackingData,
-            ppcUnitsSoldData
+            ppcUnitsSoldData,
+            cogsData,
+            ltsfData,
+            fbaInventoryDetailData
         };
     }
 
@@ -1129,12 +1143,35 @@ class AnalyseService {
         const safeInboundNonComplianceData = allData.inboundNonComplianceData || { ErrorData: [] };
         const safeRestockData = allData.restockInventoryRecommendationsData || { Products: [] };
 
+        // Per-unit COGS, keyed by ASIN — used to turn unfulfillable/stranded
+        // quantities into a dollar amount. Empty map (amount = 0) for accounts
+        // that haven't entered COGS yet.
+        const costMap = (allData.cogsData && allData.cogsData.success && allData.cogsData.data?.cogsValues) || {};
+
+        // Real long-term storage fee $ per ASIN from the GET_FBA_FULFILLMENT_LONGTERM_STORAGE_FEE_CHARGES_DATA
+        // sync, summed across rows (multiple aging buckets can appear per ASIN per snapshot).
+        // Empty map (amount = 0) when that sync hasn't run yet OR when the newest
+        // snapshot is too old to describe the seller's position today — see
+        // buildLtsfAmountMap for why the age guard is required.
+        const ltsfAmountMap = buildLtsfAmountMap(allData.ltsfData);
+
+        // Total FBA quantity per ASIN — used as a proxy for "stranded units"
+        // since the Stranded Inventory report has no quantity field of its own.
+        const qtyMap = {};
+        if (Array.isArray(allData.fbaInventoryDetailData)) {
+            allData.fbaInventoryDetailData.forEach(row => {
+                if (row && row.asin) {
+                    qtyMap[row.asin] = (qtyMap[row.asin] || 0) + (row.totalQuantity || 0);
+                }
+            });
+        }
+
         // Process Inventory Planning Data for each ASIN
         if (safeInventoryPlanningData.data && Array.isArray(safeInventoryPlanningData.data)) {
             safeInventoryPlanningData.data.forEach(item => {
                 if (item && item.asin) {
                     try {
-                        const planningResult = processInventoryPlanningData(item);
+                        const planningResult = processInventoryPlanningData(item, costMap, ltsfAmountMap);
                         inventoryAnalysis.inventoryPlanning.push(planningResult);
                     } catch (error) {
                         logger.error(`Error processing inventory planning data for ASIN ${item.asin}: ${error.message}`);
@@ -1150,7 +1187,7 @@ class AnalyseService {
                     strandedArray.forEach(item => {
                         if (item && item.asin) {
                             try {
-                                const strandedResult = processInventoryStrandedData(item);
+                                const strandedResult = processInventoryStrandedData(item, costMap, qtyMap);
                                 inventoryAnalysis.strandedInventory.push(strandedResult);
                             } catch (error) {
                                 logger.error(`Error processing stranded inventory data for ASIN ${item.asin}: ${error.message}`);

@@ -22,6 +22,7 @@ const AsinWiseSalesRun = require('../../models/finance/AsinWiseSalesRunModel.js'
 const AsinWiseSalesItem = require('../../models/finance/AsinWiseSalesItemModel.js');
 const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
 const DataFetchTracking = require('../../models/system/DataFetchTrackingModel.js');
+const { computeProfitabilityAmount, computeSponsoredAdsAmount, computeBuyBoxBenchmark, computeBuyBoxLostRevenueAmount, computeBuyBoxProfitImpact } = require('./RecoverableAmountUtils.js');
 
 // Chunk size for yielding to event loop during large data processing
 const YIELD_CHUNK_SIZE = 500;
@@ -523,8 +524,9 @@ const calculateCampaignWiseTotalSalesAndCost = (dateWisePPCData) => {
  */
 const calculateProfitabilityErrors = (profitibilityData, totalProducts = []) => {
     let totalErrors = 0;
+    let totalAmount = 0;
     const errorDetails = [];
-    
+
     // Create a map of ASIN to product name for quick lookup
     const productNameMap = new Map();
     if (Array.isArray(totalProducts)) {
@@ -534,29 +536,33 @@ const calculateProfitabilityErrors = (profitibilityData, totalProducts = []) => 
             }
         });
     }
-    
+
     profitibilityData.forEach((item) => {
         // Calculate net profit (assuming COGS is 0 initially, will be updated when user enters values)
         const netProfit = (item.sales || 0) - (item.ads || 0) - (item.amzFee || 0);
-        
+
         // Determine status based on profit margin
         const profitMargin = item.sales > 0 ? (netProfit / item.sales) * 100 : 0;
-        
+
         // Count as error if profit margin is below 10% or negative
         if (profitMargin < 10 || netProfit < 0) {
             totalErrors++;
+            const errorType = netProfit < 0 ? 'negative_profit' : 'low_margin';
+            const amount = computeProfitabilityAmount({ netProfit, profitMargin, sales: item.sales, issueType: errorType });
+            totalAmount += amount;
             errorDetails.push({
                 asin: item.asin,
                 productName: productNameMap.get(item.asin) || null,
                 sales: item.sales,
                 netProfit: netProfit,
                 profitMargin: profitMargin,
-                errorType: netProfit < 0 ? 'negative_profit' : 'low_margin'
+                errorType,
+                amount
             });
         }
     });
-    
-    return { totalErrors, errorDetails };
+
+    return { totalErrors, errorDetails, totalAmount };
 };
 
 /**
@@ -583,18 +589,21 @@ const calculateSponsoredAdsErrors = (
     keywords = []
 ) => {
     let totalErrors = 0;
+    let totalAmount = 0;
     const errorDetails = [];
-    
+
     // 1. High ACOS Campaigns (ACOS > 40% and sales > 0)
     if (Array.isArray(campaignWiseTotalSalesAndCost)) {
         campaignWiseTotalSalesAndCost.forEach((campaign) => {
             const spend = parseFloat(String(campaign.totalSpend)) || 0;
             const sales = parseFloat(String(campaign.totalSales)) || 0;
             const acos = sales > 0 ? (spend / sales) * 100 : 0;
-            
+
             // Count as error if ACOS > 40% and has sales
             if (acos > 40 && sales > 0) {
                 totalErrors++;
+                const amount = computeSponsoredAdsAmount({ errorType: 'high_acos_campaign', spend, sales });
+                totalAmount += amount;
                 errorDetails.push({
                     campaignId: campaign.campaignId,
                     campaignName: campaign.campaignName || 'Unknown Campaign',
@@ -602,7 +611,8 @@ const calculateSponsoredAdsErrors = (
                     sales: sales,
                     acos: acos,
                     errorType: 'high_acos_campaign',
-                    source: 'campaign'
+                    source: 'campaign',
+                    amount
                 });
             }
         });
@@ -620,6 +630,10 @@ const calculateSponsoredAdsErrors = (
                 const existing = aggregatedKeywordsMap.get(uniqueKey);
                 existing.cost += parseFloat(keyword.cost) || 0;
                 existing.attributedSales30d += parseFloat(keyword.attributedSales30d) || 0;
+                // clicks/impressions are aggregated too, so the task text can state
+                // the real click count instead of a hardcoded-looking 0.
+                existing.clicks += parseInt(keyword.clicks, 10) || 0;
+                existing.impressions += parseInt(keyword.impressions, 10) || 0;
             } else {
                 aggregatedKeywordsMap.set(uniqueKey, {
                     keyword: keyword.keyword,
@@ -629,7 +643,9 @@ const calculateSponsoredAdsErrors = (
                     adGroupName: keyword.adGroupName,
                     adGroupId: keyword.adGroupId,
                     cost: parseFloat(keyword.cost) || 0,
-                    attributedSales30d: parseFloat(keyword.attributedSales30d) || 0
+                    attributedSales30d: parseFloat(keyword.attributedSales30d) || 0,
+                    clicks: parseInt(keyword.clicks, 10) || 0,
+                    impressions: parseInt(keyword.impressions, 10) || 0
                 });
             }
         });
@@ -641,6 +657,8 @@ const calculateSponsoredAdsErrors = (
         // Count as error if cost > 0 and sales < 0.01 (wasted spend)
         if (keyword.cost > 0 && keyword.attributedSales30d < 0.01) {
             totalErrors++;
+            const amount = computeSponsoredAdsAmount({ errorType: 'wasted_spend_keyword', spend: keyword.cost, sales: keyword.attributedSales30d });
+            totalAmount += amount;
             errorDetails.push({
                 keyword: keyword.keyword,
                 keywordId: keyword.keywordId,
@@ -649,8 +667,11 @@ const calculateSponsoredAdsErrors = (
                 adGroupName: keyword.adGroupName,
                 spend: keyword.cost,
                 sales: keyword.attributedSales30d,
+                clicks: keyword.clicks,
+                impressions: keyword.impressions,
                 errorType: 'wasted_spend_keyword',
-                source: 'keyword'
+                source: 'keyword',
+                amount
             });
         }
     });
@@ -690,6 +711,8 @@ const calculateSponsoredAdsErrors = (
         // Count as error if clicks >= 10 and sales < 0.01
         if (term.clicks >= 10 && term.sales < 0.01) {
             totalErrors++;
+            const amount = computeSponsoredAdsAmount({ errorType: 'search_term_zero_sales', spend: term.spend, sales: term.sales });
+            totalAmount += amount;
             errorDetails.push({
                 searchTerm: term.searchTerm,
                 keyword: term.keyword,
@@ -700,7 +723,8 @@ const calculateSponsoredAdsErrors = (
                 spend: term.spend,
                 sales: term.sales,
                 errorType: 'search_term_zero_sales',
-                source: 'search_term'
+                source: 'search_term',
+                amount
             });
         }
     });
@@ -739,6 +763,9 @@ const calculateSponsoredAdsErrors = (
             if (!existsInManual) {
                 totalErrors++;
                 const acos = term.sales > 0 ? (term.spend / term.sales) * 100 : 0;
+                // Not a loss (sales already > $30) — a scaling opportunity, so amount is 0.
+                const amount = computeSponsoredAdsAmount({ errorType: 'auto_campaign_migration_needed', spend: term.spend, sales: term.sales });
+                totalAmount += amount;
                 errorDetails.push({
                     searchTerm: term.searchTerm,
                     keyword: term.keyword || '',
@@ -750,13 +777,14 @@ const calculateSponsoredAdsErrors = (
                     clicks: term.clicks,
                     acos: acos,
                     errorType: 'auto_campaign_migration_needed',
-                    source: 'auto_campaign_insight'
+                    source: 'auto_campaign_insight',
+                    amount
                 });
             }
         }
     });
-    
-    return { totalErrors, errorDetails };
+
+    return { totalErrors, errorDetails, totalAmount };
 };
 
 /**
@@ -765,7 +793,18 @@ const calculateSponsoredAdsErrors = (
  * @param {string} userId - User ID for task creation
  * @returns {Object} Calculated dashboard data
  */
-const analyseData = async (data, userId = null) => {
+/**
+ * @param {Object} data - the AnalyseService.Analyse() message
+ * @param {string|null} userId - needed both to write tasks and to read the
+ *   account's live per-ASIN finance. Pass it whenever you have it.
+ * @param {Object} [options]
+ * @param {boolean} [options.persistTasks=true] - set false to compute everything
+ *   and write nothing. Kept separate from `userId` so a read-only rehearsal still
+ *   gets real per-ASIN finance; nulling the userId to avoid writes would silently
+ *   compute profitability against zero sales.
+ */
+const analyseData = async (data, userId = null, options = {}) => {
+    const persistTasks = options.persistTasks !== false;
     const calcStartTime = Date.now();
     logger.info("[PERF] === DashboardCalculation: Processing data ===");
 
@@ -813,6 +852,37 @@ const analyseData = async (data, userId = null) => {
         userId ? getTop4ProductsByIssuesOptimized(userId, region, country) : Promise.resolve(null)
     ]);
     logger.info(`[PERF] getPpcSalesFromEconomics + getTop4ProductsByIssuesOptimized completed in ${Date.now() - stepStart}ms`);
+
+    // Per-ASIN sales/fees from the LIVE finance collection when EconomicsMetrics has
+    // none. EconomicsMetrics stopped being written in April 2026, so for almost every
+    // account the map above is empty — which made profitability read `sales: 0` for
+    // every product and report profitable products as "losing money on every sale,
+    // Revenue: $0.00". DailySkuFinance is what the Profitability page already reads.
+    //
+    // Only the per-ASIN map is substituted. Account-level totals (totalSales,
+    // totalPpcSpent) keep their existing sources so the dashboard headline figures
+    // are not moved by this.
+    if (userId && Object.keys(economicsData.asinPpcSales || {}).length === 0) {
+        try {
+            const { getAsinFinanceForWindow } = require('../Finance/AsinFinanceWindowService.js');
+            const liveAsinFinance = await getAsinFinanceForWindow(
+                userId, country, region, data.startDate, data.endDate
+            );
+            const liveCount = Object.keys(liveAsinFinance).length;
+            if (liveCount > 0) {
+                economicsData.asinPpcSales = liveAsinFinance;
+                logger.info('Per-ASIN finance sourced from DailySkuFinance (EconomicsMetrics empty)', {
+                    userId, country, region, asins: liveCount
+                });
+            }
+        } catch (financeError) {
+            // Leave the empty map rather than failing the dashboard; downstream
+            // already tolerates it (it is today's behaviour for every account).
+            logger.error('Could not source per-ASIN finance from DailySkuFinance', {
+                error: financeError.message, userId, country, region
+            });
+        }
+    }
     logger.info("EconomicsMetrics data extracted", {
         totalPpcSpent: economicsData.totalPpcSpent,
         totalSales: economicsData.totalSales,
@@ -1000,6 +1070,21 @@ const analyseData = async (data, userId = null) => {
             if (item && item.asin) strandedInventoryMap.set(item.asin, item);
         });
     }
+
+    // Inventory splits into two DIFFERENT quantities, which must not be added:
+    //  - LTSF is real storage fees already charged -> a profit cost
+    //  - unfulfillable/stranded stock value is capital locked up -> not profit
+    // Mixing them let a single ASIN's $7,902 of dead stock outrank every genuine
+    // profit issue by 62x. See RecoverableAmountUtils for the full reasoning.
+    let totalInventoryRecoverableAmount = 0;
+    let totalInventoryCapitalAmount = 0;
+    inventoryPlanningMap.forEach(item => {
+        totalInventoryRecoverableAmount += item.longTermStorageFees?.amount || 0;
+        totalInventoryCapitalAmount += item.unfulfillable?.capitalAmount || 0;
+    });
+    strandedInventoryMap.forEach(item => {
+        totalInventoryCapitalAmount += item.capitalAmount || 0;
+    });
     const inboundNonComplianceMap = new Map();
     if (activeInventoryAnalysis.inboundNonCompliance) {
         activeInventoryAnalysis.inboundNonCompliance.forEach(item => {
@@ -1038,19 +1123,62 @@ const analyseData = async (data, userId = null) => {
     // Get products without buybox - prioritize MCP BuyBox data, fallback to legacy ConversionData
     let productsWithOutBuyboxError = [];
     if (data.BuyBoxData && Array.isArray(data.BuyBoxData.asinBuyBoxData)) {
+        // Seller's own conversion rate + price from ASINs that DO have the Buy Box —
+        // used to estimate lost revenue for the ones that don't, without an external benchmark.
+        const { benchmarkCVR, benchmarkPrice } = computeBuyBoxBenchmark(data.BuyBoxData.asinBuyBoxData);
+
+        // Per-ASIN margin, so lost REVENUE can be converted into the profit it
+        // actually represents. profitibilityData is computed earlier in this same
+        // function, so this needs no extra query.
+        const marginByAsin = new Map();
+        let totalGrossProfit = 0;
+        let totalSalesForMargin = 0;
+        (Array.isArray(profitibilityData) ? profitibilityData : []).forEach((row) => {
+            if (!row || !row.asin) return;
+            if (typeof row.profitMargin === 'number') marginByAsin.set(row.asin, row.profitMargin);
+            totalGrossProfit += row.grossProfit || 0;
+            totalSalesForMargin += row.sales || 0;
+        });
+        // Fallback for an ASIN with no sales history of its own.
+        const accountAverageMargin = totalSalesForMargin > 0
+            ? (totalGrossProfit / totalSalesForMargin) * 100
+            : 0;
+
         // Use MCP BuyBox data - filter products with buyBoxPercentage = 0
         productsWithOutBuyboxError = data.BuyBoxData.asinBuyBoxData
             .filter((p) => p && p.buyBoxPercentage === 0 && p.childAsin && activeProductSet.has(p.childAsin))
-            .map((p) => ({ 
-                asin: p.childAsin, 
-                data: { 
-                    status: "Error", 
+            .map((p) => {
+                const lostRevenueAmount = computeBuyBoxLostRevenueAmount({
+                    sessions: p.sessions,
+                    actualRevenue: p.sales?.amount || 0,
+                    benchmarkCVR,
+                    benchmarkPrice
+                });
+                const profitMargin = marginByAsin.has(p.childAsin)
+                    ? marginByAsin.get(p.childAsin)
+                    : accountAverageMargin;
+
+                return {
                     asin: p.childAsin,
-                    buyBoxPercentage: p.buyBoxPercentage,
-                    pageViews: p.pageViews,
-                    sessions: p.sessions
-                } 
-            }));
+                    data: {
+                        status: "Error",
+                        asin: p.childAsin,
+                        buyBoxPercentage: p.buyBoxPercentage,
+                        pageViews: p.pageViews,
+                        sessions: p.sessions,
+                        // Raw revenue kept for display — it's the more intuitive figure
+                        // ("you're missing ~$X of sales") even though it is not profit.
+                        lostRevenueAmount,
+                        profitMarginUsed: profitMargin,
+                        // `amount` is profit-equivalent, because that is what gets ranked
+                        // against real cash losses elsewhere. Counting full revenue here
+                        // overstated Buy Box roughly tenfold.
+                        amount: computeBuyBoxProfitImpact({ lostRevenue: lostRevenueAmount, profitMargin }),
+                        amountIsEstimated: true,
+                        estimatedFromSingleDaySnapshot: true
+                    }
+                };
+            });
         logger.info("Using MCP BuyBox data for products without buybox", {
             count: productsWithOutBuyboxError.length,
             totalProducts: data.BuyBoxData.totalProducts,
@@ -1070,7 +1198,13 @@ const analyseData = async (data, userId = null) => {
             buyBoxDataKeys: data.BuyBoxData ? Object.keys(data.BuyBoxData) : []
         });
     }
-    
+
+    // Sum estimated recoverable $ across Buy Box loss records (0 for the legacy
+    // ConversionData fallback path, which carries no sessions/sales data)
+    const totalConversionRecoverableAmount = productsWithOutBuyboxError.reduce(
+        (sum, p) => sum + (p.data?.amount || 0), 0
+    );
+
     // Override count with MCP data if available (for dashboard display)
     // Use the stored count from database, which is more accurate than filtering
     const productsWithoutBuyBoxCount = (data.BuyBoxData && data.BuyBoxData.productsWithoutBuyBox !== undefined && data.BuyBoxData.productsWithoutBuyBox !== null) 
@@ -1598,6 +1732,12 @@ const analyseData = async (data, userId = null) => {
         ProductWiseSponsoredAdsGraphData: data.ProductWiseSponsoredAdsGraphData || [],
         totalProfitabilityErrors: profitabilityErrorsData.totalErrors,
         totalSponsoredAdsErrors: sponsoredAdsErrorsData.totalErrors,
+        totalProfitabilityRecoverableAmount: profitabilityErrorsData.totalAmount || 0,
+        totalSponsoredAdsRecoverableAmount: sponsoredAdsErrorsData.totalAmount || 0,
+        totalInventoryRecoverableAmount: totalInventoryRecoverableAmount || 0,
+        // Capital locked in unsellable stock — reported separately from profit.
+        totalInventoryCapitalAmount: totalInventoryCapitalAmount || 0,
+        totalConversionRecoverableAmount: totalConversionRecoverableAmount || 0,
         ProductWiseSponsoredAds: activeProductWiseSponsoredAds,
         profitabilityErrorDetails: profitabilityErrorsData.errorDetails,
         sponsoredAdsErrorDetails: sponsoredAdsErrorsData.errorDetails,
@@ -1656,11 +1796,12 @@ const analyseData = async (data, userId = null) => {
 
     logger.info(`Dashboard data processed successfully with ${activeProducts.length} active products`);
     
-    // Call CreateTask service if userId is provided
-    if (userId) {
+    // Call CreateTask service if userId is provided and writes are wanted
+    let tasksRebuilt = false;
+    if (userId && persistTasks) {
         try {
             logger.info(`Creating tasks for user: ${userId}`);
-            await CreateTaskService.createTasksFromCalculateServiceData(userId, {
+            const taskResult = await CreateTaskService.createTasksFromCalculateServiceData(userId, {
                 rankingProductWiseErrors: rankingProductWiseErrors,
                 conversionProductWiseErrors: conversionProductWiseErrors,
                 inventoryProductWiseErrors: inventoryProductWiseErrors,
@@ -1669,7 +1810,10 @@ const analyseData = async (data, userId = null) => {
                 AccountErrors: data.AccountData?.accountHealth || {},
                 TotalProducts: TotalProducts
             });
-            logger.info(`Tasks created successfully for user: ${userId}`);
+            // Only a full rebuild changes what the derived AI views summarise; stays
+            // false if task creation threw, so a failed build never triggers them.
+            tasksRebuilt = taskResult?.tasksRebuilt === true;
+            logger.info(`Tasks created successfully for user: ${userId}`, { tasksRebuilt });
         } catch (error) {
             logger.error("Error creating tasks:", {
                 message: error.message,
@@ -1683,7 +1827,7 @@ const analyseData = async (data, userId = null) => {
     const totalCalcTime = Date.now() - calcStartTime;
     logger.info(`[PERF] DashboardCalculation TOTAL time: ${totalCalcTime}ms`);
     logger.info("=== DashboardCalculation: Returning dashboard data ===");
-    return { dashboardData };
+    return { dashboardData, tasksRebuilt };
 };
 
 module.exports = {

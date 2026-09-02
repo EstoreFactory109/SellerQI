@@ -37,13 +37,44 @@ const TaskItemSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+    // Optional (was required) — profitability/sponsoredAds/Buy-Box tasks now store
+    // `renderData` instead and render `error`/`solution` on read (see
+    // CreateTasksService.getUserTasks). Every other category still populates these
+    // directly at creation time, exactly as before.
     error: {
         type: String,
-        required: true
+        required: false
     },
     solution: {
         type: String,
-        required: true
+        required: false
+    },
+    // Raw numbers needed to render `error`/`solution` on demand, for the categories
+    // that manufacture prose from numbers rather than carrying through pre-written
+    // text (profitability, sponsoredAds, Buy Box). Shape varies by errorType. Absent
+    // for every other category — they have no cheaper structured form to fall back to.
+    renderData: {
+        type: mongoose.Schema.Types.Mixed,
+        required: false
+    },
+    // Dollar amount recoverable by fixing this task (see RecoverableAmountUtils.js).
+    // 0 for categories with no computed amount (ranking, account, most conversion checks).
+    amount: {
+        type: Number,
+        default: 0
+    },
+    // True when `amount` is an estimate (e.g. stranded inventory, Buy Box loss) rather
+    // than a measured figure (e.g. real ad spend, real storage fees).
+    amountIsEstimated: {
+        type: Boolean,
+        default: false
+    },
+    // Capital locked in unsellable stock (unfulfillable / stranded inventory). A
+    // DIFFERENT quantity from `amount`: freeing it returns working capital and stops
+    // storage fees, but it never lands as profit, so the two must never be summed.
+    capitalAmount: {
+        type: Number,
+        default: 0
     },
     status: {
         type: String,
@@ -154,6 +185,10 @@ TaskItemSchema.statics.bulkInsertTasks = async function(userId, tasks, chunkSize
             errorType: task.errorType,
             error: task.error,
             solution: task.solution,
+            renderData: task.renderData,
+            amount: task.amount || 0,
+            amountIsEstimated: !!task.amountIsEstimated,
+            capitalAmount: task.capitalAmount || 0,
             status: task.status || 'pending'
         }));
         

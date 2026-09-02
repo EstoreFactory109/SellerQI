@@ -11,8 +11,30 @@ export const fetchTasks = createAsyncThunk(
       });
       
       if (response.status === 200 && response.data?.data) {
-        const { tasks = [], taskRenewalDate = null } = response.data.data;
-        return { tasks, taskRenewalDate };
+        // `groups` carries the issue-type aggregates the Dashboard reports, so a
+        // task row can show its standing inside the same figure.
+        const { tasks = [], groups = [], taskRenewalDate = null, texts = null } = response.data.data;
+
+        // Rehydrate the interned error/solution text.
+        //
+        // The server sends these once in `texts` with a per-task index instead of
+        // repeating them: on a large account there were 73 distinct solution
+        // strings across 25,455 tasks, which was ~7 MB of the response. Expanding
+        // here keeps every consumer (search, CSV export, the row renderer) working
+        // on the same `error`/`solution` fields as before.
+        //
+        // Cheap in memory: `texts[i]` hands back the same string reference each
+        // time, so many tasks sharing one string cost pointers, not copies.
+        const hydrated = Array.isArray(texts)
+          ? tasks.map((t) => ({
+              ...t,
+              error: t.errorIdx != null ? texts[t.errorIdx] : t.error,
+              solution: t.solutionIdx != null ? texts[t.solutionIdx] : t.solution,
+              productName: t.productNameIdx != null ? texts[t.productNameIdx] : t.productName,
+            }))
+          : tasks; // older server response: text already inline
+
+        return { tasks: hydrated, groups, taskRenewalDate };
       } else {
         return rejectWithValue('Failed to fetch tasks data');
       }
@@ -46,6 +68,7 @@ export const updateTaskStatus = createAsyncThunk(
 
 const initialState = {
   tasks: [],
+  groups: [],
   taskRenewalDate: null,
   loading: false,
   error: null,
@@ -88,8 +111,9 @@ const TasksSlice = createSlice({
       })
       .addCase(fetchTasks.fulfilled, (state, action) => {
         state.loading = false;
-        const { tasks = [], taskRenewalDate = null } = action.payload;
+        const { tasks = [], groups = [], taskRenewalDate = null } = action.payload;
         state.tasks = tasks;
+        state.groups = groups;
         state.taskRenewalDate = taskRenewalDate;
         state.lastFetched = Date.now();
         state.error = null;

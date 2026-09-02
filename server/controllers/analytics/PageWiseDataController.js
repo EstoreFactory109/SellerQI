@@ -817,6 +817,12 @@ const getTasksData = asyncHandler(async (req, res) => {
         return res.status(200).json(
             new ApiResponse(200, {
                 tasks: tasksDocument.tasks || [],
+                // Issue-type groups, so a task row can show its standing within the
+                // same figure the Dashboard's "Top things to fix" reports.
+                groups: tasksDocument.groups || [],
+                // Dictionary for the tasks' errorIdx / solutionIdx. Must travel with
+                // them — without it the client has indices and nothing to resolve.
+                texts: tasksDocument.texts || [],
                 taskRenewalDate: tasksDocument.taskRenewalDate
             }, "Tasks data retrieved successfully")
         );
@@ -2279,6 +2285,196 @@ const getTopPriorityProductsToFix = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Get the top 5-6 money-recovery actions for the account.
+ *
+ * Reads the pre-computed result written weekly by the scheduled pipeline
+ * (TopOpportunitiesService). If nothing is stored yet, falls back to the
+ * DETERMINISTIC ranking only — we never make an OpenAI call inside a request,
+ * so page loads can't be slowed down or cost tokens.
+ */
+const getTopOpportunities = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const region = req.region;
+    const country = req.country;
+
+    if (!userId || !country || !region) {
+        return res.status(400).json(
+            new ApiError(400, 'User ID, Country, and Region are required')
+        );
+    }
+
+    try {
+        const TopOpportunitiesService = require('../../Services/AI/TopOpportunitiesService.js');
+        const stored = await TopOpportunitiesService.getTopOpportunities(userId, country, region);
+
+        if (stored) {
+            return res.status(200).json(
+                new ApiResponse(200, stored, 'Top opportunities fetched successfully')
+            );
+        }
+
+        // Nothing stored yet (e.g. account synced before this feature shipped).
+        // Serve the deterministic ranking so the page still has content.
+        //
+        // This MUST use the same task-derived groups as the stored path. Most
+        // accounts have nothing stored, so if this fell back to a different source
+        // the dashboard would disagree with the Tasks page for almost everyone.
+        const TaskOpportunityGroupsService = require('../../Services/Calculations/TaskOpportunityGroupsService.js');
+        const ranked = await TaskOpportunityGroupsService.getTaskOpportunityGroups(userId, country, region);
+
+        if (!ranked.success) {
+            return res.status(200).json(
+                new ApiResponse(200, {
+                    opportunities: [],
+                    candidatesConsidered: 0,
+                    issuesConsidered: 0,
+                    totalEstimatedRecovery: 0,
+                    usedFallback: true,
+                    fallbackReason: ranked.error || 'No tasks available for this account'
+                }, 'No top opportunities available yet')
+            );
+        }
+
+        const { getCurrencyCode } = require('../../utils/marketplaceCurrency.js');
+        // Pass country so money in the generated prose uses the marketplace's
+        // own currency rather than defaulting to dollars.
+        const opportunities = TopOpportunitiesService.buildDeterministicSelections(
+            ranked.groups,
+            undefined,
+            country
+        );
+
+        // Headline figures come from the per-ASIN rollup, never from summing groups.
+        const rollup = await TaskOpportunityGroupsService.getTopProductsToFix(userId, country, region);
+        const accountFigures = rollup.success
+            ? { potentialProfitImpact: rollup.potentialProfitImpact || 0, capitalTiedUp: rollup.capitalTiedUp || 0 }
+            : { potentialProfitImpact: 0, capitalTiedUp: 0 };
+
+        return res.status(200).json(
+            new ApiResponse(200, {
+                currencyCode: getCurrencyCode(country),
+                opportunities,
+                candidatesConsidered: ranked.groups.length,
+                issuesConsidered: ranked.tasksConsidered,
+                // Sum of the SHOWN opportunities only — a subset, not the headline.
+                totalEstimatedRecovery: Math.round(
+                    opportunities.reduce((sum, o) => sum + (o.amount || 0), 0) * 100
+                ) / 100,
+                // Account-wide and de-duplicated per ASIN. Must come from the rollup,
+                // not from summing groups: a product's profit gap already contains its
+                // wasted ad spend, and that overlap crosses issue types.
+                potentialProfitImpact: accountFigures.potentialProfitImpact,
+                capitalTiedUp: accountFigures.capitalTiedUp,
+                generatedAt: new Date(),
+                source: 'api_fallback',
+                usedFallback: true,
+                fallbackReason: 'Not yet generated by the scheduled pipeline'
+            }, 'Top opportunities computed on the fly (not yet generated)')
+        );
+
+    } catch (error) {
+        logger.error('Error in getTopOpportunities:', {
+            message: error.message,
+            stack: error.stack
+        });
+
+        return res.status(500).json(
+            new ApiError(500, `Error getting top opportunities: ${error.message}`)
+        );
+    }
+});
+
+/**
+ * Get the top products worth fixing, ranked by recoverable money.
+ *
+ * The product-level counterpart to getTopOpportunities: same TaskItem source,
+ * same money-first ordering, grouped by ASIN instead of by issue type. Serves the
+ * stored AI-narrated result, falling back to the deterministic rollup so a page
+ * load never triggers (or pays for) an OpenAI call.
+ */
+const getTopProducts = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const region = req.region;
+    const country = req.country;
+
+    if (!userId || !country || !region) {
+        return res.status(400).json(
+            new ApiError(400, 'User ID, Country, and Region are required')
+        );
+    }
+
+    try {
+        const TopProductsService = require('../../Services/AI/TopProductsService.js');
+        const stored = await TopProductsService.getTopProducts(userId, country, region);
+
+        if (stored) {
+            return res.status(200).json(
+                new ApiResponse(200, stored, 'Top products fetched successfully')
+            );
+        }
+
+        // Nothing stored yet. Serve the deterministic rollup — it must come from the
+        // same source as the stored path, or the three surfaces reading this would
+        // disagree with the Tasks page for every account that hasn't been through
+        // the scheduled pipeline.
+        const TaskOpportunityGroupsService = require('../../Services/Calculations/TaskOpportunityGroupsService.js');
+        const ranked = await TaskOpportunityGroupsService.getTopProductsToFix(userId, country, region);
+
+        if (!ranked.success || !(ranked.products || []).length) {
+            return res.status(200).json(
+                new ApiResponse(200, {
+                    products: [],
+                    productsConsidered: 0,
+                    tasksConsidered: 0,
+                    totalRecoverableAmount: 0,
+                    unattributedAmount: 0,
+                    usedFallback: true,
+                    fallbackReason: ranked.error || 'No products with open tasks for this account'
+                }, 'No top products available yet')
+            );
+        }
+
+        const { getCurrencyCode } = require('../../utils/marketplaceCurrency.js');
+        const products = TopProductsService.buildDeterministicSelections(
+            ranked.products,
+            undefined,
+            country
+        );
+
+        return res.status(200).json(
+            new ApiResponse(200, {
+                currencyCode: getCurrencyCode(country),
+                products,
+                productsConsidered: ranked.productsConsidered,
+                tasksConsidered: ranked.tasksConsidered,
+                totalRecoverableAmount: Math.round(
+                    products.reduce((sum, p) => sum + (p.profitImpact || 0), 0) * 100
+                ) / 100,
+                // Account-wide and de-duplicated, so this path agrees with the stored
+                // path and with the Dashboard rather than reporting only the shown subset.
+                potentialProfitImpact: ranked.potentialProfitImpact || 0,
+                capitalTiedUp: ranked.capitalTiedUp || 0,
+                unattributedAmount: (ranked.adsAttribution?.unattributedAmount || 0) + (ranked.unattributableAmount || 0),
+                generatedAt: new Date(),
+                source: 'api_fallback',
+                usedFallback: true,
+                fallbackReason: 'Not yet generated by the scheduled pipeline'
+            }, 'Top products computed on the fly (not yet generated)')
+        );
+
+    } catch (error) {
+        logger.error('Error in getTopProducts:', {
+            message: error.message,
+            stack: error.stack
+        });
+
+        return res.status(500).json(
+            new ApiError(500, `Error getting top products: ${error.message}`)
+        );
+    }
+});
+
+/**
  * =====================================================================
  * OPTIMIZED YOUR PRODUCTS ENDPOINTS (v2)
  * =====================================================================
@@ -2914,9 +3110,92 @@ const getYourProductsSummaryV3 = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Per-ASIN sales for the Your Products v3 tabs, over the same ~30-day window the
+ * rest of the page reports on.
+ *
+ * SOURCE PRECEDENCE, and why it is in this order:
+ *
+ *  1. DailySkuFinance — the live per-SKU finance collection, summed over the
+ *     window. This is the only source that is both current and window-correct,
+ *     and it is what the Profitability page reports from, so the two agree.
+ *  2. EconomicsMetrics — the historical source. Kept ahead of BuyBox for the
+ *     handful of accounts that still have rows, but it stopped being written in
+ *     April 2026, so for most accounts it contributes nothing.
+ *  3. BuyBoxData — last resort. IMPORTANT: a BuyBox snapshot covers a SINGLE
+ *     DAY, so a figure from here is not comparable to the 30-day figures above.
+ *     It is returned tagged (see `windowDays`) so the caller can label it rather
+ *     than silently mixing a one-day number into a monthly column, which is what
+ *     this function used to do.
+ *
+ * ASINs present in NO source are deliberately left out, so callers still render
+ * "—" for genuinely unknown rather than a misleading $0.00.
+ *
+ * @returns {Promise<Map<string, {amount: number, windowDays: number|null, source: string}>>}
+ */
+async function buildAsinSalesMap(userId, Region, Country, economicsData) {
+    const salesMap = new Map();
+    const set = (asin, amount, source, windowDays) => {
+        const key = (asin || '').trim().toUpperCase();
+        if (!key || salesMap.has(key)) return false;
+        salesMap.set(key, { amount: Number(amount) || 0, source, windowDays });
+        return true;
+    };
+
+    // 1. Live finance, window-correct.
+    let fromFinance = 0;
+    try {
+        const { getAsinFinanceForWindow, DEFAULT_WINDOW_DAYS } = require('../../Services/Finance/AsinFinanceWindowService.js');
+        const finance = await getAsinFinanceForWindow(userId, Country, Region);
+        Object.entries(finance).forEach(([asin, row]) => {
+            if (set(asin, row.sales, 'dailySkuFinance', DEFAULT_WINDOW_DAYS)) fromFinance++;
+        });
+    } catch (financeError) {
+        logger.warn('[v3-sales] live finance source failed; falling back', {
+            userId, country: Country, region: Region, error: financeError.message
+        });
+    }
+
+    // 2. Historical economics, for the accounts that still have it.
+    const { asinPpcSales } = await ProfitabilityService.getAsinPpcSalesFromEconomics(economicsData);
+    let fromEconomics = 0;
+    Object.entries(asinPpcSales || {}).forEach(([asin, data]) => {
+        if (set(asin, data.sales, 'economicsMetrics', 30)) fromEconomics++;
+    });
+
+    // 3. BuyBox — single-day, so tagged as such rather than passed off as monthly.
+    try {
+        const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
+        const buyBoxDoc = await BuyBoxData
+            .findOne({ User: userId, region: Region, country: Country })
+            .sort({ createdAt: -1 })
+            .select('asinBuyBoxData')
+            .lean();
+
+        let fromBuyBox = 0;
+        (buyBoxDoc?.asinBuyBoxData || []).forEach(item => {
+            const asin = item.childAsin || item.parentAsin;
+            // windowDays 1: a BuyBox snapshot is one day, not the 30 the column implies.
+            if (set(asin, item.sales?.amount, 'buyBox', 1)) fromBuyBox++;
+        });
+
+        logger.info('[v3-sales] per-ASIN sales sources', {
+            userId, country: Country, region: Region,
+            fromFinance, fromEconomics, fromBuyBox, total: salesMap.size
+        });
+    } catch (buyBoxError) {
+        // Sales is one column — never fail the whole product list over it.
+        logger.warn('[v3-sales] BuyBox sales fallback failed; sales may show as "—"', {
+            userId, country: Country, region: Region, error: buyBoxError.message
+        });
+    }
+
+    return salesMap;
+}
+
+/**
  * V3 Active Products Endpoint
  * Returns: Paginated Active products with ratings (NO A+ or Ads columns)
- * 
+ *
  * Query params: page (default 1), limit (default 20)
  */
 const getYourProductsActiveV3 = asyncHandler(async (req, res) => {
@@ -2968,6 +3247,7 @@ const getYourProductsActiveV3 = asyncHandler(async (req, res) => {
                                 status: '$sellerAccount.products.status',
                                 quantity: '$sellerAccount.products.quantity',
                                 issueCount: '$sellerAccount.products.issueCount',
+                                issues: { $ifNull: ['$sellerAccount.products.issues', []] },
                                 has_b2b_pricing: '$sellerAccount.products.has_b2b_pricing'
                             }
                         }
@@ -3018,10 +3298,28 @@ const getYourProductsActiveV3 = asyncHandler(async (req, res) => {
             });
         }
 
+        // Real sales data, with the same economics-then-BuyBox precedence the
+        // Optimization tab uses (see buildAsinSalesMap).
+        const economicsData = await EconomicsMetrics.findLatest(userId, Region, Country);
+        const salesMap = await buildAsinSalesMap(userId, Region, Country, economicsData);
+
+        // Fetch precomputed short issue labels (cheap chunked read, not a live recompute -
+        // Active products never get real text in sellerAccount.products.issues, only Inactive/
+        // Incomplete do, so this is the only real source of short issue detail for this tab)
+        const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
+        const { getShortIssueLabels } = require('../../Services/Calculations/RecommendationService.js');
+        const productWiseErrorList = await IssuesDataChunks.getFieldData(userId, Country, Region, 'productWiseError');
+        const issueDetailMap = new Map();
+        productWiseErrorList.forEach(p => {
+            const k = (p.asin || '').toUpperCase();
+            if (k && pageAsinSet.has(k)) issueDetailMap.set(k, p);
+        });
+
         // Enrich products (NO A+, NO Ads)
         let enrichedProducts = rawProducts.map(product => {
             const key = product.asin?.toUpperCase() || '';
             const reviewData = reviewsMap.get(key) || {};
+            const rawIssues = Array.isArray(product.issues) ? product.issues : [];
 
             return {
                 asin: product.asin,
@@ -3033,6 +3331,11 @@ const getYourProductsActiveV3 = asyncHandler(async (req, res) => {
                 numRatings: reviewData.numRatings || '0',
                 starRatings: reviewData.starRatings || '0',
                 image: reviewData.image || null,
+                sales: salesMap.has(key) ? salesMap.get(key).amount : null,
+                // 1 when the only source was a single-day BuyBox snapshot, so the UI
+                // can say so instead of implying a 30-day figure. null = unknown.
+                salesWindowDays: salesMap.has(key) ? salesMap.get(key).windowDays : null,
+                issues: rawIssues.length > 0 ? rawIssues : getShortIssueLabels(issueDetailMap.get(key)),
                 issueCount: product.issueCount || 0,
                 has_b2b_pricing: product.has_b2b_pricing || false
             };
@@ -3325,12 +3628,31 @@ const getYourProductsNonSellableV3 = asyncHandler(async (req, res) => {
         const zeroAvailabilityTotal = result?.zeroAvailabilityCount[0]?.total || 0;
         const products = result?.products || [];
 
+        // Fetch real product photos for this page (same pattern as getYourProductsActiveV3)
+        const pageAsinSet = new Set(products.map(p => p.asin?.toUpperCase()).filter(Boolean));
+        const productReviews = pageAsinSet.size > 0 ? await NumberOfProductReviews.findOne({
+            User: userObjectId,
+            country: Country,
+            region: Region
+        }).sort({ createdAt: -1 }).select('Products.asin Products.product_photos').lean() : null;
+
+        const reviewsMap = new Map();
+        if (productReviews?.Products) {
+            productReviews.Products.forEach(p => {
+                const key = p.asin?.toUpperCase() || '';
+                if (pageAsinSet.has(key)) {
+                    reviewsMap.set(key, { image: p.product_photos?.[0] || null });
+                }
+            });
+        }
+
         // Map products to response format; for Active with qty 0, keep status Active and set issue to "0 availability"
         let responseProducts = products.map(p => {
             const statusLower = (p.status || '').toLowerCase();
             const qty = p.quantity ?? 0;
             const isZeroAvailability = statusLower === 'active' && qty <= 0;
             const issues = isZeroAvailability ? ['This product has 0 availability (out of stock).'] : (Array.isArray(p.issues) ? p.issues : []);
+            const reviewData = reviewsMap.get(p.asin?.toUpperCase()) || {};
             return {
                 asin: p.asin,
                 sku: p.sku,
@@ -3338,6 +3660,7 @@ const getYourProductsNonSellableV3 = asyncHandler(async (req, res) => {
                 price: p.price || '0',
                 status: statusLower === 'inactive' ? 'Inactive' : statusLower === 'incomplete' ? 'Incomplete' : 'Active',
                 quantity: qty,
+                image: reviewData.image || null,
                 issues
             };
         });
@@ -3453,7 +3776,9 @@ const getYourProductsWithoutAPlusV3 = asyncHandler(async (req, res) => {
                                 itemName: '$sellerAccount.products.itemName',
                                 price: '$sellerAccount.products.price',
                                 status: '$sellerAccount.products.status',
-                                quantity: '$sellerAccount.products.quantity'
+                                quantity: '$sellerAccount.products.quantity',
+                                issueCount: '$sellerAccount.products.issueCount',
+                                issues: { $ifNull: ['$sellerAccount.products.issues', []] }
                             }
                         }
                     ]
@@ -3465,16 +3790,62 @@ const getYourProductsWithoutAPlusV3 = asyncHandler(async (req, res) => {
         const totalItems = result?.count[0]?.total || 0;
         const products = result?.products || [];
 
+        // Fetch real product photos for this page (same pattern as getYourProductsActiveV3)
+        const pageAsinSet = new Set(products.map(p => p.asin?.toUpperCase()).filter(Boolean));
+        const productReviews = pageAsinSet.size > 0 ? await NumberOfProductReviews.findOne({
+            User: userObjectId,
+            country: Country,
+            region: Region
+        }).sort({ createdAt: -1 }).select('Products.asin Products.product_photos').lean() : null;
+
+        const reviewsMap = new Map();
+        if (productReviews?.Products) {
+            productReviews.Products.forEach(p => {
+                const key = p.asin?.toUpperCase() || '';
+                if (pageAsinSet.has(key)) {
+                    reviewsMap.set(key, { image: p.product_photos?.[0] || null });
+                }
+            });
+        }
+
+        // Real sales data, with the same economics-then-BuyBox precedence the
+        // Optimization tab uses (see buildAsinSalesMap).
+        const economicsData = await EconomicsMetrics.findLatest(userId, Region, Country);
+        const salesMap = await buildAsinSalesMap(userId, Region, Country, economicsData);
+
+        // Fetch precomputed short issue labels (cheap chunked read, not a live recompute -
+        // these are Active products, so sellerAccount.products.issues is never populated for
+        // them; the precomputed productWiseError snapshot is the only real source of detail)
+        const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
+        const { getShortIssueLabels } = require('../../Services/Calculations/RecommendationService.js');
+        const productWiseErrorList = await IssuesDataChunks.getFieldData(userId, Country, Region, 'productWiseError');
+        const issueDetailMap = new Map();
+        productWiseErrorList.forEach(p => {
+            const k = (p.asin || '').toUpperCase();
+            if (k && pageAsinSet.has(k)) issueDetailMap.set(k, p);
+        });
+
         // Map to response format
-        const responseProducts = products.map(p => ({
-            asin: p.asin,
-            sku: p.sku,
-            title: p.itemName || '',
-            price: p.price || '0',
-            status: p.status || 'Active',
-            quantity: p.quantity ?? 0,
-            hasAPlus: false
-        }));
+        const responseProducts = products.map(p => {
+            const key = p.asin?.toUpperCase() || '';
+            const rawIssues = Array.isArray(p.issues) ? p.issues : [];
+            return {
+                asin: p.asin,
+                sku: p.sku,
+                title: p.itemName || '',
+                price: p.price || '0',
+                status: p.status || 'Active',
+                quantity: p.quantity ?? 0,
+                image: reviewsMap.get(key)?.image || null,
+                sales: salesMap.has(key) ? salesMap.get(key).amount : null,
+                // 1 when the only source was a single-day BuyBox snapshot, so the UI
+                // can say so instead of implying a 30-day figure. null = unknown.
+                salesWindowDays: salesMap.has(key) ? salesMap.get(key).windowDays : null,
+                issues: rawIssues.length > 0 ? rawIssues : getShortIssueLabels(issueDetailMap.get(key)),
+                issueCount: p.issueCount || 0,
+                hasAPlus: false
+            };
+        });
 
         const totalPages = Math.ceil(totalItems / limit);
         const elapsed = Date.now() - startTime;
@@ -3584,7 +3955,9 @@ const getYourProductsNotTargetedInAdsV3 = asyncHandler(async (req, res) => {
                                 itemName: '$sellerAccount.products.itemName',
                                 price: '$sellerAccount.products.price',
                                 status: '$sellerAccount.products.status',
-                                quantity: '$sellerAccount.products.quantity'
+                                quantity: '$sellerAccount.products.quantity',
+                                issueCount: '$sellerAccount.products.issueCount',
+                                issues: { $ifNull: ['$sellerAccount.products.issues', []] }
                             }
                         }
                     ]
@@ -3596,16 +3969,62 @@ const getYourProductsNotTargetedInAdsV3 = asyncHandler(async (req, res) => {
         const totalItems = result?.count[0]?.total || 0;
         const products = result?.products || [];
 
+        // Fetch real product photos for this page (same pattern as getYourProductsActiveV3)
+        const pageAsinSet = new Set(products.map(p => p.asin?.toUpperCase()).filter(Boolean));
+        const productReviews = pageAsinSet.size > 0 ? await NumberOfProductReviews.findOne({
+            User: userObjectId,
+            country: Country,
+            region: Region
+        }).sort({ createdAt: -1 }).select('Products.asin Products.product_photos').lean() : null;
+
+        const reviewsMap = new Map();
+        if (productReviews?.Products) {
+            productReviews.Products.forEach(p => {
+                const key = p.asin?.toUpperCase() || '';
+                if (pageAsinSet.has(key)) {
+                    reviewsMap.set(key, { image: p.product_photos?.[0] || null });
+                }
+            });
+        }
+
+        // Real sales data, with the same economics-then-BuyBox precedence the
+        // Optimization tab uses (see buildAsinSalesMap).
+        const economicsData = await EconomicsMetrics.findLatest(userId, Region, Country);
+        const salesMap = await buildAsinSalesMap(userId, Region, Country, economicsData);
+
+        // Fetch precomputed short issue labels (cheap chunked read, not a live recompute -
+        // these are Active products, so sellerAccount.products.issues is never populated for
+        // them; the precomputed productWiseError snapshot is the only real source of detail)
+        const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
+        const { getShortIssueLabels } = require('../../Services/Calculations/RecommendationService.js');
+        const productWiseErrorList = await IssuesDataChunks.getFieldData(userId, Country, Region, 'productWiseError');
+        const issueDetailMap = new Map();
+        productWiseErrorList.forEach(p => {
+            const k = (p.asin || '').toUpperCase();
+            if (k && pageAsinSet.has(k)) issueDetailMap.set(k, p);
+        });
+
         // Map to response format
-        const responseProducts = products.map(p => ({
-            asin: p.asin,
-            sku: p.sku,
-            title: p.itemName || '',
-            price: p.price || '0',
-            status: p.status || 'Active',
-            quantity: p.quantity ?? 0,
-            isTargetedInAds: false
-        }));
+        const responseProducts = products.map(p => {
+            const key = p.asin?.toUpperCase() || '';
+            const rawIssues = Array.isArray(p.issues) ? p.issues : [];
+            return {
+                asin: p.asin,
+                sku: p.sku,
+                title: p.itemName || '',
+                price: p.price || '0',
+                status: p.status || 'Active',
+                quantity: p.quantity ?? 0,
+                image: reviewsMap.get(key)?.image || null,
+                sales: salesMap.has(key) ? salesMap.get(key).amount : null,
+                // 1 when the only source was a single-day BuyBox snapshot, so the UI
+                // can say so instead of implying a 30-day figure. null = unknown.
+                salesWindowDays: salesMap.has(key) ? salesMap.get(key).windowDays : null,
+                issues: rawIssues.length > 0 ? rawIssues : getShortIssueLabels(issueDetailMap.get(key)),
+                issueCount: p.issueCount || 0,
+                isTargetedInAds: false
+            };
+        });
 
         const totalPages = Math.ceil(totalItems / limit);
         const elapsed = Date.now() - startTime;
@@ -3789,6 +4208,8 @@ module.exports = {
     getProductCheckerData,
     getTop4ProductsOptimized,
     getTopPriorityProductsToFix,
+    getTopOpportunities,
+    getTopProducts,
     getProfitabilityData,
     getProfitabilitySummary,
     getPPCData,
@@ -3821,6 +4242,8 @@ module.exports = {
     // v3 highly optimized endpoints
     getYourProductsSummaryV3,
     getYourProductsActiveV3,
+    // Exported for tests: the sales-source precedence is the thing worth pinning down.
+    buildAsinSalesMap,
     getYourProductsInactiveV3,
     getYourProductsIncompleteV3,
     getYourProductsNonSellableV3,

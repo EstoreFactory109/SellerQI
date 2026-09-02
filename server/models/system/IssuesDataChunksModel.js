@@ -15,6 +15,7 @@
  */
 
 const mongoose = require('mongoose');
+const { sumRecoverableAmounts } = require('../../Services/Calculations/RecoverableAmountUtils.js');
 const { insertManyChunked } = require('../../utils/chunkedInsert');
 
 const CHUNK_SIZE = 200; // Max items per chunk (tuned for safety margin under 16MB)
@@ -327,6 +328,13 @@ IssuesDataChunksSchema.statics.upsertMetadata = async function(userId, country, 
         totalAccountErrors: metadata.totalAccountErrors || 0,
         totalProfitabilityErrors: metadata.totalProfitabilityErrors || 0,
         totalSponsoredAdsErrors: metadata.totalSponsoredAdsErrors || 0,
+        // Recoverable $ per category (see RecoverableAmountUtils.js). Persisted here
+        // as well as on IssueSummary so read paths can surface dollars without a full recalc.
+        totalProfitabilityRecoverableAmount: metadata.totalProfitabilityRecoverableAmount || 0,
+        totalSponsoredAdsRecoverableAmount: metadata.totalSponsoredAdsRecoverableAmount || 0,
+        totalInventoryRecoverableAmount: metadata.totalInventoryRecoverableAmount || 0,
+        totalConversionRecoverableAmount: metadata.totalConversionRecoverableAmount || 0,
+        totalRecoverableAmount: metadata.totalRecoverableAmount || 0,
         AccountErrors: metadata.AccountErrors || {},
         accountHealthPercentage: metadata.accountHealthPercentage || { Percentage: 0, status: 'Unknown' },
         buyBoxData: metadata.buyBoxData || { asinBuyBoxData: [] },
@@ -451,6 +459,11 @@ IssuesDataChunksSchema.statics.upsertIssuesData = async function(userId, country
         totalAccountErrors: issuesData.totalErrorInAccount || issuesData.totalAccountErrors || 0,
         totalProfitabilityErrors: issuesData.totalProfitabilityErrors || 0,
         totalSponsoredAdsErrors: issuesData.totalSponsoredAdsErrors || 0,
+        totalProfitabilityRecoverableAmount: issuesData.totalProfitabilityRecoverableAmount || 0,
+        totalSponsoredAdsRecoverableAmount: issuesData.totalSponsoredAdsRecoverableAmount || 0,
+        totalInventoryRecoverableAmount: issuesData.totalInventoryRecoverableAmount || 0,
+        totalConversionRecoverableAmount: issuesData.totalConversionRecoverableAmount || 0,
+        totalRecoverableAmount: sumRecoverableAmounts(issuesData),
         AccountErrors: issuesData.AccountErrors || {},
         accountHealthPercentage: issuesData.accountHealthPercentage || { Percentage: 0, status: 'Unknown' },
         buyBoxData: issuesData.buyBoxData || { asinBuyBoxData: [] },

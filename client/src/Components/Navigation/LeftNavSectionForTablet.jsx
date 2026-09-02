@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,Settings,ChartLine,LaptopMinimalCheck, ChevronDown, ChevronRight, X, Calendar, Target, DollarSign, Search, Lock, Package, LogOut, Bot} from 'lucide-react'
+import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,ChartLine,LaptopMinimalCheck, ChevronRight, X, Calendar, DollarSign, Lock, Package, LogOut, Bot, BarChart3, User, Link2, LifeBuoy, CreditCard} from 'lucide-react'
 import { logout } from '../../redux/slices/authSlice.js'
 import { clearCogsData } from '../../redux/slices/cogsSlice.js'
 import axios from 'axios';
@@ -10,6 +10,91 @@ import { useSelector,useDispatch } from 'react-redux';
 import {setPosition} from '../../redux/slices/MobileMenuSlice.js'
 import { AnimatePresence, motion } from "framer-motion";
 import NavSearch from './NavSearch.jsx';
+import { fetchAccountIssues, fetchYourProductsSummaryV3 } from '../../redux/slices/PageDataSlice.js';
+import { fetchTasks } from '../../redux/slices/TasksSlice.js';
+import stripeService from '../../services/stripeService';
+import { COLORS } from '../Shared/index.js';
+
+// "NW" from "Northwind Goods" - first letter of up to the first two words.
+const getInitials = (name) => {
+    if (!name) return '';
+    return name.trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+};
+
+const PLAN_LABELS = { LITE: 'Lite', PRO: 'Pro', AGENCY: 'Agency' };
+
+// Same category-grouped nav item pattern as the desktop sidebar (LeftNavSection.jsx),
+// duplicated here since this component already duplicates the desktop nav's logic
+// for its own mobile-drawer chrome (backdrop, close button, slide position).
+const NavItem = ({ to, icon: Icon, label, isActive: isActiveOverride, locked, onClick, expanded, onNavigate, tag, count, countTone = 'fix' }) => {
+    const countStyle = countTone === 'watch'
+        ? { background: 'rgba(245,166,35,.14)', color: COLORS.watch }
+        : { background: 'rgba(239,68,68,.14)', color: COLORS.fix };
+    const content = ({ isActive: linkActive }) => {
+        const isActive = isActiveOverride !== undefined ? isActiveOverride : linkActive;
+        return (
+            <>
+                <Icon className="w-4 h-4 flex-shrink-0" style={{ color: isActive ? COLORS.accent : COLORS.textMuted }} />
+                <span className="flex-1 truncate">{label}</span>
+                {locked && <Lock className="w-3.5 h-3.5 flex-shrink-0" style={{ color: COLORS.watch }} />}
+                {/* Small pill tag, e.g. mock's "AI" badge beside Amazon Copilot */}
+                {tag && (
+                    <span
+                        className="flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                        style={{ letterSpacing: '.04em', background: 'rgba(59,130,246,.16)', color: '#7EA8F8' }}
+                    >
+                        {tag}
+                    </span>
+                )}
+                {/* Real count pill, e.g. Account Issues count */}
+                {count != null && count > 0 && (
+                    <span
+                        className="flex-shrink-0 text-[11px] font-semibold px-1.5 py-0.5 rounded-full"
+                        style={countStyle}
+                    >
+                        {count}
+                    </span>
+                )}
+                {expanded !== undefined && (
+                    <motion.div animate={{ rotate: expanded ? 90 : 0 }} transition={{ duration: 0.2, ease: "easeInOut" }} className="flex items-center justify-center flex-shrink-0">
+                        <ChevronRight className="w-4 h-4" style={{ color: COLORS.textMuted, opacity: 0.7 }} />
+                    </motion.div>
+                )}
+            </>
+        );
+    };
+
+    const baseStyle = ({ isActive: linkActive }) => {
+        const isActive = isActiveOverride !== undefined ? isActiveOverride : linkActive;
+        return {
+            background: isActive ? 'rgba(59,130,246,.14)' : 'transparent',
+            color: isActive ? COLORS.textPrimary : COLORS.textSecondary,
+        };
+    };
+
+    if (onClick) {
+        const isActive = !!isActiveOverride;
+        return (
+            <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl font-medium text-xs cursor-pointer transition-colors" style={baseStyle({ isActive })} onClick={onClick}>
+                {content({ isActive })}
+            </div>
+        );
+    }
+
+    return (
+        <NavLink to={to} onClick={onNavigate} className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl font-medium text-xs transition-colors" style={baseStyle}>
+            {content}
+        </NavLink>
+    );
+};
+
+const NavGroupLabel = ({ children }) => (
+    <div className="text-[11px] font-semibold uppercase tracking-wider px-2 py-1.5" style={{ color: COLORS.textMuted, letterSpacing: '0.09em' }}>
+        {children}
+    </div>
+);
+
+const dropdownItemClass = "flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors";
 
 const LeftNavSection = () => {
 
@@ -17,16 +102,55 @@ const LeftNavSection = () => {
     const navigate=useNavigate();
     const location = useLocation();
     const [loader,setLoader]=useState(false)
-    const [settingsDropdownOpen, setSettingsDropdownOpen] = useState(false);
     const [sponsoredAdsDropdownOpen, setSponsoredAdsDropdownOpen] = useState(false);
 
     const position = useSelector(state => state.MobileMenu.position);
-    
+
     // Get user subscription plan from Redux store
     const user = useSelector((state) => state.Auth?.user);
     const userPlan = user?.packageType || 'LITE';
     const isAgencyUser = userPlan === 'AGENCY';
-    
+
+    // Real Account Issues count for the sidebar badge - same source Account.jsx uses.
+    const legacyAccountInfo = useSelector((state) => state.Dashboard.DashBoardInfo);
+    const accountIssuesState = useSelector((state) => state.pageData?.issuesPaginated?.account || { data: null, loading: false });
+    const accountInfo = accountIssuesState.data || legacyAccountInfo;
+    const accountIssuesCount = accountInfo?.totalAccountErrors || 0;
+
+    React.useEffect(() => {
+        if (!accountIssuesState.data && !accountIssuesState.loading) {
+            dispatch(fetchAccountIssues());
+        }
+    }, [accountIssuesState.data, accountIssuesState.loading, dispatch]);
+
+    // Real Your Products count for the sidebar badge - same summary Your Products page uses.
+    const yourProductsSummaryState = useSelector((state) => state.pageData?.yourProductsV3?.summary || { data: null, loading: false });
+    const yourProductsCount = yourProductsSummaryState.data?.totalProducts || 0;
+
+    React.useEffect(() => {
+        if (!yourProductsSummaryState.data && !yourProductsSummaryState.loading) {
+            dispatch(fetchYourProductsSummaryV3());
+        }
+    }, [yourProductsSummaryState.data, yourProductsSummaryState.loading, dispatch]);
+
+    // Real pending Tasks count for the sidebar badge - same tasks list the Tasks page uses.
+    const tasksState = useSelector((state) => state.tasks || { tasks: [], loading: false, lastFetched: null });
+    const pendingTasksCount = tasksState.tasks.filter(t => t.status !== 'completed').length;
+
+    React.useEffect(() => {
+        if (!tasksState.lastFetched && !tasksState.loading) {
+            dispatch(fetchTasks());
+        }
+    }, [tasksState.lastFetched, tasksState.loading, dispatch]);
+
+    // Real subscription renewal date for the bottom account box - fetched once locally.
+    const [nextBillingDate, setNextBillingDate] = useState(null);
+    React.useEffect(() => {
+        stripeService.getSubscription()
+            .then((sub) => setNextBillingDate(sub?.nextBillingDate || null))
+            .catch(() => {});
+    }, []);
+
     // Check if user's trial has expired
     const isTrialExpired = () => {
         if (!user?.isInTrialPeriod || !user?.trialEndsDate) return false;
@@ -34,29 +158,29 @@ const LeftNavSection = () => {
         const trialEnd = new Date(user.trialEndsDate);
         return now >= trialEnd;
     };
-    
+
     // Check if user was downgraded from trial to LITE
     const wasDowngradedFromTrial = () => {
-        return user?.packageType === 'LITE' && 
-               user?.isInTrialPeriod === false && 
-               user?.trialEndsDate !== null && 
+        return user?.packageType === 'LITE' &&
+               user?.isInTrialPeriod === false &&
+               user?.trialEndsDate !== null &&
                user?.trialEndsDate !== undefined;
     };
-    
+
     // Check if user chose LITE plan (never had trial)
     const choseLitePlan = () => {
-        return user?.packageType === 'LITE' && 
-               !user?.isInTrialPeriod && 
+        return user?.packageType === 'LITE' &&
+               !user?.isInTrialPeriod &&
                (user?.trialEndsDate === null || user?.trialEndsDate === undefined);
     };
-    
+
     // Determine if premium features should be locked (show but not accessible without upgrade)
     // Now ALL LITE users see the pages with lock icon - they can click and see blurred content
     const isPremiumLocked = userPlan === 'LITE';
-    
+
     // No longer hiding pages - all LITE users can see and access pages (with blur overlay)
     const isLiteUser = false;
-    
+
     // Check if agency admin is logged in and viewing a client
     const isAdminLoggedIn = localStorage.getItem('isAdminAuth') === 'true';
     const adminAccessType = localStorage.getItem('adminAccessType');
@@ -65,7 +189,7 @@ const LeftNavSection = () => {
     // Agency admin viewing a client's dashboard (not on manage-agency-users page)
     // loggedInAsClient is now a JSON string (same pattern as loggedInAsUser)
     const isAgencyAdminViewingClient = isAgencyAdmin && loggedInAsClient;
-    
+
     // Get current tab from URL search params
     const searchParams = new URLSearchParams(location.search);
     const currentTab = searchParams.get('tab') || 'category';
@@ -75,13 +199,6 @@ const LeftNavSection = () => {
     const isPPCDashboardPage = location.pathname === '/seller-central-checker/ppc-dashboard';
     const isKeywordAnalysisPage = location.pathname === '/seller-central-checker/keyword-analysis';
     const isSponsoredAdsPage = isPPCDashboardPage || isKeywordAnalysisPage;
-    
-    // Keep settings dropdown open if we're on settings page
-    React.useEffect(() => {
-        if (isSettingsPage) {
-            setSettingsDropdownOpen(true);
-        }
-    }, [isSettingsPage]);
 
     // Keep sponsored ads dropdown open if we're on any sponsored ads-related page
     React.useEffect(() => {
@@ -90,24 +207,11 @@ const LeftNavSection = () => {
         }
     }, [isSponsoredAdsPage]);
 
-    // Handle Settings button click
-    const handleSettingsClick = () => {
-        if (!isSettingsPage) {
-            // If not on settings page, navigate to profile
-            navigate('/seller-central-checker/settings?tab=profile');
-        }
-        setSettingsDropdownOpen(!settingsDropdownOpen);
-    };
-
-    // Handle Sponsored Ads button click
+    // Handle Sponsored Ads button click — just toggles the dropdown, never navigates
     const handleSponsoredAdsClick = () => {
-        if (!isSponsoredAdsPage) {
-            // If not on sponsored ads page, navigate to campaign audit
-            navigate('/seller-central-checker/ppc-dashboard');
-        }
         setSponsoredAdsDropdownOpen(!sponsoredAdsDropdownOpen);
     };
-    
+
     const logoutUser=async(e)=>{
         e.preventDefault();
         setLoader(true)
@@ -126,23 +230,31 @@ const LeftNavSection = () => {
         }
     }
 
+    const closeMenu = () => dispatch(setPosition("-100%"));
+    const dropdownItemStyle = (isActive) => ({
+        background: isActive ? 'rgba(59,130,246,.14)' : 'transparent',
+        color: isActive ? COLORS.accent : COLORS.textMuted,
+    });
 
     return (
         <>
             {/* Mobile Menu Backdrop */}
             {position === "0%" && (
-                <div 
+                <div
                     className="fixed inset-0 bg-black bg-opacity-50 z-[98] lg:hidden transition-opacity duration-300"
-                    onClick={() => dispatch(setPosition("-100%"))}
+                    onClick={closeMenu}
                 />
             )}
-            
+
             {/* Mobile Menu */}
-            <aside className="h-screen w-2/5 lg:w-1/5 shadow-xl border-r border-gray-200/80 font-roboto bg-gradient-to-b from-white to-gray-50/30 block lg:hidden fixed z-[99] transition-all duration-300 ease-in-out backdrop-blur-sm " style={{ left: position }}>
-            {/* Logo Section */}
+            <aside
+                className="h-screen w-2/5 lg:w-1/5 shadow-xl block lg:hidden fixed z-[99] transition-all duration-300 ease-in-out flex flex-col"
+                style={{ left: position, background: COLORS.bgBase, borderRight: `1px solid ${COLORS.border}` }}
+            >
+            {/* Logo Section - unchanged */}
             <div className="w-full px-4 py-8 flex-shrink-0">
                 <div className="flex items-center justify-between">
-                    <img 
+                    <img
                         src="https://res.cloudinary.com/ddoa960le/image/upload/v1749063777/MainLogo_1_uhcg6o.png"
                         alt="Seller QI Logo"
                         loading="lazy"
@@ -151,706 +263,217 @@ const LeftNavSection = () => {
                         height="28"
                     />
                     <button
-                        onClick={() => dispatch(setPosition("-100%"))}
-                        className="p-2 rounded-lg hover:bg-gray-100 active:bg-gray-200 transition-colors duration-200 touch-manipulation"
+                        onClick={closeMenu}
+                        className="p-2 rounded-lg transition-colors duration-200 touch-manipulation"
+                        style={{ color: COLORS.textSecondary }}
                         aria-label="Close mobile menu"
                     >
-                        <X className="w-5 h-5 text-gray-600" />
+                        <X className="w-5 h-5" />
                     </button>
                 </div>
             </div>
 
-            {/* Search Section */}
+            {/* Search Section - unchanged */}
             <NavSearch
-                variant="light"
+                variant="dark"
                 isPremiumLocked={isPremiumLocked}
-                onNavigate={() => dispatch(setPosition("-100%"))}
+                onNavigate={closeMenu}
             />
 
-            {/* Navigation Section */}
-            <div className="w-full overflow-y-auto flex-1 scrollbar-hide">
-                <div className="px-3 py-4">
-                    <div className="mb-6">
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4 px-2">Navigation</p>
+            {/* Navigation Section - grouped into categories */}
+            <div className="w-full overflow-y-auto flex-1 scrollbar-hide min-h-0">
+                <div className="px-3 py-4 flex flex-col gap-4">
+
+                    {/* Overview */}
+                    <div>
+                        <NavGroupLabel>Overview</NavGroupLabel>
                         <div className="space-y-1">
-                            {/* Dashboard - For PRO/AGENCY users and expired trial users */}
                             {(!isLiteUser || isPremiumLocked) && (
-                                <NavLink
-                                    to="/seller-central-checker/dashboard"
-                                    className={({ isActive }) =>
-                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
-                                            isActive
-                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                        }`
-                                    }
-                                >
-                                    {({ isActive }) => (
-                                        <>
-                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                                isActive ? 'bg-white/20' : 'bg-blue-50 group-hover:bg-blue-100'
-                                            }`}>
-                                                <LayoutDashboard className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                                    isActive ? 'text-white' : 'text-blue-600'
-                                                }`}/>
-                                            </div>
-                                            <span className="font-medium flex-1">Dashboard</span>
-                                            {isPremiumLocked && (
-                                                <Lock className="w-3 h-3 text-amber-500" />
-                                            )}
-                                        </>
-                                    )}
-                                </NavLink>
+                                <NavItem to="/seller-central-checker/dashboard" icon={LayoutDashboard} label="Dashboard" locked={isPremiumLocked} onNavigate={closeMenu} />
                             )}
-
-                            {/* Amazon Copilot - AI Assistant */}
                             {(!isLiteUser || isPremiumLocked) && (
-                                <NavLink
-                                    to="/seller-central-checker/qmate"
-                                    className={({ isActive }) =>
-                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
-                                            isActive
-                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                        }`
-                                    }
-                                >
-                                    {({ isActive }) => (
-                                        <>
-                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                                isActive ? 'bg-white/20' : 'bg-purple-50 group-hover:bg-purple-100'
-                                            }`}>
-                                                <Bot className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                                    isActive ? 'text-white' : 'text-purple-600'
-                                                }`}/>
-                                            </div>
-                                            <span className="font-medium flex-1">Amazon Copilot</span>
-                                            {isPremiumLocked && (
-                                                <Lock className="w-3 h-3 text-amber-500" />
-                                            )}
-                                        </>
-                                    )}
-                                </NavLink>
+                                <NavItem to="/seller-central-checker/qmate" icon={Bot} label="Amazon Copilot" locked={isPremiumLocked} onNavigate={closeMenu} tag="AI" />
                             )}
+                        </div>
+                    </div>
 
-                            {/* Your Products - For PRO/AGENCY users and expired trial users */}
+                    {/* Optimize */}
+                    <div>
+                        <NavGroupLabel>Optimize</NavGroupLabel>
+                        <div className="space-y-1">
                             {(!isLiteUser || isPremiumLocked) && (
-                                <NavLink
-                                    to="/seller-central-checker/your-products"
-                                    className={({ isActive }) =>
-                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
-                                            isActive
-                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                        }`
-                                    }
-                                >
-                                    {({ isActive }) => (
-                                        <>
-                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                                isActive ? 'bg-white/20' : 'bg-cyan-50 group-hover:bg-cyan-100'
-                                            }`}>
-                                                <Package className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                                    isActive ? 'text-white' : 'text-cyan-600'
-                                                }`}/>
-                                            </div>
-                                            <span className="font-medium flex-1">Your Products</span>
-                                            {isPremiumLocked && (
-                                                <Lock className="w-3 h-3 text-amber-500" />
-                                            )}
-                                        </>
-                                    )}
-                                </NavLink>
+                                <NavItem to="/seller-central-checker/your-products" icon={Package} label="Your Products" locked={isPremiumLocked} onNavigate={closeMenu} count={yourProductsCount} />
                             )}
+                            <NavItem to="/seller-central-checker/pre-analysis" icon={BarChart3} label="Listing Analyzer" onNavigate={closeMenu} />
 
-                            {/* Account Issues - top-level link (Issues dropdown removed) */}
-                            {(!isLiteUser || isPremiumLocked) && (
-                                <NavLink
-                                    to="/seller-central-checker/issues?tab=account"
-                                    className={({ isActive }) =>
-                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs cursor-pointer transition-all duration-300 ${
-                                            isIssuesPage && currentTab === 'account'
-                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                        }`
-                                    }
-                                >
-                                    {({ isActive }) => (
-                                        <>
-                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                                isActive
-                                                    ? 'bg-white/20' 
-                                                    : 'bg-orange-50 group-hover:bg-orange-100'
-                                            }`}>
-                                                <BadgeAlert className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                                    isActive
-                                                        ? 'text-white' 
-                                                        : 'text-orange-600'
-                                                }`}/>
-                                            </div>
-                                            <span className="font-medium flex-1">Account Issues</span>
-                                            {isPremiumLocked && (
-                                                <Lock className="w-3 h-3 text-amber-500 mr-1" />
-                                            )}
-                                        </>
-                                    )}
-                                </NavLink>
-                            )}
-
-                            {/* Sponsored Ads with Dropdown - For PRO/AGENCY users and expired trial users */}
+                            {/* Sponsored Ads with Dropdown */}
                             {(!isLiteUser || isPremiumLocked) && (
                                 <div className="space-y-1">
-                                <div
-                                    className={`group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs cursor-pointer transition-all duration-300 ${
-                                        isSponsoredAdsPage
-                                            ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                            : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                    }`}
-                                    onClick={handleSponsoredAdsClick}
-                                >
-                                    <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                        isSponsoredAdsPage 
-                                            ? 'bg-white/20' 
-                                            : 'bg-green-50 group-hover:bg-green-100'
-                                    }`}>
-                                        <LaptopMinimalCheck className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                            isSponsoredAdsPage 
-                                                ? 'text-white' 
-                                                : 'text-green-600'
-                                        }`}/>
-                                    </div>
-                                    <span className="font-medium flex-1">Sponsored Ads</span>
-                                    {isPremiumLocked && (
-                                        <Lock className="w-3 h-3 text-amber-500 mr-1" />
-                                    )}
-                                    <motion.div
-                                        animate={{ rotate: sponsoredAdsDropdownOpen ? 90 : 0 }}
-                                        transition={{ duration: 0.2, ease: "easeInOut" }}
-                                    >
-                                        <ChevronRight className="w-3 h-3 opacity-70"/>
-                                    </motion.div>
+                                    <NavItem
+                                        icon={LaptopMinimalCheck}
+                                        label="Sponsored Ads"
+                                        isActive={isSponsoredAdsPage}
+                                        locked={isPremiumLocked}
+                                        onClick={handleSponsoredAdsClick}
+                                        expanded={sponsoredAdsDropdownOpen}
+                                    />
+                                    <AnimatePresence>
+                                        {sponsoredAdsDropdownOpen && (
+                                            <motion.div
+                                                initial={{ opacity: 0, height: 0 }}
+                                                animate={{ opacity: 1, height: "auto" }}
+                                                exit={{ opacity: 0, height: 0 }}
+                                                transition={{ duration: 0.3, ease: "easeInOut", opacity: { duration: 0.2 } }}
+                                                className="ml-5 space-y-1 overflow-hidden"
+                                            >
+                                                <motion.div initial={{ y: -10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }} transition={{ delay: 0.15, duration: 0.2 }}>
+                                                    <NavLink to="/seller-central-checker/ppc-dashboard" onClick={closeMenu} className={dropdownItemClass} style={({ isActive }) => dropdownItemStyle(isActive)}>
+                                                        <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
+                                                        Campaign Audit
+                                                    </NavLink>
+                                                </motion.div>
+                                                <motion.div initial={{ y: -10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }} transition={{ delay: 0.175, duration: 0.2 }}>
+                                                    <NavLink to="/seller-central-checker/keyword-analysis" onClick={closeMenu} className={dropdownItemClass} style={({ isActive }) => dropdownItemStyle(isActive)}>
+                                                        <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
+                                                        Keyword Opportunities
+                                                    </NavLink>
+                                                </motion.div>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
                                 </div>
-                                
-                                <AnimatePresence>
-                                    {sponsoredAdsDropdownOpen && (
-                                        <motion.div
-                                            initial={{ opacity: 0, height: 0 }}
-                                            animate={{ opacity: 1, height: "auto" }}
-                                            exit={{ opacity: 0, height: 0 }}
-                                            transition={{ 
-                                                duration: 0.3, 
-                                                ease: "easeInOut",
-                                                opacity: { duration: 0.2 }
-                                            }}
-                                            className="ml-5 space-y-1 overflow-hidden"
-                                        >
-                                            <motion.div
-                                                initial={{ y: -10, opacity: 0 }}
-                                                animate={{ y: 0, opacity: 1 }}
-                                                exit={{ y: -10, opacity: 0 }}
-                                                transition={{ delay: 0.15, duration: 0.2 }}
-                                            >
-                                                <NavLink
-                                                    to="/seller-central-checker/ppc-dashboard"
-                                                    className={({ isActive }) =>
-                                                        `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
-                                                            isActive
-                                                                ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                                : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
-                                                        }`
-                                                    }
-                                                >
-                                                    <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                    Campaign Audit
-                                                </NavLink>
-                                            </motion.div>
-                                            <motion.div
-                                                initial={{ y: -10, opacity: 0 }}
-                                                animate={{ y: 0, opacity: 1 }}
-                                                exit={{ y: -10, opacity: 0 }}
-                                                transition={{ delay: 0.175, duration: 0.2 }}
-                                            >
-                                                <NavLink
-                                                    to="/seller-central-checker/keyword-analysis"
-                                                    className={({ isActive }) =>
-                                                        `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
-                                                            isActive
-                                                                ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                                : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
-                                                        }`
-                                                    }
-                                                >
-                                                    <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                    Keyword Opportunities
-                                                </NavLink>
-                                            </motion.div>
-                                        </motion.div>
-                                    )}
-                                </AnimatePresence>
-                            </div>
-                            )}
-                            
-                            {/* Profitability Dashboard - For PRO/AGENCY users and expired trial users */}
-                            {(!isLiteUser || isPremiumLocked) && (
-                                <NavLink
-                                    to="/seller-central-checker/profitibility-dashboard"
-                                    className={({ isActive }) =>
-                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
-                                            isActive
-                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                        }`
-                                    }
-                                >
-                                    {({ isActive }) => (
-                                        <>
-                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                                isActive ? 'bg-white/20' : 'bg-purple-50 group-hover:bg-purple-100'
-                                            }`}>
-                                                <ChartLine className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                                    isActive ? 'text-white' : 'text-purple-600'
-                                                }`}/>
-                                            </div>
-                                            <span className="font-medium flex-1">Profitibility</span>
-                                            {isPremiumLocked && (
-                                                <Lock className="w-3 h-3 text-amber-500" />
-                                            )}
-                                        </>
-                                    )}
-                                </NavLink>
                             )}
 
-                            {/* Reimbursement Dashboard - For PRO/AGENCY users and expired trial users */}
                             {(!isLiteUser || isPremiumLocked) && (
-                                <NavLink
-                                    to="/seller-central-checker/reimbursement-dashboard"
-                                    className={({ isActive }) =>
-                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
-                                            isActive
-                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                        }`
-                                    }
-                                >
-                                    {({ isActive }) => (
-                                        <>
-                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                                isActive ? 'bg-white/20' : 'bg-emerald-50 group-hover:bg-emerald-100'
-                                            }`}>
-                                                <DollarSign className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                                    isActive ? 'text-white' : 'text-emerald-600'
-                                                }`}/>
-                                            </div>
-                                            <span className="font-medium flex-1">Reimbursement</span>
-                                            {isPremiumLocked && (
-                                                <Lock className="w-3 h-3 text-amber-500" />
-                                            )}
-                                        </>
-                                    )}
-                                </NavLink>
-                            )}
-
-                            {/* Tasks - LITE users see it with lock icon and blurred page */}
-                            {(!isLiteUser || isPremiumLocked) && (
-                                <NavLink
-                                    to="/seller-central-checker/tasks"
-                                    className={({ isActive }) =>
-                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
-                                            isActive
-                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                        }`
-                                    }
-                                >
-                                    {({ isActive }) => (
-                                        <>
-                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                                isActive ? 'bg-white/20' : 'bg-indigo-50 group-hover:bg-indigo-100'
-                                            }`}>
-                                                <ClipboardPlus className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                                    isActive ? 'text-white' : 'text-indigo-600'
-                                                }`}/>
-                                            </div>
-                                            <span className="font-medium flex-1">Tasks</span>
-                                            {isPremiumLocked && (
-                                                <Lock className="w-3 h-3 text-amber-500" />
-                                            )}
-                                        </>
-                                    )}
-                                </NavLink>
-                            )}
-
-                            {/* Ecommerce Calendar - Available for ALL users including LITE - HIDDEN */}
-                            {false && (
-                                <NavLink
-                                    to="/seller-central-checker/ecommerce-calendar"
-                                    className={({ isActive }) =>
-                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
-                                            isActive
-                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                        }`
-                                    }
-                                >
-                                    {({ isActive }) => (
-                                        <>
-                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                                isActive ? 'bg-white/20' : 'bg-pink-50 group-hover:bg-pink-100'
-                                            }`}>
-                                                <Calendar className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                                    isActive ? 'text-white' : 'text-pink-600'
-                                                }`}/>
-                                            </div>
-                                            <span className="font-medium">Ecommerce Calendar</span>
-                                        </>
-                                    )}
-                                </NavLink>
-                            )}
-
-                        {/* Account History - For PRO/AGENCY users and expired trial users */}
-                            {(!isLiteUser || isPremiumLocked) && (
-                                <NavLink
-                                    to="/seller-central-checker/account-history"
-                                    className={({ isActive }) =>
-                                        `group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 ${
-                                            isActive
-                                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                                : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                        }`
-                                    }
-                                >
-                                    {({ isActive }) => (
-                                        <>
-                                            <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                                isActive ? 'bg-white/20' : 'bg-amber-50 group-hover:bg-amber-100'
-                                            }`}>
-                                                <Clock8 className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                                    isActive ? 'text-white' : 'text-amber-600'
-                                                }`}/>
-                                            </div>
-                                            <span className="font-medium flex-1">Accounts History</span>
-                                            {isPremiumLocked && (
-                                                <Lock className="w-3 h-3 text-amber-500" />
-                                            )}
-                                        </>
-                                    )}
-                                </NavLink>
+                                <NavItem to="/seller-central-checker/tasks" icon={ClipboardPlus} label="Tasks" locked={isPremiumLocked} onNavigate={closeMenu} count={pendingTasksCount} countTone="watch" />
                             )}
                         </div>
                     </div>
 
-                    {/* Divider - Hidden for agency admin viewing client */}
-                    {!isAgencyAdminViewingClient && (
-                    <div className="h-px bg-gradient-to-r from-transparent via-gray-300 to-transparent my-6"></div>
-                    )}
-
-                    {/* Book Consultation Button - Hidden for agency admin viewing client */}
-                    {!isAgencyAdminViewingClient && (
-                    <div className="mb-4">
-                        <NavLink
-                            to="/seller-central-checker/consultation"
-                            className="group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs cursor-pointer transition-all duration-300 bg-gradient-to-r from-orange-400 to-amber-500 text-white shadow-lg shadow-orange-500/25 hover:shadow-xl hover:shadow-orange-500/40 hover:scale-[1.02] hover:from-orange-500 hover:to-amber-600 transform"
-                        >
-                            <div className="p-1 rounded-lg transition-colors duration-300 bg-white/20 group-hover:bg-white/30">
-                                <Calendar className="w-3.5 h-3.5 transition-colors duration-300 text-white"/>
-                            </div>
-                            <span className="font-semibold flex-1">Need Help?</span>
-                            <div className="w-1.5 h-1.5 bg-yellow-300 rounded-full animate-pulse"></div>
-                        </NavLink>
-                    </div>
-                    )}
-
-                    {/* Settings Section - Hidden for agency admin viewing client */}
-                    {!isAgencyAdminViewingClient && (
-                    <div className="mb-6">
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4 px-2">Settings</p>
-                        
-                        {/* Settings with Dropdown */}
+                    {/* Money & Health */}
+                    <div>
+                        <NavGroupLabel>Money &amp; Health</NavGroupLabel>
                         <div className="space-y-1">
-                            <div
-                                className={`group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs cursor-pointer transition-all duration-300 ${
-                                    isSettingsPage
-                                        ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/25 transform scale-[1.02]'
-                                        : 'text-gray-700 hover:bg-white hover:shadow-md hover:shadow-gray-200/50 hover:text-blue-600 hover:scale-[1.01]'
-                                }`}
-                                onClick={handleSettingsClick}
-                            >
-                                <div className={`p-1 rounded-lg transition-colors duration-300 ${
-                                    isSettingsPage ? 'bg-white/20' : 'bg-gray-50 group-hover:bg-gray-100'
-                                }`}>
-                                    <Settings className={`w-3.5 h-3.5 transition-colors duration-300 ${
-                                        isSettingsPage ? 'text-white' : 'text-gray-600'
-                                    }`}/>
-                                </div>
-                                <span className="font-medium flex-1">Settings</span>
-                                <motion.div
-                                    animate={{ rotate: settingsDropdownOpen ? 90 : 0 }}
-                                    transition={{ duration: 0.2, ease: "easeInOut" }}
-                                >
-                                    <ChevronRight className="w-3 h-3 opacity-70"/>
-                                </motion.div>
-                            </div>
-                            
-                            <AnimatePresence>
-                                {settingsDropdownOpen && (
-                                    <motion.div
-                                        initial={{ opacity: 0, height: 0 }}
-                                        animate={{ opacity: 1, height: "auto" }}
-                                        exit={{ opacity: 0, height: 0 }}
-                                        transition={{ 
-                                            duration: 0.25, 
-                                            ease: "easeInOut",
-                                            opacity: { duration: 0.15 }
-                                        }}
-                                        className="ml-5 space-y-1 overflow-hidden"
-                                    >
-                                        <motion.div
-                                            initial={{ y: -10, opacity: 0 }}
-                                            animate={{ y: 0, opacity: 1 }}
-                                            exit={{ y: -10, opacity: 0 }}
-                                            transition={{ delay: 0.05, duration: 0.15 }}
-                                        >
-                                            <NavLink
-                                                to="/seller-central-checker/settings?tab=profile"
-                                                className={() =>
-                                                    `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
-                                                        isSettingsPage && currentSettingsTab === 'profile'
-                                                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                            : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
-                                                    }`
-                                                }
-                                            >
-                                                <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                User Profile
-                                            </NavLink>
-                                        </motion.div>
-                                        
-                                        {/* Account Integration - Only for PRO users (not AGENCY) */}
-                                        {!isLiteUser && !isAgencyUser && (
-                                            <motion.div
-                                                initial={{ y: -10, opacity: 0 }}
-                                                animate={{ y: 0, opacity: 1 }}
-                                                exit={{ y: -10, opacity: 0 }}
-                                                transition={{ delay: 0.08, duration: 0.15 }}
-                                            >
-                                                <NavLink
-                                                    to="/seller-central-checker/settings?tab=account-integration"
-                                                    className={() =>
-                                                        `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
-                                                            isSettingsPage && currentSettingsTab === 'account-integration'
-                                                                ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                                : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
-                                                        }`
-                                                    }
-                                                >
-                                                    <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                    Account Integration
-                                                </NavLink>
-                                            </motion.div>
-                                        )}
-                                        
-                                        {/* Plans & Billing - Available for non-AGENCY users */}
-                                        {/* {!isAgencyUser && (
-                                            <motion.div
-                                                initial={{ y: -10, opacity: 0 }}
-                                                animate={{ y: 0, opacity: 1 }}
-                                                exit={{ y: -10, opacity: 0 }}
-                                                transition={{ delay: 0.11, duration: 0.15 }}
-                                            >
-                                                <NavLink
-                                                    to="/seller-central-checker/settings?tab=plans-billing"
-                                                    className={() =>
-                                                        `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
-                                                            isSettingsPage && currentSettingsTab === 'plans-billing'
-                                                                ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                                : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
-                                                        }`
-                                                    }
-                                                >
-                                                    <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                    Plans & Billing
-                                                </NavLink>
-                                            </motion.div>
-                                        )} */}
-                                        {/* Support - Available for non-AGENCY users */}
-                                        {!isAgencyUser && (
-                                            <motion.div
-                                                initial={{ y: -10, opacity: 0 }}
-                                                animate={{ y: 0, opacity: 1 }}
-                                                exit={{ y: -10, opacity: 0 }}
-                                                transition={{ delay: 0.14, duration: 0.15 }}
-                                            >
-                                                <NavLink
-                                                    to="/seller-central-checker/settings?tab=support"
-                                                    className={() =>
-                                                        `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
-                                                            isSettingsPage && currentSettingsTab === 'support'
-                                                                ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                                : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
-                                                        }`
-                                                    }
-                                                >
-                                                    <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                    Support
-                                                </NavLink>
-                                            </motion.div>
-                                        )}
-
-                                        {/* Plans & Billing - Available for all users */}
-                                        <motion.div
-                                            initial={{ y: -10, opacity: 0 }}
-                                            animate={{ y: 0, opacity: 1 }}
-                                            exit={{ y: -10, opacity: 0 }}
-                                            transition={{ delay: 0.17, duration: 0.15 }}
-                                        >
-                                            <NavLink
-                                                to="/seller-central-checker/settings?tab=plans-billing"
-                                                className={() =>
-                                                    `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
-                                                        isSettingsPage && currentSettingsTab === 'plans-billing'
-                                                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
-                                                            : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'
-                                                    }`
-                                                }
-                                            >
-                                                <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                Plans & Billing
-                                            </NavLink>
-                                        </motion.div>
-
-                                        {/* Admin Section - Only for AGENCY users */}
-                                        {isAgencyUser && (
-                                            <>
-                                                {/* Admin Section Divider */}
-                                                <motion.div
-                                                    initial={{ y: -10, opacity: 0 }}
-                                                    animate={{ y: 0, opacity: 1 }}
-                                                    exit={{ y: -10, opacity: 0 }}
-                                                    transition={{ delay: 0.17, duration: 0.15 }}
-                                                    className="my-2"
-                                                >
-                                                    <div className="flex items-center gap-2 px-3 py-1">
-                                                        <div className="h-px bg-gradient-to-r from-purple-200 to-purple-300 flex-1"></div>
-                                                        <span className="text-[10px] font-semibold text-purple-600 uppercase tracking-wider">Admin</span>
-                                                        <div className="h-px bg-gradient-to-r from-purple-300 to-purple-200 flex-1"></div>
-                                                    </div>
-                                                </motion.div>
-
-                                                {/* Admin User Profile */}
-                                                <motion.div
-                                                    initial={{ y: -10, opacity: 0 }}
-                                                    animate={{ y: 0, opacity: 1 }}
-                                                    exit={{ y: -10, opacity: 0 }}
-                                                    transition={{ delay: 0.20, duration: 0.15 }}
-                                                >
-                                                    <NavLink
-                                                        to="/seller-central-checker/settings?tab=admin-user-profile"
-                                                        className={() =>
-                                                            `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
-                                                                isSettingsPage && currentSettingsTab === 'admin-user-profile'
-                                                                    ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-md shadow-purple-500/25'
-                                                                    : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-purple-600'
-                                                            }`
-                                                        }
-                                                    >
-                                                        <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                        Admin User Profile
-                                                    </NavLink>
-                                                </motion.div>
-
-
-
-                                                {/* Admin Account Integration */}
-                                                <motion.div
-                                                    initial={{ y: -10, opacity: 0 }}
-                                                    animate={{ y: 0, opacity: 1 }}
-                                                    exit={{ y: -10, opacity: 0 }}
-                                                    transition={{ delay: 0.24, duration: 0.15 }}
-                                                >
-                                                    <NavLink
-                                                        to="/seller-central-checker/settings?tab=admin-account-integration"
-                                                        className={() =>
-                                                            `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
-                                                                isSettingsPage && currentSettingsTab === 'admin-account-integration'
-                                                                    ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-md shadow-purple-500/25'
-                                                                    : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-purple-600'
-                                                            }`
-                                                        }
-                                                    >
-                                                        <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                        Admin Integrations
-                                                    </NavLink>
-                                                </motion.div>
-
-                                                {/* Admin Plans & Billing */}
-                                                <motion.div
-                                                    initial={{ y: -10, opacity: 0 }}
-                                                    animate={{ y: 0, opacity: 1 }}
-                                                    exit={{ y: -10, opacity: 0 }}
-                                                    transition={{ delay: 0.26, duration: 0.15 }}
-                                                >
-                                                    <NavLink
-                                                        to="/seller-central-checker/settings?tab=admin-plans-billing"
-                                                        className={() =>
-                                                            `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
-                                                                isSettingsPage && currentSettingsTab === 'admin-plans-billing'
-                                                                    ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-md shadow-purple-500/25'
-                                                                    : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-purple-600'
-                                                            }`
-                                                        }
-                                                    >
-                                                        <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                        Admin Billing
-                                                    </NavLink>
-                                                </motion.div>
-
-                                                {/* Admin Support */}
-                                                <motion.div
-                                                    initial={{ y: -10, opacity: 0 }}
-                                                    animate={{ y: 0, opacity: 1 }}
-                                                    exit={{ y: -10, opacity: 0 }}
-                                                    transition={{ delay: 0.28, duration: 0.15 }}
-                                                >
-                                                    <NavLink
-                                                        to="/seller-central-checker/settings?tab=admin-support"
-                                                        className={() =>
-                                                            `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300 ${
-                                                                isSettingsPage && currentSettingsTab === 'admin-support'
-                                                                    ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-md shadow-purple-500/25'
-                                                                    : 'text-gray-600 hover:bg-white hover:shadow-sm hover:text-purple-600'
-                                                            }`
-                                                        }
-                                                    >
-                                                        <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
-                                                        Admin Support
-                                                    </NavLink>
-                                                </motion.div>
-                                            </>
-                                        )}
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
+                            {(!isLiteUser || isPremiumLocked) && (
+                                <NavItem to="/seller-central-checker/profitibility-dashboard" icon={ChartLine} label="Profitibility" locked={isPremiumLocked} onNavigate={closeMenu} />
+                            )}
+                            {(!isLiteUser || isPremiumLocked) && (
+                                <NavItem to="/seller-central-checker/reimbursement-dashboard" icon={DollarSign} label="Reimbursement" locked={isPremiumLocked} onNavigate={closeMenu} />
+                            )}
+                            {(!isLiteUser || isPremiumLocked) && (
+                                <NavItem
+                                    to="/seller-central-checker/issues?tab=account"
+                                    icon={BadgeAlert}
+                                    label="Account Issues"
+                                    isActive={isIssuesPage && currentTab === 'account'}
+                                    locked={isPremiumLocked}
+                                    onNavigate={closeMenu}
+                                    count={accountIssuesCount}
+                                />
+                            )}
                         </div>
                     </div>
+
+                    {/* Ecommerce Calendar - Available for ALL users including LITE - HIDDEN */}
+                    {false && (
+                        <NavItem to="/seller-central-checker/ecommerce-calendar" icon={Calendar} label="Ecommerce Calendar" onNavigate={closeMenu} />
                     )}
+
+                    {/* History */}
+                    <div>
+                        <NavGroupLabel>History</NavGroupLabel>
+                        <div className="space-y-1">
+                            {(!isLiteUser || isPremiumLocked) && (
+                                <NavItem to="/seller-central-checker/account-history" icon={Clock8} label="Accounts History" locked={isPremiumLocked} onNavigate={closeMenu} />
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Book Consultation Button - Hidden for agency admin viewing client (kept as its own orange CTA accent) */}
+                {!isAgencyAdminViewingClient && (
+                <div className="px-3 mb-4">
+                    <NavLink
+                        to="/seller-central-checker/consultation"
+                        onClick={closeMenu}
+                        className="group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs cursor-pointer transition-all duration-300 border-2 border-orange-400 text-orange-400 hover:bg-gradient-to-r hover:from-orange-400 hover:to-amber-500 hover:text-black"
+                    >
+                        <Calendar className="w-3.5 h-3.5 flex-shrink-0 text-orange-400 group-hover:text-black transition-colors duration-300" />
+                        <span className="font-semibold flex-1">Need Help?</span>
+                        <div className="w-1.5 h-1.5 bg-orange-400 rounded-full animate-pulse group-hover:bg-yellow-300 transition-colors duration-300"></div>
+                    </NavLink>
+                </div>
+                )}
+
+                {/* Account & Settings - flat list like the other categories, no dropdown */}
+                {!isAgencyAdminViewingClient && (
+                <div className="px-3 mb-4">
+                    <NavGroupLabel>Account &amp; Settings</NavGroupLabel>
+                    <div className="space-y-1">
+                        <NavItem to="/seller-central-checker/settings?tab=profile" icon={User} label="User Profile" isActive={isSettingsPage && currentSettingsTab === 'profile'} onNavigate={closeMenu} />
+
+                        {/* Account Integration - Only for PRO users (not AGENCY) */}
+                        {!isLiteUser && !isAgencyUser && (
+                            <NavItem to="/seller-central-checker/settings?tab=account-integration" icon={Link2} label="Account Integration" isActive={isSettingsPage && currentSettingsTab === 'account-integration'} onNavigate={closeMenu} />
+                        )}
+
+                        {/* Support - Available for non-AGENCY users */}
+                        {!isAgencyUser && (
+                            <NavItem to="/seller-central-checker/settings?tab=support" icon={LifeBuoy} label="Support" isActive={isSettingsPage && currentSettingsTab === 'support'} onNavigate={closeMenu} />
+                        )}
+
+                        <NavItem to="/seller-central-checker/settings?tab=plans-billing" icon={CreditCard} label="Plans & Billing" isActive={isSettingsPage && currentSettingsTab === 'plans-billing'} onNavigate={closeMenu} />
+
+                        {/* Admin Section - Only for AGENCY users */}
+                        {isAgencyUser && (
+                            <>
+                                <div className="flex items-center gap-2 px-3 py-1 mt-2">
+                                    <div className="h-px flex-1" style={{ background: COLORS.border }}></div>
+                                    <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: COLORS.accent }}>Admin</span>
+                                    <div className="h-px flex-1" style={{ background: COLORS.border }}></div>
+                                </div>
+                                <NavItem to="/seller-central-checker/settings?tab=admin-user-profile" icon={User} label="Admin User Profile" isActive={isSettingsPage && currentSettingsTab === 'admin-user-profile'} onNavigate={closeMenu} />
+                                <NavItem to="/seller-central-checker/settings?tab=admin-account-integration" icon={Link2} label="Admin Integrations" isActive={isSettingsPage && currentSettingsTab === 'admin-account-integration'} onNavigate={closeMenu} />
+                                <NavItem to="/seller-central-checker/settings?tab=admin-plans-billing" icon={CreditCard} label="Admin Billing" isActive={isSettingsPage && currentSettingsTab === 'admin-plans-billing'} onNavigate={closeMenu} />
+                                <NavItem to="/seller-central-checker/settings?tab=admin-support" icon={LifeBuoy} label="Admin Support" isActive={isSettingsPage && currentSettingsTab === 'admin-support'} onNavigate={closeMenu} />
+                            </>
+                        )}
+                    </div>
+                </div>
+                )}
+
+                {/* Logout - Hidden for agency admin viewing client */}
+                {!isAgencyAdminViewingClient && (
+                <div className="px-3 mb-2">
+                    <button
+                        className='group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-colors w-full'
+                        style={{ color: COLORS.fix, borderTop: `1px solid ${COLORS.border}`, paddingTop: '10px' }}
+                        onClick={(e)=>logoutUser(e)}
+                    >
+                        <LogOut className="w-3.5 h-3.5" style={{ color: COLORS.fix }} />
+                        <span className="font-medium">Log Out</span>
+                        {loader && <BeatLoader color={COLORS.fix} size={6} />}
+                    </button>
+                </div>
+                )}
+            </div>
+
+            {/* Account/plan identity box - pinned at the very bottom, unlike the nav above */}
+            <div className="flex-shrink-0 flex items-center gap-2.5 px-4 py-3.5" style={{ borderTop: `1px solid ${COLORS.border}` }}>
+                <div
+                    className="w-[30px] h-[30px] rounded-lg flex-shrink-0 flex items-center justify-center text-xs font-semibold"
+                    style={{ background: COLORS.surfaceElevated, border: `1px solid ${COLORS.border}`, color: COLORS.textSecondary }}
+                >
+                    {getInitials(user?.brand) || 'SQ'}
+                </div>
+                <div className="flex-1 min-w-0">
+                    <div className="text-[13px] font-medium truncate" style={{ color: COLORS.textPrimary }}>{user?.brand || 'Your Brand'}</div>
+                    <div className="text-[11px]" style={{ color: COLORS.textMuted }}>
+                        {PLAN_LABELS[userPlan] || userPlan}
+                        {nextBillingDate && ` · renews ${new Date(nextBillingDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
+                    </div>
                 </div>
             </div>
-
-            {/* Logout Section - Hidden for agency admin viewing client */}
-            {!isAgencyAdminViewingClient && (
-            <div className="px-4 py-3 border-t border-gray-200/50 bg-gradient-to-r from-gray-50/50 to-white/50 flex-shrink-0">
-                <button 
-                    className='group flex items-center gap-2 px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-300 text-red-600 hover:bg-red-50 hover:shadow-md hover:shadow-red-200/50 hover:scale-[1.01] w-full'
-                    onClick={(e)=>logoutUser(e)}
-                >
-                    <div className="p-1 rounded-lg bg-red-50 group-hover:bg-red-100 transition-colors duration-300">
-                        <LogOut className="w-3.5 h-3.5 text-red-600 opacity-80" />
-                    </div>
-                    <span className="font-medium">Log Out</span>
-                    {loader && <BeatLoader color="#dc2626" size={6} />}
-                </button>
-            </div>
-            )}
         </aside>
         </>
     );

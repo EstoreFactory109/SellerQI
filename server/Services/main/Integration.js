@@ -100,6 +100,11 @@ const { storeIssuesDataFromDashboard } = require('../Calculations/IssuesDataServ
 // Product Issues Service for per-product issue counts
 const { storeProductIssuesFromDashboardData } = require('../Calculations/ProductIssuesService.js');
 
+// Top Opportunities (AI-ranked money recovery) — so a brand-new account gets the real
+// AI-selected top 5-6 immediately, instead of waiting for the Sunday job.
+const { calculateAndStoreTopOpportunities } = require('../AI/TopOpportunitiesService.js');
+const { calculateAndStoreTopProducts } = require('../AI/TopProductsService.js');
+
 class Integration {
     /**
      * Main integration function to fetch all SP-API and Amazon Ads data
@@ -353,9 +358,12 @@ class Integration {
                 }
             }
 
-            // Always add account history regardless of success
+            // Always add account history regardless of success, but only run the paid
+            // AI ranking when the fetch actually succeeded (serviceSummary is computed above).
             try {
-                await this.addNewAccountHistory(userId, Country, Region);
+                await this.addNewAccountHistory(userId, Country, Region, {
+                    runAiRanking: serviceSummary.overallSuccess
+                });
             } catch (historyError) {
                 logger.error("Error adding account history in Integration.getSpApiData", {
                     error: historyError.message,
@@ -442,9 +450,11 @@ class Integration {
             }
 
             // Still try to add account history even if there was an error
-            // This ensures history is recorded even on failed fetches
+            // This ensures history is recorded even on failed fetches.
+            // The AI ranking is skipped here — a hard throw means the issue data it
+            // would read is untrustworthy, and we don't want to pay for OpenAI on it.
             try {
-                await this.addNewAccountHistory(userId, Country, Region);
+                await this.addNewAccountHistory(userId, Country, Region, { runAiRanking: false });
                 logger.info("Account history added after unexpected error", { userId, country: Country, region: Region });
             } catch (historyError) {
                 logger.error("Error adding account history after unexpected error", {
@@ -2122,9 +2132,21 @@ class Integration {
     /**
      * Add new account history
      * Now uses local calculation service instead of external calculation server
+     *
+     * @param {string} userId
+     * @param {string} country
+     * @param {string} region
+     * @param {Object} [options]
+     * @param {boolean} [options.runAiRanking=true] - Whether to generate the AI-ranked
+     *   Top Opportunities. Set false when the integration that triggered this failed:
+     *   this function is deliberately called even on failure paths (to record history),
+     *   but the AI step makes a paid OpenAI call and reads issue data that a failed
+     *   fetch may have left stale or incomplete. Everything else here is local
+     *   computation and always runs.
      */
-    static async addNewAccountHistory(userId, country, region) {
-        logger.info("addNewAccountHistory starting", { userId, country, region });
+    static async addNewAccountHistory(userId, country, region, options = {}) {
+        const { runAiRanking = true } = options;
+        logger.info("addNewAccountHistory starting", { userId, country, region, runAiRanking });
 
         try {
             // Validate input parameters
@@ -2332,6 +2354,104 @@ class Integration {
                     country,
                     region
                 });
+            }
+
+            // AI-ranked top 5-6 money-recovery actions (Dashboard "Top things to fix").
+            // MUST run after storeIssuesDataFromDashboard above, because the ranking
+            // reads the stored issue arrays (and their recoverable $ amounts) back out
+            // of IssuesDataChunks. Same ordering as the Sunday job (runOrder 102).
+            //
+            // Makes one OpenAI call (~1.5k tokens, a few seconds) — negligible next to
+            // the SP-API report fetches this flow already does, and it degrades to a
+            // deterministic dollar-ranked list if OpenAI is unavailable.
+            //
+            // Skipped when runAiRanking is false: this function is invoked on failure
+            // paths too, and we don't want a repeatedly-failing account to keep paying
+            // for OpenAI calls over data the failed fetch left incomplete.
+            if (!runAiRanking) {
+                logger.info("Skipping AI ranking (runAiRanking=false — integration did not succeed)", {
+                    userId,
+                    country,
+                    region
+                });
+            } else {
+                try {
+                    const topOpportunitiesResult = await calculateAndStoreTopOpportunities(
+                        userId,
+                        country,
+                        region,
+                        'integration'
+                    );
+
+                    if (topOpportunitiesResult.success) {
+                        logger.info("Top opportunities stored successfully", {
+                            userId,
+                            country,
+                            region,
+                            selected: topOpportunitiesResult.data?.opportunities?.length || 0,
+                            totalEstimatedRecovery: topOpportunitiesResult.data?.totalEstimatedRecovery,
+                            usedFallback: topOpportunitiesResult.data?.usedFallback,
+                            skippedByThrottle: topOpportunitiesResult.skippedByThrottle || false
+                        });
+                    } else {
+                        logger.warn("Failed to store top opportunities", {
+                            userId,
+                            country,
+                            region,
+                            error: topOpportunitiesResult.error
+                        });
+                    }
+                } catch (topOpportunitiesError) {
+                    // Don't fail the entire process if the AI ranking fails
+                    logger.error("Error storing top opportunities", {
+                        error: topOpportunitiesError.message,
+                        userId,
+                        country,
+                        region
+                    });
+                }
+
+                // The product-level view of the same tasks. Runs right after the
+                // issue-level one so both snapshots describe the same task state —
+                // and so a brand-new account gets the AI-narrated version on its
+                // FIRST fetch rather than falling back to template copy until the
+                // next scheduled run.
+                try {
+                    const topProductsResult = await calculateAndStoreTopProducts(
+                        userId,
+                        country,
+                        region,
+                        'integration'
+                    );
+
+                    if (topProductsResult.success) {
+                        logger.info("Top products stored successfully", {
+                            userId,
+                            country,
+                            region,
+                            selected: topProductsResult.data?.products?.length || 0,
+                            potentialProfitImpact: topProductsResult.data?.potentialProfitImpact,
+                            capitalTiedUp: topProductsResult.data?.capitalTiedUp,
+                            usedFallback: topProductsResult.data?.usedFallback,
+                            skippedByThrottle: topProductsResult.skippedByThrottle || false
+                        });
+                    } else {
+                        logger.warn("Failed to store top products", {
+                            userId,
+                            country,
+                            region,
+                            error: topProductsResult.error
+                        });
+                    }
+                } catch (topProductsError) {
+                    // Same rule: never fail the integration over the AI step.
+                    logger.error("Error storing top products", {
+                        error: topProductsError.message,
+                        userId,
+                        country,
+                        region
+                    });
+                }
             }
 
             logger.info("addNewAccountHistory completed successfully", { userId, country, region });
@@ -3667,9 +3787,11 @@ class Integration {
                 }
             }
 
-            // Add account history
+            // Add account history. runAiRanking defaults to true here on purpose:
+            // reaching the Finalize phase means handleSuccess() ran, so this is the
+            // success path of the phased integration flow.
             try {
-                await this.addNewAccountHistory(userId, Country, Region);
+                await this.addNewAccountHistory(userId, Country, Region, { runAiRanking: true });
                 // Log success for add account history
                 if (sessionId) {
                     try {

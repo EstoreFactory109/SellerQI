@@ -141,7 +141,7 @@ const LeftNavSection = () => {
     const dropdownItemClass = "flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm font-medium transition-all duration-300";
 
     return (
-        <aside className="h-screen w-[240px] xl:w-[280px] flex-shrink-0 border-r border-[#30363d] font-roboto bg-[#161b22] hidden lg:flex lg:flex-col overflow-hidden">
+        <aside className="h-screen w-[252px] flex-shrink-0 border-r border-[#30363d] font-roboto bg-[#161b22] hidden lg:flex lg:flex-col overflow-hidden">
             {/* Main Container - Top and Bottom Sections */}
             <div className="flex flex-col justify-between h-full min-h-0">
                 {/* Top Section - Logo and Navigation */}

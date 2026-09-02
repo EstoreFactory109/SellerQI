@@ -12,6 +12,8 @@ const { generateAccessToken } = require('../Sp_API/GenerateTokens.js');
 const authCache = require('../../utils/authCache.js');
 const getTemporaryCredentials = require('../../utils/GenerateTemporaryCredentials.js');
 const logger = require('../../utils/Logger.js');
+const { calculateAndStoreTopOpportunities } = require('../AI/TopOpportunitiesService.js');
+const { calculateAndStoreTopProducts } = require('../AI/TopProductsService.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const { URIs, marketplaceConfig, spapiRegions } = require('../../controllers/config/config.js');
 const tokenManager = require('../../utils/TokenManager.js');
@@ -22,6 +24,14 @@ const { saveListingItemsData } = require('../products/ListingItemsService.js');
 const { getProductWiseSponsoredAdsData } = require('../amazon-ads/ProductWiseSponsoredAdsService.js');
 const { GetListingItemIssuesForInactive } = require('../Sp_API/GetListingItemsIssues.js');
 const limit = require('promise-limit')(3); // Limit to 3 concurrent promises
+
+// Sunday safety net for the AI views: regenerate only if the stored view is older
+// than this. It must EXCEED the widest gap between a rebuild and the following sweep,
+// or the net re-generates views that are already current. That widest gap is 144h (an
+// account rebuilding on Monday); a Sunday rebuild never reaches the net because it
+// takes the tasksRebuilt branch in the same run. 168h clears 144h with a day to spare
+// while still catching an account whose weekly rebuild stopped landing.
+const STALE_AI_VIEW_HOURS = Number(process.env.AI_VIEW_STALE_HOURS) || 24 * 7;
 const DataFetchTrackingService = require('../system/DataFetchTrackingService.js');
 const { runFbaInventorySyncForMarketplace } = require('../Sp_API/FbaInventoryStorageService.js');
 // Incremental dashboard slice writes — additive, non-fatal (see DashboardSliceService).
@@ -285,7 +295,11 @@ class ScheduledIntegration {
 
             // Always add account history regardless of success (same as Integration.js)
             try {
-                await this.addNewAccountHistory(userId, Country, Region);
+                const historyResult = await this.addNewAccountHistory(userId, Country, Region);
+                await this.refreshAiViews(userId, Country, Region, {
+                    tasksRebuilt: historyResult?.tasksRebuilt === true,
+                    dayOfWeek
+                });
             } catch (historyError) {
                 logger.error("Error adding account history in ScheduledIntegration", {
                     error: historyError.message,
@@ -2212,6 +2226,66 @@ class ScheduledIntegration {
     }
 
     /**
+     * Regenerate the two stored AI views (top opportunities, top products) after a
+     * scheduled run has written tasks. Call this from every path that rebuilds tasks —
+     * both the phased FINALIZE phase (the live path) and the legacy monolithic run.
+     *
+     * These cannot be ScheduleConfig batch-5 services: task refresh happens after
+     * fetchScheduledApiData completes, so a batch-5 entry would narrate the previous
+     * cycle's tasks — and right after weekly renewal, tasks that no longer exist.
+     *
+     * The trigger is the task REBUILD, not a weekday. Task renewal is a rolling
+     * per-account 7-day timer, so it lands on whatever day that account's timer hits;
+     * across production accounts it is spread over every weekday, with only a handful
+     * on Sunday. A Sunday-only job therefore left most accounts' views describing tasks
+     * renewal had already deleted, for up to six days. Keying off the rebuild holds the
+     * cost at one generation per account per week (verified against real renewal dates)
+     * while moving it to the day the underlying tasks actually change.
+     *
+     * Sunday stays as a safety net for accounts whose weekly rebuild stopped landing,
+     * but only regenerates a view already older than STALE_AI_VIEW_HOURS — otherwise
+     * every account would generate on Sunday too, doubling the spend this guards.
+     *
+     * Never throws: an AI failure must not fail the scheduled run.
+     */
+    static async refreshAiViews(userId, Country, Region, { tasksRebuilt, dayOfWeek }) {
+        if (!tasksRebuilt && dayOfWeek !== 0) return;
+
+        // 0 waives the service-level throttle, whose premise — nothing changed since
+        // the last run — is exactly false at renewal.
+        const minIntervalHours = tasksRebuilt ? 0 : STALE_AI_VIEW_HOURS;
+        logger.info('Refreshing AI views (scheduled)', {
+            userId, country: Country, region: Region,
+            reason: tasksRebuilt ? 'tasks rebuilt' : 'sunday stale-view check',
+            minIntervalHours
+        });
+
+        for (const step of [
+            { name: 'top opportunities', run: calculateAndStoreTopOpportunities },
+            { name: 'top products', run: calculateAndStoreTopProducts }
+        ]) {
+            try {
+                const result = await step.run(userId, Country, Region, 'schedule', { minIntervalHours });
+                if (result.success) {
+                    logger.info(`Stored ${step.name} (scheduled)`, {
+                        userId, country: Country, region: Region,
+                        usedFallback: result.data?.usedFallback,
+                        skippedByThrottle: result.skippedByThrottle || false
+                    });
+                } else {
+                    logger.warn(`Failed to store ${step.name} (scheduled)`, {
+                        userId, country: Country, region: Region, error: result.error
+                    });
+                }
+            } catch (aiError) {
+                logger.error(`Error storing ${step.name} (scheduled)`, {
+                    error: aiError.message, userId, country: Country, region: Region
+                });
+            }
+        }
+    }
+
+    /**
      * Add new account history
      * Same implementation as Integration.js
      * Uses local calculation service instead of external calculation server
@@ -2313,7 +2387,11 @@ class ScheduledIntegration {
             // First-time integration (Integration.js) still calculates them immediately.
 
             logger.info("addNewAccountHistory completed successfully (scheduled)", { userId, country, region });
-            return addAccountHistoryData;
+            // `tasksRebuilt` tells the caller whether analyseData replaced the whole
+            // task set (weekly renewal) rather than only appending new tasks — the
+            // signal the AI views key off. Wrapped rather than returned bare so the
+            // history document stays available.
+            return { history: addAccountHistoryData, tasksRebuilt: calculationResult.tasksRebuilt === true };
 
         } catch (error) {
             logger.error("Error in addNewAccountHistory (scheduled)", {
@@ -4237,6 +4315,13 @@ class ScheduledIntegration {
                 const { analyseData } = require('../Calculations/DashboardCalculation.js');
                 if (analysisResult.status === 200 && analysisResult.message) {
                     const calcResult = await analyseData(analysisResult.message, userId);
+                    // analyseData is what rebuilds tasks, so this is where the derived AI
+                    // views have to be refreshed — this phased path, not the legacy
+                    // monolithic run, is what production actually executes.
+                    await this.refreshAiViews(userId, Country, Region, {
+                        tasksRebuilt: calcResult?.tasksRebuilt === true,
+                        dayOfWeek: phaseData.dayOfWeek !== undefined ? phaseData.dayOfWeek : new Date().getDay()
+                    });
                     if (calcResult?.dashboardData) {
                         const dd = calcResult.dashboardData;
                         const totalIssues = (dd.TotalRankingerrors || 0) + (dd.totalErrorInConversion || 0) +

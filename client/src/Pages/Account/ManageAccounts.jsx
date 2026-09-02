@@ -112,20 +112,31 @@ const mockUsers = [
 
 const ManageAccounts = () => {
   const navigate = useNavigate();
+
+  // Helper to get initial filter values from localStorage
+  const getInitialFilterValue = (key, defaultValue) => {
+    try {
+      const saved = localStorage.getItem(`manageAccounts_${key}`);
+      return saved ? JSON.parse(saved) : defaultValue;
+    } catch {
+      return defaultValue;
+    }
+  };
+
   const [currentPage, setCurrentPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState('all');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [spApiFilter, setSpApiFilter] = useState('all'); // 'all', 'connected', 'not-connected'
-  const [adsFilter, setAdsFilter] = useState('all'); // 'all', 'connected', 'not-connected'
+  const [filterType, setFilterType] = useState(getInitialFilterValue('filterType', 'all'));
+  const [startDate, setStartDate] = useState(getInitialFilterValue('startDate', ''));
+  const [endDate, setEndDate] = useState(getInitialFilterValue('endDate', ''));
+  const [spApiFilter, setSpApiFilter] = useState(getInitialFilterValue('spApiFilter', 'all')); // 'all', 'connected', 'not-connected'
+  const [adsFilter, setAdsFilter] = useState(getInitialFilterValue('adsFilter', 'all')); // 'all', 'connected', 'not-connected'
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [stats, setStats] = useState(null);
   const [countryStats, setCountryStats] = useState(null); // { countries: [{country, count}], uncategorized } - fetched once, not filter-driven
   const [countryStatsLoading, setCountryStatsLoading] = useState(true);
-  const [statusCardFilter, setStatusCardFilter] = useState('all'); // 'all' | 'paid' | 'trial' | 'expired' | 'cancelled' - driven by stat cards
+  const [statusCardFilter, setStatusCardFilter] = useState(getInitialFilterValue('statusCardFilter', 'all')); // 'all' | 'paid' | 'trial' | 'expired' | 'cancelled' - driven by stat cards
   const [pagination, setPagination] = useState({ currentPage: 1, totalPages: 1, totalCount: 0, limit: ITEMS_PER_PAGE });
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const isFirstFilterRun = useRef(true);
@@ -219,6 +230,31 @@ const ManageAccounts = () => {
       ? { connected: true, label: 'Connected', color: 'text-green-400', bg: 'bg-green-500/10' }
       : { connected: false, label: 'Not Connected', color: 'text-red-400', bg: 'bg-red-500/10' };
   };
+
+  // Persist filter values to localStorage
+  useEffect(() => {
+    localStorage.setItem('manageAccounts_filterType', JSON.stringify(filterType));
+  }, [filterType]);
+
+  useEffect(() => {
+    localStorage.setItem('manageAccounts_startDate', JSON.stringify(startDate));
+  }, [startDate]);
+
+  useEffect(() => {
+    localStorage.setItem('manageAccounts_endDate', JSON.stringify(endDate));
+  }, [endDate]);
+
+  useEffect(() => {
+    localStorage.setItem('manageAccounts_spApiFilter', JSON.stringify(spApiFilter));
+  }, [spApiFilter]);
+
+  useEffect(() => {
+    localStorage.setItem('manageAccounts_adsFilter', JSON.stringify(adsFilter));
+  }, [adsFilter]);
+
+  useEffect(() => {
+    localStorage.setItem('manageAccounts_statusCardFilter', JSON.stringify(statusCardFilter));
+  }, [statusCardFilter]);
 
   // Debounce free-text search inputs before they trigger a backend request;
   // reset to page 1 alongside the debounced value so only one fetch fires per change.

@@ -21,6 +21,7 @@ const FinanceEngine = require('./FinanceEngine.js');
 const AdsEngine = require('./AdsEngine.js');
 const FinanceDashboardReadService = require('../../../Finance/FinanceDashboardReadService.js');
 const PPCCampaignAnalysisService = require('../../../Calculations/PPCCampaignAnalysisService.js');
+const TaskOpportunityGroupsService = require('../../../Calculations/TaskOpportunityGroupsService.js');
 const DataFetchTracking = require('../../../../models/system/DataFetchTrackingModel.js');
 
 // ── SECTION 2 — Detection ──
@@ -335,6 +336,70 @@ function rankAllIssues(finance, ads, crossDomain) {
   });
 }
 
+// ── Stored-opportunity enrichment ──
+//
+// rankAllIssues covers finance + ads only, from live context objects. Inventory
+// and Buy Box money was entirely missing here, even though those dollars are
+// already computed and stored per-issue (see RecoverableAmountUtils.js and
+// OpportunityRankingService.js).
+//
+// We pull in ONLY the categories rankAllIssues doesn't already reason about
+// (inventory, conversion/Buy Box). Ads and profitability are deliberately
+// excluded to avoid double-counting the same money the rules above already
+// report from live context.
+const STORED_CATEGORIES_TO_MERGE = ['inventory', 'conversion'];
+
+function severityForAmount(amount) {
+  if (amount >= 500) return 'critical';
+  if (amount >= 100) return 'high';
+  if (amount > 0) return 'medium';
+  return 'low';
+}
+
+/**
+ * Map task-derived opportunity groups into this engine's issue shape.
+ * @param {Array<Object>} candidates - TaskOpportunityGroupsService groups
+ * @returns {Array<Object>}
+ */
+function mapStoredOpportunitiesToIssues(candidates) {
+  return (candidates || [])
+    .filter((c) => STORED_CATEGORIES_TO_MERGE.includes(c.category))
+    .map((c) => ({
+      domain: c.category,
+      type: c.issueType,
+      severity: severityForAmount(c.totalAmount),
+      // Losses are negative in this engine's convention (see rankAllIssues).
+      profitImpact: -(c.totalAmount || 0),
+      title: c.title,
+      description: c.totalAmount > 0
+        ? `${c.count} item(s) affected — about $${c.totalAmount.toFixed(2)}${c.confidence === 'estimated' ? ' (estimated)' : ''}`
+        : `${c.count} item(s) affected`,
+      action: c.action,
+    }));
+}
+
+/**
+ * rankAllIssues + the stored inventory/Buy Box opportunities, re-sorted together.
+ * @param {Object|null} finance
+ * @param {Object|null} ads
+ * @param {Object} crossDomain
+ * @param {Array<Object>} storedCandidates - TaskOpportunityGroupsService groups
+ * @returns {Array<Object>}
+ */
+function rankAllIssuesEnriched(finance, ads, crossDomain, storedCandidates = []) {
+  const combined = [
+    ...rankAllIssues(finance, ads, crossDomain),
+    ...mapStoredOpportunitiesToIssues(storedCandidates),
+  ];
+
+  return combined.sort((a, b) => {
+    if (SEVERITY_ORDER[a.severity] !== SEVERITY_ORDER[b.severity]) {
+      return SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity];
+    }
+    return Math.abs(b.profitImpact) - Math.abs(a.profitImpact);
+  });
+}
+
 // ── FUNCTION 4 — buildActionPlan ──
 
 /**
@@ -455,8 +520,10 @@ function buildFocusResponse(actionPlan, rankedIssues, dateRange) {
 }
 
 /** 5. Complete summary — health grade + finance + ads + cross-domain + top 3 issues. */
-function buildCompleteSummaryResponse(finance, ads, crossDomain, healthScore, dateRange) {
-  const rankedIssues = rankAllIssues(finance, ads, crossDomain);
+function buildCompleteSummaryResponse(finance, ads, crossDomain, healthScore, dateRange, precomputedRankedIssues = null) {
+  // Reuse the caller's enriched list when provided so the summary can't disagree
+  // with the action plan; fall back to finance+ads only for legacy callers.
+  const rankedIssues = precomputedRankedIssues || rankAllIssues(finance, ads, crossDomain);
   return {
     type: 'strategy',
     strategyType: 'complete_summary',
@@ -604,7 +671,21 @@ async function handleStrategyQuery(interpretation, userContext, requestDateRange
     // b2) Shared analyses across both domains.
     const crossDomain = buildCrossDomainInsights(finance, ads);
     const healthScore = buildHealthScore(finance, ads);
-    const rankedIssues = rankAllIssues(finance, ads, crossDomain);
+
+    // Pull stored inventory/Buy Box opportunities so chat and the Top
+    // Opportunities view can't disagree about the top money issues.
+    // Non-fatal — a failure here just means we fall back to finance + ads only.
+    let storedCandidates = [];
+    try {
+      const ranked = await TaskOpportunityGroupsService.getTaskOpportunityGroups(
+        userContext.userId, userContext.country, userContext.region
+      );
+      if (ranked.success) storedCandidates = ranked.groups;
+    } catch (err) {
+      logger.warn('[GeneralStrategyEngine] stored opportunity enrichment failed', { message: err.message });
+    }
+
+    const rankedIssues = rankAllIssuesEnriched(finance, ads, crossDomain, storedCandidates);
     const actionPlan = buildActionPlan(rankedIssues);
 
     // c) Classify the specific strategy question.
@@ -635,7 +716,7 @@ async function handleStrategyQuery(interpretation, userContext, requestDateRange
         result = buildFocusResponse(actionPlan, rankedIssues, dateRange);
         break;
       case 'complete_summary':
-        result = buildCompleteSummaryResponse(finance, ads, crossDomain, healthScore, dateRange);
+        result = buildCompleteSummaryResponse(finance, ads, crossDomain, healthScore, dateRange, rankedIssues);
         break;
       case 'is_it_worth':
         result = buildAdWorthResponse(finance, ads, crossDomain, dateRange);
@@ -647,7 +728,7 @@ async function handleStrategyQuery(interpretation, userContext, requestDateRange
         result = buildHealthCheckResponse(finance, ads, healthScore, dateRange);
         break;
       default:
-        result = buildCompleteSummaryResponse(finance, ads, crossDomain, healthScore, dateRange);
+        result = buildCompleteSummaryResponse(finance, ads, crossDomain, healthScore, dateRange, rankedIssues);
     }
 
     // Attach the shared analyses + raw contexts so the narrator/frontend always

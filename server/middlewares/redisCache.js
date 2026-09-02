@@ -103,16 +103,19 @@ const analyseDataCache = (cacheDurationInSeconds = 3600, pageType = 'dashboard')
                 const page = parseInt(req.query.page) || 1;
                 const limit = parseInt(req.query.limit) || 20;
                 const search = (req.query.search || '').toString().trim();
-                
+
                 // Only cache page 1 - Load More (page > 1) bypasses cache
                 // IMPORTANT: when search is present, bypass cache to avoid mixing queries
                 if (search) {
                     logger.info(`[v3] Skipping cache for ${pageType} (search query present)`);
                     return next();
                 }
-                
+
                 if (page === 1) {
-                    cacheKey = `analyse_data:${pageType}:${userId}:${country}:${region}:${adminId || 'null'}:page${page}:limit${limit}`;
+                    // Suffix versions the response shape (image/issues/sales fields added to these
+                    // endpoints). Bump it whenever a field is added/removed so old cached JSON is
+                    // never served under the new key - it just goes unused and expires via TTL.
+                    cacheKey = `analyse_data:${pageType}:${userId}:${country}:${region}:${adminId || 'null'}:page${page}:limit${limit}:v3`;
                 } else {
                     logger.info(`[v3] Skipping cache for ${pageType} page ${page}`);
                     return next();
@@ -264,7 +267,7 @@ const clearAnalyseCache = async (userId, country, region, adminId = null) => {
         const redisClient = getRedisClient();
         
         // List of all page types that are cached
-        const pageTypes = ['navbar', 'dashboard', 'profitability', 'profitability-metrics', 'profitability-chart', 'profitability-issues-summary', 'ppc', 'issues', 'issues-by-product', 'keyword-analysis', 'reimbursement', 'inventory', 'your-products', 'your-products-v2-initial', 'your-products-v2-products', 'your-products-v3-summary', 'your-products-v3-active', 'your-products-v3-inactive', 'your-products-v3-incomplete', 'your-products-v3-without-aplus', 'your-products-v3-not-targeted-in-ads', 'asin-wise-sales', 'ppc-metrics-latest', 'ppc-metrics-graph', 'ppc-metrics-history', 'ppc-units-sold-latest', 'ppc-units-sold-summary', 'ppc-summary', 'ppc-tab-counts'];
+        const pageTypes = ['navbar', 'dashboard', 'profitability', 'profitability-metrics', 'profitability-chart', 'profitability-issues-summary', 'ppc', 'issues', 'issues-by-product', 'keyword-analysis', 'reimbursement', 'inventory', 'your-products', 'your-products-v2-initial', 'your-products-v2-products', 'your-products-v3-summary', 'your-products-v3-active', 'your-products-v3-inactive', 'your-products-v3-incomplete', 'your-products-v3-without-aplus', 'your-products-v3-not-targeted-in-ads', 'asin-wise-sales', 'ppc-metrics-latest', 'ppc-metrics-graph', 'ppc-metrics-history', 'ppc-units-sold-latest', 'ppc-units-sold-summary', 'ppc-summary', 'ppc-tab-counts', 'top-opportunities'];
         
         // Clear cache for all page types
         const clearPromises = pageTypes.map(pageType => {

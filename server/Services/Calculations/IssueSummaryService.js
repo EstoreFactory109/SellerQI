@@ -19,6 +19,7 @@ const logger = require('../../utils/Logger.js');
 const IssueSummary = require('../../models/system/IssueSummaryModel.js');
 const { AnalyseService } = require('../main/Analyse.js');
 const { analyseData } = require('./DashboardCalculation.js');
+const { sumRecoverableAmounts } = require('./RecoverableAmountUtils.js');
 
 /**
  * Calculate and store issue summary for a user
@@ -86,18 +87,29 @@ async function calculateAndStoreIssueSummary(userId, country, region, source = '
         const totalProfitabilityErrors = dashboardData.totalProfitabilityErrors || 0;
         const totalSponsoredAdsErrors = dashboardData.totalSponsoredAdsErrors || 0;
         const totalInventoryErrors = dashboardData.totalInventoryErrors || 0;
-        
+
         // Calculate total issues (same formula as Dashboard.jsx)
-        const totalIssues = totalProfitabilityErrors + 
-                           totalSponsoredAdsErrors + 
-                           totalInventoryErrors + 
-                           totalRankingErrors + 
-                           totalConversionErrors + 
+        const totalIssues = totalProfitabilityErrors +
+                           totalSponsoredAdsErrors +
+                           totalInventoryErrors +
+                           totalRankingErrors +
+                           totalConversionErrors +
                            totalAccountErrors;
-        
+
         const numberOfProductsWithIssues = dashboardData.productWiseError?.length || 0;
         const totalActiveProducts = dashboardData.ActiveProducts?.length || 0;
-        
+
+        const totalProfitabilityRecoverableAmount = dashboardData.totalProfitabilityRecoverableAmount || 0;
+        const totalSponsoredAdsRecoverableAmount = dashboardData.totalSponsoredAdsRecoverableAmount || 0;
+        const totalInventoryRecoverableAmount = dashboardData.totalInventoryRecoverableAmount || 0;
+        const totalConversionRecoverableAmount = dashboardData.totalConversionRecoverableAmount || 0;
+        const totalRecoverableAmount = sumRecoverableAmounts({
+            totalProfitabilityRecoverableAmount,
+            totalSponsoredAdsRecoverableAmount,
+            totalInventoryRecoverableAmount,
+            totalConversionRecoverableAmount
+        });
+
         // Step 4: Store in IssueSummary model
         const issueData = {
             totalIssues,
@@ -107,6 +119,11 @@ async function calculateAndStoreIssueSummary(userId, country, region, source = '
             totalRankingErrors,
             totalConversionErrors,
             totalAccountErrors,
+            totalProfitabilityRecoverableAmount,
+            totalSponsoredAdsRecoverableAmount,
+            totalInventoryRecoverableAmount,
+            totalConversionRecoverableAmount,
+            totalRecoverableAmount,
             numberOfProductsWithIssues,
             totalActiveProducts
         };
@@ -353,16 +370,27 @@ async function storeIssueSummaryFromDashboardData(userId, country, region, dashb
         const totalSponsoredAdsErrors = dashboardData.totalSponsoredAdsErrors || 0;
         const totalInventoryErrors = dashboardData.totalInventoryErrors || 0;
         
-        const totalIssues = totalProfitabilityErrors + 
-                           totalSponsoredAdsErrors + 
-                           totalInventoryErrors + 
-                           totalRankingErrors + 
-                           totalConversionErrors + 
+        const totalIssues = totalProfitabilityErrors +
+                           totalSponsoredAdsErrors +
+                           totalInventoryErrors +
+                           totalRankingErrors +
+                           totalConversionErrors +
                            totalAccountErrors;
-        
+
         const numberOfProductsWithIssues = dashboardData.productWiseError?.length || 0;
         const totalActiveProducts = dashboardData.ActiveProducts?.length || 0;
-        
+
+        const totalProfitabilityRecoverableAmount = dashboardData.totalProfitabilityRecoverableAmount || 0;
+        const totalSponsoredAdsRecoverableAmount = dashboardData.totalSponsoredAdsRecoverableAmount || 0;
+        const totalInventoryRecoverableAmount = dashboardData.totalInventoryRecoverableAmount || 0;
+        const totalConversionRecoverableAmount = dashboardData.totalConversionRecoverableAmount || 0;
+        const totalRecoverableAmount = sumRecoverableAmounts({
+            totalProfitabilityRecoverableAmount,
+            totalSponsoredAdsRecoverableAmount,
+            totalInventoryRecoverableAmount,
+            totalConversionRecoverableAmount
+        });
+
         const issueData = {
             totalIssues,
             totalProfitabilityErrors,
@@ -371,6 +399,11 @@ async function storeIssueSummaryFromDashboardData(userId, country, region, dashb
             totalRankingErrors,
             totalConversionErrors,
             totalAccountErrors,
+            totalProfitabilityRecoverableAmount,
+            totalSponsoredAdsRecoverableAmount,
+            totalInventoryRecoverableAmount,
+            totalConversionRecoverableAmount,
+            totalRecoverableAmount,
             numberOfProductsWithIssues,
             totalActiveProducts
         };

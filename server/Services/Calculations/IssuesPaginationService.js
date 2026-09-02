@@ -179,6 +179,12 @@ async function getIssuesSummary(userId, country, region) {
             numberOfProductsWithIssues: summary?.numberOfProductsWithIssues || metadata?.numberOfProductsWithIssues || 0,
             accountHealthPercentage: metadata?.accountHealthPercentage || { Percentage: 0, status: 'Unknown' },
             TotalProduct: totalProductCount,
+            // Recoverable $ per category (see RecoverableAmountUtils.js)
+            totalProfitabilityRecoverableAmount: summary?.totalProfitabilityRecoverableAmount || metadata?.totalProfitabilityRecoverableAmount || 0,
+            totalSponsoredAdsRecoverableAmount: summary?.totalSponsoredAdsRecoverableAmount || metadata?.totalSponsoredAdsRecoverableAmount || 0,
+            totalInventoryRecoverableAmount: summary?.totalInventoryRecoverableAmount || metadata?.totalInventoryRecoverableAmount || 0,
+            totalConversionRecoverableAmount: summary?.totalConversionRecoverableAmount || metadata?.totalConversionRecoverableAmount || 0,
+            totalRecoverableAmount: summary?.totalRecoverableAmount || metadata?.totalRecoverableAmount || 0,
             lastCalculatedAt: summary?.lastCalculatedAt || metadata?.lastCalculatedAt
         };
         
@@ -1132,6 +1138,7 @@ module.exports = {
     getInventoryIssues,
     getAccountIssues,
     getProductsWithIssues,
+    ensureIssuesData,
     DEFAULT_PAGE_SIZE,
     PRODUCTS_PAGE_SIZE
 };

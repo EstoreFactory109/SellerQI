@@ -20,6 +20,28 @@ const SUNDAY_FUNCTIONS = {
         requiresAdsToken: true,
         apiDataKey: 'keywordRecommendations'
     },
+    // ── 'ltsfData' (Long-Term Storage Fee Charges) is DELIBERATELY NOT REGISTERED ──
+    // The sync exists at Services/Sp_API/GET_FBA_FULFILLMENT_LONGTERM_STORAGE_FEE_CHARGES_DATA.js
+    // and its report TYPE is verified, but its TSV column mapping has never been
+    // checked against a live response — no public source documents this report's
+    // headers. Running it unverified would silently store $0 long-term storage
+    // fees and burn a weekly report-quota slot for nothing.
+    //
+    // To enable:
+    //   1. node server/scripts/discoverLtsfReportHeaders.js --user-id=<id> --country=<CC> --region=<RR>
+    //   2. Correct the findField() candidate lists in the sync file to the real headers
+    //   3. Restore the entry below, and re-add 'ltsfData' to the batch-routing list
+    //      and _SLICE_CATEGORY_MAP.inventory in ScheduledIntegration.js
+    //
+    // 'ltsfData': {
+    //     service: require('../Sp_API/GET_FBA_FULFILLMENT_LONGTERM_STORAGE_FEE_CHARGES_DATA.js'),
+    //     functionName: null, // Default export, use service directly
+    //     description: 'Long-Term Storage Fee Charges',
+    //     requiresAccessToken: true,
+    //     apiDataKey: 'ltsfData',
+    //     isDefaultExport: true
+    // },
+
     // Listing items for ACTIVE SKUs (one GET per SKU).
     // Weekly rather than daily: this endpoint supplies `has_b2b_pricing` and the
     // backend generic_keyword, both of which are listing configuration that rarely
@@ -52,7 +74,18 @@ const SUNDAY_FUNCTIONS = {
         apiDataKey: 'issuesData',
         isCalculationService: true,
         runOrder: 101 // Runs after productIssues
-    }
+    },
+    // ── The two AI views are NOT registered here, deliberately ──
+    // Both derive from TaskItem, and tasks are refreshed by addNewAccountHistory,
+    // which runs AFTER fetchScheduledApiData completes. A batch-5 service would
+    // therefore narrate the previous cycle's tasks. They are invoked directly after
+    // ScheduledIntegration.addNewAccountHistory instead, matching the order
+    // Integration.addNewAccountHistory already uses.
+    //
+    // Note they are not on a weekday schedule at all: they fire when a task REBUILD
+    // happens, since task renewal is a rolling per-account 7-day timer rather than a
+    // fixed day. Registering them here — on any day — would reintroduce the mismatch
+    // between a view and the tasks it describes. See the call site for the full note.
 };
 
 // Monday, Wednesday, Friday (3x/week) - Non-ads services that don't need daily freshness.

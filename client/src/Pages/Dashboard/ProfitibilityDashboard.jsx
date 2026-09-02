@@ -4,8 +4,8 @@ import MetricCard from '../../Components/ProfitibilityDashboard/MetricCard';
 import ProfitTable from '../../Components/ProfitibilityDashboard/ProfitTable';
 import SuggestionList from '../../Components/ProfitibilityDashboard/SuggestionList';
 import { useSelector, useDispatch } from "react-redux";
-import { AnimatePresence, motion } from 'framer-motion';
-import { X, AlertCircle, TrendingUp, Download, Calendar, BarChart3, TrendingDown, DollarSign, Target, Zap, HelpCircle, Loader2 } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { TrendingUp, Calendar, BarChart3, HelpCircle, Loader2 } from 'lucide-react';
 import Calender, { isClickInsideGaCalDropdown } from '../../Components/Calender/Calender.jsx';
 import DownloadReport from '../../Components/DownloadReport/DownloadReport.jsx';
 import { formatCurrencyWithLocale } from '../../utils/currencyUtils.js';
@@ -28,6 +28,8 @@ import {
 import { setDashboardDateRange } from '../../redux/slices/DashboardSlice.js';
 import { fetchCogs } from '../../redux/slices/cogsSlice.js';
 import { computeTotalCogs } from '../../utils/cogsCalculations.js';
+import { COLORS, ProductsToFixList } from '../../Components/Shared/index.js';
+import { useTopProducts } from '../../hooks/useTopProducts.js';
 
 // Helper function to get actual end date (yesterday due to 24-hour data delay)
 const getActualEndDate = () => {
@@ -65,7 +67,6 @@ const ProfitabilityDashboard = () => {
   const dispatch = useDispatch();
   const [suggestionsData, setSuggestionsData] = useState([]);
   const [openCalender, setOpenCalender] = useState(false);
-  const [showCogsPopup, setShowCogsPopup] = useState(false);
   const [profitabilityTab, setProfitabilityTab] = useState('table'); // 'table' | 'issues'
   const [ppcGraphData, setPpcGraphData] = useState([]);
   const [financeDashTotals, setFinanceDashTotals] = useState(null);
@@ -77,6 +78,7 @@ const ProfitabilityDashboard = () => {
   const [financeDashLoading, setFinanceDashLoading] = useState(false);
   const CalenderRef = useRef(null);
   const calendarAnchorRef = useRef(null);
+  const tabsSectionRef = useRef(null);
   
   // PPCMetrics model data (PRIMARY source for PPC spend)
   const ppcSummary = useSelector(selectPPCSummary);
@@ -110,22 +112,6 @@ const ProfitabilityDashboard = () => {
     };
   }, []);
 
-  // Check if COGS popup should be shown (once per session)
-  useEffect(() => {
-    const hasShownCogsPopup = sessionStorage.getItem('profitability_cogs_popup_shown');
-    if (!hasShownCogsPopup) {
-      // Show popup after a short delay for better UX
-      const timer = setTimeout(() => {
-        setShowCogsPopup(true);
-      }, 1500);
-      return () => clearTimeout(timer);
-    }
-  }, []);
-
-  const handleCloseCogsPopup = () => {
-    setShowCogsPopup(false);
-    sessionStorage.setItem('profitability_cogs_popup_shown', 'true');
-  };
 
   // Isolated date range — not tied to main dashboard / Total Sales loading
   const profitabilityDates = useSelector((state) => state.pageData?.profitabilityDates || {});
@@ -170,6 +156,15 @@ const ProfitabilityDashboard = () => {
   
   // Get currency from Redux
   const currency = useSelector(state => state.currency?.currency) || '$';
+
+  // Products ranked by recoverable money — same task source as the Dashboard's
+  // "Top things to fix" and the Tasks page, so the three cannot disagree.
+  const {
+    products: topProducts,
+    loading: topProductsLoading,
+    unattributedAmount: topProductsUnattributed,
+    capitalTiedUp: topProductsCapital
+  } = useTopProducts();
 
   // Finance dashboard + PPC graph (primary data for KPIs, chart, table) — independent of main dashboard
   useEffect(() => {
@@ -275,7 +270,14 @@ const ProfitabilityDashboard = () => {
   }, [dispatch]);
   // Optional catalog for CSV export labels only (not used for KPI/chart)
   const dashboardCatalog = useSelector((state) => state.Dashboard.DashBoardInfo) || {};
-  
+
+  // Real COGS completeness — how many of the active products have a per-unit cost entered.
+  const cogsCompletion = useMemo(() => {
+    const products = Array.isArray(financeDashAsinWise) ? financeDashAsinWise : [];
+    const withCogs = products.filter((p) => (cogsValues?.[p.asin] || 0) > 0).length;
+    return { total: products.length, withCogs, missing: products.length - withCogs };
+  }, [financeDashAsinWise, cogsValues]);
+
   const metrics = useMemo(() => {
     
     // PPC spend calculation
@@ -471,6 +473,9 @@ const ProfitabilityDashboard = () => {
       { label: 'PPC Sales', amount: ppcSales },
     ];
 
+    // Net profit is only as complete as the COGS data behind it — flag it when some products are missing COGS.
+    const productsMissingCogs = cogsCompletion.missing;
+
     const row1 = [
       {
         label: 'Total Sales',
@@ -485,23 +490,30 @@ const ProfitabilityDashboard = () => {
         icon: 'list',
       },
       {
-        label: 'Expences',
+        label: 'Expenses',
         value: `${currency}${displayTotalExpenses.toFixed(2)}`,
         icon: 'trending-down',
         breakdown: expenseBreakdown,
         isExpandable: expenseBreakdown.length > 0,
+        caption: 'Fees, ads, refunds',
       },
-      { label: 'Profit', value: `${currency}${displayProfit.toFixed(2)}`, icon: 'dollar-sign' },
+      {
+        label: 'Net Profit',
+        value: `${currency}${displayProfit.toFixed(2)}`,
+        icon: 'dollar-sign',
+        caption: productsMissingCogs > 0 ? 'Partial — costs missing' : null,
+        tintColor: productsMissingCogs > 0 ? COLORS.watch : null,
+      },
     ];
 
     const showRow2 = !!financeDashTotals;
     const row2 = showRow2 ? [
-      { label: 'ACOS%', value: `${acos.toFixed(2)}%`, icon: 'target' },
-      { label: 'Profit Margin', value: `${profitMargin}%`, icon: 'percent' },
+      { label: 'ACoS', value: `${acos.toFixed(2)}%`, icon: 'target' },
+      { label: 'Profit Margin', value: `${profitMargin}%`, icon: 'percent', caption: 'Healthy: 15–25%' },
     ] : [];
 
     return { row1, row2 };
-  }, [queryDates.ready, queryDates.startDate, queryDates.endDate, ppcSummary, ppcKPISummary, ppcDateWiseMetrics, currency, financeDashTotals, financeDashOverhead, financeDashAsinWise, cogsValues]);
+  }, [queryDates.ready, queryDates.startDate, queryDates.endDate, ppcSummary, ppcKPISummary, ppcDateWiseMetrics, currency, financeDashTotals, financeDashOverhead, financeDashAsinWise, cogsValues, cogsCompletion]);
 
   // Prepare data for CSV/Excel export
   const prepareProfitabilityData = () => {
@@ -1159,129 +1171,34 @@ const ProfitabilityDashboard = () => {
   };
 
   return (
-    <div className="min-h-screen" style={{ background: '#1a1a1a', padding: '10px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
-      {/* COGS Information Popup */}
-      <AnimatePresence>
-        {showCogsPopup && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
-            onClick={handleCloseCogsPopup}
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ duration: 0.3 }}
-              style={{ background: '#161b22', borderRadius: '12px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.3)', maxWidth: '500px', width: '100%', margin: '0 16px', border: '1px solid #30363d' }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="p-6">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg">
-                      <TrendingUp className="w-6 h-6 text-white" />
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-bold" style={{ color: '#f3f4f6' }}>Improve Profit Accuracy</h3>
-                      <p className="text-sm" style={{ color: '#9ca3af' }}>Get precise profitability insights</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={handleCloseCogsPopup}
-                    className="transition-colors p-1"
-                    style={{ color: '#9ca3af' }}
-                    onMouseEnter={(e) => e.target.style.color = '#f3f4f6'}
-                    onMouseLeave={(e) => e.target.style.color = '#9ca3af'}
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-                
-                <div className="mb-6">
-                  <div className="flex items-start gap-3 p-4 rounded-lg mb-4" style={{ background: 'rgba(251, 191, 36, 0.1)', border: '1px solid rgba(251, 191, 36, 0.3)' }}>
-                    <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" style={{ color: '#fbbf24' }} />
-                    <div>
-                      <h4 className="font-semibold mb-1" style={{ color: '#fbbf24' }}>Important Notice</h4>
-                      <p className="text-sm leading-relaxed" style={{ color: '#fde68a' }}>
-                        To get accurate gross profit calculations, please add <strong>COGS (Cost of Goods Sold) values per unit</strong> for your products.
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-3">
-                    <div className="flex items-start gap-3">
-                      <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: 'rgba(59, 130, 246, 0.2)' }}>
-                        <span className="text-sm font-bold" style={{ color: '#60a5fa' }}>1</span>
-                      </div>
-                      <p className="text-sm" style={{ color: '#f3f4f6' }}>
-                        Navigate to the product table below
-                      </p>
-                    </div>
-                    <div className="flex items-start gap-3">
-                      <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: 'rgba(59, 130, 246, 0.2)' }}>
-                        <span className="text-sm font-bold" style={{ color: '#60a5fa' }}>2</span>
-                      </div>
-                      <p className="text-sm" style={{ color: '#f3f4f6' }}>
-                        Click the "Add COGS" button for each product
-                      </p>
-                    </div>
-                    <div className="flex items-start gap-3">
-                      <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: 'rgba(59, 130, 246, 0.2)' }}>
-                        <span className="text-sm font-bold" style={{ color: '#60a5fa' }}>3</span>
-                      </div>
-                      <p className="text-sm" style={{ color: '#f3f4f6' }}>
-                        Enter your actual cost per unit for accurate profit margins
-                      </p>
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="flex gap-3">
-                  <button
-                    onClick={handleCloseCogsPopup}
-                    className="flex-1 px-4 py-2.5 font-medium rounded-lg transition-all duration-200"
-                    style={{ background: 'linear-gradient(to right, #3b82f6, #2563eb)', color: 'white' }}
-                    onMouseEnter={(e) => e.target.style.background = 'linear-gradient(to right, #2563eb, #1d4ed8)'}
-                    onMouseLeave={(e) => e.target.style.background = 'linear-gradient(to right, #3b82f6, #2563eb)'}
-                  >
-                    Got it, thanks!
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
+    <div className="min-h-screen" style={{ background: COLORS.bgBase, padding: '10px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
       {/* Main Dashboard Container */}
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
         <div className="w-full">
           {/* Header always visible */}
           <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} style={{ marginBottom: '10px' }}>
-            <div style={{ background: '#161b22', padding: '10px 15px', borderRadius: '6px', border: '1px solid #30363d', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ background: COLORS.surface, padding: '10px 15px', borderRadius: '6px', border: `1px solid ${COLORS.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
               <div className="flex items-center gap-2">
-                <TrendingUp className="w-4 h-4" style={{ color: '#34d399' }} />
+                <TrendingUp className="w-4 h-4" style={{ color: COLORS.good }} />
                 <div>
                   <div className="flex items-center gap-2">
-                    <h1 className="text-base font-bold" style={{ color: '#f3f4f6' }}>Profitability Dashboard</h1>
+                    <h1 className="text-base font-bold" style={{ color: COLORS.textPrimary }}>Profitability</h1>
                     <div className="relative group">
-                      <HelpCircle className="w-4 h-4 cursor-help transition-colors" style={{ color: '#9ca3af' }} onMouseEnter={(e) => e.target.style.color = '#d1d5db'} onMouseLeave={(e) => e.target.style.color = '#9ca3af'} />
+                      <HelpCircle className="w-4 h-4 cursor-help transition-colors" style={{ color: COLORS.textMuted }} />
                       <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-50">
-                        <div className="text-xs rounded-lg py-2 px-3 shadow-lg max-w-xs text-left" style={{ background: '#21262d', color: '#f3f4f6', width: '256px', border: '1px solid #30363d' }}>
+                        <div className="text-xs rounded-lg py-2 px-3 shadow-lg max-w-xs text-left" style={{ background: COLORS.surfaceElevated, color: COLORS.textPrimary, width: '256px', border: `1px solid ${COLORS.border}` }}>
                           Advanced profitability analysis dashboard that tracks gross and net profit margins by product. Add COGS (Cost of Goods Sold) values to get accurate net profit calculations and identify underperforming products that need optimization.
                         </div>
-                        <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent" style={{ borderTopColor: '#21262d' }}></div>
+                        <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent" style={{ borderTopColor: COLORS.surfaceElevated }}></div>
                       </div>
                     </div>
                   </div>
+                  <p className="text-xs mt-0.5" style={{ color: COLORS.textSecondary }}>What each product actually earns after Amazon takes its cut.</p>
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <div className='relative' ref={CalenderRef}>
-                  <motion.button ref={calendarAnchorRef} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} className='flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all duration-200' onClick={() => setOpenCalender(!openCalender)} style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6', fontSize: '12px' }} onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'} onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}>
+                  <motion.button ref={calendarAnchorRef} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} className='flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all duration-200' onClick={() => setOpenCalender(!openCalender)} style={{ background: COLORS.bgBase, border: `1px solid ${COLORS.border}`, color: COLORS.textPrimary, fontSize: '12px' }} onMouseEnter={(e) => e.target.style.borderColor = COLORS.accent} onMouseLeave={(e) => e.target.style.borderColor = COLORS.border}>
                     <Calendar className="w-3.5 h-3.5" />
                     <span className='font-medium'>
                       {queryDates.ready
@@ -1300,8 +1217,44 @@ const ProfitabilityDashboard = () => {
             </div>
           </motion.div>
 
+            {/* COGS completeness banner — persistent, real counts, only shown while some products are missing a cost */}
+            {cogsCompletion.total > 0 && cogsCompletion.missing > 0 && (
+              <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} style={{ marginBottom: '10px' }}>
+                <div style={{ background: 'rgba(59,130,246,.05)', border: '1px solid rgba(59,130,246,.28)', borderRadius: '13px', padding: '18px 20px', display: 'flex', alignItems: 'center', gap: '22px' }} className="flex-wrap">
+                  <div style={{ flex: 1 }}>
+                    <h3 className="text-[15px] font-semibold" style={{ color: COLORS.textPrimary, marginBottom: '4px' }}>Add product costs to see true profit</h3>
+                    <p className="text-[13px]" style={{ color: COLORS.textSecondary, margin: '0 0 12px', maxWidth: '80ch' }}>
+                      COGS is what you pay per unit before Amazon. Without it we can show revenue and fees, but not what you keep — so we show &ldquo;Set up&rdquo; rather than a misleading $0.00.
+                    </p>
+                    <div className="flex items-center gap-3" style={{ maxWidth: '420px' }}>
+                      <div className="flex-1 rounded-full overflow-hidden" style={{ height: '6px', background: COLORS.border }}>
+                        <div
+                          className="h-full rounded-full"
+                          style={{ width: `${Math.max(1.5, Math.round((cogsCompletion.withCogs / cogsCompletion.total) * 100))}%`, background: COLORS.accent }}
+                        />
+                      </div>
+                      <span className="text-xs flex-shrink-0" style={{ color: COLORS.textSecondary }}>
+                        {cogsCompletion.withCogs} of {cogsCompletion.total} done
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfitabilityTab('table');
+                      tabsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }}
+                    className="flex-shrink-0 rounded-lg text-[13px] font-semibold transition-colors"
+                    style={{ padding: '10px 16px', background: COLORS.accent, color: '#061021' }}
+                  >
+                    Add costs
+                  </button>
+                </div>
+              </motion.div>
+            )}
+
             {/* PHASED LOADING: Each section loads independently as data arrives */}
-            
+
             {/* Phase 1: Metrics Cards - Loads first (~50-100ms) */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -1313,9 +1266,9 @@ const ProfitabilityDashboard = () => {
               {(!profitabilityDates.bootstrapped || !queryDates.ready || financeDashLoading || !financeDashTotals) ? (
                 <div className="flex flex-nowrap items-stretch gap-2 w-full overflow-visible">
                   {[...Array(6)].map((_, i) => (
-                    <div key={i} className="animate-pulse flex-1 min-w-[120px]" style={{ background: '#161b22', borderRadius: '6px', border: '1px solid #30363d', padding: '16px' }}>
-                        <div style={{ background: '#30363d', height: '14px', width: '60%', borderRadius: '4px', marginBottom: '8px' }}></div>
-                        <div style={{ background: '#30363d', height: '24px', width: '80%', borderRadius: '4px' }}></div>
+                    <div key={i} className="animate-pulse flex-1 min-w-[120px]" style={{ background: COLORS.surface, borderRadius: '6px', border: `1px solid ${COLORS.border}`, padding: '16px' }}>
+                        <div style={{ background: COLORS.border, height: '14px', width: '60%', borderRadius: '4px', marginBottom: '8px' }}></div>
+                        <div style={{ background: COLORS.border, height: '24px', width: '80%', borderRadius: '4px' }}></div>
                       </div>
                     ))}
                 </div>
@@ -1323,7 +1276,7 @@ const ProfitabilityDashboard = () => {
                 <div className="flex flex-nowrap items-stretch gap-2 w-full overflow-visible">
                   {[...metrics.row1, ...metrics.row2].map((metric) => (
                     <div key={metric.label} className="flex-1 min-w-[120px] overflow-visible">
-                      <MetricCard label={metric.label} value={metric.value} icon={metric.icon} breakdown={metric.breakdown} isExpandable={metric.isExpandable} currency={currency} />
+                      <MetricCard label={metric.label} value={metric.value} icon={metric.icon} breakdown={metric.breakdown} isExpandable={metric.isExpandable} currency={currency} caption={metric.caption} tintColor={metric.tintColor} />
                     </div>
                   ))}
                 </div>
@@ -1450,40 +1403,53 @@ const ProfitabilityDashboard = () => {
               </div>
             </motion.div>
 
-            {/* Tabs: Profitability Table | Issues & AI Powered Suggestions */}
+            {/* Tabs: Product profitability | Issues & suggestions */}
             <motion.div
+              ref={tabsSectionRef}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.3 }}
               style={{ marginBottom: '10px' }}
             >
-              <div style={{ background: '#161b22', borderRadius: '6px', border: '1px solid #30363d', overflow: 'hidden' }}>
-                <div className="flex border-b border-[#30363d]" style={{ background: '#21262d' }}>
+              <div style={{ background: COLORS.surface, borderRadius: '6px', border: `1px solid ${COLORS.border}`, overflow: 'hidden' }}>
+                <div className="flex" style={{ borderBottom: `1px solid ${COLORS.border}` }}>
                   <button
                     type="button"
                     onClick={() => setProfitabilityTab('table')}
-                    className="flex-1 py-3 px-4 text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                    className="px-4 py-2.5 text-sm font-medium transition-colors"
                     style={{
-                      color: profitabilityTab === 'table' ? '#f3f4f6' : '#9ca3af',
-                      borderBottom: profitabilityTab === 'table' ? '2px solid #60a5fa' : '2px solid transparent',
-                      background: profitabilityTab === 'table' ? 'rgba(96, 165, 250, 0.08)' : 'transparent'
+                      color: profitabilityTab === 'table' ? COLORS.textPrimary : COLORS.textSecondary,
+                      borderBottom: profitabilityTab === 'table' ? `2px solid ${COLORS.accent}` : '2px solid transparent',
+                      marginBottom: '-1px',
                     }}
                   >
-                    <BarChart3 className="w-4 h-4" />
-                    Profitability Table
+                    Product profitability
                   </button>
                   <button
                     type="button"
                     onClick={() => setProfitabilityTab('issues')}
-                    className="flex-1 py-3 px-4 text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                    className="px-4 py-2.5 text-sm font-medium transition-colors"
                     style={{
-                      color: profitabilityTab === 'issues' ? '#f3f4f6' : '#9ca3af',
-                      borderBottom: profitabilityTab === 'issues' ? '2px solid #60a5fa' : '2px solid transparent',
-                      background: profitabilityTab === 'issues' ? 'rgba(96, 165, 250, 0.08)' : 'transparent'
+                      color: profitabilityTab === 'issues' ? COLORS.textPrimary : COLORS.textSecondary,
+                      borderBottom: profitabilityTab === 'issues' ? `2px solid ${COLORS.accent}` : '2px solid transparent',
+                      marginBottom: '-1px',
                     }}
                   >
-                    <Target className="w-4 h-4" />
-                    Issues & AI Powered Suggestions
+                    Issues & suggestions
+                  </button>
+                  {/* Product-level view of every category's recoverable money, not just
+                      profitability issues. Same source as the Dashboard and Tasks page. */}
+                  <button
+                    type="button"
+                    onClick={() => setProfitabilityTab('products')}
+                    className="px-4 py-2.5 text-sm font-medium transition-colors"
+                    style={{
+                      color: profitabilityTab === 'products' ? COLORS.textPrimary : COLORS.textSecondary,
+                      borderBottom: profitabilityTab === 'products' ? `2px solid ${COLORS.accent}` : '2px solid transparent',
+                      marginBottom: '-1px',
+                    }}
+                  >
+                    Products to fix
                   </button>
                 </div>
                 <div className="p-0">
@@ -1498,14 +1464,45 @@ const ProfitabilityDashboard = () => {
                     />
                   )}
                   {profitabilityTab === 'issues' && (
-                    <SuggestionList 
+                    <SuggestionList
                       suggestionsData={suggestionsData}
                       issuesData={issuesData}
                       issuesSummary={issuesSummary}
                       issuesLoading={issuesLoading}
                       onLoadMore={fetchNextIssuesPage}
                       hasMore={issuesPagination?.hasMore ?? false}
+                      onFixNow={() => {
+                        setProfitabilityTab('table');
+                        tabsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }}
                     />
+                  )}
+                  {profitabilityTab === 'products' && (
+                    <div className="p-4">
+                      <p className="m-0 mb-3 text-[13px]" style={{ color: COLORS.textSecondary }}>
+                        Ranked by the profit you would gain by fixing each product — across
+                        pricing, ads, inventory, listing quality and conversion.
+                        {topProductsCapital > 0 && (
+                          <> A further {formatCurrencyWithLocale(topProductsCapital, currency)} is
+                          capital locked in unsellable stock, which is shown per product but not
+                          counted as profit.</>
+                        )}
+                      </p>
+                      <ProductsToFixList
+                        products={topProducts}
+                        currency={currency}
+                        loading={topProductsLoading}
+                      />
+                      {topProductsUnattributed > 0 && (
+                        <p className="m-0 mt-3 text-[11px]" style={{ color: COLORS.textMuted }}>
+                          {formatCurrencyWithLocale(topProductsUnattributed, currency)} of ad waste
+                          could not be traced to a specific product. Amounts marked * include
+                          advertising spend attributed by campaign rather than measured per product,
+                          and a product's wasted ad spend is already inside its profit figure rather
+                          than added to it.
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>

@@ -1,24 +1,38 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { useSelector, useDispatch } from 'react-redux';
+import { useSearchParams } from 'react-router-dom';
 import { motion } from "framer-motion";
-import { 
-  AlertTriangle, 
-  Search, 
+import {
+  AlertTriangle,
+  Search,
   Download,
   RefreshCw,
-  TrendingUp,
-  TrendingDown,
-  ChevronLeft,
   ChevronRight,
   Info
 } from 'lucide-react';
 import { fetchTasks, updateTaskStatus } from '../../redux/slices/TasksSlice.js';
 import { TasksPageSkeleton } from '../../Components/Skeleton/PageSkeletons.jsx';
+import { COLORS } from '../../Components/Shared/index.js';
+import { formatCurrencyWithLocale } from '../../utils/currencyUtils.js';
+import {
+  BUCKET,
+  BUCKET_ORDER,
+  BUCKET_LABELS,
+  BUCKET_SUBTITLES,
+  selectBuckets,
+  formatEffort,
+  groupKeyForTask,
+  indexGroups
+} from '../../utils/taskBuckets.js';
 
 // Helper function to escape special regex characters in currency symbol
 const escapeRegex = (str) => {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 };
+
+// Tasks are grouped by what's worth doing, not by which category they came from.
+// Ordering/capping lives in utils/taskBuckets.js; the effort and impact data it
+// sorts on is computed server-side by TaskPrioritizationService.
 
 // Common currency symbols to detect in messages
 // Order matters: longer symbols first to avoid partial matches (e.g., "C$" before "$")
@@ -130,14 +144,14 @@ const FormattedMessage = ({ message, errorCategory, currency }) => {
   
   return (
     <>
-      {mainText && <span style={{ color: '#f3f4f6' }}>{mainText}</span>}
+      {mainText && <span style={{ color: COLORS.textPrimary }}>{mainText}</span>}
       {highlightedText && (
         <>
           <br />
           {shouldBold ? (
-            <strong className="mt-1 block" style={{ color: '#f3f4f6' }}>{highlightedText}</strong>
+            <strong className="mt-1 block" style={{ color: COLORS.textPrimary }}>{highlightedText}</strong>
           ) : (
-            <span className="mt-1 block" style={{ color: '#f3f4f6' }}>{highlightedText}</span>
+            <span className="mt-1 block" style={{ color: COLORS.textPrimary }}>{highlightedText}</span>
           )}
         </>
       )}
@@ -189,12 +203,31 @@ const FormattedHowToSolve = ({ text }) => {
 export default function Tasks() {
   const dispatch = useDispatch();
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterCategory, setFilterCategory] = useState('all');
+  // Deep-link support: the Dashboard's "Top things to fix" links here with
+  // ?category=&type= so a seller lands on the individual rows that make up the
+  // figure they just clicked, instead of the unfiltered list.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const linkedCategory = searchParams.get('category');
+  const linkedType = searchParams.get('type');
+  // Set when arriving from a "top products to fix" row — shows just that product's issues.
+  const linkedAsin = searchParams.get('asin');
+
+  const [filterCategory, setFilterCategory] = useState(linkedCategory || 'all');
+  const [filterType, setFilterType] = useState(linkedType || null);
+  const [filterAsin, setFilterAsin] = useState(linkedAsin || null);
   const [filterStatus, setFilterStatus] = useState('all');
-  const [sortBy, setSortBy] = useState('taskId');
-  const [sortOrder, setSortOrder] = useState('asc');
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+  const [selectedTaskIds, setSelectedTaskIds] = useState(() => new Set());
+  const [expandedGroups, setExpandedGroups] = useState({
+    [BUCKET.HIGH_IMPACT]: true,
+    [BUCKET.QUICK_WINS]: true,
+    [BUCKET.EVERYTHING_ELSE]: false
+  });
+  const [groupDisplayLimits, setGroupDisplayLimits] = useState({
+    [BUCKET.HIGH_IMPACT]: 10,
+    [BUCKET.QUICK_WINS]: 10,
+    [BUCKET.EVERYTHING_ELSE]: 10
+  });
+  const GROUP_PAGE_SIZE = 10;
 
   // Get tasks data from Redux store
   const tasks = useSelector(state => state.tasks?.tasks || []);
@@ -202,6 +235,9 @@ export default function Tasks() {
   const loading = useSelector(state => state.tasks?.loading || false);
   const error = useSelector(state => state.tasks?.error);
   const completedTasksArray = useSelector(state => state.tasks?.completedTasks || []);
+  // Issue-type aggregates, identical to what the Dashboard's "Top things to fix"
+  // reports — used to show a task's standing inside that same figure.
+  const taskGroups = useSelector(state => state.tasks?.groups || []);
   
   // Convert array to Set for easier checking
   const completedTasks = useMemo(() => new Set(completedTasksArray), [completedTasksArray]);
@@ -217,23 +253,6 @@ export default function Tasks() {
 
 
 
-  // Get severity based on error category
-  const getSeverityFromCategory = (category) => {
-    switch (category?.toLowerCase()) {
-      case 'ranking':
-        return 'medium';
-      case 'conversion':
-        return 'medium';
-      case 'inventory':
-        return 'high';
-      case 'profitability':
-        return 'high';
-      case 'sponsoredads':
-        return 'medium';
-      default:
-        return 'medium';
-    }
-  };
 
   // Fetch tasks data from Redux (only if not already loaded)
   useEffect(() => {
@@ -292,15 +311,30 @@ export default function Tasks() {
         asin: task.asin,
         sku: sku,
         errorCategory: task.errorCategory,
+        errorType: task.errorType,
         error: task.error,
         howToSolve: task.solution,
-        severity: getSeverityFromCategory(task.errorCategory),
         status: task.status,
-        sales: 0,
-        errorCount: 1
+        amount: task.amount || 0,
+        amountIsEstimated: !!task.amountIsEstimated,
+        // Effort/impact come from the server (TaskPrioritizationService) and drive
+        // the bucketing below.
+        effortMinutes: task.effortMinutes,
+        impactWeight: task.impactWeight,
+        isQuickWin: !!task.isQuickWin
       };
     });
   }, [tasks, productDetailsMap]);
+
+  // Real completion progress (over ALL tasks, not just the current filtered/paginated view)
+  const totalTasksCount = transformedTasks.length;
+  const completedTasksCount = useMemo(
+    () => transformedTasks.filter(t => completedTasks.has(t.taskId)).length,
+    [transformedTasks, completedTasks]
+  );
+  const pendingTasksCount = totalTasksCount - completedTasksCount;
+  const progressPct = totalTasksCount > 0 ? Math.round((completedTasksCount / totalTasksCount) * 100) : 0;
+  const progressWidth = completedTasksCount > 0 ? Math.max(1.5, progressPct) : 0;
 
   // completedTasks is now managed by Redux, no need for this effect
 
@@ -329,98 +363,148 @@ export default function Tasks() {
 
     // Apply category filter
     if (filterCategory !== 'all') {
-      filtered = filtered.filter(item => 
+      filtered = filtered.filter(item =>
         item.errorCategory.toLowerCase() === filterCategory.toLowerCase()
       );
     }
 
-    // Apply sorting
-    filtered.sort((a, b) => {
-      let aValue = a[sortBy];
-      let bValue = b[sortBy];
+    // Narrows to one issue type when arriving from a Dashboard opportunity. Applied
+    // only if it actually matches something — a stale link (an opportunity stored
+    // under an older issueType name) then degrades to the category view instead of
+    // stranding the seller on an empty page.
+    if (filterType) {
+      const ofType = filtered.filter(item => groupKeyForTask(item).endsWith(`:${filterType}`));
+      if (ofType.length > 0) filtered = ofType;
+    }
 
-      if (sortBy === 'slNo') {
-        aValue = parseInt(aValue);
-        bValue = parseInt(bValue);
-      } else {
-        aValue = aValue.toString().toLowerCase();
-        bValue = bValue.toString().toLowerCase();
-      }
+    // Narrows to one product when arriving from a "top products to fix" row. Same
+    // degrade-rather-than-strand rule.
+    if (filterAsin) {
+      const ofAsin = filtered.filter(item => item.asin === filterAsin);
+      if (ofAsin.length > 0) filtered = ofAsin;
+    }
 
-      if (sortOrder === 'asc') {
-        return aValue > bValue ? 1 : -1;
-      } else {
-        return aValue < bValue ? 1 : -1;
+    return filtered;
+  }, [transformedTasks, searchQuery, filterCategory, filterType, filterAsin, filterStatus, completedTasks]);
+
+  // True only when the deep-linked type really narrowed the list, so the banner
+  // can't claim a filter that isn't in effect.
+  const linkedTypeMatched = useMemo(
+    () => !!filterType && transformedTasks.some(item => groupKeyForTask(item).endsWith(`:${filterType}`)),
+    [filterType, transformedTasks]
+  );
+
+  const linkedAsinMatched = useMemo(
+    () => !!filterAsin && transformedTasks.some(item => item.asin === filterAsin),
+    [filterAsin, transformedTasks]
+  );
+
+  // Clears whichever deep-link narrowing is active and drops it from the URL.
+  const clearDeepLink = () => {
+    setFilterType(null);
+    setFilterAsin(null);
+    setFilterCategory('all');
+    const next = new URLSearchParams(searchParams);
+    next.delete('category');
+    next.delete('type');
+    next.delete('asin');
+    setSearchParams(next, { replace: true });
+  };
+
+  // High impact / Quick wins / Everything else. Computed from the FILTERED list so
+  // narrowing to one section re-buckets within that section, and from completedTasks
+  // so a ticked-off task doesn't hold a "do this first" slot.
+  const groupedTasks = useMemo(
+    () => selectBuckets(filteredAndSortedData, { completedTaskIds: completedTasks }),
+    [filteredAndSortedData, completedTasks]
+  );
+
+  // An empty bucket is hidden rather than rendered as a permanently-empty group.
+  const bucketsPresent = useMemo(
+    () => new Set(BUCKET_ORDER.filter(id => (groupedTasks[id] || []).length > 0)),
+    [groupedTasks]
+  );
+
+  const groupsById = useMemo(() => indexGroups(taskGroups), [taskGroups]);
+
+  // "1 of 93 keywords spending money with zero sales · A$187.41 total" — shown on
+  // highlighted rows so a A$26.37 task reads as part of the Dashboard's A$187.41,
+  // rather than looking like the two pages disagree.
+  const getGroupContext = (item) => {
+    const group = groupsById.get(groupKeyForTask(item));
+    if (!group || group.count <= 1) return null;
+    const money = group.totalAmount > 0
+      ? ` · ${formatCurrencyWithLocale(group.totalAmount, currency)} total`
+      : '';
+    return `1 of ${group.count} · ${group.title}${money}`;
+  };
+
+  const toggleGroup = (groupId) => {
+    setExpandedGroups(prev => ({ ...prev, [groupId]: !prev[groupId] }));
+  };
+
+  const showMoreInGroup = (groupId) => {
+    setGroupDisplayLimits(prev => ({ ...prev, [groupId]: prev[groupId] + GROUP_PAGE_SIZE }));
+  };
+
+  const toggleSelectTask = (taskId) => {
+    setSelectedTaskIds(prev => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId); else next.add(taskId);
+      return next;
+    });
+  };
+
+  const selectGroup = (items) => {
+    setSelectedTaskIds(prev => {
+      const next = new Set(prev);
+      items.forEach(item => next.add(item.taskId));
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedTaskIds(new Set());
+
+  const markSelectedComplete = () => {
+    selectedTaskIds.forEach(taskId => {
+      if (!completedTasks.has(taskId)) {
+        dispatch(updateTaskStatus({ taskId, status: 'completed' }));
       }
     });
-
-    // Reassign serial numbers after filtering and sorting
-    return filtered.map((item, index) => ({
-      ...item,
-      slNo: index + 1
-    }));
-  }, [transformedTasks, searchQuery, filterCategory, filterStatus, completedTasks, sortBy, sortOrder]);
-
-  // Reset to page 1 when filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, filterCategory, filterStatus]);
-
-  // Calculate pagination
-  const totalPages = Math.ceil(filteredAndSortedData.length / itemsPerPage);
-  const indexOfLastItem = currentPage * itemsPerPage;
-  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-  const currentItems = filteredAndSortedData.slice(indexOfFirstItem, indexOfLastItem);
-
-  // Pagination navigation functions
-  const goToPreviousPage = () => {
-    setCurrentPage(prev => Math.max(prev - 1, 1));
+    clearSelection();
   };
 
-  const goToNextPage = () => {
-    setCurrentPage(prev => Math.min(prev + 1, totalPages));
-  };
-
-  const goToPage = (pageNumber) => {
-    setCurrentPage(Math.max(1, Math.min(pageNumber, totalPages)));
-  };
-
-  const handleSort = (column) => {
-    if (sortBy === column) {
-      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortBy(column);
-      setSortOrder('asc');
-    }
-  };
-
-  const exportToCSV = () => {
-    // Create CSV content
-    const headers = ['Sl No.', 'Product', 'ASIN', 'Error Category', 'Error', 'How To Solve', 'Status'];
+  const exportRowsToCSV = (rows, filenameSuffix) => {
+    const headers = ['Product', 'ASIN', 'Error Category', 'Error', 'How To Solve', 'Amount', 'Estimated', 'Status'];
     const csvContent = [
       headers.join(','),
-      ...filteredAndSortedData.map(item => [
-        item.slNo,
+      ...rows.map(item => [
         `"${item.product.replace(/"/g, '""')}"`, // Escape quotes in product name
         item.asin,
         item.errorCategory,
         `"${item.error.replace(/"/g, '""')}"`, // Escape quotes in error message
         `"${item.howToSolve.replace(/"/g, '""')}"`, // Escape quotes in how to solve
+        item.amount > 0 ? `"${formatCurrencyWithLocale(item.amount, currency)}"` : '', // Quoted - locale formatting adds commas
+        // The on-screen amount carries a '*' when it's an estimate; keep that
+        // caveat in the export rather than losing it on download.
+        item.amount > 0 && item.amountIsEstimated ? 'Yes' : '',
         completedTasks.has(item.taskId) ? 'Completed' : 'Pending'
       ].join(','))
     ].join('\n');
 
-    // Create and download file
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `tasks_export_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `tasks_${filenameSuffix}_${new Date().toISOString().split('T')[0]}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
+
+  const exportToCSV = () => exportRowsToCSV(filteredAndSortedData, 'export');
+  const exportSelectedToCSV = () => exportRowsToCSV(transformedTasks.filter(t => selectedTaskIds.has(t.taskId)), 'selected');
 
   const toggleTaskStatus = async (taskId) => {
     const isCurrentlyCompleted = completedTasks.has(taskId);
@@ -435,13 +519,11 @@ export default function Tasks() {
     dispatch(fetchTasks());
   };
 
-  const getSeverityColor = (severity) => {
-    switch (severity.toLowerCase()) {
-      case 'high':
+  const getBucketColor = (bucketId) => {
+    switch (bucketId) {
+      case BUCKET.HIGH_IMPACT:
         return { color: '#f87171', background: 'rgba(239, 68, 68, 0.2)', border: 'rgba(239, 68, 68, 0.3)' };
-      case 'medium':
-        return { color: '#fbbf24', background: 'rgba(251, 191, 36, 0.2)', border: 'rgba(251, 191, 36, 0.3)' };
-      case 'low':
+      case BUCKET.QUICK_WINS:
         return { color: '#22c55e', background: 'rgba(34, 197, 94, 0.2)', border: 'rgba(34, 197, 94, 0.3)' };
       default:
         return { color: '#9ca3af', background: 'rgba(156, 163, 175, 0.2)', border: 'rgba(156, 163, 175, 0.3)' };
@@ -499,62 +581,54 @@ export default function Tasks() {
   }
 
   return (
-    <div className="min-h-screen overflow-x-hidden w-full" style={{ background: '#1a1a1a', padding: '10px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+    <div className="min-h-screen overflow-x-hidden w-full p-2 md:p-3 font-sans" style={{ background: COLORS.bgBase }}>
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
       {/* Header Section */}
-      <div className='sticky top-0 z-40 w-full' style={{ background: '#161b22', borderBottom: '1px solid #30363d', marginBottom: '10px', padding: '10px 15px', borderRadius: '6px', border: '1px solid #30363d' }}>
-        <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 w-full'>
-          <div className='flex items-center gap-2 min-w-0'>
-            <AlertTriangle className='w-4 h-4 flex-shrink-0' style={{ color: '#fb923c' }} />
-            <div className='min-w-0 flex-1'>
-              <h1 className='text-base font-bold' style={{ color: '#f3f4f6' }}>Tasks</h1>
-            </div>
-            <div className='hidden sm:flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-medium flex-shrink-0' style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa' }}>
-              {filterStatus === 'all' ? 'All tasks' : filterStatus === 'completed' ? 'Completed tasks' : 'Pending tasks'}
-              {filterStatus === 'all' && (
-                <>
-                  <span className='ml-1.5 px-1.5 py-0.5 rounded text-[10px]' style={{ background: 'rgba(34, 197, 94, 0.2)', color: '#22c55e' }}>
-                    {filteredAndSortedData.filter(item => completedTasks.has(item.taskId)).length} completed
-                  </span>
-                  <span className='ml-1.5 px-1.5 py-0.5 rounded text-[10px]' style={{ background: 'rgba(251, 191, 36, 0.2)', color: '#fbbf24' }}>
-                    {filteredAndSortedData.filter(item => !completedTasks.has(item.taskId)).length} pending
-                  </span>
-                </>
-              )}
-              {filterStatus !== 'all' && (
-                <span className='ml-1.5 px-1.5 py-0.5 rounded text-[10px]' style={{ background: 'rgba(251, 191, 36, 0.2)', color: '#fbbf24' }}>
-                  {filteredAndSortedData.length} {filterStatus === 'completed' ? 'completed' : 'pending'}
-                </span>
-              )}
-            </div>
+      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-2 mb-4">
+        <div>
+          <h1 className="m-0 mb-1 text-2xl leading-8 font-semibold tracking-[-0.02em]" style={{ color: COLORS.textPrimary }}>Tasks</h1>
+          <p className="m-0 text-sm" style={{ color: COLORS.textSecondary }}>Every issue we found, turned into something you can actually do. Start at the top.</p>
+        </div>
+        <div className='flex items-center gap-2 flex-shrink-0'>
+          {/* Export Button */}
+          <button
+            onClick={exportToCSV}
+            className="flex items-center gap-1.5 px-[14px] py-[9px] rounded-lg text-[13px] font-medium border transition-colors"
+            style={{ background: COLORS.surface, borderColor: COLORS.border, color: COLORS.textPrimary }}
+          >
+            <Download size={15} />
+            Export CSV
+          </button>
+
+          {/* Refresh Button */}
+          <button
+            onClick={refreshTasks}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-[14px] py-[9px] rounded-lg text-[13px] font-medium border transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ background: COLORS.surface, borderColor: COLORS.border, color: COLORS.textPrimary }}
+          >
+            <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {/* Progress summary - real completion numbers, real percentage */}
+      <div className="rounded-2xl border px-5 py-[18px] mb-3" style={{ background: COLORS.surface, borderColor: COLORS.border }}>
+        <div className="flex items-baseline justify-between gap-4 mb-[11px]">
+          <div className="text-[15px] font-semibold" style={{ color: COLORS.textPrimary }}>
+            You&apos;ve completed <span className="tabular-nums">{completedTasksCount}</span> of {totalTasksCount}
+            {totalTasksCount === 0 ? '' : pendingTasksCount > 0 ? ' — keep going.' : ' — nice work.'}
           </div>
-          
-          <div className='flex items-center gap-2 flex-shrink-0'>
-            {/* Export Button */}
-            <button 
-              onClick={exportToCSV}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all duration-200 text-xs font-medium"
-              style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
-              onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
-              onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}
-            >
-              <Download className="w-3.5 h-3.5" />
-              Export CSV
-            </button>
-            
-            {/* Refresh Button */}
-            <button 
-              onClick={refreshTasks}
-              disabled={loading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all duration-200 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
-              onMouseEnter={(e) => !loading && (e.target.style.borderColor = '#3b82f6')}
-              onMouseLeave={(e) => e.target.style.borderColor = '#30363d'}
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              Refresh
-            </button>
-          </div>
+          <div className="text-[13px] tabular-nums flex-shrink-0" style={{ color: COLORS.textSecondary }}>{progressPct}%</div>
+        </div>
+        <div className="h-[7px] rounded overflow-hidden" style={{ background: COLORS.border }}>
+          <div className="h-full rounded transition-all duration-300" style={{ background: COLORS.good, width: `${progressWidth}%` }} />
+        </div>
+        <div className="mt-[11px] text-xs" style={{ color: COLORS.textMuted }}>
+          {totalTasksCount === 0
+            ? 'No tasks yet — tasks are generated from the issues we find on your account.'
+            : `${pendingTasksCount} task${pendingTasksCount === 1 ? '' : 's'} still pending.`}
         </div>
       </div>
 
@@ -573,315 +647,335 @@ export default function Tasks() {
         </div>
       </div>
 
-      {/* Filters and Search Section */}
-      <div className='w-full' style={{ background: '#161b22', borderRadius: '6px', border: '1px solid #30363d', marginBottom: '10px', padding: '8px 12px' }}>
-        <div className='flex flex-col sm:flex-row gap-2 w-full'>
-          {/* Search */}
-          <div className='flex-1 min-w-0'>
-            <div className='relative'>
-              <Search className='absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5' style={{ color: '#6b7280' }} />
-              <input
-                type='text'
-                placeholder='Search tasks...'
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className='w-full pl-8 pr-3 py-1.5 rounded-lg text-xs'
-                style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
-                onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-                onBlur={(e) => e.target.style.borderColor = '#30363d'}
-              />
-            </div>
-          </div>
+      {/* Arrived from a Dashboard opportunity or a "top products to fix" row —
+          make the narrowing visible and undoable. */}
+      {(linkedTypeMatched || linkedAsinMatched) && (
+        <div
+          className="flex items-center gap-2 flex-wrap mb-3 px-3.5 py-2.5 rounded-xl border text-[13px]"
+          style={{ borderColor: COLORS.border, background: 'rgba(59,130,246,.07)', color: COLORS.textSecondary }}
+        >
+          <span>
+            {linkedAsinMatched ? (
+              <>
+                Showing only <strong style={{ color: COLORS.textPrimary }}>{filterAsin}</strong>
+                {' '}— every open issue on that product.
+              </>
+            ) : (
+              <>
+                Showing only <strong style={{ color: COLORS.textPrimary }}>
+                  {groupsById.get(`${filterCategory}:${filterType}`)?.title || filterType}
+                </strong> — the tasks behind that dashboard figure.
+              </>
+            )}
+          </span>
+          <button
+            type="button"
+            onClick={clearDeepLink}
+            className="px-2.5 py-1 rounded-lg text-xs border transition-colors"
+            style={{ borderColor: COLORS.borderStrong, color: COLORS.textSecondary, background: 'transparent' }}
+          >
+            Show all tasks
+          </button>
+        </div>
+      )}
 
-          {/* Category Filter */}
-          <div className='sm:w-40 flex-shrink-0'>
-            <select
-              value={filterCategory}
-              onChange={(e) => setFilterCategory(e.target.value)}
-              className='w-full px-2 py-1.5 rounded-lg text-xs'
-              style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
-              onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-              onBlur={(e) => e.target.style.borderColor = '#30363d'}
+      {/* Category filter - pill tabs, categories derived from real task data */}
+      <div className="flex gap-1.5 flex-wrap mb-3">
+        {categories.map(category => {
+          const isOn = filterCategory === category;
+          return (
+            <button
+              key={category}
+              type="button"
+              onClick={() => { setFilterCategory(category); setFilterType(null); setFilterAsin(null); }}
+              className="px-[13px] py-[7px] rounded-full text-xs font-medium border transition-colors"
+              style={{
+                borderColor: isOn ? COLORS.accent : COLORS.border,
+                background: isOn ? 'rgba(59,130,246,.12)' : 'transparent',
+                color: isOn ? COLORS.textPrimary : COLORS.textSecondary,
+              }}
             >
-              {categories.map(category => (
-                <option key={category} value={category} style={{ background: '#21262d' }}>
-                  {category === 'all' ? 'All Categories' : category}
-                </option>
-              ))}
-            </select>
-          </div>
+              {category === 'all' ? 'All categories' : category}
+            </button>
+          );
+        })}
+      </div>
 
-          {/* Status Filter */}
-          <div className='sm:w-36 flex-shrink-0'>
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className='w-full px-2 py-1.5 rounded-lg text-xs'
-              style={{ background: '#1a1a1a', border: '1px solid #30363d', color: '#f3f4f6' }}
-              onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-              onBlur={(e) => e.target.style.borderColor = '#30363d'}
-            >
-              <option value="all" style={{ background: '#21262d' }}>All Tasks</option>
-              <option value="pending" style={{ background: '#21262d' }}>Pending Only</option>
-              <option value="completed" style={{ background: '#21262d' }}>Completed Only</option>
-            </select>
-          </div>
+      {/* Search + status toggle */}
+      <div className="flex items-center gap-2.5 flex-wrap mb-3">
+        <div className="relative flex-1 min-w-[240px] max-w-[360px]">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2" size={15} style={{ color: COLORS.textMuted }} />
+          <input
+            type="text"
+            placeholder="Search a product, ASIN or problem…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 rounded-lg text-[13px] focus:outline-none transition-colors"
+            style={{ background: COLORS.bgBase, border: `1px solid ${COLORS.border}`, color: COLORS.textPrimary }}
+            onFocus={(e) => { e.target.style.borderColor = COLORS.accent; }}
+            onBlur={(e) => { e.target.style.borderColor = COLORS.border; }}
+          />
+        </div>
+        {searchQuery && (
+          <button
+            type="button"
+            onClick={() => setSearchQuery('')}
+            className="px-3 py-2 rounded-lg text-xs border transition-colors"
+            style={{ borderColor: COLORS.border, color: COLORS.textSecondary, background: 'transparent' }}
+          >
+            Clear
+          </button>
+        )}
+        <div className="flex-1" />
+        <div className="flex gap-0.5 p-0.5 rounded-lg border" style={{ borderColor: COLORS.border, background: COLORS.bgBase }}>
+          {[
+            { id: 'all', label: 'All' },
+            { id: 'pending', label: 'Pending' },
+            { id: 'completed', label: 'Completed' },
+          ].map(s => {
+            const isOn = filterStatus === s.id;
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => setFilterStatus(s.id)}
+                className="px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+                style={{
+                  background: isOn ? 'rgba(59,130,246,.16)' : 'transparent',
+                  color: isOn ? COLORS.textPrimary : COLORS.textMuted,
+                }}
+              >
+                {s.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {/* Table Section */}
-      <div className='w-full' style={{ marginBottom: '10px' }}>
-        <div className='rounded-lg' style={{ background: '#161b22', border: '1px solid #30363d' }}>
-          {/* Google Sheets-like Table */}
-          <div className='w-full'>
-            <table className='w-full'>
-              <thead style={{ background: '#21262d', borderBottom: '1px solid #30363d' }}>
-                <tr>
-                  <th 
-                    className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide cursor-pointer transition-colors w-[60px]'
-                    onClick={() => handleSort('slNo')}
-                    style={{ color: '#9ca3af' }}
-                    onMouseEnter={(e) => e.target.style.color = '#d1d5db'}
-                    onMouseLeave={(e) => e.target.style.color = '#9ca3af'}
+      {/* Selection legend */}
+      <div className="flex items-center gap-4 text-xs mb-3" style={{ color: COLORS.textMuted }}>
+        <span className="flex items-center gap-1.5">
+          <span className="w-3.5 h-3.5 rounded-full border inline-block" style={{ borderColor: COLORS.borderStrong }} />
+          Select for a batch action
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-[15px] h-[15px] rounded border inline-block" style={{ borderColor: COLORS.borderStrong }} />
+          Mark complete
+        </span>
+      </div>
+
+      {/* High impact / Quick wins / Everything else */}
+      <div className="flex flex-col gap-3.5">
+        {BUCKET_ORDER.filter(id => bucketsPresent.has(id)).map(groupId => {
+          const items = groupedTasks[groupId] || [];
+          const isOpen = expandedGroups[groupId];
+          const displayLimit = groupDisplayLimits[groupId];
+          const visibleItems = items.slice(0, displayLimit);
+          const remaining = items.length - visibleItems.length;
+          const pendingInGroup = items.filter(i => !completedTasks.has(i.taskId)).length;
+          const recoverableInGroup = items.reduce((sum, i) => sum + (i.amount || 0), 0);
+          const sc = getBucketColor(groupId);
+          const subtitle = BUCKET_SUBTITLES[groupId];
+
+          return (
+            <div key={groupId} className="rounded-2xl border overflow-hidden" style={{ borderColor: COLORS.border, background: COLORS.surface }}>
+              <div className="flex items-center gap-3 px-5 py-[15px]">
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(groupId)}
+                  className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                >
+                  <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background: sc.color }} />
+                  <span className="text-base font-semibold" style={{ color: COLORS.textPrimary }}>{BUCKET_LABELS[groupId]}</span>
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-bold flex-shrink-0" style={{ background: sc.background, color: sc.color }}>{items.length}</span>
+                  {subtitle && (
+                    <span className="text-[12px] flex-shrink-0" style={{ color: COLORS.textMuted }}>{subtitle}</span>
+                  )}
+                  <span className="flex-1" />
+                  {recoverableInGroup > 0 && (
+                    <span className="text-[13px] font-semibold flex-shrink-0" style={{ color: COLORS.good }}>
+                      {formatCurrencyWithLocale(recoverableInGroup, currency)} recoverable
+                    </span>
+                  )}
+                  <span className="text-[13px] flex-shrink-0" style={{ color: COLORS.textSecondary }}>{pendingInGroup} pending</span>
+                  <ChevronRight size={16} style={{ color: COLORS.textMuted, transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s', flexShrink: 0 }} />
+                </button>
+                {items.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => selectGroup(items)}
+                    className="flex-none px-[11px] py-1.5 rounded-lg text-xs border transition-colors whitespace-nowrap"
+                    style={{ borderColor: COLORS.border, color: COLORS.textSecondary, background: 'transparent' }}
                   >
-                    <div className='flex items-center gap-1.5'>
-                      Sl No.
-                      {sortBy === 'slNo' && (
-                        sortOrder === 'asc' ? 
-                        <TrendingUp className='w-2.5 h-2.5' /> : 
-                        <TrendingDown className='w-2.5 h-2.5' />
-                      )}
-                    </div>
-                  </th>
-                  <th 
-                    className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide cursor-pointer transition-colors min-w-[200px] max-w-[350px]'
-                    onClick={() => handleSort('product')}
-                    style={{ color: '#9ca3af' }}
-                    onMouseEnter={(e) => e.target.style.color = '#d1d5db'}
-                    onMouseLeave={(e) => e.target.style.color = '#9ca3af'}
-                  >
-                    <div className='flex items-center gap-1.5'>
-                      Product
-                      {sortBy === 'product' && (
-                        sortOrder === 'asc' ? 
-                        <TrendingUp className='w-2.5 h-2.5' /> : 
-                        <TrendingDown className='w-2.5 h-2.5' />
-                      )}
-                    </div>
-                  </th>
-                  <th 
-                    className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide cursor-pointer transition-colors min-w-[130px]'
-                    onClick={() => handleSort('asin')}
-                    style={{ color: '#9ca3af' }}
-                    onMouseEnter={(e) => e.target.style.color = '#d1d5db'}
-                    onMouseLeave={(e) => e.target.style.color = '#9ca3af'}
-                  >
-                    <div className='flex items-center gap-1.5'>
-                      ASIN/SKU
-                      {sortBy === 'asin' && (
-                        sortOrder === 'asc' ? 
-                        <TrendingUp className='w-2.5 h-2.5' /> : 
-                        <TrendingDown className='w-2.5 h-2.5' />
-                      )}
-                    </div>
-                  </th>
-                  <th 
-                    className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide cursor-pointer transition-colors w-[110px]'
-                    onClick={() => handleSort('errorCategory')}
-                    style={{ color: '#9ca3af' }}
-                    onMouseEnter={(e) => e.target.style.color = '#d1d5db'}
-                    onMouseLeave={(e) => e.target.style.color = '#9ca3af'}
-                  >
-                    <div className='flex items-center gap-1.5'>
-                      Error Category
-                      {sortBy === 'errorCategory' && (
-                        sortOrder === 'asc' ? 
-                        <TrendingUp className='w-2.5 h-2.5' /> : 
-                        <TrendingDown className='w-2.5 h-2.5' />
-                      )}
-                    </div>
-                  </th>
-                  <th 
-                    className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide cursor-pointer transition-colors'
-                    onClick={() => handleSort('error')}
-                    style={{ color: '#9ca3af' }}
-                    onMouseEnter={(e) => e.target.style.color = '#d1d5db'}
-                    onMouseLeave={(e) => e.target.style.color = '#9ca3af'}
-                  >
-                    <div className='flex items-center gap-1.5'>
-                      Error
-                      {sortBy === 'error' && (
-                        sortOrder === 'asc' ? 
-                        <TrendingUp className='w-2.5 h-2.5' /> : 
-                        <TrendingDown className='w-2.5 h-2.5' />
-                      )}
-                    </div>
-                  </th>
-                  <th className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide' style={{ color: '#9ca3af' }}>
-                    How To Solve
-                  </th>
-                  <th className='px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wide w-[100px]' style={{ color: '#9ca3af' }}>
-                    Status
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {currentItems.length > 0 ? (
-                  currentItems.map((item, index) => (
-                    <motion.tr
+                    Select group
+                  </button>
+                )}
+              </div>
+
+              {isOpen && (
+                <div>
+                  {visibleItems.map((item, index) => (
+                    <motion.div
                       key={item.taskId}
-                      initial={{ opacity: 0, y: 20 }}
+                      initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: index * 0.05 }}
-                      className='transition-colors'
-                      style={{ borderBottom: '1px solid #30363d' }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = '#21262d'}
-                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                      transition={{ delay: index * 0.03 }}
+                      className="flex gap-3.5 px-5 py-4"
+                      style={{
+                        borderTop: `1px solid ${COLORS.border}`,
+                        opacity: completedTasks.has(item.taskId) ? 0.55 : 1,
+                        background: selectedTaskIds.has(item.taskId) ? 'rgba(59,130,246,.07)' : 'transparent',
+                      }}
                     >
-                      <td className='px-2 py-2 whitespace-nowrap text-[11px] font-medium w-[60px]' style={{ color: '#f3f4f6' }}>
-                        {item.slNo}
-                      </td>
-                      <td className='px-2 py-2 text-[11px] min-w-[200px] max-w-[350px]' style={{ color: '#f3f4f6' }}>
-                        <div className='whitespace-normal break-words leading-relaxed' title={item.product}>
-                          {item.product}
+                      <div className="flex-none flex flex-col items-center gap-[11px] pr-3" style={{ borderRight: `1px solid ${COLORS.border}` }}>
+                        <button
+                          type="button"
+                          title="Select for a batch action"
+                          onClick={() => toggleSelectTask(item.taskId)}
+                          className="w-4 h-4 mt-1 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] leading-none cursor-pointer transition-colors"
+                          style={{
+                            border: `1px solid ${selectedTaskIds.has(item.taskId) ? COLORS.accent : COLORS.borderStrong}`,
+                            background: selectedTaskIds.has(item.taskId) ? 'rgba(59,130,246,.28)' : 'transparent',
+                            color: '#7EA8F8',
+                          }}
+                        >
+                          {selectedTaskIds.has(item.taskId) ? '✓' : ''}
+                        </button>
+                        <button
+                          type="button"
+                          title="Mark complete"
+                          onClick={() => toggleTaskStatus(item.taskId)}
+                          className="w-5 h-5 rounded-md flex-shrink-0 flex items-center justify-center text-xs leading-none cursor-pointer transition-colors"
+                          style={{
+                            border: `1px solid ${completedTasks.has(item.taskId) ? COLORS.good : COLORS.borderStrong}`,
+                            background: completedTasks.has(item.taskId) ? 'rgba(34,197,94,.18)' : 'transparent',
+                            color: COLORS.good,
+                          }}
+                        >
+                          {completedTasks.has(item.taskId) ? '✓' : ''}
+                        </button>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                          {(() => {
+                            const categoryStyle = getCategoryColor(item.errorCategory);
+                            return (
+                              <span className="px-2 py-0.5 rounded text-[11px] font-semibold" style={{ background: categoryStyle.background, color: categoryStyle.color }}>
+                                {item.errorCategory}
+                              </span>
+                            );
+                          })()}
+                          <span className="text-[13px] truncate" style={{ color: COLORS.textSecondary }} title={item.product}>{item.product}</span>
+                          <span className="text-xs tabular-nums flex-shrink-0" style={{ color: COLORS.textMuted }}>{item.asin}</span>
                         </div>
-                      </td>
-                      <td className='px-2 py-2 text-[11px] min-w-[130px]' style={{ color: '#f3f4f6' }}>
-                        <div className='space-y-0.5'>
-                          <div className='flex items-center gap-1'>
-                            <span className='text-[10px] font-medium' style={{ color: '#9ca3af' }}>ASIN:</span>
-                            <span className='font-mono' style={{ color: '#f3f4f6' }}>{item.asin}</span>
-                          </div>
-                          {item.sku && (
-                            <div className='flex items-center gap-1'>
-                              <span className='text-[10px] font-medium' style={{ color: '#9ca3af' }}>SKU:</span>
-                              <span className='font-mono text-[10px]' style={{ color: '#9ca3af' }}>{item.sku}</span>
-                            </div>
-                          )}
+                        <div className="text-sm font-medium mb-1.5 whitespace-normal break-words" style={{ color: COLORS.textPrimary }}>
+                          <FormattedMessage message={item.error} errorCategory={item.errorCategory} currency={currency} />
                         </div>
-                      </td>
-                      <td className='px-2 py-2 whitespace-nowrap w-[110px]'>
-                        {(() => {
-                          const categoryStyle = getCategoryColor(item.errorCategory);
-                          return (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border" style={categoryStyle}>
-                              {item.errorCategory}
-                            </span>
-                          );
-                        })()}
-                      </td>
-                      <td className='px-2 py-2 text-[11px]' style={{ color: '#f3f4f6' }}>
-                        <div>
-                          <p className='whitespace-normal'>
-                            <FormattedMessage message={item.error} errorCategory={item.errorCategory} currency={currency} />
-                          </p>
-                        </div>
-                      </td>
-                      <td className='px-2 py-2 text-[11px]' style={{ color: '#f3f4f6' }}>
-                        <div>
+                        <div className="text-[13px] leading-5" style={{ color: COLORS.textSecondary }}>
+                          <span style={{ color: COLORS.textMuted }}>How to fix — </span>
                           <FormattedHowToSolve text={item.howToSolve} />
                         </div>
-                      </td>
-                                             <td className='px-2 py-2 whitespace-nowrap w-[100px]'>
-                         <div className='flex items-center gap-1.5'>
-                           <input
-                             type="checkbox"
-                             checked={completedTasks.has(item.taskId)}
-                             onChange={() => toggleTaskStatus(item.taskId)}
-                             className="w-3.5 h-3.5 rounded focus:ring-2 cursor-pointer"
-                             style={{ accentColor: '#3b82f6', background: '#1a1a1a', border: '1px solid #30363d' }}
-                           />
-                           <span className={`text-[10px] font-medium ${
-                             completedTasks.has(item.taskId)
-                               ? 'text-green-400'
-                               : 'text-yellow-400'
-                           }`}>
-                             {completedTasks.has(item.taskId) ? 'Completed' : 'Pending'}
-                           </span>
-                         </div>
-                       </td>
-                    </motion.tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan="7" className='px-4 py-8 text-center'>
-                      <div className='flex flex-col items-center gap-2'>
-                        <AlertTriangle className='w-6 h-6' style={{ color: '#6b7280' }} />
-                        <div>
-                          <h3 className='text-sm font-medium' style={{ color: '#f3f4f6' }}>No tasks found</h3>
-                          <p className='text-xs mt-1' style={{ color: '#9ca3af' }}>
-                            {searchQuery || filterCategory !== 'all' 
-                              ? 'Try adjusting your search or filter criteria' 
-                              : 'No issues detected in your account'
-                            }
-                          </p>
-                        </div>
+                        {groupId !== BUCKET.EVERYTHING_ELSE && getGroupContext(item) && (
+                          <div className="text-[11px] mt-1.5" style={{ color: COLORS.textMuted }}>
+                            {getGroupContext(item)}
+                          </div>
+                        )}
                       </div>
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                      <div className="flex-none text-right flex flex-col items-end gap-1.5">
+                        {item.amount > 0 && (
+                          <span className="text-sm font-bold tabular-nums whitespace-nowrap" style={{ color: COLORS.good }}>
+                            {formatCurrencyWithLocale(item.amount, currency)}{item.amountIsEstimated ? '*' : ''}
+                          </span>
+                        )}
+                        {formatEffort(item.effortMinutes) && (
+                          <span className="text-[11px] whitespace-nowrap" style={{ color: COLORS.textMuted }}>
+                            {formatEffort(item.effortMinutes)}
+                          </span>
+                        )}
+                        <span
+                          className="inline-block text-[11px] font-semibold px-2 py-1 rounded-full whitespace-nowrap"
+                          style={completedTasks.has(item.taskId)
+                            ? { background: 'rgba(34,197,94,.14)', color: COLORS.good }
+                            : { background: 'rgba(245,166,35,.14)', color: COLORS.watch }}
+                        >
+                          {completedTasks.has(item.taskId) ? 'Completed' : 'Pending'}
+                        </span>
+                      </div>
+                    </motion.div>
+                  ))}
 
-          {/* Pagination Controls */}
-          {filteredAndSortedData.length > 0 && (
-            <div className="flex items-center justify-between px-3 py-2 border-t" style={{ background: '#21262d', borderTop: '1px solid #30363d' }}>
-              <div className="flex items-center gap-2">
-                <span className="text-xs" style={{ color: '#9ca3af' }}>
-                  Showing {filteredAndSortedData.length > 0 ? indexOfFirstItem + 1 : 0} to {Math.min(indexOfLastItem, filteredAndSortedData.length)} of {filteredAndSortedData.length} tasks
-                </span>
-              </div>
-              
-              <div className="flex items-center gap-2">
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={goToPreviousPage}
-                  disabled={currentPage === 1}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all duration-200 ${
-                    currentPage === 1
-                      ? 'cursor-not-allowed' 
-                      : ''
-                  }`}
-                  style={currentPage === 1 ? { background: '#21262d', color: '#6b7280' } : { background: '#1a1a1a', color: '#f3f4f6', border: '1px solid #30363d' }}
-                  onMouseEnter={(e) => currentPage !== 1 && (e.target.style.borderColor = '#3b82f6')}
-                  onMouseLeave={(e) => currentPage !== 1 && (e.target.style.borderColor = '#30363d')}
-                  aria-label="Previous page"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                  <span className="text-xs font-medium">Previous</span>
-                </motion.button>
-                
-                <div className="flex items-center gap-2">
-                  <span className="px-2 py-1 text-xs font-medium rounded-lg" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
-                    {currentPage} of {totalPages || 1}
-                  </span>
+                  {items.length === 0 && (
+                    <div className="px-5 py-[22px] text-[13px]" style={{ borderTop: `1px solid ${COLORS.border}`, color: COLORS.textMuted }}>
+                      Nothing in this group matches the current filters.
+                    </div>
+                  )}
+
+                  {remaining > 0 && (
+                    <div className="flex items-center gap-3.5 px-5 py-[13px]" style={{ borderTop: `1px solid ${COLORS.border}` }}>
+                      <button
+                        type="button"
+                        onClick={() => showMoreInGroup(groupId)}
+                        className="px-3.5 py-2 rounded-lg text-xs font-medium border transition-colors"
+                        style={{ borderColor: COLORS.border, color: COLORS.textPrimary, background: COLORS.bgBase }}
+                      >
+                        Show {Math.min(GROUP_PAGE_SIZE, remaining)} more
+                      </button>
+                      <span className="text-xs" style={{ color: COLORS.textMuted }}>{remaining} more not shown.</span>
+                    </div>
+                  )}
                 </div>
-                
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={goToNextPage}
-                  disabled={currentPage === totalPages || totalPages === 0}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all duration-200 ${
-                    currentPage === totalPages || totalPages === 0
-                      ? 'cursor-not-allowed' 
-                      : ''
-                  }`}
-                  style={(currentPage === totalPages || totalPages === 0) ? { background: '#21262d', color: '#6b7280' } : { background: '#1a1a1a', color: '#f3f4f6', border: '1px solid #30363d' }}
-                  onMouseEnter={(e) => (currentPage !== totalPages && totalPages !== 0) && (e.target.style.borderColor = '#3b82f6')}
-                  onMouseLeave={(e) => (currentPage !== totalPages && totalPages !== 0) && (e.target.style.borderColor = '#30363d')}
-                  aria-label="Next page"
-                >
-                  <span className="text-xs font-medium">Next</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </motion.button>
-              </div>
+              )}
             </div>
-          )}
-        </div>
+          );
+        })}
+
+        {filteredAndSortedData.length === 0 && (
+          <div className="rounded-2xl border py-12 text-center" style={{ borderColor: COLORS.border, background: COLORS.surface }}>
+            <AlertTriangle className="w-6 h-6 mx-auto mb-2" style={{ color: COLORS.textMuted }} />
+            <h3 className="text-[15px] font-semibold mb-1" style={{ color: COLORS.textPrimary }}>No tasks found</h3>
+            <p className="text-sm" style={{ color: COLORS.textSecondary }}>
+              {searchQuery || filterCategory !== 'all'
+                ? 'Try adjusting your search or filter criteria.'
+                : 'No issues detected in your account.'}
+            </p>
+          </div>
+        )}
       </div>
+
+      {/* Sticky batch-action bar */}
+      {selectedTaskIds.size > 0 && (
+        <div
+          className="sticky bottom-[18px] z-20 mt-3 flex items-center gap-4 px-[18px] py-[13px] rounded-xl border shadow-2xl"
+          style={{ borderColor: COLORS.borderStrong, background: COLORS.surfaceElevated }}
+        >
+          <span className="text-sm font-semibold" style={{ color: COLORS.textPrimary }}>{selectedTaskIds.size} selected</span>
+          <span className="flex-1" />
+          <button
+            type="button"
+            onClick={clearSelection}
+            className="px-3 py-2 rounded-lg text-[13px] border transition-colors"
+            style={{ borderColor: COLORS.borderStrong, color: COLORS.textSecondary, background: 'transparent' }}
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            onClick={exportSelectedToCSV}
+            className="px-3 py-2 rounded-lg text-[13px] border transition-colors"
+            style={{ borderColor: COLORS.borderStrong, color: COLORS.textPrimary, background: 'transparent' }}
+          >
+            Export selected
+          </button>
+          <button
+            type="button"
+            onClick={markSelectedComplete}
+            className="px-4 py-2 rounded-lg text-[13px] font-semibold transition-colors"
+            style={{ background: COLORS.accent, color: '#061021' }}
+          >
+            Mark complete
+          </button>
+        </div>
+      )}
       </div>
     </div>
   );

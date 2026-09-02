@@ -36,7 +36,7 @@ const dataSchema = new mongoose.Schema({
 },{timestamps:true})
 
 // Define the schema
-const GET_FBA_INVENTORY_PLANNING_DATA_Schema = new mongoose.Schema(
+const LongTermStorageFeesSchema = new mongoose.Schema(
     {
         User: {
             type: mongoose.Schema.Types.ObjectId,
@@ -56,9 +56,7 @@ const GET_FBA_INVENTORY_PLANNING_DATA_Schema = new mongoose.Schema(
     { timestamps: true } // CreatedAt & UpdatedAt automatically managed
 );
 
-// **🛡️ Hash Refresh Token Before Storing**
-
 // Create the model
-const Seller = mongoose.model("LONG_TERM_STORAGE_FEE_CHARGES_DATA", GET_FBA_INVENTORY_PLANNING_DATA_Schema);
+const LongTermStorageFees = mongoose.model("LONG_TERM_STORAGE_FEE_CHARGES_DATA", LongTermStorageFeesSchema);
 
-module.exports = Seller;
+module.exports = LongTermStorageFees;
