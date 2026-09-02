@@ -218,10 +218,21 @@ describe('parseTsv — identical rows to the pre-change implementation', () => {
         expect(parseTsv(tsv)).toEqual(projectToKeptColumns(parseTsvLegacy(tsv)));
     });
 
-    test('only the ten consumed columns are retained — nothing downstream reads the rest', () => {
+    test('only the twelve consumed columns are retained — nothing downstream reads the rest', () => {
+        // item-tax and item-promotion-discount were added after this allow-list first shipped
+        // (utils/marketplaceTax.js's sales reconciliation reads them). Their absence here once
+        // silently zeroed tax on every row, indistinguishable from Amazon not sending it — pin the
+        // full set explicitly, not just against the live constant, so a future column removal here
+        // fails a test instead of degrading production silently again.
         const [row] = parseTsv(buildTsv([tsvRow()]));
 
+        expect(SALES_REPORT_COLUMNS.has('item-tax')).toBe(true);
+        expect(SALES_REPORT_COLUMNS.has('item-promotion-discount')).toBe(true);
         expect(new Set(Object.keys(row))).toEqual(SALES_REPORT_COLUMNS);
+        expect(new Set(Object.keys(row))).toEqual(new Set([
+            'order-status', 'sales-channel', 'item-price', 'item-tax', 'item-promotion-discount',
+            'purchase-date', 'amazon-order-id', 'sku', 'asin', 'currency', 'product-name', 'quantity',
+        ]));
         expect(row).not.toHaveProperty('ship-postal-code');
         expect(row).not.toHaveProperty('buyer-company-name');
     });

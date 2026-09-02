@@ -1044,19 +1044,32 @@ async function getReportDocumentUrl(tokenManager, baseUrl, reportDocumentId) {
 /**
  * The ONLY Sales-Report columns any consumer reads.
  *
- * The report carries ~50 columns; these ten are the complete set actually used —
+ * The report carries ~50 columns; these twelve are the complete set actually used —
  * `parseSalesReportRows` (order-status, sales-channel, item-price, purchase-date,
- * amazon-order-id, sku, asin, currency, product-name, quantity) and the pending-count fold
- * (order-status, purchase-date). Keeping the other ~40 meant allocating roughly five times the
- * strings and object slots we ever look at, per row, for 24-45k rows per chunk.
+ * amazon-order-id, sku, asin, currency, product-name, quantity), the tax-inclusive sales
+ * reconciliation in utils/marketplaceTax.js (item-tax, item-promotion-discount — see below), and
+ * the pending-count fold (order-status, purchase-date). Keeping the other ~38 meant allocating
+ * roughly five times the strings and object slots we ever look at, per row, for 24-45k rows per
+ * chunk.
+ *
+ * ⚠️ item-tax and item-promotion-discount were ADDED after this allow-list first shipped. Their
+ * absence is a real production incident this comment exists to prevent a repeat of: the allow-list
+ * predates utils/marketplaceTax.js, so for every account, on every sync, `itemSalesForRow` silently
+ * read `undefined` for both fields — indistinguishable from "Amazon isn't sending tax data" unless
+ * you happen to check this Set. It was chased for several turns as an Amazon-side data problem
+ * before being traced here.
  *
  * Adding a column here is the supported way to consume a new field — it must be added here
- * FIRST or the field will read as undefined downstream.
+ * FIRST or the field will read as undefined downstream. If you add a field anywhere that reads
+ * `row['some-column']` on a Sales Report row, grep this Set before assuming Amazon stopped
+ * sending it.
  */
 const SALES_REPORT_COLUMNS = new Set([
   'order-status',
   'sales-channel',
   'item-price',
+  'item-tax',
+  'item-promotion-discount',
   'purchase-date',
   'amazon-order-id',
   'sku',
