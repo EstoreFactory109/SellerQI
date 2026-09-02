@@ -4,8 +4,9 @@
  *
  * Audits whether Finance + Ads data is being fetched on schedule across all
  * users/accounts. Reports, per seller account:
- *   - Finance: latest FinanceSyncLog date (Pacific YYYY-MM-DD), days behind
- *     yesterday-Pacific, last status, pending expense order count
+ *   - Finance: latest FinanceSyncLog date (marketplace-local YYYY-MM-DD), days behind
+ *     yesterday in the account's own marketplace calendar, last status,
+ *     pending expense order count
  *   - Ads: latest PPCMetrics metricDate, days behind yesterday
  *   - Scheduler: dailyUpdateHour and lastDailyUpdate (per-account, with
  *     hours-since-last-update so you can see if the hourly cron ever fired
@@ -15,7 +16,7 @@
  * offenders) so you don't have to scroll the per-row table on big tenants.
  *
  * Definitions of "stale" (tune via flags below):
- *   - Finance latest-date older than yesterday-Pacific by > FRESH_FINANCE_DAYS
+ *   - Finance latest-date older than marketplace-local yesterday by > FRESH_FINANCE_DAYS
  *   - Ads metricDate older than yesterday by > FRESH_ADS_DAYS
  *   - Scheduler lastDailyUpdate older than > FRESH_SCHED_HOURS
  *
@@ -42,11 +43,11 @@ const FinanceSyncLog = require('../models/finance/FinanceSyncLogModel.js');
 const PendingExpenseOrder = require('../models/finance/PendingExpenseOrderModel.js');
 const PPCMetrics = require('../models/amazon-ads/PPCMetricsModel.js');
 
-const FRESH_FINANCE_DAYS = 2;   // finance lags 1-2 days by design (yesterday Pacific)
+const FRESH_FINANCE_DAYS = 2;   // finance lags 1-2 days by design (marketplace-local yesterday)
 const FRESH_ADS_DAYS = 2;
 const FRESH_SCHED_HOURS = 26;   // hourly cron + slack
 
-const PACIFIC_OFFSET_HOURS = 7;
+const { marketplaceYesterdayStr } = require('../utils/marketplaceTimezone.js');
 
 function getArg(name) {
   const m = process.argv.slice(2).find((a) => a.startsWith(`--${name}=`));
@@ -60,10 +61,10 @@ const FILTER_USER_ID = getArg('user-id');
 const STALE_ONLY = hasFlag('stale-only');
 const LIMIT = parseInt(getArg('limit') || '0', 10);
 
-function yesterdayPacificStr() {
-  const now = Date.now();
-  const pacificMs = now - PACIFIC_OFFSET_HOURS * 60 * 60 * 1000 - 24 * 60 * 60 * 1000;
-  return new Date(pacificMs).toISOString().substring(0, 10);
+// Finance day keys are MARKETPLACE-LOCAL, so "yesterday" is per account, not global:
+// two accounts in different marketplaces are on different calendar days at the same instant.
+function yesterdayForCountry(country) {
+  return marketplaceYesterdayStr(country);
 }
 
 function daysBetween(yyyyMmDd, refYyyyMmDd) {
@@ -100,8 +101,7 @@ async function main() {
   await mongoose.connect(MONGODB_URI);
   console.log(`[freshness] Connected to ${dbConsts.dbName || MONGODB_URI}`);
 
-  const yesterday = yesterdayPacificStr();
-  console.log(`[freshness] Reference date (yesterday Pacific): ${yesterday}`);
+  console.log('[freshness] Reference date: yesterday in each account\'s own marketplace calendar');
   console.log(`[freshness] Thresholds: finance>${FRESH_FINANCE_DAYS}d, ads>${FRESH_ADS_DAYS}d, sched>${FRESH_SCHED_HOURS}h\n`);
 
   const sellerQuery = FILTER_USER_ID
@@ -143,6 +143,7 @@ async function main() {
 
       const finDate = latestFin?.date || null;
       const finStatus = latestFin?.status || 'none';
+      const yesterday = yesterdayForCountry(country);
       const finBehind = daysBetween(finDate, yesterday);
       const adsDate = latestAds?.metricDate || null;
       const adsBehind = daysBetween(adsDate, yesterday);

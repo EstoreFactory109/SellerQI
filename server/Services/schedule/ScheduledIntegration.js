@@ -27,6 +27,7 @@ const { runFbaInventorySyncForMarketplace } = require('../Sp_API/FbaInventorySto
 // Incremental dashboard slice writes — additive, non-fatal (see DashboardSliceService).
 const dashboardSliceService = require('../dashboard/DashboardSliceService.js');
 const { financeAsyncEnabledFor, adsAsyncEnabledFor } = require('../../utils/asyncFinanceGate.js');
+const { marketplaceTodayStr, marketplaceYesterdayStr } = require('../../utils/marketplaceTimezone.js');
 const { SLICE_KEYS } = dashboardSliceService;
 
 class ScheduledIntegration {
@@ -935,6 +936,10 @@ class ScheduledIntegration {
         const apiData = {};
 
         // Daily schedules fetch only yesterday's data (Pacific time, consistent with reportDateRange.js).
+        // ADS ONLY — used at the serviceFunction call sites below. Ads report ROWS are already
+        // grouped marketplace-locally by Amazon; this only picks which dates to request, so it
+        // stays Pacific. Finance day keys are marketplace-local (utils/marketplaceTimezone.js) —
+        // do not reuse this for anything finance.
         const PACIFIC_OFFSET_MS = 7 * 60 * 60 * 1000;
         const _nowPacific = new Date(Date.now() - PACIFIC_OFFSET_MS);
         const _yesterdayPacific = new Date(Date.UTC(
@@ -1100,8 +1105,8 @@ class ScheduledIntegration {
             // Batch 2: Restock Inventory, FBA Inventory Planning, Stranded Inventory, Inbound Non-Compliance, Product Reviews, Ads Keywords, Campaign Data, Reimbursement Data & Calculations
             if (['RestockinventoryData', 'fbaInventoryPlanningData', 'strandedInventoryData', 'inboundNonComplianceData', 'productReview', 'adsKeywords', 'campaignData',
                  'ledgerSummaryViewData', 'ledgerDetailViewData', 'fbaReimbursementsData',
-                 'calculateShipmentDiscrepancy', 'calculateLostInventoryReimbursement', 'calculateDamagedInventoryReimbursement', 
-                 'calculateDisposedInventoryReimbursement'].includes(functionKey)) {
+                 'calculateShipmentDiscrepancy', 'calculateLostInventoryReimbursement', 'calculateDamagedInventoryReimbursement',
+                 'calculateDisposedInventoryReimbursement', 'ltsfData'].includes(functionKey)) {
                 return 2;
             }
             // Batch 3: Shipment Data, Brand Data, Ad Groups Data, MCP SalesOnly, MCP BuyBox
@@ -2616,7 +2621,7 @@ class ScheduledIntegration {
         // Inventory slice (batch 2)
         inventory: [
             'RestockinventoryData', 'fbaInventoryPlanningData',
-            'strandedInventoryData', 'inboundNonComplianceData'
+            'strandedInventoryData', 'inboundNonComplianceData', 'ltsfData'
         ],
         // Performance slice (batch 1/2 — V2/V1 perf + reviews + ledger/reimbursement reads)
         performance: [
@@ -3425,7 +3430,9 @@ class ScheduledIntegration {
             //    congests the seller's report queue.
             const emptyRetries = { ...(phaseData.financeEmptyRetries || {}) };
             if (row.status === 'NO_DATA' && (emptyRetries[paramsKey] || 0) < 1) {
-                const todayPac = new Date(Date.now() - 7 * 3600000).toISOString().substring(0, 10);
+                // Marketplace-local: the chunk dates being aged against are marketplace-local day
+                // keys, so "today" has to be too or the age is off by a day for distant markets.
+                const todayPac = marketplaceTodayStr(Country);
                 const ageDays = Math.round((new Date(`${todayPac}T00:00:00.000Z`) - new Date(`${chunk.startDate}T00:00:00.000Z`)) / 86400000);
                 if (ageDays <= PROVISIONAL_SETTLE_DAYS) {
                     emptyRetries[paramsKey] = (emptyRetries[paramsKey] || 0) + 1;
@@ -3668,7 +3675,7 @@ class ScheduledIntegration {
         try {
             const sorted = [...dates].sort();
             const forceStart = sorted[0];
-            // ★ Anchor the END of the re-fetch window to YESTERDAY (Pacific), not
+            // ★ Anchor the END of the re-fetch window to YESTERDAY (marketplace-local), not
             //   the latest broken day. Amazon's GET_FLAT_FILE_ALL_ORDERS_DATA_BY_
             //   ORDER_DATE report only returns an OLD order-date when the request
             //   window extends toward the present — a single-old-day window (e.g.
@@ -3677,9 +3684,10 @@ class ScheduledIntegration {
             //   yesterday makes the report return the old day's data, so the
             //   catch-up RESTORES it instead of fetching nothing. (Verified: a
             //   range fetch returns the day; a single-old-day fetch returns 0.)
-            const PACIFIC_OFFSET_MS = 7 * 60 * 60 * 1000;
-            const yesterdayPac = new Date(Date.now() - PACIFIC_OFFSET_MS - 24 * 60 * 60 * 1000)
-                .toISOString().substring(0, 10);
+            //
+            //   Marketplace-local rather than Pacific, so this agrees with the day keys
+            //   FinanceService writes and with the catch-up dates the sweeper produced.
+            const yesterdayPac = marketplaceYesterdayStr(Country);
             const latestBroken = sorted[sorted.length - 1];
             const forceEnd = latestBroken > yesterdayPac ? latestBroken : yesterdayPac;
 

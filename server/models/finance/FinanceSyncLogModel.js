@@ -139,6 +139,20 @@ const FinanceSyncLogSchema = new mongoose.Schema(
     // a capped date retry immediately, the opposite of the intent.
     consecutiveFailures: { type: Number, default: 0 },
     nextRetryAfter: { type: Date, default: null },
+
+    // ── Which calendar this day's buckets were written in ──────────────────────
+    // The IANA zone (e.g. 'Australia/Sydney') whose calendar day the `date` key above refers to.
+    //
+    // Day keys used to be built from a hardcoded UTC-7, i.e. every account was bucketed as if it
+    // sold in US Pacific Daylight Time. Rows written before that fix have NO value here, which is
+    // precisely what makes them identifiable: a day with `bucketTimezone` absent was bucketed on
+    // the old, wrong calendar and its figures are shifted for any non-Pacific marketplace.
+    //
+    // This exists so a cleanup can find those days EXACTLY rather than guessing from a date range.
+    // Guessing is unsafe here: the persist layer deliberately only clears days it has fresh data
+    // for (an aged-out Amazon report returns empty and once wiped a settled day to $0), so a
+    // range-based delete would risk zeroing days it cannot refill.
+    bucketTimezone: { type: String, default: null },
   },
   { timestamps: true }
 );
