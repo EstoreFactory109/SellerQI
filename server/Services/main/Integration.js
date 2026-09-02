@@ -1506,7 +1506,15 @@ class Integration {
             // Use service layer that handles both old (embedded array) and new (separate collection) formats
             const storedSponsoredAdsData = await getProductWiseSponsoredAdsData(userId, Country, Region);
 
-            if (storedSponsoredAdsData && Array.isArray(storedSponsoredAdsData.sponsoredAds)) {
+            if (storedSponsoredAdsData && Array.isArray(storedSponsoredAdsData.campaignIds)) {
+                // Prefer the distinct sets the service now resolves with two `distinct` calls.
+                // These ids used to be scraped by walking every row of `sponsoredAds` — 234k
+                // iterations on a large account purely to build two Sets. The rows are now
+                // aggregated per (asin, adType, date) and no longer carry campaignId/adGroupId at
+                // all, so the row-scan below is the pre-aggregation fallback, not the main path.
+                campaignIdArray = storedSponsoredAdsData.campaignIds;
+                adGroupIdArray = storedSponsoredAdsData.adGroupIds || [];
+            } else if (storedSponsoredAdsData && Array.isArray(storedSponsoredAdsData.sponsoredAds)) {
                 const campaignIds = new Set();
                 const adGroupIds = new Set();
                 const SET_BUILD_CHUNK_SIZE = 500;

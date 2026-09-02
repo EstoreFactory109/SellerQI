@@ -49,22 +49,37 @@ function stub({ rowCount, items = [] }) {
 afterEach(() => jest.restoreAllMocks());
 
 describe('an oversized batch degrades instead of hanging', () => {
-    // THE REGRESSION TEST — 234,035 is the real number from the stalled account.
-    test('234k rows: returns empty, never issues the find, and says why', async () => {
-        const { find } = stub({ rowCount: 234035 });
+    // 234,035 is the real size of the account that was hanging. It MUST NOT be skipped any more:
+    // the hot path reads by aggregation now, so the ads data is kept in full. This assertion was
+    // deliberately inverted when the aggregation landed — skipping was always a stopgap, and
+    // losing ads data is not acceptable.
+    test('234k rows: loads, does NOT skip — no ads data is lost', async () => {
+        const rows = [{ asin: 'B1', spend: 3 }];
+        const { find } = stub({ rowCount: 234035, items: rows });
+
+        const res = await ProductWiseSponsoredAdsItem.findLatestByUserCountryRegion(USER, 'US', 'NA');
+
+        expect(res.skipped).toBeUndefined();
+        expect(res.items).toBe(rows);
+        expect(find).toHaveBeenCalledWith({ batchId: BATCH });
+    });
+
+    // The ceiling still exists as a backstop for anything calling this loader directly, but only
+    // fires far beyond any real account.
+    test('an absurd batch still degrades rather than hanging', async () => {
+        const { find } = stub({ rowCount: 5000000 });
 
         const res = await ProductWiseSponsoredAdsItem.findLatestByUserCountryRegion(USER, 'US', 'NA');
 
         expect(res.items).toEqual([]);
         expect(res.skipped).toBe(true);
-        expect(res.rowCount).toBe(234035);
-        expect(find).not.toHaveBeenCalled();          // the load never happens
-        expect(logger.error).toHaveBeenCalled();       // and it is not silent
+        expect(find).not.toHaveBeenCalled();
+        expect(logger.error).toHaveBeenCalled();
     });
 
     // The batchId/createdAt still come back so callers can distinguish "withheld" from "no data".
     test('the batch identity is still reported when skipped', async () => {
-        stub({ rowCount: 999999 });
+        stub({ rowCount: 5000000 });
 
         const res = await ProductWiseSponsoredAdsItem.findLatestByUserCountryRegion(USER, 'US', 'NA');
 

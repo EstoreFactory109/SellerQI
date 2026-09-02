@@ -1892,17 +1892,27 @@ class ScheduledIntegration {
             // Use service layer that handles both old (embedded array) and new (separate collection) formats
             const storedSponsoredAdsData = await getProductWiseSponsoredAdsData(userId, Country, Region);
 
-            if (storedSponsoredAdsData && Array.isArray(storedSponsoredAdsData.sponsoredAds)) {
-                const campaignIds = new Set();
-                const adGroupIds = new Set();
+            if (storedSponsoredAdsData && (Array.isArray(storedSponsoredAdsData.campaignIds) || Array.isArray(storedSponsoredAdsData.sponsoredAds))) {
+                // Prefer the distinct sets the service now resolves with two `distinct` calls.
+                // These ids used to be scraped by walking every row of `sponsoredAds` — 234k
+                // iterations on a large account purely to build two Sets. The rows are now
+                // aggregated per (asin, adType, date) and no longer carry campaignId/adGroupId at
+                // all, so the row-scan below is the pre-aggregation fallback, not the main path.
+                if (Array.isArray(storedSponsoredAdsData.campaignIds)) {
+                    campaignIdArray = storedSponsoredAdsData.campaignIds;
+                    adGroupIdArray = storedSponsoredAdsData.adGroupIds || [];
+                } else {
+                    const campaignIds = new Set();
+                    const adGroupIds = new Set();
 
-                storedSponsoredAdsData.sponsoredAds.forEach(ad => {
-                    if (ad && ad.campaignId) campaignIds.add(ad.campaignId);
-                    if (ad && ad.adGroupId) adGroupIds.add(ad.adGroupId);
-                });
+                    storedSponsoredAdsData.sponsoredAds.forEach(ad => {
+                        if (ad && ad.campaignId) campaignIds.add(ad.campaignId);
+                        if (ad && ad.adGroupId) adGroupIds.add(ad.adGroupId);
+                    });
 
-                campaignIdArray = Array.from(campaignIds);
-                adGroupIdArray = Array.from(adGroupIds);
+                    campaignIdArray = Array.from(campaignIds);
+                    adGroupIdArray = Array.from(adGroupIds);
+                }
             } else if (ppcSpendsBySKU.success && ppcSpendsBySKU.data?.sponsoredAds) {
                 const campaignIds = new Set();
                 const adGroupIds = new Set();
