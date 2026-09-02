@@ -1029,6 +1029,57 @@ class ScheduledIntegration {
         const fifthBatchPromises = [];
         const fifthBatchServiceNames = [];
 
+        // COMPUTE ONCE. The three batch-5 calculation services (issueSummary, productIssues,
+        // issuesData) each used to run the FULL pipeline themselves — `AnalyseService.Analyse()`
+        // then `analyseData()` — and their promises are created eagerly below, so all three ran
+        // CONCURRENTLY. issueSummary keeps six integers out of that, productIssues keeps one array;
+        // only issuesData uses most of it.
+        //
+        // That is ~25 collection loads and one full DashboardCalculation, three times over. On
+        // 2026-09-01 it stopped being merely wasteful: one PRO account's newest sponsored-ads batch
+        // reached 234,035 rows / 102 MB (legitimate 30-day data), which is ~300-400 MB per copy as
+        // lean JS objects. Three concurrent copies plus the other 24 collections exceeded the
+        // 1536 MB heap cap, the worker GC-thrashed, `fetchAllDataModels` never returned, and BullMQ
+        // stall-reclaimed the job every 20 minutes forever. That account had not completed a run in
+        // over a week. ONE copy fits comfortably.
+        //
+        // Memoised rather than hoisted so it is computed only if a calculation service actually
+        // runs (batch 5 is skipped entirely by _batchFilter on most phases), and so all three
+        // observe the SAME object. This mirrors what Services/main/Integration.js already does on
+        // the onboarding path — "uses the already-calculated dashboardData to avoid re-fetching".
+        let sharedDashboardDataPromise = null;
+        const getSharedDashboardData = () => {
+            if (!sharedDashboardDataPromise) {
+                sharedDashboardDataPromise = (async () => {
+                    const { AnalyseService } = require('../main/Analyse.js');
+                    const { analyseData } = require('../Calculations/DashboardCalculation.js');
+
+                    const analyse = await AnalyseService.Analyse(userId, Country, Region);
+                    if (!analyse || analyse.status !== 200 || !analyse.message) {
+                        throw new Error(`Failed to get analyse data: status ${analyse?.status}`);
+                    }
+                    const calculationResult = await analyseData(analyse.message, userId);
+                    if (!calculationResult?.dashboardData) {
+                        throw new Error('Failed to calculate dashboard data');
+                    }
+                    return calculationResult.dashboardData;
+                })();
+            }
+            return sharedDashboardDataPromise;
+        };
+
+        // Each calculation service now only STORES from the shared result. All three storers take
+        // the same (userId, country, region, dashboardData, source) signature and are already
+        // exported; the onboarding path uses them the same way.
+        const CALCULATION_STORERS = {
+            issueSummary: (dd) => require('../Calculations/IssueSummaryService.js')
+                .storeIssueSummaryFromDashboardData(userId, Country, Region, dd, 'schedule'),
+            productIssues: (dd) => require('../Calculations/ProductIssuesService.js')
+                .storeProductIssuesFromDashboardData(userId, Country, Region, dd, 'schedule'),
+            issuesData: (dd) => require('../Calculations/IssuesDataService.js')
+                .storeIssuesDataFromDashboard(userId, Country, Region, dd, 'schedule'),
+        };
+
         // Sixth batch: Review order ingestion (fetches orders + items into DB)
         const sixthBatchPromises = [];
         const sixthBatchServiceNames = [];
@@ -1480,9 +1531,14 @@ class ScheduledIntegration {
                         );
                     }
                 } else if (functionConfig.isCalculationService) {
-                    // Calculation services (IssueSummary, ProductIssues)
-                    // These run after all API fetches complete and use (userId, country, region, source)
-                    promise = serviceFunction(userId, Country, Region, 'schedule');
+                    // Calculation services (issueSummary, productIssues, issuesData). They share ONE
+                    // computation — see getSharedDashboardData above for why. A key without a storer
+                    // falls back to the old self-contained call so an added service cannot silently
+                    // do nothing.
+                    const storer = CALCULATION_STORERS[functionKey];
+                    promise = storer
+                        ? getSharedDashboardData().then(storer)
+                        : serviceFunction(userId, Country, Region, 'schedule');
                 } else {
                     // Reimbursement functions (calculation only, no API call)
                     promise = serviceFunction(userId, Country, Region);
@@ -1836,17 +1892,27 @@ class ScheduledIntegration {
             // Use service layer that handles both old (embedded array) and new (separate collection) formats
             const storedSponsoredAdsData = await getProductWiseSponsoredAdsData(userId, Country, Region);
 
-            if (storedSponsoredAdsData && Array.isArray(storedSponsoredAdsData.sponsoredAds)) {
-                const campaignIds = new Set();
-                const adGroupIds = new Set();
+            if (storedSponsoredAdsData && (Array.isArray(storedSponsoredAdsData.campaignIds) || Array.isArray(storedSponsoredAdsData.sponsoredAds))) {
+                // Prefer the distinct sets the service now resolves with two `distinct` calls.
+                // These ids used to be scraped by walking every row of `sponsoredAds` — 234k
+                // iterations on a large account purely to build two Sets. The rows are now
+                // aggregated per (asin, adType, date) and no longer carry campaignId/adGroupId at
+                // all, so the row-scan below is the pre-aggregation fallback, not the main path.
+                if (Array.isArray(storedSponsoredAdsData.campaignIds)) {
+                    campaignIdArray = storedSponsoredAdsData.campaignIds;
+                    adGroupIdArray = storedSponsoredAdsData.adGroupIds || [];
+                } else {
+                    const campaignIds = new Set();
+                    const adGroupIds = new Set();
 
-                storedSponsoredAdsData.sponsoredAds.forEach(ad => {
-                    if (ad && ad.campaignId) campaignIds.add(ad.campaignId);
-                    if (ad && ad.adGroupId) adGroupIds.add(ad.adGroupId);
-                });
+                    storedSponsoredAdsData.sponsoredAds.forEach(ad => {
+                        if (ad && ad.campaignId) campaignIds.add(ad.campaignId);
+                        if (ad && ad.adGroupId) adGroupIds.add(ad.adGroupId);
+                    });
 
-                campaignIdArray = Array.from(campaignIds);
-                adGroupIdArray = Array.from(adGroupIds);
+                    campaignIdArray = Array.from(campaignIds);
+                    adGroupIdArray = Array.from(adGroupIds);
+                }
             } else if (ppcSpendsBySKU.success && ppcSpendsBySKU.data?.sponsoredAds) {
                 const campaignIds = new Set();
                 const adGroupIds = new Set();

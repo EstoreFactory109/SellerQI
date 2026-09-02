@@ -810,7 +810,13 @@ async function getAsinWiseProfitability(userId, country, region, limit = 100) {
         const profitabilityList = asinData.map(item => {
             const asin = item.asin;
             const productInfo = productNameMap.get(asin) || {};
-            const adsSpend = adsSpendByAsin.get(asin) || 0;
+            // `.total`, not the entry itself. aggregateSpendByAsin returns
+        // Map<asin, { total, SP, SD }>, but this line treated it as a number, so
+        // `sales - adsSpend` produced NaN and `adsSpend.toFixed(2)` threw TypeError for every
+        // account that actually has ads rows. The shape changed under these two consumers and
+        // they were never updated. `?? 0` (not `|| 0`) so a genuine 0 total is preserved.
+        const adsSpendEntry = adsSpendByAsin.get(asin);
+        const adsSpend = (typeof adsSpendEntry === 'number' ? adsSpendEntry : adsSpendEntry?.total) ?? 0;
             const cogsPerUnit = cogsMap[asin] || 0;
             const totalCogs = cogsPerUnit * (item.unitsSold || 0);
             const hasCOGS = cogsPerUnit > 0;
