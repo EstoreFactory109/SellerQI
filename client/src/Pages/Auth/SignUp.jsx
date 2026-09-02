@@ -23,6 +23,9 @@ import { countryCodesData } from '../../utils/countryCodesData.js';
 import { detectCountry } from '../../utils/countryDetection.js';
 import axiosInstance from '../../config/axios.config.js';
 import { devLog } from '../../utils/devLogger.js';
+import PhoneRequiredModal from '../../Components/PhoneUpdate/PhoneRequiredModal.jsx';
+import PasswordCriteriaList from '../../Components/Shared/PasswordCriteriaList.jsx';
+import { isPasswordValid, passwordErrorMessage, extractServerError } from '../../utils/passwordCriteria.js';
 
 // Helper function to get country flag from ISO code
 const getCountryFlag = (isoCode) => {
@@ -59,8 +62,43 @@ const SignUp = () => {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [detectedCountry, setDetectedCountry] = useState(null); // For trial flow
+  // Set once a Google signup succeeds; holds the plan routing to run after the
+  // phone-collection modal is answered.
+  const [pendingGoogleSignup, setPendingGoogleSignup] = useState(null);
   const navigate = useNavigate();
   const dispatch = useDispatch();
+
+  // Something typed, but not yet meeting every rule — keeps the field red as they go.
+  const passwordIncomplete = !!formData.password && !isPasswordValid(formData.password);
+
+  // Continue the Google signup flow once the phone modal is saved or skipped.
+  // Takes the routing explicitly so it can also be called straight away, without
+  // waiting on a state update, when there is no phone to ask for.
+  const finishGoogleSignup = async (routing) => {
+    const pending = routing || pendingGoogleSignup;
+    setPendingGoogleSignup(null);
+    if (!pending) return;
+
+    const { noPlanSelected, isPROTrial, packageType, isIndianUser } = pending;
+    try {
+      if (noPlanSelected) {
+        // No plan selected - go straight to onboarding (skip pricing)
+        navigate('/connect-to-amazon');
+      } else if (isPROTrial) {
+        // PRO-Trial: Stripe checkout with 7-day trial (INR pricing for India)
+        const stripeService = (await import('../../services/stripeService.js')).default;
+        await stripeService.createCheckoutSession('PRO', null, 7, isIndianUser ? 'inr' : null);
+      } else {
+        // PRO/AGENCY (paid): Go to Stripe payment (INR pricing for Indian PRO users)
+        localStorage.setItem('intendedPackage', plans);
+        const stripeService = (await import('../../services/stripeService.js')).default;
+        await stripeService.createCheckoutSession(packageType, null, null, isIndianUser && packageType === 'PRO' ? 'inr' : null);
+      }
+    } catch (error) {
+      console.error('Post Google sign-up navigation failed:', error);
+      setErrorMessage('Sign-up completed, but we could not continue. Please refresh and try again.');
+    }
+  };
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -159,7 +197,6 @@ const SignUp = () => {
     let newErrors = {};
     const nameRegex = /^[A-Za-z]{2,}$/;
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
 
     if (!nameRegex.test(formData.firstname)) {
       newErrors.firstname = 'Enter a valid first name (only letters, min 2 characters)';
@@ -189,8 +226,8 @@ const SignUp = () => {
     
     if (!formData.password) {
       newErrors.password = 'Password is required';
-    } else if (!passwordRegex.test(formData.password)) {
-      newErrors.password = 'Password must be at least 8 characters, with a letter, a number, and a special character';
+    } else if (!isPasswordValid(formData.password)) {
+      newErrors.password = passwordErrorMessage(formData.password);
     }
     
     if (!termsAccepted) {
@@ -249,7 +286,7 @@ const SignUp = () => {
       }
     } catch (error) {
       setLoading(false);
-      setErrorMessage(error.response?.data?.message);
+      setErrorMessage(extractServerError(error));
     }
   };
 
@@ -295,21 +332,18 @@ const SignUp = () => {
           // Store auth information
           localStorage.setItem("isAuth", "true");
           dispatch(loginSuccess(response.data || response));
-          
-          // If no plan selected, redirect to connect-to-amazon page (skip pricing)
-          if (noPlanSelected) {
-            navigate('/connect-to-amazon');
-          } else if (isPROTrial) {
-            // PRO-Trial: Stripe checkout with 7-day trial (INR pricing for India)
-            const stripeService = (await import('../../services/stripeService.js')).default;
-            await stripeService.createCheckoutSession('PRO', null, 7, isIndianUser ? 'inr' : null);
+
+          // Google never gives us a phone number, so ask for it here - the paid
+          // paths below leave the app for Stripe, and there is no coming back.
+          // Only gate on the modal when the server actually flagged the account,
+          // otherwise the modal would render nothing and strand the user here.
+          const routing = { noPlanSelected, isPROTrial, packageType, isIndianUser };
+          if ((response.data || response)?.needsPhoneUpdate === true) {
+            setPendingGoogleSignup(routing);
           } else {
-            // PRO/AGENCY (paid): Go to Stripe payment (INR pricing for Indian PRO users)
-            localStorage.setItem('intendedPackage', plans);
-            const stripeService = (await import('../../services/stripeService.js')).default;
-            await stripeService.createCheckoutSession(packageType, null, null, isIndianUser && packageType === 'PRO' ? 'inr' : null);
+            await finishGoogleSignup(routing);
           }
-          
+
         } else {
             // Non-200/201 response - treat as error
             console.error('Google sign-up returned unexpected status:', response.statusCode);
@@ -345,6 +379,9 @@ const SignUp = () => {
 
   return (
     <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center">
+      {/* Google signup collects no phone number - ask before routing on to
+          onboarding or Stripe checkout. Renders nothing until then. */}
+      {pendingGoogleSignup && <PhoneRequiredModal forceShow onDone={finishGoogleSignup} />}
       {/* Form Section */}
       <div className="relative w-full flex items-center justify-center px-4 py-4 lg:py-8">
         <div className="w-full max-w-lg">
@@ -562,7 +599,11 @@ const SignUp = () => {
                      onChange={handleChange}
                      onFocus={handleFocus}
                      className={`w-full pl-10 pr-12 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300 text-gray-100 ${
-                       errors.password ? 'border-red-500 bg-red-500/10' : 'border-[#30363d] bg-[#21262d] hover:border-gray-500'
+                       errors.password || passwordIncomplete
+                         ? 'border-red-500 bg-red-500/10'
+                         : formData.password
+                           ? 'border-green-500/60 bg-[#21262d]'
+                           : 'border-[#30363d] bg-[#21262d] hover:border-gray-500'
                      }`}
                      placeholder="Create a password"
                    />
@@ -574,18 +615,7 @@ const SignUp = () => {
                     {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
                 </div>
-                {errors.password && (
-                  <motion.p
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="text-red-400 text-xs mt-1"
-                  >
-                    {errors.password}
-                  </motion.p>
-                )}
-                                 <p className="text-xs text-gray-500 mt-0.5">
-                   Min 8 chars with letters, numbers & symbols
-                 </p>
+                <PasswordCriteriaList value={formData.password} error={errors.password} />
               </div>
 
               {/* Terms Checkbox */}

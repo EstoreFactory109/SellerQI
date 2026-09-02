@@ -138,9 +138,14 @@ describe('guards', () => {
     });
 
     test('recent JobStatus activity means a run is still walking — do not duplicate it', async () => {
-        // The regression that matters most: getAllPhaseJobIds does not enumerate the
-        // `-pollN` ids the ads/finance phases reschedule under, so producer.js's own dedup
-        // is blind to a live poll chain. A healthy ads phase alone runs 40-50 min.
+        // The regression that matters most: getAllPhaseJobIds does not enumerate the `-pollN` ids
+        // the ads/finance phases reschedule under, so a live poll chain is easy to miss. A healthy
+        // ads phase alone runs 40-50 min, and its first poll waits a full hour.
+        //
+        // This sweep's guard is the JobStatus check below. The producer now covers the same ground
+        // from the other side by asking BullMQ for pending work — deliberately a DIFFERENT signal,
+        // because a warm JobStatus row cannot tell "still going" from "just finished", which is
+        // fine here (only 9h-frozen docs get this far) but would stall an account there.
         mockJobStatusFindOne.mockReturnValue(chain({ _id: 'alive' }));
 
         const res = await sweepStalledPipelines();

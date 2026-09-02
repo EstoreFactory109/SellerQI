@@ -49,8 +49,21 @@ const DEFAULT_TIMEOUT_MS = () => envInt('SPAPI_REPORT_DOWNLOAD_TIMEOUT_MS', 5 * 
 // Idle ceiling: no bytes at all for this long means the transfer is dead, even if the overall
 // budget has time left. This is what actually catches a silent stall quickly.
 const DEFAULT_IDLE_TIMEOUT_MS = () => envInt('SPAPI_REPORT_IDLE_TIMEOUT_MS', 60 * 1000);
-// 0 = unlimited. Set it to fail fast rather than push the worker past max_memory_restart.
-const DEFAULT_MAX_BYTES = () => envInt('SPAPI_REPORT_MAX_BYTES', 0);
+// Compressed-byte ceiling. 0 disables it entirely.
+//
+// This defaulted to 0 and was set NOWHERE — checked across the tree and the deployed process
+// environment — so the cap documented here did not actually exist in production.
+//
+// The default below is a CATASTROPHE BACKSTOP, not a tuning knob: real reports here run to a
+// few MB compressed, so 256 MB never fires for legitimate traffic. A 256 MB compressed TSV
+// decompresses to multiple GB and is then parsed into JS objects at a further multiple — on
+// heaps of 1536 MB (worker) and 768 MB (api) that is an OOM, and PM2 then recycles the whole
+// process, killing every other job it was holding. Failing one report loudly is much cheaper
+// than taking several concurrent accounts down with it.
+//
+// Lower it via SPAPI_REPORT_MAX_BYTES for a genuinely tight cap; doing that well needs real
+// report sizes, which are computed here but not currently recorded anywhere.
+const DEFAULT_MAX_BYTES = () => envInt('SPAPI_REPORT_MAX_BYTES', 256 * 1024 * 1024);
 
 /**
  * Download (and optionally gunzip) a report document.
@@ -86,12 +99,29 @@ function downloadReportContent(url, opts = {}) {
         let overallTimer = null;
         let idleTimer = null;
         let request = null;
+        // Hoisted so cleanup() can reach it. The gunzip stream is created inside the response
+        // handler below, i.e. in a scope the settle functions cannot see — which is precisely why
+        // it was never destroyed.
+        let inflateStream = null;
 
         function cleanup() {
             if (overallTimer) clearTimeout(overallTimer);
             if (idleTimer) clearTimeout(idleTimer);
             overallTimer = null;
             idleTimer = null;
+            // Release the zlib context.
+            //
+            // WHY THIS MATTERS MORE THAN IT LOOKS. A gunzip stream holds a NATIVE zlib context and
+            // buffer pool. Those live in RSS but NOT in the V8 heap, so they exert almost no GC
+            // pressure and are never collected on their own — the process simply grows. This fires
+            // on every gzipped SP-API/Ads report download, of which a pipeline does many.
+            //
+            // It is also the only mechanism found that explains RSS climbing with uptime while the
+            // heap stays healthy, which is the divergence that made a memory leak look likely.
+            // Called from cleanup() so every settle path (success, failure, timeout) is covered
+            // exactly once — same shape as request.destroy() below.
+            try { if (inflateStream) inflateStream.destroy(); } catch (_) { /* already gone */ }
+            inflateStream = null;
         }
 
         function fail(err) {
@@ -186,6 +216,9 @@ function downloadReportContent(url, opts = {}) {
 
             const stream = isGzip ? res.pipe(zlib.createGunzip()) : res;
             if (isGzip) {
+                // Record it so cleanup() can destroy the native zlib context on every settle path.
+                // Only when we actually created one — `res` is destroyed via request.destroy().
+                inflateStream = stream;
                 // A corrupt/truncated gzip surfaces here rather than as short output.
                 stream.on('error', (err) => fail(new Error(`[${label}] gunzip failed: ${err.message}`)));
             }

@@ -4,13 +4,13 @@ import { motion } from 'framer-motion';
 import {
   Mail,
   User,
-  Phone,
   UserPlus,
   Loader2,
 } from 'lucide-react';
 import axios from 'axios';
 import { useDispatch } from 'react-redux';
 import { loginSuccess } from '../../redux/slices/authSlice';
+import PhoneNumberInput, { validatePhoneParts, buildPhoneValue } from '../Shared/PhoneNumberInput.jsx';
 
 const AddClientForm = ({ onCancel, showCancelButton = false, agencyName = '' }) => {
   const navigate = useNavigate();
@@ -20,6 +20,7 @@ const AddClientForm = ({ onCancel, showCancelButton = false, agencyName = '' }) 
     phone: '',
     email: '',
   });
+  const [countryCode, setCountryCode] = useState('+1');
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -38,7 +39,6 @@ const AddClientForm = ({ onCancel, showCancelButton = false, agencyName = '' }) 
     let newErrors = {};
     const nameRegex = /^[A-Za-z]{2,}$/;
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const phoneRegex = /^\d{10}$/;
 
     if (!nameRegex.test(formData.firstname)) {
       newErrors.firstname = 'Valid first name (letters only, min 2)';
@@ -46,9 +46,7 @@ const AddClientForm = ({ onCancel, showCancelButton = false, agencyName = '' }) 
     if (!nameRegex.test(formData.lastname)) {
       newErrors.lastname = 'Valid last name (letters only, min 2)';
     }
-    if (!phoneRegex.test(formData.phone)) {
-      newErrors.phone = 'Valid 10-digit phone';
-    }
+    Object.assign(newErrors, validatePhoneParts(countryCode, formData.phone));
     if (!emailRegex.test(formData.email)) {
       newErrors.email = 'Valid email address';
     }
@@ -64,6 +62,7 @@ const AddClientForm = ({ onCancel, showCancelButton = false, agencyName = '' }) 
     try {
       const clientData = {
         ...formData,
+        phone: buildPhoneValue(countryCode, formData.phone), // keep the country code
         allTermsAndConditionsAgreed: true,
       };
       const response = await axios.post(
@@ -157,22 +156,22 @@ const AddClientForm = ({ onCancel, showCancelButton = false, agencyName = '' }) 
           </div>
         </div>
 
-        <div>
-          <label className={labelClass}>Phone</label>
-          <div className="relative">
-            <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 w-4 h-4" />
-            <input
-              type="tel"
-              name="phone"
-              value={formData.phone}
-              onChange={handleChange}
-              onFocus={handleFocus}
-              className={inputClass(!!errors.phone)}
-              placeholder="10-digit phone number"
-            />
-          </div>
-          {errors.phone && <p className="text-red-400 text-xs mt-1">{errors.phone}</p>}
-        </div>
+        <PhoneNumberInput
+          countryCode={countryCode}
+          phone={formData.phone}
+          onCountryCodeChange={(code) => {
+            setCountryCode(code);
+            setFormData({ ...formData, phone: '' }); // lengths differ per country
+            setErrors({ ...errors, phone: '', countryCode: '' });
+          }}
+          onPhoneChange={(value) => {
+            setFormData({ ...formData, phone: value });
+            setErrors({ ...errors, phone: '' });
+          }}
+          errors={errors}
+          label="Phone"
+          disabled={loading}
+        />
 
         <div>
           <label className={labelClass}>Email</label>

@@ -338,6 +338,15 @@ class AnalyseService {
         const ThirtyDaysAgo = new Date(createdDate);
         ThirtyDaysAgo.setDate(ThirtyDaysAgo.getDate() - 30);
 
+        // How many days of per-day ads rows the dashboard pulls. The UI offers Last 7 / 14 / 30
+        // and anchors its calendar to the backend's own dataRange, so 30 covers every selectable
+        // range; anything beyond it was being fetched, shipped to the browser, and never shown.
+        // Env-overridable so this can be widened in production without a deploy.
+        const dashboardLookbackDays = Math.max(
+            1,
+            parseInt(process.env.DASHBOARD_ADS_LOOKBACK_DAYS || '30', 10) || 30
+        );
+
         // Create individual timed queries for performance measurement
         const timedQuery = async (name, queryFn) => {
             const start = Date.now();
@@ -401,7 +410,7 @@ class AnalyseService {
             timedQuery('negativeKeywords', () => loadLatestSnapshotDoc(NegetiveKeywords, userId, country, region)),
             timedQuery('keywords', () => loadKeywordSnapshot(userId, country, region)),
             timedQuery('searchTerms', () =>
-                SearchTerms.findMergedSearchTermData(userId, country, region, {}).then((rows) =>
+                SearchTerms.findMergedSearchTermData(userId, country, region, { lookbackDays: dashboardLookbackDays }).then((rows) =>
                     rows?.length ? { userId, country, region, searchTermData: rows } : null
                 )
             ),
@@ -413,12 +422,20 @@ class AnalyseService {
             // Deprecated: FBAFeesModel - replaced by EconomicsMetrics (MCP provides ASIN-wise fees)
             Promise.resolve(null), // FBAFeesData - use EconomicsMetrics.asinWiseSales instead
             timedQuery('adsKeywords', () =>
-                adsKeywordsPerformanceModel.findMergedKeywordsData(userId, country, region, {}).then((rows) =>
+                adsKeywordsPerformanceModel.findMergedKeywordsData(userId, country, region, { lookbackDays: dashboardLookbackDays }).then((rows) =>
                     rows?.length ? { userId, country, region, keywordsData: rows } : null
                 )
             ),
             timedQuery('orderData', () => GetOrderDataModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
-            timedQuery('ppcSpend', () => GetDateWisePPCspendModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()),
+            // Per-day merge with the same bounded window as its ads siblings above. The old
+            // `findOne().sort({createdAt:-1})` loaded ONE document holding the whole report —
+            // 13MB for the largest account — and, because a catch-up run writes a single-day
+            // document, could collapse the entire chart to that one day.
+            timedQuery('ppcSpend', () =>
+                GetDateWisePPCspendModel.findMergedDateWiseSpends(userId, country, region, { lookbackDays: dashboardLookbackDays }).then((rows) =>
+                    rows?.length ? { userId, country, region, dateWisePPCSpends: rows } : null
+                )
+            ),
             timedQuery('adsGroup', () => loadLatestSnapshotDoc(AdsGroup, userId, country, region)),
             timedQuery('keywordTracking', () => KeywordTrackingModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()),
             timedQuery('ppcUnitsSold', () => PPCUnitsSold.findLatestForUser(userId, country, region))

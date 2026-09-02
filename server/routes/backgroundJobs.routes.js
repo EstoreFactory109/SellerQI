@@ -20,6 +20,8 @@ const {
     getDetailedScheduleStats
 } = require('../controllers/system/BackgroundJobController.js');
 
+const { getPipelineProgress } = require('../controllers/system/PipelineProgressController.js');
+
 const auth = require('../middlewares/Auth/auth.js');
 const adminAuth = require('../middlewares/Auth/adminAuth.js');
 const { getLocation } = require('../middlewares/Auth/getLocation.js');
@@ -29,6 +31,16 @@ const { validateJobNameParam, validateUserIdParam } = require('../middlewares/va
 router.get('/user/schedule', auth, getUserSchedule);
 router.post('/user/manual-update', auth, getLocation, manualUserUpdate);
 router.put('/user/update-accounts', auth, updateUserAccounts);
+
+// Which stage of a data fetch is running, and is it still alive.
+//
+// DELIBERATELY NOT WRAPPED IN analyseDataCache. Nearly every neighbouring analytics route is
+// cached, so this omission reads as an oversight unless stated: cached progress is worse than no
+// progress, because it reports a stale stage with full confidence. Liveness is the entire point.
+router.get('/pipeline-progress', auth, getLocation, getPipelineProgress);
+// Admin variant — same handler. adminAuth sets req.userAccessType, which is what permits ?userId=
+// to target another account; without it the handler silently scopes to the caller.
+router.get('/admin/pipeline-progress', auth, adminAuth, getLocation, getPipelineProgress);
 
 // Admin routes (require admin access)
 router.get('/admin/system-stats', auth, adminAuth, getSystemStats);

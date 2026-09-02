@@ -55,6 +55,16 @@ const authSlice = createSlice({
         }
       }
     },
+    // Applied after the phone-collection modal saves, so the modal stops showing
+    // without needing a fresh /app/profile round trip.
+    phoneCollected(state, action) {
+      if (state.user) {
+        state.user.phone = action.payload.phone;
+        state.user.whatsapp = action.payload.whatsapp;
+        state.user.needsPhoneUpdate = false;
+        state.user.phoneUpdateReason = null;
+      }
+    },
     logout(state) {
       state.isAuthenticated = false;
       state.user = null;
@@ -62,5 +72,5 @@ const authSlice = createSlice({
   }
 });
 
-export const { loginSuccess, logout, addBrand, updatePackageType, updateProfileDetails, updateTrialStatus } = authSlice.actions;
+export const { loginSuccess, logout, addBrand, updatePackageType, updateProfileDetails, updateTrialStatus, phoneCollected } = authSlice.actions;
 export default authSlice.reducer;

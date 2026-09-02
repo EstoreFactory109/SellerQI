@@ -30,6 +30,54 @@ class StripeWebhookService {
     }
 
     /**
+     * Read the current billing period off a Stripe Subscription, across API versions.
+     *
+     * IMPORTANT: as of API version 2025-03-31.basil, `current_period_start`/`current_period_end`
+     * were REMOVED from the Subscription object and now live on each subscription item
+     * (`subscription.items.data[].current_period_*`). This installation is mixed:
+     *   - webhook payloads render at the account default (2022-11-15) -> fields present on the subscription
+     *   - stripe-node 18.x pins 2025-08-27.basil, so anything fetched via
+     *     `stripe.subscriptions.retrieve()` has them ONLY on the items
+     * Reading just one location silently yields undefined on the other, which is how the
+     * renewal date ended up depending on incidental fallbacks. Always go through this helper.
+     *
+     * Returns Unix timestamps (seconds), or nulls when genuinely unavailable.
+     */
+    getSubscriptionPeriod(subscription) {
+        if (!subscription) return { start: null, end: null };
+
+        // Newer (Basil+): period lives on the items. Take the furthest-out item period -
+        // multi-item subscriptions share one billing cycle, but be defensive.
+        const itemPeriods = (subscription.items?.data || [])
+            .map((item) => ({ start: item.current_period_start, end: item.current_period_end }))
+            .filter((p) => typeof p.end === 'number');
+
+        if (itemPeriods.length) {
+            const furthest = itemPeriods.reduce((a, b) => (b.end > a.end ? b : a));
+            return { start: furthest.start ?? null, end: furthest.end ?? null };
+        }
+
+        // Older (<= 2025-02-24.acacia): period lives on the subscription itself.
+        return {
+            start: typeof subscription.current_period_start === 'number' ? subscription.current_period_start : null,
+            end: typeof subscription.current_period_end === 'number' ? subscription.current_period_end : null,
+        };
+    }
+
+    /**
+     * Resolve the subscription id off an Invoice, across API versions.
+     * `invoice.subscription` was removed in 2025-03-31.basil in favour of
+     * `invoice.parent.subscription_details.subscription`.
+     */
+    getInvoiceSubscriptionId(invoice) {
+        if (!invoice) return null;
+        const direct = typeof invoice.subscription === 'string'
+            ? invoice.subscription
+            : invoice.subscription?.id || null;
+        return direct || invoice.parent?.subscription_details?.subscription || null;
+    }
+
+    /**
      * Verify webhook signature
      */
     verifyWebhookSignature(payload, signature) {
@@ -265,6 +313,9 @@ class StripeWebhookService {
             const existingSubscription = await Subscription.findOne({ userId });
             const checkoutAlreadyCompleted = existingSubscription?.checkoutCompleted === true;
 
+            // Read period across API versions (see getSubscriptionPeriod)
+            const createdPeriod = this.getSubscriptionPeriod(subscription);
+
             // Update subscription in our database with Stripe details
             const subscriptionData = {
                 stripeSubscriptionId: subscription.id,
@@ -275,9 +326,13 @@ class StripeWebhookService {
                 paymentStatus: isTrialing ? 'no_payment_required' : (subscription.status === 'active' ? 'paid' : 'pending'),
                 amount: subscription.items.data[0].price.unit_amount,
                 currency: subscription.items.data[0].price.currency,
-                currentPeriodStart: this.safeDate(subscription.current_period_start),
-                currentPeriodEnd: this.safeDate(subscription.current_period_end),
-                nextBillingDate: this.safeDate(subscription.trial_end || subscription.current_period_end),
+                currentPeriodStart: this.safeDate(createdPeriod.start),
+                currentPeriodEnd: this.safeDate(createdPeriod.end),
+                // Stripe sets current_period_end == trial_end while trialing, so
+                // current_period_end alone is correct in both the trial and paid case -
+                // see the note on handleSubscriptionUpdated for why trial_end must not be
+                // used here (it never clears back to null once a trial has occurred).
+                nextBillingDate: this.safeDate(createdPeriod.end),
                 cancelAtPeriodEnd: subscription.cancel_at_period_end,
             };
 
@@ -366,13 +421,22 @@ class StripeWebhookService {
 
             logger.info(`Subscription updated for user: ${userId}, status: ${normalizedStatus}, isTrialing: ${isTrialing}`);
 
+            // Read period across API versions (see getSubscriptionPeriod)
+            const updatedPeriod = this.getSubscriptionPeriod(subscription);
+
             // Update subscription in our database
             const subscriptionData = {
                 status: normalizedStatus,
                 gatewayStatus: subscription.status,
-                currentPeriodStart: this.safeDate(subscription.current_period_start),
-                currentPeriodEnd: this.safeDate(subscription.current_period_end),
-                nextBillingDate: this.safeDate(subscription.trial_end || subscription.current_period_end),
+                currentPeriodStart: this.safeDate(updatedPeriod.start),
+                currentPeriodEnd: this.safeDate(updatedPeriod.end),
+                // BUG FIXED: subscription.trial_end never clears back to null once a trial
+                // has occurred - it keeps reporting the original trial-end date forever, even
+                // after the subscription has renewed many times as a paid plan. Falling back
+                // to it here permanently froze nextBillingDate at the trial date for every
+                // user who ever had a trial. Stripe already sets current_period_end == trial_end
+                // while actually trialing, so current_period_end alone is correct in both cases.
+                nextBillingDate: this.safeDate(updatedPeriod.end),
                 cancelAtPeriodEnd: subscription.cancel_at_period_end,
             };
 
@@ -387,9 +451,22 @@ class StripeWebhookService {
 
             await this.updateSubscription(userId, subscriptionData);
 
-            // Update user subscription status
+            // Update user subscription status.
+            //
+            // BUG FIXED: a payment-failure status must NEVER restore the user's paid plan.
+            // Stripe emits customer.subscription.updated (past_due) within a second of
+            // invoice.payment_failed, so this call was overwriting the LITE downgrade that
+            // handleInvoicePaymentFailed had just applied - leaving accounts permanently
+            // stuck as PRO + past_due, which Manage Accounts renders as "Expired".
+            // During the retry window the plan is simply left as-is (a paying customer
+            // keeps PRO while Stripe retries); once retries are exhausted the downgrade
+            // written by the failure/deleted handlers now survives.
             if (planType) {
-                await this.updateUserSubscription(userId, planType, normalizedStatus, subscription);
+                const isPaymentFailureStatus = ['past_due', 'unpaid', 'incomplete', 'incomplete_expired', 'cancelled']
+                    .includes(normalizedStatus);
+                await this.updateUserSubscription(userId, planType, normalizedStatus, subscription, {
+                    preservePackageType: isPaymentFailureStatus
+                });
             }
 
             // If subscription is cancelled, downgrade user to LITE
@@ -478,8 +555,8 @@ class StripeWebhookService {
      */
     async handleInvoicePaymentSucceeded(invoice, webhookEventId = null) {
         try {
-            const subscriptionId = invoice.subscription;
-            
+            const subscriptionId = this.getInvoiceSubscriptionId(invoice);
+
             if (!subscriptionId) {
                 return; // Not a subscription invoice
             }
@@ -509,6 +586,34 @@ class StripeWebhookService {
 
             logger.info(`Invoice payment succeeded for user: ${userId}, amount: ${invoice.amount_paid}, billing_reason: ${invoice.billing_reason}, isTrialEndPayment: ${isTrialEndPayment}`);
 
+            // subscription.current_period_end is Stripe's authoritative "next renewal" date
+            // (Stripe docs: "End of the current period... At the end of this period, a new
+            // invoice will be created"). The invoice's own line-item period is used only as
+            // a secondary confirmation - never to override it - because an invoice can carry
+            // proration line items (e.g. a mid-cycle plan change) whose period ends around
+            // *today*, not at the next renewal. Blindly trusting "the invoice line" here would
+            // write the renewal-just-happened date instead of the actual next renewal date.
+            const { start: subscriptionPeriodStart, end: subscriptionPeriodEnd } =
+                this.getSubscriptionPeriod(subscription);
+
+            const matchingLines = (invoice.lines?.data || []).filter(
+                (line) => line.subscription === subscriptionId || line.parent?.subscription_item_details?.subscription === subscriptionId
+            );
+            // Among this subscription's lines on the invoice, the true renewal period is the
+            // one furthest out - proration lines cover short past-to-now spans.
+            const invoicePeriodEnd = matchingLines.length
+                ? Math.max(...matchingLines.map((line) => line.period?.end || 0)) || null
+                : null;
+
+            if (invoicePeriodEnd && subscriptionPeriodEnd && invoicePeriodEnd !== subscriptionPeriodEnd) {
+                logger.warn(`Renewal date check: invoice ${invoice.id} line period.end=${invoicePeriodEnd} differs from subscription.current_period_end=${subscriptionPeriodEnd} for subscription ${subscriptionId}. Using subscription.current_period_end (authoritative next-renewal date).`);
+            }
+
+            const confirmedPeriodEnd = subscriptionPeriodEnd || invoicePeriodEnd;
+            if (!confirmedPeriodEnd) {
+                logger.error(`Could not confirm renewal date from Stripe for subscription ${subscriptionId} (invoice ${invoice.id}); leaving currentPeriodEnd/nextBillingDate untouched`);
+            }
+
             // Add payment to history with invoice URLs
             await this.addPaymentToHistory(userId, {
                 amount: invoice.amount_paid,
@@ -523,12 +628,40 @@ class StripeWebhookService {
                 paymentGateway: 'stripe'
             });
 
-            // Update subscription payment status
-            await this.updateSubscription(userId, {
+            // Update subscription payment status and renewal dates.
+            // current_period_end/nextBillingDate are refreshed here directly (not just
+            // via customer.subscription.updated) so renewal date advances even if that
+            // separate event is delayed, dropped, or missing metadata.userId.
+            const subscriptionUpdate = {
                 paymentStatus: 'paid',
                 lastPaymentDate: this.safeDate(invoice.status_transitions.paid_at),
-                status: subscription.status
-            });
+                // normalizeStatus() maps Stripe's raw wording (e.g. 'canceled') to this
+                // model's enum (e.g. 'cancelled'); writing subscription.status directly
+                // throws a validator error and drops the whole update whenever Stripe
+                // reports a status this enum doesn't spell the same way.
+                status: this.normalizeStatus(subscription.status)
+            };
+            if (confirmedPeriodEnd) {
+                subscriptionUpdate.currentPeriodEnd = this.safeDate(confirmedPeriodEnd);
+                // current_period_end == trial_end while actually trialing, so it alone is
+                // correct here - trial_end must not be used as a fallback since it never
+                // clears back to null once a trial has occurred (see handleSubscriptionUpdated).
+                subscriptionUpdate.nextBillingDate = this.safeDate(confirmedPeriodEnd);
+
+                // Only write the period start when we actually resolved one. Assigning an
+                // unresolved value here would blank out a previously-correct stored date.
+                const confirmedPeriodStart = subscriptionPeriodStart
+                    || (matchingLines.length
+                        ? Math.min(...matchingLines.map((line) => line.period?.start || Infinity))
+                        : null);
+                const periodStartDate = this.safeDate(
+                    Number.isFinite(confirmedPeriodStart) ? confirmedPeriodStart : null
+                );
+                if (periodStartDate) {
+                    subscriptionUpdate.currentPeriodStart = periodStartDate;
+                }
+            }
+            await this.updateSubscription(userId, subscriptionUpdate);
 
             // Detect trial-to-paid conversion.
             // Skip $0 trial-start invoices (subscription still trialing).
@@ -612,8 +745,8 @@ class StripeWebhookService {
      */
     async handleInvoicePaymentFailed(invoice, webhookEventId = null) {
         try {
-            const subscriptionId = invoice.subscription;
-            
+            const subscriptionId = this.getInvoiceSubscriptionId(invoice);
+
             if (!subscriptionId) {
                 return; // Not a subscription invoice
             }
@@ -955,13 +1088,19 @@ class StripeWebhookService {
     /**
      * Update user subscription details
      */
-    async updateUserSubscription(userId, planType, subscriptionStatus, subscription = null) {
+    async updateUserSubscription(userId, planType, subscriptionStatus, subscription = null, options = {}) {
         try {
             const updateData = {
-                packageType: planType,
                 subscriptionStatus: subscriptionStatus,
                 reviewRequestAuthStatus: true,
             };
+
+            // `preservePackageType` leaves the user's current plan untouched. Used for
+            // payment-failure statuses so this handler cannot re-grant a paid plan that
+            // handleInvoicePaymentFailed / handleSubscriptionDeleted just took away.
+            if (!options.preservePackageType) {
+                updateData.packageType = planType;
+            }
 
             // Handle trial status
             if (subscriptionStatus === 'trialing') {
@@ -980,7 +1119,7 @@ class StripeWebhookService {
             }
             
             await User.findByIdAndUpdate(userId, updateData);
-            logger.info(`Updated user ${userId}: packageType=${planType}, subscriptionStatus=${subscriptionStatus}, isInTrialPeriod=${updateData.isInTrialPeriod}`);
+            logger.info(`Updated user ${userId}: packageType=${options.preservePackageType ? '(preserved)' : planType}, subscriptionStatus=${subscriptionStatus}, isInTrialPeriod=${updateData.isInTrialPeriod}`);
         } catch (error) {
             logger.error('Error updating user subscription:', error);
             throw error;

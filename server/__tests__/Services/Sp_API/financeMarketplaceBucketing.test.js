@@ -414,3 +414,37 @@ describe('resolveDatesToClear — a fully-cancelled day must drop to $0', () => 
     expect(zeroedDays).toEqual(['2026-07-11']);
   });
 });
+
+describe('foldSalesReportRows daysSeen — must agree with resolveDatesToClear\'s direct-rows path', () => {
+  // Regression guard for a real integration seam. When the sync's memory-optimized "fold, then
+  // release the raw rows" path (foldSalesReportRows) was merged with the fix that lets a fully-
+  // cancelled day drop to $0 (resolveDatesToClear), the two had to agree on which days a report
+  // "covers" WITHOUT resolveDatesToClear ever seeing the raw rows again — they are gone by then.
+  // foldSalesReportRows computes `daysSeen` during its single pass for exactly this purpose; this
+  // pins that it always matches what resolveDatesToClear would derive itself from the same rows.
+  const { foldSalesReportRows, resolveDatesToClear } = require('../../../Services/Sp_API/FinanceService.js');
+
+  const rows = [
+    { 'amazon-order-id': 'A-1', 'purchase-date': '2026-07-11T18:00:00Z', 'order-status': 'Cancelled', 'item-price': '0.00', quantity: '0', sku: 'S', 'sales-channel': 'Amazon.com' },
+    { 'amazon-order-id': 'A-2', 'purchase-date': '2026-07-12T18:00:00Z', 'order-status': 'Shipped', 'item-price': '20.73', quantity: '1', sku: 'S', 'sales-channel': 'Amazon.com' },
+    { 'amazon-order-id': 'A-3', 'purchase-date': '2026-07-13T18:00:00Z', 'order-status': 'Pending', 'item-price': '', quantity: '1', sku: 'S', 'sales-channel': 'Amazon.ca' },
+  ];
+
+  test('the fold path (no raw rows at persist time) clears the same days as the direct path', () => {
+    const folded = foldSalesReportRows(rows, 'US');
+    const viaFold = resolveDatesToClear({ daysSeen: folded.daysSeen, country: 'US', startDate: '2026-07-10', endDate: '2026-07-14', bucketDates: new Set() });
+    const viaRows = resolveDatesToClear({ reportRows: rows, country: 'US', startDate: '2026-07-10', endDate: '2026-07-14', bucketDates: new Set() });
+    expect(viaFold.datesToClear.sort()).toEqual(viaRows.datesToClear.sort());
+    expect(viaFold.zeroedDays).toEqual(viaRows.zeroedDays);
+    // All three days are covered — the cancelled and pending-on-another-marketplace rows too.
+    expect(viaFold.zeroedDays).toEqual(['2026-07-11', '2026-07-12', '2026-07-13']);
+  });
+
+  test('daysSeen is unfiltered — the cancelled-only day case that motivated resolveDatesToClear', () => {
+    const cancelledOnly = [rows[0]];
+    const folded = foldSalesReportRows(cancelledOnly, 'US');
+    expect([...folded.daysSeen]).toEqual(['2026-07-11']);
+    const { zeroedDays } = resolveDatesToClear({ daysSeen: folded.daysSeen, country: 'US', startDate: '2026-07-11', endDate: '2026-07-11', bucketDates: new Set() });
+    expect(zeroedDays).toEqual(['2026-07-11']);
+  });
+});

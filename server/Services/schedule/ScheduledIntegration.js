@@ -1034,13 +1034,63 @@ class ScheduledIntegration {
         const fifthBatchPromises = [];
         const fifthBatchServiceNames = [];
 
-        // Sixth batch: Review order ingestion (fetches orders + items into DB)
-        const sixthBatchPromises = [];
-        const sixthBatchServiceNames = [];
+        // COMPUTE ONCE. The three batch-5 calculation services (issueSummary, productIssues,
+        // issuesData) each used to run the FULL pipeline themselves — `AnalyseService.Analyse()`
+        // then `analyseData()` — and their promises are created eagerly below, so all three ran
+        // CONCURRENTLY. issueSummary keeps six integers out of that, productIssues keeps one array;
+        // only issuesData uses most of it.
+        //
+        // That is ~25 collection loads and one full DashboardCalculation, three times over. On
+        // 2026-09-01 it stopped being merely wasteful: one PRO account's newest sponsored-ads batch
+        // reached 234,035 rows / 102 MB (legitimate 30-day data), which is ~300-400 MB per copy as
+        // lean JS objects. Three concurrent copies plus the other 24 collections exceeded the
+        // 1536 MB heap cap, the worker GC-thrashed, `fetchAllDataModels` never returned, and BullMQ
+        // stall-reclaimed the job every 20 minutes forever. That account had not completed a run in
+        // over a week. ONE copy fits comfortably.
+        //
+        // Memoised rather than hoisted so it is computed only if a calculation service actually
+        // runs (batch 5 is skipped entirely by _batchFilter on most phases), and so all three
+        // observe the SAME object. This mirrors what Services/main/Integration.js already does on
+        // the onboarding path — "uses the already-calculated dashboardData to avoid re-fetching".
+        let sharedDashboardDataPromise = null;
+        const getSharedDashboardData = () => {
+            if (!sharedDashboardDataPromise) {
+                sharedDashboardDataPromise = (async () => {
+                    const { AnalyseService } = require('../main/Analyse.js');
+                    const { analyseData } = require('../Calculations/DashboardCalculation.js');
 
-        // Seventh batch: Review request sender (must run AFTER ingestion completes)
-        const seventhBatchPromises = [];
-        const seventhBatchServiceNames = [];
+                    const analyse = await AnalyseService.Analyse(userId, Country, Region);
+                    if (!analyse || analyse.status !== 200 || !analyse.message) {
+                        throw new Error(`Failed to get analyse data: status ${analyse?.status}`);
+                    }
+                    const calculationResult = await analyseData(analyse.message, userId);
+                    if (!calculationResult?.dashboardData) {
+                        throw new Error('Failed to calculate dashboard data');
+                    }
+                    return calculationResult.dashboardData;
+                })();
+            }
+            return sharedDashboardDataPromise;
+        };
+
+        // Each calculation service now only STORES from the shared result. All three storers take
+        // the same (userId, country, region, dashboardData, source) signature and are already
+        // exported; the onboarding path uses them the same way.
+        const CALCULATION_STORERS = {
+            issueSummary: (dd) => require('../Calculations/IssueSummaryService.js')
+                .storeIssueSummaryFromDashboardData(userId, Country, Region, dd, 'schedule'),
+            productIssues: (dd) => require('../Calculations/ProductIssuesService.js')
+                .storeProductIssuesFromDashboardData(userId, Country, Region, dd, 'schedule'),
+            issuesData: (dd) => require('../Calculations/IssuesDataService.js')
+                .storeIssuesDataFromDashboard(userId, Country, Region, dd, 'schedule'),
+        };
+
+        // Batches 6 and 7 (review order ingestion / review request sender) are gone. They now
+        // run in the standalone `review-worker` process — see reviewWorkerStandalone.js. They
+        // were never data-fetch or calculation work; they sat here only because they were
+        // flagged isCalculationService, and the sender's deliberate 5-15s per-order pacing
+        // held sched_finalize — and therefore the dashboard's date range — for over an hour on
+        // 8 accounts and 23.8h on one.
 
         // Helper function to determine batch number for a function key
         const getBatchNumber = (functionKey) => {
@@ -1071,22 +1121,15 @@ class ScheduledIntegration {
             if (functionKey === 'financeSync') {
                 return 'finance';
             }
-            // Batch 4: Negative Keywords, Search Keywords, Keyword Recommendations
-            if (['negativeKeywords', 'searchKeywords', 'keywordRecommendations'].includes(functionKey)) {
+            // Batch 4: Negative Keywords, Search Keywords, Keyword Recommendations,
+            // Listing Items (Sunday only; handled inline, see the block after batch 7).
+            if (['negativeKeywords', 'searchKeywords', 'keywordRecommendations', 'GetListingItem'].includes(functionKey)) {
                 return 4;
             }
             // Batch 5: Calculation services (run after all API fetches complete)
             // These are marked with isCalculationService: true in ScheduleConfig
             if (['issueSummary', 'productIssues', 'issuesData'].includes(functionKey)) {
                 return 5;
-            }
-            // Batch 6: Review order ingestion (must complete before sender)
-            if (functionKey === 'reviewOrderIngestion') {
-                return 6;
-            }
-            // Batch 7: Review request sender (runs after ingestion finishes)
-            if (functionKey === 'reviewRequestSender') {
-                return 7;
             }
             // Default to batch 2 if function key is not recognized
             logger.warn(`Unknown function key for batch assignment: ${functionKey}, defaulting to batch 2`);
@@ -1096,6 +1139,25 @@ class ScheduledIntegration {
         // Helper function to add function to appropriate batch
         const addToBatch = (functionKey, functionConfig, promise, batchNumber) => {
             const { description } = functionConfig;
+
+            // THE PROMISES IN HERE ARE ALREADY RUNNING. The setup loop above INVOKES each service
+            // immediately (`promise = wrapSpApiFunction(...)(...)`), but the batches below are
+            // awaited SEQUENTIALLY — and a batch can be skipped entirely by runBatch(). So a
+            // batch-4 promise that rejects while batch 1 is still being awaited has no rejection
+            // handler attached yet, and Node raises `unhandledRejection`. Under the worker's
+            // top-level handler that terminates the process.
+            //
+            // This is not hypothetical. Captured in production 2026-08-29: a burst of SP-API
+            // `QuotaExceeded` errors rejected five report promises (ledger summary, ledger detail,
+            // stranded inventory, inbound noncompliance, restock) within 250ms and took the worker
+            // down with them. BullMQ then re-ran `sched_init`, which is the ~20-minute duplicate
+            // run series and the orphaned tracking docs behind it. ~340 restarts in 46 hours.
+            //
+            // A no-op catch marks the rejection handled. It SWALLOWS NOTHING: `.catch()` returns a
+            // NEW promise that is discarded here, while `Promise.allSettled` still attaches its own
+            // handlers to the ORIGINAL and still reports `status: 'rejected'` with the same reason.
+            if (promise && typeof promise.catch === 'function') promise.catch(() => {});
+
             switch(batchNumber) {
                 case 1:
                     firstBatchPromises.push(promise);
@@ -1124,14 +1186,6 @@ class ScheduledIntegration {
                 case 5:
                     fifthBatchPromises.push(promise);
                     fifthBatchServiceNames.push(description);
-                    break;
-                case 6:
-                    sixthBatchPromises.push(promise);
-                    sixthBatchServiceNames.push(description);
-                    break;
-                case 7:
-                    seventhBatchPromises.push(promise);
-                    seventhBatchServiceNames.push(description);
                     break;
             }
         };
@@ -1186,6 +1240,12 @@ class ScheduledIntegration {
             }
             // Skip explicitly excluded services (handled by the async engine elsewhere).
             if (excludeSet.has(functionKey)) {
+                continue;
+            }
+            // GetListingItem is not a one-shot call: it needs paired sku/asin arrays and
+            // persists its own output. It runs inline after batch 7 (gated on runBatch(4)),
+            // so keep it out of the promise registry.
+            if (functionKey === 'GetListingItem') {
                 continue;
             }
 
@@ -1459,9 +1519,14 @@ class ScheduledIntegration {
                         );
                     }
                 } else if (functionConfig.isCalculationService) {
-                    // Calculation services (IssueSummary, ProductIssues)
-                    // These run after all API fetches complete and use (userId, country, region, source)
-                    promise = serviceFunction(userId, Country, Region, 'schedule');
+                    // Calculation services (issueSummary, productIssues, issuesData). They share ONE
+                    // computation — see getSharedDashboardData above for why. A key without a storer
+                    // falls back to the old self-contained call so an added service cannot silently
+                    // do nothing.
+                    const storer = CALCULATION_STORERS[functionKey];
+                    promise = storer
+                        ? getSharedDashboardData().then(storer)
+                        : serviceFunction(userId, Country, Region, 'schedule');
                 } else {
                     // Reimbursement functions (calculation only, no API call)
                     promise = serviceFunction(userId, Country, Region);
@@ -1696,82 +1761,41 @@ class ScheduledIntegration {
         }
         logger.info("Fifth Batch (Calculation Services) Ends");
 
-        // Sixth Batch: Review order ingestion (must finish before sender)
-        if (sixthBatchPromises.length > 0 && runBatch(6)) {
-            logger.info("Sixth Batch (Review Order Ingestion) Starts");
-            const sixthBatchResults = await Promise.allSettled(sixthBatchPromises);
-            let resultIndex = 0;
-
-            for (const serviceName of sixthBatchServiceNames) {
-                const functionKey = Object.keys(scheduledFunctions).find(key =>
-                    scheduledFunctions[key].description === serviceName
+        // Listing items for ACTIVE SKUs — weekly (Sunday), inside batch 4.
+        //
+        // This used to be a stub that always assigned []. Two things were broken by that:
+        //   1. `has_b2b_pricing` never refreshed on the scheduled path (it is only written
+        //      by this endpoint and by the inactive-SKU endpoint), so it went stale from
+        //      the last manual reconnect onwards.
+        //   2. `genericKeyWordArray` was always empty, so the backend-keyword check in
+        //      Analyse.js ran against listing data that only refreshed on manual reconnect.
+        //
+        // Integration.processListingItems is a static taking everything as arguments, so it
+        // can be reused directly; it also performs the B2B write itself.
+        apiData.genericKeyWordArray = [];
+        const listingSkuArray = Array.isArray(productData?.skuArray) ? productData.skuArray : [];
+        const listingAsinArray = Array.isArray(productData?.asinArray) ? productData.asinArray : [];
+        if (scheduledFunctions['GetListingItem'] && AccessToken && runBatch(4)
+            && !excludeSet.has('GetListingItem') && listingSkuArray.length > 0) {
+            logger.info("Processing Listing Items (active SKUs)", { skuCount: listingSkuArray.length });
+            try {
+                const { Integration } = require('../main/Integration.js');
+                const genericKeyWordArray = await Integration.processListingItems(
+                    AccessToken, listingSkuArray, listingAsinArray, dataToSend,
+                    userId, Base_URI, Country, Region, RefreshToken, AdsRefreshToken, loggingHelper
                 );
-                if (functionKey && resultIndex < sixthBatchResults.length) {
-                    const dataKey = scheduledFunctions[functionKey].apiDataKey || functionKey;
-                    if (!apiData[dataKey]) {
-                        const result = sixthBatchResults[resultIndex];
-                        if (result.status === 'fulfilled') {
-                            const value = result.value;
-                            if (value && typeof value === 'object' && 'success' in value) {
-                                apiData[dataKey] = value;
-                            } else if (value) {
-                                apiData[dataKey] = { success: true, data: value, error: null };
-                            } else {
-                                apiData[dataKey] = { success: false, data: null, error: 'Unknown error' };
-                            }
-                        } else {
-                            const errorMsg = result.reason?.message || 'Promise rejected';
-                            apiData[dataKey] = { success: false, data: null, error: errorMsg };
-                        }
-                    }
-                    resultIndex++;
+                const fetchedCount = Array.isArray(genericKeyWordArray) ? genericKeyWordArray.length : 0;
+                // Persist here rather than leaving the array on apiData: the phased path
+                // never calls processAndSaveData, and carrying a few thousand items on
+                // apiData for the rest of the phase is pure memory cost.
+                if (fetchedCount > 0) {
+                    await saveListingItemsData(userId, Country, Region, genericKeyWordArray);
                 }
+                apiData.listingItems = { success: true, data: { fetchedCount }, error: null };
+            } catch (listingError) {
+                logger.error("Listing Items (active SKUs) failed", { error: listingError.message, userId });
+                apiData.listingItems = { success: false, data: null, error: listingError.message };
             }
-        }
-        logger.info("Sixth Batch (Review Order Ingestion) Ends");
-
-        // Seventh Batch: Review request sender (runs after ingestion completes)
-        if (seventhBatchPromises.length > 0 && runBatch(7)) {
-            logger.info("Seventh Batch (Review Request Sender) Starts");
-            const seventhBatchResults = await Promise.allSettled(seventhBatchPromises);
-            let resultIndex = 0;
-
-            for (const serviceName of seventhBatchServiceNames) {
-                const functionKey = Object.keys(scheduledFunctions).find(key =>
-                    scheduledFunctions[key].description === serviceName
-                );
-                if (functionKey && resultIndex < seventhBatchResults.length) {
-                    const dataKey = scheduledFunctions[functionKey].apiDataKey || functionKey;
-                    if (!apiData[dataKey]) {
-                        const result = seventhBatchResults[resultIndex];
-                        if (result.status === 'fulfilled') {
-                            const value = result.value;
-                            if (value && typeof value === 'object' && 'success' in value) {
-                                apiData[dataKey] = value;
-                            } else if (value) {
-                                apiData[dataKey] = { success: true, data: value, error: null };
-                            } else {
-                                apiData[dataKey] = { success: false, data: null, error: 'Unknown error' };
-                            }
-                        } else {
-                            const errorMsg = result.reason?.message || 'Promise rejected';
-                            apiData[dataKey] = { success: false, data: null, error: errorMsg };
-                        }
-                    }
-                    resultIndex++;
-                }
-            }
-        }
-        logger.info("Seventh Batch (Review Request Sender) Ends");
-
-        // Process listing items if scheduled (simplified version)
-        if (scheduledFunctions['GetListingItem'] && AccessToken) {
-            logger.info("Processing Listing Items (simplified)");
-            // For scheduled runs, we'll skip the complex batch processing
-            // This can be enhanced later if needed
-            apiData.genericKeyWordArray = [];
-        } else {
-            apiData.genericKeyWordArray = [];
         }
 
         return apiData;
@@ -1788,17 +1812,27 @@ class ScheduledIntegration {
             // Use service layer that handles both old (embedded array) and new (separate collection) formats
             const storedSponsoredAdsData = await getProductWiseSponsoredAdsData(userId, Country, Region);
 
-            if (storedSponsoredAdsData && Array.isArray(storedSponsoredAdsData.sponsoredAds)) {
-                const campaignIds = new Set();
-                const adGroupIds = new Set();
+            if (storedSponsoredAdsData && (Array.isArray(storedSponsoredAdsData.campaignIds) || Array.isArray(storedSponsoredAdsData.sponsoredAds))) {
+                // Prefer the distinct sets the service now resolves with two `distinct` calls.
+                // These ids used to be scraped by walking every row of `sponsoredAds` — 234k
+                // iterations on a large account purely to build two Sets. The rows are now
+                // aggregated per (asin, adType, date) and no longer carry campaignId/adGroupId at
+                // all, so the row-scan below is the pre-aggregation fallback, not the main path.
+                if (Array.isArray(storedSponsoredAdsData.campaignIds)) {
+                    campaignIdArray = storedSponsoredAdsData.campaignIds;
+                    adGroupIdArray = storedSponsoredAdsData.adGroupIds || [];
+                } else {
+                    const campaignIds = new Set();
+                    const adGroupIds = new Set();
 
-                storedSponsoredAdsData.sponsoredAds.forEach(ad => {
-                    if (ad && ad.campaignId) campaignIds.add(ad.campaignId);
-                    if (ad && ad.adGroupId) adGroupIds.add(ad.adGroupId);
-                });
+                    storedSponsoredAdsData.sponsoredAds.forEach(ad => {
+                        if (ad && ad.campaignId) campaignIds.add(ad.campaignId);
+                        if (ad && ad.adGroupId) adGroupIds.add(ad.adGroupId);
+                    });
 
-                campaignIdArray = Array.from(campaignIds);
-                adGroupIdArray = Array.from(adGroupIds);
+                    campaignIdArray = Array.from(campaignIds);
+                    adGroupIdArray = Array.from(adGroupIds);
+                }
             } else if (ppcSpendsBySKU.success && ppcSpendsBySKU.data?.sponsoredAds) {
                 const campaignIds = new Set();
                 const adGroupIds = new Set();
@@ -1939,6 +1973,12 @@ class ScheduledIntegration {
 
     /**
      * Update Seller model with issues for inactive products (same as Integration)
+     *
+     * Also writes `has_b2b_pricing`, which GetListingItemIssuesForInactive returns in the
+     * same response and which the scheduled path previously dropped on the floor. Applied
+     * in this method rather than through a separate updateSellerProductB2BPricing call so
+     * the (potentially multi-MB) seller document is loaded and saved once per batch, not
+     * twice. No extra SP-API calls: the data is already in `issuesDataArray`.
      */
     static async updateSellerProductIssues(userId, Country, Region, issuesDataArray) {
         logger.info("updateSellerProductIssues starting", {
@@ -1965,15 +2005,24 @@ class ScheduledIntegration {
 
             // Create a map of SKU to issues for quick lookup
             const issuesMap = new Map();
+            // ...and a separate map for B2B pricing. Kept separate on purpose: a SKU can
+            // report B2B pricing without reporting issues and vice versa, and a SKU absent
+            // from the response must not be forced to false.
+            const b2bPricingMap = new Map();
             issuesDataArray.forEach(item => {
-                if (item && item.sku && Array.isArray(item.issues)) {
+                if (!item || !item.sku) return;
+                if (Array.isArray(item.issues)) {
                     issuesMap.set(item.sku, item.issues);
+                }
+                if (item.has_b2b_pricing !== undefined) {
+                    b2bPricingMap.set(item.sku, item.has_b2b_pricing);
                 }
             });
 
             // Update the products array with issues
             const products = sellerDetails.sellerAccount[accountIndex].products;
             let updatedCount = 0;
+            let b2bUpdatedCount = 0;
 
             products.forEach(product => {
                 // Update issues for both Inactive and Incomplete products
@@ -1981,12 +2030,19 @@ class ScheduledIntegration {
                     product.issues = issuesMap.get(product.sku);
                     updatedCount++;
                 }
+                // B2B pricing is not status-dependent — match Integration's semantics and
+                // key purely on SKU.
+                if (b2bPricingMap.has(product.sku)) {
+                    product.has_b2b_pricing = b2bPricingMap.get(product.sku);
+                    b2bUpdatedCount++;
+                }
             });
 
             await sellerDetails.save();
 
             logger.info("updateSellerProductIssues ended", {
                 updatedCount,
+                b2bUpdatedCount,
                 totalProducts: products.length
             });
 
@@ -2369,7 +2425,11 @@ class ScheduledIntegration {
                 const { getDefaultReportDateRange } = require('../../utils/reportDateRange.js');
                 const trackingRange = getDefaultReportDateRange(30);
                 try {
-                    const entry = await DataFetchTrackingService.startTracking(userId, Country, Region, { startDate: trackingRange.startDate, endDate: trackingRange.endDate }, sessionId);
+                    // startTrackingForRun, NOT startTracking: BullMQ re-runs a job whose lock
+                    // lapses (lockDuration 20min, maxStalledCount 3), so this line can execute up
+                    // to four times for ONE run. The plain create has no dedup, so each execution
+                    // used to leave another orphaned `started` doc behind.
+                    const entry = await DataFetchTrackingService.startTrackingForRun(userId, Country, Region, { startDate: trackingRange.startDate, endDate: trackingRange.endDate }, sessionId);
                     trackingEntryId = entry._id.toString();
                     logger.info('[ScheduledIntegration:InitPhase] Calendar tracking started', { trackingId: trackingEntryId, dayName: dayNames[dayOfWeek], dataRange: trackingRange });
                 } catch (te) {
@@ -2437,7 +2497,19 @@ class ScheduledIntegration {
         } catch (error) {
             logger.error(`[ScheduledIntegration:InitPhase] Failed for user ${userId}:`, error);
             if (loggingHelper) { loggingHelper.logFunctionError('ScheduledIntegration.InitPhase', error); await loggingHelper.endSession('failed'); }
-            return { success: false, error: error.message, statusCode: 500 };
+            // Carry trackingEntryId even on failure. It is created above, but used to be returned
+            // ONLY inside the success path's dataForNextPhase — so a throw after creation (e.g. in
+            // fetchMerchantListings, runFbaInventorySyncForMarketplace or writeSlice) lost the id
+            // for good. The worker still advances the chain on failure by design, so the pipeline
+            // reached sched_finalize looking entirely normal while `phaseData.trackingEntryId` was
+            // undefined; finalize's `if (trackingEntryId)` guard then skipped its whole closing
+            // block and the doc was orphaned from birth, silently. Nothing logged it.
+            return {
+                success: false,
+                error: error.message,
+                statusCode: 500,
+                dataForNextPhase: { trackingEntryId, sessionId }
+            };
         }
     }
 
@@ -2565,7 +2637,7 @@ class ScheduledIntegration {
         // Keywords slice (batch 4)
         keywords: ['negativeKeywords', 'searchKeywords', 'keywordRecommendations'],
         // Issues slice (calc_review phase)
-        issues: ['issueSummary', 'productIssues', 'issuesData', 'reviewOrderIngestion', 'reviewRequestSender']
+        issues: ['issueSummary', 'productIssues', 'issuesData']
     };
 
     /**
@@ -2725,6 +2797,10 @@ class ScheduledIntegration {
         return this._runAsyncAdsPhase({
             userId, Region, Country, phaseData, group: 'sched_batch_1_2', services,
             inlineOnFirstTick, sliceKeys: [SLICE_KEYS.INVENTORY, SLICE_KEYS.PERFORMANCE],
+            // These are SP-API report services, not Amazon Ads. Without this the shared
+            // runner reports their failures as "all Amazon Ads reports failed" and tells
+            // the seller to re-authorize Ads — the wrong integration entirely.
+            integration: 'SP-API',
             // SP-API reports: wait ~15 min before the first check, then re-check every ~15 min.
             pollConfig: {
                 initialDelayMs: parseInt(process.env.SPAPI_INITIAL_POLL_DELAY_MS || '900000', 10), // 15 min
@@ -2880,7 +2956,7 @@ class ScheduledIntegration {
      * runDate don't collide. `dateRange` restricts to a single day (catch-up).
      * `inlineOnFirstTick(ctx)` runs any non-polling sibling services once (BATCH_4).
      */
-    static async _runAsyncAdsPhase({ userId, Region, Country, phaseData, group, services, dateRange = null, inlineOnFirstTick = null, sliceKeys = [], buildArgsFrom = null, tokenGuard = null, pollConfig = null }) {
+    static async _runAsyncAdsPhase({ userId, Region, Country, phaseData, group, services, dateRange = null, inlineOnFirstTick = null, sliceKeys = [], buildArgsFrom = null, tokenGuard = null, pollConfig = null, integration = 'Amazon Ads' }) {
         const { runAsyncAdsReports } = require('../AmazonAds/asyncReportEngine.js');
         const AsyncReportRequest = require('../../models/amazon-ads/AsyncReportRequestModel.js');
         // Same descriptor the engine uses for its own failures: keeps the message verbatim (so
@@ -2939,9 +3015,13 @@ class ScheduledIntegration {
             }
 
             // ---- All reports terminal: per-service combine+save + success flags. -------
+            // `result: 0` — adapters persist their own output inside finalize and this loop only
+            // needs status/note/authRevoked. Historical rows still carry a legacy `result` blob
+            // (up to 15MB) until the model TTL clears them; pulling those into the worker heap
+            // here bought nothing. See ROW_PROJECTION in asyncReportEngine.js.
             const allRows = await AsyncReportRequest.find({
                 userId: String(userId), country: Country, region: Region, runDate, group
-            }).lean();
+            }, { result: 0 }).lean();
             const apiResults = { ...(phaseData.apiResults || {}), ...inlineResults };
             for (const svc of services) {
                 const rows = allRows.filter(r => r.service === svc.serviceName);
@@ -2951,15 +3031,23 @@ class ScheduledIntegration {
                 // report erroring counts as the reports being unusable.
                 const reportsUsable = rows.length > 0 && rows.some(r => r.status === 'DONE' || r.status === 'NO_DATA');
 
-                // A revoked Amazon Ads grant needs its own message. "all ads reports failed" sends
+                // A revoked grant needs its own message. A generic "all reports failed" sends
                 // an operator hunting an Amazon outage; only this names the one thing that fixes it.
                 // Ports the inline guard at GetPPCMetrics.js:1043-1057.
+                //
+                // `integration` is NOT cosmetic. This runner is shared: sched_batch_1_2 drives
+                // SP-API report services (stranded inventory, inbound non-compliance, restock,
+                // V1/V2 performance) through it, while sched_ads / sched_ads_catchup /
+                // sched_batch_4 drive Amazon Ads. Hard-coding "Ads" here told operators to
+                // re-authorize the WRONG integration — production logs carry 445
+                // `strandedInventoryData: all ads reports failed` and 405 the same on
+                // `inboundNonComplianceData`, neither of which is an ads service.
                 const allRevoked = rows.length > 0 && rows.every(r => r.authRevoked === true);
                 if (allRevoked) {
                     logger.error(
-                        `[AdsAsync:${group}] Amazon Ads permission REVOKED for user ${userId} ` +
+                        `[AsyncReports:${group}] ${integration} permission REVOKED for user ${userId} ` +
                         `(${Country}-${Region}) — all ${rows.length} ${svc.serviceName} report(s) came back 401. ` +
-                        `The seller must RE-AUTHORIZE Amazon Ads; no retry will fix this. ` +
+                        `The seller must RE-AUTHORIZE ${integration}; no retry will fix this. ` +
                         `Sample note: ${rows.find(r => r.note)?.note || '(none)'}`
                     );
                 }
@@ -2974,7 +3062,7 @@ class ScheduledIntegration {
                         // `${err.message}` is exactly what cost three rounds of diagnosis on the
                         // finance side; do not "simplify" this back to interpolation.
                         logger.error(
-                            `[AdsAsync:${group}] saveFromRows(${svc.serviceName}) failed for user ${userId} ` +
+                            `[AsyncReports:${group}] saveFromRows(${svc.serviceName}) failed for user ${userId} ` +
                             `(${Country}-${Region} runDate ${runDate}) — reports were fetched but NOT persisted`,
                             saveErr
                         );
@@ -2983,7 +3071,7 @@ class ScheduledIntegration {
                     // Don't hand a save function nothing but failures. Harmless for today's two real
                     // savers (they no-op on empty), but one refactor away from writing an all-zero doc
                     // over good data.
-                    logger.warn(`[AdsAsync:${group}] ${svc.serviceName}: all ${rows.length} report(s) FAILED — skipping save`);
+                    logger.warn(`[AsyncReports:${group}] ${svc.serviceName}: all ${rows.length} report(s) FAILED — skipping save`);
                 }
 
                 const ok = reportsUsable && !saveError;
@@ -2992,8 +3080,8 @@ class ScheduledIntegration {
                     error: ok
                         ? null
                         : (saveError ? `save failed: ${saveError}`
-                            : (allRevoked ? 'Amazon Ads permission revoked — seller must re-authorize'
-                                : 'all ads reports failed')),
+                            : (allRevoked ? `${integration} permission revoked — seller must re-authorize`
+                                : `all ${integration} reports failed`)),
                     // Set ONLY when reports arrived and persisting them threw: we HAD the data and
                     // lost it. Read by _canMarkDailyComplete to block stamping the day — no later run
                     // will fill that hole, because these engine rows are terminal and tomorrow's run
@@ -3015,7 +3103,7 @@ class ScheduledIntegration {
                 dataForNextPhase: { apiResults },
             };
         } catch (error) {
-            logger.error(`[AdsAsync:${group}] Failed for user ${userId}:`, error);
+            logger.error(`[AsyncReports:${group}] Failed for user ${userId}:`, error);
             // Carry the failure FORWARD for the same reason as the inline ads phase: finalize
             // decides whether to stamp lastDailyUpdate by checking whether any ads key is present
             // in apiResults. Returning without dataForNextPhase leaves them absent, which finalize
@@ -4079,9 +4167,19 @@ class ScheduledIntegration {
                     if (failed.length === 0 && successful.length > 0) {
                         await DataFetchTrackingService.completeTracking(trackingEntryId);
                     } else if (failed.length > 0 && successful.length > 0) {
+                        // Compare-and-set on `status: 'started'`, matching markCompleted/markFailed.
+                        // A read-modify-write here would resurrect a doc that a supersede or the
+                        // stalled sweep had already closed, producing a `partial` row still
+                        // carrying `autoClosedStale: true`.
                         const DataFetchTracking = require('../../models/system/DataFetchTrackingModel');
-                        const entry = await DataFetchTracking.findById(trackingEntryId);
-                        if (entry) { entry.status = 'partial'; entry.errorMessage = `Partial: ${failed.length}/${totalServices} failed`; await entry.save(); }
+                        const updated = await DataFetchTracking.findOneAndUpdate(
+                            { _id: trackingEntryId, status: 'started' },
+                            { $set: { status: 'partial', errorMessage: `Partial: ${failed.length}/${totalServices} failed` } },
+                            { new: true }
+                        );
+                        if (!updated) {
+                            logger.warn('[ScheduledIntegration:FinalizePhase] Tracking entry already closed by someone else; leaving it alone', { trackingEntryId });
+                        }
                     } else {
                         await DataFetchTrackingService.failTracking(trackingEntryId, 'All services failed');
                     }

@@ -16,6 +16,8 @@ import {
 import axios from 'axios';
 import { useNavigate, Link } from 'react-router-dom';
 import { countryCodesData } from '../../utils/countryCodesData.js';
+import PasswordCriteriaList from '../../Components/Shared/PasswordCriteriaList.jsx';
+import { isPasswordValid, passwordErrorMessage, extractServerError } from '../../utils/passwordCriteria.js';
 
 const defaultCountryData = {
   iso: 'XX',
@@ -49,6 +51,9 @@ const AgencySignUp = () => {
   const [errorMessage, setErrorMessage] = useState('');
   const [termsAccepted, setTermsAccepted] = useState(false);
   const navigate = useNavigate();
+
+  // Something typed, but not yet meeting every rule — keeps the field red as they go.
+  const passwordIncomplete = !!formData.password && !isPasswordValid(formData.password);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -97,7 +102,6 @@ const AgencySignUp = () => {
   const validateForm = () => {
     const nameRegex = /^[A-Za-z]{2,}$/;
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
     const newErrors = {};
 
     if (!nameRegex.test(formData.firstname)) {
@@ -127,8 +131,8 @@ const AgencySignUp = () => {
     }
     if (!formData.password) {
       newErrors.password = 'Password is required';
-    } else if (!passwordRegex.test(formData.password)) {
-      newErrors.password = 'Password must be at least 8 characters, with a letter, number, and special character';
+    } else if (!isPasswordValid(formData.password)) {
+      newErrors.password = passwordErrorMessage(formData.password);
     }
     if (!termsAccepted) {
       newErrors.terms = 'You must agree to the Terms of Use and Privacy Policy';
@@ -169,7 +173,9 @@ const AgencySignUp = () => {
         });
       }
     } catch (err) {
-      setErrorMessage(err.response?.data?.message || 'Sign up failed. Please try again.');
+      // Reads the validator's `errors[]` too, not just `message`, so a rejection
+      // says what was actually wrong instead of the generic fallback.
+      setErrorMessage(extractServerError(err, 'Sign up failed. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -366,7 +372,11 @@ const AgencySignUp = () => {
                     onChange={handleChange}
                     onFocus={handleFocus}
                     className={`w-full pl-10 pr-12 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300 text-gray-100 ${
-                      errors.password ? 'border-red-500 bg-red-500/10' : 'border-[#30363d] bg-[#21262d] hover:border-gray-500'
+                      errors.password || passwordIncomplete
+                        ? 'border-red-500 bg-red-500/10'
+                        : formData.password
+                          ? 'border-green-500/60 bg-[#21262d]'
+                          : 'border-[#30363d] bg-[#21262d] hover:border-gray-500'
                     }`}
                     placeholder="Create a password"
                   />
@@ -378,10 +388,7 @@ const AgencySignUp = () => {
                     {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
                 </div>
-                {errors.password && (
-                  <motion.p initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="text-red-400 text-xs mt-1">{errors.password}</motion.p>
-                )}
-                <p className="text-xs text-gray-500 mt-0.5">Min 8 chars with letters, numbers & symbols</p>
+                <PasswordCriteriaList value={formData.password} error={errors.password} />
               </div>
 
               <div>

@@ -30,9 +30,15 @@ function makeFakeModel() {
             return String(doc[k]) === String(v);
         });
 
+    // Every projection the engine passes to find(), so a test can assert the legacy `result` blob
+    // is excluded from the poll-tick reads.
+    const findProjections = [];
+
     return {
         _docs: docs,
-        find(filter) {
+        _findProjections: findProjections,
+        find(filter, projection) {
+            findProjections.push(projection);
             return { lean: async () => docs.filter(d => matches(d, filter)).map(d => ({ ...d })) };
         },
         async updateOne(filter, update, opts = {}) {
@@ -158,14 +164,41 @@ describe('asyncReportEngine — POLL stage', () => {
         expect(res.summary).toMatchObject({ total: 1, done: 1, noData: 0, failed: 0 });
     });
 
-    it('stashes finalize().result on the row so the phase can combine reports before saving', async () => {
+    // THE REGRESSION TEST — inverted from what it used to assert.
+    //
+    // The engine used to stash `finalize().result` on the row so a later `saveFromRows` could
+    // combine SP/SB/SD before saving. That made the tracking row carry an entire 31-day report:
+    // measured in production 2026-08-21, ppcSpendsBySKU rows reached 15.13MB and
+    // ppcMetricsAggregated 10.00MB — together 233.5MB of the collection's 233.9MB. Past MongoDB's
+    // 16MB ceiling the `updateOne` threw ERR_OUT_OF_RANGE, the catch marked the row FAILED, and so
+    // the mechanism meant to let the phase combine reports was instead destroying the report it had
+    // just downloaded, on every run, for the largest account.
+    //
+    // Adapters now persist their own output inside `finalize`. A returned `result` must never reach
+    // the row — silently accepting one is exactly how the blob crept in.
+    it('does NOT persist finalize().result — a report must never be stashed on the row', async () => {
         const Model = makeFakeModel();
         await seed(Model, 'svcA', 'rep-A');
         const metrics = { totalSpend: 12.5, campaigns: [{ id: 'c1' }] };
         const specs = [specFor('svcA', { submit: jest.fn(), checkStatusOnce: async () => ({ ready: true, handle: {} }), finalize: async () => ({ empty: false, result: metrics }) })];
         await runAsyncAdsReports({ ...ACCT, specs, Model });
         expect(Model._docs[0].status).toBe('DONE');
-        expect(Model._docs[0].result).toEqual(metrics);
+        expect(Model._docs[0].result).toBeUndefined();
+    });
+
+    // These reads run on every poll tick (~15 min per account per phase). Historical rows keep
+    // their legacy blob until the model's 30-day TTL clears them, so without a projection each
+    // tick would pull multi-MB payloads into the worker heap for data no caller uses — and worker
+    // memory is the known reason the largest accounts cannot finish a daily cycle.
+    it('excludes the legacy result blob from every row read', async () => {
+        const Model = makeFakeModel();
+        await seed(Model, 'svcA', 'rep-A');
+        const specs = [specFor('svcA', { submit: jest.fn(), checkStatusOnce: async () => 'PROCESSING' })];
+        await runAsyncAdsReports({ ...ACCT, specs, Model });
+        expect(Model._findProjections.length).toBeGreaterThan(0);
+        for (const projection of Model._findProjections) {
+            expect(projection).toEqual({ result: 0 });
+        }
     });
 
     it('ready but empty report → NO_DATA', async () => {
@@ -325,5 +358,126 @@ describe('finalize failure diagnosability', () => {
         expect(row.note.length).toBeLessThan(340);        // ~300 descriptor + "finalize failed: "
         expect(row.note).toContain('[lwaToken]');
         expect(row.note).toContain('socket hang up');     // the head of the message is preserved
+    });
+});
+
+/**
+ * Regression: the submit-vs-poll decision must be made PER SPEC, never for the bucket.
+ *
+ * WHY THIS EXISTS
+ * `baseFilter` is scoped to (account, runDate, group, phase) with NO `paramsKey` — it answers
+ * "which rows are mine?", not "has my report been submitted?". The engine used to conflate the two
+ * (`if (existing.length === 0) submitAll(specs) else pollAll(...)`), so ONE unrelated row anywhere
+ * in the bucket suppressed the submit for EVERY spec. `pollAll` then skips rows it has no spec for,
+ * nothing is pending, and it returns done:true — while the caller's read-back
+ * (`find({...baseFilter, paramsKey})`) finds nothing and reports "no engine row for chunk".
+ *
+ * Deterministic, not a race, and it was live for finance: `runDate` there is `chunk.endDate` (a DATA
+ * date), chunk boundaries re-align when the shared FinanceSyncLog cursor moves, and rows live 30
+ * days — so a later run routinely asks for a new `paramsKey` under a `runDate` an older row already
+ * occupies. Confirmed in production on 6a57b823571ceb9266953c30: a `2026-08-01_2026-08-02` row from
+ * Aug 4 blocked `2026-07-31_2026-08-02` on Aug 7, and the catch-up sweeper re-armed it daily.
+ */
+describe('asyncReportEngine — per-spec submit/poll (regression: "no engine row for chunk")', () => {
+    /** Seed a terminal row under ACCT's bucket for an arbitrary paramsKey. */
+    async function seedRow(Model, { service, paramsKey, status = 'DONE', group = 'sched_ads', phase = 'ads' }) {
+        const key = { ...ACCT, group, phase, service, paramsKey };
+        await Model.updateOne(key, { $set: { ...key, reportId: `rep-${paramsKey}`, status, maxPollAttempts: 240 }, $setOnInsert: { pollAttempts: 0 } }, { upsert: true });
+    }
+
+    it('a stale row with a DIFFERENT paramsKey does NOT suppress the new spec`s submit', async () => {
+        // THE bug. Fails against the pre-fix engine: submit is never called, no row is created for
+        // 'chunk-B', and the caller is left with nothing to read back.
+        const Model = makeFakeModel();
+        await seedRow(Model, { service: 'svcA', paramsKey: 'chunk-A' });   // yesterday's leftover
+
+        const submit = jest.fn(async () => 'rep-B');
+        const specs = [specFor('svcA', { paramsKey: 'chunk-B', submit, checkStatusOnce: jest.fn(), finalize: jest.fn() })];
+
+        const res = await runAsyncAdsReports({ ...ACCT, specs, Model });
+
+        expect(submit).toHaveBeenCalledTimes(1);
+        const mine = Model._docs.find(d => d.paramsKey === 'chunk-B');
+        expect(mine).toBeDefined();                 // the caller's read-back will now find it
+        expect(mine.status).toBe('SUBMITTED');
+        expect(res.done).toBe(false);               // a fresh report is pending, so keep polling
+    });
+
+    it('an existing row for the SAME paramsKey is polled, never re-submitted', async () => {
+        // The other direction: this must stay idempotent, or every tick re-hits Amazon and burns
+        // the seller's report quota.
+        const Model = makeFakeModel();
+        await seedRow(Model, { service: 'svcA', paramsKey: 'chunk-A', status: 'SUBMITTED' });
+
+        const submit = jest.fn();
+        const checkStatusOnce = jest.fn(async () => 'PROCESSING');
+        const specs = [specFor('svcA', { paramsKey: 'chunk-A', submit, checkStatusOnce, finalize: jest.fn() })];
+
+        await runAsyncAdsReports({ ...ACCT, specs, Model });
+
+        expect(submit).not.toHaveBeenCalled();
+        expect(checkStatusOnce).toHaveBeenCalledTimes(1);
+        expect(Model._docs).toHaveLength(1);        // no duplicate row
+    });
+
+    it('a mixed batch polls the one that exists and submits the one that does not', async () => {
+        const Model = makeFakeModel();
+        await seedRow(Model, { service: 'svcA', paramsKey: 'have', status: 'SUBMITTED' });
+
+        const submitHave = jest.fn();
+        const checkHave = jest.fn(async () => 'PROCESSING');
+        const submitMissing = jest.fn(async () => 'rep-missing');
+        const specs = [
+            specFor('svcA', { paramsKey: 'have', submit: submitHave, checkStatusOnce: checkHave, finalize: jest.fn() }),
+            specFor('svcA', { paramsKey: 'missing', submit: submitMissing, checkStatusOnce: jest.fn(), finalize: jest.fn() }),
+        ];
+
+        await runAsyncAdsReports({ ...ACCT, specs, Model });
+
+        expect(submitHave).not.toHaveBeenCalled();
+        expect(checkHave).toHaveBeenCalledTimes(1);
+        expect(submitMissing).toHaveBeenCalledTimes(1);
+        expect(Model._docs.map(d => d.paramsKey).sort()).toEqual(['have', 'missing']);
+    });
+
+    it('a tick that submits anything new gets the INITIAL delay, not the short poll delay', async () => {
+        // Keyed on "did THIS tick submit", so a mixed tick still gives the brand-new report its
+        // full head start instead of spending poll attempts on one Amazon has only just accepted.
+        const Model = makeFakeModel();
+        await seedRow(Model, { service: 'svcA', paramsKey: 'have', status: 'SUBMITTED' });
+
+        const specs = [
+            specFor('svcA', { paramsKey: 'have', submit: jest.fn(), checkStatusOnce: async () => 'PROCESSING', finalize: jest.fn() }),
+            specFor('svcA', { paramsKey: 'missing', submit: async () => 'rep-missing', checkStatusOnce: jest.fn(), finalize: jest.fn() }),
+        ];
+
+        const res = await runAsyncAdsReports({ ...ACCT, specs, Model, pollDelayMs: 300000, initialDelayMs: 3600000 });
+
+        expect(res.reschedule.delayMs).toBe(3600000);
+    });
+
+    it('a pure re-check (nothing new submitted) still uses the short poll delay', async () => {
+        const Model = makeFakeModel();
+        await seedRow(Model, { service: 'svcA', paramsKey: 'have', status: 'SUBMITTED' });
+
+        const specs = [specFor('svcA', { paramsKey: 'have', submit: jest.fn(), checkStatusOnce: async () => 'PROCESSING', finalize: jest.fn() })];
+
+        const res = await runAsyncAdsReports({ ...ACCT, specs, Model, pollDelayMs: 300000, initialDelayMs: 3600000 });
+
+        expect(res.reschedule.delayMs).toBe(300000);
+    });
+
+    it('an unrelated stale row does not stop the bucket reaching done:true once my spec is terminal', async () => {
+        // The stale row is already terminal, so after my newly-submitted spec finishes there is
+        // nothing pending and the phase advances normally.
+        const Model = makeFakeModel();
+        await seedRow(Model, { service: 'svcA', paramsKey: 'chunk-A', status: 'DONE' });
+
+        const specs = [specFor('svcA', { paramsKey: 'chunk-B', submit: async () => null, checkStatusOnce: jest.fn(), finalize: jest.fn() })];
+
+        const res = await runAsyncAdsReports({ ...ACCT, specs, Model });
+
+        expect(res.done).toBe(true);
+        expect(Model._docs.find(d => d.paramsKey === 'chunk-B').status).toBe('NO_DATA');
     });
 });

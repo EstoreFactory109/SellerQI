@@ -2,15 +2,49 @@ const { generateAccessToken } = require('../Services/Sp_API/GenerateTokens.js');
 const { generateAdsAccessToken } = require('../Services/AmazonAds/GenerateToken.js');
 const logger = require('./Logger.js');
 
+/**
+ * How long an entry may sit untouched before it is dropped.
+ *
+ * Amazon access tokens expire after ~1 hour and this class refreshes at 55 minutes, so anything
+ * untouched well beyond that is dead weight — the next call regenerates it anyway. 6 hours is
+ * generous enough that a slow-cycling account never pays a refresh it would not have paid anyway.
+ */
+const TOKEN_ENTRY_TTL_MS = Math.max(
+    60 * 60 * 1000,
+    parseInt(process.env.TOKEN_MANAGER_TTL_MS || String(6 * 60 * 60 * 1000), 10) || 6 * 60 * 60 * 1000
+);
+
 class TokenManager {
     constructor() {
         this.tokens = new Map(); // Store tokens by userId
         this.refreshPromises = new Map(); // Prevent concurrent refresh attempts
     }
 
+    /**
+     * Drop entries untouched for longer than the TTL.
+     *
+     * WHY. `tokens` is a Map on a module singleton keyed by userId, and nothing ever deleted from
+     * it — no TTL, no cap, no eviction anywhere in this file. In a worker process that lives for
+     * days while the daily rotation walks the whole user base, it grew monotonically for the life
+     * of the process. Each entry is only a few KB so this was never the headline number on its own,
+     * but it was the ONE unambiguously unbounded structure in the worker's 191-module require
+     * graph — and an unbounded Map is also how a much larger object graph accidentally gets pinned.
+     *
+     * Swept on write rather than on a timer: writes are the only thing that grow the Map, the sweep
+     * is O(size) over a few hundred small entries, and it needs no interval to clean up after.
+     * `refreshPromises` needs no equivalent — it already deletes in a `finally`.
+     */
+    _evictStaleTokens(now) {
+        for (const [key, entry] of this.tokens) {
+            const touched = entry?.lastRefresh || entry?.spApiTokenTime || 0;
+            if (now - touched > TOKEN_ENTRY_TTL_MS) this.tokens.delete(key);
+        }
+    }
+
     // Store tokens with metadata
     setTokens(userId, spApiToken, adsToken, spRefreshToken, adsRefreshToken) {
         const now = Date.now();
+        this._evictStaleTokens(now);
         this.tokens.set(userId, {
             spApiToken,
             adsToken,
@@ -106,7 +140,7 @@ class TokenManager {
                 refreshPromises.push(Promise.resolve(null));
             }
 
-            console.log(`🔄 Refreshing tokens for user ${userId}: ${tokensToRefresh.join(', ')}`);
+            logger.debug(`🔄 Refreshing tokens for user ${userId}: ${tokensToRefresh.join(', ')}`);
             const [newSpApiToken, newAdsToken] = await Promise.all(refreshPromises);
 
             // Check if we got the tokens we needed
@@ -161,7 +195,7 @@ class TokenManager {
         if ((error.response && error.response.status === 401) ||
             (error.statusCode === 401) ||
             (error.status === 401)) {
-            console.log("🔍 TokenManager: Detected 401 status code");
+            logger.debug("🔍 TokenManager: Detected 401 status code");
             return true;
         }
         
@@ -190,7 +224,7 @@ class TokenManager {
                     );
                     
                     if (isUnauthorized) {
-                        console.log("🔍 TokenManager: Detected unauthorized in Amazon errors array", { code, message: err.message });
+                        logger.debug("🔍 TokenManager: Detected unauthorized in Amazon errors array", { code, message: err.message });
                     }
                     
                     return isUnauthorized;
@@ -210,7 +244,7 @@ class TokenManager {
                 directMessage.includes('invalid token') ||
                 directMessage.includes('invalid_token') ||
                 directMessage.includes('authenticating lwa token')) {
-                console.log("🔍 TokenManager: Detected unauthorized in direct response", { code: directCode, message: responseData.message });
+                logger.debug("🔍 TokenManager: Detected unauthorized in direct response", { code: directCode, message: responseData.message });
                 return true;
             }
         }
@@ -231,13 +265,13 @@ class TokenManager {
         );
         
         if (messageChecks) {
-            console.log("🔍 TokenManager: Detected unauthorized in error message", { message: errorMessage });
+            logger.debug("🔍 TokenManager: Detected unauthorized in error message", { message: errorMessage });
             return true;
         }
         
         // Check if error was thrown with Amazon API error structure preserved
         if (error.amazonApiError) {
-            console.log("🔍 TokenManager: Detected amazonApiError flag");
+            logger.debug("🔍 TokenManager: Detected amazonApiError flag");
             return true;
         }
         
@@ -263,57 +297,58 @@ class TokenManager {
 
     // Execute function without retry logic
     async executeWithTokenRefresh(fn, params, userId, spRefreshToken, adsRefreshToken) {
-        console.log(`🔄 TokenManager: Executing function for user ${userId} (no retries)`);
+        logger.debug(`🔄 TokenManager: Executing function for user ${userId} (no retries)`);
         
         try {
-            console.log(`🔄 TokenManager: Getting valid tokens for user ${userId}`);
+            logger.debug(`🔄 TokenManager: Getting valid tokens for user ${userId}`);
             
             // Get valid tokens (with proactive refresh if needed)
             const validTokens = await this.getValidTokens(userId, spRefreshToken, adsRefreshToken);
             
-            console.log(`✅ TokenManager: Got valid tokens for user ${userId}`);
+            logger.debug(`✅ TokenManager: Got valid tokens for user ${userId}`);
             
             // Update params with fresh tokens if they contain token fields
             const updatedParams = this.updateParamsWithTokens(params, validTokens);
             
             // Execute the function
             const result = await fn(updatedParams);
-            console.log(`✅ TokenManager: Function executed successfully for user ${userId}`);
+            logger.debug(`✅ TokenManager: Function executed successfully for user ${userId}`);
             return result;
             
         } catch (error) {
-            console.log(`❌ TokenManager: Function failed for user ${userId}:`, error.message);
+            logger.debug(`❌ TokenManager: Function failed for user ${userId}:`, error.message);
             
             // Check if this is an unauthorized error
             const isUnauthorized = this.isUnauthorizedError(error);
-            console.log(`🔍 TokenManager: Is unauthorized error: ${isUnauthorized}`);
+            logger.debug(`🔍 TokenManager: Is unauthorized error: ${isUnauthorized}`);
             
             // If it's an unauthorized error, try to refresh tokens once
             if (isUnauthorized) {
-                console.log(`⚠️ TokenManager: Unauthorized error detected, refreshing tokens...`);
+                logger.debug(`⚠️ TokenManager: Unauthorized error detected, refreshing tokens...`);
                 
                 try {
-                    console.log(`🔄 TokenManager: Starting token refresh for user ${userId}...`);
+                    logger.debug(`🔄 TokenManager: Starting token refresh for user ${userId}...`);
                     await this.refreshBothTokens(userId, spRefreshToken, adsRefreshToken);
-                    console.log(`✅ TokenManager: Token refresh completed for user ${userId}`);
+                    logger.debug(`✅ TokenManager: Token refresh completed for user ${userId}`);
                     
                     // Get updated tokens and try once more
                     const updatedTokens = await this.getValidTokens(userId, spRefreshToken, adsRefreshToken);
                     const updatedParams = this.updateParamsWithTokens(params, updatedTokens);
                     
-                    console.log(`🔄 TokenManager: Retrying function execution with refreshed tokens for user ${userId}...`);
+                    logger.debug(`🔄 TokenManager: Retrying function execution with refreshed tokens for user ${userId}...`);
                     const result = await fn(updatedParams);
-                    console.log(`✅ TokenManager: Function executed successfully after token refresh for user ${userId}`);
+                    logger.debug(`✅ TokenManager: Function executed successfully after token refresh for user ${userId}`);
                     return result;
                     
                 } catch (refreshError) {
-                    console.error(`❌ TokenManager: Token refresh failed for user ${userId}:`, refreshError.message);
-                    logger.error(`Token refresh failed: ${refreshError.message}`);
+                    // The console.error that used to sit here duplicated the line below and
+                    // bypassed the level gate. Pass the Error so Logger renders its stack.
+                    logger.error(`TokenManager: token refresh failed for user ${userId}`, refreshError);
                     throw refreshError;
                 }
             } else {
                 // Not an unauthorized error, throw the original error
-                console.log(`❌ TokenManager: Non-unauthorized error, not retrying (user ${userId})`);
+                logger.debug(`❌ TokenManager: Non-unauthorized error, not retrying (user ${userId})`);
                 throw error;
             }
         }
@@ -379,11 +414,11 @@ class TokenManager {
     // Create wrapper for Ads functions  
     wrapAdsFunction(fn, userId, spRefreshToken, adsRefreshToken) {
         return async (...args) => {
-            console.log(`🔄 TokenManager: Wrapping Ads function for user ${userId}`);
+            logger.debug(`🔄 TokenManager: Wrapping Ads function for user ${userId}`);
             return await this.executeWithTokenRefresh(
                 async (tokens) => {
                     // Replace first argument (token) with fresh token for Ads functions
-                    console.log(`🔄 TokenManager: Using refreshed Ads token for function execution`);
+                    logger.debug(`🔄 TokenManager: Using refreshed Ads token for function execution`);
                     const updatedArgs = [tokens.adsToken, ...args.slice(1)];
                     return await fn(...updatedArgs);
                 },

@@ -8,6 +8,100 @@ const { promisify } = require('util');
 const gunzip = promisify(zlib.gunzip);
 const { getReportOptions, normalizeHeaders } = require('../../utils/ReportHeaderMapping');
 
+/**
+ * How many `TotatProducts` history entries to keep per seller account.
+ *
+ * That array is appended to on every run and was capped by nothing. Production had one document
+ * carrying 1,131 entries. It has ZERO readers anywhere in client or server — only the schema, the
+ * write below, and the account-delete script reference it — so its only real cost is read
+ * amplification: every unprojected `Seller.findOne` drags the whole thing over the wire, and that
+ * happens several times per pipeline run (ProductIssuesService, Integration, ScheduledIntegration,
+ * FbaInventoryStorageService). Kept rather than dropped so a short history stays available.
+ */
+const TOTAT_PRODUCTS_HISTORY_LIMIT = 90;
+
+/** Statuses for which `issues` is meaningful — see carryForwardProductFields. */
+const ISSUE_BEARING_STATUSES = new Set(['Inactive', 'Incomplete']);
+
+/**
+ * Identity for a listing row. Composite `asin|sku`, matching FbaInventoryStorageService — the one
+ * other service that carries values into `products[]`.
+ *
+ * SKU alone would be enough in the normal case (checked across production: 79,015 products, zero
+ * duplicate SKUs within an account). ASIN alone would NOT be — 95 accounts have one ASIN spread
+ * across multiple SKUs. The composite is chosen because it fails to match when a SKU is re-pointed
+ * at a different ASIN, which is exactly the case where the old `issueCount` MUST NOT be carried:
+ * that count is derived per-ASIN (ProductIssuesService keys its map by asin), so inheriting it
+ * across an ASIN change would silently attribute one product's errors to another.
+ */
+function productKey(p) {
+    return `${String(p?.asin ?? '').trim()}|${String(p?.sku ?? '').trim()}`;
+}
+
+/**
+ * Carry per-product fields that OTHER services own across the merchant-listings rebuild.
+ *
+ * WHY THIS EXISTS
+ * The listings report only supplies {asin, sku, itemName, price, status, quantity}. Assigning it
+ * straight over `sellerAccount[].products` made Mongoose apply sub-schema defaults to everything
+ * else, so `issueCount` reset to 0 and `issues`/`has_b2b_pricing` were dropped — for the whole
+ * account, in the INIT phase, minutes into a run. Those values are only recomputed in CALC_REVIEW,
+ * phase 7 of 8, which on large accounts is HOURS later. The dashboard reads the live document with
+ * no snapshot layer and hides any product with no issues, so the "products to fix" widgets sat
+ * empty for that entire window. `has_b2b_pricing` was worse: nothing on the scheduled path ever
+ * restores it, so it was being wiped permanently.
+ *
+ * This does NOT change which products exist. The caller still assigns the freshly-built array, so
+ * delisted rows disappear exactly as before — that drop-out is relied on by product counts and by
+ * the asin/sku arrays that drive downstream SP-API calls.
+ *
+ * @param {Array} existingProducts products currently on the seller doc (may be a Mongoose array)
+ * @param {Array} incomingProducts freshly built rows from the report; MUTATED and returned
+ */
+function carryForwardProductFields(existingProducts, incomingProducts) {
+    const incoming = Array.isArray(incomingProducts) ? incomingProducts : [];
+    const existing = Array.isArray(existingProducts) ? existingProducts : [];
+    if (!existing.length || !incoming.length) return incoming;
+
+    const previous = new Map();
+    for (const p of existing) {
+        // A Mongoose subdocument answers property access fine; no toObject() needed.
+        if (p) previous.set(productKey(p), p);
+    }
+
+    for (const row of incoming) {
+        const prev = previous.get(productKey(row));
+        if (!prev) continue;   // new listing, or ASIN re-pointed: start clean, on purpose
+
+        // Re-derived from scratch every CALC_REVIEW (ProductIssuesService visits every product and
+        // writes `map.get(asin) || 0`), so carrying these can only shorten the blind window — it
+        // can never leave a permanently wrong value behind.
+        if (prev.issueCount !== undefined && prev.issueCount !== null) row.issueCount = prev.issueCount;
+        if (prev.issueCountUpdatedAt) row.issueCountUpdatedAt = prev.issueCountUpdatedAt;
+
+        // Nothing on the scheduled path writes this, so without carrying it forward it is lost for
+        // good on the first scheduled run after a connect.
+        if (prev.has_b2b_pricing !== undefined && prev.has_b2b_pricing !== null) {
+            row.has_b2b_pricing = prev.has_b2b_pricing;
+        }
+
+        // ── `issues` is the one field that must NOT be carried unconditionally ──
+        // It is only ever SET for Inactive/Incomplete products, and NOTHING ever clears it. Today
+        // this wholesale replace is the only thing that does. Carry it blindly and a product that
+        // gets fixed and goes Active keeps its stale strings forever — and the dashboard falls back
+        // to `issues.length` when `issueCount` is 0, so that product would permanently re-appear in
+        // "top products to fix". Gating on the NEW status is what keeps the clear-on-fix behaviour.
+        if (Array.isArray(prev.issues) && ISSUE_BEARING_STATUSES.has(row.status)) {
+            row.issues = prev.issues;
+        }
+
+        // `quantity` is deliberately NOT carried: FbaInventoryStorageService overwrites it seconds
+        // later in the same phase, and the report supplies a value anyway.
+    }
+
+    return incoming;
+}
+
 const generateReport = async (accessToken, marketplaceIds, baseURI) => {
     try {
         const now = new Date();
@@ -319,10 +413,20 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
 
         for (let i = 0; i < getSellerDetails.sellerAccount.length; i++) {
             if (getSellerDetails.sellerAccount[i].country === country && getSellerDetails.sellerAccount[i].region === region) {
+                // Carry over the fields other services own BEFORE the replace, or the sub-schema
+                // defaults wipe them for the whole account until CALC_REVIEW runs hours later.
+                // Still a full replace, so delisted listings drop out exactly as before.
+                carryForwardProductFields(getSellerDetails.sellerAccount[i].products, ProductData);
                 getSellerDetails.sellerAccount[i].products=ProductData;
                 getSellerDetails.sellerAccount[i].TotatProducts.push({
                     NumberOfProducts:ProductData.length
                 })
+                // Bound the history. Appended every run, read by nothing; production had 1,131
+                // entries on one document. splice() so the Mongoose array tracks the change.
+                const history = getSellerDetails.sellerAccount[i].TotatProducts;
+                if (history.length > TOTAT_PRODUCTS_HISTORY_LIMIT) {
+                    history.splice(0, history.length - TOTAT_PRODUCTS_HISTORY_LIMIT);
+                }
                 break;
             }
         }
@@ -391,3 +495,10 @@ async function convertTSVToJsonLegacy(tsvBuffer) {
 }
 
 module.exports = getReport;
+// Named exports alongside the default: every caller does `require(...)` and calls the result
+// directly, so the default must stay a function. These exist so the merge can be unit-tested as a
+// pure function instead of mocking the whole HTTP + gunzip + TSV stack it sits behind — the same
+// reason FinanceService exports parseTsv/foldSalesReportRows.
+module.exports.carryForwardProductFields = carryForwardProductFields;
+module.exports.productKey = productKey;
+module.exports.TOTAT_PRODUCTS_HISTORY_LIMIT = TOTAT_PRODUCTS_HISTORY_LIMIT;

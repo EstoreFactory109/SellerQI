@@ -52,7 +52,7 @@ const COUNTRY_TO_INTERNAL_REGION = {
   US: 'na', CA: 'na', MX: 'na', BR: 'na',
   UK: 'eu', DE: 'eu', FR: 'eu', IT: 'eu', ES: 'eu', NL: 'eu',
   SE: 'eu', PL: 'eu', BE: 'eu', IN: 'eu', TR: 'eu', AE: 'eu',
-  SA: 'eu', EG: 'eu',
+  SA: 'eu', EG: 'eu', ZA: 'eu',
   AU: 'apac', JP: 'apac', SG: 'apac',
 };
 

@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { toYyyyMmDd } = require('../../utils/metricDateKey.js');
+const { toYyyyMmDd, shiftMetricDateKey } = require('../../utils/metricDateKey.js');
 
 const searchTermsSchema = new mongoose.Schema({
   userId: {
@@ -79,9 +79,18 @@ searchTermsSchema.index(
   }
 );
 
+/**
+ * Merge per-day documents for an optional window.
+ *
+ * See findMergedKeywordsData in adsKeywordsPerformanceModel.js for the full rationale behind
+ * `lookbackDays` — this collection has the identical shape (one doc per account per day, no TTL)
+ * and the identical unbounded-growth problem when callers pass `{}`.
+ *
+ * Precedence: explicit startDate+endDate > lookbackDays > unbounded (legacy behaviour).
+ */
 searchTermsSchema.statics.findMergedSearchTermData = async function(userId, country, region, options = {}) {
   const userIdStr = userId?.toString?.() || String(userId);
-  const { startDate, endDate } = options;
+  const { startDate, endDate, lookbackDays } = options;
   const startStr = toYyyyMmDd(startDate);
   const endStr = toYyyyMmDd(endDate);
 
@@ -93,6 +102,21 @@ searchTermsSchema.statics.findMergedSearchTermData = async function(userId, coun
   };
   if (startStr && endStr) {
     dailyQuery.metricDate = { $gte: startStr, $lte: endStr };
+  } else if (Number.isFinite(lookbackDays) && lookbackDays > 0) {
+    // Anchored to the newest day this account HAS, not to today — the pipeline lags, and a
+    // today-anchored window would blank the dashboard for any account a few days behind.
+    const newest = await this.findOne(dailyQuery)
+      .sort({ metricDate: -1 })
+      .select('metricDate')
+      .lean();
+    const anchor = toYyyyMmDd(newest?.metricDate);
+    // No anchor => no per-day rows; stay unbounded so the legacy fallback below is reached.
+    if (anchor) {
+      const windowStart = shiftMetricDateKey(anchor, -(lookbackDays - 1));
+      if (windowStart) {
+        dailyQuery.metricDate = { $gte: windowStart, $lte: anchor };
+      }
+    }
   }
 
   const dailyDocs = await this.find(dailyQuery).sort({ metricDate: 1 }).lean();

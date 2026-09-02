@@ -1041,17 +1041,97 @@ async function getReportDocumentUrl(tokenManager, baseUrl, reportDocumentId) {
   }
 }
 
+/**
+ * The ONLY Sales-Report columns any consumer reads.
+ *
+ * The report carries ~50 columns; these ten are the complete set actually used —
+ * `parseSalesReportRows` (order-status, sales-channel, item-price, purchase-date,
+ * amazon-order-id, sku, asin, currency, product-name, quantity) and the pending-count fold
+ * (order-status, purchase-date). Keeping the other ~40 meant allocating roughly five times the
+ * strings and object slots we ever look at, per row, for 24-45k rows per chunk.
+ *
+ * Adding a column here is the supported way to consume a new field — it must be added here
+ * FIRST or the field will read as undefined downstream.
+ */
+const SALES_REPORT_COLUMNS = new Set([
+  'order-status',
+  'sales-channel',
+  'item-price',
+  'purchase-date',
+  'amazon-order-id',
+  'sku',
+  'asin',
+  'currency',
+  'product-name',
+  'quantity',
+]);
+
+/**
+ * Parse the Sales Report TSV into row objects carrying only SALES_REPORT_COLUMNS.
+ *
+ * MEMORY, not style. This runs on the full decompressed report — tens of MB — and the previous
+ * implementation held roughly 2.5-3x of it live at once:
+ *   1. `rawData.split('\n')` builds an array of SlicedStrings. V8 slices share the parent's
+ *      backing store, so that array pinned the ENTIRE raw text for the whole parse loop even
+ *      after the caller was done with it.
+ *   2. Zipping all ~50 headers into every row produced a second, independent copy of the same
+ *      characters, re-fragmented into ~50 short strings per row.
+ * Scanning with indexOf and projecting to the ten used columns removes both. Same rows, same
+ * values, same order — just without materialising what nothing reads. The scan technique mirrors
+ * `countNonEmptyLines` in utils/spApiReportDownload.js, which does it for the same reason.
+ *
+ * Behaviour deliberately preserved verbatim from the split-based version:
+ *   - blank / whitespace-only lines are skipped ANYWHERE in the file, not just at the end
+ *     (the old `.filter(l => l.trim())` ran across all lines, so a blank line mid-file did not
+ *      terminate parsing and did not shift the header)
+ *   - fewer than 2 non-empty lines yields [] (header-only = "no orders", which the caller
+ *     distinguishes from an unusable payload)
+ *   - each cell is `.trim()`ed and stripped of \r (CRLF reports)
+ *   - a missing trailing cell becomes '' — ragged rows are normal in these reports
+ *   - a falsy cell becomes '' (the old `values[idx] || ''`), so '0' survives but '' stays ''
+ */
 function parseTsv(rawData) {
-  const lines = rawData.split('\n').filter((l) => l.trim());
-  if (lines.length < 2) return [];
-  const headers = lines[0].split('\t').map((h) => h.trim().replace(/\r/g, ''));
+  if (!rawData) return [];
+
+  const cleanCell = (s) => s.trim().replace(/\r/g, '');
+
+  // Walk non-empty lines without materialising an array of them.
+  let pos = 0;
+  const nextNonEmptyLine = () => {
+    while (pos < rawData.length) {
+      let nl = rawData.indexOf('\n', pos);
+      if (nl === -1) nl = rawData.length;
+      const line = rawData.slice(pos, nl);
+      pos = nl + 1;
+      if (line.trim()) return line;
+    }
+    return null;
+  };
+
+  const headerLine = nextNonEmptyLine();
+  if (headerLine === null) return [];
+
+  // Header index -> retained column name. Non-retained columns map to undefined and are skipped,
+  // so the per-row loop never even allocates their values.
+  const headerNames = headerLine.split('\t').map(cleanCell);
+  const keptAt = headerNames.map((h) => (SALES_REPORT_COLUMNS.has(h) ? h : undefined));
+
   const rows = [];
-  for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split('\t').map((v) => v.trim().replace(/\r/g, ''));
+  let line;
+  while ((line = nextNonEmptyLine()) !== null) {
+    const values = line.split('\t');
     const row = {};
-    headers.forEach((h, idx) => { row[h] = values[idx] || ''; });
+    for (let i = 0; i < keptAt.length; i++) {
+      const name = keptAt[i];
+      if (name === undefined) continue;
+      const raw = values[i];
+      row[name] = raw === undefined ? '' : (cleanCell(raw) || '');
+    }
     rows.push(row);
   }
+
+  // Header-only (or blank) body: no data rows. Matches the old `lines.length < 2 -> []`.
+  if (rows.length === 0) return [];
   return rows;
 }
 
@@ -1212,18 +1292,116 @@ function parseSalesReportRows(reportRows, country) {
  * Everything is clamped to [startDate, endDate] so `datesToClear ⊆ requested range` holds. That
  * invariant is what stops one chunk's clear from deleting a neighbouring chunk's fresh rows.
  *
+ * Accepts EITHER `daysSeen` (a pre-computed Set of day-keys — what `foldSalesReportRows` produces
+ * as a side effect of its single pass, so the caller need not keep the raw rows alive until persist
+ * time) OR `reportRows` directly (recomputes the set; used by callers/tests that only have rows).
+ *
  * @returns {{datesToClear: string[], zeroedDays: string[]}}
  */
-function resolveDatesToClear({ reportRows, country, startDate, endDate, bucketDates }) {
+function resolveDatesToClear({ reportRows, daysSeen, country, startDate, endDate, bucketDates }) {
   const datesToClear = new Set(bucketDates || []);
   const zeroedDays = new Set();
-  for (const row of (reportRows || [])) {
-    const d = toMarketplaceDayKey(row['purchase-date'], country);
+  const seen = daysSeen || collectDaysSeen(reportRows || [], country);
+  for (const d of seen) {
     if (!d || d < startDate || d > endDate || datesToClear.has(d)) continue;
     datesToClear.add(d);
     zeroedDays.add(d);
   }
   return { datesToClear: [...datesToClear], zeroedDays: [...zeroedDays].sort() };
+}
+
+/** Every marketplace-local day key seen across `reportRows`, unfiltered by status or channel. */
+function collectDaysSeen(reportRows, country) {
+  const out = new Set();
+  for (const row of reportRows) {
+    const d = toMarketplaceDayKey(row['purchase-date'], country);
+    if (d) out.add(d);
+  }
+  return out;
+}
+
+/**
+ * One pass producing everything the caller needs from the Sales Report rows:
+ * the order×SKU map, the per-date pending count, the set of days the report covers at all
+ * (`daysSeen` — see `resolveDatesToClear`), and the row count.
+ *
+ * WHY: these were separate loops over `reportRows` (parseSalesReportRows, an inline pending-count
+ * loop, and — once `resolveDatesToClear` existed — a third pass over the same rows again at persist
+ * time), and the array had to stay alive for all of them. Folding them into one pass lets the
+ * caller release the rows immediately afterwards — before the Finance API walk, which is 1000+
+ * pages and tens of minutes. That release is the actual memory win; this fold is what makes it
+ * legal, INCLUDING for `resolveDatesToClear`, which would otherwise need the raw rows again long
+ * after they should have been freed.
+ *
+ * `parseSalesReportRows` is deliberately kept exported and untouched: it is the reference
+ * implementation the equivalence test asserts this function's sales half against. Its bucketing
+ * (`toMarketplaceDayKey`) and tax reconciliation (`itemSalesForRow`) are mirrored here exactly —
+ * see their own docs (utils/marketplaceTimezone.js, utils/marketplaceTax.js) for why a plain
+ * Pacific offset or a raw `item-price` sum would misstate money.
+ *
+ * ── THE ASYMMETRY, DO NOT "TIDY" IT ──
+ * The pending count is taken BEFORE the sales filters and is NOT subject to them. That is not an
+ * oversight in the original code: pendingCountByDate feeds the provisional/unsettled marking on
+ * FinanceSyncLog, which asks "is any part of this day still unsettled?" — a pending order on
+ * another marketplace still makes the day untrustworthy even though its revenue is excluded
+ * here. Moving the pending check below the filters would silently under-count and let days settle
+ * early at $0. ('cancelled' cannot also start with 'pending', so that filter is immaterial to the
+ * count; the sales-channel ones are not.)
+ *
+ * `daysSeen`, by contrast, MUST be unfiltered by everything (including 'cancelled') — that is the
+ * whole point of `resolveDatesToClear`'s day-2 case: a cancelled-only day still needs clearing.
+ */
+function foldSalesReportRows(reportRows, country) {
+  const orderMap = new Map();
+  const pendingCountByDate = new Map();
+  const daysSeen = new Set();
+  let totalItems = 0;
+  let rowCount = 0;
+  const salesChannel = country ? COUNTRY_TO_SALES_CHANNEL[country.toUpperCase()] : null;
+  let skippedChannel = 0;
+
+  // Same rationale as parseSalesReportRows: the correction is a pure function of each row, never
+  // of this batch — see utils/marketplaceTax.js for why a batch-derived rate was chunk-unstable.
+  warnIfRateLooksWrong(reportRows, country);
+
+  for (const row of reportRows) {
+    rowCount++;
+    const status = (row['order-status'] || '').toLowerCase();
+    const marketplaceDate = toMarketplaceDayKey(row['purchase-date'], country);
+    if (marketplaceDate) daysSeen.add(marketplaceDate);
+
+    // ── pending pass — unfiltered by design (see note above) ──
+    if (status.startsWith('pending')) {
+      if (marketplaceDate) pendingCountByDate.set(marketplaceDate, (pendingCountByDate.get(marketplaceDate) || 0) + 1);
+    }
+
+    // ── sales pass — same filters, same order, as parseSalesReportRows ──
+    if (status === 'cancelled') continue;
+    if ((row['sales-channel'] || '').toLowerCase() === 'non-amazon') continue;
+    if (salesChannel && row['sales-channel'] !== salesChannel) { skippedChannel++; continue; }
+    const price = itemSalesForRow(row, country);
+    const pacificDate = marketplaceDate;
+    if (!pacificDate) continue;
+    const orderId = row['amazon-order-id'] || '';
+    if (!orderId) continue;
+    const sku = row['sku'] || 'N/A';
+
+    if (!orderMap.has(orderId)) orderMap.set(orderId, new Map());
+    const skuMap = orderMap.get(orderId);
+
+    if (!skuMap.has(sku)) {
+      skuMap.set(sku, { orderId, sku, asin: row['asin'] || '', pacificDate, currency: row['currency'] || '', productName: row['product-name'] || '', totalPrice: 0, totalUnits: 0 });
+      totalItems++;
+    }
+    const item = skuMap.get(sku);
+    item.totalPrice += price;
+    item.totalUnits += parseInt(row['quantity'], 10) || 0;
+    if (!item.asin && row['asin']) item.asin = row['asin'];
+  }
+
+  if (skippedChannel > 0) logger.debug(`[SalesReport] Skipped ${skippedChannel} rows from other marketplaces (filtering for ${salesChannel})`);
+  logger.info(`[SalesReport] Valid orders: ${orderMap.size}, order-items (order×SKU): ${totalItems}`);
+  return { salesOrderMap: orderMap, pendingCountByDate, daysSeen, rowCount };
 }
 
 // ═══════════════════════════════════════════════
@@ -1714,9 +1892,12 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
   const { salesStartISO, salesEndISO } = salesReportWindowISO(startDate, endDate, country);
 
   logger.info(`[Step1] Sales Report: ${startDate} → ${endDate} (${country} local)`);
-  const reportRows = await fetchSalesReport(tokenManager, baseUrl, marketplaceId, salesStartISO, salesEndISO);
+  // Handed over in a holder so processSalesReportRows can release the rows once it has folded
+  // them — before the Finance API walk. Holding them in a local `const` here instead would keep
+  // the array alive for this whole frame no matter what the callee does with its parameter.
+  const reportRowsHolder = { rows: await fetchSalesReport(tokenManager, baseUrl, marketplaceId, salesStartISO, salesEndISO) };
 
-  return processSalesReportRows({ userId, country, regionModel, startDate, endDate, reportRows, tokenManager });
+  return processSalesReportRows({ userId, country, regionModel, startDate, endDate, reportRowsHolder, tokenManager });
 }
 
 /**
@@ -1731,26 +1912,31 @@ async function fetchNewSalesAndExpenses({ userId, country, regionModel, startDat
  *   repeated finalize (BullMQ retry) can detect that it already ran and skip. Without this a
  *   re-run after Step 2 had converted estimated fees into actuals would reinstate the estimates.
  */
-async function processSalesReportRows({ userId, country, regionModel, startDate, endDate, reportRows, tokenManager, syncRunId = null }) {
+async function processSalesReportRows({ userId, country, regionModel, startDate, endDate, reportRows, reportRowsHolder = null, tokenManager, syncRunId = null }) {
   const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
   const regionInternal = internalRegionFromModel(regionModel);
   const { baseUrl, marketplaceId } = resolveMarketplaceAndRegion(country.toUpperCase(), regionInternal);
-  const salesOrderMap = parseSalesReportRows(reportRows, country);
 
-  // ── Per-day "unsettled sales" signal (for provisional sync-log marking) ──
-  // Amazon withholds buyer/price data for orders in 'Pending' status, so those
-  // rows arrive with an empty item-price and are summed as $0. A day that
-  // contains such rows is NOT yet trustworthy and must be re-fetched later.
-  // ('Unshipped' orders are confirmed and DO carry prices — not counted here;
-  //  only statuses beginning with 'pending' have the empty-price problem.)
-  const pendingCountByDate = new Map();
-  for (const row of reportRows) {
-    const status = (row['order-status'] || '').toLowerCase();
-    if (!status.startsWith('pending')) continue;
-    const d = toMarketplaceDayKey(row['purchase-date'], country);
-    if (!d) continue;
-    pendingCountByDate.set(d, (pendingCountByDate.get(d) || 0) + 1);
-  }
+  // ── Fold the report rows, then LET THEM GO ──
+  // Everything downstream needs is produced here: the order×SKU map (with the marketplace-local
+  // bucketing and tax reconciliation `parseSalesReportRows` also applies), the per-day pending
+  // count (see foldSalesReportRows for why that one is unfiltered), `daysSeen` (every day the
+  // report covers at all — feeds `resolveDatesToClear` at persist time, further down, so that call
+  // does not need the raw rows again), and the row count.
+  //
+  // Releasing matters because of what comes next: the Finance API walk below is 1000+ paginated
+  // calls over tens of minutes, and it used to run with the entire row array — 24-45k rows of
+  // ~50 fields each — still pinned, purely so `reportRows.length` could be read at the end (and,
+  // later, so a persist-time re-scan of the rows could compute which days to clear).
+  //
+  // Callers pass `reportRowsHolder` ({ rows }) so the release actually frees something: nulling a
+  // plain parameter would not, because the caller's own binding keeps the array alive. `reportRows`
+  // is still accepted directly for tests and for the empty/no-data path, where there is nothing
+  // worth releasing.
+  const rowsIn = reportRowsHolder ? reportRowsHolder.rows : reportRows;
+  const { salesOrderMap, pendingCountByDate, daysSeen, rowCount: reportRowCount } =
+    foldSalesReportRows(rowsIn || [], country);
+  if (reportRowsHolder) reportRowsHolder.rows = null;
 
   // DEBUG — remove after testing
   let debugTotal = 0, debugUnits = 0, debugOrders = 0;
@@ -2200,12 +2386,15 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
 
   // `endD` is still needed by the sync-log loop below.
   const endD = new Date(`${endDate}T00:00:00.000Z`);
-  const salesReportEmpty = (reportRows.length === 0);
+  const salesReportEmpty = (reportRowCount === 0);
   if (salesReportEmpty || allDates.size === 0) {
-    logger.warn(`[Step1] Sales Report produced no buckets for ${startDate}→${endDate} (reportRows=${reportRows.length}). Clearing nothing — existing data for these days is preserved (re-fetch of aged-out days must never zero them).`);
+    logger.warn(`[Step1] Sales Report produced no buckets for ${startDate}→${endDate} (reportRows=${reportRowCount}). Clearing nothing — existing data for these days is preserved (re-fetch of aged-out days must never zero them).`);
   }
 
-  const { datesToClear, zeroedDays } = resolveDatesToClear({ reportRows, country, startDate, endDate, bucketDates: allDates });
+  // `daysSeen` (not `reportRows`) — the raw rows are gone by now when this ran via the holder
+  // path (see the fold above); `daysSeen` is exactly what resolveDatesToClear needs and was
+  // computed before the release, in the same pass as everything else.
+  const { datesToClear, zeroedDays } = resolveDatesToClear({ daysSeen, country, startDate, endDate, bucketDates: allDates });
   if (zeroedDays.length > 0) {
     // Worth a log line: this is the path that takes a day DOWN to $0, so it should be visible if
     // it ever fires unexpectedly.
@@ -2310,7 +2499,9 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
   }
 
   logger.info(`[Step1] Done. ${saved.skuDocCount} SKU docs. ${pendingOrders.length} pending.`);
-  return { salesOrders: salesOrderMap.size, skuDocs: saved.skuDocCount, overheadDocs: saved.overheadDocCount, pendingOrders: pendingOrders.length, token: tokenManager.token, tokenManager, marketplaceId, baseUrl };
+  // `reportRowCount` is returned so callers never need to keep the row array alive just to
+  // report on it — that retention was the memory problem this path was carrying.
+  return { salesOrders: salesOrderMap.size, skuDocs: saved.skuDocCount, overheadDocs: saved.overheadDocCount, pendingOrders: pendingOrders.length, reportRowCount, token: tokenManager.token, tokenManager, marketplaceId, baseUrl };
 }
 
 // ═══════════════════════════════════════════════
@@ -3094,29 +3285,36 @@ const financeSalesReportAsync = {
         // orders". There is nothing to download, but we still process, because the empty-rows
         // path is what writes the sync-log rows that ADVANCE THE CURSOR. Skipping it would
         // leave the chunk unlogged and retried forever.
-        const reportRows = handle && handle.reportDocumentId
-          ? (await downloadSalesReportRows(tokenManager, baseUrl, handle.reportDocumentId, paramsKey)).rows
-          : [];
+        // Holder, not a local const: processSalesReportRows releases the rows as soon as it has
+        // folded them, and this is the path that matters most — it is the one all live accounts
+        // use, and the Finance API walk it runs afterwards is where the memory was being held.
+        const reportRowsHolder = {
+          rows: handle && handle.reportDocumentId
+            ? (await downloadSalesReportRows(tokenManager, baseUrl, handle.reportDocumentId, paramsKey)).rows
+            : [],
+        };
 
         const stats = await processSalesReportRows({
           userId, country, regionModel,
           startDate: chunk.startDate, endDate: chunk.endDate,
-          reportRows, tokenManager, syncRunId,
+          reportRowsHolder, tokenManager, syncRunId,
         });
 
         // `empty` marks the row NO_DATA so the phase can allow exactly one re-submit. The data
         // has still been processed above either way.
         //
+        // Read the count off `stats`, not off the array: the array is deliberately gone by now.
+        //
         // Copy fields explicitly: `stats` carries `token` and a live `tokenManager`, and this
         // object is persisted to Mongo.
         return {
-          empty: reportRows.length === 0,
+          empty: stats.reportRowCount === 0,
           result: {
             salesOrders: stats.salesOrders,
             skuDocs: stats.skuDocs,
             overheadDocs: stats.overheadDocs,
             pendingOrders: stats.pendingOrders,
-            reportRows: reportRows.length,
+            reportRows: stats.reportRowCount,
           },
         };
       },
@@ -3142,6 +3340,11 @@ module.exports = {
   parseSalesReportRows,
   toMarketplaceDayKey,
   resolveDatesToClear,
+  // Exported for the equivalence tests. `parseSalesReportRows` is kept as the reference
+  // implementation that `foldSalesReportRows` is asserted against — do not delete it as "dead".
+  parseTsv,
+  foldSalesReportRows,
+  SALES_REPORT_COLUMNS,
   indexFinanceRowsByOrderId,
   buildOverheadBuckets,
   EXPENSE_CATEGORY_TO_FIELD,

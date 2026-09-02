@@ -36,6 +36,21 @@ const { describeError } = require('../../utils/errorContext.js');
 const TERMINAL = new Set(['DONE', 'NO_DATA', 'FAILED']);
 
 /**
+ * Exclude the legacy `result` blob from every row read.
+ *
+ * Nothing writes `result` any more (see the finalize handler below), but historical rows keep
+ * theirs until the model's 30-day TTL expires them, and these reads happen on EVERY poll tick —
+ * once every ~15 minutes per account per phase. Without this, each tick hydrates up to 15MB per
+ * row into the worker heap for data no caller uses. Worker memory is the known reason the largest
+ * accounts cannot finish a daily cycle, so this is not just tidiness.
+ *
+ * Kept as an explicit exclusion rather than an inclusion list so a new field added to the schema
+ * still reaches callers by default — but if anything ever stashes a payload again, exclude it here
+ * too rather than letting the poll path carry it.
+ */
+const ROW_PROJECTION = { result: 0 };
+
+/**
  * @param {object} args
  * @param {string} args.userId
  * @param {string} args.country
@@ -69,28 +84,57 @@ async function runAsyncAdsReports(args) {
 
     // Scope to (account, day, phase-group) so phases sharing a runDate (e.g. sched_ads
     // and sched_batch_4 in the same daily run) never see each other's rows.
+    //
+    // NOTE the filter deliberately has NO `paramsKey`: it is the "which rows are mine?"
+    // scope, NOT the "has my report been submitted yet?" test. Those are different
+    // questions and conflating them was a real bug — see the per-spec split below.
     const baseFilter = { userId: String(userId), country, region, runDate, group, phase };
     const specByKey = new Map(specs.map(s => [`${s.service}|${s.paramsKey}`, s]));
 
-    const existing = await Model.find(baseFilter).lean();
-    const justSubmitted = existing.length === 0;
+    const existing = await Model.find(baseFilter, ROW_PROJECTION).lean();
 
-    if (justSubmitted) {
-        // ---- SUBMIT stage: create every report, persist a SUBMITTED row -------
-        await submitAll({ Model, baseFilter, specs, maxPollAttempts });
-    } else {
-        // ---- POLL stage: advance each not-yet-terminal report ----------------
+    // ── Decide SUBMIT vs POLL PER SPEC, never for the bucket as a whole. ──
+    // This used to be `if (existing.length === 0) submitAll(specs) else pollAll(...)`, i.e. a
+    // single row anywhere in the bucket suppressed the submit for EVERY spec — including specs
+    // that had never been submitted at all. `pollAll` then skips rows it has no spec for, finds
+    // nothing pending, and returns done:true, so the caller's read-back
+    // (`find({...baseFilter, paramsKey})`) hits nothing and reports "no engine row for chunk".
+    //
+    // That is not hypothetical and not a timing race — it is deterministic and was live for
+    // finance. `runDate` there is `chunk.endDate` (a DATA date, not a run date), and chunk
+    // boundaries re-align whenever the shared FinanceSyncLog cursor moves, so a later run
+    // legitimately asks for a different `paramsKey` under a `runDate` an earlier run already
+    // occupied. Rows live 30 days (model TTL), so the stale one is always still there. Observed
+    // on account 6a57b823571ceb9266953c30: bucket (runDate 2026-08-02, group sched_finance) held
+    // `2026-08-01_2026-08-02` from Aug 4, which silently blocked `2026-07-31_2026-08-02` on Aug 7,
+    // and the failure then re-armed itself daily via the catch-up sweeper.
+    //
+    // Both halves are safe to run in the same tick: submitAll upserts on the unique
+    // (account, runDate, group, service, paramsKey) key, and pollAll already tolerates rows whose
+    // spec is absent — this is just the mirror of that same tolerance.
+    const existingKeys = new Set(existing.map(r => `${r.service}|${r.paramsKey}`));
+    const missingSpecs = specs.filter(s => !existingKeys.has(`${s.service}|${s.paramsKey}`));
+
+    if (missingSpecs.length > 0) {
+        // ---- SUBMIT stage: create the not-yet-submitted reports ---------------
+        await submitAll({ Model, baseFilter, specs: missingSpecs, maxPollAttempts });
+    }
+    if (existing.length > 0) {
+        // ---- POLL stage: advance each not-yet-terminal report -----------------
         await pollAll({ Model, baseFilter, rows: existing, specByKey });
     }
 
     // Recompute terminal/pending counts after this pass.
-    const rows = await Model.find(baseFilter).lean();
+    const rows = await Model.find(baseFilter, ROW_PROJECTION).lean();
     const pending = rows.filter(r => !TERMINAL.has(r.status));
 
     if (pending.length > 0) {
-        // First wait after SUBMIT uses the (long) initial delay; subsequent re-checks use
-        // the shorter poll delay.
-        const delayMs = justSubmitted ? firstDelayMs : pollDelayMs;
+        // A tick that submitted anything new waits the (long) initial delay before its first
+        // status check; a pure re-check uses the shorter poll delay. Keyed on whether THIS tick
+        // submitted, so a mixed tick (some polled, some newly submitted) still gives the fresh
+        // report its full head start instead of burning poll attempts on a report Amazon has
+        // only just accepted.
+        const delayMs = missingSpecs.length > 0 ? firstDelayMs : pollDelayMs;
         return { done: false, reschedule: { delayMs, pollAttempt: pollAttempt + 1 } };
     }
 
@@ -186,11 +230,26 @@ async function pollAll({ Model, baseFilter, rows, specByKey }) {
             try {
                 const fin = await spec.finalize(result.handle, row);
                 const status = fin && fin.empty ? 'NO_DATA' : 'DONE';
-                // Stash any processed output so the phase can combine across reports
-                // (e.g. PPC metrics merges SP/SB/SD into one per-day doc before saving).
-                const set = { status, note: '' };
-                if (fin && fin.result !== undefined) set.result = fin.result;
-                await Model.updateOne({ _id: row._id }, { $set: set });
+                // A finalize must PERSIST its own output and return only `{ empty }`.
+                //
+                // This used to stash `fin.result` on the row so a later `saveFromRows` could
+                // combine SP/SB/SD before writing. That made the tracking row carry an entire
+                // 31-day report, and two services duly outgrew MongoDB's 16MB document ceiling:
+                // measured 2026-08-21, ppcSpendsBySKU rows reached 15.13MB and
+                // ppcMetricsAggregated 10.00MB, together 233.5MB of this collection's 233.9MB.
+                // Past the limit `updateOne` throws ERR_OUT_OF_RANGE, the catch below marks the
+                // row FAILED, and the fetched report is discarded — so the very mechanism meant
+                // to let the phase combine reports was destroying the data instead.
+                //
+                // Both services now save per ad type inside finalize, using partial-save
+                // machinery they already had (GetPPCMetrics.mergeDailyMetricsDoc and the
+                // adType-scoped delete in ProductWiseSponsoredAdsService). That matches what
+                // every other adapter here already did.
+                //
+                // Deliberately NOT persisted even if an adapter returns one: silently accepting
+                // it is how the blob crept in. `result` remains on the schema only so historical
+                // rows still deserialize.
+                await Model.updateOne({ _id: row._id }, { $set: { status, note: '' } });
             } catch (err) {
                 // The note below is bounded and lands in Mongo; the STACK only survives if it is
                 // logged HERE. Two separate rounds of production diagnosis attributed a

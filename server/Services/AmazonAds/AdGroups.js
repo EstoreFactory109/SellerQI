@@ -1,8 +1,10 @@
 const axios = require('axios');
 const AdsGroup = require('../../models/amazon-ads/adsgroupModel.js');
+const AdsGroupChunk = require('../../models/amazon-ads/adsGroupChunkModel.js');
 const logger = require('../../utils/Logger.js');
 const { getYesterdayMetricDateUtc } = require('../../utils/metricDateKey.js');
 const { chunkIds, ADS_ID_FILTER_MAX, ADS_CHUNK_DELAY_MS: CHUNK_DELAY_MS, sleep } = require('../../utils/adsIdFilter.js');
+const { persistChunkedSnapshot } = require('../../utils/snapshotChunkStore.js');
 
 /**
  * Ad groups list → one snapshot doc per `metricDate` (upsert).
@@ -208,20 +210,21 @@ async function getAdGroups(accessToken, profileId, region, userId, country, camp
     console.log(`✅ Ad Groups data fetched: ${normalizedAdGroups.length} ad groups total`);
 
     // ===== SAVE TO DATABASE =====
+    // Chunks only if the set outgrows one 16MB document; below the threshold this is the
+    // same inline `$set` as before. Preventive — ad groups peak at ~0.5MB today — but the
+    // shape matches the snapshots that already overflowed. See utils/snapshotChunkStore.js.
     const metricDate = getYesterdayMetricDateUtc();
-    const createCampaignData = await AdsGroup.findOneAndUpdate(
-      { userId: String(userId), country, region, metricDate },
-      {
-        $set: {
-          userId: String(userId),
-          country,
-          region,
-          metricDate,
-          adsGroupData: normalizedAdGroups
-        }
-      },
-      { upsert: true, new: true, runValidators: true }
-    );
+    const createCampaignData = await persistChunkedSnapshot({
+      Model: AdsGroup,
+      ChunkModel: AdsGroupChunk,
+      dataField: 'adsGroupData',
+      userId,
+      country,
+      region,
+      metricDate,
+      rows: normalizedAdGroups,
+      label: 'adsGroupData',
+    });
 
     if (!createCampaignData) {
       logger.error('Failed to save ad group data to database', { userId, region, country });

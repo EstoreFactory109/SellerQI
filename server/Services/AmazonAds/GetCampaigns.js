@@ -1,7 +1,9 @@
 const axios = require('axios');
 const Campaign = require('../../models/amazon-ads/CampaignModel');
+const CampaignChunk = require('../../models/amazon-ads/campaignChunkModel.js');
 const logger = require('../../utils/Logger.js');
 const { getYesterdayMetricDateUtc } = require('../../utils/metricDateKey.js');
+const { persistChunkedSnapshot } = require('../../utils/snapshotChunkStore.js');
 
 /**
  * Sponsored Products campaigns list → one snapshot doc per `metricDate` (upsert).
@@ -158,20 +160,22 @@ async function getCampaign(accessToken, profileId, region, userId, country) {
     // ===== SAVE TO DATABASE WITH VALIDATION =====
     let createCampaignData;
     try {
+      // Chunks only if the set outgrows one 16MB document; below the threshold this is the
+      // same inline `$set` as before. Preventive here — campaigns peak at ~1.4MB today —
+      // but the shape is identical to the keyword and negative-keyword snapshots that DID
+      // overflow, and the failure mode is an opaque driver-level ERR_OUT_OF_RANGE.
       const metricDate = getYesterdayMetricDateUtc();
-      createCampaignData = await Campaign.findOneAndUpdate(
-        { userId: String(userId), country, region, metricDate },
-        {
-          $set: {
-            userId: String(userId),
-            country,
-            region,
-            metricDate,
-            campaignData: normalizedCampaigns
-          }
-        },
-        { upsert: true, new: true, runValidators: true }
-      );
+      createCampaignData = await persistChunkedSnapshot({
+        Model: Campaign,
+        ChunkModel: CampaignChunk,
+        dataField: 'campaignData',
+        userId,
+        country,
+        region,
+        metricDate,
+        rows: normalizedCampaigns,
+        label: 'campaignData',
+      });
 
       if (!createCampaignData) {
         // Log warning but don't fail - return the data anyway

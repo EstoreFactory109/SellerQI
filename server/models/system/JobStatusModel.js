@@ -98,6 +98,20 @@ const JobStatusSchema = new mongoose.Schema({
         required: false,
         default: 3
     },
+    // Liveness heartbeat, written on each lock-extension tick while a phase is running.
+    // Its real PURPOSE is to move `updatedAt`: producer.js and freshnessSweeper both treat
+    // "JobStatus has not moved recently" as "this account is frozen", and before the heartbeat
+    // existed a phase legitimately running for hours was indistinguishable from a dead one
+    // (rows are written only at phase start and end). These two fields are the human-readable
+    // half — they make "running 9h, last beat 3min ago" answerable from a single query.
+    lastHeartbeatAt: {
+        type: Date,
+        required: false
+    },
+    elapsedMs: {
+        type: Number,
+        required: false
+    },
     // Additional metadata
     metadata: {
         type: mongoose.Schema.Types.Mixed,
