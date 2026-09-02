@@ -334,11 +334,11 @@ const config = {
             // range. The sender sleeps 5-15s per order by design, up to 400 orders a run, so
             // it held that range hostage for over an hour on 8 accounts and 23.8h on one.
             //
-            // SHIPS DISABLED. REVIEW_WORKER_ENABLED defaults to 'false': the tick runs and
-            // logs which accounts it WOULD process, but calls neither processor, because the
-            // pipeline is still doing this work. Flipping it to 'true' and removing the two
-            // ScheduleConfig entries is a single change — there must be no window in which
-            // both send.
+            // ENABLED, and the two ScheduleConfig entries were removed in the SAME change —
+            // there must never be a window in which both the pipeline and this worker send,
+            // because that burns the single solicitation Amazon allows per order.
+            // Rollback is the mirror image: set REVIEW_WORKER_ENABLED=false and restore the
+            // two ScheduleConfig entries together.
             //
             // REVIEW_INGEST_STREAMING is passed through so ingestion runs in exactly the mode
             // it does in the pipeline today. Changing that is a separate decision.
@@ -355,7 +355,7 @@ const config = {
                 NODE_ENV: 'production',
                 TIMEZONE: process.env.TIMEZONE || 'UTC',
                 REVIEW_WORKER_CRON: process.env.REVIEW_WORKER_CRON || '0 1 * * *',
-                REVIEW_WORKER_ENABLED: process.env.REVIEW_WORKER_ENABLED || 'false',
+                REVIEW_WORKER_ENABLED: process.env.REVIEW_WORKER_ENABLED || 'true',
                 REVIEW_INGEST_STREAMING: process.env.REVIEW_INGEST_STREAMING || 'false'
             },
             error_file: './logs/pm2-review-worker-error.log',

@@ -496,11 +496,20 @@ describe('the PM2 app is registered and matches the worker', () => {
         expect(app.max_memory_restart).toBe('512M');
     });
 
-    test('it ships DISABLED — the pipeline is still doing this work', () => {
+    test('it is ENABLED, and the pipeline no longer runs these services', () => {
+        // These two assertions belong together on purpose. The worker being on while the
+        // pipeline still had the services would mean both soliciting the same buyers; the
+        // pipeline losing them while the worker was off would mean nobody does. Either half
+        // alone is a bug, so the test fails if they ever drift apart.
         const { apps } = require(path.join(__dirname, '../../../../ecosystem.config.js'));
         const app = apps.find((a) => a.name === 'review-worker');
+        const scheduleConfigSrc = require('fs').readFileSync(
+            path.join(__dirname, '../../../Services/schedule/ScheduleConfig.js'), 'utf8'
+        );
 
-        expect(app.env.REVIEW_WORKER_ENABLED).toBe('false');
+        expect(app.env.REVIEW_WORKER_ENABLED).toBe('true');
+        expect(scheduleConfigSrc).not.toMatch(/'reviewOrderIngestion':/);
+        expect(scheduleConfigSrc).not.toMatch(/'reviewRequestSender':/);
     });
 
     test('ingestion mode is passed through, so it matches the pipeline', () => {
