@@ -2151,7 +2151,7 @@ const PPCDashboard = () => {
   return (
     <div className='min-h-screen w-full overflow-x-hidden' style={{ background: COLORS.bgBase }}>
       {/* Bidbison Ads Automation Banner */}
-      <div className='w-full bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 px-4 py-5 shadow-lg'>
+      <div className='w-full px-4 py-5 shadow-lg' style={{ background: '#3B82F6' }}>
         <div className='max-w-6xl mx-auto flex items-center justify-between gap-4 flex-wrap'>
           <div className='flex-1 min-w-0'>
             <div className='flex items-center gap-3 mb-2'>
