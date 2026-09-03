@@ -15,6 +15,7 @@
  */
 
 const mongoose = require('mongoose');
+const { sumRecoverableAmounts } = require('../../Services/Calculations/RecoverableAmountUtils.js');
 const { insertManyChunked } = require('../../utils/chunkedInsert');
 
 const CHUNK_SIZE = 200; // Max items per chunk (tuned for safety margin under 16MB)

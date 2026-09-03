@@ -256,6 +256,23 @@ describe('CreateTasksService.getUserTasks (read-time rendering)', () => {
         TaskItem.countByStatus.mockResolvedValue({ total: 0, pending: 0, completed: 0, in_progress: 0 });
     });
 
+    /**
+     * getUserTasks interns the rendered text: `error`, `solution` and
+     * `productName` travel once in `texts` with a per-task index, because on a
+     * 25,455-task account they were ~62% of a 24.6 MB response. This resolves
+     * them the same way the client's thunk does, so these tests assert what the
+     * seller actually ends up seeing.
+     */
+    const readTasks = async (userId = 'user1') => {
+        const { tasks, texts } = await CreateTaskService.getUserTasks(userId);
+        return tasks.map((t) => ({
+            ...t,
+            error: t.errorIdx != null ? texts[t.errorIdx] : undefined,
+            solution: t.solutionIdx != null ? texts[t.solutionIdx] : undefined,
+            productName: t.productNameIdx != null ? texts[t.productNameIdx] : undefined,
+        }));
+    };
+
     it('renders error/solution on the fly for a renderData-only task', async () => {
         TaskItem.findByUserId.mockResolvedValue([
             {
@@ -267,7 +284,7 @@ describe('CreateTasksService.getUserTasks (read-time rendering)', () => {
             },
         ]);
 
-        const { tasks } = await CreateTaskService.getUserTasks('user1');
+        const tasks = await readTasks();
         expect(tasks[0].error).toContain('Negative Profit');
         expect(tasks[0].error).toContain('-$20.00');
         expect(tasks[0].solution).toBeTruthy();
@@ -278,7 +295,7 @@ describe('CreateTasksService.getUserTasks (read-time rendering)', () => {
             { taskId: 't2', errorCategory: 'profitability', errorType: 'negative_profit', error: 'Legacy error text', solution: 'Legacy solution text' },
         ]);
 
-        const { tasks } = await CreateTaskService.getUserTasks('user1');
+        const tasks = await readTasks();
         expect(tasks[0].error).toBe('Legacy error text');
         expect(tasks[0].solution).toBe('Legacy solution text');
     });
@@ -288,7 +305,7 @@ describe('CreateTasksService.getUserTasks (read-time rendering)', () => {
             { taskId: 't3', errorCategory: 'inventory', errorType: 'long_term_storage_fees' },
         ]);
 
-        const { tasks } = await CreateTaskService.getUserTasks('user1');
+        const tasks = await readTasks();
         expect(tasks[0].error).toBeTruthy();
         expect(tasks[0].solution).toBeTruthy();
     });
@@ -304,7 +321,7 @@ describe('CreateTasksService.getUserTasks (read-time rendering)', () => {
             },
         ]);
 
-        const { tasks } = await CreateTaskService.getUserTasks('user1');
+        const tasks = await readTasks();
         expect(tasks[0].error).toContain('"blue widget"');
     });
 
@@ -319,8 +336,69 @@ describe('CreateTasksService.getUserTasks (read-time rendering)', () => {
             },
         ]);
 
-        const { tasks } = await CreateTaskService.getUserTasks('user1');
+        const tasks = await readTasks();
         expect(tasks[0].error).toContain('0% Buy Box ownership');
+    });
+
+    describe('text interning (payload size)', () => {
+        const sameSolution = (n) => Array.from({ length: n }, (_, i) => ({
+            taskId: `t${i}`,
+            errorCategory: 'profitability',
+            errorType: 'negative_profit',
+            renderData: { netProfit: -20, sales: 80, profitMargin: -25 },
+            amount: 20,
+        }));
+
+        it('sends one copy of a repeated solution, not one per task', async () => {
+            TaskItem.findByUserId.mockResolvedValue(sameSolution(50));
+
+            const { tasks, texts } = await CreateTaskService.getUserTasks('user1');
+
+            // 50 identical tasks share one error string and one solution string.
+            expect(tasks).toHaveLength(50);
+            expect(texts).toHaveLength(2);
+            expect(new Set(tasks.map(t => t.solutionIdx)).size).toBe(1);
+        });
+
+        it('does not put the bulky text back on the task objects', async () => {
+            TaskItem.findByUserId.mockResolvedValue(sameSolution(3));
+
+            const { tasks } = await CreateTaskService.getUserTasks('user1');
+
+            // If these came back the payload win would be undone.
+            expect(tasks[0].error).toBeUndefined();
+            expect(tasks[0].solution).toBeUndefined();
+            expect(tasks[0].productName).toBeUndefined();
+        });
+
+        it('drops fields the client never displays', async () => {
+            TaskItem.findByUserId.mockResolvedValue([
+                { ...sameSolution(1)[0], _id: 'abc', userId: 'user1', __v: 0, createdAt: new Date(), updatedAt: new Date() },
+            ]);
+
+            const { tasks } = await CreateTaskService.getUserTasks('user1');
+
+            ['_id', 'userId', '__v', 'createdAt', 'updatedAt'].forEach((k) => {
+                expect(tasks[0][k]).toBeUndefined();
+            });
+            // ...while keeping what it does need.
+            expect(tasks[0].taskId).toBe('t0');
+            expect(tasks[0].amount).toBe(20);
+        });
+
+        it('keeps distinct strings distinct, since a solution can embed per-task detail', async () => {
+            TaskItem.findByUserId.mockResolvedValue([
+                { taskId: 'a', errorCategory: 'sponsoredAds', errorType: 'search_term_zero_sales', renderData: { searchTerm: 'alpha', spend: 5, clicks: 3 } },
+                { taskId: 'b', errorCategory: 'sponsoredAds', errorType: 'search_term_zero_sales', renderData: { searchTerm: 'beta', spend: 6, clicks: 4 } },
+            ]);
+
+            const { tasks, texts } = await CreateTaskService.getUserTasks('user1');
+
+            // Same errorType, different search term => must NOT collapse together.
+            expect(tasks[0].solutionIdx).not.toBe(tasks[1].solutionIdx);
+            expect(texts[tasks[0].solutionIdx]).toContain('alpha');
+            expect(texts[tasks[1].solutionIdx]).toContain('beta');
+        });
     });
 });
 
@@ -382,5 +460,73 @@ describe('CreateTasksService.createTasksFromErrors — tasksRebuilt signal', () 
         const result = await CreateTaskService.createTasksFromErrors(errorPayload);
 
         expect(result.tasksRebuilt).toBe(true);
+    });
+});
+
+/**
+ * Brand Story tasks.
+ *
+ * `brandStoryErrorData` was already counted on the Issues pages
+ * (RecommendationService, IssuesPaginationService) but generated no task, so a
+ * seller saw the issue in one place and had nothing to act on in the other.
+ * Upstream only sets the key for products whose status is 'Error', so presence
+ * alone is the correct condition — the same contract its A+ sibling relies on.
+ */
+describe('generateConversionTasks (Brand Story)', () => {
+    it('creates a missing_brand_story task from the upstream error data', () => {
+        const tasks = CreateTaskService.generateConversionTasks([
+            {
+                asin: 'B010',
+                Title: 'Widget',
+                brandStoryErrorData: { status: 'Error', Message: 'No Brand Story found.', HowToSolve: 'Add one.' },
+            },
+        ]);
+        const task = tasks.find(t => t.errorType === 'missing_brand_story');
+        expect(task).toBeDefined();
+        expect(task.errorCategory).toBe('conversion');
+        expect(task.asin).toBe('B010');
+        expect(task.error).toContain('No Brand Story found.');
+        expect(task.solution).toBe('Add one.');
+    });
+
+    it('falls back to its own copy when upstream supplies no message or fix', () => {
+        const [task] = CreateTaskService.generateConversionTasks([
+            { asin: 'B011', Title: 'Widget', brandStoryErrorData: { status: 'Error' } },
+        ]);
+        expect(task.error).toContain('Brand Story');
+        expect(task.solution).toMatch(/Brand Story module/);
+    });
+
+    // The guard that keeps healthy products out of the task list.
+    it('creates nothing when the product has no brand story error', () => {
+        const tasks = CreateTaskService.generateConversionTasks([
+            { asin: 'B012', Title: 'Widget' },
+        ]);
+        expect(tasks.some(t => t.errorType === 'missing_brand_story')).toBe(false);
+    });
+
+    it('sits alongside the A+ task rather than replacing it', () => {
+        const tasks = CreateTaskService.generateConversionTasks([
+            {
+                asin: 'B013',
+                Title: 'Widget',
+                aplusErrorData: { status: 'Error', Message: 'No A+.' },
+                brandStoryErrorData: { status: 'Error', Message: 'No Brand Story.' },
+            },
+        ]);
+        expect(tasks.map(t => t.errorType).sort()).toEqual(['missing_aplus_content', 'missing_brand_story']);
+    });
+
+    // Without these it would fall to the unmapped default (15 min) and be
+    // advertised as a quick win, and would render with no group title.
+    it('has effort/impact metadata and group copy, so it buckets and narrates', () => {
+        const { getTaskPriorityMeta } = require('../../../Services/Calculations/TaskPrioritizationService.js');
+        const { GROUP_COPY } = require('../../../Services/Calculations/TaskOpportunityGroupsService.js');
+        const meta = getTaskPriorityMeta({ errorCategory: 'conversion', errorType: 'missing_brand_story' });
+        expect(meta.effortMinutes).toBe(90);
+        expect(meta.isQuickWin).toBe(false);
+        expect(GROUP_COPY['conversion:missing_brand_story']).toEqual(
+            expect.objectContaining({ title: expect.any(String), action: expect.any(String) })
+        );
     });
 });

@@ -49,7 +49,7 @@ const { syncFinanceData } = require('../Services/Sp_API/FinanceService.js');
 const { getAccessToken } = require('../Services/Sp_API/SpApiMarketplace.js');
 const spCredentials = require('../Services/Sp_API/config.js');
 
-const PACIFIC_OFFSET_HOURS = 7;
+const { marketplaceYesterdayStr } = require('../utils/marketplaceTimezone.js');
 
 function getArg(name) {
   const m = process.argv.slice(2).find((a) => a.startsWith(`--${name}=`));
@@ -66,10 +66,6 @@ const WINDOW_DAYS = parseInt(getArg('days') || '30', 10);
 const DRY_RUN = hasFlag('dry-run');
 const INCLUDE_ZERO = hasFlag('include-zero');
 
-function pacificYesterdayStr() {
-  const ms = Date.now() - PACIFIC_OFFSET_HOURS * 3600000 - 86400000;
-  return new Date(ms).toISOString().substring(0, 10);
-}
 function subDays(dateStr, n) {
   const d = new Date(`${dateStr}T00:00:00.000Z`);
   d.setUTCDate(d.getUTCDate() - n);
@@ -144,7 +140,9 @@ function collectAccounts(seller) {
 
 async function healAccount(userObjectId, userIdStr, acct, clientId, clientSecret) {
   const { country, region, refreshToken } = acct;
-  const endDate = pacificYesterdayStr();
+  // Marketplace-local, matching the day keys FinanceService writes — a Pacific reference here
+  // would scan a window offset from the days that actually exist for non-Pacific accounts.
+  const endDate = marketplaceYesterdayStr(country);
   const startDate = subDays(endDate, WINDOW_DAYS - 1);
 
   const broken = await findBrokenDays(userObjectId, country, region, startDate, endDate);

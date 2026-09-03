@@ -24,9 +24,9 @@ const {
     parseTsv,
     parseSalesReportRows,
     foldSalesReportRows,
-    toPacificDateStr,
     SALES_REPORT_COLUMNS,
 } = require('../../../Services/Sp_API/FinanceService.js');
+const { toMarketplaceDateStr } = require('../../../utils/marketplaceTimezone.js');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // REFERENCE IMPLEMENTATIONS — verbatim pre-change code. Do not "improve".
@@ -46,13 +46,21 @@ function parseTsvLegacy(rawData) {
     return rows;
 }
 
-/** The pending-count loop exactly as it was inline in processSalesReportRows. */
-function pendingCountLegacy(reportRows) {
+/**
+ * The pending-count loop exactly as it was inline in processSalesReportRows, held here as an
+ * independent reference — deliberately not calling foldSalesReportRows or parseSalesReportRows.
+ *
+ * Uses `toMarketplaceDateStr`, not the old Pacific-only bucketing: the memory refactor this file
+ * proves (fold vs. two/three separate passes) is orthogonal to the marketplace-local day-bucketing
+ * fix, and this reference must hold the SHARED baseline behaviour constant, not resurrect the
+ * pre-fix one.
+ */
+function pendingCountLegacy(reportRows, country) {
     const pendingCountByDate = new Map();
     for (const row of reportRows) {
         const status = (row['order-status'] || '').toLowerCase();
         if (!status.startsWith('pending')) continue;
-        const d = toPacificDateStr(row['purchase-date']);
+        const d = toMarketplaceDateStr(row['purchase-date'], country);
         if (!d) continue;
         pendingCountByDate.set(d, (pendingCountByDate.get(d) || 0) + 1);
     }
@@ -210,10 +218,21 @@ describe('parseTsv — identical rows to the pre-change implementation', () => {
         expect(parseTsv(tsv)).toEqual(projectToKeptColumns(parseTsvLegacy(tsv)));
     });
 
-    test('only the ten consumed columns are retained — nothing downstream reads the rest', () => {
+    test('only the twelve consumed columns are retained — nothing downstream reads the rest', () => {
+        // item-tax and item-promotion-discount were added after this allow-list first shipped
+        // (utils/marketplaceTax.js's sales reconciliation reads them). Their absence here once
+        // silently zeroed tax on every row, indistinguishable from Amazon not sending it — pin the
+        // full set explicitly, not just against the live constant, so a future column removal here
+        // fails a test instead of degrading production silently again.
         const [row] = parseTsv(buildTsv([tsvRow()]));
 
+        expect(SALES_REPORT_COLUMNS.has('item-tax')).toBe(true);
+        expect(SALES_REPORT_COLUMNS.has('item-promotion-discount')).toBe(true);
         expect(new Set(Object.keys(row))).toEqual(SALES_REPORT_COLUMNS);
+        expect(new Set(Object.keys(row))).toEqual(new Set([
+            'order-status', 'sales-channel', 'item-price', 'item-tax', 'item-promotion-discount',
+            'purchase-date', 'amazon-order-id', 'sku', 'asin', 'currency', 'product-name', 'quantity',
+        ]));
         expect(row).not.toHaveProperty('ship-postal-code');
         expect(row).not.toHaveProperty('buyer-company-name');
     });
@@ -280,7 +299,7 @@ describe('foldSalesReportRows — identical output to the two separate passes', 
         const folded = foldSalesReportRows(rows, COUNTRY);
 
         expect(canonicaliseCountMap(folded.pendingCountByDate))
-            .toEqual(canonicaliseCountMap(pendingCountLegacy(rows)));
+            .toEqual(canonicaliseCountMap(pendingCountLegacy(rows, COUNTRY)));
     });
 
     // The subtle one. Fusing two loops invites "hoist the filters" — which would silently
@@ -293,12 +312,12 @@ describe('foldSalesReportRows — identical output to the two separate passes', 
 
         // A-5, A-6 (other marketplace) and A-7 (PendingAvailability) share one Pacific day and
         // all three count — including A-6, which the sales pass excludes.
-        const day = toPacificDateStr('2026-08-14T18:30:00+00:00');
+        const day = toMarketplaceDateStr('2026-08-14T18:30:00+00:00', COUNTRY);
         expect(counts[day]).toBe(3);
         // ...while that same order is absent from sales.
         expect(folded.salesOrderMap.has('A-6')).toBe(false);
         // And a genuinely different Pacific day is its own bucket.
-        expect(counts[toPacificDateStr('2026-08-16T18:30:00+00:00')]).toBe(1);
+        expect(counts[toMarketplaceDateStr('2026-08-16T18:30:00+00:00', COUNTRY)]).toBe(1);
     });
 
     test('rowCount equals the input length, including rows both passes skip', () => {
@@ -340,7 +359,7 @@ describe('foldSalesReportRows — identical output to the two separate passes', 
 
         const legacyRows = parseTsvLegacy(tsv);
         const legacyMap = parseSalesReportRows(legacyRows, COUNTRY);
-        const legacyPending = pendingCountLegacy(legacyRows);
+        const legacyPending = pendingCountLegacy(legacyRows, COUNTRY);
 
         expect(canonicaliseOrderMap(newFold.salesOrderMap)).toEqual(canonicaliseOrderMap(legacyMap));
         expect(canonicaliseCountMap(newFold.pendingCountByDate)).toEqual(canonicaliseCountMap(legacyPending));

@@ -66,49 +66,62 @@ const calculateNegativeKeywordsMetrics = (negativeKeywords, adsKeywordsPerforman
         return [];
     }
 
-    // Create a map for faster lookup of keyword performance data (keeping this for potential future use)
-    const keywordPerformanceMap = new Map();
-    
-    adsKeywordsPerformanceData.forEach(item => {
-        // Create a unique key using keyword text and campaign name for better matching
-        const key = `${item.keyword?.toLowerCase()}-${item.campaignName?.toLowerCase()}`;
-        keywordPerformanceMap.set(key, {
-            keyword: item.keyword,
-            campaignName: item.campaignName,
-            campaignId: item.campaignId,
-            attributedSales30d: parseFloat(String(item.attributedSales30d)) || 0,
-            cost: parseFloat(String(item.cost)) || 0,
-            clicks: item.clicks || 0,
-            impressions: item.impressions || 0,
-            matchType: item.matchType
-        });
-    });
+    // WHY THIS IS INDEXED RATHER THAN SCANNED
+    //
+    // This used to be three `adsKeywordsPerformanceData.find(...)` calls INSIDE
+    // `negativeKeywords.map(...)`, each re-lowercasing both sides on every comparison. That is
+    // O(negative keywords × performance rows), and it is not a theoretical cost: one production
+    // account carries 379,401 negative keywords (38 chunks) against 117,108 performance rows —
+    // ~44 TRILLION comparisons per pass, each allocating one or two throwaway strings. At any
+    // plausible rate that is not "slow", it is "never finishes".
+    //
+    // It ran inside `sched_calc_review`, synchronously, so it blocked the worker's event loop
+    // outright: no lock extension, no heartbeat, BullMQ stall-reclaiming the job every 20 minutes
+    // and failing it after three attempts, for over a week. Other accounts finished the same phase
+    // in 17 seconds. The billions of short-lived lowercase strings are also the likeliest source
+    // of the worker RSS sitting near 1.7GB while the live heap stayed small.
+    //
+    // The lookups below return exactly what `Array#find` returned — first match wins, and
+    // `undefined` is a legal Map key so rows with no keyword or campaignId behave as the `?.`
+    // comparisons did.
+
+    // Lower-case each performance keyword ONCE instead of once per pair.
+    const perfRows = adsKeywordsPerformanceData.map((perf) => ({ perf, kw: perf.keyword?.toLowerCase() }));
+
+    const byKeywordAndCampaign = new Map(); // kw -> Map(campaignId -> perf)
+    const byKeyword = new Map();            // kw -> perf
+    for (const { perf, kw } of perfRows) {
+        if (!byKeyword.has(kw)) byKeyword.set(kw, perf);
+        let byCampaign = byKeywordAndCampaign.get(kw);
+        if (!byCampaign) { byCampaign = new Map(); byKeywordAndCampaign.set(kw, byCampaign); }
+        if (!byCampaign.has(perf.campaignId)) byCampaign.set(perf.campaignId, perf);
+    }
+
+    // The fuzzy fallback depends ONLY on the keyword text, never on the campaign, so its answer is
+    // identical for every negative keyword sharing one. That account's 379,401 rows carry just
+    // 2,450 distinct texts, so caching turns the one genuinely O(n×m) pass into ~287 million
+    // comparisons instead of trillions — and it only runs for texts that matched nothing exactly.
+    // Measured end to end on that account: the phase went from never completing to 115 seconds.
+    const fuzzyCache = new Map();
+    const findFuzzyMatch = (kwLower) => {
+        if (!fuzzyCache.has(kwLower)) {
+            fuzzyCache.set(kwLower, perfRows.find(({ kw }) =>
+                kw?.includes(kwLower || '') || kwLower?.includes(kw || '')
+            )?.perf);
+        }
+        return fuzzyCache.get(kwLower);
+    };
 
     // Join negative keywords with their performance data
     const result = negativeKeywords.map((keyword) => {
         const { keywordText, campaignId } = keyword;
-        
-        // First, try to find exact match by keyword and campaign ID
-        let performanceData = adsKeywordsPerformanceData.find(perf => 
-            perf.keyword?.toLowerCase() === keywordText?.toLowerCase() && 
-            perf.campaignId === campaignId
-        );
-        
-        // If not found, try to find by keyword text only (fallback)
-        if (!performanceData) {
-            performanceData = adsKeywordsPerformanceData.find(perf => 
-                perf.keyword?.toLowerCase() === keywordText?.toLowerCase()
-            );
-        }
-        
-        // If still not found, try partial matching (more fuzzy)
-        if (!performanceData) {
-            performanceData = adsKeywordsPerformanceData.find(perf => 
-                perf.keyword?.toLowerCase().includes(keywordText?.toLowerCase() || '') ||
-                keywordText?.toLowerCase().includes(perf.keyword?.toLowerCase() || '')
-            );
-        }
-        
+        const kwLower = keywordText?.toLowerCase();
+
+        // Exact (keyword + campaign), then keyword only, then fuzzy — the original precedence.
+        const performanceData = byKeywordAndCampaign.get(kwLower)?.get(campaignId)
+            || byKeyword.get(kwLower)
+            || findFuzzyMatch(kwLower);
+
         if (!performanceData) {
             return {
                 keyword: keywordText || '',

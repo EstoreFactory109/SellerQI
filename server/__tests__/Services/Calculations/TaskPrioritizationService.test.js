@@ -29,6 +29,7 @@ const ALL_TASK_TYPES = [
     ['ranking', 'duplicate_words'],
 
     ['conversion', 'missing_aplus_content'],
+    ['conversion', 'missing_brand_story'],
     ['conversion', 'insufficient_images'],
     ['conversion', 'missing_video'],
     ['conversion', 'low_star_rating'],

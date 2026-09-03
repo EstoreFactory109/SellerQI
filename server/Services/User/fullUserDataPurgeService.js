@@ -33,6 +33,8 @@ const TaskItem = require('../../models/MCP/TaskItemModel.js');
 const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
 const IssuesData = require('../../models/system/IssuesDataModel.js');
 const IssueSummary = require('../../models/system/IssueSummaryModel.js');
+const TopOpportunities = require('../../models/system/TopOpportunitiesModel.js');
+const TopProducts = require('../../models/system/TopProductsModel.js');
 const Cogs = require('../../models/finance/CogsModel.js');
 const ProductWiseStorageFees = require('../../models/finance/ProductWiseStorageFees.js');
 const FBAFees = require('../../models/finance/FBAFeesModel.js');
@@ -196,6 +198,11 @@ const collectionsWithUserId = [
     { model: IssuesDataChunks, key: 'userId' },
     { model: IssuesData, key: 'userId' },
     { model: IssueSummary, key: 'userId' },
+    // The two stored AI views. Derived from TaskItem, but they hold their own
+    // per-account rows (narrated opportunity and product text), so they leak the
+    // same way anything else keyed by userId would if left off this list.
+    { model: TopOpportunities, key: 'userId' },
+    { model: TopProducts, key: 'userId' },
     { model: Cogs, key: 'userId' },
     { model: ProductWiseStorageFees, key: 'userId' },
     { model: FBAFees, key: 'userId' },

@@ -20,6 +20,28 @@ const SUNDAY_FUNCTIONS = {
         requiresAdsToken: true,
         apiDataKey: 'keywordRecommendations'
     },
+    // ── 'ltsfData' (Long-Term Storage Fee Charges) is DELIBERATELY NOT REGISTERED ──
+    // The sync exists at Services/Sp_API/GET_FBA_FULFILLMENT_LONGTERM_STORAGE_FEE_CHARGES_DATA.js
+    // and its report TYPE is verified, but its TSV column mapping has never been
+    // checked against a live response — no public source documents this report's
+    // headers. Running it unverified would silently store $0 long-term storage
+    // fees and burn a weekly report-quota slot for nothing.
+    //
+    // To enable:
+    //   1. node server/scripts/discoverLtsfReportHeaders.js --user-id=<id> --country=<CC> --region=<RR>
+    //   2. Correct the findField() candidate lists in the sync file to the real headers
+    //   3. Restore the entry below, and re-add 'ltsfData' to the batch-routing list
+    //      and _SLICE_CATEGORY_MAP.inventory in ScheduledIntegration.js
+    //
+    // 'ltsfData': {
+    //     service: require('../Sp_API/GET_FBA_FULFILLMENT_LONGTERM_STORAGE_FEE_CHARGES_DATA.js'),
+    //     functionName: null, // Default export, use service directly
+    //     description: 'Long-Term Storage Fee Charges',
+    //     requiresAccessToken: true,
+    //     apiDataKey: 'ltsfData',
+    //     isDefaultExport: true
+    // },
+
     // Listing items for ACTIVE SKUs (one GET per SKU).
     // Weekly rather than daily: this endpoint supplies `has_b2b_pricing` and the
     // backend generic_keyword, both of which are listing configuration that rarely
@@ -76,15 +98,6 @@ const MON_WED_FRI_FUNCTIONS = {
         description: 'MCP SalesOnly Data',
         requiresRefreshToken: true,
         apiDataKey: 'mcpEconomicsData'
-    },
-    // Review Order Ingestion - fetches recent shipped orders + items from SP-API
-    'reviewOrderIngestion': {
-        service: require('../review/scheduledReviewIngestionProcessor.js'),
-        functionName: 'scheduledReviewIngestion',
-        description: 'Review Order Ingestion',
-        apiDataKey: 'reviewOrderIngestion',
-        isCalculationService: true,
-        runOrder: 97
     },
 };
 
@@ -292,15 +305,6 @@ const DAILY_FUNCTIONS = {
         description: 'MCP BuyBox Data',
         requiresRefreshToken: true,
         apiDataKey: 'mcpBuyBoxData'
-    },
-    // Review Request Sender - checks eligibility + sends solicitations for unsent orders (5-30 day window)
-    'reviewRequestSender': {
-        service: require('../review/scheduledReviewRequestProcessor.js'),
-        functionName: 'scheduledReviewRequestSender',
-        description: 'Review Request Sender',
-        apiDataKey: 'reviewRequestSender',
-        isCalculationService: true,
-        runOrder: 98
     },
     // Unified Finance Sync - Sales Report + Finance API → DailySkuFinance,
     // DailyOverheadFinance, AsinRelationship, FinanceSyncLog. Runs daily so
