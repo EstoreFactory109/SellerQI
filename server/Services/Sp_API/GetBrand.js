@@ -85,15 +85,23 @@ const getBrand = async ( dataToReceive, UserId, baseuri) => {
       return { success: true, data: null, message: "Brand value is empty" };
     }
 
-    const sellerCentral = await SellerCentralModel.findOne({User: UserId});
+    // Targeted atomic write.
+    //
+    // This was findOne() + doc.save(), which mongoose validates over the WHOLE
+    // document. sellerAccount[].products[] requires asin/sku/itemName/price/status on
+    // every single entry, so one incomplete product - and Amazon returns those
+    // routinely - threw a ValidationError that the catch below swallowed as a generic
+    // failure, leaving brand permanently unset. It also loaded and rewrote every
+    // product in the catalogue just to set one string.
+    const updateResult = await SellerCentralModel.updateOne(
+      { User: UserId },
+      { $set: { brand: brandValue } }
+    );
 
-    if(!sellerCentral){
+    if (updateResult.matchedCount === 0) {
       logger.error("GetBrand: Seller Central not found for user", { userId: UserId });
       return { success: false, error: "Seller Central not found" };
     }
-   
-    sellerCentral.brand = brandValue;
-    await sellerCentral.save();
 
     logger.info("GetBrand completed successfully", { 
       userId: UserId, 
