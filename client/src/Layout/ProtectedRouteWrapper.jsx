@@ -13,6 +13,7 @@ import Loader from '../Components/Loader/Loader.jsx';
 import { isSpApiConnected, isAdsAccountConnected } from '../utils/spApiConnectionCheck.js';
 import { hasPremiumAccess } from '../utils/subscriptionCheck.js';
 import { devLog, devWarn } from '../utils/devLogger.js';
+import { prefetchEsfPageAccess } from '../hooks/useEsfPageAccess.js';
 
 // Map country codes to currency symbols
 const amazonMarketplaceCurrencies = {
@@ -79,6 +80,10 @@ const ProtectedRouteWrapper = ({ children }) => {
 
           dispatch(updateImageLink(userData.profilePic));
           dispatch(loginSuccess(userData));
+
+          // Warm the ESF page-permission cache while this loader is already up,
+          // so EsfPageAccessGuard does not add a spinner of its own.
+          prefetchEsfPageAccess();
           
           // Check SP-API and Ads account connections, then subscription
           const hasPremium = hasPremiumAccess(userData);

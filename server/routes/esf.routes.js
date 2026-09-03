@@ -16,6 +16,9 @@ const {
     removeEsfUser,
     resetEsfUserPassword,
     updateEsfUserRole,
+    getEsfPageCatalogue,
+    updateEsfUserPermissions,
+    getEsfSessionPermissions,
 } = require('../controllers/esf/esf.js');
 const esfAuth = require('../middlewares/Auth/esfAuth.js');
 const { authRateLimiter, registerRateLimiter } = require('../middlewares/rateLimiting.js');
@@ -29,6 +32,11 @@ const {
 
 // Public
 router.post('/login', authRateLimiter, validateEsfLogin, esfLogin);
+
+// Read from inside a client's account to decide what the sidebar shows.
+// Answers 200 with isEsfSession:false when no staff session is present, so the
+// seller app can call it unconditionally.
+router.get('/session-permissions', getEsfSessionPermissions);
 
 // Everything below requires a valid ESFToken cookie belonging to an esfUser.
 router.post('/logout', esfAuth, esfLogout);
@@ -46,7 +54,9 @@ router.delete('/clients/:clientId', esfAuth, removeEsfClient);
 // Team members
 router.get('/users', esfAuth, getEsfUsers);
 router.post('/users', esfAuth, registerRateLimiter, validateEsfUser, createEsfUser);
+router.get('/pages', esfAuth, getEsfPageCatalogue);
 router.patch('/users/:userId/role', esfAuth, validateEsfRole, updateEsfUserRole);
+router.put('/users/:userId/permissions', esfAuth, updateEsfUserPermissions);
 router.post('/users/:userId/reset-password', esfAuth, resetEsfUserPassword);
 router.delete('/users/:userId', esfAuth, removeEsfUser);
 

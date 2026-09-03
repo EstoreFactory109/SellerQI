@@ -116,6 +116,13 @@ const userSchema = new mongoose.Schema(
         enum: ["owner", "admin", "member"],
         default: "member",
       },
+      // Pages this staff member may NOT open inside an ESF client's account.
+      // A blocklist, so empty === full access and new pages default to visible.
+      // Only meaningful when accessType === 'esfUser'. See Services/User/esfPages.js.
+      esfDeniedPages: {
+        type: [String],
+        default: [],
+      },
       // Stamped on ESF portal login; shown in the portal's team member list.
       lastLoginAt: {
         type: Date,

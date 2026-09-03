@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { LayoutDashboard, BadgeAlert, ClipboardPlus, Clock8, ChartLine, LaptopMinimalCheck, ChevronRight, Activity, Calendar, DollarSign, Lock, Package, BarChart3, LogOut, Bot, User, Link2, LifeBuoy, CreditCard } from 'lucide-react';
+import useEsfPageAccess from '../../hooks/useEsfPageAccess.js';
 import { useDispatch, useSelector } from 'react-redux';
 import { logout } from '../../redux/slices/authSlice.js'
 import { clearCogsData } from '../../redux/slices/cogsSlice.js'
@@ -28,7 +29,21 @@ const SHOW_RECENT_ORDERS_NAV = true;
 
 // Category-grouped nav item: flat background tint when active (matches the redesign
 // mock's sidebar), muted/primary text swap, icon tinted to accent when active.
+// The ESF page-permission key is the route segment, so a nav link carries its
+// own key and no second mapping can drift out of sync with the server's list.
+const pageKeyFromPath = (to) => {
+    if (typeof to !== 'string') return null;
+    const clean = to.split('?')[0];
+    const segments = clean.split('/').filter(Boolean);
+    return segments.length ? segments[segments.length - 1] : null;
+};
+
 const NavItem = ({ to, icon: Icon, label, isActive: isActiveOverride, locked, onClick, tag, count, countTone = 'fix', expanded }) => {
+    // Hidden when the ESF staff member driving this session is blocked from the
+    // page. Non-ESF sessions and the owner always pass.
+    const { isPageAllowed } = useEsfPageAccess();
+    if (to && !isPageAllowed(pageKeyFromPath(to))) return null;
+
     const countStyle = countTone === 'watch'
         ? { background: 'rgba(245,166,35,.14)', color: COLORS.watch }
         : { background: 'rgba(239,68,68,.14)', color: COLORS.fix };
@@ -117,6 +132,9 @@ const LeftNavSection = () => {
 
     // Get user subscription plan from Redux store
     const user = useSelector((state) => state.Auth?.user);
+    const { isPageAllowed } = useEsfPageAccess();
+    // ESF-managed clients get extra internal pages that no other account sees.
+    const isEsfClient = user?.isEsfClient === true;
     const userPlan = user?.packageType || 'LITE';
     const isAgencyUser = userPlan === 'AGENCY';
 
@@ -305,7 +323,8 @@ const LeftNavSection = () => {
                                 <NavItem to="/seller-central-checker/pre-analysis" icon={BarChart3} label="Listing Analyzer" />
 
                                 {/* Sponsored Ads with Dropdown */}
-                                {(!isLiteUser || isPremiumLocked) && (
+                                {(!isLiteUser || isPremiumLocked) &&
+                                 (isPageAllowed('ppc-dashboard') || isPageAllowed('keyword-analysis')) && (
                                     <div className="space-y-0.5">
                                         <NavItem
                                             icon={LaptopMinimalCheck}
@@ -324,18 +343,22 @@ const LeftNavSection = () => {
                                                     transition={{ duration: 0.3, ease: "easeInOut", opacity: { duration: 0.2 } }}
                                                     className="ml-4 space-y-0.5 overflow-hidden"
                                                 >
+                                                    {isPageAllowed('ppc-dashboard') && (
                                                     <motion.div initial={{ y: -10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }} transition={{ delay: 0.15, duration: 0.2 }}>
                                                         <NavLink to="/seller-central-checker/ppc-dashboard" className={dropdownItemClass} style={({ isActive }) => dropdownItemStyle(isActive)}>
                                                             <div className="w-1.5 h-1.5 bg-current rounded-full opacity-60"></div>
                                                             Campaign Audit
                                                         </NavLink>
                                                     </motion.div>
+                                                    )}
+                                                    {isPageAllowed('keyword-analysis') && (
                                                     <motion.div initial={{ y: -10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }} transition={{ delay: 0.175, duration: 0.2 }}>
                                                         <NavLink to="/seller-central-checker/keyword-analysis" className={dropdownItemClass} style={({ isActive }) => dropdownItemStyle(isActive)}>
                                                             <div className="w-1.5 h-1.5 bg-current rounded-full opacity-60"></div>
                                                             Keyword Opportunities
                                                         </NavLink>
                                                     </motion.div>
+                                                    )}
                                                 </motion.div>
                                             )}
                                         </AnimatePresence>

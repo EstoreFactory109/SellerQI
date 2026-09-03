@@ -71,6 +71,7 @@ import EsfClientConnectToAmazon from './Pages/ESF/Client/EsfClientConnectToAmazo
 import EsfClientConnectAccounts from './Pages/ESF/Client/EsfClientConnectAccounts.jsx';
 import EsfClientProfileSelection from './Pages/ESF/Client/EsfClientProfileSelection.jsx';
 import EsfClientDashboard from './Pages/ESF/ClientDashboard.jsx';
+import EsfPageAccessGuard from './Layout/EsfPageAccessGuard.jsx';
 import AdminSubscription from './Pages/Admin/Subscription.jsx';
 import AdminEmailLogs from './Pages/Admin/EmailLogs.jsx';
 import AdminPaymentLogs from './Pages/Admin/PaymentLogs.jsx';
@@ -228,6 +229,9 @@ const App = () => {
             </PackageRouteWrapper>
           }>
 
+            {/* Blocks pages an ESF staff member is not allowed to open for this
+                client. No-ops for everyone else. */}
+            <Route element={<EsfPageAccessGuard />}>
             <Route path='dashboard' element={<DashBoard />} />
             {/* ESF-only page. Server returns 403 for non-ESF accounts and the
                 page redirects away, so it stays invisible to everyone else. */}
@@ -252,6 +256,7 @@ const App = () => {
             <Route path='consultation' element={<CalendlyWidget />} />
             {/* Product detail (ASIN) - must be last so fixed paths are matched first */}
             <Route path=':asin' element={<ProductDetails />} />
+            </Route>
           </Route>
         </Route>
         <Route path='/demo' element={<DemoAutoLogin />} />

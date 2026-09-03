@@ -15,7 +15,7 @@ const {
     issueClientSession,
     ESF_CLIENT_QUERY,
 } = require('../../Services/User/ManagedClientService.js');
-const { createAccessToken } = require('../../utils/Tokens.js');
+const { createAccessToken, verifyAccessToken } = require('../../utils/Tokens.js');
 const { hashPassword, verifyPassword } = require('../../utils/HashPassword.js');
 const { getHttpsCookieOptions } = require('../../utils/cookieConfig.js');
 const { ApiError } = require('../../utils/ApiError.js');
@@ -29,6 +29,10 @@ const {
     resolveEsfRole,
     canManageTeam,
 } = require('../../Services/User/esfRoles.js');
+const {
+    ESF_CLIENT_PAGES,
+    sanitizeDeniedPages,
+} = require('../../Services/User/esfPages.js');
 
 /** Shape a staff user for the client, never leaking the password hash. */
 const toStaffResponse = (user, extra = {}) => ({
@@ -40,6 +44,8 @@ const toStaffResponse = (user, extra = {}) => ({
     accessType: user.accessType,
     esfRole: resolveEsfRole(user),
     isOwner: isEsfOwner(user),
+    // Owner is never restricted, so their blocklist is always reported empty.
+    esfDeniedPages: isEsfOwner(user) ? [] : sanitizeDeniedPages(user.esfDeniedPages),
     lastLoginAt: user.lastLoginAt || null,
     createdAt: user.createdAt,
     ...extra,
@@ -359,7 +365,7 @@ const setEsfClientPassword = asyncHandler(async (req, res) => {
 /** GET /app/esf/users — the staff who can access this portal. */
 const getEsfUsers = asyncHandler(async (req, res) => {
     const users = await UserModel.find({ accessType: 'esfUser' })
-        .select('firstName lastName email phone esfRole createdAt lastLoginAt')
+        .select('firstName lastName email phone esfRole esfDeniedPages createdAt lastLoginAt')
         .sort({ createdAt: -1 })
         .lean();
 
@@ -374,6 +380,7 @@ const getEsfUsers = asyncHandler(async (req, res) => {
         ...user,
         esfRole: resolveEsfRole(user),
         isOwner: isEsfOwner(user),
+        esfDeniedPages: isEsfOwner(user) ? [] : sanitizeDeniedPages(user.esfDeniedPages),
         clientsAdded: countById.get(String(user._id)) || 0,
     }));
 
@@ -502,6 +509,75 @@ const updateEsfUserRole = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, toStaffResponse(user), 'Role updated successfully'));
 });
 
+/**
+ * GET /app/esf/pages
+ * The catalogue of restrictable pages, so the permissions UI never hard-codes
+ * a second copy of the list.
+ */
+const getEsfPageCatalogue = asyncHandler(async (req, res) => {
+    return res.status(200).json(new ApiResponse(200, ESF_CLIENT_PAGES, 'Page catalogue fetched'));
+});
+
+/**
+ * PUT /app/esf/users/:userId/permissions
+ * Body: { deniedPages: string[] }  — pages this member may NOT open for ESF clients.
+ */
+const updateEsfUserPermissions = asyncHandler(async (req, res) => {
+    if (!requireTeamManager(req, res)) return;
+
+    const { userId } = req.params;
+    const { deniedPages } = req.body;
+
+    if (!Array.isArray(deniedPages)) {
+        return res.status(400).json(new ApiResponse(400, '', 'deniedPages must be an array of page keys'));
+    }
+
+    // Refuses when the target is the portal owner.
+    const user = await loadModifiableStaff(userId, res);
+    if (!user) return;
+
+    user.esfDeniedPages = sanitizeDeniedPages(deniedPages);
+    await user.save();
+
+    logger.info(
+        `ESF user ${req.esfUserId} set page access for ${user.email} ` +
+            `(denied: ${user.esfDeniedPages.join(', ') || 'none'})`
+    );
+
+    return res.status(200).json(new ApiResponse(200, toStaffResponse(user), 'Page access updated successfully'));
+});
+
+/**
+ * GET /app/esf/session-permissions
+ *
+ * Called from inside a client's account (not the portal) so the sidebar knows
+ * what to hide. Deliberately tolerant: it answers 200 with isEsfSession:false
+ * when no staff session is present, so the seller app can call it
+ * unconditionally without treating a normal user as an error.
+ */
+const getEsfSessionPermissions = asyncHandler(async (req, res) => {
+    const esfToken = req.cookies?.ESFToken;
+    const empty = { isEsfSession: false, esfRole: null, isOwner: false, deniedPages: [] };
+
+    if (!esfToken) return res.status(200).json(new ApiResponse(200, empty, 'No ESF session'));
+
+    const decoded = await verifyAccessToken(esfToken);
+    if (!decoded || !decoded.isvalid) return res.status(200).json(new ApiResponse(200, empty, 'No ESF session'));
+
+    const staff = await UserModel.findById(decoded.tokenData).select('accessType esfRole esfDeniedPages email');
+    if (!staff || staff.accessType !== 'esfUser') {
+        return res.status(200).json(new ApiResponse(200, empty, 'No ESF session'));
+    }
+
+    const owner = isEsfOwner(staff);
+    return res.status(200).json(new ApiResponse(200, {
+        isEsfSession: true,
+        esfRole: resolveEsfRole(staff),
+        isOwner: owner,
+        deniedPages: owner ? [] : sanitizeDeniedPages(staff.esfDeniedPages),
+    }, 'ESF session permissions fetched'));
+});
+
 module.exports = {
     esfLogin,
     esfLogout,
@@ -518,4 +594,7 @@ module.exports = {
     removeEsfUser,
     resetEsfUserPassword,
     updateEsfUserRole,
+    getEsfPageCatalogue,
+    updateEsfUserPermissions,
+    getEsfSessionPermissions,
 };
