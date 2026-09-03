@@ -7,20 +7,23 @@ const SIDEBAR_BG = '#0E121A';
 const PANEL_BG = '#10141C';
 
 /**
- * The 5 steps of the real onboarding flow.
+ * The 4 steps of the real onboarding flow.
  *
  * These map onto the real pages/routes as follows:
  *  1. Create your account      → /sign-up
  *  2. Connect Seller Central   → /connect-to-amazon (marketplace) + /connect-accounts (SP-API OAuth)
  *  3. Connect Amazon Ads       → /connect-accounts (Ads OAuth) + /profile-selection (Ads profile)
- *  4. Choose a plan            → /connect-accounts (Stripe checkout / trial)
- *  5. See your findings        → /analyse-account
+ *  4. See your findings        → /analyse-account
+ *
+ * The old step 4, "Choose a plan" (Stripe checkout / trial), was removed when
+ * payments were disabled - see the commented entry in buildSteps below to restore.
  */
 const buildSteps = (trialDays) => [
   { label: 'Create your account', short: 'Account', sub: 'Name, email, password', time: '30s' },
   { label: 'Connect Seller Central', short: 'Seller Central', sub: 'One click on Amazon, read-only', time: '60s', tag: 'Required', tagTone: 'req' },
   { label: 'Connect Amazon Ads', short: 'Amazon Ads', sub: 'Where the wasted spend hides', time: '40s', tag: 'Recommended', tagTone: 'rec' },
-  { label: 'Choose a plan', short: 'Plan', sub: `Free for ${trialDays} days, cancel anytime`, time: '60s' },
+  // ===== PAYMENT DISABLED - 'Choose a plan' step removed from onboarding =====
+  // { label: 'Choose a plan', short: 'Plan', sub: `Free for ${trialDays} days, cancel anytime`, time: '60s' },
   { label: 'See your findings', short: 'Findings', sub: 'Scan runs while you finish', time: 'auto' },
 ];
 
@@ -107,10 +110,11 @@ const TIME_LEFT_LABELS = [
 /**
  * Shared onboarding wizard shell: fixed left step-tracker sidebar + centred content area.
  *
- * @param {number} currentStep  1-based index of the active step (1-5).
+ * @param {number} currentStep  1-based index of the active step (1-4).
  * @param {number[]} doneSteps  step numbers already completed (shown with a checkmark).
  * @param {number[]} skippedSteps step numbers the user chose to skip (shown with a dash).
- * @param {number} trialDays    real trial length, used in the "Choose a plan" sub-label.
+ * @param {number} trialDays    unused while payments are disabled; kept for the
+ *                              commented-out "Choose a plan" sub-label.
  * @param {string} maxWidth     content column max width (mock uses 620px for most steps).
  */
 const OnboardingShell = ({

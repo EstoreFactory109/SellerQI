@@ -184,7 +184,7 @@ const AnalysingAccount = () => {
   }
 
   return (
-    <OnboardingShell currentStep={5} doneSteps={[1, 2, 3, 4]} maxWidth="700px">
+    <OnboardingShell currentStep={4} doneSteps={[1, 2, 3]} maxWidth="700px">
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
         {/* Status pill */}
         <div
