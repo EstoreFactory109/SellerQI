@@ -110,6 +110,12 @@ const getUserById =async(id)=>{
         // Drives the phone-collection modal on the frontend
         needsPhoneUpdate: user.needsPhoneUpdate || false,
         phoneUpdateReason: user.phoneUpdateReason || null,
+        // Brand lives at the root of the Seller document (not on sellerAccount[]).
+        // It has to ship with the profile: the nav/sidebar read state.Auth.user.brand,
+        // and without this the only source is the secondary /api/pagewise/navbar call,
+        // which is 300s-cached and skipped entirely when a user is redirected to
+        // onboarding - so the UI fell back to the 'Your Brand' placeholder.
+        brand: sellerCentral?.brand || null,
         // Include sellerCentral data for SP-API and Ads connection check
         sellerCentral: sellerCentral ? {
             sellerAccount: (sellerCentral.sellerAccount || []).map(account => ({

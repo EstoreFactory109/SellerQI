@@ -81,19 +81,23 @@ const SignUp = () => {
 
     const { noPlanSelected, isPROTrial, packageType, isIndianUser } = pending;
     try {
-      if (noPlanSelected) {
-        // No plan selected - go straight to onboarding (skip pricing)
-        navigate('/connect-to-amazon');
-      } else if (isPROTrial) {
-        // PRO-Trial: Stripe checkout with 7-day trial (INR pricing for India)
-        const stripeService = (await import('../../services/stripeService.js')).default;
-        await stripeService.createCheckoutSession('PRO', null, 7, isIndianUser ? 'inr' : null);
-      } else {
-        // PRO/AGENCY (paid): Go to Stripe payment (INR pricing for Indian PRO users)
-        localStorage.setItem('intendedPackage', plans);
-        const stripeService = (await import('../../services/stripeService.js')).default;
-        await stripeService.createCheckoutSession(packageType, null, null, isIndianUser && packageType === 'PRO' ? 'inr' : null);
-      }
+      // ===== PAYMENT DISABLED - free PRO for all users =====
+      // Everyone signs up as PRO, so skip Stripe and go straight to onboarding.
+      // To re-enable payments: remove the navigate() below and uncomment the block.
+      navigate('/connect-to-amazon');
+      // if (noPlanSelected) {
+        // // No plan selected - go straight to onboarding (skip pricing)
+        // navigate('/connect-to-amazon');
+      // } else if (isPROTrial) {
+        // // PRO-Trial: Stripe checkout with 7-day trial (INR pricing for India)
+        // const stripeService = (await import('../../services/stripeService.js')).default;
+        // await stripeService.createCheckoutSession('PRO', null, 7, isIndianUser ? 'inr' : null);
+      // } else {
+        // // PRO/AGENCY (paid): Go to Stripe payment (INR pricing for Indian PRO users)
+        // localStorage.setItem('intendedPackage', plans);
+        // const stripeService = (await import('../../services/stripeService.js')).default;
+        // await stripeService.createCheckoutSession(packageType, null, null, isIndianUser && packageType === 'PRO' ? 'inr' : null);
+      // }
     } catch (error) {
       console.error('Post Google sign-up navigation failed:', error);
       setErrorMessage('Sign-up completed, but we could not continue. Please refresh and try again.');
@@ -252,25 +256,20 @@ const SignUp = () => {
       const isAGENCY = plans === "AGENCY";
       const noPlanSelected = plans === null || plans === undefined;
       
-      // Determine packageType based on plan
-      // If no plan selected, default to LITE (user will choose on pricing page)
-      // For PRO-Trial, start as LITE until Stripe trial is activated
-      let packageType = "LITE";
+      // All users get PRO by default - no payment required
+      let packageType = "PRO";
       if (isAGENCY) {
         packageType = "AGENCY";
-      } else if (isPRO) {
-        packageType = "PRO";
       }
-      // PRO-Trial starts as LITE, will be upgraded when Stripe checkout completes
-      
+
       const formDataWithTerms = {
         ...formData,
         phone: `${countryCode} ${formData.phone}`, // Include country code
         allTermsAndConditionsAgreed: termsAccepted,
-        packageType: packageType, // LITE for no plan or PRO-Trial, PRO for PRO, AGENCY for AGENCY
-        isInTrialPeriod: false, // Trial is now managed by Stripe, not manually
-        subscriptionStatus: noPlanSelected || isPROTrial ? "active" : "inactive", // LITE is active, PRO/AGENCY needs payment first
-        trialEndsDate: null, // Trial dates managed by Stripe
+        packageType: packageType, // PRO for all users, AGENCY for AGENCY
+        isInTrialPeriod: false,
+        subscriptionStatus: "active", // All users have active access by default
+        trialEndsDate: null,
         intendedPackage: plans, // Store the intended package for post-verification flow (null if no plan)
       };
       const response = await axios.post(`${import.meta.env.VITE_BASE_URI}/app/register`, formDataWithTerms, { withCredentials: true });
@@ -308,19 +307,15 @@ const SignUp = () => {
       const noPlanSelected = plans === null || plans === undefined;
       const isIndianUser = detectedCountry === 'IN';
       
-      // Determine packageType based on plan
-      // If no plan selected, default to LITE (user will choose on pricing page)
-      // For PRO-Trial, start as LITE until trial is activated (Stripe for non-India, manual for India)
-      let packageType = "LITE";
+      // All users get PRO by default - no payment required
+      let packageType = "PRO";
       if (isAGENCY) {
         packageType = "AGENCY";
-      } else if (plans === "PRO") {
-        packageType = "PRO";
       }
-      
-      // For Indian users with PRO-Trial, we'll activate manual trial after signup
+
+      // All users have immediate access - no trial period needed
       const isInTrialPeriod = false;
-      const subscriptionStatus = noPlanSelected || isPROTrial ? "active" : "inactive";
+      const subscriptionStatus = "active";
       const trialEndsDate = null;
       
       const response = await googleAuthService.handleGoogleSignUp(packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate);
