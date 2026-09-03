@@ -22,6 +22,18 @@ const amazonMarketplaceCurrencies = {
   IN: "₹", JP: "¥", SG: "S$", AU: "A$"
 };
 
+// ---------------------------------------------------------------------------
+// TEMPORARY — remove when the ESF client Amazon-connect flow is finished.
+//
+// true  = skip the "connect your Amazon account first" gate, so /seller-central-checker/*
+//         is reachable with no SP-API / Ads connection. Applies to EVERY user,
+//         not just ESF clients.
+// false = restore the normal onboarding flow.
+//
+// Flip this one line back to false to revert.
+// ---------------------------------------------------------------------------
+const BYPASS_ONBOARDING_GATE = true;
+
 const ProtectedRouteWrapper = ({ children }) => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
@@ -81,7 +93,10 @@ const ProtectedRouteWrapper = ({ children }) => {
           // Flow: Super admins (or super admin sessions) always have access. For regular users, check both SP-API and Ads account
           // Only apply redirects if user is trying to access dashboard routes
           if (isDashboardRoute) {
-            if (isSuperAdmin || isSuperAdminSession) {
+            if (BYPASS_ONBOARDING_GATE) {
+              // TEMPORARY (see flag at top of file) - onboarding gate disabled.
+              devLog('ProtectedRouteWrapper: onboarding gate BYPASSED (temporary flag)');
+            } else if (isSuperAdmin || isSuperAdminSession) {
               // Super admin or super admin session → always allow dashboard access
               devLog('ProtectedRouteWrapper: Super admin/session - allowing dashboard access');
               // Continue with normal flow

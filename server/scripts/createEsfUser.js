@@ -13,8 +13,11 @@
  * Re-running with an existing email promotes that user to esfUser and resets
  * their password, so it doubles as a recovery path if everyone is locked out.
  */
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
+
 const mongoose = require('mongoose');
+const dbConsts = require('../config/config.js');
 const UserModel = require('../models/user-auth/userModel.js');
 const { hashPassword } = require('../utils/HashPassword.js');
 
@@ -32,14 +35,15 @@ if (password.length < 8) {
 }
 
 const run = async () => {
-    const uri = process.env.MONGODB_URI || process.env.MONGO_URI || process.env.DB_URI;
-    if (!uri) {
-        console.error('No Mongo connection string found (MONGODB_URI / MONGO_URI / DB_URI).');
+    // Same composition the app uses (server/config/dbConn.js) so this always
+    // targets the same database the API reads from.
+    if (!dbConsts.dbUri || !dbConsts.dbName) {
+        console.error('DB_URI and DB_NAME must both be set in .env');
         process.exit(1);
     }
 
-    await mongoose.connect(uri);
-    console.log('Connected to MongoDB');
+    await mongoose.connect(`${dbConsts.dbUri}/${dbConsts.dbName}`);
+    console.log(`Connected to MongoDB (db: ${dbConsts.dbName})`);
 
     const normalizedEmail = email.trim().toLowerCase();
     const existing = await UserModel.findOne({ email: normalizedEmail });

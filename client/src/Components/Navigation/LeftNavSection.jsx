@@ -190,6 +190,8 @@ const LeftNavSection = () => {
     // Determine if premium features should be locked (show but not accessible without upgrade)
     // Now ALL LITE users see the pages with lock icon - they can click and see blurred content
     const isPremiumLocked = userPlan === 'LITE';
+    // ESF-managed clients get extra internal pages that no other account sees.
+    const isEsfClient = user?.isEsfClient === true;
 
     // No longer hiding pages - all LITE users can see and access pages (with blur overlay)
     const isLiteUser = false;
@@ -283,6 +285,9 @@ const LeftNavSection = () => {
                             <div className="space-y-0.5">
                                 {(!isLiteUser || isPremiumLocked) && (
                                     <NavItem to="/seller-central-checker/dashboard" icon={LayoutDashboard} label="Dashboard" locked={isPremiumLocked} />
+                                )}
+                                {isEsfClient && (
+                                    <NavItem to="/seller-central-checker/client-dashboard" icon={Activity} label="Client Dashboard" />
                                 )}
                                 {(!isLiteUser || isPremiumLocked) && (
                                     <NavItem to="/seller-central-checker/qmate" icon={Bot} label="Amazon Copilot" locked={isPremiumLocked} tag="AI" />

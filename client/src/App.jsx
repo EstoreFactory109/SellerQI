@@ -70,6 +70,7 @@ import EsfSettings from './Pages/ESF/EsfSettings.jsx';
 import EsfClientConnectToAmazon from './Pages/ESF/Client/EsfClientConnectToAmazon.jsx';
 import EsfClientConnectAccounts from './Pages/ESF/Client/EsfClientConnectAccounts.jsx';
 import EsfClientProfileSelection from './Pages/ESF/Client/EsfClientProfileSelection.jsx';
+import EsfClientDashboard from './Pages/ESF/ClientDashboard.jsx';
 import AdminSubscription from './Pages/Admin/Subscription.jsx';
 import AdminEmailLogs from './Pages/Admin/EmailLogs.jsx';
 import AdminPaymentLogs from './Pages/Admin/PaymentLogs.jsx';
@@ -228,6 +229,9 @@ const App = () => {
           }>
 
             <Route path='dashboard' element={<DashBoard />} />
+            {/* ESF-only page. Server returns 403 for non-ESF accounts and the
+                page redirects away, so it stays invisible to everyone else. */}
+            <Route path='client-dashboard' element={<EsfClientDashboard />} />
             <Route path='review-request' element={<RecentOrders />} />
             <Route path='qmate' element={<QMate />} />
             <Route path='profitibility-dashboard' element={<ProfitibilityDashboard />} />

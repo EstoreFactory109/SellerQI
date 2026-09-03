@@ -441,9 +441,11 @@ const EsfClients = () => {
                           setClients((prev) => [client, ...prev]);
                           setShowAddClientModal(false);
                           setCurrentPage(1);
-                          // Same handoff as the agency portal: a new client goes
-                          // straight into the Amazon connect flow.
-                          navigate(`/esf/client/${client._id}/connect-to-amazon`);
+                          // TEMPORARY: onboarding is bypassed, so go straight to
+                          // the dashboard. Restore the line below to send a new
+                          // client into the Amazon connect flow instead.
+                          // navigate(`/esf/client/${client._id}/connect-to-amazon`);
+                          window.location.href = '/seller-central-checker/dashboard';
                         }}
                       />
                     </div>

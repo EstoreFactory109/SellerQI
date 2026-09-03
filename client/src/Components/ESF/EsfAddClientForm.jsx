@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
+import { useDispatch } from 'react-redux';
 import { motion } from 'framer-motion';
+import { loginSuccess } from '../../redux/slices/authSlice.js';
 import { Mail, User, UserPlus, Loader2 } from 'lucide-react';
 import PhoneNumberInput, { validatePhoneParts, buildPhoneValue } from '../Shared/PhoneNumberInput.jsx';
 import axiosInstance from '../../config/axios.config.js';
@@ -19,6 +21,7 @@ const EsfAddClientForm = ({ onCancel, onCreated, showCancelButton = false }) => 
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const dispatch = useDispatch();
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -63,6 +66,20 @@ const EsfAddClientForm = ({ onCancel, onCreated, showCancelButton = false }) => 
 
       if (res.data?.statusCode === 201 && res.data?.data?.clientId) {
         const created = res.data.data;
+
+        // The server already swapped the IBEX* cookies to this client, but the
+        // app only trusts Redux/localStorage. Without this the connect flow
+        // reads isAuthenticated === false and bounces to the seller login page.
+        localStorage.setItem('isAuth', 'true');
+        dispatch(loginSuccess({
+          _id: created.clientId,
+          firstName: created.firstName,
+          lastName: created.lastName,
+          email: created.email,
+          packageType: 'PRO',
+          isVerified: true,
+        }));
+
         onCreated?.({
           _id: created.clientId,
           firstName: created.firstName,
