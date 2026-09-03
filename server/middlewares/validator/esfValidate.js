@@ -1,4 +1,5 @@
 const { body, validationResult } = require("express-validator");
+const { ASSIGNABLE_ESF_ROLES } = require("../../Services/User/esfRoles.js");
 
 const EMAIL_NORMALIZE_OPTS = {
     gmail_remove_dots: false,
@@ -83,6 +84,18 @@ const validateEsfUser = [
     body("password")
         .notEmpty().withMessage("Password is required")
         .isLength({ min: 8 }).withMessage("Password must be at least 8 characters long"),
+    // 'owner' is intentionally not accepted - there is exactly one, and it is seeded.
+    body("role")
+        .optional()
+        .isIn(ASSIGNABLE_ESF_ROLES).withMessage(`Role must be one of: ${ASSIGNABLE_ESF_ROLES.join(", ")}`),
+    handleValidation,
+];
+
+/** PATCH /app/esf/users/:userId/role */
+const validateEsfRole = [
+    body("role")
+        .notEmpty().withMessage("Role is required")
+        .isIn(ASSIGNABLE_ESF_ROLES).withMessage(`Role must be one of: ${ASSIGNABLE_ESF_ROLES.join(", ")}`),
     handleValidation,
 ];
 
@@ -98,5 +111,6 @@ module.exports = {
     validateEsfLogin,
     validateEsfClient,
     validateEsfUser,
+    validateEsfRole,
     validateEsfProfile,
 };

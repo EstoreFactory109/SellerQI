@@ -108,6 +108,14 @@ const userSchema = new mongoose.Schema(
         required: false,
         default: null,
       },
+      // Role inside the ESF staff portal. Only meaningful when
+      // accessType === 'esfUser'. See Services/User/esfRoles.js for the rules.
+      // 'owner' is never assignable through the API - it is seeded.
+      esfRole: {
+        type: String,
+        enum: ["owner", "admin", "member"],
+        default: "member",
+      },
       // Stamped on ESF portal login; shown in the portal's team member list.
       lastLoginAt: {
         type: Date,

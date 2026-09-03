@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Mail, User, Lock, UserPlus, Loader2, Eye, EyeOff } from 'lucide-react';
+import { Mail, User, Lock, UserPlus, Loader2, Eye, EyeOff, Shield } from 'lucide-react';
 import PhoneNumberInput, { validatePhoneParts, buildPhoneValue } from '../Shared/PhoneNumberInput.jsx';
 import axiosInstance from '../../config/axios.config.js';
 
@@ -15,6 +15,7 @@ const EsfAddUserForm = ({ onCancel, onCreated, showCancelButton = false }) => {
     phone: '',
     email: '',
     password: '',
+    role: 'member',
   });
   const [countryCode, setCountryCode] = useState('+1');
   const [showPassword, setShowPassword] = useState(false);
@@ -189,6 +190,25 @@ const EsfAddUserForm = ({ onCancel, onCreated, showCancelButton = false }) => {
             </button>
           </div>
           {errors.password && <p className="text-red-400 text-xs mt-1">{errors.password}</p>}
+        </div>
+
+        <div>
+          <label className={labelClass}>Role</label>
+          <div className="relative">
+            <Shield className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 w-4 h-4 pointer-events-none" />
+            <select
+              name="role"
+              value={formData.role}
+              onChange={handleChange}
+              className={`${inputClass(false)} appearance-none cursor-pointer`}
+            >
+              <option value="member">Member — manage clients only</option>
+              <option value="admin">Admin — manage clients and team members</option>
+            </select>
+          </div>
+          <p className="mt-1 text-xs text-gray-500">
+            The owner role cannot be assigned; the portal has exactly one owner.
+          </p>
         </div>
 
         <div className="flex flex-col-reverse sm:flex-row gap-2 sm:gap-3 pt-2">

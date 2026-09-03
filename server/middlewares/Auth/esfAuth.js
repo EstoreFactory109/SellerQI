@@ -4,6 +4,7 @@ const { ApiResponse } = require('../../utils/ApiResponse.js');
 const { verifyAccessToken } = require('../../utils/Tokens.js');
 const UserModel = require('../../models/user-auth/userModel.js');
 const logger = require('../../utils/Logger.js');
+const { resolveEsfRole } = require('../../Services/User/esfRoles.js');
 
 /**
  * ESF staff portal auth.
@@ -31,7 +32,7 @@ const esfAuth = asyncHandler(async (req, res, next) => {
 
     // Re-check the role on every request so revoking access takes effect
     // immediately rather than when the 15-day token happens to expire.
-    const user = await UserModel.findById(decoded.tokenData).select('accessType firstName lastName email phone');
+    const user = await UserModel.findById(decoded.tokenData).select('accessType esfRole firstName lastName email phone');
     if (!user) {
         logger.error(new ApiError(401, 'ESF user not found'));
         return res.status(401).json(new ApiResponse(401, '', 'ESF user not found'));
@@ -45,6 +46,8 @@ const esfAuth = asyncHandler(async (req, res, next) => {
 
     req.esfUserId = user._id;
     req.esfUser = user;
+    // Resolved (not raw) so the owner-email fallback applies everywhere.
+    req.esfRole = resolveEsfRole(user);
     next();
 });
 

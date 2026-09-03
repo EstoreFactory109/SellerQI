@@ -22,6 +22,13 @@ const { ApiError } = require('../../utils/ApiError.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
 const asyncHandler = require('../../utils/AsyncHandler.js');
 const logger = require('../../utils/Logger.js');
+const {
+    ESF_ROLES,
+    ASSIGNABLE_ESF_ROLES,
+    isEsfOwner,
+    resolveEsfRole,
+    canManageTeam,
+} = require('../../Services/User/esfRoles.js');
 
 /** Shape a staff user for the client, never leaking the password hash. */
 const toStaffResponse = (user, extra = {}) => ({
@@ -31,10 +38,51 @@ const toStaffResponse = (user, extra = {}) => ({
     email: user.email,
     phone: user.phone,
     accessType: user.accessType,
+    esfRole: resolveEsfRole(user),
+    isOwner: isEsfOwner(user),
     lastLoginAt: user.lastLoginAt || null,
     createdAt: user.createdAt,
     ...extra,
 });
+
+/**
+ * Guard for team-management endpoints.
+ * Returns true when the request may proceed; otherwise it has already responded.
+ */
+const requireTeamManager = (req, res) => {
+    if (canManageTeam(req.esfUser)) return true;
+    logger.warn(`ESF user ${req.esfUserId} (${req.esfRole}) attempted a team-management action`);
+    res.status(403).json(new ApiResponse(403, '', 'Only the owner and admins can manage team members'));
+    return false;
+};
+
+/**
+ * Load a staff member for modification, refusing when the target is the owner.
+ * The owner is immutable: no role change, no removal, no password reset by
+ * anyone. They manage their own password through Settings.
+ *
+ * Returns the user, or null when it has already responded.
+ */
+const loadModifiableStaff = async (userId, res) => {
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+        res.status(400).json(new ApiResponse(400, '', 'Invalid user id'));
+        return null;
+    }
+
+    const user = await UserModel.findOne({ _id: userId, accessType: 'esfUser' });
+    if (!user) {
+        res.status(404).json(new ApiResponse(404, '', 'Team member not found'));
+        return null;
+    }
+
+    if (isEsfOwner(user)) {
+        logger.warn(`Blocked an attempt to modify the ESF portal owner (${user.email})`);
+        res.status(403).json(new ApiResponse(403, '', 'The portal owner account cannot be modified'));
+        return null;
+    }
+
+    return user;
+};
 
 /* ------------------------------------------------------------------ auth -- */
 
@@ -311,7 +359,7 @@ const setEsfClientPassword = asyncHandler(async (req, res) => {
 /** GET /app/esf/users — the staff who can access this portal. */
 const getEsfUsers = asyncHandler(async (req, res) => {
     const users = await UserModel.find({ accessType: 'esfUser' })
-        .select('firstName lastName email phone createdAt lastLoginAt')
+        .select('firstName lastName email phone esfRole createdAt lastLoginAt')
         .sort({ createdAt: -1 })
         .lean();
 
@@ -324,15 +372,26 @@ const getEsfUsers = asyncHandler(async (req, res) => {
 
     const withCounts = users.map((user) => ({
         ...user,
+        esfRole: resolveEsfRole(user),
+        isOwner: isEsfOwner(user),
         clientsAdded: countById.get(String(user._id)) || 0,
     }));
+
+    // Owner first, then admins, then members - the list reads as a hierarchy.
+    const rank = { [ESF_ROLES.OWNER]: 0, [ESF_ROLES.ADMIN]: 1, [ESF_ROLES.MEMBER]: 2 };
+    withCounts.sort((a, b) => rank[a.esfRole] - rank[b.esfRole]);
 
     return res.status(200).json(new ApiResponse(200, withCounts, 'ESF users fetched successfully'));
 });
 
 /** POST /app/esf/users — add another staff member. */
 const createEsfUser = asyncHandler(async (req, res) => {
-    const { firstname, lastname, phone, email, password } = req.body;
+    if (!requireTeamManager(req, res)) return;
+
+    const { firstname, lastname, phone, email, password, role } = req.body;
+
+    // 'owner' can never be handed out - there is exactly one, and it is seeded.
+    const esfRole = ASSIGNABLE_ESF_ROLES.includes(role) ? role : ESF_ROLES.MEMBER;
 
     const existing = await getUserByEmail(email);
     if (existing) {
@@ -348,6 +407,7 @@ const createEsfUser = asyncHandler(async (req, res) => {
         email: email,
         password: await hashPassword(password),
         accessType: 'esfUser',
+        esfRole,
         isVerified: true,
         allTermsAndConditionsAgreed: true,
         // Staff accounts are internal tooling, not billable seller accounts.
@@ -358,7 +418,7 @@ const createEsfUser = asyncHandler(async (req, res) => {
 
     const savedUser = await newUser.save();
 
-    logger.info(`ESF user ${req.esfUserId} added staff member ${savedUser._id} (${savedUser.email})`);
+    logger.info(`ESF user ${req.esfUserId} added staff member ${savedUser._id} (${savedUser.email}) as ${esfRole}`);
 
     return res
         .status(201)
@@ -367,20 +427,17 @@ const createEsfUser = asyncHandler(async (req, res) => {
 
 /** DELETE /app/esf/users/:userId — revoke a staff member's portal access. */
 const removeEsfUser = asyncHandler(async (req, res) => {
-    const { userId } = req.params;
+    if (!requireTeamManager(req, res)) return;
 
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-        return res.status(400).json(new ApiResponse(400, '', 'Invalid user id'));
-    }
+    const { userId } = req.params;
 
     if (String(userId) === String(req.esfUserId)) {
         return res.status(400).json(new ApiResponse(400, '', 'You cannot remove your own access'));
     }
 
-    const user = await UserModel.findOne({ _id: userId, accessType: 'esfUser' });
-    if (!user) {
-        return res.status(404).json(new ApiResponse(404, '', 'Team member not found'));
-    }
+    // Refuses outright when the target is the portal owner.
+    const user = await loadModifiableStaff(userId, res);
+    if (!user) return;
 
     // Refuse to leave the portal with no way in.
     const remaining = await UserModel.countDocuments({ accessType: 'esfUser' });
@@ -396,26 +453,53 @@ const removeEsfUser = asyncHandler(async (req, res) => {
 
 /** POST /app/esf/users/:userId/reset-password */
 const resetEsfUserPassword = asyncHandler(async (req, res) => {
+    if (!requireTeamManager(req, res)) return;
+
     const { userId } = req.params;
     const { newPassword } = req.body;
 
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-        return res.status(400).json(new ApiResponse(400, '', 'Invalid user id'));
-    }
     if (!newPassword || newPassword.length < 8) {
         return res.status(400).json(new ApiResponse(400, '', 'New password must be at least 8 characters long'));
     }
 
-    const user = await UserModel.findOne({ _id: userId, accessType: 'esfUser' });
-    if (!user) {
-        return res.status(404).json(new ApiResponse(404, '', 'Team member not found'));
-    }
+    // The owner's password is theirs alone - changed via Settings, not here.
+    const user = await loadModifiableStaff(userId, res);
+    if (!user) return;
 
     user.password = await hashPassword(newPassword);
     await user.save();
 
     logger.info(`ESF user ${req.esfUserId} reset the password for staff member ${userId}`);
     return res.status(200).json(new ApiResponse(200, '', 'Password reset successfully'));
+});
+
+/**
+ * PATCH /app/esf/users/:userId/role
+ * Change a team member's role. Cannot target the owner, and cannot grant
+ * 'owner' — there is exactly one and it is seeded, not assigned.
+ */
+const updateEsfUserRole = asyncHandler(async (req, res) => {
+    if (!requireTeamManager(req, res)) return;
+
+    const { userId } = req.params;
+    const { role } = req.body;
+
+    if (!ASSIGNABLE_ESF_ROLES.includes(role)) {
+        return res.status(400).json(new ApiResponse(400, '', `Role must be one of: ${ASSIGNABLE_ESF_ROLES.join(', ')}`));
+    }
+
+    if (String(userId) === String(req.esfUserId)) {
+        return res.status(400).json(new ApiResponse(400, '', 'You cannot change your own role'));
+    }
+
+    const user = await loadModifiableStaff(userId, res);
+    if (!user) return;
+
+    user.esfRole = role;
+    await user.save();
+
+    logger.info(`ESF user ${req.esfUserId} set ${user.email} role to ${role}`);
+    return res.status(200).json(new ApiResponse(200, toStaffResponse(user), 'Role updated successfully'));
 });
 
 module.exports = {
@@ -433,4 +517,5 @@ module.exports = {
     createEsfUser,
     removeEsfUser,
     resetEsfUserPassword,
+    updateEsfUserRole,
 };

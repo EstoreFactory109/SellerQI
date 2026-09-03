@@ -15,6 +15,7 @@ const {
     createEsfUser,
     removeEsfUser,
     resetEsfUserPassword,
+    updateEsfUserRole,
 } = require('../controllers/esf/esf.js');
 const esfAuth = require('../middlewares/Auth/esfAuth.js');
 const { authRateLimiter, registerRateLimiter } = require('../middlewares/rateLimiting.js');
@@ -22,6 +23,7 @@ const {
     validateEsfLogin,
     validateEsfClient,
     validateEsfUser,
+    validateEsfRole,
     validateEsfProfile,
 } = require('../middlewares/validator/esfValidate.js');
 
@@ -44,6 +46,7 @@ router.delete('/clients/:clientId', esfAuth, removeEsfClient);
 // Team members
 router.get('/users', esfAuth, getEsfUsers);
 router.post('/users', esfAuth, registerRateLimiter, validateEsfUser, createEsfUser);
+router.patch('/users/:userId/role', esfAuth, validateEsfRole, updateEsfUserRole);
 router.post('/users/:userId/reset-password', esfAuth, resetEsfUserPassword);
 router.delete('/users/:userId', esfAuth, removeEsfUser);
 
