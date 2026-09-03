@@ -12,20 +12,24 @@ const UserModel = require('../../models/user-auth/userModel.js');
 const SellerCentralModel = require('../../models/user-auth/sellerCentralModel.js');
 const { getUserByEmail } = require('./userServices.js');
 const { createAccessToken, createRefreshToken, createLocationToken } = require('../../utils/Tokens.js');
+const { hashPassword } = require('../../utils/HashPassword.js');
 const { UserSchedulingService } = require('../BackgroundJobs/UserSchedulingService.js');
 const logger = require('../../utils/Logger.js');
 
 /**
  * Create a managed client account.
  *
- * Managed clients have no password — they are reachable only by impersonation
- * from the portal that owns them (see issueClientSession).
+ * Always reachable by impersonation from the owning portal (see
+ * issueClientSession). If `password` is supplied the client can ALSO sign in
+ * directly at /app/login — ESF clients do, agency clients do not.
  *
  * @param {object} params
  * @param {string} params.firstname
  * @param {string} params.lastname
  * @param {string} params.phone
  * @param {string} params.email
+ * @param {string} [params.password] Plain password; hashed here. Omit for
+ *   password-less clients (the agency portal's behaviour).
  * @param {boolean} [params.allTermsAndConditionsAgreed]
  * @param {object} params.ownership Ownership fields written onto the client doc.
  *   Agency: { agencyId, adminId, isAgencyClient: true }
@@ -37,6 +41,7 @@ const createManagedClient = async ({
     lastname,
     phone,
     email,
+    password,
     allTermsAndConditionsAgreed,
     ownership = {},
 }) => {
@@ -56,7 +61,9 @@ const createManagedClient = async ({
             phone: phone,
             whatsapp: phone, // managed clients are not asked for a separate WhatsApp number
             email: email,
-            // No password stored — managed clients cannot log in directly.
+            // Only set when the owning portal issues credentials. Without it the
+            // client exists but cannot sign in directly.
+            ...(password ? { password: await hashPassword(password) } : {}),
             isVerified: true,
             allTermsAndConditionsAgreed: allTermsAndConditionsAgreed || true,
             packageType: 'PRO', // managed clients get PRO access by default

@@ -190,7 +190,10 @@ export default function Login() {
           setErrorMessage(error.response?.data?.message || 'Invalid email or password. Please try again.');
         }
       } else if (error.response?.status === 403) {
-        setErrorMessage('Account is disabled. Please contact support.');
+        // The server explains WHY access was refused (agency client, ESF staff
+        // signing in at the wrong portal, no password set…). Showing the generic
+        // "disabled" text instead hid the real reason.
+        setErrorMessage(error.response?.data?.message || 'Account is disabled. Please contact support.');
       } else if (error.response?.status === 404) {
         setErrorMessage('User not found. Please check your email or sign up.');
       } else {

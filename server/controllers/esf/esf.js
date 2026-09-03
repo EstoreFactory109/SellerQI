@@ -174,13 +174,14 @@ const getEsfClients = asyncHandler(async (req, res) => {
  * the Amazon connect flow — the same handoff the agency portal performs.
  */
 const createEsfClient = asyncHandler(async (req, res) => {
-    const { firstname, lastname, phone, email, allTermsAndConditionsAgreed } = req.body;
+    const { firstname, lastname, phone, email, password, allTermsAndConditionsAgreed } = req.body;
 
     const result = await createManagedClient({
         firstname,
         lastname,
         phone,
         email,
+        password, // ESF clients sign in directly, so they are given credentials
         allTermsAndConditionsAgreed,
         ownership: {
             isEsfClient: true,
@@ -274,6 +275,35 @@ const switchToEsfClient = asyncHandler(async (req, res) => {
             email: client.email,
             packageType: client.packageType,
         }, 'Successfully switched to client'));
+});
+
+/**
+ * POST /app/esf/clients/:clientId/set-password
+ * Sets or resets a client's sign-in password. Also covers clients created
+ * before passwords existed, which otherwise have no way to sign in.
+ */
+const setEsfClientPassword = asyncHandler(async (req, res) => {
+    const { clientId } = req.params;
+    const { newPassword } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(clientId)) {
+        return res.status(400).json(new ApiResponse(400, '', 'Invalid client id'));
+    }
+    if (!newPassword || newPassword.length < 8) {
+        return res.status(400).json(new ApiResponse(400, '', 'Password must be at least 8 characters long'));
+    }
+
+    // Scoped to ESF clients so this can never reset an agency client or a seller.
+    const client = await UserModel.findOne({ _id: clientId, ...ESF_CLIENT_QUERY });
+    if (!client) {
+        return res.status(404).json(new ApiResponse(404, '', 'Client not found'));
+    }
+
+    client.password = await hashPassword(newPassword);
+    await client.save();
+
+    logger.info(`ESF user ${req.esfUserId} set the password for client ${clientId}`);
+    return res.status(200).json(new ApiResponse(200, '', 'Client password updated successfully'));
 });
 
 /* ----------------------------------------------------------------- staff -- */
@@ -398,6 +428,7 @@ module.exports = {
     createEsfClient,
     removeEsfClient,
     switchToEsfClient,
+    setEsfClientPassword,
     getEsfUsers,
     createEsfUser,
     removeEsfUser,

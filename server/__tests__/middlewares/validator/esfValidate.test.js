@@ -1,9 +1,8 @@
 /**
  * Tests for the ESF staff portal validators.
  *
- * The important distinction covered here: ESF *clients* have no password (they
- * are only reachable by impersonation), while ESF *staff* must have one, since
- * they sign in at /esf-login directly.
+ * Both ESF clients and ESF staff must have a password: clients sign in at the
+ * main login page, staff sign in at /esf-login.
  */
 
 const { validationResult } = require('express-validator');
@@ -29,14 +28,26 @@ const clientBody = {
   lastname: 'Shah',
   phone: '+19876543210',
   email: 'client@test.com',
+  password: 'Cl1entPass',
 };
 const staffBody = { ...clientBody, email: 'staff@estorefactory.net', password: 'S3cretPass' };
 
 describe('esfValidate', () => {
   describe('validateEsfClient', () => {
-    it('passes with a valid payload and no password', async () => {
+    it('passes with a valid payload', async () => {
       const { errors } = await run(validateEsfClient, clientBody);
       expect(errors.isEmpty()).toBe(true);
+    });
+
+    it('requires a password so the client can sign in', async () => {
+      const { password, ...withoutPassword } = clientBody;
+      const { errors } = await run(validateEsfClient, withoutPassword);
+      expect(errorFor(errors, 'password')).toBeDefined();
+    });
+
+    it('rejects a password shorter than 8 characters', async () => {
+      const { errors } = await run(validateEsfClient, { ...clientBody, password: 'short' });
+      expect(errorFor(errors, 'password')).toBeDefined();
     });
 
     it('keeps the country code on the phone', async () => {
@@ -81,7 +92,7 @@ describe('esfValidate', () => {
       expect(errors.isEmpty()).toBe(true);
     });
 
-    it('requires a password, unlike a client', async () => {
+    it('requires a password', async () => {
       const { password, ...withoutPassword } = staffBody;
       const { errors } = await run(validateEsfUser, withoutPassword);
       expect(errorFor(errors, 'password')).toBeDefined();

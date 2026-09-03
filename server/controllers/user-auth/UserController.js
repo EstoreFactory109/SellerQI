@@ -373,11 +373,10 @@ const loginUser = asyncHandler(async (req, res) => {
         return res.status(403).json(new ApiResponse(403, "", "Agency clients cannot login directly. Please contact your agency administrator."));
     }
 
-    // Same rule for ESF-managed clients — reachable only via the ESF portal.
-    if (checkUserIfExists.isEsfClient === true) {
-        logger.warn(`ESF client ${checkUserIfExists.email} attempted direct login`);
-        return res.status(403).json(new ApiResponse(403, "", "This account is managed by eStore Factory. Please contact your account manager."));
-    }
+    // NOTE: ESF clients are deliberately NOT blocked here. Unlike agency clients,
+    // they are given a password when they are created, so they sign in normally
+    // with their email and password as well as being reachable by staff
+    // impersonation from the ESF portal.
 
     // ESF staff sign in at the ESF portal (/app/esf/login), not here.
     if (checkUserIfExists.accessType === 'esfUser') {
@@ -408,7 +407,14 @@ const loginUser = asyncHandler(async (req, res) => {
         return res.status(401).json(new ApiResponse(401, { email: checkUserIfExists.email }, "User not verified"));
     }
 
-    // Agency clients have no password, but this check happens above
+    // Managed accounts can exist with no password stored (agency clients always,
+    // and ESF clients created before passwords were added). bcrypt.compare throws
+    // on an undefined hash, so answer explicitly instead of 500-ing.
+    if (!checkUserIfExists.password) {
+        logger.warn(`Login attempt on account with no password set: ${checkUserIfExists.email}`);
+        return res.status(403).json(new ApiResponse(403, "", "No password is set for this account. Please ask your account manager to set one."));
+    }
+
     // For regular users, verify password
     const checkPassword = await verifyPassword(password, checkUserIfExists.password);
 

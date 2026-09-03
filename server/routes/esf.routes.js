@@ -10,6 +10,7 @@ const {
     createEsfClient,
     removeEsfClient,
     switchToEsfClient,
+    setEsfClientPassword,
     getEsfUsers,
     createEsfUser,
     removeEsfUser,
@@ -37,6 +38,7 @@ router.put('/update-password', esfAuth, updateEsfPassword);
 router.get('/clients', esfAuth, getEsfClients);
 router.post('/clients', esfAuth, registerRateLimiter, validateEsfClient, createEsfClient);
 router.post('/clients/switch', esfAuth, switchToEsfClient);
+router.post('/clients/:clientId/set-password', esfAuth, setEsfClientPassword);
 router.delete('/clients/:clientId', esfAuth, removeEsfClient);
 
 // Team members

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useDispatch } from 'react-redux';
 import { motion } from 'framer-motion';
 import { loginSuccess } from '../../redux/slices/authSlice.js';
-import { Mail, User, UserPlus, Loader2 } from 'lucide-react';
+import { Mail, User, Lock, UserPlus, Loader2, Eye, EyeOff } from 'lucide-react';
 import PhoneNumberInput, { validatePhoneParts, buildPhoneValue } from '../Shared/PhoneNumberInput.jsx';
 import axiosInstance from '../../config/axios.config.js';
 
@@ -16,8 +16,10 @@ const EsfAddClientForm = ({ onCancel, onCreated, showCancelButton = false }) => 
     lastname: '',
     phone: '',
     email: '',
+    password: '',
   });
   const [countryCode, setCountryCode] = useState('+1');
+  const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -46,6 +48,9 @@ const EsfAddClientForm = ({ onCancel, onCreated, showCancelButton = false }) => 
     Object.assign(newErrors, validatePhoneParts(countryCode, formData.phone));
     if (!emailRegex.test(formData.email)) {
       newErrors.email = 'Valid email address';
+    }
+    if (!formData.password || formData.password.length < 8) {
+      newErrors.password = 'Password must be at least 8 characters';
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -103,8 +108,8 @@ const EsfAddClientForm = ({ onCancel, onCreated, showCancelButton = false }) => 
     }
   };
 
-  const inputClass = (hasError) =>
-    `w-full pl-10 pr-4 py-2.5 rounded-lg border bg-white/[0.04] text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500/70 transition ${
+  const inputClass = (hasError, rightPadding = 'pr-4') =>
+    `w-full pl-10 ${rightPadding} py-2.5 rounded-lg border bg-white/[0.04] text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500/70 transition ${
       hasError ? 'border-red-500/60' : 'border-white/10 hover:border-white/20'
     }`;
   const labelClass = 'block text-sm font-medium text-gray-400 mb-1.5';
@@ -191,6 +196,32 @@ const EsfAddClientForm = ({ onCancel, onCreated, showCancelButton = false }) => 
           {errors.email && <p className="text-red-400 text-xs mt-1">{errors.email}</p>}
         </div>
 
+        <div>
+          <label className={labelClass}>Password</label>
+          <div className="relative">
+            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 w-4 h-4" />
+            <input
+              type={showPassword ? 'text' : 'password'}
+              name="password"
+              value={formData.password}
+              onChange={handleChange}
+              onFocus={handleFocus}
+              className={inputClass(!!errors.password, 'pr-12')}
+              placeholder="At least 8 characters"
+              autoComplete="new-password"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-300 transition-colors"
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+            >
+              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
+          {errors.password && <p className="text-red-400 text-xs mt-1">{errors.password}</p>}
+        </div>
+
         <div className="flex flex-col-reverse sm:flex-row gap-2 sm:gap-3 pt-2">
           {showCancelButton && onCancel && (
             <button
@@ -219,8 +250,9 @@ const EsfAddClientForm = ({ onCancel, onCreated, showCancelButton = false }) => 
       </form>
 
       <p className="mt-4 text-xs text-gray-500 border-t border-white/10 pt-4">
-        The client will be added to the eStore Factory portal. Connect their Amazon account from the
-        &quot;Setup / Connect&quot; action, then open their dashboard with &quot;Login as client&quot;.
+        The client can sign in at the main login page with this email and password. You can also open
+        their account directly from the &quot;Login as client&quot; action, and connect their Amazon
+        account from &quot;Setup / Connect&quot;.
       </p>
     </>
   );

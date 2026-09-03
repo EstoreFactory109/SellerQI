@@ -12,6 +12,7 @@ import {
   Mail,
   UserPlus,
   Settings,
+  Key,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
@@ -20,7 +21,7 @@ import EsfAddClientForm from '../../Components/ESF/EsfAddClientForm.jsx';
 
 const ITEMS_PER_PAGE = 10;
 const DROPDOWN_MENU_WIDTH = 160;
-const DROPDOWN_MENU_HEIGHT = 120;
+const DROPDOWN_MENU_HEIGHT = 160;
 
 const EsfClients = () => {
   const navigate = useNavigate();
@@ -31,6 +32,7 @@ const EsfClients = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [loginLoadingId, setLoginLoadingId] = useState(null);
   const [notice, setNotice] = useState('');
+  const [noticeTone, setNoticeTone] = useState('error'); // 'error' | 'success'
   const [deletingId, setDeletingId] = useState(null);
   const [deleteError, setDeleteError] = useState('');
   const [deleteConfirmClient, setDeleteConfirmClient] = useState(null);
@@ -129,12 +131,40 @@ const EsfClients = () => {
         localStorage.setItem('isAuth', 'true');
         window.location.href = '/seller-central-checker/dashboard';
       } else {
+        setNoticeTone('error');
         setNotice(res.data?.message || 'Failed to open this client');
         setLoginLoadingId(null);
       }
     } catch (err) {
+      setNoticeTone('error');
       setNotice(err.response?.data?.message || 'Failed to open this client');
       setLoginLoadingId(null);
+    }
+  };
+
+  // Covers clients created before the add-client form asked for a password.
+  const handleSetPassword = async (client) => {
+    const newPassword = window.prompt(
+      `Set a sign-in password for ${client.firstName} ${client.lastName} (min 8 characters):`
+    );
+    if (!newPassword) return;
+    if (newPassword.length < 8) {
+      setNoticeTone('error');
+      setNotice('Password must be at least 8 characters long.');
+      return;
+    }
+    try {
+      const res = await axiosInstance.post(`/app/esf/clients/${client._id}/set-password`, { newPassword });
+      const ok = res.data?.statusCode === 200;
+      setNoticeTone(ok ? 'success' : 'error');
+      setNotice(
+        ok
+          ? `Password set. ${client.email} can now sign in at the main login page.`
+          : res.data?.message || 'Failed to set password'
+      );
+    } catch (err) {
+      setNoticeTone('error');
+      setNotice(err.response?.data?.message || 'Failed to set password');
     }
   };
 
@@ -192,10 +222,16 @@ const EsfClients = () => {
           </div>
         )}
 
-        {/* Action-level failures (switch to client, etc.) */}
+        {/* Action-level feedback (switch to client, set password, …) */}
         {notice && (
-          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 mb-6 shadow-lg shadow-red-950/10">
-            <p className="text-sm font-medium text-red-300">{notice}</p>
+          <div
+            className={`rounded-xl border p-4 mb-6 shadow-lg ${
+              noticeTone === 'success'
+                ? 'border-green-500/30 bg-green-500/10 shadow-green-950/10'
+                : 'border-red-500/30 bg-red-500/10 shadow-red-950/10'
+            }`}
+          >
+            <p className={`text-sm font-medium ${noticeTone === 'success' ? 'text-green-300' : 'text-red-300'}`}>{notice}</p>
             <button
               onClick={() => setNotice('')}
               className="mt-2 px-3 py-2 text-sm font-medium rounded-lg border border-white/10 text-gray-300 hover:bg-white/[0.05] hover:text-gray-200 transition-colors"
@@ -478,6 +514,18 @@ const EsfClients = () => {
                   >
                     <Settings className="w-3.5 h-3.5" />
                     Setup / Connect
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenDropdownId(null);
+                      setDropdownPosition(null);
+                      handleSetPassword(client);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-gray-300 hover:bg-[#252525] hover:text-gray-100"
+                  >
+                    <Key className="w-3.5 h-3.5" />
+                    Set password
                   </button>
                   <button
                     type="button"

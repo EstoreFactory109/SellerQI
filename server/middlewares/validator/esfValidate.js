@@ -59,12 +59,15 @@ const validateEsfLogin = [
     handleValidation,
 ];
 
-/** POST /app/esf/clients — managed clients have no password. */
+/** POST /app/esf/clients — ESF clients get a password so they can sign in. */
 const validateEsfClient = [
     nameRule("firstname", "First name"),
     nameRule("lastname", "Last name"),
     phoneRule,
     emailRule,
+    body("password")
+        .notEmpty().withMessage("Password is required")
+        .isLength({ min: 8 }).withMessage("Password must be at least 8 characters long"),
     body("allTermsAndConditionsAgreed")
         .optional()
         .isBoolean().withMessage("Terms agreement must be a boolean"),
