@@ -81,19 +81,23 @@ const SignUp = () => {
 
     const { noPlanSelected, isPROTrial, packageType, isIndianUser } = pending;
     try {
-      if (noPlanSelected) {
-        // No plan selected - go straight to onboarding (skip pricing)
-        navigate('/connect-to-amazon');
-      } else if (isPROTrial) {
-        // PRO-Trial: Stripe checkout with 7-day trial (INR pricing for India)
-        const stripeService = (await import('../../services/stripeService.js')).default;
-        await stripeService.createCheckoutSession('PRO', null, 7, isIndianUser ? 'inr' : null);
-      } else {
-        // PRO/AGENCY (paid): Go to Stripe payment (INR pricing for Indian PRO users)
-        localStorage.setItem('intendedPackage', plans);
-        const stripeService = (await import('../../services/stripeService.js')).default;
-        await stripeService.createCheckoutSession(packageType, null, null, isIndianUser && packageType === 'PRO' ? 'inr' : null);
-      }
+      // ===== PAYMENT DISABLED - free PRO for all users =====
+      // Everyone signs up as PRO, so skip Stripe and go straight to onboarding.
+      // To re-enable payments: remove the navigate() below and uncomment the block.
+      navigate('/connect-to-amazon');
+      // if (noPlanSelected) {
+        // // No plan selected - go straight to onboarding (skip pricing)
+        // navigate('/connect-to-amazon');
+      // } else if (isPROTrial) {
+        // // PRO-Trial: Stripe checkout with 7-day trial (INR pricing for India)
+        // const stripeService = (await import('../../services/stripeService.js')).default;
+        // await stripeService.createCheckoutSession('PRO', null, 7, isIndianUser ? 'inr' : null);
+      // } else {
+        // // PRO/AGENCY (paid): Go to Stripe payment (INR pricing for Indian PRO users)
+        // localStorage.setItem('intendedPackage', plans);
+        // const stripeService = (await import('../../services/stripeService.js')).default;
+        // await stripeService.createCheckoutSession(packageType, null, null, isIndianUser && packageType === 'PRO' ? 'inr' : null);
+      // }
     } catch (error) {
       console.error('Post Google sign-up navigation failed:', error);
       setErrorMessage('Sign-up completed, but we could not continue. Please refresh and try again.');

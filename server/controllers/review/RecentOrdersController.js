@@ -211,16 +211,19 @@ const toggleReviewAuthStatus = async (req, res) => {
       return res.status(404).json({ success: false, error: "User not found." });
     }
 
-    if (
-      enabled &&
-      user.packageType === "LITE" &&
-      !user.isInTrialPeriod
-    ) {
-      return res.status(403).json({
-        success: false,
-        error: "Upgrade to PRO to enable automatic review requests.",
-      });
-    }
+    // ===== PAYMENT DISABLED - free PRO for all users =====
+    // The LITE gate below used to block automatic review requests. Uncomment to restore.
+
+    // if (
+      // enabled &&
+      // user.packageType === "LITE" &&
+      // !user.isInTrialPeriod
+    // ) {
+      // return res.status(403).json({
+        // success: false,
+        // error: "Upgrade to PRO to enable automatic review requests.",
+      // });
+    // }
 
     await User.findByIdAndUpdate(userId, {
       reviewRequestAuthStatus: enabled,

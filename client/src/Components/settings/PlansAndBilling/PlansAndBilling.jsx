@@ -56,9 +56,11 @@ export default function PlansAndBilling() {
   // Show "Try 7 days for Free" card for:
   // - LITE users who have never been served a trial
   // - Cancelled users (so they can start a new trial and resubscribe)
-  const showFreeTrialCard =
-    currentPlan === 'LITE' &&
-    (user?.servedTrial !== true || subscriptionStatus === 'cancelled');
+  // ===== PAYMENT DISABLED - free PRO for all users (no trial card) =====
+  const showFreeTrialCard = false;
+  // const showFreeTrialCard =
+    // currentPlan === 'LITE' &&
+    // (user?.servedTrial !== true || subscriptionStatus === 'cancelled');
   const dispatch = useDispatch();
   const navigate = useNavigate();
 
@@ -209,16 +211,18 @@ export default function PlansAndBilling() {
     setLoading(prev => ({ ...prev, [planType]: true }));
 
     try {
-      if (planType === 'LITE') {
-        // Downgrade to LITE (would need cancellation logic)
-        alert('To downgrade to LITE, please contact support.');
-      } else {
-        // Store current plan for post-payment redirect logic
-        localStorage.setItem('previousPlan', currentPlan);
-        
-        // Upgrade to PRO or AGENCY
-        await stripeService.createCheckoutSession(planType);
-      }
+      // ===== PAYMENT DISABLED - free PRO for all users =====
+      alert('All plans are free right now - your account already has full PRO access.');
+      // if (planType === 'LITE') {
+        // // Downgrade to LITE (would need cancellation logic)
+        // alert('To downgrade to LITE, please contact support.');
+      // } else {
+        // // Store current plan for post-payment redirect logic
+        // localStorage.setItem('previousPlan', currentPlan);
+      //
+        // // Upgrade to PRO or AGENCY
+        // await stripeService.createCheckoutSession(planType);
+      // }
     } catch (error) {
       console.error('Error during upgrade:', error);
       alert('Failed to process upgrade. Please try again.');
@@ -232,8 +236,10 @@ export default function PlansAndBilling() {
   const handleStartFreeTrial = async () => {
     setFreeTrialLoading(true);
     try {
-      localStorage.setItem('previousPlan', currentPlan);
-      await stripeService.createCheckoutSession('PRO', null, 7);
+      // ===== PAYMENT DISABLED - free PRO for all users =====
+      alert('No trial needed - your account already has full PRO access.');
+      // localStorage.setItem('previousPlan', currentPlan);
+      // await stripeService.createCheckoutSession('PRO', null, 7);
     } catch (error) {
       console.error('Error starting free trial:', error);
       alert(error.response?.data?.message || 'Failed to start free trial. Please try again.');

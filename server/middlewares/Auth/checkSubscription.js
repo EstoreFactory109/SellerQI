@@ -29,14 +29,19 @@ const determineAccess = (user, subscription, requiredPlans, options = {}) => {
     const isInTrial = user.isInTrialPeriod || false;
     const trialEndsDate = user.trialEndsDate;
     
-    // LITE users always have access to LITE-level features
-    // LITE is the default free tier, no payment required
-    if (packageType === 'LITE') {
-        if (requiredPlans.includes('LITE')) {
-            return { hasAccess: true, reason: 'LITE plan access', effectivePlan: 'LITE' };
-        }
-        return { hasAccess: false, reason: 'Feature requires higher plan', effectivePlan: 'LITE' };
-    }
+    // ===== PAYMENT DISABLED - free PRO for all users =====
+    // Every authenticated user gets full access regardless of packageType.
+    // To re-enable plan gating: remove the return below and uncomment the original
+    // LITE branch; the trial/subscription logic further down is still intact.
+    return { hasAccess: true, reason: 'Payments disabled - full access', effectivePlan: packageType };
+    // // LITE users always have access to LITE-level features
+    // // LITE is the default free tier, no payment required
+    // if (packageType === 'LITE') {
+        // if (requiredPlans.includes('LITE')) {
+            // return { hasAccess: true, reason: 'LITE plan access', effectivePlan: 'LITE' };
+        // }
+        // return { hasAccess: false, reason: 'Feature requires higher plan', effectivePlan: 'LITE' };
+    // }
     
     // For paid plans (PRO/AGENCY), check subscription status
     

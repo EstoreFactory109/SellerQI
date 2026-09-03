@@ -850,9 +850,13 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
       
       devLog(`[ConnectAccounts] Detected country: ${country}, navigating to payment...`);
       
-      // Stripe: trial when eligible, else paid PRO; INR for India when detected
+      // ===== PAYMENT DISABLED - free PRO for all users =====
+      // Skip Stripe entirely and go straight to the analysis step.
       setWaitingForAnalysis(false);
-      await stripeService.createCheckoutSession('PRO', null, trialDays, isIndianUser ? 'inr' : null);
+      navigate('/analyse-account');
+      // // Stripe: trial when eligible, else paid PRO; INR for India when detected
+      // setWaitingForAnalysis(false);
+      // await stripeService.createCheckoutSession('PRO', null, trialDays, isIndianUser ? 'inr' : null);
     } catch (error) {
       console.error('[ConnectAccounts] Error navigating to payment:', error);
       setWaitingForAnalysis(false);
