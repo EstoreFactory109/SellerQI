@@ -1,8 +1,30 @@
 const axios = require('axios');
 const NegativeKeywords = require('../../models/amazon-ads/NegetiveKeywords.js');
+const NegativeKeywordChunk = require('../../models/amazon-ads/negativeKeywordChunkModel.js');
 const logger = require('../../utils/Logger.js');
 const { getYesterdayMetricDateUtc } = require('../../utils/metricDateKey.js');
 const { chunkIds, ADS_ID_FILTER_MAX, ADS_CHUNK_DELAY_MS: CHUNK_DELAY_MS, sleep } = require('../../utils/adsIdFilter.js');
+const { persistChunkedSnapshot } = require('../../utils/snapshotChunkStore.js');
+
+/**
+ * Project a collected row down to the five fields the schema actually stores.
+ *
+ * The collectors below attach `matchType`, `stateLower`, `_level` and `_v3Original` for
+ * their own filtering/merging. Mongoose strict mode already discards all four, so dropping
+ * them here changes nothing that reaches Mongo — but it removes ~25-35% of the bytes we ask
+ * the driver to serialize, which matters directly when the whole point is that this document
+ * got too big. Applied at PERSIST time, not at collection time, so the collectors (and the
+ * tests that assert on `_level`) are untouched.
+ */
+function toStoredNegativeRow(item) {
+    return {
+        campaignId: item.campaignId || '',
+        adGroupId: item.adGroupId || '',
+        keywordId: item.keywordId || '',
+        keywordText: item.keywordText || '',
+        state: item.state || 'ENABLED',
+    };
+}
 
 /**
  * Negative keyword entities → one snapshot doc per `metricDate` (upsert).
@@ -142,29 +164,21 @@ async function getNegativeKeywords(accessToken, profileId, userId, country, regi
     if (validCampaignIds.length === 0 && validAdGroupIds.length === 0) {
       logger.warn('No valid campaign or ad group IDs provided, returning empty negative keywords result', { userId, region, country });
 
+      // Routed through the same helper as the main write so this path also CLEARS any
+      // overflow chunks from a previous, larger sync. Writing an empty header while stale
+      // chunks survived would leave orphaned documents behind forever.
       const metricDate = getYesterdayMetricDateUtc();
-      const negativeKeywords = await NegativeKeywords.findOneAndUpdate(
-        {
-          userId: String(userId),
-          country: country,
-          region: region,
-          metricDate
-        },
-        {
-          $set: {
-            userId: String(userId),
-            country: country,
-            region: region,
-            metricDate,
-            negativeKeywordsData: []
-          }
-        },
-        {
-          new: true,
-          upsert: true,
-          runValidators: true
-        }
-      );
+      const negativeKeywords = await persistChunkedSnapshot({
+        Model: NegativeKeywords,
+        ChunkModel: NegativeKeywordChunk,
+        dataField: 'negativeKeywordsData',
+        userId,
+        country,
+        region,
+        metricDate,
+        rows: [],
+        label: 'negativeKeywords(empty)',
+      });
 
       return negativeKeywords;
     }
@@ -322,29 +336,23 @@ async function getNegativeKeywords(accessToken, profileId, userId, country, regi
 
     console.log(`✅ Negative keywords processing complete: ${uniqueNegativeKeywordsData.length} unique keywords found`);
 
-    // Save all merged data to database (update if exists, create if not)
+    // Save all merged data, chunking only if the set is too large for one 16MB document.
+    // Below the threshold this is byte-identical to the previous single `$set` — the whole
+    // reason the existing chunking suite keeps passing unmodified. Above it, the primary doc
+    // becomes a flagged header and the rows spill into NegativeKeywordChunk; readers
+    // reassemble transparently in loadLatestSnapshotDoc.
     const metricDate = getYesterdayMetricDateUtc();
-    const negativeKeywords = await NegativeKeywords.findOneAndUpdate(
-      {
-        userId: String(userId),
-        country: country,
-        region: region,
-        metricDate
-      },
-      {
-        $set: {
-          userId: String(userId),
-          country,
-          region,
-          metricDate,
-          negativeKeywordsData: uniqueNegativeKeywordsData
-        }
-      },
-      {
-        new: true,
-        upsert: true
-      }
-    );
+    const negativeKeywords = await persistChunkedSnapshot({
+      Model: NegativeKeywords,
+      ChunkModel: NegativeKeywordChunk,
+      dataField: 'negativeKeywordsData',
+      userId,
+      country,
+      region,
+      metricDate,
+      rows: uniqueNegativeKeywordsData.map(toStoredNegativeRow),
+      label: 'negativeKeywords',
+    });
 
     if (!negativeKeywords) {
       return false;

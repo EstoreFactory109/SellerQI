@@ -153,6 +153,10 @@ const GROUP_COPY = {
         title: 'Listings without A+ content',
         action: 'Build A+ content for these listings'
     },
+    'conversion:missing_brand_story': {
+        title: 'Listings without a Brand Story',
+        action: 'Add the Brand Story module to these listings'
+    },
     'conversion:low_star_rating': {
         title: 'Products whose rating is driving buyers away',
         action: 'Address the complaints behind the low rating'

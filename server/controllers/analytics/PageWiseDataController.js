@@ -820,6 +820,9 @@ const getTasksData = asyncHandler(async (req, res) => {
                 // Issue-type groups, so a task row can show its standing within the
                 // same figure the Dashboard's "Top things to fix" reports.
                 groups: tasksDocument.groups || [],
+                // Dictionary for the tasks' errorIdx / solutionIdx. Must travel with
+                // them — without it the client has indices and nothing to resolve.
+                texts: tasksDocument.texts || [],
                 taskRenewalDate: tasksDocument.taskRenewalDate
             }, "Tasks data retrieved successfully")
         );
@@ -1434,7 +1437,9 @@ const getNavbarData = asyncHandler(async (req, res) => {
         logger.info(`Getting navbar data for user ${userId}, region ${Region}, country ${Country}`);
 
         // Get user data
-        const user = await User.findById(userId).select('name email profilePic selectedPlan accessType isSuperAdminSession').lean();
+        // `name`, `selectedPlan` and `isSuperAdminSession` are not fields on this schema,
+        // so selecting them yielded undefined for all three.
+        const user = await User.findById(userId).select('firstName lastName email profilePic packageType accessType').lean();
         
         if (!user) {
             return res.status(404).json(
@@ -1443,7 +1448,13 @@ const getNavbarData = asyncHandler(async (req, res) => {
         }
 
         // Get seller data with all accounts
-        const seller = await Seller.findOne({ User: userId }).lean();
+        // Project only what the navbar needs. Without this projection .lean() pulls the
+        // entire Seller document on every navbar fetch - including
+        // sellerAccount[].products[] (every ASIN, each with its issues array) and
+        // TotatProducts[], which for a large catalogue is megabytes of dead weight.
+        const seller = await Seller.findOne({ User: userId })
+            .select('brand sellerAccount.country sellerAccount.region sellerAccount.selling_partner_id sellerAccount.spiRefreshToken')
+            .lean();
         
         let allSellerAccounts = [];
         let brandName = '';
@@ -1456,11 +1467,16 @@ const getNavbarData = asyncHandler(async (req, res) => {
             if (seller.sellerAccount) {
                 // Get all seller accounts for account switcher
                 allSellerAccounts = seller.sellerAccount.map(acc => ({
-                    sellerId: acc.sellerId,
+                    // TopNav reads userId/country/region/brand off these entries.
+                    userId,
+                    sellerId: acc.selling_partner_id,
                     region: acc.region,
                     country: acc.country || acc.region,
-                    marketplaceId: acc.marketplaceId,
-                    isConnected: acc.isConnected || false,
+                    // Derived from whether SP-API is linked. `acc.isConnected` is not a
+                    // schema field, so this used to be hardcoded false for everyone.
+                    // marketplaceId is likewise not on the schema; it was always
+                    // undefined and therefore dropped by JSON, so it is gone here.
+                    isConnected: Boolean(acc.spiRefreshToken && acc.spiRefreshToken.trim()),
                     brand: seller.brand || '' // Include brand in each account for display
                 }));
             }
@@ -1486,12 +1502,19 @@ const getNavbarData = asyncHandler(async (req, res) => {
             new ApiResponse(200, {
                 user: {
                     _id: user._id,
-                    name: user.name,
+                    // The schema has firstName/lastName - there is no `name` field, so
+                    // this was undefined for every user. Compose it, and pass the parts.
+                    name: [user.firstName, user.lastName].filter(Boolean).join(' '),
+                    firstName: user.firstName,
+                    lastName: user.lastName,
                     email: user.email,
-                    profilePic: user.profilePic,
-                    selectedPlan: user.selectedPlan,
+                    // The plan field is `packageType`; `selectedPlan` does not exist.
+                    // Kept as an alias so the response shape stays backwards compatible.
+                    selectedPlan: user.packageType,
+                    packageType: user.packageType,
                     accessType: user.accessType,
-                    isSuperAdminSession: user.isSuperAdminSession
+                    // Set by the auth middleware on the request, never stored on the doc.
+                    isSuperAdminSession: req.isSuperAdminSession || false
                 },
                 AllSellerAccounts: allSellerAccounts,
                 Brand: brandName,
@@ -3107,30 +3130,59 @@ const getYourProductsSummaryV3 = asyncHandler(async (req, res) => {
 });
 
 /**
- * Per-ASIN sales for the Your Products v3 tabs.
+ * Per-ASIN sales for the Your Products v3 tabs, over the same ~30-day window the
+ * rest of the page reports on.
  *
- * EconomicsMetrics is the preferred source, but most accounts do not have that
- * document — when it is absent this map came back empty and every row rendered "—"
- * even though BuyBoxData held real sales for those ASINs. The Optimization tab never
- * showed that gap because ProductPerformanceService already falls back to BuyBox; this
- * mirrors its precedence (economics wins per ASIN, BuyBox fills the rest) so the two
- * tabs cannot report different sales for the same product.
+ * SOURCE PRECEDENCE, and why it is in this order:
  *
- * ASINs present in NEITHER source are deliberately left out of the map, so callers
- * still render "—" for genuinely unknown instead of a misleading $0.00.
+ *  1. DailySkuFinance — the live per-SKU finance collection, summed over the
+ *     window. This is the only source that is both current and window-correct,
+ *     and it is what the Profitability page reports from, so the two agree.
+ *  2. EconomicsMetrics — the historical source. Kept ahead of BuyBox for the
+ *     handful of accounts that still have rows, but it stopped being written in
+ *     April 2026, so for most accounts it contributes nothing.
+ *  3. BuyBoxData — last resort. IMPORTANT: a BuyBox snapshot covers a SINGLE
+ *     DAY, so a figure from here is not comparable to the 30-day figures above.
+ *     It is returned tagged (see `windowDays`) so the caller can label it rather
+ *     than silently mixing a one-day number into a monthly column, which is what
+ *     this function used to do.
+ *
+ * ASINs present in NO source are deliberately left out, so callers still render
+ * "—" for genuinely unknown rather than a misleading $0.00.
+ *
+ * @returns {Promise<Map<string, {amount: number, windowDays: number|null, source: string}>>}
  */
 async function buildAsinSalesMap(userId, Region, Country, economicsData) {
     const salesMap = new Map();
-
-    const { asinPpcSales } = await ProfitabilityService.getAsinPpcSalesFromEconomics(economicsData);
-    Object.entries(asinPpcSales || {}).forEach(([asin, data]) => {
+    const set = (asin, amount, source, windowDays) => {
         const key = (asin || '').trim().toUpperCase();
-        if (key) salesMap.set(key, data.sales || 0);
+        if (!key || salesMap.has(key)) return false;
+        salesMap.set(key, { amount: Number(amount) || 0, source, windowDays });
+        return true;
+    };
+
+    // 1. Live finance, window-correct.
+    let fromFinance = 0;
+    try {
+        const { getAsinFinanceForWindow, DEFAULT_WINDOW_DAYS } = require('../../Services/Finance/AsinFinanceWindowService.js');
+        const finance = await getAsinFinanceForWindow(userId, Country, Region);
+        Object.entries(finance).forEach(([asin, row]) => {
+            if (set(asin, row.sales, 'dailySkuFinance', DEFAULT_WINDOW_DAYS)) fromFinance++;
+        });
+    } catch (financeError) {
+        logger.warn('[v3-sales] live finance source failed; falling back', {
+            userId, country: Country, region: Region, error: financeError.message
+        });
+    }
+
+    // 2. Historical economics, for the accounts that still have it.
+    const { asinPpcSales } = await ProfitabilityService.getAsinPpcSalesFromEconomics(economicsData);
+    let fromEconomics = 0;
+    Object.entries(asinPpcSales || {}).forEach(([asin, data]) => {
+        if (set(asin, data.sales, 'economicsMetrics', 30)) fromEconomics++;
     });
 
-    // Fill only the ASINs economics did not cover. A BuyBox row reporting 0 is kept as
-    // 0 rather than skipped: the row existing means we measured that ASIN and it sold
-    // nothing, which is information, and it matches what the Optimization tab shows.
+    // 3. BuyBox — single-day, so tagged as such rather than passed off as monthly.
     try {
         const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
         const buyBoxDoc = await BuyBoxData
@@ -3139,21 +3191,17 @@ async function buildAsinSalesMap(userId, Region, Country, economicsData) {
             .select('asinBuyBoxData')
             .lean();
 
-        let filled = 0;
+        let fromBuyBox = 0;
         (buyBoxDoc?.asinBuyBoxData || []).forEach(item => {
-            const key = (item.childAsin || item.parentAsin || '').trim().toUpperCase();
-            if (!key || salesMap.has(key)) return;
-            salesMap.set(key, item.sales?.amount || 0);
-            filled++;
+            const asin = item.childAsin || item.parentAsin;
+            // windowDays 1: a BuyBox snapshot is one day, not the 30 the column implies.
+            if (set(asin, item.sales?.amount, 'buyBox', 1)) fromBuyBox++;
         });
 
-        if (filled > 0) {
-            logger.info('[v3-sales] Filled sales from BuyBox where economics had no row', {
-                userId, country: Country, region: Region,
-                fromEconomics: Object.keys(asinPpcSales || {}).length,
-                fromBuyBox: filled
-            });
-        }
+        logger.info('[v3-sales] per-ASIN sales sources', {
+            userId, country: Country, region: Region,
+            fromFinance, fromEconomics, fromBuyBox, total: salesMap.size
+        });
     } catch (buyBoxError) {
         // Sales is one column — never fail the whole product list over it.
         logger.warn('[v3-sales] BuyBox sales fallback failed; sales may show as "—"', {
@@ -3303,7 +3351,10 @@ const getYourProductsActiveV3 = asyncHandler(async (req, res) => {
                 numRatings: reviewData.numRatings || '0',
                 starRatings: reviewData.starRatings || '0',
                 image: reviewData.image || null,
-                sales: salesMap.has(key) ? salesMap.get(key) : null,
+                sales: salesMap.has(key) ? salesMap.get(key).amount : null,
+                // 1 when the only source was a single-day BuyBox snapshot, so the UI
+                // can say so instead of implying a 30-day figure. null = unknown.
+                salesWindowDays: salesMap.has(key) ? salesMap.get(key).windowDays : null,
                 issues: rawIssues.length > 0 ? rawIssues : getShortIssueLabels(issueDetailMap.get(key)),
                 issueCount: product.issueCount || 0,
                 has_b2b_pricing: product.has_b2b_pricing || false
@@ -3806,7 +3857,10 @@ const getYourProductsWithoutAPlusV3 = asyncHandler(async (req, res) => {
                 status: p.status || 'Active',
                 quantity: p.quantity ?? 0,
                 image: reviewsMap.get(key)?.image || null,
-                sales: salesMap.has(key) ? salesMap.get(key) : null,
+                sales: salesMap.has(key) ? salesMap.get(key).amount : null,
+                // 1 when the only source was a single-day BuyBox snapshot, so the UI
+                // can say so instead of implying a 30-day figure. null = unknown.
+                salesWindowDays: salesMap.has(key) ? salesMap.get(key).windowDays : null,
                 issues: rawIssues.length > 0 ? rawIssues : getShortIssueLabels(issueDetailMap.get(key)),
                 issueCount: p.issueCount || 0,
                 hasAPlus: false
@@ -3982,7 +4036,10 @@ const getYourProductsNotTargetedInAdsV3 = asyncHandler(async (req, res) => {
                 status: p.status || 'Active',
                 quantity: p.quantity ?? 0,
                 image: reviewsMap.get(key)?.image || null,
-                sales: salesMap.has(key) ? salesMap.get(key) : null,
+                sales: salesMap.has(key) ? salesMap.get(key).amount : null,
+                // 1 when the only source was a single-day BuyBox snapshot, so the UI
+                // can say so instead of implying a 30-day figure. null = unknown.
+                salesWindowDays: salesMap.has(key) ? salesMap.get(key).windowDays : null,
                 issues: rawIssues.length > 0 ? rawIssues : getShortIssueLabels(issueDetailMap.get(key)),
                 issueCount: p.issueCount || 0,
                 isTargetedInAds: false

@@ -19,9 +19,12 @@
 
 const mockUpsert = jest.fn();
 const mockFindByMetricDate = jest.fn();
+const mockFind = jest.fn();
 jest.mock('../../../models/amazon-ads/PPCMetricsModel', () => ({
     upsertMetricsForDate: (...a) => mockUpsert(...a),
     findByMetricDate: (...a) => mockFindByMetricDate(...a),
+    // Used by zeroUnmeasuredTypesForWindow to find the days that already have a document.
+    find: (...a) => mockFind(...a),
 }));
 
 const {
@@ -29,6 +32,7 @@ const {
     upsertDailyMetricsDocs,
     summariseBreakdown,
     savePpcMetricsFromRows,
+    savePpcMetricsFromResults,
     CAMPAIGN_TYPES,
 } = require('../../../Services/AmazonAds/GetPPCMetrics.js');
 
@@ -157,52 +161,152 @@ describe('upsertDailyMetricsDocs', () => {
     });
 });
 
-describe('savePpcMetricsFromRows (async adapter entry point)', () => {
-    const row = (campaignType, status, result = null) => ({
+/**
+ * The empty-vs-failed distinction after saving moved into `finalize`.
+ *
+ * Each report now persists itself in finalize, so by the time the adapter's `saveFromRows` runs,
+ * every DONE type is already stored and there is no report data to combine. What survives here is
+ * the one case finalize cannot reach: a type that hit NO_DATA WITHOUT finalize running, because its
+ * `submit` returned null (the type is not enabled on the account). Its stored figures must still be
+ * zeroed, or an account that stops running Sponsored Brands keeps showing old Sponsored Brands
+ * numbers forever — the same half of the distinction the tests above pin from the other direction.
+ *
+ * Crucially, this path reads only `status` and `params`. That is the whole point: nothing has to be
+ * stashed on the tracking row, which is what used to grow past MongoDB's 16MB ceiling.
+ */
+describe('savePpcMetricsFromRows — zeroes measured-but-empty types, never failed ones', () => {
+    const WINDOW = { startDate: '2026-07-01', endDate: '2026-07-31' };
+    const row = (campaignType, status) => ({
         service: 'ppcMetricsAggregated',
-        params: { campaignType },
+        params: { campaignType, ...WINDOW },
         status,
-        result,
     });
-    const metricsFor = (sales, spend) => ({
-        dateWiseData: { [DATE]: { sales, spend, impressions: 100, clicks: 10, unitsSoldClicks1d: 1 } },
-        campaigns: [],
+    /** A stored day that has real money in all three types. */
+    const storedDay = () => ({
+        metricDate: DATE,
+        profileId: 'p1',
+        dateRange: { startDate: DATE, endDate: DATE },
+        campaignTypeBreakdown: {
+            sponsoredProducts: bd(100, 10),
+            sponsoredBrands: bd(200, 20),
+            sponsoredDisplay: bd(400, 40, 4000, 200, 20),
+        },
+        campaignSummaries: { sponsoredDisplay: ['sd-previously-stored'] },
+        processedCampaignTypes: ALL_TYPES,
     });
+    const findReturns = (docs) => mockFind.mockReturnValue({ lean: async () => docs });
 
-    test('NO_DATA counts as measured, so its zeros are written', async () => {
-        mockFindByMetricDate.mockResolvedValue(existingWithSd());
+    test('a NO_DATA type is zeroed on the days that already have a document', async () => {
+        findReturns([storedDay()]);
         await savePpcMetricsFromRows(USER, 'US', 'NA', 'p1', [
-            row('SPONSORED_PRODUCTS', 'DONE', metricsFor(100, 10)),
-            row('SPONSORED_BRANDS', 'DONE', metricsFor(200, 20)),
+            row('SPONSORED_PRODUCTS', 'DONE'),
+            row('SPONSORED_BRANDS', 'DONE'),
             row('SPONSORED_DISPLAY', 'NO_DATA'),
         ]);
-        // All three measured => complete => no merge, no read.
-        expect(mockFindByMetricDate).not.toHaveBeenCalled();
-        expect(mockUpsert.mock.calls[0][4].summary.totalSpend).toBe(30);
+        const written = mockUpsert.mock.calls[0][4];
+        expect(written.campaignTypeBreakdown.sponsoredDisplay.spend).toBe(0);
+        // The other two are untouched, and the total is recomputed from the zeroed breakdown.
+        expect(written.campaignTypeBreakdown.sponsoredProducts.spend).toBe(10);
+        expect(written.summary.totalSpend).toBe(30);
+        // The type is no longer recorded as having data.
+        expect(written.processedCampaignTypes).not.toContain('SPONSORED_DISPLAY');
     });
 
-    test('FAILED does NOT count as measured, so stored figures are preserved', async () => {
-        // This is the regression: before the fix, FAILED and NO_DATA were collapsed into `!metrics`
-        // and both wrote zeros over real data.
-        mockFindByMetricDate.mockResolvedValue(existingWithSd());
+    // THE REGRESSION, in the direction that destroys data: a failed report means we do not know the
+    // true value, so stored figures must survive untouched.
+    test('a FAILED type is NOT zeroed', async () => {
+        findReturns([storedDay()]);
         await savePpcMetricsFromRows(USER, 'US', 'NA', 'p1', [
-            row('SPONSORED_PRODUCTS', 'DONE', metricsFor(100, 10)),
-            row('SPONSORED_BRANDS', 'DONE', metricsFor(200, 20)),
+            row('SPONSORED_PRODUCTS', 'DONE'),
+            row('SPONSORED_BRANDS', 'DONE'),
             row('SPONSORED_DISPLAY', 'FAILED'),
         ]);
-        expect(mockFindByMetricDate).toHaveBeenCalled();
-        const written = mockUpsert.mock.calls[0][4];
-        expect(written.campaignTypeBreakdown.sponsoredDisplay.spend).toBe(40);
-        expect(written.summary.totalSpend).toBe(70);
+        expect(mockUpsert).not.toHaveBeenCalled();
     });
 
     test('every report FAILED writes nothing at all', async () => {
+        findReturns([storedDay()]);
         await savePpcMetricsFromRows(USER, 'US', 'NA', 'p1', [
             row('SPONSORED_PRODUCTS', 'FAILED'),
             row('SPONSORED_BRANDS', 'FAILED'),
             row('SPONSORED_DISPLAY', 'FAILED'),
         ]);
-        // No dates survive, so there is nothing to write — and crucially nothing to zero.
         expect(mockUpsert).not.toHaveBeenCalled();
+    });
+
+    // Every type succeeded, so all three already saved themselves in finalize. Touching anything
+    // here would rewrite documents that are already correct.
+    test('all types DONE writes nothing — finalize already saved them', async () => {
+        findReturns([storedDay()]);
+        await savePpcMetricsFromRows(USER, 'US', 'NA', 'p1', [
+            row('SPONSORED_PRODUCTS', 'DONE'),
+            row('SPONSORED_BRANDS', 'DONE'),
+            row('SPONSORED_DISPLAY', 'DONE'),
+        ]);
+        expect(mockUpsert).not.toHaveBeenCalled();
+        expect(mockFind).not.toHaveBeenCalled();
+    });
+
+    test('a type already at zero is not rewritten', async () => {
+        const day = storedDay();
+        day.campaignTypeBreakdown.sponsoredDisplay = bd(0, 0, 0, 0, 0);
+        findReturns([day]);
+        await savePpcMetricsFromRows(USER, 'US', 'NA', 'p1', [
+            row('SPONSORED_PRODUCTS', 'DONE'),
+            row('SPONSORED_DISPLAY', 'NO_DATA'),
+        ]);
+        expect(mockUpsert).not.toHaveBeenCalled();
+    });
+
+    // It must never invent a day: only days that already have a document are candidates.
+    test('no stored days means nothing is written', async () => {
+        findReturns([]);
+        await savePpcMetricsFromRows(USER, 'US', 'NA', 'p1', [
+            row('SPONSORED_PRODUCTS', 'DONE'),
+            row('SPONSORED_DISPLAY', 'NO_DATA'),
+        ]);
+        expect(mockUpsert).not.toHaveBeenCalled();
+    });
+
+    test('the zeroing query is bounded to the report window', async () => {
+        findReturns([storedDay()]);
+        await savePpcMetricsFromRows(USER, 'US', 'NA', 'p1', [
+            row('SPONSORED_PRODUCTS', 'DONE'),
+            row('SPONSORED_DISPLAY', 'NO_DATA'),
+        ]);
+        expect(mockFind).toHaveBeenCalledWith(expect.objectContaining({
+            userId: USER, country: 'US', region: 'NA',
+            metricDate: { $gte: WINDOW.startDate, $lte: WINDOW.endDate },
+        }));
+    });
+});
+
+/**
+ * The per-type save that `finalize` now performs.
+ *
+ * One report type at a time reaches `savePpcMetricsFromResults`, so the per-day merge is what
+ * composes SP + SB + SD into one document. If that ever stopped preserving the types absent from a
+ * call, each type's save would wipe the previous one and only the last report to finish would
+ * survive — silently, and only for accounts large enough to matter.
+ */
+describe('savePpcMetricsFromResults — a single type composes via the merge', () => {
+    const metricsFor = (sales, spend) => ({
+        dateWiseData: { [DATE]: { sales, spend, impressions: 100, clicks: 10, unitsSoldClicks1d: 1 } },
+        campaigns: [],
+    });
+
+    test('saving one type preserves the other two from the stored document', async () => {
+        mockFindByMetricDate.mockResolvedValue(existingWithSd());
+        await savePpcMetricsFromResults(USER, 'US', 'NA', 'p1', [
+            { campaignType: 'SPONSORED_PRODUCTS', metrics: metricsFor(100, 10), usable: true },
+        ]);
+        // Partial by construction => the merge path runs and reads the stored day.
+        expect(mockFindByMetricDate).toHaveBeenCalled();
+        const written = mockUpsert.mock.calls[0][4];
+        expect(written.campaignTypeBreakdown.sponsoredProducts.spend).toBe(10);
+        expect(written.campaignTypeBreakdown.sponsoredBrands.spend).toBe(20);
+        expect(written.campaignTypeBreakdown.sponsoredDisplay.spend).toBe(40);
+        // Recomputed from the merged breakdown, so the preserved types are included.
+        expect(written.summary.totalSpend).toBe(70);
     });
 });

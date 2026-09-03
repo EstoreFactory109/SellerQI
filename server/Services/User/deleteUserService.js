@@ -1,19 +1,25 @@
 /**
  * Delete User Service
  *
- * Removes a user's Amazon connection and operational data while retaining
- * the User document itself for audit/history. This is the single delete
- * behavior used by both the admin manual-delete route and the automated
- * six-month inactivity cleanup — there is no separate hard-delete mode.
+ * Removes a user's Amazon connection and operational data. There are two
+ * delete modes, chosen by the caller via the `hardDelete` option:
  *
- * What happens:
- * - All Seller documents (Amazon SP-API/Ads tokens, product catalog) for
- *   the user are deleted.
- * - The User document's dangling refs into collections that
- *   fullUserDataPurgeService is about to purge are cleared.
- * - purgedAt is stamped on the User document.
- * - email/password/name are left untouched, so the person can still log
- *   back in later and reconnect their Amazon accounts.
+ * SOFT (default) — used by the automated six-month inactivity cleanup.
+ *   - All Seller documents (Amazon SP-API/Ads tokens, product catalog) deleted.
+ *   - The User document's dangling refs into collections that
+ *     fullUserDataPurgeService is about to purge are cleared.
+ *   - purgedAt is stamped on the User document.
+ *   - email/password/name are left untouched, so the person can still log
+ *     back in later and reconnect their Amazon accounts.
+ *
+ * HARD (`{ hardDelete: true }`) — used by the admin's manual delete only.
+ *   - Same Seller deletion, then the User document itself is removed.
+ *   - The account is gone: the person cannot log in, and the email is freed
+ *     for a fresh signup.
+ *
+ * Billing history (Subscription + PaymentLogs) is kept on the soft path and removed
+ * on the hard path. That deletion happens in fullUserDataPurgeService, driven by its
+ * `includeBillingHistory` option, which the admin route sets when it enqueues.
  */
 
 const User = require('../../models/user-auth/userModel.js');
@@ -114,11 +120,14 @@ const deleteUserByEmail = async (email) => {
 };
 
 /**
- * Purge a user's Seller data and mark the account purged, by user ID.
+ * Delete a user's Seller data, then either mark the account purged (soft) or
+ * remove the account outright (hard). See the module header for the two modes.
  * @param {string} userId - User ID
+ * @param {{ hardDelete?: boolean }} [options] - hardDelete removes the User document
  * @returns {Object} - Result object with success status and details
  */
-const deleteUserById = async (userId) => {
+const deleteUserById = async (userId, options = {}) => {
+    const { hardDelete = false } = options;
     try {
         if (!userId) {
             throw new ApiError(400, "User ID is required");
@@ -133,28 +142,53 @@ const deleteUserById = async (userId) => {
         const email = user.email;
         const userName = `${user.firstName} ${user.lastName}`;
 
+        // An agency owner's clients point at them via agencyId (or the legacy
+        // adminId — switchToClient still accepts either). Removing the owner document
+        // would leave those clients pointing at nothing, so refuse instead of
+        // silently orphaning them.
+        if (hardDelete) {
+            const dependentClients = await User.countDocuments({
+                $or: [{ agencyId: userId }, { adminId: userId }],
+            });
+            if (dependentClients > 0) {
+                throw new ApiError(
+                    409,
+                    `This agency still has ${dependentClients} client account(s). Remove or reassign them before deleting the agency.`
+                );
+            }
+        }
+
         const sellerDocumentsDeleted = await deleteSellerDocumentsForUser(userId);
 
-        await User.findByIdAndUpdate(userId, {
-            $set: { purgedAt: new Date() },
-            $unset: DANGLING_REF_FIELDS,
-        });
+        if (hardDelete) {
+            await User.findByIdAndDelete(userId);
+        } else {
+            await User.findByIdAndUpdate(userId, {
+                $set: { purgedAt: new Date() },
+                $unset: DANGLING_REF_FIELDS,
+            });
+        }
 
-        logger.info(`User purged (data cleared, account retained): ${email} (${userId})`, {
-            email,
-            userId,
-            userName,
-            sellerDocumentsDeleted
-        });
+        const message = hardDelete
+            ? "Seller documents, operational data and the user account were removed."
+            : "Seller documents and operational data removed. User account retained.";
+
+        logger.info(
+            hardDelete
+                ? `User hard-deleted (account removed): ${email} (${userId})`
+                : `User purged (data cleared, account retained): ${email} (${userId})`,
+            { email, userId, userName, sellerDocumentsDeleted, hardDelete }
+        );
 
         return {
             success: true,
-            message: "Seller documents and operational data removed. User account retained.",
+            message,
             data: {
                 email,
                 userId,
                 userName,
-                sellerDocumentsDeleted
+                sellerDocumentsDeleted,
+                hardDelete
             }
         };
 

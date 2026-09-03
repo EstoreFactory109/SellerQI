@@ -51,9 +51,11 @@ export default function IndiaBilling() {
   // Show "Try 7 days for Free" card for:
   // - LITE users who have never been served a trial
   // - Cancelled users (so they can start a new trial and resubscribe)
-  const showFreeTrialCard =
-    currentPlan === 'LITE' &&
-    (user?.servedTrial !== true || subscriptionStatus === 'cancelled');
+  // ===== PAYMENT DISABLED - free PRO for all users (no trial card) =====
+  const showFreeTrialCard = false;
+  // const showFreeTrialCard =
+    // currentPlan === 'LITE' &&
+    // (user?.servedTrial !== true || subscriptionStatus === 'cancelled');
   const dispatch = useDispatch();
   const navigate = useNavigate();
 
@@ -206,8 +208,11 @@ export default function IndiaBilling() {
       if (planType === 'LITE') {
         alert('To downgrade to LITE, please cancel your subscription.');
       } else if (planType === 'PRO') {
-        // Use Stripe with INR pricing for India
-        await stripeService.createCheckoutSession('PRO', null, null, 'inr');
+        // ===== PAYMENT DISABLED - free PRO for all users =====
+        alert('All plans are free right now - your account already has full PRO access.');
+        setLoading(prev => ({ ...prev, [planType]: false }));
+        // // Use Stripe with INR pricing for India
+        // await stripeService.createCheckoutSession('PRO', null, null, 'inr');
       } else if (planType === 'AGENCY') {
         // Navigate to support page
         navigate('/seller-central-checker/settings?tab=support');
@@ -223,7 +228,10 @@ export default function IndiaBilling() {
   const handleStartFreeTrial = async () => {
     setFreeTrialLoading(true);
     try {
-      await stripeService.createCheckoutSession('PRO', null, 7, 'inr');
+      // ===== PAYMENT DISABLED - free PRO for all users =====
+      alert('No trial needed - your account already has full PRO access.');
+      setFreeTrialLoading(false);
+      // await stripeService.createCheckoutSession('PRO', null, 7, 'inr');
     } catch (error) {
       console.error('Error starting free trial:', error);
       const errorMsg = error.response?.data?.message || error.message || 'Failed to start free trial. Please try again.';

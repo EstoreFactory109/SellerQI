@@ -199,15 +199,18 @@ const OtpVerification = () => {
         } else if (intendedPackage === 'PRO-Trial') {
           localStorage.removeItem('intendedPackage');
           
-          // Stripe checkout with 7-day trial (INR pricing for India)
-          try {
-            await stripeService.createCheckoutSession('PRO', null, 7, isIndianUser ? 'inr' : null);
-          } catch (stripeError) {
-            console.error('Stripe checkout error:', stripeError);
-            setErrorMessage('Failed to initiate free trial. Please try again.');
-            setLoading(false);
-            return;
-          }
+          // ===== PAYMENT DISABLED - free PRO for all users =====
+          // To re-enable the 7-day Stripe trial: remove the navigate() and uncomment below.
+          navigate("/connect-to-amazon");
+          // // Stripe checkout with 7-day trial (INR pricing for India)
+          // try {
+            // await stripeService.createCheckoutSession('PRO', null, 7, isIndianUser ? 'inr' : null);
+          // } catch (stripeError) {
+            // console.error('Stripe checkout error:', stripeError);
+            // setErrorMessage('Failed to initiate free trial. Please try again.');
+            // setLoading(false);
+            // return;
+          // }
         } else if (intendedPackage === 'AGENCY') {
           // Separate agency flow: no Stripe; activate account and redirect to manage-agency-users
           localStorage.removeItem('intendedPackage');
@@ -232,14 +235,17 @@ const OtpVerification = () => {
         } else if (intendedPackage === 'PRO') {
           // PRO direct payment via Stripe (INR pricing for India)
           localStorage.removeItem('intendedPackage');
-          try {
-            await stripeService.createCheckoutSession('PRO', null, null, isIndianUser ? 'inr' : null);
-          } catch (stripeError) {
-            console.error('Stripe checkout error:', stripeError);
-            setErrorMessage('Failed to initiate payment. Please try again.');
-            setLoading(false);
-            return;
-          }
+          // ===== PAYMENT DISABLED - free PRO for all users =====
+          // To re-enable paid PRO checkout: remove the navigate() and uncomment below.
+          navigate("/connect-to-amazon");
+          // try {
+            // await stripeService.createCheckoutSession('PRO', null, null, isIndianUser ? 'inr' : null);
+          // } catch (stripeError) {
+            // console.error('Stripe checkout error:', stripeError);
+            // setErrorMessage('Failed to initiate payment. Please try again.');
+            // setLoading(false);
+            // return;
+          // }
         } else {
           // Unknown package - redirect to connect-to-amazon page (skip pricing)
           localStorage.removeItem('intendedPackage');

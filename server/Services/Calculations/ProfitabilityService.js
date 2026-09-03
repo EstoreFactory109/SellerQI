@@ -31,6 +31,13 @@ const PROFITABILITY_TABLE_CACHE_TTL = 600;
 // Chunk size for yielding to event loop during large data processing
 const YIELD_CHUNK_SIZE = 500;
 
+// Lookback for the date-wise PPC spend merge. Matches DASHBOARD_ADS_LOOKBACK_DAYS in
+// Analyse.js so the Profitability page and the PPC dashboard cover the same window.
+const PROFITABILITY_PPC_LOOKBACK_DAYS = Math.max(
+    1,
+    parseInt(process.env.DASHBOARD_ADS_LOOKBACK_DAYS || '30', 10) || 30
+);
+
 /**
  * Yield to event loop to allow timers (like lock extension) to fire.
  * Critical for preventing job stalling during large data processing.
@@ -70,7 +77,8 @@ const fetchProfitabilityData = async (userId, country, region) => {
             }
         ).lean(),
         getProductWiseSponsoredAdsData(userId, country, region),
-        GetDateWisePPCspendModel.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean()
+        // Returns the merged FLAT ROW ARRAY, not a document — see the unwrap below.
+        GetDateWisePPCspendModel.findMergedDateWiseSpends(userId, country, region, { lookbackDays: PROFITABILITY_PPC_LOOKBACK_DAYS })
     ]);
 
     const fetchTime = Date.now() - startTime;
@@ -103,7 +111,12 @@ const fetchProfitabilityData = async (userId, country, region) => {
         economicsMetricsData: processedEconomicsMetricsData,
         products,
         ProductWiseSponsoredAds: ProductWiseSponsoredAdsArray,
-        dateWisePPCspendData: dateWisePPCspendData?.data || [],
+        // BUG FIX: this read `dateWisePPCspendData?.data`, but the field has always been
+        // `dateWisePPCSpends` — so this was ALWAYS `[]` and the Profitability page's
+        // `dateWiseTotalCosts` was permanently empty, while still loading a ~10MB document
+        // into heap to discard it. The fetch above now returns the merged flat array
+        // directly, so this is just a pass-through.
+        dateWisePPCspendData: Array.isArray(dateWisePPCspendData) ? dateWisePPCspendData : [],
         adsPPCSpend,
         country,
         region
@@ -903,7 +916,13 @@ const computeFullProfitabilityTableData = async (userId, country, region) => {
         
         const parentAsin = data.parentAsin || asin;
         const productInfo = productNameMap.get(asin) || {};
-        const adsSpend = adsSpendByAsin.get(asin) || 0;
+        // `.total`, not the entry itself. aggregateSpendByAsin returns
+        // Map<asin, { total, SP, SD }>, but this line treated it as a number, so
+        // `sales - adsSpend` produced NaN and `adsSpend.toFixed(2)` threw TypeError for every
+        // account that actually has ads rows. The shape changed under these two consumers and
+        // they were never updated. `?? 0` (not `|| 0`) so a genuine 0 total is preserved.
+        const adsSpendEntry = adsSpendByAsin.get(asin);
+        const adsSpend = (typeof adsSpendEntry === 'number' ? adsSpendEntry : adsSpendEntry?.total) ?? 0;
         const sales = data.sales || 0;
         const totalFees = data.totalFees || 0;
         const grossProfit = sales - adsSpend - totalFees;

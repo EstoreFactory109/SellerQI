@@ -24,6 +24,8 @@ import { detectCountry } from '../../utils/countryDetection.js';
 import axiosInstance from '../../config/axios.config.js';
 import { devLog } from '../../utils/devLogger.js';
 import PhoneRequiredModal from '../../Components/PhoneUpdate/PhoneRequiredModal.jsx';
+import PasswordCriteriaList from '../../Components/Shared/PasswordCriteriaList.jsx';
+import { isPasswordValid, passwordErrorMessage, extractServerError } from '../../utils/passwordCriteria.js';
 
 // Helper function to get country flag from ISO code
 const getCountryFlag = (isoCode) => {
@@ -66,6 +68,9 @@ const SignUp = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
 
+  // Something typed, but not yet meeting every rule — keeps the field red as they go.
+  const passwordIncomplete = !!formData.password && !isPasswordValid(formData.password);
+
   // Continue the Google signup flow once the phone modal is saved or skipped.
   // Takes the routing explicitly so it can also be called straight away, without
   // waiting on a state update, when there is no phone to ask for.
@@ -76,19 +81,23 @@ const SignUp = () => {
 
     const { noPlanSelected, isPROTrial, packageType, isIndianUser } = pending;
     try {
-      if (noPlanSelected) {
-        // No plan selected - go straight to onboarding (skip pricing)
-        navigate('/connect-to-amazon');
-      } else if (isPROTrial) {
-        // PRO-Trial: Stripe checkout with 7-day trial (INR pricing for India)
-        const stripeService = (await import('../../services/stripeService.js')).default;
-        await stripeService.createCheckoutSession('PRO', null, 7, isIndianUser ? 'inr' : null);
-      } else {
-        // PRO/AGENCY (paid): Go to Stripe payment (INR pricing for Indian PRO users)
-        localStorage.setItem('intendedPackage', plans);
-        const stripeService = (await import('../../services/stripeService.js')).default;
-        await stripeService.createCheckoutSession(packageType, null, null, isIndianUser && packageType === 'PRO' ? 'inr' : null);
-      }
+      // ===== PAYMENT DISABLED - free PRO for all users =====
+      // Everyone signs up as PRO, so skip Stripe and go straight to onboarding.
+      // To re-enable payments: remove the navigate() below and uncomment the block.
+      navigate('/connect-to-amazon');
+      // if (noPlanSelected) {
+        // // No plan selected - go straight to onboarding (skip pricing)
+        // navigate('/connect-to-amazon');
+      // } else if (isPROTrial) {
+        // // PRO-Trial: Stripe checkout with 7-day trial (INR pricing for India)
+        // const stripeService = (await import('../../services/stripeService.js')).default;
+        // await stripeService.createCheckoutSession('PRO', null, 7, isIndianUser ? 'inr' : null);
+      // } else {
+        // // PRO/AGENCY (paid): Go to Stripe payment (INR pricing for Indian PRO users)
+        // localStorage.setItem('intendedPackage', plans);
+        // const stripeService = (await import('../../services/stripeService.js')).default;
+        // await stripeService.createCheckoutSession(packageType, null, null, isIndianUser && packageType === 'PRO' ? 'inr' : null);
+      // }
     } catch (error) {
       console.error('Post Google sign-up navigation failed:', error);
       setErrorMessage('Sign-up completed, but we could not continue. Please refresh and try again.');
@@ -192,7 +201,6 @@ const SignUp = () => {
     let newErrors = {};
     const nameRegex = /^[A-Za-z]{2,}$/;
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
 
     if (!nameRegex.test(formData.firstname)) {
       newErrors.firstname = 'Enter a valid first name (only letters, min 2 characters)';
@@ -222,8 +230,8 @@ const SignUp = () => {
     
     if (!formData.password) {
       newErrors.password = 'Password is required';
-    } else if (!passwordRegex.test(formData.password)) {
-      newErrors.password = 'Password must be at least 8 characters, with a letter, a number, and a special character';
+    } else if (!isPasswordValid(formData.password)) {
+      newErrors.password = passwordErrorMessage(formData.password);
     }
     
     if (!termsAccepted) {
@@ -248,25 +256,20 @@ const SignUp = () => {
       const isAGENCY = plans === "AGENCY";
       const noPlanSelected = plans === null || plans === undefined;
       
-      // Determine packageType based on plan
-      // If no plan selected, default to LITE (user will choose on pricing page)
-      // For PRO-Trial, start as LITE until Stripe trial is activated
-      let packageType = "LITE";
+      // All users get PRO by default - no payment required
+      let packageType = "PRO";
       if (isAGENCY) {
         packageType = "AGENCY";
-      } else if (isPRO) {
-        packageType = "PRO";
       }
-      // PRO-Trial starts as LITE, will be upgraded when Stripe checkout completes
-      
+
       const formDataWithTerms = {
         ...formData,
         phone: `${countryCode} ${formData.phone}`, // Include country code
         allTermsAndConditionsAgreed: termsAccepted,
-        packageType: packageType, // LITE for no plan or PRO-Trial, PRO for PRO, AGENCY for AGENCY
-        isInTrialPeriod: false, // Trial is now managed by Stripe, not manually
-        subscriptionStatus: noPlanSelected || isPROTrial ? "active" : "inactive", // LITE is active, PRO/AGENCY needs payment first
-        trialEndsDate: null, // Trial dates managed by Stripe
+        packageType: packageType, // PRO for all users, AGENCY for AGENCY
+        isInTrialPeriod: false,
+        subscriptionStatus: "active", // All users have active access by default
+        trialEndsDate: null,
         intendedPackage: plans, // Store the intended package for post-verification flow (null if no plan)
       };
       const response = await axios.post(`${import.meta.env.VITE_BASE_URI}/app/register`, formDataWithTerms, { withCredentials: true });
@@ -282,7 +285,7 @@ const SignUp = () => {
       }
     } catch (error) {
       setLoading(false);
-      setErrorMessage(error.response?.data?.message);
+      setErrorMessage(extractServerError(error));
     }
   };
 
@@ -304,19 +307,15 @@ const SignUp = () => {
       const noPlanSelected = plans === null || plans === undefined;
       const isIndianUser = detectedCountry === 'IN';
       
-      // Determine packageType based on plan
-      // If no plan selected, default to LITE (user will choose on pricing page)
-      // For PRO-Trial, start as LITE until trial is activated (Stripe for non-India, manual for India)
-      let packageType = "LITE";
+      // All users get PRO by default - no payment required
+      let packageType = "PRO";
       if (isAGENCY) {
         packageType = "AGENCY";
-      } else if (plans === "PRO") {
-        packageType = "PRO";
       }
-      
-      // For Indian users with PRO-Trial, we'll activate manual trial after signup
+
+      // All users have immediate access - no trial period needed
       const isInTrialPeriod = false;
-      const subscriptionStatus = noPlanSelected || isPROTrial ? "active" : "inactive";
+      const subscriptionStatus = "active";
       const trialEndsDate = null;
       
       const response = await googleAuthService.handleGoogleSignUp(packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate);
@@ -595,7 +594,11 @@ const SignUp = () => {
                      onChange={handleChange}
                      onFocus={handleFocus}
                      className={`w-full pl-10 pr-12 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300 text-gray-100 ${
-                       errors.password ? 'border-red-500 bg-red-500/10' : 'border-[#30363d] bg-[#21262d] hover:border-gray-500'
+                       errors.password || passwordIncomplete
+                         ? 'border-red-500 bg-red-500/10'
+                         : formData.password
+                           ? 'border-green-500/60 bg-[#21262d]'
+                           : 'border-[#30363d] bg-[#21262d] hover:border-gray-500'
                      }`}
                      placeholder="Create a password"
                    />
@@ -607,18 +610,7 @@ const SignUp = () => {
                     {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
                 </div>
-                {errors.password && (
-                  <motion.p
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="text-red-400 text-xs mt-1"
-                  >
-                    {errors.password}
-                  </motion.p>
-                )}
-                                 <p className="text-xs text-gray-500 mt-0.5">
-                   Min 8 chars with letters, numbers & symbols
-                 </p>
+                <PasswordCriteriaList value={formData.password} error={errors.password} />
               </div>
 
               {/* Terms Checkbox */}

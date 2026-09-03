@@ -176,9 +176,9 @@ const LeftNavSection = () => {
 
     // Determine if premium features should be locked (show but not accessible without upgrade)
     // Now ALL LITE users see the pages with lock icon - they can click and see blurred content
-    const isPremiumLocked = userPlan === 'LITE';
-    // ESF-managed clients get extra internal pages that no other account sees.
-    const isEsfClient = user?.isEsfClient === true;
+    // ===== PAYMENT DISABLED - free PRO for all users (never lock nav items) =====
+    const isPremiumLocked = false;
+    // const isPremiumLocked = userPlan === 'LITE';
 
     // No longer hiding pages - all LITE users can see and access pages (with blur overlay)
     const isLiteUser = false;

@@ -93,6 +93,9 @@ const EFFORT_MINUTES = {
     'conversion:insufficient_images': 120,
     'conversion:missing_video': 240,
     'conversion:missing_aplus_content': 240,
+    // Cheaper than a full A+ page: one module, and the copy usually already
+    // exists in the brand's other listings.
+    'conversion:missing_brand_story': 90,
 
     // ── Inventory: Seller Central workflows (removal orders, shipments).
     'inventory:stranded_inventory': 10,  // usually one listing field to fix
@@ -184,6 +187,9 @@ const IMPACT_WEIGHT = {
     'conversion:missing_video': 40,
     'conversion:insufficient_reviews': 38,
     'conversion:missing_aplus_content': 36,
+    // Below A+ content: it sits under the A+ description, so it lifts trust and
+    // cross-sell rather than the primary conversion decision.
+    'conversion:missing_brand_story': 24,
 
     // Discoverability. Title carries far more search weight than bullets, and
     // bullets more than the description.

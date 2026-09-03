@@ -38,6 +38,7 @@ const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
 const { getQueue } = require('./queue.js');
 const scheduledPhases = require('./scheduledPhases.js');
 const logger = require('../../utils/Logger.js');
+const { marketplaceTodayStr, marketplaceYesterdayStr, addDaysToDateStr } = require('../../utils/marketplaceTimezone.js');
 
 // How far back to scan for missing days.
 const ADS_LOOKBACK_DAYS = 7;
@@ -144,10 +145,81 @@ const PIPELINE_STALL_QUIET_MINUTES = Math.max(15, parseInt(process.env.PIPELINE_
 // fanning out into one simultaneous re-run per account. Truncation is logged.
 const PIPELINE_STALL_MAX_RECOVERIES_PER_TICK = Math.max(1, parseInt(process.env.PIPELINE_STALL_MAX_RECOVERIES_PER_TICK || '5', 10) || 5);
 
+// ── Seller document-size monitor ─────────────────────────────────────────────
+// MongoDB's 16MB per-document ceiling is a HARD limit: past it `sellerDetails.save()`
+// throws and every write path that touches the seller document (products, issues, B2B
+// pricing, issue counts) fails at once. The seller document embeds `sellerAccount[].products`,
+// so it grows with catalogue size and has no natural bound.
+//
+// Measured 2026-08-20: exactly ONE of 301 seller documents exceeds 4MB — 8.21MB, and it
+// belongs to a CANCELLED account that has been flat at 27,263 products and has not been
+// fetched since 2026-07-08. The next largest is 3.00MB. So nothing is close today and
+// nothing is trending; restructuring `products[]` out of the document would be a large
+// migration for a problem no active account has.
+//
+// What is worth having is a warning if that changes — which is all this does. Read-only:
+// no writes, no deletes, bounded output. It is hour-gated by the caller (once a day)
+// because the aggregation must read every seller document to size it.
+const DOC_SIZE_SWEEP_ENABLED = process.env.DOC_SIZE_SWEEP_DISABLED !== 'true';
+// 8MB = half the hard limit. Below this there is nothing to say.
+const DOC_SIZE_WARN_BYTES = Math.max(
+    1,
+    parseInt(process.env.SELLER_DOC_WARN_BYTES || '', 10) || 8 * 1024 * 1024
+);
+// 12MB = 75% of the limit. At this point a single large catalogue refresh could push a
+// document over, so it is logged at error level rather than warn.
+const DOC_SIZE_CRITICAL_BYTES = Math.max(
+    DOC_SIZE_WARN_BYTES,
+    parseInt(process.env.SELLER_DOC_CRITICAL_BYTES || '', 10) || 12 * 1024 * 1024
+);
+// Bound the report. If this ever fires for dozens of accounts the count matters, not the list.
+const DOC_SIZE_MAX_REPORTED = Math.max(
+    1,
+    parseInt(process.env.SELLER_DOC_MAX_REPORTED || '', 10) || 20
+);
+// MongoDB's hard per-document ceiling, for the percentage in the log line.
+const MONGO_MAX_DOC_BYTES = 16 * 1024 * 1024;
+
+/**
+ * BullMQ priority for catch-up work. Backfill must never queue ahead of the daily pipeline.
+ *
+ * WHY THIS EXISTS. Observed in production: 36 active jobs, every one a catch-up job, ZERO
+ * daily-pipeline phases, with 26 more catch-up jobs queued behind them. A customer's account sat
+ * frozen because its `sched_init` was stuck behind that backlog. Stopping this sweeper by hand freed
+ * the queue and the account immediately progressed — that was the workaround; this is the fix.
+ *
+ * The arithmetic makes it inevitable rather than unlucky: one 3-hourly tick can enqueue up to 450
+ * jobs (ads 50 + finance 100 + deep-resync 300) into 18 slots (6 workers x concurrency 3), while a
+ * single daily run needs ~9 SEQUENTIAL slots.
+ *
+ * MIND THE VERSION. BullMQ INVERTED priority between v4 and v5. In the installed 5.76.7, job.js
+ * states: "Ranges from 0 (highest priority) to 2,097,152 (lowest priority). @defaultValue 0" — so 0
+ * is the HIGHEST priority, and it is what every un-prioritised job already gets.
+ *
+ * That is what makes this a one-line fix. moveToActive-11.js drains strictly in this order:
+ *     local jobId = rcall("RPOPLPUSH", waitKey, activeKey)       -- priority 0 jobs
+ *     if jobId then ... else moveJobFromPrioritizedToActive(...)  -- priority > 0 jobs
+ * and placement is `if priority == 0 then` -> `wait`, else -> `prioritized`. The `wait` list is
+ * emptied before `prioritized` is touched at all. The daily pipeline sets no priority, so it is
+ * already at 0 and already in `wait` — marking catch-up alone is sufficient and the scheduled path
+ * needs no edit. DO NOT "tidy" this by giving the daily pipeline an explicit priority: any non-zero
+ * value would move it into `prioritized` and forfeit exactly the precedence this buys.
+ *
+ * Limit worth knowing: this orders WAITING jobs, it does not preempt RUNNING ones. If every slot is
+ * already busy with catch-up, a daily job still waits for one to free — but catch-up now only
+ * occupies slots the daily pipeline is not asking for.
+ */
+const CATCHUP_JOB_PRIORITY = Math.max(
+    1,
+    parseInt(process.env.CATCHUP_JOB_PRIORITY || '10', 10) || 10
+);
+
 // Job options for catch-up jobs.
 const CATCHUP_JOB_OPTS = {
     attempts: 3,
     backoff: { type: 'exponential', delay: 60_000 },
+    // Lower precedence than the daily pipeline — see CATCHUP_JOB_PRIORITY above.
+    priority: CATCHUP_JOB_PRIORITY,
     // No `timeout`: it is a no-op since BullMQ v4 (see queue.js). Ads async reports
     // usually finish in 30-45 min per call; anything that hangs far past that is caught
     // by the lock-extension ceiling in worker.js, not by a per-job option.
@@ -163,7 +235,13 @@ const CATCHUP_JOB_OPTS = {
 const PACIFIC_OFFSET_MS = 7 * 60 * 60 * 1000;
 
 /**
- * UTC yesterday in Pacific (matches what the daily ads phase fetches).
+ * UTC yesterday in Pacific (matches what the daily ADS phase fetches).
+ *
+ * ⚠️ ADS ONLY. The finance sweeps below deliberately do NOT use this — finance day keys are
+ * MARKETPLACE-LOCAL (see utils/marketplaceTimezone.js), and if this sweeper's notion of
+ * "yesterday" disagreed with the day keys FinanceService writes, it would look for a day that
+ * finance has not produced yet and re-enqueue that phantom missing day on every tick. AU is
+ * 17 hours ahead of Pacific, so that loop would start immediately.
  */
 function pacificYesterdayISO() {
     const ms = Date.now() - PACIFIC_OFFSET_MS - 24 * 60 * 60 * 1000;
@@ -465,12 +543,10 @@ async function isAccountFinanceAuthDenied(userObjectId, country, region) {
  * Returns a sorted array of YYYY-MM-DD. Excludes yesterday (the daily owns it).
  */
 async function findBrokenFinanceDatesForAccount(userObjectId, country, region) {
-    const yesterday = pacificYesterdayISO();
-    const startDate = (() => {
-        const d = new Date(`${yesterday}T00:00:00.000Z`);
-        d.setUTCDate(d.getUTCDate() - (FINANCE_LOOKBACK_DAYS - 1));
-        return d.toISOString().substring(0, 10);
-    })();
+    // MARKETPLACE-LOCAL, to match the day keys FinanceService writes. Using Pacific here would
+    // ask for a day finance has not produced yet and re-enqueue it forever.
+    const yesterday = marketplaceYesterdayStr(country);
+    const startDate = addDaysToDateStr(yesterday, -(FINANCE_LOOKBACK_DAYS - 1));
 
     // All days in the window.
     const days = [];
@@ -500,7 +576,7 @@ async function findBrokenFinanceDatesForAccount(userObjectId, country, region) {
     ]);
     const daysWithData = new Set(dataAgg.map((r) => r._id));
 
-    const today = new Date(Date.now() - PACIFIC_OFFSET_MS).toISOString().substring(0, 10);
+    const today = marketplaceTodayStr(country);
     const ageDays = (d) => Math.round((new Date(`${today}T00:00:00.000Z`) - new Date(`${d}T00:00:00.000Z`)) / 86400000);
 
     const nowMs = Date.now();
@@ -679,16 +755,18 @@ async function sweepFinanceDeepResync() {
     const queue = getQueue();
     const summary = { accountsScanned: 0, eligible: 0, enqueued: 0, skippedDup: 0, skippedCap: 0, errors: 0, rotation: false, cycleDays: 1, durationMs: 0 };
 
-    // Build the rolling window [today-(N-1) … yesterday] of Pacific dates to re-fetch.
-    const yesterday = pacificYesterdayISO();
-    const todayStr = new Date(Date.now() - PACIFIC_OFFSET_MS).toISOString().substring(0, 10);
-    const windowDates = [];
-    {
-        const d = new Date(`${yesterday}T00:00:00.000Z`);
-        d.setUTCDate(d.getUTCDate() - (FINANCE_DEEP_RESYNC_DAYS - 1));
-        const end = new Date(`${yesterday}T00:00:00.000Z`);
-        while (d <= end) { windowDates.push(d.toISOString().substring(0, 10)); d.setUTCDate(d.getUTCDate() + 1); }
-    }
+    // The rolling window [yesterday-(N-1) … yesterday] is MARKETPLACE-LOCAL, so it is built
+    // per account inside the loop below rather than once here — accounts in different
+    // marketplaces are on different calendar days at the same instant (AU is 17h ahead of
+    // Pacific), and the window has to line up with the day keys FinanceService writes.
+    const deepResyncWindowFor = (country) => {
+        const yesterday = marketplaceYesterdayStr(country);
+        const dates = [];
+        for (let i = FINANCE_DEEP_RESYNC_DAYS - 1; i >= 0; i--) {
+            dates.push(addDaysToDateStr(yesterday, -i));
+        }
+        return { yesterday, windowDates: dates };
+    };
 
     const sellers = await Seller.find(
         { 'sellerAccount.spiRefreshToken': { $exists: true, $ne: null, $ne: '' } },
@@ -751,8 +829,10 @@ async function sweepFinanceDeepResync() {
 
     for (let i = 0; i < perTick; i++) {
         const e = eligible[i];
-        // Date-stamped jobId → at most one deep re-sync per account per day.
-        const jobId = buildDeepResyncJobId(e.user, e.country, e.region, todayStr);
+        const { yesterday, windowDates } = deepResyncWindowFor(e.country);
+        // Date-stamped jobId → at most one deep re-sync per account per day. Stamped with the
+        // account's OWN calendar day, consistent with the window it is about to re-fetch.
+        const jobId = buildDeepResyncJobId(e.user, e.country, e.region, marketplaceTodayStr(e.country));
         let skip;
         try { skip = await shouldSkipEnqueue(queue, jobId); } catch (_) { skip = false; }
         if (skip) {
@@ -869,6 +949,124 @@ async function sweepStaleSessions() {
  *
  * Idempotent and safe to run repeatedly.
  */
+/**
+ * Split sized documents into warn/critical bands.
+ *
+ * Pure and exported so the threshold logic can be tested without a database — the
+ * aggregation below is the only part that needs Mongo, and it does no classification.
+ *
+ * @param {Array<{_id: any, User: any, sizeBytes: number, productCount: number}>} rows
+ * @param {{warnBytes: number, criticalBytes: number}} thresholds
+ * @returns {{warn: Array, critical: Array, worst: Object|null}}
+ */
+function classifyDocumentSizes(rows, { warnBytes, criticalBytes } = {}) {
+    const warnAt = Number.isFinite(warnBytes) ? warnBytes : DOC_SIZE_WARN_BYTES;
+    const criticalAt = Number.isFinite(criticalBytes) ? criticalBytes : DOC_SIZE_CRITICAL_BYTES;
+    const warn = [];
+    const critical = [];
+    let worst = null;
+
+    for (const row of Array.isArray(rows) ? rows : []) {
+        const size = Number(row?.sizeBytes);
+        if (!Number.isFinite(size)) continue;
+        if (!worst || size > Number(worst.sizeBytes)) worst = row;
+        // Bands are exclusive: a critical document is not also counted as a warning,
+        // so `warn.length + critical.length` is the number of distinct accounts.
+        if (size >= criticalAt) critical.push(row);
+        else if (size >= warnAt) warn.push(row);
+    }
+
+    return { warn, critical, worst };
+}
+
+/**
+ * Read-only check for seller documents approaching MongoDB's 16MB ceiling.
+ *
+ * See the DOC_SIZE_* block above for why this is monitoring rather than a fix. It
+ * writes nothing and enqueues nothing; its entire output is a log line.
+ *
+ * Cost: the `$bsonSize` projection forces a full scan of the sellers collection, so
+ * the caller gates this to one tick per day rather than running it every 3 hours.
+ */
+async function sweepDocumentSizes() {
+    const startedAt = Date.now();
+    const summary = {
+        enabled: true, scanned: 0, warned: 0, critical: 0,
+        worstBytes: 0, worstUserId: null, worstProductCount: 0, errors: 0, durationMs: 0,
+    };
+    if (!DOC_SIZE_SWEEP_ENABLED) return { ...summary, enabled: false };
+
+    try {
+        // Project down to four scalars before anything else so the pipeline never
+        // materialises a full seller document (the largest is >8MB) in the cursor.
+        const rows = await Seller.aggregate([
+            {
+                $project: {
+                    User: 1,
+                    sizeBytes: { $bsonSize: '$$ROOT' },
+                    productCount: {
+                        $sum: {
+                            $map: {
+                                input: { $ifNull: ['$sellerAccount', []] },
+                                as: 'acct',
+                                in: { $size: { $ifNull: ['$$acct.products', []] } }
+                            }
+                        }
+                    }
+                }
+            },
+            // Filter server-side: only documents already worth talking about cross the wire.
+            { $match: { sizeBytes: { $gte: DOC_SIZE_WARN_BYTES } } },
+            { $sort: { sizeBytes: -1 } },
+            { $limit: DOC_SIZE_MAX_REPORTED }
+        ]).allowDiskUse(true);
+
+        summary.scanned = rows.length;
+
+        const { warn, critical, worst } = classifyDocumentSizes(rows, {
+            warnBytes: DOC_SIZE_WARN_BYTES,
+            criticalBytes: DOC_SIZE_CRITICAL_BYTES,
+        });
+        summary.warned = warn.length;
+        summary.critical = critical.length;
+
+        if (worst) {
+            summary.worstBytes = Number(worst.sizeBytes) || 0;
+            summary.worstUserId = worst.User ? String(worst.User) : String(worst._id);
+            summary.worstProductCount = Number(worst.productCount) || 0;
+        }
+
+        const describe = (row) => ({
+            userId: row.User ? String(row.User) : String(row._id),
+            sizeMB: +(Number(row.sizeBytes) / (1024 * 1024)).toFixed(2),
+            percentOfLimit: +((Number(row.sizeBytes) / MONGO_MAX_DOC_BYTES) * 100).toFixed(1),
+            productCount: Number(row.productCount) || 0,
+        });
+
+        if (critical.length > 0) {
+            logger.error('[FreshnessSweeper] Seller documents near MongoDB 16MB limit', {
+                count: critical.length,
+                thresholdMB: +(DOC_SIZE_CRITICAL_BYTES / (1024 * 1024)).toFixed(2),
+                documents: critical.map(describe),
+            });
+        }
+        if (warn.length > 0) {
+            logger.warn('[FreshnessSweeper] Large seller documents', {
+                count: warn.length,
+                thresholdMB: +(DOC_SIZE_WARN_BYTES / (1024 * 1024)).toFixed(2),
+                documents: warn.map(describe),
+            });
+        }
+    } catch (error) {
+        summary.errors++;
+        logger.error('[FreshnessSweeper] Document-size sweep failed', { error: error?.message });
+    }
+
+    summary.durationMs = Date.now() - startedAt;
+    logger.info('[FreshnessSweeper] Document-size sweep complete', summary);
+    return summary;
+}
+
 async function sweepStalledPipelines() {
     const summary = {
         enabled: true, scanned: 0, frozen: 0, recovered: 0, blocked: 0,
@@ -938,8 +1136,16 @@ async function sweepStalledPipelines() {
             //
             // This is what stops the sweep fighting a long-but-healthy run: a phase
             // legitimately mid-flight keeps its JobStatus row warm. It also covers the
-            // ads/finance `-pollN` job ids, which getAllPhaseJobIds does not enumerate,
-            // so producer.js's own dedup is blind to them.
+            // ads/finance `-pollN` job ids, which getAllPhaseJobIds does not enumerate.
+            //
+            // NOT the same check producer.hasLiveAccountPhase runs — an earlier comment here
+            // claimed it was, and that was wrong in both directions. This query has no `status`
+            // filter, so ANY recent row counts, including a terminal one; that is right HERE
+            // (this sweep only touches docs already frozen 9h, so being conservative costs
+            // nothing) but would be wrong in the producer, where it would block an account for an
+            // hour after a SUCCESSFUL finish. The producer instead asks BullMQ directly whether
+            // work is pending, which is the only signal that distinguishes "in flight" from
+            // "recently touched" — see producer.hasLiveAccountPhase.
             const live = await JobStatus.findOne({
                 jobId: { $regex: `^scheduled-${userId}-${country}-${region}` },
                 updatedAt: { $gt: quietBefore },
@@ -1025,16 +1231,25 @@ module.exports = {
     sweepFinanceDeepResync,
     sweepStaleSessions,
     sweepStalledPipelines,
+    sweepDocumentSizes,
+    classifyDocumentSizes,
     findMissingDatesForAccount,
     findBrokenFinanceDatesForAccount,
     buildCatchupJobId,
     buildFinanceCatchupJobId,
     buildDeepResyncJobId,
     // Exposed for tests / scripts
+    CATCHUP_JOB_OPTS,
+    CATCHUP_JOB_PRIORITY,
     ADS_LOOKBACK_DAYS,
     MAX_ENQUEUES_PER_TICK,
     FINANCE_LOOKBACK_DAYS,
     FINANCE_DEEP_RESYNC_DAYS,
     PIPELINE_STALL_MAX_AGE_HOURS,
     PIPELINE_STALL_MAX_RECOVERIES_PER_TICK,
+    // Exported so a test can pin it against producer.HEARTBEAT_STALE_MS: the two gate the same
+    // decision from opposite sides and must not drift apart.
+    PIPELINE_STALL_QUIET_MINUTES,
+    DOC_SIZE_WARN_BYTES,
+    DOC_SIZE_CRITICAL_BYTES,
 };

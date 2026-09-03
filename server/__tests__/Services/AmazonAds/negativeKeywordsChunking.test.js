@@ -18,6 +18,17 @@ jest.mock('axios');
 jest.mock('../../../models/amazon-ads/NegetiveKeywords.js', () => ({
     findOneAndUpdate: jest.fn(),
 }));
+// The snapshot is now written through persistChunkedSnapshot, which ALWAYS clears stale
+// overflow chunks first (a set that shrank must not leave higher-index chunks behind). That
+// makes NegativeKeywordChunk a real collaborator of this service, so it has to be mocked —
+// left unmocked, `deleteMany` buffers against a connection that doesn't exist in unit tests
+// and every case here times out. Every assertion below is unchanged: these fixtures are far
+// under SNAPSHOT_CHUNK_SIZE, so the write still takes the inline `findOneAndUpdate` path
+// with `$set.negativeKeywordsData`, exactly as before chunking existed.
+jest.mock('../../../models/amazon-ads/negativeKeywordChunkModel.js', () => ({
+    deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }),
+    updateOne: jest.fn().mockResolvedValue({}),
+}));
 // Chunk pacing exists to avoid 429s in production; zero it so tests don't sleep. Must be set
 // before the require below (read into a module-level const at load time), and restored in afterAll
 // so it cannot leak into other suites — jest workers share one process and do not reset env.

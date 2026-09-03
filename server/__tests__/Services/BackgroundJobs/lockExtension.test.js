@@ -130,19 +130,21 @@ describe('normal operation is unchanged', () => {
     });
 });
 
-describe('resolveCeiling — the calc_review carve-out', () => {
-    // Measured over 1,384 completed production phases: every phase except calc_review
-    // stays under 2h, while calc_review legitimately reached 23.8h. A flat 3h ceiling
-    // would have wrongly reclaimed 4 real calc_review runs — and a reclaimed job is
-    // RE-RUN, so for a phase that ingests and SENDS review requests that means duplicate
-    // messages to real customers. Too-low is the dangerous direction, not too-high.
+describe('resolveCeiling — the long-ceiling mechanism', () => {
+    // This exercises the FUNCTION with a hypothetical carve-out set. No phase is currently
+    // in worker.js's LONG_PHASES — see the separate describe block below for that.
+    //
+    // Measured over 1,384 completed production phases: every phase stayed under 2h except
+    // calc_review, which reached 23.8h. That is why the mechanism exists. It is also why
+    // too-low was the dangerous direction: a reclaimed job is RE-RUN, and calc_review used
+    // to send review requests, so a false reclaim meant duplicate messages to real buyers.
     const CFG = { defaultMs: 3 * 3600_000, longMs: 26 * 3600_000, longPhases: new Set(['sched_calc_review']) };
 
     test('an ordinary phase gets the tight default', () => {
         expect(resolveCeiling('sched_ads', CFG)).toBe(CFG.defaultMs);
     });
 
-    test('calc_review gets the long ceiling, above its observed 23.8h max', () => {
+    test('a phase IN the set gets the long ceiling', () => {
         expect(resolveCeiling('sched_calc_review', CFG)).toBe(CFG.longMs);
         expect(CFG.longMs).toBeGreaterThan(23.8 * 3600_000);
     });
@@ -162,6 +164,37 @@ describe('resolveCeiling — the calc_review carve-out', () => {
 
     test('tolerates a missing longPhases set', () => {
         expect(resolveCeiling('sched_ads', { defaultMs: 1, longMs: 2 })).toBe(1);
+    });
+
+    test('an EMPTY set means every phase gets the tight default', () => {
+        // worker.js's actual configuration since the review services moved out.
+        const empty = { ...CFG, longPhases: new Set() };
+        expect(resolveCeiling('sched_calc_review', empty)).toBe(empty.defaultMs);
+        expect(resolveCeiling('sched_ads', empty)).toBe(empty.defaultMs);
+        // ...but the phaseless legacy job is decided BEFORE the set is consulted, so it
+        // keeps the long ceiling regardless. Emptying the set must not change that.
+        expect(resolveCeiling(undefined, empty)).toBe(empty.longMs);
+    });
+});
+
+describe('calc_review no longer has a carve-out', () => {
+    /**
+     * WHY THIS IS A SOURCE ASSERTION. worker.js assigns module.exports inside startWorker(),
+     * so requiring it here to read LONG_PHASES would mean booting a worker. Reading the
+     * declaration is enough to pin the thing that matters.
+     *
+     * THE DEFECT IT GUARDS. calc_review had a 26h lock ceiling because it legitimately ran
+     * that long — it did review ingestion and sending. Those moved to review-worker, so the
+     * phase is batch 5 only and the allowance became 26 hours of a wedged job holding a
+     * worker slot before anything reacted. Putting calc_review back in this set without
+     * moving the review services back would restore that blind spot.
+     */
+    test('worker.js declares an empty LONG_PHASES', () => {
+        const src = require('fs').readFileSync(
+            require('path').join(__dirname, '../../../Services/BackgroundJobs/worker.js'), 'utf8'
+        );
+        expect(src).toMatch(/const LONG_PHASES = new Set\(\);/);
+        expect(src).not.toMatch(/const LONG_PHASES = new Set\(\[/);
     });
 });
 

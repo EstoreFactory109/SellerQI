@@ -131,31 +131,80 @@ describe('saveProductWiseSponsoredAdsData — delete scoping', () => {
     });
 });
 
-describe('saveProductWiseFromRows — async adapter entry point', () => {
-    // Driven separately from the service so the usable/failed derivation is pinned on its own.
-    const { adsAsync } = require('../../../Services/AmazonAds/GetPPCProductWise.js');
-    const row = (adType, status, result = null) => ({ params: { adType }, status, result });
+/**
+ * The per-ad-type save that the async `finalize` now performs.
+ *
+ * `finalize` used to return the whole mapped report as `result` for the engine to stash on the
+ * AsyncReportRequest row, so a later `saveFromRows` could combine SP + SD. That row grew to 15.13MB
+ * in production and then failed the write outright past MongoDB's 16MB ceiling, discarding the
+ * report it had just downloaded. Each ad type now saves itself, one at a time.
+ *
+ * Which makes the ADOPTION step (half 2 in the header above) load-bearing in a new way: SP saving
+ * and SD saving are now two separate calls, so each must carry the other type's rows into its own
+ * batch or the newest-batch readers would see only whichever type finished last.
+ */
+describe('per-ad-type save composes SP and SD into one visible batch', () => {
+    test('saving SP alone adopts the existing SD rows into the new batch', async () => {
+        await saveProductWiseSponsoredAdsData(USER, 'US', 'NA', [item('SP', '2026-07-20')], {
+            usableAdTypes: ['SP'],
+        });
 
-    test('SP DONE + SD FAILED passes usableAdTypes: [SP], so SD survives', async () => {
+        expect(mockDeleteMany.mock.calls[0][0].adType).toEqual({ $in: ['SP'] });
+        // SD is preserved, and re-stamped so the dashboard's newest-batch read still sees it.
+        expect(mockUpdateMany).toHaveBeenCalledTimes(1);
+        expect(mockUpdateMany.mock.calls[0][0].adType).toEqual({ $in: ['SD'] });
+    });
+
+    // THE GAP per-type saving introduces. Adoption is normally scoped to the dates present in THIS
+    // save. With one type at a time, a day the OTHER type has and this one does not would be left
+    // behind on the previous batch — present in the collection, invisible to every reader, and
+    // purged by deleteOldBatches within three runs. Passing the report window closes it.
+    test('preserveDateRange widens adoption to the whole report window', async () => {
+        await saveProductWiseSponsoredAdsData(USER, 'US', 'NA', [item('SP', '2026-07-20')], {
+            usableAdTypes: ['SP'],
+            preserveDateRange: { startDate: '2026-07-01', endDate: '2026-07-31' },
+        });
+
+        expect(mockUpdateMany.mock.calls[0][0].date).toEqual({ $gte: '2026-07-01', $lte: '2026-07-31' });
+    });
+
+    test('without preserveDateRange adoption stays scoped to this save\'s dates', async () => {
+        await saveProductWiseSponsoredAdsData(USER, 'US', 'NA', [item('SP', '2026-07-20')], {
+            usableAdTypes: ['SP'],
+        });
+
+        expect(mockUpdateMany.mock.calls[0][0].date).toEqual({ $in: ['2026-07-20'] });
+    });
+});
+
+describe('saveProductWiseFromRows — clears measured-but-empty ad types', () => {
+    const { adsAsync } = require('../../../Services/AmazonAds/GetPPCProductWise.js');
+    const WINDOW = { startDate: '2026-07-01', endDate: '2026-07-31' };
+    const row = (adType, status) => ({ params: { adType, ...WINDOW }, status });
+
+    // The report ran and this account genuinely has no SD spend, so stale SD rows must go.
+    // Preserving them would over-report spend forever. This case cannot be handled in finalize —
+    // an ad type whose `submit` returned null never gets a finalize at all.
+    test('SD NO_DATA clears SD rows across the report window', async () => {
         await adsAsync.saveFromRows(USER, 'US', 'NA', 'p1', [
-            row('SP', 'DONE', [item('SP', '2026-07-20')]),
+            row('SP', 'DONE'),
+            row('SD', 'NO_DATA'),
+        ]);
+
+        expect(mockDeleteMany).toHaveBeenCalledTimes(1);
+        expect(mockDeleteMany.mock.calls[0][0].adType).toEqual({ $in: ['SD'] });
+        expect(mockDeleteMany.mock.calls[0][0].date).toEqual({ $gte: '2026-07-01', $lte: '2026-07-31' });
+    });
+
+    // THE REGRESSION, in the direction that destroys data: FAILED means we do not know, so the
+    // stored rows must survive. Collapsing it with NO_DATA is what wiped real spend.
+    test('SD FAILED clears nothing', async () => {
+        await adsAsync.saveFromRows(USER, 'US', 'NA', 'p1', [
+            row('SP', 'DONE'),
             row('SD', 'FAILED'),
         ]);
 
-        expect(mockDeleteMany.mock.calls[0][0].adType).toEqual({ $in: ['SP'] });
-        expect(mockUpdateMany).toHaveBeenCalledTimes(1);
-    });
-
-    test('SD NO_DATA counts as measured, so its rows ARE cleared', async () => {
-        // The mirror of the above: the report ran and this account genuinely has no SD spend, so stale
-        // SD rows must go. Preserving them would over-report spend forever.
-        await adsAsync.saveFromRows(USER, 'US', 'NA', 'p1', [
-            row('SP', 'DONE', [item('SP', '2026-07-20')]),
-            row('SD', 'NO_DATA', []),
-        ]);
-
-        expect(mockDeleteMany.mock.calls[0][0].adType).toEqual({ $in: ['SP', 'SD'] });
-        expect(mockUpdateMany).not.toHaveBeenCalled();
+        expect(mockDeleteMany).not.toHaveBeenCalled();
     });
 
     test('every report FAILED touches nothing', async () => {
@@ -165,6 +214,17 @@ describe('saveProductWiseFromRows — async adapter entry point', () => {
         ]);
 
         expect(res.documentsSaved).toBe(0);
+        expect(mockDeleteMany).not.toHaveBeenCalled();
+        expect(mockInsertMany).not.toHaveBeenCalled();
+    });
+
+    // All types succeeded, so both already saved themselves in finalize.
+    test('all types DONE touches nothing — finalize already saved them', async () => {
+        await adsAsync.saveFromRows(USER, 'US', 'NA', 'p1', [
+            row('SP', 'DONE'),
+            row('SD', 'DONE'),
+        ]);
+
         expect(mockDeleteMany).not.toHaveBeenCalled();
         expect(mockInsertMany).not.toHaveBeenCalled();
     });

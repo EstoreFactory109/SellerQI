@@ -42,6 +42,21 @@ const SUNDAY_FUNCTIONS = {
     //     isDefaultExport: true
     // },
 
+    // Listing items for ACTIVE SKUs (one GET per SKU).
+    // Weekly rather than daily: this endpoint supplies `has_b2b_pricing` and the
+    // backend generic_keyword, both of which are listing configuration that rarely
+    // changes, and a daily run would cost ~1 call per active SKU per account per day.
+    // NOTE: this entry is NOT dispatched through the promise registry — it is handled
+    // inline in ScheduledIntegration.fetchScheduledApiData (it needs paired sku/asin
+    // arrays and persists its own results). The entry exists so the inline block knows
+    // today is a day it should run. It is assigned to batch 4 (sched_batch_4).
+    'GetListingItem': {
+        service: require('../Sp_API/GetListingItemsIssues.js'),
+        functionName: 'GetListingItem',
+        description: 'Listing Items (Active SKUs)',
+        requiresAccessToken: true,
+        apiDataKey: 'listingItems'
+    },
     // Issue calculation - runs after productReview to update issue counts
     // This calculates/updates IssueSummary and per-product issueCount
     'issueSummary': {
@@ -83,15 +98,6 @@ const MON_WED_FRI_FUNCTIONS = {
         description: 'MCP SalesOnly Data',
         requiresRefreshToken: true,
         apiDataKey: 'mcpEconomicsData'
-    },
-    // Review Order Ingestion - fetches recent shipped orders + items from SP-API
-    'reviewOrderIngestion': {
-        service: require('../review/scheduledReviewIngestionProcessor.js'),
-        functionName: 'scheduledReviewIngestion',
-        description: 'Review Order Ingestion',
-        apiDataKey: 'reviewOrderIngestion',
-        isCalculationService: true,
-        runOrder: 97
     },
 };
 
@@ -299,15 +305,6 @@ const DAILY_FUNCTIONS = {
         description: 'MCP BuyBox Data',
         requiresRefreshToken: true,
         apiDataKey: 'mcpBuyBoxData'
-    },
-    // Review Request Sender - checks eligibility + sends solicitations for unsent orders (5-30 day window)
-    'reviewRequestSender': {
-        service: require('../review/scheduledReviewRequestProcessor.js'),
-        functionName: 'scheduledReviewRequestSender',
-        description: 'Review Request Sender',
-        apiDataKey: 'reviewRequestSender',
-        isCalculationService: true,
-        runOrder: 98
     },
     // Unified Finance Sync - Sales Report + Finance API → DailySkuFinance,
     // DailyOverheadFinance, AsinRelationship, FinanceSyncLog. Runs daily so
