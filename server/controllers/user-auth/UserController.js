@@ -13,6 +13,12 @@ const mongoose = require('mongoose');
 
 const { uploadToCloudinary } = require('../../Services/Cloudinary/Cloudinary.js');
 const AgencyAdminService = require('../../Services/User/AgencyAdminService.js');
+const {
+    createManagedClient,
+    listManagedClients,
+    issueClientSession,
+    agencyClientQuery,
+} = require('../../Services/User/ManagedClientService.js');
 const { sendEmailResetLink } = require('../../Services/Email/SendResetLink.js');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
@@ -147,83 +153,48 @@ const registerAgencyClient = asyncHandler(async (req, res) => {
         return res.status(409).json(new ApiResponse(409, "", "User already exists"));
     }
 
-    try {
-        // Agency clients do not have passwords - they can only be accessed via agency owner
-        // Create the client user with agencyId set to agency owner
-        const newClient = new UserModel({
-            firstName: firstname,
-            lastName: lastname,
-            phone: phone,
-            whatsapp: phone, // Use phone as whatsapp for simplicity
-            email: email,
-            // No password stored for agency clients
-            isVerified: true, // Auto-verify agency clients
-            allTermsAndConditionsAgreed: allTermsAndConditionsAgreed || true,
-            packageType: 'PRO', // Give clients PRO access by default
-            agencyId: agencyOwnerId, // Store the agency owner's ID
-            isAgencyClient: true, // Mark as agency client
-            adminId: agencyOwnerId, // Keep for backward compatibility
-            OTP: null
-        });
+    // Provisioning (create, tokens, scheduling) is shared with the ESF portal.
+    const result = await createManagedClient({
+        firstname,
+        lastname,
+        phone,
+        email,
+        allTermsAndConditionsAgreed,
+        ownership: {
+            agencyId: agencyOwnerId,   // current ownership field
+            adminId: agencyOwnerId,    // kept for backward compatibility
+            isAgencyClient: true,
+        },
+    });
 
-        const savedClient = await newClient.save();
-
-        if (!savedClient) {
-            logger.error(new ApiError(500, "Internal server error in creating client"));
-            return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating client"));
-        }
-
-        // Create tokens for the new client (switch to client context)
-        const AccessToken = await createAccessToken(savedClient._id);
-        const RefreshToken = await createRefreshToken(savedClient._id);
-
-        if (!AccessToken || !RefreshToken) {
-            logger.error(new ApiError(500, "Internal server error in creating tokens"));
-            return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating tokens"));
-        }
-
-        // Update client with refresh token
-        await UserModel.findOneAndUpdate(
-            { _id: savedClient._id },
-            { $set: { appRefreshToken: RefreshToken } },
-            { new: true }
-        );
-
-        // Initialize background job scheduling for the new client
-        try {
-            await UserSchedulingService.initializeUserSchedule(savedClient._id);
-            logger.info(`Background job scheduling initialized for client ${savedClient._id}`);
-        } catch (error) {
-            logger.error(`Failed to initialize scheduling for client ${savedClient._id}:`, error);
-            // Don't fail the registration process if scheduling fails
-        }
-
-        // Create admin token for the agency owner (to be stored in localStorage)
-        const AdminAccessToken = await createAccessToken(agencyOwnerId);
-
-        const options = getHttpsCookieOptions();
-
-        // Set cookies for the client (the user will operate as the client)
-        // Also return admin token in response for localStorage storage
-        res.status(201)
-            .cookie("IBEXAccessToken", AccessToken, options)
-            .cookie("IBEXRefreshToken", RefreshToken, options)
-            .json(new ApiResponse(201, {
-                clientId: savedClient._id,
-                firstName: savedClient.firstName,
-                lastName: savedClient.lastName,
-                email: savedClient.email,
-                // Admin token for the agency owner
-                adminToken: AdminAccessToken,
-                adminId: agencyOwnerId,
-                adminAccessType: agencyOwner.accessType || 'enterpriseAdmin',
-                agencyName: agencyOwner.agencyName || ''
-            }, "Client registered successfully"));
-
-    } catch (error) {
-        logger.error(new ApiError(500, `Error creating client: ${error.message}`));
-        return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating client"));
+    if (!result.ok) {
+        logger.error(new ApiError(result.status, result.message));
+        return res.status(result.status).json(new ApiResponse(result.status, "", result.message));
     }
+
+    const savedClient = result.client;
+
+    // Create admin token for the agency owner (to be stored in localStorage)
+    const AdminAccessToken = await createAccessToken(agencyOwnerId);
+
+    const options = getHttpsCookieOptions();
+
+    // Set cookies for the client (the user will operate as the client)
+    // Also return admin token in response for localStorage storage
+    res.status(201)
+        .cookie("IBEXAccessToken", result.accessToken, options)
+        .cookie("IBEXRefreshToken", result.refreshToken, options)
+        .json(new ApiResponse(201, {
+            clientId: savedClient._id,
+            firstName: savedClient.firstName,
+            lastName: savedClient.lastName,
+            email: savedClient.email,
+            // Admin token for the agency owner
+            adminToken: AdminAccessToken,
+            adminId: agencyOwnerId,
+            adminAccessType: agencyOwner.accessType || 'enterpriseAdmin',
+            agencyName: agencyOwner.agencyName || ''
+        }, "Client registered successfully"));
 });
 
 const verifyUser = asyncHandler(async (req, res) => {
@@ -400,6 +371,18 @@ const loginUser = asyncHandler(async (req, res) => {
     if (checkUserIfExists.isAgencyClient === true || checkUserIfExists.agencyId) {
         logger.warn(`Agency client ${checkUserIfExists.email} attempted direct login`);
         return res.status(403).json(new ApiResponse(403, "", "Agency clients cannot login directly. Please contact your agency administrator."));
+    }
+
+    // Same rule for ESF-managed clients — reachable only via the ESF portal.
+    if (checkUserIfExists.isEsfClient === true) {
+        logger.warn(`ESF client ${checkUserIfExists.email} attempted direct login`);
+        return res.status(403).json(new ApiResponse(403, "", "This account is managed by eStore Factory. Please contact your account manager."));
+    }
+
+    // ESF staff sign in at the ESF portal (/app/esf/login), not here.
+    if (checkUserIfExists.accessType === 'esfUser') {
+        logger.warn(`ESF staff ${checkUserIfExists.email} attempted seller login`);
+        return res.status(403).json(new ApiResponse(403, "", "Please sign in through the eStore Factory portal."));
     }
 
     if (checkUserIfExists.isVerified === false) {
@@ -1798,72 +1781,9 @@ const getAdminClients = asyncHandler(async (req, res) => {
     }
 
     try {
-        // Query by agencyId (new field) OR adminId (legacy field) for backward compatibility
-        const clients = await UserModel.find({
-            $or: [
-                { agencyId: adminId },
-                { adminId: adminId }
-            ]
-        })
-            .select('firstName lastName email phone createdAt subscriptionStatus packageType agencyId isAgencyClient')
-            .sort({ createdAt: -1 });
-
-        // Check Amazon connection status for each client
-        const clientsWithConnectionStatus = await Promise.all(
-            clients.map(async (client) => {
-                const clientObj = client.toObject();
-
-                // Find seller central document for this client
-                const sellerDocument = await SellerCentralModel.findOne({ User: client._id });
-
-                if (!sellerDocument || !sellerDocument.sellerAccount || sellerDocument.sellerAccount.length === 0) {
-                    // No seller document or no seller account
-                    return {
-                        ...clientObj,
-                        amazonStatus: 'Not Connected',
-                        amazonConnected: false,
-                        hasSpApi: false,
-                        hasAdsApi: false,
-                        brandName: null,
-                        marketplace: null,
-                        connectedDate: null
-                    };
-                }
-
-                const sellerAccount = sellerDocument.sellerAccount[0];
-                const hasSpiToken = sellerAccount.spiRefreshToken && sellerAccount.spiRefreshToken.trim() !== '';
-                const hasAdsToken = sellerAccount.adsRefreshToken && sellerAccount.adsRefreshToken.trim() !== '';
-
-                let amazonStatus = 'Not Connected';
-                let amazonConnected = false;
-
-                if (hasSpiToken && hasAdsToken) {
-                    amazonStatus = 'Connected';
-                    amazonConnected = true;
-                } else if (hasSpiToken && !hasAdsToken) {
-                    amazonStatus = 'Seller Central';
-                    amazonConnected = true;
-                } else if (!hasSpiToken && hasAdsToken) {
-                    amazonStatus = 'Amazon Ads';
-                    amazonConnected = true;
-                } else {
-                    amazonStatus = 'Not Connected';
-                    amazonConnected = false;
-                }
-
-                return {
-                    ...clientObj,
-                    amazonStatus,
-                    amazonConnected,
-                    hasSpApi: hasSpiToken,
-                    hasAdsApi: hasAdsToken,
-                    brandName: sellerDocument.brand || null,
-                    marketplace: amazonConnected ? (sellerAccount.country || null) : null,
-                    region: amazonConnected ? (sellerAccount.region || null) : null,
-                    connectedDate: amazonConnected ? sellerDocument.createdAt : null
-                };
-            })
-        );
+        // Listing + Amazon connection summary is shared with the ESF portal.
+        // Query matches agencyId (current) OR adminId (legacy) for compatibility.
+        const clientsWithConnectionStatus = await listManagedClients(agencyClientQuery(adminId));
 
         return res.status(200).json(new ApiResponse(200, clientsWithConnectionStatus, "Admin clients fetched successfully"));
     } catch (error) {
@@ -1945,23 +1865,13 @@ const switchToClient = asyncHandler(async (req, res) => {
         return res.status(404).json(new ApiResponse(404, "", "Client not found"));
     }
 
-    const accessToken = await createAccessToken(client._id);
-    const refreshToken = await createRefreshToken(client._id);
-    if (!accessToken || !refreshToken) {
-        logger.error(new ApiError(500, "Failed to create tokens"));
-        return res.status(500).json(new ApiResponse(500, "", "Failed to create tokens"));
+    // Token minting + location resolution is shared with the ESF portal.
+    const session = await issueClientSession(client._id);
+    if (!session.ok) {
+        logger.error(new ApiError(session.status, session.message));
+        return res.status(session.status).json(new ApiResponse(session.status, "", session.message));
     }
-
-    await UserModel.findByIdAndUpdate(client._id, { appRefreshToken: refreshToken });
-
-    const sellerCentral = await SellerCentralModel.findOne({ User: client._id });
-    let locationToken;
-    if (!sellerCentral || !sellerCentral.sellerAccount?.length) {
-        locationToken = await createLocationToken("US", "NA");
-    } else {
-        const acc = sellerCentral.sellerAccount[0];
-        locationToken = await createLocationToken(acc.country || "US", acc.region || "NA");
-    }
+    const { accessToken, refreshToken, locationToken } = session;
 
     const options = getHttpsCookieOptions();
     const responseData = {

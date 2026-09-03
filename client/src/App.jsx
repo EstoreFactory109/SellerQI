@@ -60,6 +60,16 @@ import AgencyClientProfileSelection from './Pages/Agency/Client/AgencyClientProf
 import AgencyAnalysingAccount from './Pages/Agency/Client/AgencyAnalysingAccount.jsx';
 import ManageAccountsLayout from './Layout/ManageAccountsLayout.jsx';
 import ManageAccounts from './Pages/Account/ManageAccounts.jsx';
+import EsfLayout from './Layout/EsfLayout.jsx';
+import EsfClientLayout from './Layout/EsfClientLayout.jsx';
+import ProtectedEsfRouteWrapper from './Layout/ProtectedEsfRouteWrapper.jsx';
+import EsfLogin from './Pages/ESF/EsfLogin.jsx';
+import EsfClients from './Pages/ESF/EsfClients.jsx';
+import EsfUsers from './Pages/ESF/EsfUsers.jsx';
+import EsfSettings from './Pages/ESF/EsfSettings.jsx';
+import EsfClientConnectToAmazon from './Pages/ESF/Client/EsfClientConnectToAmazon.jsx';
+import EsfClientConnectAccounts from './Pages/ESF/Client/EsfClientConnectAccounts.jsx';
+import EsfClientProfileSelection from './Pages/ESF/Client/EsfClientProfileSelection.jsx';
 import AdminSubscription from './Pages/Admin/Subscription.jsx';
 import AdminEmailLogs from './Pages/Admin/EmailLogs.jsx';
 import AdminPaymentLogs from './Pages/Admin/PaymentLogs.jsx';
@@ -145,6 +155,29 @@ const App = () => {
           <Route path='profile-selection' element={<AgencyClientProfileSelection />} />
         </Route>
         <Route path='/agency-analysing-account' element={<AgencyAnalysingAccount />} />
+        {/* eStore Factory internal staff portal. Guarded server-side by
+            GET /app/esf/me, so a stale localStorage flag cannot render it. */}
+        <Route path='/esf-login' element={<EsfLogin />} />
+        <Route
+          element={
+            <ProtectedEsfRouteWrapper>
+              <Outlet />
+            </ProtectedEsfRouteWrapper>
+          }
+        >
+          <Route path='/esf' element={<EsfLayout />}>
+            <Route index element={<Navigate to="clients" replace />} />
+            <Route path='clients' element={<EsfClients />} />
+            <Route path='users' element={<EsfUsers />} />
+            <Route path='settings' element={<EsfSettings />} />
+          </Route>
+          <Route path='/esf/client/:clientId' element={<EsfClientLayout />}>
+            <Route index element={<Navigate to="connect-to-amazon" replace />} />
+            <Route path='connect-to-amazon' element={<EsfClientConnectToAmazon />} />
+            <Route path='connect-accounts' element={<EsfClientConnectAccounts />} />
+            <Route path='profile-selection' element={<EsfClientProfileSelection />} />
+          </Route>
+        </Route>
         <Route path='/manage-accounts' element={<ManageAccountsLayout />}>
           <Route index element={<ManageAccounts />} />
           <Route path='subscription' element={<AdminSubscription />} />

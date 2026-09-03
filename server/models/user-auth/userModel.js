@@ -88,8 +88,31 @@ const userSchema = new mongoose.Schema(
       accessType: {
         type: String,
         required: [true, "Access type is required"],
-        enum: ["user", "superAdmin", "enterpriseAdmin"],
+        // "esfUser" = internal eStore Factory staff. They sign in at the ESF
+        // portal only (blocked from /app/login) and manage ESF clients.
+        enum: ["user", "superAdmin", "enterpriseAdmin", "esfUser"],
         default: "user"
+      },
+      // True if this user is a client created through the ESF staff portal.
+      // Deliberately separate from isAgencyClient/agencyId so ESF clients never
+      // appear in an agency owner's list (their queries match agencyId/adminId).
+      isEsfClient: {
+        type: Boolean,
+        default: false,
+      },
+      // Which staff member added this client. Audit only — every ESF staff
+      // member can see every ESF client.
+      esfAddedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: false,
+        default: null,
+      },
+      // Stamped on ESF portal login; shown in the portal's team member list.
+      lastLoginAt: {
+        type: Date,
+        required: false,
+        default: null,
       },
       packageType:{
         type:String,
@@ -227,6 +250,10 @@ userSchema.index({ isAgencyClient: 1 });
 userSchema.index({ packageType: 1, subscriptionStatus: 1 });
 userSchema.index({ isVerified: 1, packageType: 1 });
 userSchema.index({ agencyId: 1, isAgencyClient: 1 });
+// ESF portal: list all staff-managed clients, newest first
+userSchema.index({ isEsfClient: 1, createdAt: -1 });
+// ESF portal: list staff accounts
+userSchema.index({ accessType: 1 });
 // Used by the six-month inactivity cleanup cron to scan candidates efficiently
 userSchema.index({ purgedAt: 1 });
 userSchema.index({ sixMonthWarningSentAt: 1 });

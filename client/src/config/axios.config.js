@@ -54,7 +54,10 @@ axiosInstance.interceptors.response.use(
                                   currentPath.includes('/connect-to-amazon') ||
                                   currentPath.includes('/auth/callback') ||
                                   currentPath.startsWith('/agency/') ||
-                                  currentPath.startsWith('/manage-agency');
+                                  currentPath.startsWith('/manage-agency') ||
+                                  // ESF portal has its own ESFToken cookie — refreshing the
+                                  // seller token cannot fix its 401s, so let it handle them.
+                                  currentPath.startsWith('/esf');
     
     // Handle 401 Unauthorized errors - try to refresh token first
     if (statusCode === 401 && !isLogoutRequest && !isFromConnectAccounts && !isRefreshRequest && !originalRequest._retry) {

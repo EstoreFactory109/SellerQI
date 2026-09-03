@@ -51,7 +51,9 @@ const REGION_NAMES = {
   'FE': 'Far East'
 };
 
-const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = '' }) => {
+// `basePath`, when given, overrides the agency-derived client route prefix so
+// other portals (e.g. the ESF staff portal) can reuse this flow unchanged.
+const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = '', basePath = '' }) => {
   const [marketPlace, setMarketPlace] = useState("");
   const [region, setRegion] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -153,7 +155,9 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
       // Redirect to connect accounts page with region and country parameters
       if (response.status === 201) {
         setLoading(false);
-        if (isAgencyContext && clientId && agencyName) {
+        if (basePath) {
+          navigate(`${basePath}/connect-accounts?country=${marketPlace}&region=${region}`);
+        } else if (isAgencyContext && clientId && agencyName) {
           navigate(`/agency/${encodeURIComponent(agencyName)}/client/${clientId}/connect-accounts?country=${marketPlace}&region=${region}`);
         } else {
           navigate(`/connect-accounts?country=${marketPlace}&region=${region}`);
