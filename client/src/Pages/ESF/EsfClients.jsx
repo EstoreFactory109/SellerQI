@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 import EsfAddClientForm from '../../Components/ESF/EsfAddClientForm.jsx';
+import EsfExistingUsersPicker from '../../Components/ESF/EsfExistingUsersPicker.jsx';
 import { isPasswordValid, passwordErrorMessage } from '../../utils/passwordCriteria.js';
 
 const ITEMS_PER_PAGE = 10;
@@ -40,12 +41,16 @@ const EsfClients = () => {
   const [openDropdownId, setOpenDropdownId] = useState(null);
   const [dropdownPosition, setDropdownPosition] = useState(null);
   const [showAddClientModal, setShowAddClientModal] = useState(false);
+  const [addClientTab, setAddClientTab] = useState('new'); // 'new' | 'existing'
   const dropdownRef = useRef(null);
   const openDropdownButtonRef = useRef(null);
 
-  const fetchClients = async () => {
+  const fetchClients = async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
+      // `silent` refreshes the table without flipping `loading` — the add-client
+      // modal renders inside the !loading branch, so toggling it would unmount
+      // the modal mid-use.
+      if (!silent) setLoading(true);
       setError('');
       const res = await axiosInstance.get('/app/esf/clients');
       if (res.data?.statusCode === 200 && Array.isArray(res.data.data)) {
@@ -61,7 +66,7 @@ const EsfClients = () => {
       }
       setError(err.response?.data?.message || 'Failed to load clients');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -451,7 +456,7 @@ const EsfClients = () => {
                   aria-labelledby="esf-add-client-modal-title"
                 >
                   <div
-                    className="bg-[#101722] rounded-2xl border border-white/10 w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl"
+                    className="bg-[#101722] rounded-2xl border border-white/10 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="flex items-center justify-between p-4 md:p-5 border-b border-white/10">
@@ -463,7 +468,11 @@ const EsfClients = () => {
                           <h2 id="esf-add-client-modal-title" className="text-lg font-semibold text-gray-100">
                             Add client
                           </h2>
-                          <p className="text-xs text-gray-500">Create a new client in the eStore Factory portal</p>
+                          <p className="text-xs text-gray-500">
+                            {addClientTab === 'new'
+                              ? 'Create a brand new client account'
+                              : 'Adopt an existing SellerQI seller'}
+                          </p>
                         </div>
                       </div>
                       <button
@@ -475,21 +484,56 @@ const EsfClients = () => {
                         <XIcon className="w-5 h-5" />
                       </button>
                     </div>
+                    {/* Two ways in: create a fresh account, or adopt a seller
+                        who already has one. */}
+                    <div className="flex items-center gap-1 px-4 md:px-6 pt-4 border-b border-white/10">
+                      {[
+                        { key: 'new', label: 'New client' },
+                        { key: 'existing', label: 'Existing users' },
+                      ].map((tab) => (
+                        <button
+                          key={tab.key}
+                          type="button"
+                          onClick={() => setAddClientTab(tab.key)}
+                          className={`px-4 py-2.5 text-sm font-medium transition-colors -mb-px border-b-2 ${
+                            addClientTab === tab.key
+                              ? 'text-gray-100 border-blue-500'
+                              : 'text-gray-500 border-transparent hover:text-gray-300'
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
+
                     <div className="p-4 md:p-6">
-                      <EsfAddClientForm
-                        showCancelButton
-                        onCancel={() => setShowAddClientModal(false)}
-                        onCreated={(client) => {
-                          setClients((prev) => [client, ...prev]);
-                          setShowAddClientModal(false);
-                          setCurrentPage(1);
-                          // TEMPORARY: onboarding is bypassed, so go straight to
-                          // the dashboard. Restore the line below to send a new
-                          // client into the Amazon connect flow instead.
-                          // navigate(`/esf/client/${client._id}/connect-to-amazon`);
-                          window.location.href = '/seller-central-checker/dashboard';
-                        }}
-                      />
+                      {addClientTab === 'new' ? (
+                        <EsfAddClientForm
+                          showCancelButton
+                          onCancel={() => setShowAddClientModal(false)}
+                          onCreated={(client) => {
+                            setClients((prev) => [client, ...prev]);
+                            setShowAddClientModal(false);
+                            setCurrentPage(1);
+                            // TEMPORARY: onboarding is bypassed, so go straight to
+                            // the dashboard. Restore the line below to send a new
+                            // client into the Amazon connect flow instead.
+                            // navigate(`/esf/client/${client._id}/connect-to-amazon`);
+                            window.location.href = '/seller-central-checker/dashboard';
+                          }}
+                        />
+                      ) : (
+                        <EsfExistingUsersPicker
+                          onCancel={() => setShowAddClientModal(false)}
+                          onLinked={() => {
+                            // Modal stays open so several batches can be added.
+                            // The picker shows its own confirmation; this just
+                            // refreshes the table behind it.
+                            setCurrentPage(1);
+                            fetchClients({ silent: true });
+                          }}
+                        />
+                      )}
                     </div>
                   </div>
                 </div>,

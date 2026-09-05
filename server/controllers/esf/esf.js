@@ -16,6 +16,7 @@ const {
     issueClientSession,
     ESF_CLIENT_QUERY,
 } = require('../../Services/User/ManagedClientService.js');
+const { getLinkableUsers, linkUsersToEsf } = require('../../Services/User/esfLinkableUsers.js');
 const { createAccessToken, verifyAccessToken } = require('../../utils/Tokens.js');
 const { hashPassword, verifyPassword } = require('../../utils/HashPassword.js');
 const { getHttpsCookieOptions } = require('../../utils/cookieConfig.js');
@@ -378,6 +379,50 @@ const setEsfClientPassword = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, '', 'Client password updated successfully'));
 });
 
+/**
+ * GET /app/esf/linkable-users
+ * Existing SellerQI sellers who can be adopted into the portal, with the counts
+ * behind each filter capsule.
+ * Query: search, filter (all|PRO|LITE|connected|notConnected), page, limit
+ */
+const listLinkableUsers = asyncHandler(async (req, res) => {
+    const data = await getLinkableUsers({
+        search: req.query.search,
+        filter: req.query.filter,
+        page: req.query.page,
+        limit: req.query.limit,
+    });
+    return res.status(200).json(new ApiResponse(200, data, 'Linkable users fetched successfully'));
+});
+
+/**
+ * POST /app/esf/clients/link — body: { userIds: string[] }
+ * Adopts existing sellers as ESF clients. Their account and data are untouched;
+ * only the ESF ownership fields are set.
+ */
+const linkExistingUsers = asyncHandler(async (req, res) => {
+    const { userIds } = req.body || {};
+
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+        return res.status(400).json(new ApiResponse(400, '', 'Select at least one user to add'));
+    }
+
+    const { linked, requested } = await linkUsersToEsf(userIds, req.esfUserId);
+
+    if (linked === 0) {
+        return res.status(409).json(new ApiResponse(409, '', 'None of those users can be added — they may already be managed elsewhere.'));
+    }
+
+    logger.info(`ESF user ${req.esfUserId} linked ${linked}/${requested} existing user(s) to the portal`);
+
+    const skipped = requested - linked;
+    const message = skipped > 0
+        ? `${linked} client(s) added. ${skipped} could not be added — they may already be managed elsewhere.`
+        : `${linked} client(s) added successfully`;
+
+    return res.status(200).json(new ApiResponse(200, { linked, skipped }, message));
+});
+
 /* ----------------------------------------------------------------- staff -- */
 
 /** GET /app/esf/users — the staff who can access this portal. */
@@ -577,6 +622,8 @@ module.exports = {
     removeEsfClient,
     switchToEsfClient,
     setEsfClientPassword,
+    listLinkableUsers,
+    linkExistingUsers,
     getEsfUsers,
     removeEsfUser,
     resetEsfUserPassword,

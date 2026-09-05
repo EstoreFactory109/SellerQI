@@ -11,6 +11,8 @@ const {
     removeEsfClient,
     switchToEsfClient,
     setEsfClientPassword,
+    listLinkableUsers,
+    linkExistingUsers,
     getEsfUsers,
     removeEsfUser,
     resetEsfUserPassword,
@@ -61,6 +63,9 @@ router.put('/update-password', esfAuth, updateEsfPassword);
 router.get('/clients', esfAuth, getEsfClients);
 router.post('/clients', esfAuth, registerRateLimiter, validateEsfClient, createEsfClient);
 router.post('/clients/switch', esfAuth, switchToEsfClient);
+// Adopting existing SellerQI sellers instead of creating a new account.
+router.get('/linkable-users', esfAuth, listLinkableUsers);
+router.post('/clients/link', esfAuth, linkExistingUsers);
 router.post('/clients/:clientId/set-password', esfAuth, setEsfClientPassword);
 router.delete('/clients/:clientId', esfAuth, removeEsfClient);
 
