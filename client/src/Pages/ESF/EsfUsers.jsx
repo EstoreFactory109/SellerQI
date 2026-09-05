@@ -9,6 +9,9 @@ import {
   Mail,
   UserPlus,
   Key,
+  Send,
+  Clock,
+  RefreshCw,
   Shield,
   ShieldCheck,
   Crown,
@@ -17,7 +20,8 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import axiosInstance from '../../config/axios.config.js';
-import EsfAddUserForm from '../../Components/ESF/EsfAddUserForm.jsx';
+import EsfInviteUserForm from '../../Components/ESF/EsfInviteUserForm.jsx';
+import { isPasswordValid, passwordErrorMessage } from '../../utils/passwordCriteria.js';
 import EsfPagePermissionsModal from '../../Components/ESF/EsfPagePermissionsModal.jsx';
 import { useEsfUser } from '../../contexts/EsfUserContext.js';
 
@@ -48,6 +52,7 @@ const EsfUsers = () => {
   const [openDropdownId, setOpenDropdownId] = useState(null);
   const [dropdownPosition, setDropdownPosition] = useState(null);
   const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [invites, setInvites] = useState([]);
   const [permissionsMember, setPermissionsMember] = useState(null);
   const dropdownRef = useRef(null);
   const openDropdownButtonRef = useRef(null);
@@ -74,8 +79,20 @@ const EsfUsers = () => {
     }
   };
 
+  const fetchInvites = async () => {
+    try {
+      const res = await axiosInstance.get('/app/esf/invites');
+      if (res.data?.statusCode === 200 && Array.isArray(res.data.data)) {
+        setInvites(res.data.data);
+      }
+    } catch (_) {
+      // A failed invite list must not blank the members table.
+    }
+  };
+
   useEffect(() => {
     fetchUsers();
+    fetchInvites();
   }, []);
 
   useEffect(() => {
@@ -130,7 +147,13 @@ const EsfUsers = () => {
         setDeleteError(res.data?.message || 'Failed to remove team member');
       }
     } catch (err) {
-      setDeleteError(err.response?.data?.message || 'Failed to remove team member');
+      // No response at all means the request timed out or never reached the
+      // server — say so, rather than implying the server refused it.
+      setDeleteError(
+        err.response
+          ? (err.response.data?.message || 'Failed to remove team member')
+          : 'No response from the server. The request timed out — please try again.'
+      );
     } finally {
       setDeletingId(null);
     }
@@ -154,11 +177,44 @@ const EsfUsers = () => {
     }
   };
 
+  const handleResendInvite = async (invite) => {
+    try {
+      setDeletingId(invite._id);
+      setError('');
+      const res = await axiosInstance.post(`/app/esf/invites/${invite._id}/resend`);
+      if (res.data?.statusCode === 200) fetchInvites();
+      else setError(res.data?.message || 'Failed to resend the invitation');
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to resend the invitation');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleRevokeInvite = async (invite) => {
+    try {
+      setDeletingId(invite._id);
+      setError('');
+      const res = await axiosInstance.delete(`/app/esf/invites/${invite._id}`);
+      if (res.data?.statusCode === 200) setInvites((prev) => prev.filter((i) => i._id !== invite._id));
+      else setError(res.data?.message || 'Failed to revoke the invitation');
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to revoke the invitation');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const handleResetPassword = async (user) => {
-    const newPassword = window.prompt(`Enter a new password for ${user.firstName} ${user.lastName} (min 8 characters):`);
+    const newPassword = window.prompt(
+      `Enter a new password for ${user.firstName} ${user.lastName}
+
+` +
+        'Min 8 characters with 1 uppercase, 1 lowercase, a number and a symbol:'
+    );
     if (!newPassword) return;
-    if (newPassword.length < 8) {
-      setError('Password must be at least 8 characters long.');
+    if (!isPasswordValid(newPassword)) {
+      setError(passwordErrorMessage(newPassword));
       return;
     }
     try {
@@ -228,13 +284,62 @@ const EsfUsers = () => {
                     onClick={() => setShowAddUserModal(true)}
                     className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-500 transition-colors shadow-lg shadow-blue-950/30"
                   >
-                    <UserPlus className="w-4 h-4" />
-                    Add user
+                    <Send className="w-4 h-4" />
+                    Invite user
                   </button>
                   )}
                 </div>
               </div>
             </div>
+
+            {/* Pending invitations — people who have been emailed but not joined yet */}
+            {canManageTeam && invites.length > 0 && (
+              <div className="rounded-2xl border border-white/10 bg-[#101722]/90 mb-6 overflow-hidden shadow-2xl shadow-black/20 backdrop-blur">
+                <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-amber-300" />
+                  <h2 className="text-sm font-semibold text-gray-100">
+                    Pending invitations ({invites.length})
+                  </h2>
+                </div>
+                <div className="divide-y divide-white/10">
+                  {invites.map((invite) => (
+                    <div key={invite._id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                      <Mail className="w-4 h-4 text-gray-500 shrink-0" />
+                      <span className="text-sm text-gray-100 break-all min-w-0 flex-1">{invite.email}</span>
+
+                      <span className={`inline-flex items-center justify-center gap-1 rounded-full border px-2 py-1 text-xs font-medium ${
+                        (ROLE_BADGE[invite.role] || ROLE_BADGE.member).className
+                      }`}>
+                        {(ROLE_BADGE[invite.role] || ROLE_BADGE.member).label}
+                      </span>
+
+                      <span className={`text-xs ${invite.isExpired ? 'text-red-300' : 'text-gray-500'}`}>
+                        {invite.isExpired ? 'Expired' : `Expires ${formatDate(invite.expiresAt)}`}
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() => handleResendInvite(invite)}
+                        disabled={deletingId === invite._id}
+                        className="inline-flex items-center gap-1 text-xs font-medium text-blue-400 hover:text-blue-300 disabled:opacity-50"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        Resend
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRevokeInvite(invite)}
+                        disabled={deletingId === invite._id}
+                        className="inline-flex items-center gap-1 text-xs font-medium text-red-400 hover:text-red-300 disabled:opacity-50"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Revoke
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Table */}
             <div className="rounded-2xl border border-white/10 bg-[#101722]/90 overflow-hidden shadow-2xl shadow-black/20 backdrop-blur">
@@ -428,9 +533,9 @@ const EsfUsers = () => {
                         </div>
                         <div>
                           <h2 id="esf-add-user-modal-title" className="text-lg font-semibold text-gray-100">
-                            Add user
+                            Invite a team member
                           </h2>
-                          <p className="text-xs text-gray-500">Give a colleague access to this portal</p>
+                          <p className="text-xs text-gray-500">They set their own name and password</p>
                         </div>
                       </div>
                       <button
@@ -443,13 +548,12 @@ const EsfUsers = () => {
                       </button>
                     </div>
                     <div className="p-4 md:p-6">
-                      <EsfAddUserForm
+                      <EsfInviteUserForm
                         showCancelButton
                         onCancel={() => setShowAddUserModal(false)}
-                        onCreated={(user) => {
-                          setUsers((prev) => [user, ...prev]);
+                        onSent={(invite) => {
+                          setInvites((prev) => [invite, ...prev]);
                           setShowAddUserModal(false);
-                          setCurrentPage(1);
                         }}
                       />
                     </div>
@@ -548,7 +652,10 @@ const EsfUsers = () => {
                 >
                   <h3 className="text-base font-semibold text-gray-100 mb-2">Remove access</h3>
                   <p className="text-sm text-gray-400 mb-4">
-                    Are you sure you want to remove {deleteConfirmUser.firstName} {deleteConfirmUser.lastName}? They will no longer be able to sign in to this portal.
+                    Permanently delete the account for {deleteConfirmUser.firstName} {deleteConfirmUser.lastName}
+                    {deleteConfirmUser.email ? ` (${deleteConfirmUser.email})` : ''}? Their account and data are
+                    removed from the database and they can no longer sign in. This cannot be undone — you would
+                    need to invite them again.
                   </p>
                   {deleteError && <p className="text-xs text-red-400 mb-4">{deleteError}</p>}
                   <div className="flex gap-2">

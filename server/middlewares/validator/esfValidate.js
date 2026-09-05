@@ -79,17 +79,29 @@ const validateEsfClient = [
     handleValidation,
 ];
 
-/** POST /app/esf/users — staff accounts do have a password. */
-const validateEsfUser = [
-    nameRule("firstname", "First name"),
-    nameRule("lastname", "Last name"),
-    phoneRule,
+/**
+ * POST /app/esf/invites — the inviter supplies only an address and a role.
+ * Everything else is filled in by the recipient when they accept.
+ */
+const validateEsfInvite = [
     emailRule,
-    passwordRule(),
     // 'owner' is intentionally not accepted - there is exactly one, and it is seeded.
     body("role")
         .optional()
         .isIn(ASSIGNABLE_ESF_ROLES).withMessage(`Role must be one of: ${ASSIGNABLE_ESF_ROLES.join(", ")}`),
+    handleValidation,
+];
+
+/**
+ * POST /app/esf/invites/token/:token/accept — the recipient's own details.
+ * No email and no role: both come from the invitation, so accepting cannot be
+ * used to claim a different address or a higher role.
+ */
+const validateEsfInviteAccept = [
+    nameRule("firstname", "First name"),
+    nameRule("lastname", "Last name"),
+    phoneRule,
+    passwordRule(),
     handleValidation,
 ];
 
@@ -112,7 +124,8 @@ const validateEsfProfile = [
 module.exports = {
     validateEsfLogin,
     validateEsfClient,
-    validateEsfUser,
+    validateEsfInvite,
+    validateEsfInviteAccept,
     validateEsfRole,
     validateEsfProfile,
 };

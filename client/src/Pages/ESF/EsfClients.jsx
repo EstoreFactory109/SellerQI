@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 import EsfAddClientForm from '../../Components/ESF/EsfAddClientForm.jsx';
+import { isPasswordValid, passwordErrorMessage } from '../../utils/passwordCriteria.js';
 
 const ITEMS_PER_PAGE = 10;
 const DROPDOWN_MENU_WIDTH = 160;
@@ -145,12 +146,17 @@ const EsfClients = () => {
   // Covers clients created before the add-client form asked for a password.
   const handleSetPassword = async (client) => {
     const newPassword = window.prompt(
-      `Set a sign-in password for ${client.firstName} ${client.lastName} (min 8 characters):`
+      `Set a sign-in password for ${client.firstName} ${client.lastName}
+
+` +
+        'Min 8 characters with 1 uppercase, 1 lowercase, a number and a symbol:'
     );
     if (!newPassword) return;
-    if (newPassword.length < 8) {
+    // Same rules the server enforces, so the message names what is missing
+    // rather than sending a request that comes back rejected.
+    if (!isPasswordValid(newPassword)) {
       setNoticeTone('error');
-      setNotice('Password must be at least 8 characters long.');
+      setNotice(passwordErrorMessage(newPassword));
       return;
     }
     try {
@@ -551,7 +557,7 @@ const EsfClients = () => {
                     className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-red-500 hover:bg-[#252525] hover:text-red-400 disabled:opacity-50"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    Remove client
+                    Remove from portal
                   </button>
                 </div>,
                 document.body
@@ -568,9 +574,15 @@ const EsfClients = () => {
                   className="bg-[#101722] rounded-2xl max-w-md w-full p-6 border border-white/10 shadow-2xl"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <h3 className="text-base font-semibold text-gray-100 mb-2">Remove client</h3>
+                  <h3 className="text-base font-semibold text-gray-100 mb-2">Remove from portal</h3>
                   <p className="text-sm text-gray-400 mb-4">
-                    Are you sure you want to remove {deleteConfirmClient.firstName} {deleteConfirmClient.lastName}? This cannot be undone.
+                    Remove {deleteConfirmClient.firstName} {deleteConfirmClient.lastName}
+                    {deleteConfirmClient.email ? ` (${deleteConfirmClient.email})` : ''} from the eStore Factory
+                    portal? Their SellerQI account, Amazon connection and data are kept — they simply stop being
+                    an ESF client, and the team can no longer open or manage their account.
+                  </p>
+                  <p className="text-xs text-gray-500 mb-4">
+                    Deleting a seller account entirely is done by a super admin, not from this portal.
                   </p>
                   {deleteError && <p className="text-xs text-red-400 mb-4">{deleteError}</p>}
                   <div className="flex gap-2">
@@ -586,7 +598,7 @@ const EsfClients = () => {
                       disabled={!!deletingId}
                       className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-red-600 text-white hover:bg-red-500 disabled:opacity-50 transition-colors"
                     >
-                      {deletingId ? 'Removing…' : 'Remove'}
+                      {deletingId ? 'Removing…' : 'Remove from portal'}
                     </button>
                   </div>
                 </div>

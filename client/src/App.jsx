@@ -64,6 +64,7 @@ import EsfLayout from './Layout/EsfLayout.jsx';
 import EsfClientLayout from './Layout/EsfClientLayout.jsx';
 import ProtectedEsfRouteWrapper from './Layout/ProtectedEsfRouteWrapper.jsx';
 import EsfLogin from './Pages/ESF/EsfLogin.jsx';
+import EsfAcceptInvite from './Pages/ESF/EsfAcceptInvite.jsx';
 import EsfClients from './Pages/ESF/EsfClients.jsx';
 import EsfUsers from './Pages/ESF/EsfUsers.jsx';
 import EsfSettings from './Pages/ESF/EsfSettings.jsx';
@@ -160,6 +161,8 @@ const App = () => {
         {/* eStore Factory internal staff portal. Guarded server-side by
             GET /app/esf/me, so a stale localStorage flag cannot render it. */}
         <Route path='/esf-login' element={<EsfLogin />} />
+        {/* Public — the invitee has no account yet; the token is the credential. */}
+        <Route path='/esf-invite/:token' element={<EsfAcceptInvite />} />
         <Route
           element={
             <ProtectedEsfRouteWrapper>

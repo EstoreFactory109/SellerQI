@@ -7,6 +7,7 @@
  */
 const mongoose = require('mongoose');
 const UserModel = require('../../models/user-auth/userModel.js');
+const EsfInvite = require('../../models/user-auth/EsfInviteModel.js');
 const { getUserByEmail } = require('../../Services/User/userServices.js');
 const { deleteUserById } = require('../../Services/User/deleteUserService.js');
 const {
@@ -270,7 +271,18 @@ const createEsfClient = asyncHandler(async (req, res) => {
         }, 'Client registered successfully'));
 });
 
-/** DELETE /app/esf/clients/:clientId */
+/**
+ * DELETE /app/esf/clients/:clientId
+ *
+ * Detaches the client from the ESF portal — it does NOT delete their account.
+ * The seller keeps their SellerQI account, their Amazon connection and all their
+ * data; they simply stop being an ESF-managed client. Deleting a seller account
+ * outright is the super admin's job, not this portal's.
+ *
+ * Clearing isEsfClient severs every ESF tie at once: they leave this list, staff
+ * can no longer impersonate them or set their password, and the ESF-only pages
+ * and page-permission guard stop applying to them.
+ */
 const removeEsfClient = asyncHandler(async (req, res) => {
     const { clientId } = req.params;
 
@@ -278,7 +290,7 @@ const removeEsfClient = asyncHandler(async (req, res) => {
         return res.status(400).json(new ApiResponse(400, '', 'Invalid client id'));
     }
 
-    // Scope the lookup to ESF clients so this endpoint can never delete an
+    // Scope the lookup to ESF clients so this endpoint can never touch an
     // agency client or a self-serve seller.
     const client = await UserModel.findOne({ _id: clientId, ...ESF_CLIENT_QUERY });
     if (!client) {
@@ -286,10 +298,14 @@ const removeEsfClient = asyncHandler(async (req, res) => {
         return res.status(404).json(new ApiResponse(404, '', 'Client not found'));
     }
 
-    await deleteUserById(clientId);
+    // Unlink only. Nothing is deleted — no account, no seller data, no history.
+    await UserModel.updateOne(
+        { _id: clientId },
+        { $set: { isEsfClient: false, esfAddedBy: null } }
+    );
 
-    logger.info(`ESF user ${req.esfUserId} removed client ${clientId}`);
-    return res.status(200).json(new ApiResponse(200, '', 'Client removed successfully'));
+    logger.info(`ESF user ${req.esfUserId} unlinked client ${clientId} (${client.email}) from the ESF portal`);
+    return res.status(200).json(new ApiResponse(200, '', 'Client removed from the eStore Factory portal'));
 });
 
 /**
@@ -393,47 +409,6 @@ const getEsfUsers = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, withCounts, 'ESF users fetched successfully'));
 });
 
-/** POST /app/esf/users — add another staff member. */
-const createEsfUser = asyncHandler(async (req, res) => {
-    if (!requireTeamManager(req, res)) return;
-
-    const { firstname, lastname, phone, email, password, role } = req.body;
-
-    // 'owner' can never be handed out - there is exactly one, and it is seeded.
-    const esfRole = ASSIGNABLE_ESF_ROLES.includes(role) ? role : ESF_ROLES.MEMBER;
-
-    const existing = await getUserByEmail(email);
-    if (existing) {
-        logger.error(new ApiError(409, 'User already exists'));
-        return res.status(409).json(new ApiResponse(409, '', 'A user with this email already exists'));
-    }
-
-    const newUser = new UserModel({
-        firstName: firstname,
-        lastName: lastname,
-        phone: phone,
-        whatsapp: phone,
-        email: email,
-        password: await hashPassword(password),
-        accessType: 'esfUser',
-        esfRole,
-        isVerified: true,
-        allTermsAndConditionsAgreed: true,
-        // Staff accounts are internal tooling, not billable seller accounts.
-        packageType: 'LITE',
-        subscriptionStatus: 'active',
-        OTP: null,
-    });
-
-    const savedUser = await newUser.save();
-
-    logger.info(`ESF user ${req.esfUserId} added staff member ${savedUser._id} (${savedUser.email}) as ${esfRole}`);
-
-    return res
-        .status(201)
-        .json(new ApiResponse(201, toStaffResponse(savedUser, { clientsAdded: 0 }), 'Team member added successfully'));
-});
-
 /** DELETE /app/esf/users/:userId — revoke a staff member's portal access. */
 const removeEsfUser = asyncHandler(async (req, res) => {
     if (!requireTeamManager(req, res)) return;
@@ -454,9 +429,20 @@ const removeEsfUser = asyncHandler(async (req, res) => {
         return res.status(400).json(new ApiResponse(400, '', 'Cannot remove the last team member'));
     }
 
-    await deleteUserById(userId);
+    // Hard delete: a soft delete left accessType 'esfUser' and the password
+    // intact, so a "removed" member could still sign in at /esf-login.
+    //
+    // Deliberately does NOT go through the full-user-data-purge queue. A staff
+    // account never connects Amazon and has no seller, finance or analysis rows —
+    // its only related documents are its invitations, cleaned up right here.
+    // Depending on the queue made this endpoint hang whenever Redis was
+    // unreachable: BullMQ's add() retries rather than throwing, so the request
+    // timed out instead of failing fast.
+    await EsfInvite.deleteMany({ $or: [{ invitedBy: userId }, { acceptedUserId: userId }] });
 
-    logger.info(`ESF user ${req.esfUserId} removed staff member ${userId}`);
+    await deleteUserById(userId, { hardDelete: true });
+
+    logger.info(`ESF user ${req.esfUserId} hard-deleted staff member ${userId}`);
     return res.status(200).json(new ApiResponse(200, '', 'Team member removed successfully'));
 });
 
@@ -592,7 +578,6 @@ module.exports = {
     switchToEsfClient,
     setEsfClientPassword,
     getEsfUsers,
-    createEsfUser,
     removeEsfUser,
     resetEsfUserPassword,
     updateEsfUserRole,

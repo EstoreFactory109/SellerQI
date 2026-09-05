@@ -11,7 +11,8 @@ const { validationResult } = require('express-validator');
 const {
   validateEsfLogin,
   validateEsfClient,
-  validateEsfUser,
+  validateEsfInvite,
+  validateEsfInviteAccept,
 } = require('../../../middlewares/validator/esfValidate.js');
 
 const run = async (chain, body) => {
@@ -32,7 +33,9 @@ const clientBody = {
   email: 'client@test.com',
   password: 'Cl1entPass!',
 };
-const staffBody = { ...clientBody, email: 'staff@estorefactory.net', password: 'S3cretPass!' };
+// Accepting an invite carries the person's own details only — the email and
+// role come from the invitation, never the request body.
+const acceptBody = { firstname: 'Priya', lastname: 'Shah', phone: '+19876543210', password: 'S3cretPass!' };
 
 describe('esfValidate', () => {
   describe('validateEsfClient', () => {
@@ -100,32 +103,48 @@ describe('esfValidate', () => {
     });
   });
 
-  describe('validateEsfUser', () => {
-    it('passes with a valid staff payload', async () => {
-      const { errors } = await run(validateEsfUser, staffBody);
+  describe('validateEsfInvite', () => {
+    it('passes with just an email', async () => {
+      const { errors } = await run(validateEsfInvite, { email: 'new@estorefactory.net' });
       expect(errors.isEmpty()).toBe(true);
     });
 
-    it('requires a password', async () => {
-      const { password, ...withoutPassword } = staffBody;
-      const { errors } = await run(validateEsfUser, withoutPassword);
+    it('accepts an assignable role', async () => {
+      const { errors } = await run(validateEsfInvite, { email: 'new@estorefactory.net', role: 'admin' });
+      expect(errorFor(errors, 'role')).toBeUndefined();
+    });
+
+    it('refuses to invite someone straight to owner', async () => {
+      const { errors } = await run(validateEsfInvite, { email: 'new@estorefactory.net', role: 'owner' });
+      expect(errorFor(errors, 'role')).toBeDefined();
+    });
+
+    it('rejects a malformed email', async () => {
+      const { errors } = await run(validateEsfInvite, { email: 'nope' });
+      expect(errorFor(errors, 'email')).toBeDefined();
+    });
+  });
+
+  describe('validateEsfInviteAccept', () => {
+    it('passes with the details the invitee supplies', async () => {
+      const { errors } = await run(validateEsfInviteAccept, acceptBody);
+      expect(errors.isEmpty()).toBe(true);
+    });
+
+    it('requires a password meeting the signup rules', async () => {
+      const { errors } = await run(validateEsfInviteAccept, { ...acceptBody, password: 'weakpass' });
       expect(errorFor(errors, 'password')).toBeDefined();
     });
 
-    it('rejects a password shorter than 8 characters', async () => {
-      const { errors } = await run(validateEsfUser, { ...staffBody, password: 'short' });
-      expect(errorFor(errors, 'password')).toBeDefined();
+    it('requires a name', async () => {
+      const { errors } = await run(validateEsfInviteAccept, { ...acceptBody, firstname: '' });
+      expect(errorFor(errors, 'firstname')).toBeDefined();
     });
 
-    it.each([
-      ['no uppercase', 'cl1entpass!'],
-      ['no lowercase', 'CL1ENTPASS!'],
-      ['no number', 'ClientPass!'],
-      ['no special character', 'Cl1entPass'],
-      ['too short', 'Cl1!aA'],
-    ])('rejects a password with %s', async (_label, password) => {
-      const { errors } = await run(validateEsfUser, { ...staffBody, password });
-      expect(errorFor(errors, 'password')).toBeDefined();
+    it('ignores any email sent in the body — it comes from the invitation', async () => {
+      const { errors } = await run(validateEsfInviteAccept, { ...acceptBody, email: 'attacker@evil.com' });
+      expect(errorFor(errors, 'email')).toBeUndefined();
+      expect(errors.isEmpty()).toBe(true);
     });
   });
 

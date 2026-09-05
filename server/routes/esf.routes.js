@@ -12,7 +12,6 @@ const {
     switchToEsfClient,
     setEsfClientPassword,
     getEsfUsers,
-    createEsfUser,
     removeEsfUser,
     resetEsfUserPassword,
     updateEsfUserRole,
@@ -20,12 +19,21 @@ const {
     updateEsfUserPermissions,
     getEsfSessionPermissions,
 } = require('../controllers/esf/esf.js');
+const {
+    listInvites,
+    createInvite,
+    resendInvite,
+    revokeInvite,
+    getInviteByToken,
+    acceptInvite,
+} = require('../controllers/esf/esfInvites.js');
 const esfAuth = require('../middlewares/Auth/esfAuth.js');
 const { authRateLimiter, registerRateLimiter } = require('../middlewares/rateLimiting.js');
 const {
     validateEsfLogin,
     validateEsfClient,
-    validateEsfUser,
+    validateEsfInvite,
+    validateEsfInviteAccept,
     validateEsfRole,
     validateEsfProfile,
 } = require('../middlewares/validator/esfValidate.js');
@@ -37,6 +45,11 @@ router.post('/login', authRateLimiter, validateEsfLogin, esfLogin);
 // Answers 200 with isEsfSession:false when no staff session is present, so the
 // seller app can call it unconditionally.
 router.get('/session-permissions', getEsfSessionPermissions);
+
+// Invitation acceptance is public by necessity — the recipient has no account
+// yet. The invite token is the credential.
+router.get('/invites/token/:token', getInviteByToken);
+router.post('/invites/token/:token/accept', registerRateLimiter, validateEsfInviteAccept, acceptInvite);
 
 // Everything below requires a valid ESFToken cookie belonging to an esfUser.
 router.post('/logout', esfAuth, esfLogout);
@@ -53,7 +66,11 @@ router.delete('/clients/:clientId', esfAuth, removeEsfClient);
 
 // Team members
 router.get('/users', esfAuth, getEsfUsers);
-router.post('/users', esfAuth, registerRateLimiter, validateEsfUser, createEsfUser);
+// Staff are added by invitation (see /invites) rather than created directly.
+router.get('/invites', esfAuth, listInvites);
+router.post('/invites', esfAuth, registerRateLimiter, validateEsfInvite, createInvite);
+router.post('/invites/:inviteId/resend', esfAuth, resendInvite);
+router.delete('/invites/:inviteId', esfAuth, revokeInvite);
 router.get('/pages', esfAuth, getEsfPageCatalogue);
 router.patch('/users/:userId/role', esfAuth, validateEsfRole, updateEsfUserRole);
 router.put('/users/:userId/permissions', esfAuth, updateEsfUserPermissions);

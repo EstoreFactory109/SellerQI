@@ -122,12 +122,20 @@ const ReviewOrderItem = require('../../models/review/ReviewOrderItemModel.js');
 const ReviewOrder = require('../../models/review/ReviewOrderModel.js');
 const ListingFixStatus = require('../../models/system/ListingFixStatusModel.js');
 const WhatsAppLink = require('../../models/user-auth/WhatsAppLinkModel.js');
+const EsfInvite = require('../../models/user-auth/EsfInviteModel.js');
+
 // Billing history — purged only for an admin's manual delete, see below.
 const Subscription = require('../../models/user-auth/SubscriptionModel.js');
 const PaymentLogs = require('../../models/system/PaymentLogsModel.js');
 
 /** @type {{ model: import('mongoose').Model, key: string }[]} Collections with User (ObjectId) */
 const collectionsWithUser = [
+    // ESF portal invitations. Listed twice because the collection references a
+    // user two ways: invitations this person SENT, and the invitation they
+    // accepted to join. Deleting the inviter must also kill their outstanding
+    // invite links.
+    { model: EsfInvite, key: 'invitedBy' },
+    { model: EsfInvite, key: 'acceptedUserId' },
     { model: ListingItemsKeyword, key: 'User' },
     { model: ListingItems, key: 'User' },
     { model: BuyBoxData, key: 'User' },

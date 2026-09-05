@@ -19,9 +19,10 @@ const EmailLogsSchema = new mongoose.Schema(
           "SUPPORT_MESSAGE", 
           "USER_REGISTERED", 
           "ALERTS",
+          "ESF_INVITE",
           "OTHER"
         ],
-        message: "Email type must be one of: OTP, WELCOME_LITE, PASSWORD_RESET, ANALYSIS_READY, WEEKLY_REPORT, UPGRADE_REMINDER, CONNECTION_REMINDER, SUPPORT_MESSAGE, USER_REGISTERED, ALERTS, OTHER"
+        message: "Email type must be one of: OTP, WELCOME_LITE, PASSWORD_RESET, ANALYSIS_READY, WEEKLY_REPORT, UPGRADE_REMINDER, CONNECTION_REMINDER, SUPPORT_MESSAGE, USER_REGISTERED, ALERTS, ESF_INVITE, OTHER"
       },
       trim: true,
       uppercase: true
