@@ -58,10 +58,10 @@ const toStaffResponse = (user, extra = {}) => ({
  * Guard for team-management endpoints.
  * Returns true when the request may proceed; otherwise it has already responded.
  */
-const requireTeamManager = (req, res) => {
+const requireTeamManager = (req, res, message = 'Only the owner and admins can manage team members') => {
     if (canManageTeam(req.esfUser)) return true;
-    logger.warn(`ESF user ${req.esfUserId} (${req.esfRole}) attempted a team-management action`);
-    res.status(403).json(new ApiResponse(403, '', 'Only the owner and admins can manage team members'));
+    logger.warn(`ESF user ${req.esfUserId} (${req.esfRole}) attempted a restricted action`);
+    res.status(403).json(new ApiResponse(403, '', message));
     return false;
 };
 
@@ -285,6 +285,8 @@ const createEsfClient = asyncHandler(async (req, res) => {
  * and page-permission guard stop applying to them.
  */
 const removeEsfClient = asyncHandler(async (req, res) => {
+    if (!requireTeamManager(req, res, 'Only the owner and admins can remove a client from the portal')) return;
+
     const { clientId } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(clientId)) {

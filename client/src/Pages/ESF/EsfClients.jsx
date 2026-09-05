@@ -17,13 +17,19 @@ import {
 import axiosInstance from '../../config/axios.config.js';
 import EsfAddClientForm from '../../Components/ESF/EsfAddClientForm.jsx';
 import EsfExistingUsersPicker from '../../Components/ESF/EsfExistingUsersPicker.jsx';
+import { useEsfUser } from '../../contexts/EsfUserContext.js';
 
 const ITEMS_PER_PAGE = 10;
 const DROPDOWN_MENU_WIDTH = 160;
-const DROPDOWN_MENU_HEIGHT = 90;
+const DROPDOWN_MENU_ITEM_HEIGHT = 45;
 
 const EsfClients = () => {
   const navigate = useNavigate();
+  const signedInUser = useEsfUser();
+  // Members may open a client, but only the owner and admins may detach one.
+  // The server enforces the same rule on DELETE /app/esf/clients/:id.
+  const canRemoveClients = signedInUser?.esfRole === 'owner' || signedInUser?.esfRole === 'admin';
+  const menuHeight = canRemoveClients ? DROPDOWN_MENU_ITEM_HEIGHT * 2 : DROPDOWN_MENU_ITEM_HEIGHT;
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -339,10 +345,10 @@ const EsfClients = () => {
                                     openDropdownButtonRef.current = e.currentTarget;
                                     const rect = e.currentTarget.getBoundingClientRect();
                                     const spaceBelow = window.innerHeight - rect.bottom;
-                                    const openAbove = spaceBelow < DROPDOWN_MENU_HEIGHT && rect.top >= spaceBelow;
+                                    const openAbove = spaceBelow < menuHeight && rect.top >= spaceBelow;
                                     setDropdownPosition({
                                       left: Math.max(8, rect.right - DROPDOWN_MENU_WIDTH),
-                                      top: openAbove ? rect.top - DROPDOWN_MENU_HEIGHT - 4 : rect.bottom + 4,
+                                      top: openAbove ? rect.top - menuHeight - 4 : rect.bottom + 4,
                                     });
                                     setOpenDropdownId(client._id);
                                   }
@@ -516,7 +522,7 @@ const EsfClients = () => {
                   className="fixed z-[100] min-w-[160px] w-[160px] py-1 rounded-lg bg-[#1a1a1a] border border-[#252525] shadow-lg"
                   style={{
                     left: dropdownPosition.left,
-                    top: Math.max(8, Math.min(dropdownPosition.top, window.innerHeight - DROPDOWN_MENU_HEIGHT - 8)),
+                    top: Math.max(8, Math.min(dropdownPosition.top, window.innerHeight - menuHeight - 8)),
                   }}
                 >
                   <button
@@ -532,6 +538,7 @@ const EsfClients = () => {
                     <LogIn className="w-3.5 h-3.5" />
                     Login as client
                   </button>
+                  {canRemoveClients && (
                   <button
                     type="button"
                     onClick={() => {
@@ -545,13 +552,14 @@ const EsfClients = () => {
                     <Trash2 className="w-3.5 h-3.5" />
                     Remove from portal
                   </button>
+                  )}
                 </div>,
                 document.body
               );
             })()}
 
             {/* Remove confirmation */}
-            {deleteConfirmClient && (
+            {deleteConfirmClient && canRemoveClients && (
               <div
                 className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[210] p-4"
                 onClick={() => !deletingId && setDeleteConfirmClient(null)}
