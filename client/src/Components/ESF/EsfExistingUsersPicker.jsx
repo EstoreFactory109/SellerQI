@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Search, Loader2, ChevronLeft, ChevronRight, Check, CheckCircle, X as XIcon, UserPlus } from 'lucide-react';
+import { Search, Loader2, ChevronLeft, ChevronRight, Check, X as XIcon, UserPlus } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 import { extractServerError } from '../../utils/passwordCriteria.js';
 
@@ -44,7 +44,6 @@ const EsfExistingUsersPicker = ({ onCancel, onLinked }) => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
 
   // Debounced so typing does not fire a request per keystroke.
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -80,7 +79,6 @@ const EsfExistingUsersPicker = ({ onCancel, onLinked }) => {
   useEffect(() => { load(); }, [load]);
 
   const toggle = (id) => {
-    setSuccess('');
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -96,13 +94,8 @@ const EsfExistingUsersPicker = ({ onCancel, onLinked }) => {
       setError('');
       const res = await axiosInstance.post('/app/esf/clients/link', { userIds: [...selected] });
       if (res.data?.statusCode === 200) {
-        // Deliberately stays open: the people just added drop out of this list
-        // (they are no longer linkable), so the natural next step is to carry on
-        // picking. Closing here meant reopening and re-choosing the tab.
-        setSelected(new Set());
-        setSuccess(res.data.message || 'Clients added successfully');
-        await load();
-        onLinked?.(res.data.message); // refreshes the clients table behind the modal
+        // The parent closes the modal and shows the confirmation on the page.
+        onLinked?.(res.data.message);
       } else {
         setError(res.data?.message || 'Failed to add the selected users');
       }
@@ -117,12 +110,6 @@ const EsfExistingUsersPicker = ({ onCancel, onLinked }) => {
     <>
       {error && (
         <div className="mb-3 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">{error}</div>
-      )}
-      {success && (
-        <div className="mb-3 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm flex items-center gap-2">
-          <CheckCircle className="w-4 h-4 shrink-0" />
-          {success}
-        </div>
       )}
 
       <div className="relative mb-3">

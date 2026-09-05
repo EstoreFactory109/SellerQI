@@ -11,19 +11,16 @@ import {
   X as XIcon,
   Mail,
   UserPlus,
-  Settings,
-  Key,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 import EsfAddClientForm from '../../Components/ESF/EsfAddClientForm.jsx';
 import EsfExistingUsersPicker from '../../Components/ESF/EsfExistingUsersPicker.jsx';
-import { isPasswordValid, passwordErrorMessage } from '../../utils/passwordCriteria.js';
 
 const ITEMS_PER_PAGE = 10;
 const DROPDOWN_MENU_WIDTH = 160;
-const DROPDOWN_MENU_HEIGHT = 160;
+const DROPDOWN_MENU_HEIGHT = 90;
 
 const EsfClients = () => {
   const navigate = useNavigate();
@@ -34,7 +31,7 @@ const EsfClients = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [loginLoadingId, setLoginLoadingId] = useState(null);
   const [notice, setNotice] = useState('');
-  const [noticeTone, setNoticeTone] = useState('error'); // 'error' | 'success'
+  const [successNotice, setSuccessNotice] = useState('');
   const [deletingId, setDeletingId] = useState(null);
   const [deleteError, setDeleteError] = useState('');
   const [deleteConfirmClient, setDeleteConfirmClient] = useState(null);
@@ -45,12 +42,9 @@ const EsfClients = () => {
   const dropdownRef = useRef(null);
   const openDropdownButtonRef = useRef(null);
 
-  const fetchClients = async ({ silent = false } = {}) => {
+  const fetchClients = async () => {
     try {
-      // `silent` refreshes the table without flipping `loading` — the add-client
-      // modal renders inside the !loading branch, so toggling it would unmount
-      // the modal mid-use.
-      if (!silent) setLoading(true);
+      setLoading(true);
       setError('');
       const res = await axiosInstance.get('/app/esf/clients');
       if (res.data?.statusCode === 200 && Array.isArray(res.data.data)) {
@@ -66,7 +60,7 @@ const EsfClients = () => {
       }
       setError(err.response?.data?.message || 'Failed to load clients');
     } finally {
-      if (!silent) setLoading(false);
+      setLoading(false);
     }
   };
 
@@ -137,45 +131,12 @@ const EsfClients = () => {
         localStorage.setItem('isAuth', 'true');
         window.location.href = '/seller-central-checker/dashboard';
       } else {
-        setNoticeTone('error');
         setNotice(res.data?.message || 'Failed to open this client');
         setLoginLoadingId(null);
       }
     } catch (err) {
-      setNoticeTone('error');
       setNotice(err.response?.data?.message || 'Failed to open this client');
       setLoginLoadingId(null);
-    }
-  };
-
-  // Covers clients created before the add-client form asked for a password.
-  const handleSetPassword = async (client) => {
-    const newPassword = window.prompt(
-      `Set a sign-in password for ${client.firstName} ${client.lastName}
-
-` +
-        'Min 8 characters with 1 uppercase, 1 lowercase, a number and a symbol:'
-    );
-    if (!newPassword) return;
-    // Same rules the server enforces, so the message names what is missing
-    // rather than sending a request that comes back rejected.
-    if (!isPasswordValid(newPassword)) {
-      setNoticeTone('error');
-      setNotice(passwordErrorMessage(newPassword));
-      return;
-    }
-    try {
-      const res = await axiosInstance.post(`/app/esf/clients/${client._id}/set-password`, { newPassword });
-      const ok = res.data?.statusCode === 200;
-      setNoticeTone(ok ? 'success' : 'error');
-      setNotice(
-        ok
-          ? `Password set. ${client.email} can now sign in at the main login page.`
-          : res.data?.message || 'Failed to set password'
-      );
-    } catch (err) {
-      setNoticeTone('error');
-      setNotice(err.response?.data?.message || 'Failed to set password');
     }
   };
 
@@ -233,16 +194,22 @@ const EsfClients = () => {
           </div>
         )}
 
-        {/* Action-level feedback (switch to client, set password, …) */}
+        {successNotice && (
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 mb-6 shadow-lg shadow-emerald-950/10">
+            <p className="text-sm font-medium text-emerald-300">{successNotice}</p>
+            <button
+              onClick={() => setSuccessNotice('')}
+              className="mt-2 px-3 py-2 text-sm font-medium rounded-lg border border-white/10 text-gray-300 hover:bg-white/[0.05] hover:text-gray-200 transition-colors"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* Action-level failures (opening a client, removing one) */}
         {notice && (
-          <div
-            className={`rounded-xl border p-4 mb-6 shadow-lg ${
-              noticeTone === 'success'
-                ? 'border-green-500/30 bg-green-500/10 shadow-green-950/10'
-                : 'border-red-500/30 bg-red-500/10 shadow-red-950/10'
-            }`}
-          >
-            <p className={`text-sm font-medium ${noticeTone === 'success' ? 'text-green-300' : 'text-red-300'}`}>{notice}</p>
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 mb-6 shadow-lg shadow-red-950/10">
+            <p className="text-sm font-medium text-red-300">{notice}</p>
             <button
               onClick={() => setNotice('')}
               className="mt-2 px-3 py-2 text-sm font-medium rounded-lg border border-white/10 text-gray-300 hover:bg-white/[0.05] hover:text-gray-200 transition-colors"
@@ -293,7 +260,7 @@ const EsfClients = () => {
                   </div>
                   <button
                     type="button"
-                    onClick={() => setShowAddClientModal(true)}
+                    onClick={() => { setAddClientTab('new'); setShowAddClientModal(true); }}
                     className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-500 transition-colors shadow-lg shadow-blue-950/30"
                   >
                     <UserPlus className="w-4 h-4" />
@@ -498,7 +465,7 @@ const EsfClients = () => {
                           className={`px-4 py-2.5 text-sm font-medium transition-colors -mb-px border-b-2 ${
                             addClientTab === tab.key
                               ? 'text-gray-100 border-blue-500'
-                              : 'text-gray-500 border-transparent hover:text-gray-300'
+                              : 'text-gray-300 border-transparent hover:text-white hover:border-white/25'
                           }`}
                         >
                           {tab.label}
@@ -525,12 +492,11 @@ const EsfClients = () => {
                       ) : (
                         <EsfExistingUsersPicker
                           onCancel={() => setShowAddClientModal(false)}
-                          onLinked={() => {
-                            // Modal stays open so several batches can be added.
-                            // The picker shows its own confirmation; this just
-                            // refreshes the table behind it.
+                          onLinked={(message) => {
+                            setShowAddClientModal(false);
+                            setSuccessNotice(message || 'Clients added successfully');
                             setCurrentPage(1);
-                            fetchClients({ silent: true });
+                            fetchClients();
                           }}
                         />
                       )}
@@ -553,30 +519,6 @@ const EsfClients = () => {
                     top: Math.max(8, Math.min(dropdownPosition.top, window.innerHeight - DROPDOWN_MENU_HEIGHT - 8)),
                   }}
                 >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpenDropdownId(null);
-                      setDropdownPosition(null);
-                      navigate(`/esf/client/${client._id}/connect-to-amazon`);
-                    }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-blue-400 hover:bg-[#252525] hover:text-blue-300"
-                  >
-                    <Settings className="w-3.5 h-3.5" />
-                    Setup / Connect
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpenDropdownId(null);
-                      setDropdownPosition(null);
-                      handleSetPassword(client);
-                    }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-gray-300 hover:bg-[#252525] hover:text-gray-100"
-                  >
-                    <Key className="w-3.5 h-3.5" />
-                    Set password
-                  </button>
                   <button
                     type="button"
                     onClick={() => {
