@@ -1,5 +1,34 @@
 const mongoose = require("mongoose");
 
+/**
+ * An extra email address on a user account. The primary address stays on
+ * `User.email` (the unique login key); these are additional recipients.
+ * See Services/User/emailAccounts.js for the rules.
+ */
+const additionalEmailSchema = new mongoose.Schema(
+  {
+    email: {
+      type: String,
+      required: true,
+      trim: true,
+      lowercase: true,
+      match: [
+        /^([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/,
+        "Please enter a valid email address",
+      ],
+    },
+    // Ownership proved by entering the emailed code. Unverified addresses can
+    // neither receive mail nor be used to sign in.
+    isVerified: { type: Boolean, default: false },
+    // Whether broadcast mail is delivered here. Independent of verification.
+    receivesMail: { type: Boolean, default: true },
+    verificationCode: { type: String, default: null, select: false },
+    verificationExpiresAt: { type: Date, default: null },
+    addedAt: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
+
 const userSchema = new mongoose.Schema(
     {
       firstName: {
@@ -59,6 +88,19 @@ const userSchema = new mongoose.Schema(
         required: false, // Not required for agency clients
         minlength: [8, "Password must be at least 8 characters long"],
         select: false, // Prevents returning password in queries
+      },
+      // Extra addresses this user has added and verified. The primary address
+      // above remains the login key; these receive mail alongside it and can
+      // also be used to sign in once verified.
+      additionalEmails: {
+        type: [additionalEmailSchema],
+        default: [],
+      },
+      // Lets the primary address be muted like any other, without giving up its
+      // role as the login identity.
+      primaryReceivesMail: {
+        type: Boolean,
+        default: true,
       },
       agencyId: {
         type: mongoose.Schema.Types.ObjectId,
@@ -265,6 +307,8 @@ userSchema.index({ isAgencyClient: 1 });
 userSchema.index({ packageType: 1, subscriptionStatus: 1 });
 userSchema.index({ isVerified: 1, packageType: 1 });
 userSchema.index({ agencyId: 1, isAgencyClient: 1 });
+// Sign-in and recipient lookups match on any of a user's addresses.
+userSchema.index({ 'additionalEmails.email': 1 });
 // ESF portal: list all staff-managed clients, newest first
 userSchema.index({ isEsfClient: 1, createdAt: -1 });
 // ESF portal: list staff accounts

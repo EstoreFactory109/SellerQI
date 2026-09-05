@@ -3,6 +3,7 @@ const SellerCentralModel = require('../../models/user-auth/sellerCentralModel.js
 const { ApiError } = require("../../utils/ApiError.js");
 const { hashPassword } = require("../../utils/HashPassword.js");
 const logger = require("../../utils/Logger.js");
+const { findUserByAnyEmail, normalizeEmail } = require("./emailAccounts.js");
 
 
 const createUser = async (firstname, lastname, phone, whatsapp, email, password, otp, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate, agencyName = null) => {
@@ -65,13 +66,18 @@ const createUser = async (firstname, lastname, phone, whatsapp, email, password,
     }
 }
 
+/**
+ * Look a user up by ANY of their addresses - primary, or a verified additional
+ * one. Sign-in, duplicate checks and password recovery all go through here, so
+ * every address a user has proved they own behaves the same way.
+ */
 const getUserByEmail =async(email)=>{
     
     if(!email){
         logger.error(new ApiError(404,"Email is missing"));
         return false;
     }
-    return await UserModel.findOne({ email }).select('+password');
+    return await findUserByAnyEmail(email, { withPassword: true });
 
     
 }
@@ -219,7 +225,9 @@ const updatePassword = async (email, newPassword) => {
     }
 
     try {
-        const user = await UserModel.findOne({ email: email });
+        // Match any of the user's addresses - a reset started from a secondary
+        // address must still find (and update) the right account.
+        const user = await findUserByAnyEmail(email);
         
         if (!user) {
             logger.error(new ApiError(404, "User not found"));

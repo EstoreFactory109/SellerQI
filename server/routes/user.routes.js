@@ -15,6 +15,14 @@ const auth=require('../middlewares/Auth/auth.js')
 const upload=require('../middlewares/multer/multer.js')
 const {verifyResetPasswordCode}=require('../controllers/user-auth/UserController.js')
 const { authRateLimiter, registerRateLimiter, passwordResetRateLimiter, otpRateLimiter } = require('../middlewares/rateLimiting.js');
+const {
+    listEmails,
+    addEmail,
+    verifyEmail,
+    resendVerification,
+    updateEmailPreference,
+    removeEmail,
+} = require('../controllers/user-auth/EmailAccountsController.js');
 
 
 
@@ -43,6 +51,17 @@ router.get('/check-first-analysis-status', auth, checkFirstAnalysisStatus); // R
 router.post('/google-login', authRateLimiter, validateGoogleIdToken, googleLoginUser);
 router.post('/google-register', registerRateLimiter, validateGoogleIdToken, googleRegisterUser);
 router.post('/register-agency-client', auth, validateAgencyClientRegistration, registerAgencyClient);
+
+// ===== EMAIL ADDRESSES =====
+// Multiple addresses per account, managed from the profile page.
+// Added addresses are verified by code, then receive mail and can be used to
+// sign in. Any address (including the primary) can be muted, but not the last one.
+router.get('/emails', auth, listEmails);
+router.post('/emails', auth, otpRateLimiter, addEmail);
+router.post('/emails/verify', auth, verifyEmail);
+router.post('/emails/resend', auth, otpRateLimiter, resendVerification);
+router.patch('/emails/preferences', auth, updateEmailPreference);
+router.delete('/emails', auth, removeEmail);
 
 // Admin routes
 router.get('/admin/profile', auth, getAdminProfile);
