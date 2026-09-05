@@ -5,6 +5,8 @@ import { loginSuccess } from '../../redux/slices/authSlice.js';
 import { Mail, User, Lock, UserPlus, Loader2, Eye, EyeOff } from 'lucide-react';
 import PhoneNumberInput, { validatePhoneParts, buildPhoneValue } from '../Shared/PhoneNumberInput.jsx';
 import axiosInstance from '../../config/axios.config.js';
+import PasswordCriteriaList from '../Shared/PasswordCriteriaList.jsx';
+import { isPasswordValid, passwordErrorMessage, extractServerError } from '../../utils/passwordCriteria.js';
 
 /**
  * Add-client form for the ESF portal.
@@ -49,8 +51,10 @@ const EsfAddClientForm = ({ onCancel, onCreated, showCancelButton = false }) => 
     if (!emailRegex.test(formData.email)) {
       newErrors.email = 'Valid email address';
     }
-    if (!formData.password || formData.password.length < 8) {
-      newErrors.password = 'Password must be at least 8 characters';
+    if (!formData.password) {
+      newErrors.password = 'Password is required';
+    } else if (!isPasswordValid(formData.password)) {
+      newErrors.password = passwordErrorMessage(formData.password);
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -101,8 +105,7 @@ const EsfAddClientForm = ({ onCancel, onCreated, showCancelButton = false }) => 
         setErrorMessage(res.data?.message || 'Failed to add client. Please try again.');
       }
     } catch (error) {
-      const errors = error.response?.data?.errors;
-      setErrorMessage(errors?.[0]?.msg || error.response?.data?.message || 'Failed to add client. Please try again.');
+      setErrorMessage(extractServerError(error, 'Failed to add client. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -207,7 +210,7 @@ const EsfAddClientForm = ({ onCancel, onCreated, showCancelButton = false }) => 
               onChange={handleChange}
               onFocus={handleFocus}
               className={inputClass(!!errors.password, 'pr-12')}
-              placeholder="At least 8 characters"
+              placeholder="Create a password"
               autoComplete="new-password"
             />
             <button
@@ -219,7 +222,7 @@ const EsfAddClientForm = ({ onCancel, onCreated, showCancelButton = false }) => 
               {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
           </div>
-          {errors.password && <p className="text-red-400 text-xs mt-1">{errors.password}</p>}
+          <PasswordCriteriaList value={formData.password} error={errors.password} />
         </div>
 
         <div className="flex flex-col-reverse sm:flex-row gap-2 sm:gap-3 pt-2">

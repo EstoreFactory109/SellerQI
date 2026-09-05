@@ -1,5 +1,6 @@
 const { body, validationResult } = require("express-validator");
 const { ASSIGNABLE_ESF_ROLES } = require("../../Services/User/esfRoles.js");
+const { applyPasswordRules } = require("../../utils/passwordPolicy.js");
 
 const EMAIL_NORMALIZE_OPTS = {
     gmail_remove_dots: false,
@@ -53,6 +54,11 @@ const phoneRule = body("phone")
     })
     .customSanitizer((value) => value.replace(/[\s\-\(\)]/g, ''));
 
+// Same strength the normal signup page enforces - one definition, applied to
+// both ESF clients and ESF staff. A factory so each chain is its own instance.
+const passwordRule = () =>
+    applyPasswordRules(body("password").notEmpty().withMessage("Password is required"));
+
 /** POST /app/esf/login */
 const validateEsfLogin = [
     emailRule,
@@ -66,9 +72,7 @@ const validateEsfClient = [
     nameRule("lastname", "Last name"),
     phoneRule,
     emailRule,
-    body("password")
-        .notEmpty().withMessage("Password is required")
-        .isLength({ min: 8 }).withMessage("Password must be at least 8 characters long"),
+    passwordRule(),
     body("allTermsAndConditionsAgreed")
         .optional()
         .isBoolean().withMessage("Terms agreement must be a boolean"),
@@ -81,9 +85,7 @@ const validateEsfUser = [
     nameRule("lastname", "Last name"),
     phoneRule,
     emailRule,
-    body("password")
-        .notEmpty().withMessage("Password is required")
-        .isLength({ min: 8 }).withMessage("Password must be at least 8 characters long"),
+    passwordRule(),
     // 'owner' is intentionally not accepted - there is exactly one, and it is seeded.
     body("role")
         .optional()

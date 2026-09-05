@@ -2,7 +2,9 @@
  * Tests for the ESF staff portal validators.
  *
  * Both ESF clients and ESF staff must have a password: clients sign in at the
- * main login page, staff sign in at /esf-login.
+ * main login page, staff sign in at /esf-login. Both are held to the SAME
+ * strength rules as the normal signup page - uppercase, lowercase, number and
+ * special character - so neither form is a way past that requirement.
  */
 
 const { validationResult } = require('express-validator');
@@ -28,9 +30,9 @@ const clientBody = {
   lastname: 'Shah',
   phone: '+19876543210',
   email: 'client@test.com',
-  password: 'Cl1entPass',
+  password: 'Cl1entPass!',
 };
-const staffBody = { ...clientBody, email: 'staff@estorefactory.net', password: 'S3cretPass' };
+const staffBody = { ...clientBody, email: 'staff@estorefactory.net', password: 'S3cretPass!' };
 
 describe('esfValidate', () => {
   describe('validateEsfClient', () => {
@@ -47,6 +49,18 @@ describe('esfValidate', () => {
 
     it('rejects a password shorter than 8 characters', async () => {
       const { errors } = await run(validateEsfClient, { ...clientBody, password: 'short' });
+      expect(errorFor(errors, 'password')).toBeDefined();
+    });
+
+
+    it.each([
+      ['no uppercase', 'cl1entpass!'],
+      ['no lowercase', 'CL1ENTPASS!'],
+      ['no number', 'ClientPass!'],
+      ['no special character', 'Cl1entPass'],
+      ['too short', 'Cl1!aA'],
+    ])('rejects a password with %s', async (_label, password) => {
+      const { errors } = await run(validateEsfClient, { ...clientBody, password });
       expect(errorFor(errors, 'password')).toBeDefined();
     });
 
@@ -102,11 +116,22 @@ describe('esfValidate', () => {
       const { errors } = await run(validateEsfUser, { ...staffBody, password: 'short' });
       expect(errorFor(errors, 'password')).toBeDefined();
     });
+
+    it.each([
+      ['no uppercase', 'cl1entpass!'],
+      ['no lowercase', 'CL1ENTPASS!'],
+      ['no number', 'ClientPass!'],
+      ['no special character', 'Cl1entPass'],
+      ['too short', 'Cl1!aA'],
+    ])('rejects a password with %s', async (_label, password) => {
+      const { errors } = await run(validateEsfUser, { ...staffBody, password });
+      expect(errorFor(errors, 'password')).toBeDefined();
+    });
   });
 
   describe('validateEsfLogin', () => {
     it('passes with an email and password', async () => {
-      const { errors } = await run(validateEsfLogin, { email: 'staff@estorefactory.net', password: 'S3cretPass' });
+      const { errors } = await run(validateEsfLogin, { email: 'staff@estorefactory.net', password: 'S3cretPass!' });
       expect(errors.isEmpty()).toBe(true);
     });
 
@@ -116,7 +141,7 @@ describe('esfValidate', () => {
     });
 
     it('rejects a malformed email', async () => {
-      const { errors } = await run(validateEsfLogin, { email: 'nope', password: 'S3cretPass' });
+      const { errors } = await run(validateEsfLogin, { email: 'nope', password: 'S3cretPass!' });
       expect(errorFor(errors, 'email')).toBeDefined();
     });
   });

@@ -22,6 +22,7 @@ const { ApiError } = require('../../utils/ApiError.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
 const asyncHandler = require('../../utils/AsyncHandler.js');
 const logger = require('../../utils/Logger.js');
+const { isStrongPassword, passwordPolicyMessage } = require('../../utils/passwordPolicy.js');
 const {
     ESF_ROLES,
     ASSIGNABLE_ESF_ROLES,
@@ -180,8 +181,9 @@ const updateEsfPassword = asyncHandler(async (req, res) => {
     if (!currentPassword || !newPassword) {
         return res.status(400).json(new ApiResponse(400, '', 'Current and new password are required'));
     }
-    if (newPassword.length < 8) {
-        return res.status(400).json(new ApiResponse(400, '', 'New password must be at least 8 characters long'));
+    // Same strength as the signup page - otherwise this is a way straight past it.
+    if (!isStrongPassword(newPassword)) {
+        return res.status(400).json(new ApiResponse(400, '', passwordPolicyMessage(newPassword)));
     }
 
     const user = await UserModel.findById(req.esfUserId).select('+password');
@@ -343,8 +345,8 @@ const setEsfClientPassword = asyncHandler(async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(clientId)) {
         return res.status(400).json(new ApiResponse(400, '', 'Invalid client id'));
     }
-    if (!newPassword || newPassword.length < 8) {
-        return res.status(400).json(new ApiResponse(400, '', 'Password must be at least 8 characters long'));
+    if (!isStrongPassword(newPassword)) {
+        return res.status(400).json(new ApiResponse(400, '', passwordPolicyMessage(newPassword)));
     }
 
     // Scoped to ESF clients so this can never reset an agency client or a seller.
@@ -465,8 +467,8 @@ const resetEsfUserPassword = asyncHandler(async (req, res) => {
     const { userId } = req.params;
     const { newPassword } = req.body;
 
-    if (!newPassword || newPassword.length < 8) {
-        return res.status(400).json(new ApiResponse(400, '', 'New password must be at least 8 characters long'));
+    if (!isStrongPassword(newPassword)) {
+        return res.status(400).json(new ApiResponse(400, '', passwordPolicyMessage(newPassword)));
     }
 
     // The owner's password is theirs alone - changed via Settings, not here.
