@@ -391,9 +391,11 @@ const loginUser = asyncHandler(async (req, res) => {
 
 
 
+    // Unknown email and wrong password return an identical response so the endpoint
+    // cannot be used to discover which addresses have accounts. The log stays specific.
     if (!checkUserIfExists) {
-        logger.error(new ApiError(404, "User not found"));
-        return res.status(404).json(new ApiResponse(404, "", "User not found"));
+        logger.error(new ApiError(401, `Login attempt for unknown email: ${email}`));
+        return res.status(401).json(new ApiResponse(401, "", "Incorrect email or password"));
     }
 
     // Block agency clients from direct login - they can only be accessed via agency owner
@@ -407,8 +409,8 @@ const loginUser = asyncHandler(async (req, res) => {
     const checkPassword = await verifyPassword(password, checkUserIfExists.password);
 
     if (!checkPassword) {
-        logger.error(new ApiError(401, "Password not matched"))
-        return res.status(401).json(new ApiResponse(401, "", "Password not matched"));
+        logger.error(new ApiError(401, `Password not matched for ${checkUserIfExists.email}`))
+        return res.status(401).json(new ApiResponse(401, "", "Incorrect email or password"));
     }
 
     // Runs only after the password is confirmed, so a wrong password cannot be used to

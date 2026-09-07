@@ -187,12 +187,12 @@ export default function Login() {
           navigate('/connect-to-amazon');
         } else {
           // Handle wrong password or invalid credentials
-          setErrorMessage(error.response?.data?.message || 'Invalid email or password. Please try again.');
+          setErrorMessage(error.response?.data?.message || 'Incorrect email or password');
         }
       } else if (error.response?.status === 403) {
         setErrorMessage('Account is disabled. Please contact support.');
       } else if (error.response?.status === 404) {
-        setErrorMessage('User not found. Please check your email or sign up.');
+        setErrorMessage(error.response?.data?.message || 'Login failed. Please try again.');
       } else {
         setErrorMessage(error.response?.data?.message || 'Login failed. Please try again.');
       }
