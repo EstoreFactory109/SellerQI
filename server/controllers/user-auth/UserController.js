@@ -402,6 +402,17 @@ const loginUser = asyncHandler(async (req, res) => {
         return res.status(403).json(new ApiResponse(403, "", "Agency clients cannot login directly. Please contact your agency administrator."));
     }
 
+    // Agency clients have no password, but this check happens above
+    // For regular users, verify password
+    const checkPassword = await verifyPassword(password, checkUserIfExists.password);
+
+    if (!checkPassword) {
+        logger.error(new ApiError(401, "Password not matched"))
+        return res.status(401).json(new ApiResponse(401, "", "Password not matched"));
+    }
+
+    // Runs only after the password is confirmed, so a wrong password cannot be used to
+    // trigger verification emails to someone else's address.
     if (checkUserIfExists.isVerified === false) {
 
         let otp = generateOTP();
@@ -412,7 +423,7 @@ const loginUser = asyncHandler(async (req, res) => {
         }
 
         let emailSent = await sendEmail(checkUserIfExists.email, checkUserIfExists.firstName, otp);
-  
+
         if (!emailSent) {
             logger.error(new ApiError(500, "Internal server error in sending email"));
             return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending email"));
@@ -423,15 +434,6 @@ const loginUser = asyncHandler(async (req, res) => {
 
         logger.info(`OTP sent to unverified user: ${checkUserIfExists.email}`);
         return res.status(401).json(new ApiResponse(401, { email: checkUserIfExists.email }, "User not verified"));
-    }
-
-    // Agency clients have no password, but this check happens above
-    // For regular users, verify password
-    const checkPassword = await verifyPassword(password, checkUserIfExists.password);
-
-    if (!checkPassword) {
-        logger.error(new ApiError(401, "Password not matched"))
-        return res.status(401).json(new ApiResponse(401, "", "Password not matched"));
     }
 
     // Check trial status on login
@@ -647,14 +649,15 @@ const logoutUser = asyncHandler(async (req, res) => {
     }
 
     const UpdateRefreshToken = await UserModel.findOneAndUpdate(
-        { _id: userId, isVerified: true },
+        { _id: userId },
         { $set: { appRefreshToken: "" } },
         { new: true }
     )
 
+    // Cookies are cleared even if the token reset found no document, so a failed
+    // update can never leave the caller holding a live session cookie.
     if (!UpdateRefreshToken) {
         logger.error(new ApiError(500, "Internal server error in updating refresh token"));
-        return res.status(500).json(new ApiResponse(500, "", "Internal server error in updating refresh token"));
     }
 
     // Define the SAME options used when setting cookies
