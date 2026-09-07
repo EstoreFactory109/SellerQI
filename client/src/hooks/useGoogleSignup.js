@@ -5,14 +5,17 @@ import googleAuthService from '../services/googleAuthService.js';
 import { loginSuccess } from '../redux/slices/authSlice.js';
 import { clearAuthCache } from '../utils/authCoordinator.js';
 
+// Payment is disabled, so every new account is created as PRO with immediate
+// access. Mirrors what SignUp.jsx sends on the password path.
+const FREE_PRO = {
+  packageType: 'PRO',
+  isInTrialPeriod: false,
+  subscriptionStatus: 'active',
+  trialEndsDate: null,
+};
+
 /**
  * The Google sign-up half of both auth pages.
- *
- * The plan is deliberately not sent from here: the product is free and the server
- * grants PRO to every new account (see resolveFreeAccountPlan in
- * server/controllers/user-auth/UserController.js). Keeping that decision in one
- * place server-side is what stops the entry points from disagreeing, which is how
- * some users ended up on LITE behind a paywall.
  *
  * Google never gives us a phone number, so `pendingSignup` holds the routing
  * while the phone-collection modal is open.
@@ -35,6 +38,7 @@ export const useGoogleSignup = ({ onError } = {}) => {
   const registerWithGoogle = useCallback(
     async ({ idToken, packageType, agencyName } = {}) => {
       const registration = {
+        ...FREE_PRO,
         allTermsAndConditionsAgreed: true,
         ...(packageType ? { packageType } : {}),
         ...(agencyName ? { agencyName } : {}),

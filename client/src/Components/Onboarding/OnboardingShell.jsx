@@ -15,14 +15,15 @@ const PANEL_BG = '#10141C';
  *  3. Connect Amazon Ads       → /connect-accounts (Ads OAuth) + /profile-selection (Ads profile)
  *  4. See your findings        → /analyse-account
  *
- * There used to be a "Choose a plan" step between 3 and 4. The product is free and
- * every account is granted PRO, so there is no plan to choose and no checkout to
- * send anyone to.
+ * The old step 4, "Choose a plan" (Stripe checkout / trial), was removed when
+ * payments were disabled - see the commented entry in buildSteps below to restore.
  */
-const buildSteps = () => [
+const buildSteps = (trialDays) => [
   { label: 'Create your account', short: 'Account', sub: 'Name, email, password', time: '30s' },
   { label: 'Connect Seller Central', short: 'Seller Central', sub: 'One click on Amazon, read-only', time: '60s', tag: 'Required', tagTone: 'req' },
   { label: 'Connect Amazon Ads', short: 'Amazon Ads', sub: 'Where the wasted spend hides', time: '40s', tag: 'Recommended', tagTone: 'rec' },
+  // ===== PAYMENT DISABLED - 'Choose a plan' step removed from onboarding =====
+  // { label: 'Choose a plan', short: 'Plan', sub: `Free for ${trialDays} days, cancel anytime`, time: '60s' },
   { label: 'See your findings', short: 'Findings', sub: 'Scan runs while you finish', time: 'auto' },
 ];
 
@@ -112,16 +113,19 @@ const TIME_LEFT_LABELS = [
  * @param {number} currentStep  1-based index of the active step (1-4).
  * @param {number[]} doneSteps  step numbers already completed (shown with a checkmark).
  * @param {number[]} skippedSteps step numbers the user chose to skip (shown with a dash).
+ * @param {number} trialDays    unused while payments are disabled; kept for the
+ *                              commented-out "Choose a plan" sub-label.
  * @param {string} maxWidth     content column max width (mock uses 620px for most steps).
  */
 const OnboardingShell = ({
   currentStep = 1,
   doneSteps = [],
   skippedSteps = [],
+  trialDays = 7,
   maxWidth = '620px',
   children,
 }) => {
-  const steps = buildSteps();
+  const steps = buildSteps(trialDays);
   const idx = Math.min(Math.max(currentStep - 1, 0), steps.length - 1);
   const progressWidth = `${Math.round(((idx + 1) / steps.length) * 100)}%`;
 

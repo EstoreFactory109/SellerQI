@@ -65,6 +65,7 @@ const SignUp = () => {
   // Something typed, but not yet meeting every rule — keeps the field red as they go.
   const passwordIncomplete = !!formData.password && !isPasswordValid(formData.password);
 
+
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
     
@@ -196,15 +197,23 @@ const SignUp = () => {
     if (!validateForm()) return;
     setLoading(true);
     try {
-      // The plan is not chosen here: the product is free and the server grants PRO
-      // to every new account. AGENCY is the one shape that still has to be asked
-      // for, because it routes to a different activation step after verification.
+      // All users get PRO by default - no payment required. AGENCY is the one
+      // shape that differs, because it routes to its own activation step.
+      const isAGENCY = plans === "AGENCY";
+      let packageType = "PRO";
+      if (isAGENCY) {
+        packageType = "AGENCY";
+      }
+
       const formDataWithTerms = {
         ...formData,
         phone: `${countryCode} ${formData.phone}`, // Include country code
         allTermsAndConditionsAgreed: termsAccepted,
-        ...(plans === 'AGENCY' ? { packageType: 'AGENCY' } : {}),
-        intendedPackage: plans, // Drives the post-verification routing (null if no plan)
+        packageType: packageType, // PRO for all users, AGENCY for AGENCY
+        isInTrialPeriod: false,
+        subscriptionStatus: "active", // All users have active access by default
+        trialEndsDate: null,
+        intendedPackage: plans, // Store the intended package for post-verification flow (null if no plan)
       };
       const response = await axios.post(`${import.meta.env.VITE_BASE_URI}/app/register`, formDataWithTerms, { withCredentials: true });
       if (response.status === 201) {

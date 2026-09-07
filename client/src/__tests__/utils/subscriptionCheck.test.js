@@ -85,26 +85,26 @@ describe('subscriptionCheck', () => {
       expect(hasPremiumAccess(user)).toBe(true);
     });
 
-    it('should return false for PRO users with cancelled subscription', () => {
+    it('should return true for PRO users regardless of subscription status', () => {
       const user = {
         packageType: 'PRO',
         subscriptionStatus: 'cancelled',
         isInTrialPeriod: false,
       };
-      expect(hasPremiumAccess(user)).toBe(false);
+      expect(hasPremiumAccess(user)).toBe(true);
     });
 
-    it('should return false for PRO users with past_due subscription', () => {
+    it('should return true for PRO users with past_due subscription', () => {
       const user = {
         packageType: 'PRO',
         subscriptionStatus: 'past_due',
         isInTrialPeriod: false,
       };
-      expect(hasPremiumAccess(user)).toBe(false);
+      expect(hasPremiumAccess(user)).toBe(true);
     });
 
     describe('trial period handling', () => {
-      it('should return true for PRO user in active trial', () => {
+      it('should return true for PRO user regardless of trial status', () => {
         const user = {
           packageType: 'PRO',
           isInTrialPeriod: true,
@@ -113,16 +113,16 @@ describe('subscriptionCheck', () => {
         expect(hasPremiumAccess(user)).toBe(true);
       });
 
-      it('should return false for PRO user with expired trial', () => {
+      it('should return true for PRO user with expired trial', () => {
         const user = {
           packageType: 'PRO',
           isInTrialPeriod: true,
           trialEndsDate: createPastDate(7),
         };
-        expect(hasPremiumAccess(user)).toBe(false);
+        expect(hasPremiumAccess(user)).toBe(true);
       });
 
-      it('should return true for AGENCY user in active trial', () => {
+      it('should return true for AGENCY user regardless of trial status', () => {
         const user = {
           packageType: 'AGENCY',
           isInTrialPeriod: true,
@@ -286,7 +286,7 @@ describe('subscriptionCheck', () => {
 
       const result = getSubscriptionDetails(user);
 
-      expect(result.hasPremiumAccess).toBe(false);
+      expect(result.hasPremiumAccess).toBe(true);
       expect(result.isTrialExpired).toBe(true);
       expect(result.isInActiveTrial).toBe(false);
     });

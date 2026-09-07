@@ -24,26 +24,12 @@ const sendVerificationCode = require('../../Services/SMS/sendSMS.js');
 const subscriptionVerificationService = require('../../Services/User/SubscriptionVerificationService.js');
 const { sendRegisteredEmail } = require('../../Services/Email/SendEmailOnRegistered.js');
 
-// The product is free: every new self-serve account is granted PRO outright, with
-// no payment step and no trial. Decided here rather than trusted from the request
-// so that every entry point agrees — the in-app signup used to send LITE while the
-// marketing site sent PRO, which left users on different plans for the same product
-// and had to be patched by hand.
-//
-// AGENCY is the one exception: it is a different product shape, not a paid tier.
-const resolveFreeAccountPlan = (requestedPackageType) => ({
-    packageType: requestedPackageType === 'AGENCY' ? 'AGENCY' : 'PRO',
-    subscriptionStatus: 'active',
-    isInTrialPeriod: false,
-    trialEndsDate: null,
-});
-
 const registerUser = asyncHandler(async (req, res) => {
-    const { firstname, lastname, phone, email, password, allTermsAndConditionsAgreed, packageType, intendedPackage, agencyName } = req.body;
+    const { firstname, lastname, phone, email, password, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate, intendedPackage, agencyName } = req.body;
     // console.log(firstname)
 
-    // Plan fields are no longer required from the caller — the server grants them.
-    if (!firstname || !lastname || !phone || !email || !password) {
+    // Validate required fields - trialEndsDate is only required for trial users
+    if (!firstname || !lastname || !phone || !email || !password || !packageType || (isInTrialPeriod == null) || !subscriptionStatus) {
         logger.error(new ApiError(400, "Details and credentials are missing"));
         return res.status(400).json(new ApiResponse(400, "", "Details and credentials are missing"));
     }
@@ -54,8 +40,11 @@ const registerUser = asyncHandler(async (req, res) => {
         return res.status(400).json(new ApiResponse(400, "", "Agency name is required for agency registration"));
     }
 
-    const { packageType: grantedPackageType, isInTrialPeriod, subscriptionStatus, trialEndsDate } =
-        resolveFreeAccountPlan(packageType);
+    // If user is in trial period, trialEndsDate is required
+    if (isInTrialPeriod === true && !trialEndsDate) {
+        logger.error(new ApiError(400, "Trial end date is required for trial users"));
+        return res.status(400).json(new ApiResponse(400, "", "Trial end date is required for trial users"));
+    }
 
     if (typeof allTermsAndConditionsAgreed !== 'boolean' || allTermsAndConditionsAgreed !== true) {
         logger.error(new ApiError(400, "Terms and conditions agreement is required"));
@@ -90,19 +79,23 @@ const registerUser = asyncHandler(async (req, res) => {
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending SMS"));
     }   */
 
+    // Create user with proper package settings
+    // PRO-Trial: isInTrialPeriod=true, subscriptionStatus=active, trialEndsDate set
+    // PRO: isInTrialPeriod=false, subscriptionStatus=inactive (needs payment)
+    // AGENCY: includes agencyName
     let data = await createUser(
-        firstname,
-        lastname,
-        phone,
-        phone,
-        email,
-        password,
-        otp,
-        allTermsAndConditionsAgreed,
-        grantedPackageType,    // PRO for everyone, AGENCY for agencies
-        isInTrialPeriod,       // always false — nothing is being charged for
-        subscriptionStatus,    // always active
-        trialEndsDate,         // always null
+        firstname, 
+        lastname, 
+        phone, 
+        phone, 
+        email, 
+        password, 
+        otp, 
+        allTermsAndConditionsAgreed, 
+        packageType,           // PRO for both PRO-Trial and PRO, AGENCY for agencies
+        isInTrialPeriod,       // true for PRO-Trial, false for PRO
+        subscriptionStatus,    // active for PRO-Trial, inactive for PRO (pending payment)
+        trialEndsDate,         // Date for PRO-Trial, null for PRO
         agencyName             // Required for AGENCY, null for others
     );
 
@@ -111,12 +104,12 @@ const registerUser = asyncHandler(async (req, res) => {
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in registering user"));
     }
 
-    logger.info(`User registered: ${email}, package: ${grantedPackageType}, requested: ${packageType || 'none'}, intendedPackage: ${intendedPackage || 'not specified'}`);
+    logger.info(`User registered: ${email}, package: ${packageType}, isInTrialPeriod: ${isInTrialPeriod}, intendedPackage: ${intendedPackage || 'not specified'}`);
 
     res.status(201)
-        .json(new ApiResponse(201, {
+        .json(new ApiResponse(201, { 
             email: email,
-            packageType: grantedPackageType,
+            packageType: packageType,
             isInTrialPeriod: isInTrialPeriod,
             subscriptionStatus: subscriptionStatus
         }, "User registered successfully. OTP has been sent to your email address"));
@@ -375,6 +368,10 @@ const loginUser = asyncHandler(async (req, res) => {
 
     const checkUserIfExists = await getUserByEmail(email);
 
+
+
+
+
     // Unknown email and wrong password return an identical response so the endpoint
     // cannot be used to discover which addresses have accounts. The log stays specific.
     if (!checkUserIfExists) {
@@ -388,6 +385,8 @@ const loginUser = asyncHandler(async (req, res) => {
         return res.status(403).json(new ApiResponse(403, "", "Agency clients cannot login directly. Please contact your agency administrator."));
     }
 
+    // Agency clients have no password, but this check happens above
+    // For regular users, verify password
     // A Google account has no password to compare against, and bcrypt.compare
     // throws rather than returning false when the stored hash is absent — so this
     // must be answered before verifyPassword, not after.
@@ -456,19 +455,18 @@ const loginUser = asyncHandler(async (req, res) => {
             });
 
             if (verificationResult.shouldDowngrade) {
-                // Safe to downgrade - no active subscription with payment gateway
+                // Keep user as PRO - application is now free for all PRO users
+                // No downgrade to LITE anymore
                 await UserModel.findByIdAndUpdate(checkUserIfExists._id, {
                     isInTrialPeriod: false,
-                    packageType: 'LITE',
-                    subscriptionStatus: 'inactive'
+                    subscriptionStatus: 'active'
                 });
 
                 // Update the local user object for the response
                 checkUserIfExists.isInTrialPeriod = false;
-                checkUserIfExists.packageType = 'LITE';
-                checkUserIfExists.subscriptionStatus = 'inactive';
+                checkUserIfExists.subscriptionStatus = 'active';
 
-                logger.info(`User ${checkUserIfExists._id} trial expired and no active subscription found. Downgraded to LITE plan.`);
+                logger.info(`User ${checkUserIfExists._id} trial expired. Keeping as PRO user (free access enabled).`);
             } else if (verificationResult.hasActiveSubscription) {
                 // DON'T downgrade - user has an active subscription with the payment gateway
                 // Sync the subscription status from the gateway
@@ -841,10 +839,9 @@ const verifyEmailForPasswordReset = asyncHandler(async (req, res) => {
     }
 
     // Nothing to reset on a genuinely passwordless account, so say so instead of
-    // mailing a link. Deliberately keyed on the password and not on authProvider:
-    // a legacy Google account still carries a hash, and letting it reset is the
-    // only way back in if the user loses their Google account. updatePassword
-    // moves authProvider to 'password' when that happens, so state stays honest.
+    // mailing a link. Keyed on the password and not on authProvider: a legacy
+    // Google account still carries a hash, and letting it reset is the only way
+    // back in if the user loses their Google account.
     if (!user.password) {
         logger.info(`Password reset requested for a passwordless account: ${user.email}`);
         return res.status(400).json(new ApiResponse(400, { useGoogle: true }, "This account uses Google Sign-In. Please continue with Google."));
@@ -1073,8 +1070,8 @@ const googleLoginUser = asyncHandler(async (req, res) => {
         // Check if user exists
         const checkUserIfExists = await getUserByEmail(email);
 
-        // No account yet — hand the caller the verified profile so it can collect a
-        // plan and consent, then create the account. Previously a dead end.
+        // No account yet — hand the caller the verified profile so it can collect
+        // consent and create the account. Previously a dead end.
         if (!checkUserIfExists) {
             logger.info(`Google login for unregistered email ${email} — offering signup`);
             return res.status(404).json(new ApiResponse(404, {
@@ -1112,19 +1109,18 @@ const googleLoginUser = asyncHandler(async (req, res) => {
                 });
 
                 if (verificationResult.shouldDowngrade) {
-                    // Safe to downgrade - no active subscription with payment gateway
+                    // Keep user as PRO - application is now free for all PRO users
+                    // No downgrade to LITE anymore
                     await UserModel.findByIdAndUpdate(checkUserIfExists._id, {
                         isInTrialPeriod: false,
-                        packageType: 'LITE',
-                        subscriptionStatus: 'inactive'
+                        subscriptionStatus: 'active'
                     });
 
                     // Update the local user object for the response
                     checkUserIfExists.isInTrialPeriod = false;
-                    checkUserIfExists.packageType = 'LITE';
-                    checkUserIfExists.subscriptionStatus = 'inactive';
+                    checkUserIfExists.subscriptionStatus = 'active';
 
-                    logger.info(`User ${checkUserIfExists._id} trial expired and no active subscription found (Google login). Downgraded to LITE plan.`);
+                    logger.info(`User ${checkUserIfExists._id} trial expired. Keeping as PRO user (free access enabled).`);
                 } else if (verificationResult.hasActiveSubscription) {
                     // DON'T downgrade - user has an active subscription with the payment gateway
                     // Sync the subscription status from the gateway
@@ -1270,11 +1266,25 @@ const googleLoginUser = asyncHandler(async (req, res) => {
 
 // Google OAuth Register Handler
 const googleRegisterUser = asyncHandler(async (req, res) => {
-    const { idToken, packageType, allTermsAndConditionsAgreed, agencyName } = req.body;
+    const { idToken, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate, allTermsAndConditionsAgreed } = req.body;
+
+
 
     if (!idToken) {
         logger.error(new ApiError(400, "Google ID token is missing"));
         return res.status(400).json(new ApiResponse(400, "", "Google ID token is missing"));
+    }
+
+    // Validate required fields - trialEndsDate is only required for trial users
+    if (!packageType || (isInTrialPeriod == null) || !subscriptionStatus) {
+        logger.error(new ApiError(400, "Package type, isInTrialPeriod, and subscriptionStatus are missing"));
+        return res.status(400).json(new ApiResponse(400, "", "Package type, isInTrialPeriod, and subscriptionStatus are missing"));
+    }
+    
+    // If user is in trial period, trialEndsDate is required
+    if (isInTrialPeriod === true && !trialEndsDate) {
+        logger.error(new ApiError(400, "Trial end date is required for trial users"));
+        return res.status(400).json(new ApiResponse(400, "", "Trial end date is required for trial users"));
     }
 
     // Accounts can now be created straight from the login page, so consent has to
@@ -1283,15 +1293,6 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
         logger.error(new ApiError(400, "You must agree to the Terms of Use and Privacy Policy"));
         return res.status(400).json(new ApiResponse(400, "", "You must agree to the Terms of Use and Privacy Policy"));
     }
-
-    if (packageType === 'AGENCY' && !agencyName) {
-        logger.error(new ApiError(400, "Agency name is required for agency accounts"));
-        return res.status(400).json(new ApiResponse(400, "", "Agency name is required for agency accounts"));
-    }
-
-    // Same free-PRO grant as the password signup path.
-    const { packageType: grantedPackageType, isInTrialPeriod, subscriptionStatus, trialEndsDate } =
-        resolveFreeAccountPlan(packageType);
 
     try {
         // Verify the Google ID token using environment variable
@@ -1324,10 +1325,11 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
             return res.status(409).json(new ApiResponse(409, { email: email }, "User already exists. Please login instead."));
         }
 
-        // Create new user. lastName has a minlength of 2 in the schema, so a
-        // single-word Google profile name must not produce an empty string.
+        // Create new user
         const firstName = given_name || name?.split(' ')[0] || 'User';
         const derivedLastName = family_name || name?.split(' ').slice(1).join(' ') || '';
+        // lastName has a minlength of 2 in the schema, so a single-word Google
+        // profile name must not produce an empty string.
         const lastName = derivedLastName.length >= 2 ? derivedLastName : '--';
 
         // For Google OAuth users, we'll use unique placeholder values for required fields
@@ -1351,7 +1353,7 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
             allTermsAndConditionsAgreed: true, // enforced from the request above
             authProvider: 'google',
             OTP: null,
-            packageType: grantedPackageType,
+            packageType: packageType,
             isInTrialPeriod: isInTrialPeriod,
             subscriptionStatus: subscriptionStatus,
             needsPhoneUpdate: true,        // phone above is a placeholder, not a real number
@@ -1361,10 +1363,6 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
         // Only set trialEndsDate if it's provided (for trial users)
         if (trialEndsDate) {
             userData.trialEndsDate = trialEndsDate;
-        }
-
-        if (grantedPackageType === 'AGENCY' && agencyName) {
-            userData.agencyName = agencyName;
         }
 
         const newUser = new UserModel(userData);
@@ -2183,8 +2181,9 @@ const superAdminUpdateUserPassword = asyncHandler(async (req, res) => {
     // Hash the new password
     const hashedPassword = await hashPassword(newPassword);
 
-    // Update the user's password. A Google account given a password by an admin now
-    // genuinely has one, so stop reporting it as Google-only at login.
+    // Update the user's password
+    // A Google account given a password by an admin genuinely has one now, so stop
+    // reporting it as Google-only at login.
     targetUser.password = hashedPassword;
     targetUser.authProvider = 'password';
     await targetUser.save();

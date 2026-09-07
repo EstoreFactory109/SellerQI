@@ -5,7 +5,9 @@ import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import axios from 'axios';
 import axiosInstance from '../../config/axios.config.js';
+import { detectCountry } from '../../utils/countryDetection.js';
 import { hasPremiumAccess } from '../../utils/subscriptionCheck.js';
+import stripeService from '../../services/stripeService.js';
 import OnboardingShell from '../../Components/Onboarding/OnboardingShell.jsx';
 import { COLORS } from '../../Components/Shared/index.js';
 
@@ -265,12 +267,95 @@ const ProfileIDSelection = () => {
     });
   };
 
-  // Onboarding used to end at a Stripe checkout, with a premium check to decide
-  // whether to skip it. The product is free and every account is granted PRO, so
-  // there is nothing to check and nowhere to redirect but the analysis.
-  const goToAnalysis = () => {
-    setWaitingForAnalysis(false);
-    navigate('/analyse-account');
+  const navigateToPayment = async () => {
+    try {
+      // Debug: Log Redux userData
+      console.log('[ProfileIDSelection] navigateToPayment called');
+      console.log('[ProfileIDSelection] Redux userData:', userData);
+      console.log('[ProfileIDSelection] Redux userData details:', {
+        packageType: userData?.packageType,
+        subscriptionStatus: userData?.subscriptionStatus,
+        isInTrialPeriod: userData?.isInTrialPeriod,
+        trialEndsDate: userData?.trialEndsDate
+      });
+      
+      // First check Redux state for premium access
+      const hasPremiumFromRedux = hasPremiumAccess(userData);
+      console.log('[ProfileIDSelection] hasPremiumAccess(userData) result:', hasPremiumFromRedux);
+      
+      if (hasPremiumFromRedux) {
+        console.log('[ProfileIDSelection] User already has premium access (from Redux), skipping payment...');
+        setWaitingForAnalysis(false);
+        navigate('/analyse-account');
+        return;
+      }
+      
+      // Fetch fresh user data from API to ensure we have the latest subscription status
+      // This handles cases where Redux state might be stale
+      let freshUserData = null;
+      try {
+        console.log('[ProfileIDSelection] Fetching fresh user data to verify subscription status...');
+        const profileResponse = await axiosInstance.get('/app/profile');
+        console.log('[ProfileIDSelection] Profile API response:', profileResponse);
+        
+        if (profileResponse?.status === 200 && profileResponse.data?.data) {
+          freshUserData = profileResponse.data.data;
+          console.log('[ProfileIDSelection] Fresh user data:', {
+            packageType: freshUserData.packageType,
+            subscriptionStatus: freshUserData.subscriptionStatus,
+            isInTrialPeriod: freshUserData.isInTrialPeriod,
+            trialEndsDate: freshUserData.trialEndsDate,
+            servedTrial: freshUserData.servedTrial
+          });
+          
+          // Check fresh data for premium access (PRO, AGENCY, or active trial)
+          const hasPremiumFromApi = hasPremiumAccess(freshUserData);
+          console.log('[ProfileIDSelection] hasPremiumAccess(freshUserData) result:', hasPremiumFromApi);
+          
+          if (hasPremiumFromApi) {
+            console.log('[ProfileIDSelection] User already has premium access (from fresh API data), skipping payment...');
+            console.log('[ProfileIDSelection] Navigating to /analyse-account...');
+            setWaitingForAnalysis(false);
+            navigate('/analyse-account');
+            return;
+          }
+        } else {
+          console.log('[ProfileIDSelection] Profile API returned unexpected response:', profileResponse?.status);
+        }
+      } catch (profileError) {
+        console.warn('[ProfileIDSelection] Could not fetch fresh profile data, proceeding with Redux state:', profileError);
+        // Continue with payment flow if we can't fetch fresh data
+      }
+      
+      // Mirror server StripeController: trial only if not (servedTrial && status !== cancelled)
+      const eligibilityUser = freshUserData || userData || {};
+      const canStartTrial =
+        !eligibilityUser.servedTrial || eligibilityUser.subscriptionStatus === 'cancelled';
+      const trialDays = canStartTrial ? 7 : null;
+      console.log('[ProfileIDSelection] Checkout trial eligibility:', { canStartTrial, trialDays });
+
+      // Detect user's country
+      const country = await detectCountry();
+      const isIndianUser = country === 'IN';
+      
+      console.log(`[ProfileIDSelection] Detected country: ${country}, navigating to payment...`);
+      
+      // ===== PAYMENT DISABLED - free PRO for all users =====
+      // Skip Stripe entirely and go straight to the analysis step.
+      setWaitingForAnalysis(false);
+      navigate('/analyse-account');
+      // // Stripe: trial when eligible, else paid PRO; INR for India when detected
+      // setWaitingForAnalysis(false);
+      // await stripeService.createCheckoutSession('PRO', null, trialDays, isIndianUser ? 'inr' : null);
+    } catch (error) {
+      console.error('[ProfileIDSelection] Error navigating to payment:', error);
+      setWaitingForAnalysis(false);
+      const msg =
+        error?.response?.data?.message ||
+        error?.message ||
+        'Could not open payment. Please try again from Billing or contact support.';
+      alert(msg);
+    }
   };
 
   // Trigger the first-analysis integration job (reusing an in-progress one if
@@ -298,7 +383,7 @@ const ProfileIDSelection = () => {
       if (existingStatus === 'active' || existingStatus === 'running' || existingStatus === 'waiting' || existingStatus === 'delayed') {
         console.log('[ProfileIDSelection] Job is currently in progress, reusing existing job');
         setAnalysisStarted(true);
-        goToAnalysis();
+        await navigateToPayment();
         return;
       }
 
@@ -323,7 +408,7 @@ const ProfileIDSelection = () => {
       await waitForJobToStart(jobId);
       setAnalysisStarted(true);
       console.log('[ProfileIDSelection] Job started, navigating to payment...');
-      goToAnalysis();
+      await navigateToPayment();
     } else {
       throw new Error('No job ID received');
     }
@@ -506,7 +591,7 @@ const ProfileIDSelection = () => {
                 className="inline-flex items-center gap-2"
                 style={{ padding: '5px 11px', borderRadius: 999, background: 'rgba(59,130,246,.12)', color: '#7EA8F8', fontSize: 12, fontWeight: 600, marginBottom: 16 }}
               >
-                Step 3 of 4 · Almost done
+                Step 3 of 5 · Almost done
               </div>
               <h1 style={{ margin: '0 0 8px', fontSize: 27, lineHeight: '34px', fontWeight: 600, letterSpacing: '-0.025em', color: COLORS.textPrimary }}>
                 Pick your ads profile

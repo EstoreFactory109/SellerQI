@@ -29,31 +29,27 @@ const determineAccess = (user, subscription, requiredPlans, options = {}) => {
     const isInTrial = user.isInTrialPeriod || false;
     const trialEndsDate = user.trialEndsDate;
     
-    // LITE users always have access to LITE-level features
-    // LITE is the default free tier, no payment required
-    if (packageType === 'LITE') {
-        if (requiredPlans.includes('LITE')) {
-            return { hasAccess: true, reason: 'LITE plan access', effectivePlan: 'LITE' };
-        }
-        return { hasAccess: false, reason: 'Feature requires higher plan', effectivePlan: 'LITE' };
-    }
+    // ===== PAYMENT DISABLED - free PRO for all users =====
+    // Every authenticated user gets full access regardless of packageType.
+    // To re-enable plan gating: remove the return below and uncomment the original
+    // LITE branch; the trial/subscription logic further down is still intact.
+    return { hasAccess: true, reason: 'Payments disabled - full access', effectivePlan: packageType };
+    // // LITE users always have access to LITE-level features
+    // // LITE is the default free tier, no payment required
+    // if (packageType === 'LITE') {
+        // if (requiredPlans.includes('LITE')) {
+            // return { hasAccess: true, reason: 'LITE plan access', effectivePlan: 'LITE' };
+        // }
+        // return { hasAccess: false, reason: 'Feature requires higher plan', effectivePlan: 'LITE' };
+    // }
     
     // For paid plans (PRO/AGENCY), check subscription status
     
-    // Check if user is in trial period
-    if (isInTrial && trialEndsDate) {
-        if (isTrialExpired(trialEndsDate)) {
-            // Trial has expired - treat as LITE
-            return { 
-                hasAccess: requiredPlans.includes('LITE'), 
-                reason: 'Trial expired', 
-                effectivePlan: 'LITE',
-                trialExpired: true
-            };
-        }
-        // Active trial - has access to their plan
+    // For PRO users, no trial enforcement - all PRO users have access
+    // Trial dates are kept for historical reasons but don't affect access
+    if (packageType === 'PRO' || packageType === 'AGENCY') {
         if (requiredPlans.includes(packageType)) {
-            return { hasAccess: true, reason: 'Active trial', effectivePlan: packageType };
+            return { hasAccess: true, reason: 'Paid plan access', effectivePlan: packageType };
         }
         return { hasAccess: false, reason: 'Feature requires different plan', effectivePlan: packageType };
     }
@@ -272,14 +268,12 @@ const getSubscriptionInfo = asyncHandler(async (req, res, next) => {
         // Check trial expiry
         const trialExpired = user.isInTrialPeriod && user.trialEndsDate && isTrialExpired(user.trialEndsDate);
         
-        // Determine effective plan
+        // Determine effective plan - no trial downgrade for PRO/AGENCY
         let effectivePlan = user.packageType || 'LITE';
-        if (trialExpired) {
-            effectivePlan = 'LITE';
-        }
-        
-        // Check if subscription is active
-        const isActive = ['active', 'trialing'].includes(user.subscriptionStatus) && !trialExpired;
+
+        // Check if subscription is active - PRO users are always active
+        const isActive = user.packageType === 'PRO' || user.packageType === 'AGENCY' ||
+                        (['active', 'trialing'].includes(user.subscriptionStatus) && !trialExpired);
         
         req.subscriptionInfo = {
             hasSubscription: !!subscription,

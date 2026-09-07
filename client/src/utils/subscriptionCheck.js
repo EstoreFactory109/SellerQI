@@ -15,33 +15,11 @@ export const hasPremiumAccess = (user) => {
   }
 
   const packageType = user.packageType;
-  const isInTrialPeriod = user.isInTrialPeriod;
-  const trialEndsDate = user.trialEndsDate;
-  const subscriptionStatus = user.subscriptionStatus;
 
-  // Check if user is on PRO or AGENCY plan
+  // All PRO and AGENCY users have premium access by default
+  // No payment or trial checks required
   if (packageType === 'PRO' || packageType === 'AGENCY') {
-    // For PRO users in trial period, check if trial hasn't expired
-    if (isInTrialPeriod && trialEndsDate) {
-      const now = new Date();
-      const trialEnd = new Date(trialEndsDate);
-      if (now > trialEnd) {
-        // Trial has expired - no premium access
-        return false;
-      }
-      // Trial is still active
-      return true;
-    }
-
-    // For paid PRO/AGENCY users, check subscription status
-    // Active, trialing, or undefined subscription status means valid access
-    // 'trialing' status is set when user starts a trial period via Stripe/Razorpay
-    if (!subscriptionStatus || subscriptionStatus === 'active' || subscriptionStatus === 'trialing') {
-      return true;
-    }
-
-    // Subscription is inactive, cancelled, or past_due
-    return false;
+    return true;
   }
 
   // LITE users don't have premium access

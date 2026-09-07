@@ -73,12 +73,16 @@ const PackageRouteWrapper = ({ children }) => {
 
   // Determine if user needs to upgrade (any LITE user - expired trial, downgraded, or chose LITE)
   const needsUpgrade = useMemo(() => {
-    // If user data is not loaded yet, don't show overlay (wait for data)
-    if (!user) return false;
-    if (hasPaidPlan) return false;
-    if (isSuperAdminAccess) return false;
-    // Any user on LITE plan needs upgrade to access restricted routes
-    return user.packageType === 'LITE';
+    // ===== PAYMENT DISABLED - free PRO for all users =====
+    // Nobody is ever asked to upgrade, so the blur overlay never shows.
+    // To re-enable: remove `return false;` and uncomment the block below.
+    return false;
+    // // If user data is not loaded yet, don't show overlay (wait for data)
+    // if (!user) return false;
+    // if (hasPaidPlan) return false;
+    // if (isSuperAdminAccess) return false;
+    // // Any user on LITE plan needs upgrade to access restricted routes
+    // return user.packageType === 'LITE';
   }, [user, hasPaidPlan, isSuperAdminAccess]);
 
   // Should show the upgrade overlay (blur)?

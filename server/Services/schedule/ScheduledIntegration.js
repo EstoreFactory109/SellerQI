@@ -1136,8 +1136,9 @@ class ScheduledIntegration {
                 return 'finance';
             }
             // Batch 4: Negative Keywords, Search Keywords, Keyword Recommendations,
+            // Listing Items (Sunday only; handled inline, see the block after batch 7).,
             // Listing Items (Sunday only; handled inline, see the block after batch 7).
-            if (['negativeKeywords', 'searchKeywords', 'keywordRecommendations', 'GetListingItem'].includes(functionKey)) {
+            if (['negativeKeywords', 'searchKeywords', 'keywordRecommendations', 'GetListingItem', 'GetListingItem'].includes(functionKey)) {
                 return 4;
             }
             // Batch 5: Calculation services (run after all API fetches complete)
@@ -1153,6 +1154,25 @@ class ScheduledIntegration {
         // Helper function to add function to appropriate batch
         const addToBatch = (functionKey, functionConfig, promise, batchNumber) => {
             const { description } = functionConfig;
+
+            // THE PROMISES IN HERE ARE ALREADY RUNNING. The setup loop above INVOKES each service
+            // immediately (`promise = wrapSpApiFunction(...)(...)`), but the batches below are
+            // awaited SEQUENTIALLY — and a batch can be skipped entirely by runBatch(). So a
+            // batch-4 promise that rejects while batch 1 is still being awaited has no rejection
+            // handler attached yet, and Node raises `unhandledRejection`. Under the worker's
+            // top-level handler that terminates the process.
+            //
+            // This is not hypothetical. Captured in production 2026-08-29: a burst of SP-API
+            // `QuotaExceeded` errors rejected five report promises (ledger summary, ledger detail,
+            // stranded inventory, inbound noncompliance, restock) within 250ms and took the worker
+            // down with them. BullMQ then re-ran `sched_init`, which is the ~20-minute duplicate
+            // run series and the orphaned tracking docs behind it. ~340 restarts in 46 hours.
+            //
+            // A no-op catch marks the rejection handled. It SWALLOWS NOTHING: `.catch()` returns a
+            // NEW promise that is discarded here, while `Promise.allSettled` still attaches its own
+            // handlers to the ORIGINAL and still reports `status: 'rejected'` with the same reason.
+            if (promise && typeof promise.catch === 'function') promise.catch(() => {});
+
 
             // THE PROMISES IN HERE ARE ALREADY RUNNING. The setup loop above INVOKES each service
             // immediately (`promise = wrapSpApiFunction(...)(...)`), but the batches below are
@@ -1254,6 +1274,12 @@ class ScheduledIntegration {
             }
             // Skip explicitly excluded services (handled by the async engine elsewhere).
             if (excludeSet.has(functionKey)) {
+                continue;
+            }
+            // GetListingItem is not a one-shot call: it needs paired sku/asin arrays and
+            // persists its own output. It runs inline after batch 7 (gated on runBatch(4)),
+            // so keep it out of the promise registry.
+            if (functionKey === 'GetListingItem') {
                 continue;
             }
             // GetListingItem is not a one-shot call: it needs paired sku/asin arrays and

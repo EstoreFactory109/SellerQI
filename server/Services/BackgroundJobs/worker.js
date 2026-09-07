@@ -218,16 +218,23 @@ const LOCK_EXTENSION_AMOUNT = Math.max(
 //     init/finalize  0.5     1.5    41.4                    0
 //     calc_review    1.3   141.1  1426.8 (23.8h!)           4   <-- the exception
 //
-// So 3h is comfortably above every phase EXCEPT calc_review, where legitimate runs reach
-// nearly a full day and a 3h ceiling would have wrongly reclaimed 4 real runs. That is not
-// a harmless false positive: calc_review does review ingestion/sending, so re-running a
-// live one risks duplicate review requests to real customers. It therefore gets its own,
-// much higher ceiling — 26h clears the observed 23.8h max with margin and still bounds it,
-// where the old code bounded nothing at all.
+// calc_review WAS the exception, and is no longer. Both reasons it needed 26h are gone:
 //
-// (A phase that can legitimately run 24h is itself worth fixing — it should release the
-// worker and poll via the `reschedule` path rather than hold a slot for a day. Out of
-// scope here; this change only stops a hang lasting FOREVER.)
+//   1. Its 23.8h max came from review ingestion/sending, which now run in the standalone
+//      `review-worker` process (see reviewWorkerStandalone.js). The phase is batch 5 only —
+//      issueSummary, productIssues, issuesData.
+//   2. The reason a false reclaim was dangerous — "re-running a live one risks duplicate
+//      review requests to real customers" — went with them. Nothing in this phase now talks
+//      to a buyer.
+//
+// What remained was 26 hours of a wedged job holding a worker slot before anything reacted:
+// a hang detector that no longer detected hangs. The p95 of 141 min was review sending; the
+// other contributor, three concurrent copies of the full dashboard calculation, was fixed
+// separately by memoising it (ScheduledIntegration.js:1050). So calc_review now sits under
+// the same 3h ceiling as every other phase, with the same generous margin.
+//
+// MAX_LOCK_EXTENSION_LONG_MS is still used — resolveCeiling hands it to the legacy phaseless
+// whole-account job, whose runtime is unbounded by design. That path is unaffected.
 const MAX_LOCK_EXTENSION_MS = Math.max(
     30 * 60 * 1000,
     parseInt(process.env.WORKER_MAX_PHASE_MS || String(3 * 60 * 60 * 1000), 10) || 3 * 60 * 60 * 1000
@@ -238,7 +245,10 @@ const MAX_LOCK_EXTENSION_LONG_MS = Math.max(
     MAX_LOCK_EXTENSION_MS,
     parseInt(process.env.WORKER_MAX_LONG_PHASE_MS || String(26 * 60 * 60 * 1000), 10) || 26 * 60 * 60 * 1000
 );
-const LONG_PHASES = new Set([scheduledPhases.PHASES.CALC_REVIEW]);
+// Empty on purpose — see above. Kept (rather than deleted along with resolveCeiling's
+// `longPhases` argument) so a phase that genuinely needs a longer ceiling has an obvious
+// place to go, and so the phaseless-job path keeps its own ceiling either way.
+const LONG_PHASES = new Set();
 
 /** Ceiling for this job. Resolution logic lives in lockExtension.js so it can be tested. */
 function ceilingForJob(job) {

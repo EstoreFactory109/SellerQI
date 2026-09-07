@@ -5,6 +5,8 @@ import { Mail, Clock, RotateCcw, ArrowRight, Loader2 } from 'lucide-react';
 import axios from "axios";
 import BeatLoader from "react-spinners/BeatLoader";
 import { clearAuthCache } from '../../utils/authCoordinator.js';
+import stripeService from '../../services/stripeService.js';
+import { detectCountry } from '../../utils/countryDetection.js';
 import axiosInstance from '../../config/axios.config.js';
 
 
@@ -26,6 +28,7 @@ const OtpVerification = () => {
   const [resendCooldown, setResendCooldown] = useState(40); // 40 seconds cooldown
   const [canResend, setCanResend] = useState(false);
   const [isExpired, setIsExpired] = useState(false);
+  const [detectedCountry, setDetectedCountry] = useState(null); // For trial flow
   const one = useRef(null);
   const two = useRef(null);
   const three = useRef(null);
@@ -54,6 +57,18 @@ const OtpVerification = () => {
 
   useEffect(() => {
     one.current.focus();
+    
+    // Detect country for trial flow
+    const detectUserCountry = async () => {
+      try {
+        const country = await detectCountry();
+        setDetectedCountry(country);
+      } catch (error) {
+        console.error('Error detecting country:', error);
+        setDetectedCountry(null);
+      }
+    };
+    detectUserCountry();
   }, []);
 
   // Timer effect for OTP expiration
@@ -170,9 +185,33 @@ const OtpVerification = () => {
         clearAuthCache();
         localStorage.setItem("isAuth", "true");
         
-        // Agency has its own activation step; everyone else is already PRO and
-        // goes straight to onboarding.
-        if (intendedPackage === 'AGENCY') {
+        const isIndianUser = detectedCountry === 'IN';
+        
+        // Redirect based on intended package
+        // If no intended package: Redirect to pricing page to choose plan
+        // PRO-Trial: For India use manual trial, for others use Stripe trial
+        // PRO: Go to Stripe payment page (requires immediate payment)
+        // AGENCY: Go to Stripe payment page (requires immediate payment)
+        if (!intendedPackage || intendedPackage === 'null' || intendedPackage === 'undefined') {
+          // No plan selected - redirect to connect-to-amazon page (skip pricing)
+          localStorage.removeItem('intendedPackage');
+          navigate("/connect-to-amazon");
+        } else if (intendedPackage === 'PRO-Trial') {
+          localStorage.removeItem('intendedPackage');
+          
+          // ===== PAYMENT DISABLED - free PRO for all users =====
+          // To re-enable the 7-day Stripe trial: remove the navigate() and uncomment below.
+          navigate("/connect-to-amazon");
+          // // Stripe checkout with 7-day trial (INR pricing for India)
+          // try {
+            // await stripeService.createCheckoutSession('PRO', null, 7, isIndianUser ? 'inr' : null);
+          // } catch (stripeError) {
+            // console.error('Stripe checkout error:', stripeError);
+            // setErrorMessage('Failed to initiate free trial. Please try again.');
+            // setLoading(false);
+            // return;
+          // }
+        } else if (intendedPackage === 'AGENCY') {
           // Separate agency flow: no Stripe; activate account and redirect to manage-agency-users
           localStorage.removeItem('intendedPackage');
           try {
@@ -193,9 +232,22 @@ const OtpVerification = () => {
             setErrorMessage(agencyError.response?.data?.message || 'Failed to activate agency account. Please try again.');
             setLoading(false);
           }
+        } else if (intendedPackage === 'PRO') {
+          // PRO direct payment via Stripe (INR pricing for India)
+          localStorage.removeItem('intendedPackage');
+          // ===== PAYMENT DISABLED - free PRO for all users =====
+          // To re-enable paid PRO checkout: remove the navigate() and uncomment below.
+          navigate("/connect-to-amazon");
+          // try {
+            // await stripeService.createCheckoutSession('PRO', null, null, isIndianUser ? 'inr' : null);
+          // } catch (stripeError) {
+            // console.error('Stripe checkout error:', stripeError);
+            // setErrorMessage('Failed to initiate payment. Please try again.');
+            // setLoading(false);
+            // return;
+          // }
         } else {
-          // Everyone else: the account is already PRO and nothing is charged for,
-          // so go straight to onboarding whatever plan the link asked for.
+          // Unknown package - redirect to connect-to-amazon page (skip pricing)
           localStorage.removeItem('intendedPackage');
           navigate("/connect-to-amazon");
         }

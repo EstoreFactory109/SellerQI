@@ -83,15 +83,18 @@ export default function PricingPage() {
     setLoading(prev => ({ ...prev, [planType]: true }));
 
     try {
-      if (['PRO', 'AGENCY'].includes(planType)) {
-        if (isAuthenticated && currentPlan) {
-          localStorage.setItem('previousPlan', currentPlan);
-        }
-        // Use Stripe for all countries
-        await stripeService.createCheckoutSession(planType);
-      } else {
-        throw new Error('Invalid plan type');
-      }
+      // ===== PAYMENT DISABLED - free PRO for all users =====
+      // Every account already has PRO, so send them into the app instead of Stripe.
+      navigate('/seller-central-checker/dashboard');
+      // if (['PRO', 'AGENCY'].includes(planType)) {
+        // if (isAuthenticated && currentPlan) {
+          // localStorage.setItem('previousPlan', currentPlan);
+        // }
+        // // Use Stripe for all countries
+        // await stripeService.createCheckoutSession(planType);
+      // } else {
+        // throw new Error('Invalid plan type');
+      // }
     } catch (error) {
       console.error('Error handling subscription:', error);
       alert(error.response?.data?.message || 'Failed to process subscription. Please try again.');
@@ -119,10 +122,12 @@ export default function PricingPage() {
     setLoading(prev => ({ ...prev, [planType]: true }));
 
     try {
-      if (isAuthenticated && currentPlan) {
-        localStorage.setItem('previousPlan', currentPlan);
-      }
-      await stripeService.createCheckoutSession(planType, null, null, 'inr');
+      // ===== PAYMENT DISABLED - free PRO for all users =====
+      navigate('/seller-central-checker/dashboard');
+      // if (isAuthenticated && currentPlan) {
+        // localStorage.setItem('previousPlan', currentPlan);
+      // }
+      // await stripeService.createCheckoutSession(planType, null, null, 'inr');
     } catch (error) {
       console.error('Error initiating Stripe payment:', error);
       alert(error.response?.data?.message || 'Failed to process payment. Please try again.');
@@ -145,8 +150,10 @@ export default function PricingPage() {
     try {
       localStorage.removeItem('intendedAction');
       
-      // Stripe checkout with 7-day trial (INR pricing for India)
-      await stripeService.createCheckoutSession('PRO', null, 7, country === 'IN' ? 'inr' : null);
+      // ===== PAYMENT DISABLED - free PRO for all users =====
+      navigate('/seller-central-checker/dashboard');
+      // // Stripe checkout with 7-day trial (INR pricing for India)
+      // await stripeService.createCheckoutSession('PRO', null, 7, country === 'IN' ? 'inr' : null);
     } catch (error) {
       console.error('Error starting free trial:', error);
       alert(error.response?.data?.message || 'Failed to start free trial. Please try again.');

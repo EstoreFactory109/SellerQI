@@ -1437,7 +1437,9 @@ const getNavbarData = asyncHandler(async (req, res) => {
         logger.info(`Getting navbar data for user ${userId}, region ${Region}, country ${Country}`);
 
         // Get user data
-        const user = await User.findById(userId).select('name email profilePic selectedPlan accessType isSuperAdminSession').lean();
+        // `name`, `selectedPlan` and `isSuperAdminSession` are not fields on this schema,
+        // so selecting them yielded undefined for all three.
+        const user = await User.findById(userId).select('firstName lastName email profilePic packageType accessType').lean();
         
         if (!user) {
             return res.status(404).json(
@@ -1446,7 +1448,13 @@ const getNavbarData = asyncHandler(async (req, res) => {
         }
 
         // Get seller data with all accounts
-        const seller = await Seller.findOne({ User: userId }).lean();
+        // Project only what the navbar needs. Without this projection .lean() pulls the
+        // entire Seller document on every navbar fetch - including
+        // sellerAccount[].products[] (every ASIN, each with its issues array) and
+        // TotatProducts[], which for a large catalogue is megabytes of dead weight.
+        const seller = await Seller.findOne({ User: userId })
+            .select('brand sellerAccount.country sellerAccount.region sellerAccount.selling_partner_id sellerAccount.spiRefreshToken')
+            .lean();
         
         let allSellerAccounts = [];
         let brandName = '';
@@ -1459,11 +1467,16 @@ const getNavbarData = asyncHandler(async (req, res) => {
             if (seller.sellerAccount) {
                 // Get all seller accounts for account switcher
                 allSellerAccounts = seller.sellerAccount.map(acc => ({
-                    sellerId: acc.sellerId,
+                    // TopNav reads userId/country/region/brand off these entries.
+                    userId,
+                    sellerId: acc.selling_partner_id,
                     region: acc.region,
                     country: acc.country || acc.region,
-                    marketplaceId: acc.marketplaceId,
-                    isConnected: acc.isConnected || false,
+                    // Derived from whether SP-API is linked. `acc.isConnected` is not a
+                    // schema field, so this used to be hardcoded false for everyone.
+                    // marketplaceId is likewise not on the schema; it was always
+                    // undefined and therefore dropped by JSON, so it is gone here.
+                    isConnected: Boolean(acc.spiRefreshToken && acc.spiRefreshToken.trim()),
                     brand: seller.brand || '' // Include brand in each account for display
                 }));
             }
@@ -1489,12 +1502,19 @@ const getNavbarData = asyncHandler(async (req, res) => {
             new ApiResponse(200, {
                 user: {
                     _id: user._id,
-                    name: user.name,
+                    // The schema has firstName/lastName - there is no `name` field, so
+                    // this was undefined for every user. Compose it, and pass the parts.
+                    name: [user.firstName, user.lastName].filter(Boolean).join(' '),
+                    firstName: user.firstName,
+                    lastName: user.lastName,
                     email: user.email,
-                    profilePic: user.profilePic,
-                    selectedPlan: user.selectedPlan,
+                    // The plan field is `packageType`; `selectedPlan` does not exist.
+                    // Kept as an alias so the response shape stays backwards compatible.
+                    selectedPlan: user.packageType,
+                    packageType: user.packageType,
                     accessType: user.accessType,
-                    isSuperAdminSession: user.isSuperAdminSession
+                    // Set by the auth middleware on the request, never stored on the doc.
+                    isSuperAdminSession: req.isSuperAdminSession || false
                 },
                 AllSellerAccounts: allSellerAccounts,
                 Brand: brandName,

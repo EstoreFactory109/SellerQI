@@ -14,7 +14,11 @@ const authSlice = createSlice({
       state.user = action.payload;
     },
     addBrand(state,action){
-      state.user.brand = action.payload;
+      // Guard like every sibling reducer: this fires from the navbar/dashboard
+      // fetches, which can resolve after a logout has already nulled the user.
+      if (state.user) {
+        state.user.brand = action.payload;
+      }
     },
     updatePackageType(state, action) {
       if (state.user) {
