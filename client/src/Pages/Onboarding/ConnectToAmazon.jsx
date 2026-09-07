@@ -186,7 +186,7 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
           className="inline-flex items-center gap-2"
           style={{ padding: '5px 11px', borderRadius: 999, background: 'rgba(59,130,246,.12)', color: '#7EA8F8', fontSize: 12, fontWeight: 600, marginBottom: 16 }}
         >
-          Step 2 of 5 · About 60 seconds
+          Step 2 of 4 · About 60 seconds
         </div>
         <h1 style={{ margin: '0 0 8px', fontSize: 27, lineHeight: '34px', fontWeight: 600, letterSpacing: '-0.025em', color: COLORS.textPrimary }}>
           Connect Amazon Seller Central

@@ -2,12 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Eye, EyeOff, Mail, Lock, ArrowRight, Loader2, AlertCircle, CheckCircle, X } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
-import axiosInstance from '../../config/axios.config.js';
+import axiosInstance, { SESSION_EXPIRED_KEY } from '../../config/axios.config.js';
 import { useDispatch } from 'react-redux';
 import { loginSuccess } from '../../redux/slices/authSlice.js';
 import { clearAuthCache } from '../../utils/authCoordinator.js';
-import googleAuthService from '../../services/googleAuthService.js';
+import googleAuthService, { isNeedsSignupError } from '../../services/googleAuthService.js';
 import { isSpApiConnected, isAdsAccountConnected, getAdsAccountWithoutProfileId } from '../../utils/spApiConnectionCheck.js';
+import GoogleSignupStep from '../../Components/Auth/GoogleSignupStep.jsx';
+import PhoneRequiredModal from '../../Components/PhoneUpdate/PhoneRequiredModal.jsx';
+import { useGoogleSignup } from '../../hooks/useGoogleSignup.js';
 
 export default function Login() {
   const [formData, setFormData] = useState({
@@ -20,8 +23,13 @@ export default function Login() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  // Set when Google verified someone who has no account yet: holds their verified
+  // profile and the token to reuse, so the consent step can create the account
+  // without prompting Google again.
+  const [googleSignupPrompt, setGoogleSignupPrompt] = useState(null);
   const navigate = useNavigate();
   const dispatch = useDispatch();
+  const { pendingSignup, registerWithGoogle, finishSignup } = useGoogleSignup({ onError: setErrorMessage });
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -48,6 +56,19 @@ export default function Login() {
       }
     }
   }, [navigate]);
+
+  // Explain the redirect when the interceptor signed the user out mid-session.
+  useEffect(() => {
+    try {
+      const expiredMessage = sessionStorage.getItem(SESSION_EXPIRED_KEY);
+      if (expiredMessage) {
+        sessionStorage.removeItem(SESSION_EXPIRED_KEY);
+        setErrorMessage(expiredMessage);
+      }
+    } catch {
+      /* storage unavailable — the login form still works, just unexplained */
+    }
+  }, []);
 
   // Auto-dismiss error messages after 5 seconds
   useEffect(() => {
@@ -208,7 +229,21 @@ export default function Login() {
   const handleGoogleLogin = async () => {
     setGoogleLoading(true);
     try {
-      const response = await googleAuthService.handleGoogleSignIn();
+      // Sign in and authenticate as two steps so the token stays in hand: if this
+      // address has no account, the plan step reuses it instead of re-prompting.
+      const idToken = await googleAuthService.signIn();
+      let response;
+      try {
+        response = await googleAuthService.authenticateWithBackend(idToken, { isSignUp: false });
+      } catch (authError) {
+        if (isNeedsSignupError(authError)) {
+          setErrorMessage('');
+          setGoogleSignupPrompt({ idToken, profile: authError.response.data.data });
+          return;
+        }
+        throw authError;
+      }
+
       if (response.statusCode === 200) {
         // Clear any cached auth state to force fresh checks
         clearAuthCache();
@@ -270,8 +305,33 @@ export default function Login() {
     setErrorMessage('Amazon login is coming soon. Please use email login or Google login for now.');
   };
 
+  const handleGoogleSignupSubmit = async () => {
+    setGoogleLoading(true);
+    try {
+      await registerWithGoogle({ idToken: googleSignupPrompt.idToken });
+      setGoogleSignupPrompt(null);
+    } catch (error) {
+      console.error('Google sign-up failed:', error);
+      setErrorMessage(error.response?.data?.message || 'Google sign-up failed. Please try again.');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center">
+      {googleSignupPrompt && !pendingSignup && (
+        <GoogleSignupStep
+          profile={googleSignupPrompt.profile}
+          loading={googleLoading}
+          error={errorMessage}
+          onSubmit={handleGoogleSignupSubmit}
+          onCancel={() => { setGoogleSignupPrompt(null); setErrorMessage(''); }}
+        />
+      )}
+      {/* Google gives us no phone number, and the paid path leaves for Stripe
+          without returning, so collect it before routing. */}
+      {pendingSignup && <PhoneRequiredModal forceShow onDone={() => finishSignup()} />}
       {/* Form Section */}
       <div className="relative w-full flex items-center justify-center px-4 py-4 lg:py-8">
         <div className="w-full max-w-lg">

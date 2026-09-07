@@ -225,7 +225,11 @@ const updatePassword = async (email, newPassword) => {
         // Update the password and clear the reset code
         user.password = hashedPassword;
         user.resetPasswordCode = null;
-        
+        // Completing a reset means the account really does have a password now —
+        // reachable for a Google account only via a code issued before resets were
+        // gated, but the stored provider should still match reality.
+        user.authProvider = 'password';
+
         await user.save();
         
         return true;

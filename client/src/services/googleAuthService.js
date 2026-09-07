@@ -171,17 +171,17 @@ class GoogleAuthService {
     });
   }
 
-  async authenticateWithBackend(idToken, isSignUp = false,packageType,isInTrialPeriod,subscriptionStatus,trialEndsDate) {
+  async authenticateWithBackend(idToken, { isSignUp = false, ...registration } = {}) {
     try {
       const endpoint = isSignUp ? '/app/google-register' : '/app/google-login';
       devLog(`📤 Sending to backend: ${endpoint}`);
-      
+
       const response = await axios.post(
         `${import.meta.env.VITE_BASE_URI}${endpoint}`,
-        { idToken,packageType,isInTrialPeriod,subscriptionStatus,trialEndsDate },
+        { idToken, ...(isSignUp ? registration : {}) },
         { withCredentials: true }
       );
-      
+
       devLog('✅ Backend authentication succeeded');
       return response.data;
     } catch (error) {
@@ -196,7 +196,7 @@ class GoogleAuthService {
       devLog('🔐 Starting Google Sign-In flow...');
       const idToken = await this.signIn();
       devLog('🎟️ Got ID token, authenticating with backend...');
-      const result = await this.authenticateWithBackend(idToken, false);
+      const result = await this.authenticateWithBackend(idToken, { isSignUp: false });
       devLog('✅ Google Sign-In completed successfully');
       return result;
     } catch (error) {
@@ -205,13 +205,19 @@ class GoogleAuthService {
     }
   }
 
+  // Register using a token already obtained from a sign-in attempt, so the login
+  // page can create the account without prompting Google a second time.
+  async registerWithToken(idToken, registration) {
+    return this.authenticateWithBackend(idToken, { isSignUp: true, ...registration });
+  }
+
   // Method to handle complete Google sign-up flow
-  async handleGoogleSignUp(packageType,isInTrialPeriod,subscriptionStatus,trialEndsDate) {
+  async handleGoogleSignUp(registration) {
     try {
       devLog('📝 Starting Google Sign-Up flow...');
       const idToken = await this.signIn();
       devLog('🎟️ Got ID token, registering with backend...');
-      const result = await this.authenticateWithBackend(idToken, true,packageType,isInTrialPeriod,subscriptionStatus,trialEndsDate);
+      const result = await this.registerWithToken(idToken, registration);
       devLog('✅ Google Sign-Up completed successfully');
       return result;
     } catch (error) {
@@ -219,7 +225,13 @@ class GoogleAuthService {
       throw error;
     }
   }
+
 }
+
+// Surfaced by /app/google-login when the address has no account yet — the body
+// carries the Google-verified profile so the caller can offer sign-up.
+export const isNeedsSignupError = (error) =>
+  error?.response?.status === 404 && error.response.data?.data?.needsSignup === true;
 
 const googleAuthService = new GoogleAuthService();
 export default googleAuthService;

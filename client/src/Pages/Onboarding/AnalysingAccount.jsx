@@ -184,7 +184,7 @@ const AnalysingAccount = () => {
   }
 
   return (
-    <OnboardingShell currentStep={5} doneSteps={[1, 2, 3, 4]} maxWidth="700px">
+    <OnboardingShell currentStep={4} doneSteps={[1, 2, 3]} maxWidth="700px">
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
         {/* Status pill */}
         <div
@@ -199,7 +199,7 @@ const AnalysingAccount = () => {
             marginBottom: 16,
           }}
         >
-          {analysisComplete ? '✓ Setup complete' : 'Step 5 of 5 · Almost there'}
+          {analysisComplete ? '✓ Setup complete' : 'Step 4 of 4 · Almost there'}
         </div>
 
         <h1 style={{ margin: '0 0 8px', fontSize: 27, lineHeight: '34px', fontWeight: 600, letterSpacing: '-0.025em', color: COLORS.textPrimary }}>

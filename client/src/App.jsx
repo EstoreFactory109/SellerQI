@@ -42,7 +42,6 @@ import Advertisement from './Pages/Marketing/advertisement.jsx';
 import QMate from './Pages/Tools/QMate.jsx';
 import Features from './Pages/Marketing/features.jsx';
 import InventoryManagement from './Pages/Marketing/inventoryManagement.jsx';
-import GoogleInfoPage from './Pages/Auth/GoogleInfoPage.jsx';
 import ConnectAccounts from './Pages/Onboarding/ConnectAccounts.jsx';
 import ProfileIDSelection from './Pages/Onboarding/ProfileIDSeclection.jsx';
 import PaymentCancel from './Pages/Payment/PaymentCancel.jsx';
@@ -177,7 +176,6 @@ const App = () => {
         {/* <Route path='/advertisement' element={<Advertisement />} /> */}
         {/* <Route path='/features' element={<Features />} /> */}
         {/* <Route path='/inventory-management' element={<InventoryManagement />} /> */}
-        {/* <Route path='/auth/info' element={<GoogleInfoPage />} /> */}
         <Route
           element={
             <ProtectedRouteWrapper>

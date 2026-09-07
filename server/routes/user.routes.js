@@ -25,6 +25,10 @@ router.post('/verify-user', authRateLimiter, verifyUser);
 router.get('/profile', auth, profileUser);
 router.post('/refresh-token', refreshAccessToken); // No auth middleware - uses refresh token from cookie
 router.get('/logout', auth, logoutUser);
+// Callers are split between GET and POST (TopNav, useAuth and the agency layout
+// POST; the nav sections and onboarding pages GET). The POSTs were silently
+// 404ing, so those logouts never reached the server to revoke the session.
+router.post('/logout', auth, logoutUser);
 router.put('/updateProfilePic', auth, upload.single('avatar'), updateProfilePic);
 router.put('/updateDetails', auth, validateUpdateDetails, updateDetails);
 router.put('/update-phone', auth, validateUpdatePhone, updateUserPhone); // phone-collection modal

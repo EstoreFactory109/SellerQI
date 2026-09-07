@@ -7,20 +7,22 @@ const SIDEBAR_BG = '#0E121A';
 const PANEL_BG = '#10141C';
 
 /**
- * The 5 steps of the real onboarding flow.
+ * The 4 steps of the real onboarding flow.
  *
  * These map onto the real pages/routes as follows:
  *  1. Create your account      → /sign-up
  *  2. Connect Seller Central   → /connect-to-amazon (marketplace) + /connect-accounts (SP-API OAuth)
  *  3. Connect Amazon Ads       → /connect-accounts (Ads OAuth) + /profile-selection (Ads profile)
- *  4. Choose a plan            → /connect-accounts (Stripe checkout / trial)
- *  5. See your findings        → /analyse-account
+ *  4. See your findings        → /analyse-account
+ *
+ * There used to be a "Choose a plan" step between 3 and 4. The product is free and
+ * every account is granted PRO, so there is no plan to choose and no checkout to
+ * send anyone to.
  */
-const buildSteps = (trialDays) => [
+const buildSteps = () => [
   { label: 'Create your account', short: 'Account', sub: 'Name, email, password', time: '30s' },
   { label: 'Connect Seller Central', short: 'Seller Central', sub: 'One click on Amazon, read-only', time: '60s', tag: 'Required', tagTone: 'req' },
   { label: 'Connect Amazon Ads', short: 'Amazon Ads', sub: 'Where the wasted spend hides', time: '40s', tag: 'Recommended', tagTone: 'rec' },
-  { label: 'Choose a plan', short: 'Plan', sub: `Free for ${trialDays} days, cancel anytime`, time: '60s' },
   { label: 'See your findings', short: 'Findings', sub: 'Scan runs while you finish', time: 'auto' },
 ];
 
@@ -107,21 +109,19 @@ const TIME_LEFT_LABELS = [
 /**
  * Shared onboarding wizard shell: fixed left step-tracker sidebar + centred content area.
  *
- * @param {number} currentStep  1-based index of the active step (1-5).
+ * @param {number} currentStep  1-based index of the active step (1-4).
  * @param {number[]} doneSteps  step numbers already completed (shown with a checkmark).
  * @param {number[]} skippedSteps step numbers the user chose to skip (shown with a dash).
- * @param {number} trialDays    real trial length, used in the "Choose a plan" sub-label.
  * @param {string} maxWidth     content column max width (mock uses 620px for most steps).
  */
 const OnboardingShell = ({
   currentStep = 1,
   doneSteps = [],
   skippedSteps = [],
-  trialDays = 7,
   maxWidth = '620px',
   children,
 }) => {
-  const steps = buildSteps(trialDays);
+  const steps = buildSteps();
   const idx = Math.min(Math.max(currentStep - 1, 0), steps.length - 1);
   const progressWidth = `${Math.round(((idx + 1) / steps.length) * 100)}%`;
 

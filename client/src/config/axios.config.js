@@ -6,6 +6,38 @@ const axiosInstance = axios.create({
   withCredentials: true,
 });
 
+export const SESSION_EXPIRED_KEY = 'sessionExpiredMessage';
+const SESSION_EXPIRED_MESSAGE = 'Your session expired — please sign in again.';
+
+// A failed refresh means the session is gone. The raw server error ("Refresh
+// token is missing" / "Invalid or expired refresh token") is plumbing detail that
+// dozens of components render straight into the UI, so replace it with copy that
+// makes sense to a user. Rejecting a same-shaped error means every one of those
+// call sites is covered without being edited.
+const sessionExpiredError = (cause) => {
+  const err = new Error(SESSION_EXPIRED_MESSAGE);
+  err.isSessionExpired = true;
+  err.config = cause?.config;
+  err.response = {
+    ...(cause?.response || {}),
+    status: 401,
+    data: { statusCode: 401, data: '', message: SESSION_EXPIRED_MESSAGE },
+  };
+  return err;
+};
+
+// The redirect below is a full page load, which destroys React state, so the
+// message is handed to the login screen through sessionStorage instead.
+const signOutLocally = () => {
+  try {
+    sessionStorage.setItem(SESSION_EXPIRED_KEY, SESSION_EXPIRED_MESSAGE);
+  } catch {
+    /* private mode — the redirect still happens, just without the explanation */
+  }
+  localStorage.removeItem('isAuth');
+  localStorage.removeItem('userAccessType');
+};
+
 // Track if we're currently refreshing the token to avoid infinite loops
 let isRefreshing = false;
 let failedQueue = [];
@@ -94,16 +126,22 @@ axiosInstance.interceptors.response.use(
         return axiosInstance(originalRequest);
         
       } catch (refreshError) {
-        processQueue(refreshError);
+        const expired = sessionExpiredError(refreshError);
+        processQueue(expired);
         isRefreshing = false;
 
+        // The session is gone regardless of which surface noticed, so always
+        // clear local auth state before deciding where to send the user.
+        signOutLocally();
+
         // Agency routes: redirect to agency-login instead of regular login
+        const adminAccessType = localStorage.getItem('adminAccessType');
         const isAgencyRoute = currentPath.startsWith('/agency/') || currentPath.startsWith('/manage-agency');
-        if (isAgencyRoute) {
+        if (isAgencyRoute || adminAccessType === 'enterpriseAdmin') {
           if (currentPath !== '/agency-login') {
             window.location.href = '/agency-login';
           }
-          return Promise.reject(refreshError);
+          return Promise.reject(expired);
         }
 
         // If this was an admin route, clear admin auth and redirect to admin login to avoid redirect loop
@@ -115,25 +153,15 @@ axiosInstance.interceptors.response.use(
           if (currentPath !== '/admin-login') {
             window.location.href = '/admin-login';
           }
-          return Promise.reject(refreshError);
+          return Promise.reject(expired);
         }
 
-        // Refresh failed - clear auth and redirect to login
-        // But NOT for agency users — they should go to /agency-login
-        const adminAccessType = localStorage.getItem('adminAccessType');
-        if (adminAccessType === 'enterpriseAdmin') {
-          window.location.href = '/agency-login';
-          return Promise.reject(refreshError);
-        }
-
-        localStorage.removeItem("isAuth");
-
-        // Redirect to login only if we're not already on the login page
-        if (currentPath !== '/' && !currentPath.includes('/log-in')) {
+        // Redirect to login only if we're not already on it
+        if (currentPath !== '/') {
           window.location.href = '/';
         }
 
-        return Promise.reject(refreshError);
+        return Promise.reject(expired);
       }
     }
     

@@ -3,7 +3,7 @@
  *
  * - Clears agencyId, isAgencyClient, adminId (matches how agency clients are stored)
  * - Sets a new bcrypt password
- * - Clears appRefreshToken so existing sessions must log in again
+ * - Clears refreshTokens so existing sessions must log in again
  *
  * Usage (from repo root):
  *   node server/scripts/promoteAgencyClientToIndependent.js <email>
@@ -135,7 +135,7 @@ async function main() {
         agencyId: null,
         adminId: null,
         password: hashed,
-        appRefreshToken: '',
+        refreshTokens: [],
       },
     },
     { new: true }

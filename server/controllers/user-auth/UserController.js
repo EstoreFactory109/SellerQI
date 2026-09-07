@@ -2,7 +2,7 @@ const { createUser, getUserByEmail, verify, getUserById, updateInfo, updatePassw
 const { ApiError } = require('../../utils/ApiError.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
 const asyncHandler = require('../../utils/AsyncHandler.js');
-const { createAccessToken, createRefreshToken, createLocationToken, refreshAccess } = require('../../utils/Tokens.js');
+const { createAccessToken, createRefreshToken, createLocationToken, refreshAccess, revokeRefreshToken } = require('../../utils/Tokens.js');
 const { verifyPassword, hashPassword } = require('../../utils/HashPassword.js');
 const logger = require('../../utils/Logger.js');
 const { generateOTP } = require('../../utils/OTPGenerator.js');
@@ -24,12 +24,26 @@ const sendVerificationCode = require('../../Services/SMS/sendSMS.js');
 const subscriptionVerificationService = require('../../Services/User/SubscriptionVerificationService.js');
 const { sendRegisteredEmail } = require('../../Services/Email/SendEmailOnRegistered.js');
 
+// The product is free: every new self-serve account is granted PRO outright, with
+// no payment step and no trial. Decided here rather than trusted from the request
+// so that every entry point agrees — the in-app signup used to send LITE while the
+// marketing site sent PRO, which left users on different plans for the same product
+// and had to be patched by hand.
+//
+// AGENCY is the one exception: it is a different product shape, not a paid tier.
+const resolveFreeAccountPlan = (requestedPackageType) => ({
+    packageType: requestedPackageType === 'AGENCY' ? 'AGENCY' : 'PRO',
+    subscriptionStatus: 'active',
+    isInTrialPeriod: false,
+    trialEndsDate: null,
+});
+
 const registerUser = asyncHandler(async (req, res) => {
-    const { firstname, lastname, phone, email, password, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate, intendedPackage, agencyName } = req.body;
+    const { firstname, lastname, phone, email, password, allTermsAndConditionsAgreed, packageType, intendedPackage, agencyName } = req.body;
     // console.log(firstname)
 
-    // Validate required fields - trialEndsDate is only required for trial users
-    if (!firstname || !lastname || !phone || !email || !password || !packageType || (isInTrialPeriod == null) || !subscriptionStatus) {
+    // Plan fields are no longer required from the caller — the server grants them.
+    if (!firstname || !lastname || !phone || !email || !password) {
         logger.error(new ApiError(400, "Details and credentials are missing"));
         return res.status(400).json(new ApiResponse(400, "", "Details and credentials are missing"));
     }
@@ -40,11 +54,8 @@ const registerUser = asyncHandler(async (req, res) => {
         return res.status(400).json(new ApiResponse(400, "", "Agency name is required for agency registration"));
     }
 
-    // If user is in trial period, trialEndsDate is required
-    if (isInTrialPeriod === true && !trialEndsDate) {
-        logger.error(new ApiError(400, "Trial end date is required for trial users"));
-        return res.status(400).json(new ApiResponse(400, "", "Trial end date is required for trial users"));
-    }
+    const { packageType: grantedPackageType, isInTrialPeriod, subscriptionStatus, trialEndsDate } =
+        resolveFreeAccountPlan(packageType);
 
     if (typeof allTermsAndConditionsAgreed !== 'boolean' || allTermsAndConditionsAgreed !== true) {
         logger.error(new ApiError(400, "Terms and conditions agreement is required"));
@@ -79,23 +90,19 @@ const registerUser = asyncHandler(async (req, res) => {
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in sending SMS"));
     }   */
 
-    // Create user with proper package settings
-    // PRO-Trial: isInTrialPeriod=true, subscriptionStatus=active, trialEndsDate set
-    // PRO: isInTrialPeriod=false, subscriptionStatus=inactive (needs payment)
-    // AGENCY: includes agencyName
     let data = await createUser(
-        firstname, 
-        lastname, 
-        phone, 
-        phone, 
-        email, 
-        password, 
-        otp, 
-        allTermsAndConditionsAgreed, 
-        packageType,           // PRO for both PRO-Trial and PRO, AGENCY for agencies
-        isInTrialPeriod,       // true for PRO-Trial, false for PRO
-        subscriptionStatus,    // active for PRO-Trial, inactive for PRO (pending payment)
-        trialEndsDate,         // Date for PRO-Trial, null for PRO
+        firstname,
+        lastname,
+        phone,
+        phone,
+        email,
+        password,
+        otp,
+        allTermsAndConditionsAgreed,
+        grantedPackageType,    // PRO for everyone, AGENCY for agencies
+        isInTrialPeriod,       // always false — nothing is being charged for
+        subscriptionStatus,    // always active
+        trialEndsDate,         // always null
         agencyName             // Required for AGENCY, null for others
     );
 
@@ -104,12 +111,12 @@ const registerUser = asyncHandler(async (req, res) => {
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in registering user"));
     }
 
-    logger.info(`User registered: ${email}, package: ${packageType}, isInTrialPeriod: ${isInTrialPeriod}, intendedPackage: ${intendedPackage || 'not specified'}`);
+    logger.info(`User registered: ${email}, package: ${grantedPackageType}, requested: ${packageType || 'none'}, intendedPackage: ${intendedPackage || 'not specified'}`);
 
     res.status(201)
-        .json(new ApiResponse(201, { 
+        .json(new ApiResponse(201, {
             email: email,
-            packageType: packageType,
+            packageType: grantedPackageType,
             isInTrialPeriod: isInTrialPeriod,
             subscriptionStatus: subscriptionStatus
         }, "User registered successfully. OTP has been sent to your email address"));
@@ -182,13 +189,6 @@ const registerAgencyClient = asyncHandler(async (req, res) => {
             return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating tokens"));
         }
 
-        // Update client with refresh token
-        await UserModel.findOneAndUpdate(
-            { _id: savedClient._id },
-            { $set: { appRefreshToken: RefreshToken } },
-            { new: true }
-        );
-
         // Initialize background job scheduling for the new client
         try {
             await UserSchedulingService.initializeUserSchedule(savedClient._id);
@@ -252,17 +252,6 @@ const verifyUser = asyncHandler(async (req, res) => {
     if (!AccessToken || !RefreshToken) {
         logger.error(new ApiError(500, "Internal server error in creating access token or refresh Token"));
         return res.status(500).json(new ApiError(500, "Internal server error in creating access token"));
-    }
-
-    const UpdateRefreshToken = await UserModel.findOneAndUpdate(
-        { _id: verifyUser.id, isVerified: true },
-        { $set: { appRefreshToken: RefreshToken } },
-        { new: true }
-    )
-
-    if (!UpdateRefreshToken) {
-        logger.error(new ApiError(500, "Internal server error in updating refresh token"));
-        return res.status(500).json(new ApiError(500, "Internal server error in updating refresh token"));
     }
 
     // Initialize background job scheduling for the new user
@@ -386,11 +375,6 @@ const loginUser = asyncHandler(async (req, res) => {
 
     const checkUserIfExists = await getUserByEmail(email);
 
-    console.log("checkUserIfExists: ", checkUserIfExists);
-
-
-
-
     // Unknown email and wrong password return an identical response so the endpoint
     // cannot be used to discover which addresses have accounts. The log stays specific.
     if (!checkUserIfExists) {
@@ -404,11 +388,25 @@ const loginUser = asyncHandler(async (req, res) => {
         return res.status(403).json(new ApiResponse(403, "", "Agency clients cannot login directly. Please contact your agency administrator."));
     }
 
-    // Agency clients have no password, but this check happens above
-    // For regular users, verify password
+    // A Google account has no password to compare against, and bcrypt.compare
+    // throws rather than returning false when the stored hash is absent — so this
+    // must be answered before verifyPassword, not after.
+    const GOOGLE_ONLY_MESSAGE = "This account uses Google Sign-In. Please continue with Google.";
+    if (!checkUserIfExists.password) {
+        logger.info(`Password login attempted on a passwordless account: ${checkUserIfExists.email}`);
+        return res.status(401).json(new ApiResponse(401, { useGoogle: true }, GOOGLE_ONLY_MESSAGE));
+    }
+
     const checkPassword = await verifyPassword(password, checkUserIfExists.password);
 
     if (!checkPassword) {
+        // Accounts created via Google before this change still carry a generated
+        // hash that the user was never told, so a mismatch there means the same
+        // thing as having no password at all.
+        if (checkUserIfExists.authProvider === 'google') {
+            logger.info(`Password login attempted on a legacy Google account: ${checkUserIfExists.email}`);
+            return res.status(401).json(new ApiResponse(401, { useGoogle: true }, GOOGLE_ONLY_MESSAGE));
+        }
         logger.error(new ApiError(401, `Password not matched for ${checkUserIfExists.email}`))
         return res.status(401).json(new ApiResponse(401, "", "Incorrect email or password"));
     }
@@ -650,16 +648,11 @@ const logoutUser = asyncHandler(async (req, res) => {
         return res.status(400).json(new ApiResponse(400, "", "User id is missing"));
     }
 
-    const UpdateRefreshToken = await UserModel.findOneAndUpdate(
-        { _id: userId },
-        { $set: { appRefreshToken: "" } },
-        { new: true }
-    )
-
-    // Cookies are cleared even if the token reset found no document, so a failed
-    // update can never leave the caller holding a live session cookie.
-    if (!UpdateRefreshToken) {
-        logger.error(new ApiError(500, "Internal server error in updating refresh token"));
+    // Revoke only the session presented by this request, so the user's other
+    // devices stay signed in.
+    const presentedRefreshToken = req.cookies.IBEXRefreshToken;
+    if (presentedRefreshToken) {
+        await revokeRefreshToken(presentedRefreshToken);
     }
 
     // Define the SAME options used when setting cookies
@@ -845,6 +838,16 @@ const verifyEmailForPasswordReset = asyncHandler(async (req, res) => {
     if (!user) {
         logger.error(new ApiError(404, "User not found"));
         return res.status(404).json(new ApiResponse(404, "", "User not found"));
+    }
+
+    // Nothing to reset on a genuinely passwordless account, so say so instead of
+    // mailing a link. Deliberately keyed on the password and not on authProvider:
+    // a legacy Google account still carries a hash, and letting it reset is the
+    // only way back in if the user loses their Google account. updatePassword
+    // moves authProvider to 'password' when that happens, so state stays honest.
+    if (!user.password) {
+        logger.info(`Password reset requested for a passwordless account: ${user.email}`);
+        return res.status(400).json(new ApiResponse(400, { useGoogle: true }, "This account uses Google Sign-In. Please continue with Google."));
     }
 
     const code = jwt.sign({ email: email, code: uuidv4() }, process.env.JWT_SECRET, { expiresIn: '30m' });
@@ -1051,19 +1054,42 @@ const googleLoginUser = asyncHandler(async (req, res) => {
         console.log('🎯 Token audience:', payload.aud);
         console.log('📧 User email:', payload.email);
 
-        const { email, name, given_name, family_name, picture } = payload;
+        const { email, name, given_name, family_name, picture, email_verified } = payload;
 
         if (!email) {
             logger.error(new ApiError(400, "Email not provided by Google"));
             return res.status(400).json(new ApiResponse(400, "", "Email not provided by Google"));
         }
 
+        // Matching on email is what lets a password account sign in with Google, so
+        // refuse an address Google says it cannot vouch for. Only an explicit false
+        // is rejected: locking out every existing Google user over a missing claim
+        // would be far worse than the narrow case this guards against.
+        if (email_verified === false) {
+            logger.error(new ApiError(400, `Google login attempted with an unverified email: ${email}`));
+            return res.status(400).json(new ApiResponse(400, "", "Your Google email address is not verified"));
+        }
+
         // Check if user exists
         const checkUserIfExists = await getUserByEmail(email);
 
+        // No account yet — hand the caller the verified profile so it can collect a
+        // plan and consent, then create the account. Previously a dead end.
         if (!checkUserIfExists) {
-            logger.error(new ApiError(404, "User not found. Please sign up first."));
-            return res.status(404).json(new ApiResponse(404, "", "User not found. Please sign up first."));
+            logger.info(`Google login for unregistered email ${email} — offering signup`);
+            return res.status(404).json(new ApiResponse(404, {
+                needsSignup: true,
+                email,
+                firstName: given_name || name?.split(' ')[0] || '',
+                lastName: family_name || name?.split(' ').slice(1).join(' ') || '',
+                picture: picture || ''
+            }, "No account yet for this Google address"));
+        }
+
+        // Mirrors loginUser: agency clients are reachable only via their agency owner.
+        if (checkUserIfExists.isAgencyClient === true || checkUserIfExists.agencyId) {
+            logger.warn(`Agency client ${checkUserIfExists.email} attempted direct Google login`);
+            return res.status(403).json(new ApiResponse(403, "", "Agency clients cannot login directly. Please contact your agency administrator."));
         }
 
         // Check trial status on Google login
@@ -1204,7 +1230,8 @@ const googleLoginUser = asyncHandler(async (req, res) => {
                     region: account.region,
                     selling_partner_id: account.selling_partner_id,
                     spiRefreshToken: account.spiRefreshToken ? 'connected' : null, // Don't expose actual token, just indicate if connected
-                    adsRefreshToken: account.adsRefreshToken ? 'connected' : null // Don't expose actual token, just indicate if connected
+                    adsRefreshToken: account.adsRefreshToken ? 'connected' : null, // Don't expose actual token, just indicate if connected
+                    ProfileId: account.ProfileId || null // Needed so the frontend can route users without a selected profile to profile-selection
                 }))
             };
         }
@@ -1243,26 +1270,28 @@ const googleLoginUser = asyncHandler(async (req, res) => {
 
 // Google OAuth Register Handler
 const googleRegisterUser = asyncHandler(async (req, res) => {
-    const { idToken, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate } = req.body;
-
-
+    const { idToken, packageType, allTermsAndConditionsAgreed, agencyName } = req.body;
 
     if (!idToken) {
         logger.error(new ApiError(400, "Google ID token is missing"));
         return res.status(400).json(new ApiResponse(400, "", "Google ID token is missing"));
     }
 
-    // Validate required fields - trialEndsDate is only required for trial users
-    if (!packageType || (isInTrialPeriod == null) || !subscriptionStatus) {
-        logger.error(new ApiError(400, "Package type, isInTrialPeriod, and subscriptionStatus are missing"));
-        return res.status(400).json(new ApiResponse(400, "", "Package type, isInTrialPeriod, and subscriptionStatus are missing"));
+    // Accounts can now be created straight from the login page, so consent has to
+    // be carried in the request rather than assumed by the caller.
+    if (allTermsAndConditionsAgreed !== true) {
+        logger.error(new ApiError(400, "You must agree to the Terms of Use and Privacy Policy"));
+        return res.status(400).json(new ApiResponse(400, "", "You must agree to the Terms of Use and Privacy Policy"));
     }
-    
-    // If user is in trial period, trialEndsDate is required
-    if (isInTrialPeriod === true && !trialEndsDate) {
-        logger.error(new ApiError(400, "Trial end date is required for trial users"));
-        return res.status(400).json(new ApiResponse(400, "", "Trial end date is required for trial users"));
+
+    if (packageType === 'AGENCY' && !agencyName) {
+        logger.error(new ApiError(400, "Agency name is required for agency accounts"));
+        return res.status(400).json(new ApiResponse(400, "", "Agency name is required for agency accounts"));
     }
+
+    // Same free-PRO grant as the password signup path.
+    const { packageType: grantedPackageType, isInTrialPeriod, subscriptionStatus, trialEndsDate } =
+        resolveFreeAccountPlan(packageType);
 
     try {
         // Verify the Google ID token using environment variable
@@ -1295,9 +1324,11 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
             return res.status(409).json(new ApiResponse(409, { email: email }, "User already exists. Please login instead."));
         }
 
-        // Create new user
+        // Create new user. lastName has a minlength of 2 in the schema, so a
+        // single-word Google profile name must not produce an empty string.
         const firstName = given_name || name?.split(' ')[0] || 'User';
-        const lastName = family_name || name?.split(' ').slice(1).join(' ') || '';
+        const derivedLastName = family_name || name?.split(' ').slice(1).join(' ') || '';
+        const lastName = derivedLastName.length >= 2 ? derivedLastName : '--';
 
         // For Google OAuth users, we'll use unique placeholder values for required fields
         // Generate unique placeholder phone numbers to avoid unique constraint conflicts
@@ -1306,24 +1337,21 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
         const timestamp = Date.now().toString().slice(-10); // Last 10 digits of timestamp
         const placeholderPhone = timestamp; // Use timestamp as unique phone placeholder
         const placeholderWhatsapp = (parseInt(timestamp) + 1).toString(); // Slightly different for whatsapp
-        const googleTempPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8); // Random password
 
-        // Hash the password before saving
-        const hashedPassword = await hashPassword(googleTempPassword);
-
-        // Create user data based on package settings from request
+        // No password is stored. Google is the credential, so inventing one only
+        // created an account the user could never sign into with the form.
         const userData = {
             firstName: firstName,
             lastName: lastName,
             phone: placeholderPhone,
             whatsapp: placeholderWhatsapp,
             email: email,
-            password: hashedPassword, // Use hashed password
             profilePic: picture || "",
             isVerified: true, // Google accounts are pre-verified
-            allTermsAndConditionsAgreed: true, // Assuming Google signup implies agreement
+            allTermsAndConditionsAgreed: true, // enforced from the request above
+            authProvider: 'google',
             OTP: null,
-            packageType: packageType,
+            packageType: grantedPackageType,
             isInTrialPeriod: isInTrialPeriod,
             subscriptionStatus: subscriptionStatus,
             needsPhoneUpdate: true,        // phone above is a placeholder, not a real number
@@ -1333,6 +1361,10 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
         // Only set trialEndsDate if it's provided (for trial users)
         if (trialEndsDate) {
             userData.trialEndsDate = trialEndsDate;
+        }
+
+        if (grantedPackageType === 'AGENCY' && agencyName) {
+            userData.agencyName = agencyName;
         }
 
         const newUser = new UserModel(userData);
@@ -1354,13 +1386,6 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
             logger.error(new ApiError(500, "Internal server error in creating tokens"));
             return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating tokens"));
         }
-
-        // Update user with refresh token
-        await UserModel.findOneAndUpdate(
-            { _id: savedUser._id },
-            { $set: { appRefreshToken: RefreshToken } },
-            { new: true }
-        );
 
         // Initialize background job scheduling for the new user
         try {
@@ -1957,8 +1982,6 @@ const switchToClient = asyncHandler(async (req, res) => {
         return res.status(500).json(new ApiResponse(500, "", "Failed to create tokens"));
     }
 
-    await UserModel.findByIdAndUpdate(client._id, { appRefreshToken: refreshToken });
-
     const sellerCentral = await SellerCentralModel.findOne({ User: client._id });
     let locationToken;
     if (!sellerCentral || !sellerCentral.sellerAccount?.length) {
@@ -2053,9 +2076,6 @@ const completeAgencySignup = asyncHandler(async (req, res) => {
         logger.error(new ApiError(500, "Failed to create tokens"));
         return res.status(500).json(new ApiResponse(500, "", "Failed to create tokens"));
     }
-
-    // Update user with refresh token
-    await UserModel.findByIdAndUpdate(userId, { appRefreshToken: refreshToken });
 
     const options = getHttpsCookieOptions();
     logger.info(`Agency signup completed for user ${userId} (${user.email}) without Stripe`);
@@ -2163,8 +2183,10 @@ const superAdminUpdateUserPassword = asyncHandler(async (req, res) => {
     // Hash the new password
     const hashedPassword = await hashPassword(newPassword);
 
-    // Update the user's password
+    // Update the user's password. A Google account given a password by an admin now
+    // genuinely has one, so stop reporting it as Google-only at login.
     targetUser.password = hashedPassword;
+    targetUser.authProvider = 'password';
     await targetUser.save();
 
     logger.info(`Super admin ${adminId} updated password for user ${userId} (${targetUser.email})`);

@@ -56,9 +56,17 @@ const userSchema = new mongoose.Schema(
 
       password: {
         type: String,
-        required: false, // Not required for agency clients
+        required: false, // Not required for agency clients or Google accounts
         minlength: [8, "Password must be at least 8 characters long"],
         select: false, // Prevents returning password in queries
+      },
+      // How the account was created. Provenance only — what a user can actually
+      // sign in with is decided by whether `password` is set, since linking lets a
+      // password account also use Google.
+      authProvider: {
+        type: String,
+        enum: ["password", "google"],
+        default: "password",
       },
       agencyId: {
         type: mongoose.Schema.Types.ObjectId,
@@ -137,6 +145,14 @@ const userSchema = new mongoose.Schema(
       isVerified: {
         type: Boolean,
         default: false,
+      },
+      // One entry per signed-in device. A list rather than a single value because
+      // impersonation and agency client-switching mint a refresh token against a
+      // user id other than the caller's, so one user legitimately has several live
+      // sessions at once and a single field would evict the real owner.
+      refreshTokens: {
+        type: [String],
+        default: [],
       },
       resetPasswordCode: {
         type: String,

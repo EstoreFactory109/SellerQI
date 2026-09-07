@@ -7,15 +7,19 @@ const jwt = require('jsonwebtoken');
 // Mock User model before requiring Tokens
 jest.mock('../../models/user-auth/userModel.js', () => ({
   findById: jest.fn(),
+  findByIdAndUpdate: jest.fn(),
+  updateOne: jest.fn(),
 }));
 
 const {
   createAccessToken,
   createRefreshToken,
+  revokeRefreshToken,
   createLocationToken,
   verifyAccessToken,
   refreshAccess,
   verifyLocationToken,
+  MAX_REFRESH_TOKENS,
 } = require('../../utils/Tokens.js');
 const User = require('../../models/user-auth/userModel.js');
 
@@ -26,6 +30,9 @@ describe('Tokens', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // createRefreshToken records the session as it mints, so these must resolve.
+    User.findByIdAndUpdate.mockResolvedValue({});
+    User.updateOne.mockResolvedValue({});
   });
 
   describe('createAccessToken', () => {
@@ -189,10 +196,10 @@ describe('Tokens', () => {
     it('should refresh access token for valid refresh token', async () => {
       const refreshToken = await createRefreshToken(testUserId);
       
-      // Mock User.findById to return a user with matching refresh token
+      // Mock User.findById to return a user holding this token as a live session
       User.findById.mockReturnValue({
         select: jest.fn().mockResolvedValue({
-          appRefreshToken: refreshToken,
+          refreshTokens: [refreshToken],
         }),
       });
       
@@ -222,21 +229,89 @@ describe('Tokens', () => {
       expect(result).toBe(false);
     });
 
-    it('should return false when refresh token does not match stored token', async () => {
+    it('should return false when the token is not among the active sessions', async () => {
       const refreshToken = await createRefreshToken(testUserId);
-      
+
       User.findById.mockReturnValue({
         select: jest.fn().mockResolvedValue({
-          appRefreshToken: 'different-token',
+          refreshTokens: ['some-other-devices-token'],
         }),
       });
-      
+
+      const result = await refreshAccess(refreshToken);
+      expect(result).toBe(false);
+    });
+
+    it('should return false when the user has no active sessions', async () => {
+      const refreshToken = await createRefreshToken(testUserId);
+
+      User.findById.mockReturnValue({
+        select: jest.fn().mockResolvedValue({}),
+      });
+
       const result = await refreshAccess(refreshToken);
       expect(result).toBe(false);
     });
 
     it('should return false for invalid token', async () => {
       const result = await refreshAccess('invalid-token');
+      expect(result).toBe(false);
+    });
+
+    it('should reject an access token presented as a refresh token', async () => {
+      const accessToken = await createAccessToken(testUserId);
+
+      User.findById.mockReturnValue({
+        select: jest.fn().mockResolvedValue({ refreshTokens: [accessToken] }),
+      });
+
+      // Even though it is signed and listed, the type claim must disqualify it.
+      const result = await refreshAccess(accessToken);
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('refresh token session bookkeeping', () => {
+    it('should record the token as an active session when minting it', async () => {
+      const token = await createRefreshToken(testUserId);
+
+      expect(User.findByIdAndUpdate).toHaveBeenCalledWith(testUserId, {
+        $push: { refreshTokens: { $each: [token], $slice: -MAX_REFRESH_TOKENS } },
+      });
+    });
+
+    it('should still return the token when recording the session fails', async () => {
+      User.findByIdAndUpdate.mockRejectedValue(new Error('db down'));
+
+      // A transient write failure must not block the login — the access token is
+      // still good for 15 days.
+      const token = await createRefreshToken(testUserId);
+      expect(typeof token).toBe('string');
+    });
+
+    it('should revoke a session by token without needing the user id', async () => {
+      const token = await createRefreshToken(testUserId);
+
+      const result = await revokeRefreshToken(token);
+
+      expect(result).toBe(true);
+      expect(User.updateOne).toHaveBeenCalledWith(
+        { refreshTokens: token },
+        { $pull: { refreshTokens: token } }
+      );
+    });
+
+    it('should return false when revoking without a token', async () => {
+      const result = await revokeRefreshToken(null);
+      expect(result).toBe(false);
+      expect(User.updateOne).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('token type separation', () => {
+    it('should reject a refresh token presented as an access token', async () => {
+      const refreshToken = await createRefreshToken(testUserId);
+      const result = await verifyAccessToken(refreshToken);
       expect(result).toBe(false);
     });
   });
