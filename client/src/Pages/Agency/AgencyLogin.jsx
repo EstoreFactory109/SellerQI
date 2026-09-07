@@ -92,7 +92,7 @@ export default function AgencyLogin() {
           navigate('/verify-email', { state: { email: formData.email } });
           return;
         }
-        setErrorMessage(err.response?.data?.message || 'Invalid email or password.');
+        setErrorMessage(err.response?.data?.message || 'Incorrect email or password');
       } else if (err.response?.status === 403) {
         setErrorMessage('Account is disabled. Please contact support.');
       } else if (err.response?.status === 404) {
