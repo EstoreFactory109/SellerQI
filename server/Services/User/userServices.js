@@ -81,7 +81,7 @@ const getUserById =async(id)=>{
         logger.error(new ApiError(404,"Id is missing"));
         return false;
     }
-    const user=await UserModel.findOne({_id:id,isVerified:true}).select("firstName lastName phone whatsapp email profilePic packageType subscriptionStatus isInTrialPeriod trialEndsDate accessType servedTrial agencyName agencyId isAgencyClient needsPhoneUpdate phoneUpdateReason");
+    const user=await UserModel.findOne({_id:id}).select("firstName lastName phone whatsapp email profilePic packageType subscriptionStatus isInTrialPeriod trialEndsDate accessType servedTrial agencyName agencyId isAgencyClient needsPhoneUpdate phoneUpdateReason isVerified");
     if(!user){
         logger.error(new ApiError(404,"User not found"));
         return false;
@@ -104,6 +104,7 @@ const getUserById =async(id)=>{
         trialEndsDate: user.trialEndsDate,
         accessType: user.accessType,
         servedTrial: user.servedTrial,
+        isVerified: user.isVerified,
         agencyName: user.agencyName || null,
         agencyId: user.agencyId || null,
         isAgencyClient: user.isAgencyClient || false,

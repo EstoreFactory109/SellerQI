@@ -48,7 +48,13 @@ axiosInstance.interceptors.response.use(
     
     // Skip refresh for refresh-token endpoint to avoid infinite loop
     const isRefreshRequest = requestUrl.includes('/app/refresh-token');
-    
+
+    // Auth endpoints answer 401 as a real result (not-verified / bad-password / bad-OTP).
+    // Refreshing would discard that answer, so let it reach the caller.
+    const isAuthRequest = ['/app/login', '/app/auth/admin-login', '/app/register',
+                           '/app/verify-user', '/app/resend-otp']
+      .some(path => requestUrl.includes(path));
+
     // Check if we're on pages that handle their own auth errors
     const isFromConnectAccounts = currentPath.includes('/connect-accounts') || 
                                   currentPath.includes('/connect-to-amazon') ||
@@ -57,7 +63,7 @@ axiosInstance.interceptors.response.use(
                                   currentPath.startsWith('/manage-agency');
     
     // Handle 401 Unauthorized errors - try to refresh token first
-    if (statusCode === 401 && !isLogoutRequest && !isFromConnectAccounts && !isRefreshRequest && !originalRequest._retry) {
+    if (statusCode === 401 && !isLogoutRequest && !isFromConnectAccounts && !isRefreshRequest && !isAuthRequest && !originalRequest._retry) {
       
       if (isRefreshing) {
         // If already refreshing, queue this request
