@@ -1,538 +1,305 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSelector } from 'react-redux';
-import { useNavigate } from 'react-router-dom';
-import {
-  ComposedChart,
-  Line,
-  Area,
-  XAxis,
-  YAxis,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  CartesianGrid,
-} from 'recharts';
-import { motion } from 'framer-motion';
-import { TrendingUp, TrendingDown, Minus, Loader2, AlertCircle, Calendar } from 'lucide-react';
-import axiosInstance from '../../config/axios.config.js';
-import { COLORS, TYPOGRAPHY } from '../../Components/Shared/tokens.js';
-import { formatCurrencyWithLocale } from '../../utils/currencyUtils.js';
-
-/** Preset windows. `days` is inclusive and always ends yesterday. */
-const PRESETS = [
-  { key: 'last7', label: 'Last 7 days', days: 7 },
-  { key: 'last30', label: 'Last 30 days', days: 30 },
-  { key: 'last90', label: 'Last 90 days', days: 90 },
-];
-
-const toYmd = (date) => date.toISOString().slice(0, 10);
-const addDays = (date, days) => new Date(date.getTime() + days * 86400000);
-
-/** The window for a preset: `days` long, ending yesterday. */
-const presetRange = (days) => {
-  const yesterday = addDays(new Date(`${toYmd(new Date())}T00:00:00.000Z`), -1);
-  return { startDate: toYmd(addDays(yesterday, -(days - 1))), endDate: toYmd(yesterday) };
-};
-
-const formatDayLabel = (ymd) => {
-  const date = new Date(`${ymd}T00:00:00.000Z`);
-  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
-};
-
-const formatPercent = (value) => `${Number(value || 0).toFixed(2)}%`;
+import { Navigate } from 'react-router-dom';
 
 /**
- * Delta pill. Sales-type metrics are "up is good"; cost-type metrics (ACOS,
- * TACOS, ad spend) are "up is bad", so the colour is inverted for those.
+ * "Overview" — the landing page of the Estore Factory section on a client's own
+ * account (nav: Estore Factory > Overview). Recreates the design in
+ * deploy/index.html exactly: same layout, copy and color tokens.
+ *
+ * This design is visually distinct from the rest of the app on purpose — it uses
+ * its own near-black/orange palette (not Shared/tokens.js's blue-accented
+ * redesign tokens), matching the mock file-for-file. Kept local rather than
+ * merged into the shared token set so a change to one doesn't drift the other.
+ *
+ * Data reality check: only the header (brand name, connected marketplaces) has a
+ * real backend source today — both already ship on state.Auth.user via
+ * getUserById (server/Services/User/userServices.js). Everything below the
+ * header (tasks in progress, tickets, next report, "what we're working on",
+ * account manager, recent activity, the opportunity callout) describes an
+ * ESF-staff-driven account-management workflow that has no backend yet — no
+ * assigned-manager model, no client activity log, no staff task queue distinct
+ * from the seller's own Tasks page. Those sections render the mock's own sample
+ * content verbatim so the page matches the design exactly; wiring them to real
+ * data needs that backend built first.
  */
-const DeltaBadge = ({ delta, invert = false, unit = 'percent' }) => {
-  if (!delta) return null;
-
-  const raw = unit === 'points' ? delta.points : delta.percent;
-  if (raw === null || raw === undefined) {
-    return (
-      <span className="inline-flex items-center gap-1 text-xs" style={{ color: COLORS.textMuted }}>
-        <Minus className="w-3 h-3" />
-        no prior data
-      </span>
-    );
-  }
-
-  const isFlat = Math.abs(raw) < 0.005;
-  const isUp = raw > 0;
-  const isGood = isFlat ? null : (invert ? !isUp : isUp);
-  const color = isFlat ? COLORS.textMuted : isGood ? COLORS.good : COLORS.fix;
-  const Icon = isFlat ? Minus : isUp ? TrendingUp : TrendingDown;
-  const text = unit === 'points'
-    ? `${isUp ? '+' : ''}${raw.toFixed(2)} pt`
-    : `${isUp ? '+' : ''}${raw.toFixed(2)}%`;
-
-  return (
-    <span className="inline-flex items-center gap-1 text-xs font-medium" style={{ color }}>
-      <Icon className="w-3 h-3" />
-      {text}
-      <span style={{ color: COLORS.textMuted }} className="font-normal">vs prev</span>
-    </span>
-  );
+const PALETTE = {
+    bg: '#0B0C0E',
+    surface: '#14161A',
+    surfaceHover: '#171A1F',
+    border: 'rgba(255,255,255,.07)',
+    borderHover: 'rgba(255,255,255,.16)',
+    divider: 'rgba(255,255,255,.05)',
+    textPrimary: '#F2F4F7',
+    textBody: '#DCE0E6',
+    textSecondary: '#8A9099',
+    textTertiary: '#9BA1AB',
+    textMuted: '#6E747E',
+    textFaint: '#787E88',
+    accent: '#FF7A1A',
+    accentHover: '#FF8A2B',
+    teal: '#5FD3C4',
+    amberBg: 'rgba(245,166,35,.07)',
+    amberBorder: 'rgba(245,166,35,.34)',
+    amberLabel: '#E8B457',
+    amberValue: '#F7B750',
+    amberSub: '#C99B48',
 };
 
-const KpiCard = ({ label, value, delta, invert, unit, hint }) => (
-  <div
-    className="rounded-xl p-4 border"
-    style={{ background: COLORS.surface, borderColor: COLORS.border }}
-  >
-    <p className={TYPOGRAPHY.cardLabel} style={{ color: COLORS.textSecondary }}>{label}</p>
-    <p className={`${TYPOGRAPHY.kpiValue} mt-1.5`} style={{ color: COLORS.textPrimary }}>{value}</p>
-    <div className="mt-1.5">
-      <DeltaBadge delta={delta} invert={invert} unit={unit} />
-    </div>
-    {hint && <p className="mt-1 text-[11px]" style={{ color: COLORS.textMuted }}>{hint}</p>}
-  </div>
+/** Country code -> Amazon storefront domain. Matches the codes used at connect
+ * time in Pages/Onboarding/ConnectToAmazon.jsx (UK, not GB). Extend as more
+ * marketplaces are onboarded; unlisted codes fall back to a generic label. */
+const MARKETPLACE_DOMAIN = {
+    US: 'Amazon.com', CA: 'Amazon.ca', MX: 'Amazon.com.mx', BR: 'Amazon.com.br',
+    UK: 'Amazon.co.uk', DE: 'Amazon.de', FR: 'Amazon.fr', IT: 'Amazon.it',
+    ES: 'Amazon.es', NL: 'Amazon.nl', SE: 'Amazon.se', PL: 'Amazon.pl',
+    IN: 'Amazon.in', JP: 'Amazon.co.jp', AU: 'Amazon.com.au', SG: 'Amazon.sg', AE: 'Amazon.ae',
+};
+
+const StatCard = ({ label, value, valueColor, sub, subColor, tone, href }) => (
+    <a
+        href={href}
+        onClick={(e) => e.preventDefault()}
+        className="flex flex-col gap-3 rounded-lg p-5 pb-[18px] transition-colors"
+        style={{
+            background: tone === 'alert' ? PALETTE.amberBg : PALETTE.surface,
+            border: `1px solid ${tone === 'alert' ? PALETTE.amberBorder : PALETTE.border}`,
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.borderColor = tone === 'alert' ? 'rgba(245,166,35,.5)' : PALETTE.borderHover; }}
+        onMouseLeave={(e) => { e.currentTarget.style.borderColor = tone === 'alert' ? PALETTE.amberBorder : PALETTE.border; }}
+    >
+        <span className="text-[12.5px]" style={{ color: tone === 'alert' ? PALETTE.amberLabel : PALETTE.textSecondary }}>{label}</span>
+        <span className="text-[34px] font-semibold leading-none tracking-[-0.02em]" style={{ color: valueColor }}>{value}</span>
+        <span className="text-xs" style={{ color: subColor || PALETTE.textMuted }}>{sub}</span>
+    </a>
 );
 
-const ClientDashboard = () => {
-  const navigate = useNavigate();
-  const user = useSelector((state) => state.Auth?.user);
-  const currency = useSelector((state) => state.currency?.currency) || '$';
+const STATUS_BADGE = {
+    'In progress': { bg: 'rgba(95,211,196,.11)', color: PALETTE.teal },
+    'In review': { bg: 'rgba(95,211,196,.11)', color: PALETTE.teal },
+    'Waiting on Amazon': { bg: 'rgba(255,255,255,.06)', color: PALETTE.textTertiary },
+    'Waiting on you': { bg: 'rgba(245,166,35,.13)', color: PALETTE.amberValue },
+};
 
-  const [preset, setPreset] = useState('last30');
-  const [customRange, setCustomRange] = useState({ startDate: '', endDate: '' });
-  const [range, setRange] = useState(() => presetRange(30));
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [tab, setTab] = useState('sales');
-
-  const fetchData = useCallback(async (window) => {
-    try {
-      setLoading(true);
-      setError('');
-      const res = await axiosInstance.get('/api/pagewise/esf/client-dashboard', {
-        params: { startDate: window.startDate, endDate: window.endDate },
-      });
-      if (res.data?.statusCode === 200 && res.data?.data) {
-        setData(res.data.data);
-      } else {
-        setError(res.data?.message || 'Failed to load dashboard data');
-      }
-    } catch (err) {
-      // 403 = this account is not an ESF client; the page should not exist for them.
-      if (err.response?.status === 403) {
-        navigate('/seller-central-checker/dashboard', { replace: true });
-        return;
-      }
-      setError(err.response?.data?.message || 'Failed to load dashboard data');
-    } finally {
-      setLoading(false);
-    }
-  }, [navigate]);
-
-  useEffect(() => {
-    fetchData(range);
-  }, [range, fetchData]);
-
-  const applyPreset = (key) => {
-    const found = PRESETS.find((p) => p.key === key);
-    if (!found) return;
-    setPreset(key);
-    setRange(presetRange(found.days));
-  };
-
-  const applyCustom = () => {
-    if (!customRange.startDate || !customRange.endDate) return;
-    if (customRange.startDate > customRange.endDate) {
-      setError('Start date must be before end date.');
-      return;
-    }
-    setPreset('custom');
-    setRange({ startDate: customRange.startDate, endDate: customRange.endDate });
-  };
-
-  const money = (value) => formatCurrencyWithLocale(Number(value || 0), currency);
-
-  const chartData = useMemo(() => {
-    if (!data?.timeseries) return [];
-    return data.timeseries.map((row) => ({ ...row, label: formatDayLabel(row.date) }));
-  }, [data]);
-
-  const current = data?.current;
-  const previous = data?.previous;
-  const deltas = data?.deltas;
-
-  const chartTooltip = ({ active, payload, label }) => {
-    if (!active || !payload?.length) return null;
-    return (
-      <div
-        className="rounded-lg border px-3 py-2 text-xs"
-        style={{ background: COLORS.surfaceElevated, borderColor: COLORS.border, color: COLORS.textPrimary }}
-      >
-        <p className="font-semibold mb-1">{label}</p>
-        {payload.map((entry) => (
-          <p key={entry.dataKey} style={{ color: entry.color }} className="tabular-nums">
-            {entry.name}: {entry.dataKey === 'acos' || entry.dataKey === 'tacos'
-              ? formatPercent(entry.value)
-              : money(entry.value)}
-          </p>
-        ))}
-      </div>
-    );
-  };
-
-  return (
-    <div className="w-full min-h-full p-4 md:p-6" style={{ background: COLORS.bgBase }}>
-      <div className="max-w-[1600px] mx-auto w-full">
-        {/* Header + range controls */}
-        <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-4 mb-6">
-          <div>
-            <h1 className={TYPOGRAPHY.pageTitle} style={{ color: COLORS.textPrimary }}>
-              Overview
-            </h1>
-            <p className="mt-1 text-sm" style={{ color: COLORS.textSecondary }}>
-              {user?.firstName ? `${user.firstName} ${user.lastName || ''} — ` : ''}
-              Total sales, PPC sales and ACOS over time
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {PRESETS.map((p) => (
-              <button
-                key={p.key}
-                type="button"
-                onClick={() => applyPreset(p.key)}
-                className="px-3 py-2 rounded-lg text-sm font-medium border transition-colors"
-                style={{
-                  background: preset === p.key ? COLORS.accent : COLORS.surface,
-                  borderColor: preset === p.key ? COLORS.accent : COLORS.border,
-                  color: preset === p.key ? '#fff' : COLORS.textSecondary,
-                }}
-              >
-                {p.label}
-              </button>
-            ))}
-
-            <div
-              className="flex items-center gap-2 rounded-lg border px-2 py-1.5"
-              style={{ background: COLORS.surface, borderColor: preset === 'custom' ? COLORS.accent : COLORS.border }}
-            >
-              <Calendar className="w-4 h-4 shrink-0" style={{ color: COLORS.textMuted }} />
-              <input
-                type="date"
-                value={customRange.startDate}
-                max={customRange.endDate || undefined}
-                onChange={(e) => setCustomRange((r) => ({ ...r, startDate: e.target.value }))}
-                className="bg-transparent text-xs outline-none"
-                style={{ color: COLORS.textPrimary, colorScheme: 'dark' }}
-                aria-label="Custom start date"
-              />
-              <span style={{ color: COLORS.textMuted }} className="text-xs">to</span>
-              <input
-                type="date"
-                value={customRange.endDate}
-                min={customRange.startDate || undefined}
-                onChange={(e) => setCustomRange((r) => ({ ...r, endDate: e.target.value }))}
-                className="bg-transparent text-xs outline-none"
-                style={{ color: COLORS.textPrimary, colorScheme: 'dark' }}
-                aria-label="Custom end date"
-              />
-              <button
-                type="button"
-                onClick={applyCustom}
-                disabled={!customRange.startDate || !customRange.endDate}
-                className="px-2.5 py-1 rounded-md text-xs font-semibold disabled:opacity-40"
-                style={{ background: COLORS.accent, color: '#fff' }}
-              >
-                Apply
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Comparison caption — always says exactly what is being compared */}
-        {data && (
-          <p className="mb-4 text-xs" style={{ color: COLORS.textMuted }}>
-            Showing <span style={{ color: COLORS.textSecondary }}>{data.range.startDate} → {data.range.endDate}</span>
-            {' '}({data.range.days} days), compared with{' '}
-            <span style={{ color: COLORS.textSecondary }}>{data.compareRange.startDate} → {data.compareRange.endDate}</span>
-          </p>
-        )}
-
-        {error && (
-          <div
-            className="rounded-xl border p-4 mb-6 flex items-start gap-2"
-            style={{ borderColor: 'rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)' }}
-          >
-            <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" style={{ color: COLORS.fix }} />
-            <div>
-              <p className="text-sm font-medium" style={{ color: COLORS.fix }}>{error}</p>
-              <button
-                onClick={() => fetchData(range)}
-                className="mt-2 px-3 py-1.5 rounded-lg text-xs font-medium"
-                style={{ background: COLORS.fix, color: '#fff' }}
-              >
-                Retry
-              </button>
-            </div>
-          </div>
-        )}
-
-        {loading && (
-          <div
-            className="flex items-center justify-center rounded-xl border py-20"
-            style={{ background: COLORS.surface, borderColor: COLORS.border }}
-          >
-            <Loader2 className="w-6 h-6 animate-spin" style={{ color: COLORS.accent }} />
-            <p className="ml-3 text-sm" style={{ color: COLORS.textSecondary }}>Loading client dashboard…</p>
-          </div>
-        )}
-
-        {!loading && !error && current && (
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
-            {/* KPIs */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-              <KpiCard
-                label="Total Sales"
-                value={money(current.totalSales)}
-                delta={deltas?.totalSales}
-                hint={`Previous: ${money(previous?.totalSales)}`}
-              />
-              <KpiCard
-                label="PPC Sales"
-                value={money(current.ppcSales)}
-                delta={deltas?.ppcSales}
-                hint={`Previous: ${money(previous?.ppcSales)}`}
-              />
-              <KpiCard
-                label="ACOS"
-                value={formatPercent(current.acos)}
-                delta={deltas?.acos}
-                unit="points"
-                invert
-                hint={`Ad spend ÷ PPC sales · prev ${formatPercent(previous?.acos)}`}
-              />
-              <KpiCard
-                label="TACOS"
-                value={formatPercent(current.tacos)}
-                delta={deltas?.tacos}
-                unit="points"
-                invert
-                hint={`Ad spend ÷ total sales · prev ${formatPercent(previous?.tacos)}`}
-              />
-            </div>
-
-            {/* Chart */}
-            <div
-              className="rounded-xl border mb-6 overflow-hidden"
-              style={{ background: COLORS.surface, borderColor: COLORS.border }}
-            >
-              <div
-                className="flex items-center justify-between gap-4 px-4 py-3 border-b flex-wrap"
-                style={{ borderColor: COLORS.border }}
-              >
-                <h2 className={TYPOGRAPHY.sectionTitle} style={{ color: COLORS.textPrimary }}>
-                  Performance over time
-                </h2>
-                <div className="flex items-center gap-1">
-                  {[
-                    { key: 'sales', label: 'Sales' },
-                    { key: 'acos', label: 'ACOS' },
-                  ].map((t) => (
-                    <button
-                      key={t.key}
-                      type="button"
-                      onClick={() => setTab(t.key)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-                      style={{
-                        background: tab === t.key ? COLORS.surfaceElevated : 'transparent',
-                        color: tab === t.key ? COLORS.textPrimary : COLORS.textMuted,
-                      }}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="p-4" style={{ height: 360 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-                    <defs>
-                      <linearGradient id="esfTotalSales" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={COLORS.accent} stopOpacity={0.35} />
-                        <stop offset="100%" stopColor={COLORS.accent} stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
-                    <XAxis
-                      dataKey="label"
-                      tick={{ fill: COLORS.textMuted, fontSize: 11 }}
-                      stroke={COLORS.border}
-                      minTickGap={24}
-                    />
-                    <YAxis
-                      tick={{ fill: COLORS.textMuted, fontSize: 11 }}
-                      stroke={COLORS.border}
-                      width={64}
-                      tickFormatter={(v) => (tab === 'acos' ? `${v}%` : `${currency}${v >= 1000 ? `${Math.round(v / 1000)}k` : v}`)}
-                    />
-                    <Tooltip content={chartTooltip} />
-                    <Legend wrapperStyle={{ fontSize: 12, color: COLORS.textSecondary }} />
-
-                    {tab === 'sales' ? (
-                      <>
-                        <Area
-                          type="monotone"
-                          dataKey="totalSales"
-                          name="Total Sales"
-                          stroke={COLORS.accent}
-                          fill="url(#esfTotalSales)"
-                          strokeWidth={2}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="ppcSales"
-                          name="PPC Sales"
-                          stroke={COLORS.good}
-                          strokeWidth={2}
-                          dot={false}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="adSpend"
-                          name="Ad Spend"
-                          stroke={COLORS.watch}
-                          strokeWidth={2}
-                          dot={false}
-                        />
-                      </>
-                    ) : (
-                      <>
-                        <Line
-                          type="monotone"
-                          dataKey="acos"
-                          name="ACOS"
-                          stroke={COLORS.fix}
-                          strokeWidth={2}
-                          dot={false}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="tacos"
-                          name="TACOS"
-                          stroke={COLORS.setup}
-                          strokeWidth={2}
-                          dot={false}
-                        />
-                      </>
-                    )}
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Period comparison table */}
-            <div
-              className="rounded-xl border mb-6 overflow-hidden"
-              style={{ background: COLORS.surface, borderColor: COLORS.border }}
-            >
-              <div className="px-4 py-3 border-b" style={{ borderColor: COLORS.border }}>
-                <h2 className={TYPOGRAPHY.sectionTitle} style={{ color: COLORS.textPrimary }}>
-                  Period comparison
-                </h2>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[640px]">
-                  <thead>
-                    <tr style={{ background: COLORS.bgBase }}>
-                      {['Metric', 'Selected period', 'Previous period', 'Change'].map((h, i) => (
-                        <th
-                          key={h}
-                          className={`px-4 py-2.5 text-xs font-semibold uppercase tracking-wider ${i === 0 ? 'text-left' : 'text-right'}`}
-                          style={{ color: COLORS.textSecondary }}
-                        >
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[
-                      { label: 'Total Sales', cur: money(current.totalSales), prev: money(previous?.totalSales), delta: deltas?.totalSales, unit: 'percent', invert: false },
-                      { label: 'PPC Sales', cur: money(current.ppcSales), prev: money(previous?.ppcSales), delta: deltas?.ppcSales, unit: 'percent', invert: false },
-                      { label: 'Ad Spend', cur: money(current.adSpend), prev: money(previous?.adSpend), delta: deltas?.adSpend, unit: 'percent', invert: true },
-                      { label: 'ACOS', cur: formatPercent(current.acos), prev: formatPercent(previous?.acos), delta: deltas?.acos, unit: 'points', invert: true },
-                      { label: 'TACOS', cur: formatPercent(current.tacos), prev: formatPercent(previous?.tacos), delta: deltas?.tacos, unit: 'points', invert: true },
-                      { label: 'Units Sold', cur: (current.unitsSold || 0).toLocaleString(), prev: (previous?.unitsSold || 0).toLocaleString(), delta: deltas?.unitsSold, unit: 'percent', invert: false },
-                    ].map((row) => (
-                      <tr key={row.label} className="border-t" style={{ borderColor: COLORS.border }}>
-                        <td className="px-4 py-2.5 text-sm font-medium" style={{ color: COLORS.textPrimary }}>{row.label}</td>
-                        <td className="px-4 py-2.5 text-sm text-right tabular-nums" style={{ color: COLORS.textPrimary }}>{row.cur}</td>
-                        <td className="px-4 py-2.5 text-sm text-right tabular-nums" style={{ color: COLORS.textSecondary }}>{row.prev}</td>
-                        <td className="px-4 py-2.5 text-right">
-                          <DeltaBadge delta={row.delta} unit={row.unit} invert={row.invert} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Daily breakdown table */}
-            <div
-              className="rounded-xl border overflow-hidden"
-              style={{ background: COLORS.surface, borderColor: COLORS.border }}
-            >
-              <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: COLORS.border }}>
-                <h2 className={TYPOGRAPHY.sectionTitle} style={{ color: COLORS.textPrimary }}>
-                  Daily breakdown
-                </h2>
-                <span className="text-xs" style={{ color: COLORS.textMuted }}>
-                  {chartData.length} days
-                </span>
-              </div>
-              <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
-                <table className="w-full min-w-[720px]">
-                  <thead className="sticky top-0" style={{ background: COLORS.bgBase }}>
-                    <tr>
-                      {['Date', 'Total Sales', 'PPC Sales', 'Ad Spend', 'ACOS', 'TACOS', 'Units'].map((h, i) => (
-                        <th
-                          key={h}
-                          className={`px-4 py-2.5 text-xs font-semibold uppercase tracking-wider ${i === 0 ? 'text-left' : 'text-right'}`}
-                          style={{ color: COLORS.textSecondary }}
-                        >
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {chartData.map((row) => (
-                      <tr key={row.date} className="border-t" style={{ borderColor: COLORS.border }}>
-                        <td className="px-4 py-2 text-sm" style={{ color: COLORS.textPrimary }}>{row.label}</td>
-                        <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: COLORS.textPrimary }}>{money(row.totalSales)}</td>
-                        <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: COLORS.textSecondary }}>{money(row.ppcSales)}</td>
-                        <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: COLORS.textSecondary }}>{money(row.adSpend)}</td>
-                        <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: COLORS.textSecondary }}>{formatPercent(row.acos)}</td>
-                        <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: COLORS.textSecondary }}>{formatPercent(row.tacos)}</td>
-                        <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: COLORS.textSecondary }}>{(row.unitsSold || 0).toLocaleString()}</td>
-                      </tr>
-                    ))}
-                    {chartData.length === 0 && (
-                      <tr>
-                        <td colSpan={7} className="px-4 py-10 text-center text-sm" style={{ color: COLORS.textMuted }}>
-                          No data for this period.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </div>
+const WorkItemRow = ({ text, status, time }) => (
+    <div className="flex items-center gap-4 py-[15px]" style={{ borderTop: `1px solid ${PALETTE.divider}` }}>
+        <span className="flex-1 text-[13.5px]" style={{ color: PALETTE.textBody }}>{text}</span>
+        <span
+            className="flex-none text-[11.5px] font-semibold px-2.5 py-1 rounded-md"
+            style={{ background: STATUS_BADGE[status]?.bg, color: STATUS_BADGE[status]?.color }}
+        >
+            {status}
+        </span>
+        <span className="flex-none w-[88px] text-right text-xs" style={{ color: PALETTE.textMuted }}>{time}</span>
     </div>
-  );
+);
+
+/** Small icon glyph for a Recent Activity row. `kind` picks a shape + color to
+ * match the mock's mix of dots, diamonds and bars — not meant to be a full icon
+ * system, just enough variety to distinguish activity types at a glance. */
+const ActivityGlyph = ({ kind }) => {
+    const glyphs = {
+        dot: <span className="w-[9px] h-[9px] rounded-full" style={{ background: PALETTE.teal }} />,
+        reply: <span className="w-2 h-2 rotate-45" style={{ background: PALETTE.textTertiary }} />,
+        square: <span className="w-2 h-2 rounded-[1px]" style={{ background: '#8FA0B8' }} />,
+        bar: <span className="w-[11px] h-1 rounded-[1px]" style={{ background: PALETTE.textTertiary }} />,
+    };
+    const bg = kind === 'dot' ? 'rgba(95,211,196,.1)' : 'rgba(255,255,255,.05)';
+    return (
+        <span className="flex-none w-[26px] h-[26px] rounded-md flex items-center justify-center" style={{ background: bg }}>
+            {glyphs[kind]}
+        </span>
+    );
+};
+
+const ActivityRow = ({ kind, text, time }) => (
+    <div className="flex items-center gap-3.5 py-[13px]" style={{ borderTop: `1px solid ${PALETTE.divider}` }}>
+        <ActivityGlyph kind={kind} />
+        <span className="flex-1 text-[13.5px]" style={{ color: PALETTE.textBody }}>{text}</span>
+        <span className="flex-none text-xs" style={{ color: PALETTE.textMuted }}>{time}</span>
+    </div>
+);
+
+// Sample content — see the file header note. Kept verbatim from deploy/index.html
+// so the page matches the design; replace once a real work-item / activity-log
+// backend exists.
+const SAMPLE_WORK_ITEMS = [
+    { text: 'Rewriting the bullet points on your digital kitchen scale listing', status: 'In progress', time: '2 hours ago' },
+    { text: 'Restructuring your Sponsored Products campaigns around top converting keywords', status: 'In review', time: 'Yesterday' },
+    { text: 'Filing reimbursement claims for 214 units lost in Amazon’s warehouses', status: 'Waiting on Amazon', time: '3 days ago' },
+    { text: 'Building A+ content for the espresso tamper — we need your product photos', status: 'Waiting on you', time: '5 days ago' },
+];
+
+const SAMPLE_ACTIVITY = [
+    { kind: 'dot', text: 'Keyword research finished for your milk frother line — 41 new terms added', time: '2h ago' },
+    { kind: 'reply', text: 'Priya replied to your question about raising the PPC budget for Q4', time: '4h ago' },
+    { kind: 'dot', text: 'Backend search terms updated across 12 ASINs', time: 'Yesterday' },
+    { kind: 'square', text: 'August performance report published', time: '2d ago' },
+    { kind: 'bar', text: 'Invoice EF-2041 paid — $2,400.00', time: '4d ago' },
+    { kind: 'dot', text: 'Negative keywords added to 6 campaigns to cut wasted ad spend', time: '5d ago' },
+    { kind: 'reply', text: 'Marcus answered your question about restock timing before Prime Day', time: '6d ago' },
+    { kind: 'dot', text: 'Main image on the stainless steel kettle replaced with the new hero shot', time: 'Aug 24' },
+];
+
+const ClientDashboard = () => {
+    const user = useSelector((state) => state.Auth?.user);
+
+    // Same admission rule as the backend's esfClientOnly middleware (server/middlewares/
+    // Auth/esfClientOnly.js): isEsfClient, or a superAdmin servicing the account.
+    // user is null only for an instant on first load (ProtectedRouteWrapper populates
+    // it); undefined here means "not decided yet", not "denied" — only redirect once
+    // we actually know.
+    if (user && user.isEsfClient !== true && user.accessType !== 'superAdmin') {
+        return <Navigate to="/seller-central-checker/dashboard" replace />;
+    }
+
+    const marketplaces = (user?.sellerCentral?.sellerAccount || []).filter((acc) => acc.country);
+
+    return (
+        <div className="min-h-full w-full" style={{ background: PALETTE.bg, color: PALETTE.textPrimary, fontFamily: "system-ui, -apple-system, 'Helvetica Neue', Helvetica, sans-serif" }}>
+            <div className="max-w-[1170px] mx-auto flex flex-col gap-7 px-8 md:px-10 py-9 md:py-11">
+
+                {/* Header */}
+                <header className="flex flex-col gap-[7px]">
+                    <h1 className="m-0 text-[29px] font-semibold tracking-[-0.02em]">Overview</h1>
+                    <div className="flex items-center gap-[9px] text-[13.5px]" style={{ color: PALETTE.textSecondary }}>
+                        <span style={{ color: '#B7BDC6' }}>{user?.brand || 'Your Brand'}</span>
+                        <span className="w-[3px] h-[3px] rounded-full" style={{ background: '#4A5058' }} />
+                        <span>Managed by eStore Factory</span>
+                    </div>
+                    {marketplaces.length > 0 && (
+                        <div className="flex items-center gap-2.5 flex-wrap mt-[9px]">
+                            <span className="text-[11.5px] tracking-[.04em] mr-0.5" style={{ color: PALETTE.textMuted }}>MARKETPLACES</span>
+                            {marketplaces.map((acc, i) => {
+                                const domain = MARKETPLACE_DOMAIN[acc.country] || `Amazon · ${acc.country}`;
+                                const connected = Boolean(acc.spiRefreshToken);
+                                return (
+                                    <span
+                                        key={`${acc.country}-${acc.region}-${i}`}
+                                        className="flex items-center gap-[7px] text-[12.5px] px-[11px] py-[5px] rounded-md"
+                                        style={{
+                                            fontWeight: connected ? 600 : 400,
+                                            color: connected ? PALETTE.textPrimary : PALETTE.textTertiary,
+                                            background: connected ? 'rgba(255,255,255,.07)' : 'rgba(255,255,255,.04)',
+                                            border: `1px solid ${connected ? 'rgba(255,255,255,.12)' : 'rgba(255,255,255,.08)'}`,
+                                        }}
+                                    >
+                                        <span className="w-[5px] h-[5px] rounded-full" style={{ background: connected ? PALETTE.teal : PALETTE.textMuted }} />
+                                        {domain}{acc.country ? ` · ${acc.country}` : ''}
+                                    </span>
+                                );
+                            })}
+                        </div>
+                    )}
+                </header>
+
+                {/* Stat row */}
+                <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <StatCard label="Tasks in progress" value="7" valueColor={PALETTE.teal} sub="Your team is handling this" />
+                    <StatCard label="Waiting on you" value="1" valueColor={PALETTE.amberValue} sub="1 item needs your reply" subColor={PALETTE.amberSub} tone="alert" />
+                    <StatCard label="Open tickets" value="1" valueColor={PALETTE.textPrimary} sub="Last reply 4 hours ago" />
+                    <StatCard label="Next report" value="Oct 3" valueColor={PALETTE.textPrimary} sub="September performance" />
+                </section>
+
+                {/* What we're working on | Your team */}
+                <section className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-5 items-start">
+
+                    <div className="rounded-lg flex flex-col gap-1" style={{ background: PALETTE.surface, border: `1px solid ${PALETTE.border}`, padding: '22px 24px 16px' }}>
+                        <h2 className="m-0 mb-3 text-[15px] font-semibold tracking-[-0.01em]">What we&rsquo;re working on</h2>
+                        {SAMPLE_WORK_ITEMS.map((item) => (
+                            <WorkItemRow key={item.text} {...item} />
+                        ))}
+                        <div className="pt-3.5 pb-1.5" style={{ borderTop: `1px solid ${PALETTE.divider}` }}>
+                            <a href="#" onClick={(e) => e.preventDefault()} className="text-[12.5px]" style={{ color: PALETTE.textSecondary }}>
+                                View all 7 tasks →
+                            </a>
+                        </div>
+                    </div>
+
+                    <div className="rounded-lg flex flex-col gap-[18px]" style={{ background: PALETTE.surface, border: `1px solid ${PALETTE.border}`, padding: '22px 24px 24px' }}>
+                        <h2 className="m-0 text-[15px] font-semibold tracking-[-0.01em]">Your team</h2>
+                        <div className="flex items-center gap-3.5">
+                            <div
+                                className="w-14 h-14 rounded-full flex-none flex items-center justify-center text-[8px] font-medium"
+                                style={{
+                                    background: 'repeating-linear-gradient(135deg, #1E2228 0 6px, #252A31 6px 12px)',
+                                    border: '1px solid rgba(255,255,255,.09)',
+                                    color: '#7A8189',
+                                    fontFamily: 'ui-monospace, Menlo, monospace',
+                                }}
+                            >
+                                photo
+                            </div>
+                            <div className="flex flex-col gap-[5px]">
+                                <span className="text-[15px] font-semibold">Priya Raghavan</span>
+                                <span className="text-[12.5px]" style={{ color: PALETTE.textSecondary }}>Your account manager</span>
+                            </div>
+                        </div>
+                        <div className="flex flex-col gap-[9px]">
+                            <a
+                                href="#"
+                                onClick={(e) => e.preventDefault()}
+                                className="text-center text-[13.5px] font-semibold py-3 rounded-lg transition-colors"
+                                style={{ background: PALETTE.accent, color: '#141414' }}
+                                onMouseEnter={(e) => { e.currentTarget.style.background = PALETTE.accentHover; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.background = PALETTE.accent; }}
+                            >
+                                Start a conversation
+                            </a>
+                            <span className="text-center text-xs" style={{ color: PALETTE.textMuted }}>Usually replies within a few hours</span>
+                        </div>
+                    </div>
+                </section>
+
+                {/* Recent activity */}
+                <section className="rounded-lg flex flex-col" style={{ background: PALETTE.surface, border: `1px solid ${PALETTE.border}`, padding: '22px 24px 12px' }}>
+                    <h2 className="m-0 mb-2 text-[15px] font-semibold tracking-[-0.01em]">Recent activity</h2>
+                    {SAMPLE_ACTIVITY.map((item) => (
+                        <ActivityRow key={item.text} {...item} />
+                    ))}
+                    <div className="py-3.5" style={{ borderTop: `1px solid ${PALETTE.divider}` }}>
+                        <a href="#" onClick={(e) => e.preventDefault()} className="text-[12.5px]" style={{ color: PALETTE.textSecondary }}>
+                            See full activity history →
+                        </a>
+                    </div>
+                </section>
+
+                {/* One thing worth looking at */}
+                <section className="rounded-lg flex flex-col gap-[18px]" style={{ background: PALETTE.surface, border: `1px solid ${PALETTE.border}`, padding: '24px 26px 26px' }}>
+                    <h2 className="m-0 text-[15px] font-semibold tracking-[-0.01em]">One thing worth looking at</h2>
+                    <div className="flex flex-col md:flex-row items-start gap-8 md:gap-12">
+                        <div className="flex-1 flex flex-col gap-2.5 max-w-[640px]">
+                            <span className="text-[10.5px]" style={{ color: PALETTE.textFaint }}>From your account data · Within Amazon</span>
+                            <span className="text-[17px] font-semibold tracking-[-0.015em]" style={{ color: PALETTE.textPrimary }}>Your brand store has never been built</span>
+                            <p className="m-0 text-[13.5px] leading-[1.65]" style={{ color: PALETTE.textTertiary }}>
+                                Shoppers who click your brand name from a listing land on a generic search page instead of a store.
+                                That traffic already exists — roughly 6,400 clicks last month — and it converts about 18% better
+                                when it reaches a proper store.
+                            </p>
+                        </div>
+                        <div className="flex-none flex flex-col gap-3.5 items-start min-w-[190px]">
+                            <div className="flex flex-col gap-1">
+                                <span className="text-[11.5px] tracking-[.04em]" style={{ color: PALETTE.textMuted }}>ESTIMATED UPSIDE</span>
+                                <span className="text-2xl font-semibold leading-none tracking-[-0.02em] tabular-nums">
+                                    $3,800<span className="text-sm font-medium" style={{ color: PALETTE.textSecondary }}>/mo</span>
+                                </span>
+                            </div>
+                            <a
+                                href="#"
+                                onClick={(e) => e.preventDefault()}
+                                className="text-[13px] font-medium px-[18px] py-2.5 rounded-lg transition-colors"
+                                style={{ border: '1px solid rgba(255,255,255,.16)', color: '#E8EAED' }}
+                                onMouseEnter={(e) => { e.currentTarget.style.borderColor = PALETTE.accent; e.currentTarget.style.color = PALETTE.accentHover; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,.16)'; e.currentTarget.style.color = '#E8EAED'; }}
+                            >
+                                Discuss this
+                            </a>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+        </div>
+    );
 };
 
 export default ClientDashboard;
