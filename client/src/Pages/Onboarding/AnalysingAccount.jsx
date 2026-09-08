@@ -199,7 +199,7 @@ const AnalysingAccount = () => {
             marginBottom: 16,
           }}
         >
-          {analysisComplete ? '✓ Setup complete' : 'Step 5 of 5 · Almost there'}
+          {analysisComplete ? '✓ Setup complete' : 'Step 4 of 4 · Almost there'}
         </div>
 
         <h1 style={{ margin: '0 0 8px', fontSize: 27, lineHeight: '34px', fontWeight: 600, letterSpacing: '-0.025em', color: COLORS.textPrimary }}>

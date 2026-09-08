@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Eye, EyeOff, Mail, Lock, ArrowRight, Loader2, AlertCircle, X } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
-import axiosInstance from '../../config/axios.config.js';
+import axiosInstance, { SESSION_EXPIRED_KEY } from '../../config/axios.config.js';
 import { useDispatch } from 'react-redux';
 import { loginSuccess } from '../../redux/slices/authSlice.js';
 import { clearAuthCache } from '../../utils/authCoordinator.js';
@@ -18,6 +18,19 @@ export default function AgencyLogin() {
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  // Explain the redirect when the interceptor signed the user out mid-session.
+  useEffect(() => {
+    try {
+      const expiredMessage = sessionStorage.getItem(SESSION_EXPIRED_KEY);
+      if (expiredMessage) {
+        sessionStorage.removeItem(SESSION_EXPIRED_KEY);
+        setErrorMessage(expiredMessage);
+      }
+    } catch {
+      /* storage unavailable — the login form still works, just unexplained */
+    }
   }, []);
 
   useEffect(() => {

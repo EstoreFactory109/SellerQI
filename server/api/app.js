@@ -1,6 +1,14 @@
 require('dotenv').config()
 const express=require('express')
 const app=express();
+
+// Production runs behind nginx on the same host, so without this `req.ip` is
+// nginx's socket address and every client looks like one caller — which silently
+// collapsed all rate limiting into a single shared bucket, and made the
+// anonymous IP search quota global. `1` trusts exactly that one hop; `true`
+// would let a client spoof X-Forwarded-For to evade both.
+app.set('trust proxy', 1);
+
 const path=require('path')
 const fs=require('fs')
 const _dirname=path.resolve()

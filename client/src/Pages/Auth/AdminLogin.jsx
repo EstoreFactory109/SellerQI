@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Eye, EyeOff, Mail, Lock, ArrowRight, Loader2, Shield, Crown } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
-import axiosInstance from '../../config/axios.config.js';
+import axiosInstance, { SESSION_EXPIRED_KEY } from '../../config/axios.config.js';
 
 export default function AdminLogin() {
   const [formData, setFormData] = useState({
@@ -17,6 +17,19 @@ export default function AdminLogin() {
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  // Explain the redirect when the interceptor signed the admin out mid-session.
+  useEffect(() => {
+    try {
+      const expiredMessage = sessionStorage.getItem(SESSION_EXPIRED_KEY);
+      if (expiredMessage) {
+        sessionStorage.removeItem(SESSION_EXPIRED_KEY);
+        setErrorMessage(expiredMessage);
+      }
+    } catch {
+      /* storage unavailable — the login form still works, just unexplained */
+    }
   }, []);
 
   const handleChange = (e) => {

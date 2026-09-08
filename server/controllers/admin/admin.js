@@ -5,7 +5,7 @@ const { enqueueFullUserDataPurge } = require('../../Services/BackgroundJobs/dele
 const { ApiError } = require('../../utils/ApiError.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
 const asyncHandler = require('../../utils/AsyncHandler.js');
-const { createAccessToken, createRefreshToken, createLocationToken } = require('../../utils/Tokens.js');
+const { createAccessToken, createRefreshToken, createLocationToken, revokeRefreshToken } = require('../../utils/Tokens.js');
 const { verifyPassword } = require('../../utils/HashPassword.js');
 const logger = require('../../utils/Logger.js');
 const UserModel = require('../../models/user-auth/userModel.js');
@@ -128,8 +128,6 @@ const exportAllAccountsCsv = asyncHandler(async (req, res) => {
 const adminLogin = asyncHandler(async (req, res) => {
     const { email, password } = req.body;
 
-    console.log(email,password);
-
     // Validate required fields
     if (!email || !password) {
         logger.error(new ApiError(400, "Email and password are required"));
@@ -201,6 +199,14 @@ const adminLogout = asyncHandler(async (req, res) => {
     if (!admin) {
         logger.error(new ApiError(404, "Admin user not found"));
         return res.status(404).json(new ApiResponse(404, "", "Admin user not found"));
+    }
+
+    // If the admin was impersonating someone, the IBEX refresh cookie belongs to
+    // that user, not the admin. Revoke it here or the impersonation session stays
+    // valid on their account after the admin logs out.
+    const impersonatedRefreshToken = req.cookies.IBEXRefreshToken;
+    if (impersonatedRefreshToken) {
+        await revokeRefreshToken(impersonatedRefreshToken);
     }
 
     // Set secure cookie options for clearing
@@ -1001,11 +1007,6 @@ const loginSelectedUser = asyncHandler(async (req, res) => {
             logger.error(new ApiError(500, "Failed to create user tokens"));
             return res.status(500).json(new ApiResponse(500, "", "Failed to create user tokens"));
         }
-
-        // Update user's refresh token in database
-        await UserModel.findByIdAndUpdate(user._id, {
-            appRefreshToken: refreshToken
-        });
 
         // Prepare response data
         const responseData = {

@@ -15,12 +15,8 @@ import {
 
 import axios from 'axios';
 import { useNavigate, Link } from 'react-router-dom';
-import { useDispatch } from 'react-redux';
-import { loginSuccess } from '../../redux/slices/authSlice';
-import { clearAuthCache } from '../../utils/authCoordinator.js';
-import googleAuthService from '../../services/googleAuthService.js';
+import { useGoogleSignup } from '../../hooks/useGoogleSignup.js';
 import { countryCodesData } from '../../utils/countryCodesData.js';
-import { detectCountry } from '../../utils/countryDetection.js';
 import axiosInstance from '../../config/axios.config.js';
 import { devLog } from '../../utils/devLogger.js';
 import PhoneRequiredModal from '../../Components/PhoneUpdate/PhoneRequiredModal.jsx';
@@ -61,63 +57,18 @@ const SignUp = () => {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [detectedCountry, setDetectedCountry] = useState(null); // For trial flow
-  // Set once a Google signup succeeds; holds the plan routing to run after the
-  // phone-collection modal is answered.
-  const [pendingGoogleSignup, setPendingGoogleSignup] = useState(null);
   const navigate = useNavigate();
-  const dispatch = useDispatch();
+  // Registration + post-signup routing is shared with the login page, which can
+  // now also create an account from its Google button.
+  const { pendingSignup, registerWithGoogle, finishSignup } = useGoogleSignup({ onError: setErrorMessage });
 
   // Something typed, but not yet meeting every rule — keeps the field red as they go.
   const passwordIncomplete = !!formData.password && !isPasswordValid(formData.password);
 
-  // Continue the Google signup flow once the phone modal is saved or skipped.
-  // Takes the routing explicitly so it can also be called straight away, without
-  // waiting on a state update, when there is no phone to ask for.
-  const finishGoogleSignup = async (routing) => {
-    const pending = routing || pendingGoogleSignup;
-    setPendingGoogleSignup(null);
-    if (!pending) return;
-
-    const { noPlanSelected, isPROTrial, packageType, isIndianUser } = pending;
-    try {
-      // ===== PAYMENT DISABLED - free PRO for all users =====
-      // Everyone signs up as PRO, so skip Stripe and go straight to onboarding.
-      // To re-enable payments: remove the navigate() below and uncomment the block.
-      navigate('/connect-to-amazon');
-      // if (noPlanSelected) {
-        // // No plan selected - go straight to onboarding (skip pricing)
-        // navigate('/connect-to-amazon');
-      // } else if (isPROTrial) {
-        // // PRO-Trial: Stripe checkout with 7-day trial (INR pricing for India)
-        // const stripeService = (await import('../../services/stripeService.js')).default;
-        // await stripeService.createCheckoutSession('PRO', null, 7, isIndianUser ? 'inr' : null);
-      // } else {
-        // // PRO/AGENCY (paid): Go to Stripe payment (INR pricing for Indian PRO users)
-        // localStorage.setItem('intendedPackage', plans);
-        // const stripeService = (await import('../../services/stripeService.js')).default;
-        // await stripeService.createCheckoutSession(packageType, null, null, isIndianUser && packageType === 'PRO' ? 'inr' : null);
-      // }
-    } catch (error) {
-      console.error('Post Google sign-up navigation failed:', error);
-      setErrorMessage('Sign-up completed, but we could not continue. Please refresh and try again.');
-    }
-  };
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
     
-    // Detect country for trial flow
-    const detectUserCountry = async () => {
-      try {
-        const country = await detectCountry();
-        setDetectedCountry(country);
-      } catch (error) {
-        console.error('Error detecting country:', error);
-        setDetectedCountry(null);
-      }
-    };
-    detectUserCountry();
   }, []);
 
   // Auto-dismiss error messages after 5 seconds
@@ -246,17 +197,9 @@ const SignUp = () => {
     if (!validateForm()) return;
     setLoading(true);
     try {
-      // Determine package settings based on selected plan
-      // If no plan selected (plans is null), user will choose on pricing page after signup
-      // PRO-Trial: 7-day Stripe trial (payment method collected, charged after trial ends)
-      // PRO: Requires payment after email verification
-      // AGENCY: Requires payment after email verification
-      const isPROTrial = plans === "PRO-Trial";
-      const isPRO = plans === "PRO";
+      // All users get PRO by default - no payment required. AGENCY is the one
+      // shape that differs, because it routes to its own activation step.
       const isAGENCY = plans === "AGENCY";
-      const noPlanSelected = plans === null || plans === undefined;
-      
-      // All users get PRO by default - no payment required
       let packageType = "PRO";
       if (isAGENCY) {
         packageType = "AGENCY";
@@ -301,49 +244,10 @@ const SignUp = () => {
 
     setGoogleLoading(true);
     try {
-      // Determine package settings based on selected plan
-      const isPROTrial = plans === "PRO-Trial";
-      const isAGENCY = plans === "AGENCY";
-      const noPlanSelected = plans === null || plans === undefined;
-      const isIndianUser = detectedCountry === 'IN';
-      
-      // All users get PRO by default - no payment required
-      let packageType = "PRO";
-      if (isAGENCY) {
-        packageType = "AGENCY";
-      }
-
-      // All users have immediate access - no trial period needed
-      const isInTrialPeriod = false;
-      const subscriptionStatus = "active";
-      const trialEndsDate = null;
-      
-      const response = await googleAuthService.handleGoogleSignUp(packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate);
-        
-        if (response.statusCode === 201) {
-          // New user registration - continue with signup flow
-          // Clear any cached auth state to force fresh checks
-          clearAuthCache();
-          // Store auth information
-          localStorage.setItem("isAuth", "true");
-          dispatch(loginSuccess(response.data || response));
-
-          // Google never gives us a phone number, so ask for it here - the paid
-          // paths below leave the app for Stripe, and there is no coming back.
-          // Only gate on the modal when the server actually flagged the account,
-          // otherwise the modal would render nothing and strand the user here.
-          const routing = { noPlanSelected, isPROTrial, packageType, isIndianUser };
-          if ((response.data || response)?.needsPhoneUpdate === true) {
-            setPendingGoogleSignup(routing);
-          } else {
-            await finishGoogleSignup(routing);
-          }
-
-        } else {
-            // Non-200/201 response - treat as error
-            console.error('Google sign-up returned unexpected status:', response.statusCode);
-            setErrorMessage(response.message || 'Google sign-up failed. Please try again.');
-        }
+      // The plan is not sent: the server grants PRO to every new account. AGENCY
+      // is the one exception and needs an agency name this page does not collect,
+      // so agency owners belong in /agency-sign-up.
+      await registerWithGoogle();
     } catch (error) {
         console.error('Google sign-up failed:', error);
         
@@ -376,7 +280,7 @@ const SignUp = () => {
     <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center">
       {/* Google signup collects no phone number - ask before routing on to
           onboarding or Stripe checkout. Renders nothing until then. */}
-      {pendingGoogleSignup && <PhoneRequiredModal forceShow onDone={finishGoogleSignup} />}
+      {pendingSignup && <PhoneRequiredModal forceShow onDone={() => finishSignup()} />}
       {/* Form Section */}
       <div className="relative w-full flex items-center justify-center px-4 py-4 lg:py-8">
         <div className="w-full max-w-lg">

@@ -4,23 +4,67 @@ const User = require('../models/user-auth/userModel.js');
 const {ApiError}=require('./ApiError.js')
 
 
+// How long a signed-in session survives, and how many devices can hold one at
+// once. The oldest entry is dropped past the cap.
+const REFRESH_TOKEN_TTL = '90d';
+const MAX_REFRESH_TOKENS = 5;
+
+// Access and refresh tokens carry the same {id} payload signed with the same
+// secret, so without this claim a refresh token is accepted anywhere an access
+// token is expected. Same guard as `purpose` on the WhatsApp link token below.
+const ACCESS = 'access';
+const REFRESH = 'refresh';
+
 const createAccessToken=async(userId)=>{
     if(!userId){
         logger.error(new ApiError(400,"User ID is missing"));
         return false;
     }
-    const accessToken=jwt.sign({id:userId},process.env.JWT_SECRET,{expiresIn:'15d'});
-   
+    const accessToken=jwt.sign({id:userId,type:ACCESS},process.env.JWT_SECRET,{expiresIn:'15d'});
+
     return accessToken;
 }
 
+// Minting and recording are deliberately one operation. There are 17 call sites,
+// and a token that is issued but not recorded is silently unusable — the user
+// logs in fine, then cannot refresh. That was the original bug; keeping these
+// coupled makes it unrepeatable.
+//
+// A failed write is logged loudly but still returns the token: the access token
+// remains valid for 15 days, so a transient DB error degrades that one session
+// rather than blocking the login outright.
 const createRefreshToken=async(userId)=>{
     if(!userId){
         logger.error(new ApiError(400,"User ID is missing"));
         return false;
     }
-    const refreshToken=jwt.sign({id:userId},process.env.JWT_SECRET);
+    const refreshToken=jwt.sign({id:userId,type:REFRESH},process.env.JWT_SECRET,{expiresIn:REFRESH_TOKEN_TTL});
+    try {
+        await User.findByIdAndUpdate(userId,{
+            $push:{refreshTokens:{$each:[refreshToken],$slice:-MAX_REFRESH_TOKENS}}
+        });
+    } catch (error) {
+        logger.error(`Error recording refresh token session for ${userId}: ${error}`);
+    }
     return refreshToken;
+}
+
+// Ends one session, leaving this user's other devices signed in. Keyed on the
+// token alone: it is unique, and the caller's own id is the wrong one to trust
+// under impersonation and agency client-switching, where the presented cookie
+// belongs to a different user than the request's `userId`.
+const revokeRefreshToken=async(token)=>{
+    if(!token){
+        logger.error(new ApiError(400,"Token is missing"));
+        return false;
+    }
+    try {
+        await User.updateOne({refreshTokens:token},{$pull:{refreshTokens:token}});
+        return true;
+    } catch (error) {
+        logger.error(`Error revoking refresh token: ${error}`);
+        return false;
+    }
 }
 
 const createLocationToken=async(country,region)=>{
@@ -42,6 +86,10 @@ const verifyAccessToken=async(token)=>{
         // console.log(decoded)
         if(!decoded){
             logger.error(new ApiError(400,"Invalid token"));
+            return false;
+        }
+        if(decoded.type!==ACCESS){
+            logger.error(new ApiError(400,"Token is not an access token"));
             return false;
         }
         const tokenResponse={
@@ -69,14 +117,18 @@ const refreshAccess=async(token)=>{
     }
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const CheckUserRefreshToken=await User.findById(decoded.id).select('appRefreshToken');
+        if(decoded.type!==REFRESH){
+            logger.error(new ApiError(400,"Token is not a refresh token"));
+            return false;
+        }
+        const CheckUserRefreshToken=await User.findById(decoded.id).select('refreshTokens');
         if(!CheckUserRefreshToken){
             logger.error(new ApiError(404,"User not found"));
             return false;
         }
 
-        if(CheckUserRefreshToken.appRefreshToken!==token){
-            logger.error(new ApiError(400,"Invalid token"));
+        if(!(CheckUserRefreshToken.refreshTokens||[]).includes(token)){
+            logger.error(new ApiError(400,"Refresh token is not an active session"));
             return false;
         }
         const accessToken=await createAccessToken(decoded.id);
@@ -106,7 +158,7 @@ const createDemoAccessToken = async (userId) => {
         logger.error(new ApiError(400, "User ID is missing"));
         return false;
     }
-    const token = jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    const token = jwt.sign({ id: userId, type: ACCESS }, process.env.JWT_SECRET, { expiresIn: '1h' });
     return token;
 };
 
@@ -142,4 +194,4 @@ const verifyLinkToken = async (token) => {
     }
 };
 
-module.exports={createAccessToken, createRefreshToken,verifyAccessToken,refreshAccess,createLocationToken,verifyLocationToken,createDemoAccessToken,createLinkToken,verifyLinkToken};
+module.exports={createAccessToken, createRefreshToken,revokeRefreshToken,verifyAccessToken,refreshAccess,createLocationToken,verifyLocationToken,createDemoAccessToken,createLinkToken,verifyLinkToken,MAX_REFRESH_TOKENS};

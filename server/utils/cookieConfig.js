@@ -1,3 +1,7 @@
+// Without this the auth cookies are session cookies, so closing the browser
+// silently signs the user out. Matches the refresh token's 90-day TTL.
+const AUTH_COOKIE_MAX_AGE = 90 * 24 * 60 * 60 * 1000;
+
 /**
  * Determine if we're running in a secure (HTTPS) environment
  * Checks environment variables and defaults appropriately
@@ -39,7 +43,8 @@ const getCookieOptions = (req = null) => {
 const getHttpCookieOptions = () => ({
   httpOnly: true,
   secure: false,
-  sameSite: "Lax"
+  sameSite: "Lax",
+  maxAge: AUTH_COOKIE_MAX_AGE
 });
 
 /**
@@ -49,11 +54,12 @@ const getHttpCookieOptions = () => ({
  */
 const getHttpsCookieOptions = () => {
   const isSecure = isSecureEnvironment();
-  
+
   return {
     httpOnly: true,
     secure: isSecure,
-    sameSite: isSecure ? "None" : "Lax"
+    sameSite: isSecure ? "None" : "Lax",
+    maxAge: AUTH_COOKIE_MAX_AGE
   };
 };
 
@@ -61,5 +67,6 @@ module.exports = {
   getCookieOptions,
   getHttpCookieOptions,
   getHttpsCookieOptions,
-  isSecureEnvironment
+  isSecureEnvironment,
+  AUTH_COOKIE_MAX_AGE
 };
