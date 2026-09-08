@@ -79,13 +79,28 @@ const asDate = (...candidates) => {
 const normaliseProject = (project = {}) => ({
     id: asId(project.id, project.id_string),
     name: project.name || null,
+    // Zoho returns HTML here (the UI's rich-text field), not plain text.
     description: project.description || null,
-    status: project.status || null,
-    ownerName: project.owner_name || (project.created_by_details && project.created_by_details.name) || null,
-    createdAt: asDate(project.created_date_long, project.created_time_long, project.created_date, project.created_time),
-    startDate: asDate(project.start_date_long, project.start_date),
-    endDate: asDate(project.end_date_long, project.end_date),
-    taskCount: (project.task_count && (project.task_count.open + project.task_count.closed)) || null,
+    // v3 nests status as an object with its own id/name/colour; the bare value is
+    // "[object Object]" if used directly.
+    status: (project.status && project.status.name) || project.status_name || null,
+    // Separate from status: 'active' | 'archived' | 'template'.
+    projectType: project.project_type || null,
+    ownerName: (project.owner && (project.owner.full_name || project.owner.name))
+        || (project.created_by && project.created_by.full_name)
+        || null,
+    ownerEmail: (project.owner && project.owner.email) || null,
+    createdAt: asDate(project.created_time, project.created_time_long, project.created_date),
+    modifiedAt: asDate(project.modified_time, project.last_modified_time),
+    startDate: asDate(project.start_date, project.start_date_long),
+    endDate: asDate(project.end_date, project.end_date_long),
+    percentComplete: project.percent_complete !== undefined ? Number(project.percent_complete) : null,
+    // v3 shape is tasks:{open_count,closed_count}; keep the split as well as the total,
+    // since "18 open of 18" and "0 open of 18" are very different at a glance.
+    taskCount: project.tasks
+        ? (Number(project.tasks.open_count || 0) + Number(project.tasks.closed_count || 0))
+        : null,
+    openTaskCount: project.tasks ? Number(project.tasks.open_count || 0) : null,
     url: (project.link && project.link.self && project.link.self.url) || project.url || null
 });
 
@@ -145,10 +160,15 @@ const listPortals = async () => {
     });
 
     return unwrap(payload, PATHS.portals.envelope).map((portal) => ({
-        id: asId(portal.id, portal.id_string),
-        name: portal.name || null,
-        isDefault: Boolean(portal.default),
-        role: portal.role || null
+        id: asId(portal.id, portal.id_string, portal.zsoid),
+        // v3 keys are portal_name / is_default_portal — `name` and `default` are absent,
+        // which is why the portal name came back null on the first live connect.
+        name: portal.portal_name || portal.org_name || portal.name || null,
+        isDefault: Boolean(portal.is_default_portal || portal.default),
+        // The caller's PROFILE in this portal (e.g. "Read Only", "Administrator"). This is
+        // the ceiling on what the integration can do, whatever the OAuth scopes allow.
+        role: (portal.profile && portal.profile.name) || portal.role || null,
+        url: portal.portal_url || null
     }));
 };
 

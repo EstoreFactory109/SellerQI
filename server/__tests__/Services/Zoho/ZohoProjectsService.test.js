@@ -120,7 +120,17 @@ describe('zohoRequest', () => {
 
 describe('listProjects', () => {
     test('pages until a short page and normalises the payload', async () => {
-        const page = (n) => Array.from({ length: n }, (_, i) => ({ id: i, name: `P${i}`, status: 'active' }));
+        // Fixture mirrors a real v3 payload: status/owner/tasks are nested objects, not
+        // flat *_name strings. An earlier flat fixture hid a mapping bug that only showed
+        // up against a live portal ("[object Object]" for every project status).
+        const page = (n) => Array.from({ length: n }, (_, i) => ({
+            id: i,
+            name: `P${i}`,
+            status: { id: '20089', name: 'Active', color: '#2cc8ba' },
+            project_type: 'active',
+            owner: { full_name: 'Henil Modi', email: 'henil@example.com' },
+            tasks: { open_count: 18, closed_count: 2 },
+        }));
 
         // 200 is the documented max page size, so a full page means "keep going".
         axios.mockResolvedValueOnce({ data: { projects: page(200) } });
@@ -130,7 +140,15 @@ describe('listProjects', () => {
 
         expect(axios).toHaveBeenCalledTimes(2);
         expect(projects).toHaveLength(203);
-        expect(projects[0]).toMatchObject({ id: '0', name: 'P0', status: 'active' });
+        expect(projects[0]).toMatchObject({
+            id: '0',
+            name: 'P0',
+            status: 'Active',            // unwrapped from status.name
+            projectType: 'active',
+            ownerName: 'Henil Modi',     // from owner.full_name, not owner_name
+            taskCount: 20,               // open_count + closed_count
+            openTaskCount: 18,
+        });
     });
 
     test('stops at an explicit limit', async () => {
@@ -140,6 +158,31 @@ describe('listProjects', () => {
 
         expect(projects).toHaveLength(2);
         expect(axios).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('listPortals', () => {
+    test('maps the real v3 portal keys, including the caller profile', async () => {
+        // portal_name / is_default_portal / profile.name — NOT name / default / role.
+        // Getting this wrong left portalName null after the first successful connect.
+        axios.mockResolvedValue({ data: [{
+            id: '851273093',
+            portal_name: 'estorefactory',
+            org_name: 'eStore Factory',
+            is_default_portal: false,
+            profile: { name: 'Read Only', id: 123 },
+            portal_url: 'https://projects.zoho.com/portal/estorefactory',
+        }] });
+
+        const portals = await ZohoProjectsService.listPortals();
+
+        expect(portals[0]).toMatchObject({
+            id: '851273093',
+            name: 'estorefactory',
+            isDefault: false,
+            role: 'Read Only',
+            url: 'https://projects.zoho.com/portal/estorefactory',
+        });
     });
 });
 
