@@ -154,7 +154,8 @@ function createRedisStore(windowMs) {
 
 /**
  * Get identifier for rate limiting (IP or user ID)
- * Uses ipKeyGenerator helper for proper IPv6 handling
+ * Uses ipKeyGenerator helper for proper IPv6 handling. It takes the IP string,
+ * not the request — passing `req` yields "[object Object]" and one shared bucket.
  * @param {Object} req - Express request object
  * @returns {string} Identifier for rate limiting
  */
@@ -164,7 +165,7 @@ function getRateLimitKey(req) {
         return `rate_limit:user:${req.userId}`;
     }
     // For public routes, use IP address with proper IPv6 handling
-    const ip = ipKeyGenerator(req);
+    const ip = ipKeyGenerator(req.ip);
     return `rate_limit:ip:${ip}`;
 }
 
@@ -230,7 +231,7 @@ const authRateLimiter = rateLimit({
     keyGenerator: (req) => {
         // Use IP for auth endpoints (before user is authenticated)
         // Use ipKeyGenerator helper for proper IPv6 handling
-        const ip = ipKeyGenerator(req);
+        const ip = ipKeyGenerator(req.ip);
         return `rate_limit:auth:${ip}`;
     },
     store: createRedisStore(15 * 60 * 1000),
@@ -260,7 +261,7 @@ const registerRateLimiter = rateLimit({
     legacyHeaders: false,
     keyGenerator: (req) => {
         // Use ipKeyGenerator helper for proper IPv6 handling
-        const ip = ipKeyGenerator(req);
+        const ip = ipKeyGenerator(req.ip);
         return `rate_limit:register:${ip}`;
     },
     store: createRedisStore(60 * 60 * 1000),
@@ -295,7 +296,7 @@ const passwordResetRateLimiter = rateLimit({
             return `rate_limit:password_reset:${email}`;
         }
         // Use ipKeyGenerator helper for proper IPv6 handling
-        const ip = ipKeyGenerator(req);
+        const ip = ipKeyGenerator(req.ip);
         return `rate_limit:password_reset:${ip}`;
     },
     store: createRedisStore(60 * 60 * 1000),
@@ -329,7 +330,7 @@ const otpRateLimiter = rateLimit({
             return `rate_limit:otp:${email}`;
         }
         // Use ipKeyGenerator helper for proper IPv6 handling
-        const ip = ipKeyGenerator(req);
+        const ip = ipKeyGenerator(req.ip);
         return `rate_limit:otp:${ip}`;
     },
     store: createRedisStore(15 * 60 * 1000),
@@ -363,7 +364,7 @@ const integrationRateLimiter = rateLimit({
             return `rate_limit:integration:user:${req.userId}`;
         }
         // Use ipKeyGenerator helper for proper IPv6 handling
-        const ip = ipKeyGenerator(req);
+        const ip = ipKeyGenerator(req.ip);
         return `rate_limit:integration:${ip}`;
     },
     store: createRedisStore(60 * 60 * 1000),
@@ -445,7 +446,7 @@ const webhookRateLimiter = rateLimit({
     legacyHeaders: false,
     keyGenerator: (req) => {
         // Use ipKeyGenerator helper for proper IPv6 handling
-        const ip = ipKeyGenerator(req);
+        const ip = ipKeyGenerator(req.ip);
         return `rate_limit:webhook:${ip}`;
     },
     store: createRedisStore(60 * 1000),
