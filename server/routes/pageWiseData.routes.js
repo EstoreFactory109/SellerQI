@@ -98,6 +98,8 @@ const {
 } = require('../controllers/analytics/PPCCampaignAnalysisController.js');
 
 const { getAsinDailyAggregation } = require('../controllers/analytics/ProductWiseAsinDailyController.js');
+const { getEsfClientDashboard } = require('../controllers/analytics/EsfClientDashboardController.js');
+const esfClientOnly = require('../middlewares/Auth/esfClientOnly.js');
 
 const { pauseKeyword, pauseKeywordsBulk } = require('../controllers/analytics/PauseKeywordController.js');
 const { addToNegativeKeywords } = require('../controllers/analytics/AddToNegativeController.js');
@@ -283,6 +285,14 @@ router.post('/ads/pause-keywords', auth, getLocation, pauseKeywordsBulk);
 
 // Bulk: pause then add to negative for multiple keywords. POST body: { keywords: [{ keywordId, campaignId, adGroupId, keywordText, matchType? }], adType? }
 router.post('/ads/pause-and-add-to-negative-bulk', auth, getLocation, pauseAndAddToNegativeBulk);
+
+// ===== ESF-ONLY CLIENT DASHBOARD =====
+// Total Sales / PPC Sales / ACOS charted and tabled by day, with the selected
+// window compared against a previous one.
+// Visible ONLY to ESF-managed clients - esfClientOnly returns 403 otherwise.
+// Query params: startDate, endDate, compareStartDate, compareEndDate (YYYY-MM-DD)
+// Cache TTL: 10 minutes (keyed per date range by the cache middleware)
+router.get('/esf/client-dashboard', auth, esfClientOnly, getLocation, analyseDataCache(600, 'esf-client-dashboard'), getEsfClientDashboard);
 
 // ===== ISSUES PAGE =====
 // Returns issues summary data

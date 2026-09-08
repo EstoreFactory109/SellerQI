@@ -1,5 +1,34 @@
 const mongoose = require("mongoose");
 
+/**
+ * An extra email address on a user account. The primary address stays on
+ * `User.email` (the unique login key); these are additional recipients.
+ * See Services/User/emailAccounts.js for the rules.
+ */
+const additionalEmailSchema = new mongoose.Schema(
+  {
+    email: {
+      type: String,
+      required: true,
+      trim: true,
+      lowercase: true,
+      match: [
+        /^([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/,
+        "Please enter a valid email address",
+      ],
+    },
+    // Ownership proved by entering the emailed code. Unverified addresses can
+    // neither receive mail nor be used to sign in.
+    isVerified: { type: Boolean, default: false },
+    // Whether broadcast mail is delivered here. Independent of verification.
+    receivesMail: { type: Boolean, default: true },
+    verificationCode: { type: String, default: null, select: false },
+    verificationExpiresAt: { type: Date, default: null },
+    addedAt: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
+
 const userSchema = new mongoose.Schema(
     {
       firstName: {
@@ -68,6 +97,19 @@ const userSchema = new mongoose.Schema(
         enum: ["password", "google"],
         default: "password",
       },
+      // Extra addresses this user has added and verified. The primary address
+      // above remains the login key; these receive mail alongside it and can
+      // also be used to sign in once verified.
+      additionalEmails: {
+        type: [additionalEmailSchema],
+        default: [],
+      },
+      // Lets the primary address be muted like any other, without giving up its
+      // role as the login identity.
+      primaryReceivesMail: {
+        type: Boolean,
+        default: true,
+      },
       agencyId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
@@ -96,8 +138,46 @@ const userSchema = new mongoose.Schema(
       accessType: {
         type: String,
         required: [true, "Access type is required"],
-        enum: ["user", "superAdmin", "enterpriseAdmin"],
+        // "esfUser" = internal eStore Factory staff. They sign in at the ESF
+        // portal only (blocked from /app/login) and manage ESF clients.
+        enum: ["user", "superAdmin", "enterpriseAdmin", "esfUser"],
         default: "user"
+      },
+      // True if this user is a client created through the ESF staff portal.
+      // Deliberately separate from isAgencyClient/agencyId so ESF clients never
+      // appear in an agency owner's list (their queries match agencyId/adminId).
+      isEsfClient: {
+        type: Boolean,
+        default: false,
+      },
+      // Which staff member added this client. Audit only — every ESF staff
+      // member can see every ESF client.
+      esfAddedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: false,
+        default: null,
+      },
+      // Role inside the ESF staff portal. Only meaningful when
+      // accessType === 'esfUser'. See Services/User/esfRoles.js for the rules.
+      // 'owner' is never assignable through the API - it is seeded.
+      esfRole: {
+        type: String,
+        enum: ["owner", "admin", "member"],
+        default: "member",
+      },
+      // Pages this staff member may NOT open inside an ESF client's account.
+      // A blocklist, so empty === full access and new pages default to visible.
+      // Only meaningful when accessType === 'esfUser'. See Services/User/esfPages.js.
+      esfDeniedPages: {
+        type: [String],
+        default: [],
+      },
+      // Stamped on ESF portal login; shown in the portal's team member list.
+      lastLoginAt: {
+        type: Date,
+        required: false,
+        default: null,
       },
       packageType:{
         type:String,
@@ -243,6 +323,12 @@ userSchema.index({ isAgencyClient: 1 });
 userSchema.index({ packageType: 1, subscriptionStatus: 1 });
 userSchema.index({ isVerified: 1, packageType: 1 });
 userSchema.index({ agencyId: 1, isAgencyClient: 1 });
+// Sign-in and recipient lookups match on any of a user's addresses.
+userSchema.index({ 'additionalEmails.email': 1 });
+// ESF portal: list all staff-managed clients, newest first
+userSchema.index({ isEsfClient: 1, createdAt: -1 });
+// ESF portal: list staff accounts
+userSchema.index({ accessType: 1 });
 // Used by the six-month inactivity cleanup cron to scan candidates efficiently
 userSchema.index({ purgedAt: 1 });
 userSchema.index({ sixMonthWarningSentAt: 1 });

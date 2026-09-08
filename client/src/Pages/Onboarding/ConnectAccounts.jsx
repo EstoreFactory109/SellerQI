@@ -168,7 +168,9 @@ const getAdsOAuthBaseUrl = (region) => {
   return ADS_OAUTH_BASE_BY_REGION[key] || ADS_OAUTH_BASE_BY_REGION.NA;
 };
 
-const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName = '' }) => {
+// `basePath`, when given, overrides the agency-derived client route prefix so
+// other portals (e.g. the ESF staff portal) can reuse this flow unchanged.
+const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName = '', basePath = '' }) => {
   const [sellerCentralLoading, setSellerCentralLoading] = useState(false);
   const [amazonAdsLoading, setAmazonAdsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -188,7 +190,8 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
   const userData = useSelector(state => state.Auth?.user);
   const isAuthenticated = useSelector(state => state.Auth?.isAuthenticated) || localStorage.getItem('isAuth') === 'true';
 
-  const agencyBasePath = (isAgencyContext && clientId && agencyName) ? `/agency/${encodeURIComponent(agencyName)}/client/${clientId}` : '';
+  const agencyBasePath = basePath
+    || ((isAgencyContext && clientId && agencyName) ? `/agency/${encodeURIComponent(agencyName)}/client/${clientId}` : '');
 
   // Get country code and region from URL parameters. These drive the initial
   // UI display only — the actual redirect URL for Connect Seller Central /

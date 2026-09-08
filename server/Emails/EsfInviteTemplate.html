@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>You have been invited to {{appName}}</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f6f9;
+            line-height: 1.6;
+        }
+
+        .email-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2563eb 0%, #1e3a8a 100%);
+            color: #ffffff;
+            padding: 32px 24px;
+            text-align: center;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 26px;
+            font-weight: 400;
+        }
+
+        .header .subtitle {
+            margin: 8px 0 0 0;
+            font-size: 15px;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 32px 28px;
+            color: #1f2937;
+        }
+
+        .greeting {
+            font-size: 17px;
+            margin: 0 0 16px 0;
+        }
+
+        .intro {
+            font-size: 15px;
+            color: #4b5563;
+            margin: 0 0 24px 0;
+        }
+
+        .details {
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            background-color: #f9fafb;
+            padding: 4px 18px;
+            margin: 0 0 26px 0;
+        }
+
+        .detail-row {
+            display: block;
+            padding: 12px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+
+        .detail-label {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #6b7280;
+            margin: 0 0 2px 0;
+        }
+
+        .detail-value {
+            font-size: 15px;
+            font-weight: 600;
+            color: #111827;
+            margin: 0;
+            word-break: break-all;
+        }
+
+        .cta-wrapper {
+            text-align: center;
+            margin: 0 0 24px 0;
+        }
+
+        .cta-button {
+            display: inline-block;
+            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+            color: #ffffff !important;
+            text-decoration: none;
+            padding: 14px 36px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .fallback {
+            font-size: 13px;
+            color: #6b7280;
+            margin: 0 0 24px 0;
+            word-break: break-all;
+        }
+
+        .fallback a {
+            color: #2563eb;
+        }
+
+        .note {
+            font-size: 13px;
+            color: #6b7280;
+            background-color: #f3f4f6;
+            border-left: 3px solid #2563eb;
+            padding: 12px 14px;
+            border-radius: 4px;
+            margin: 0;
+        }
+
+        .footer {
+            background-color: #f9fafb;
+            border-top: 1px solid #e5e7eb;
+            padding: 20px 24px;
+            text-align: center;
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .footer a {
+            color: #2563eb;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <div class="header">
+            <h1>You have been invited</h1>
+            <p class="subtitle">Join the {{appName}} team</p>
+        </div>
+
+        <div class="content">
+            <p class="greeting">Hi,</p>
+            <p class="intro">
+                <strong>{{inviterName}}</strong> has invited you to join the
+                <strong>{{portalName}}</strong> on {{appName}}. Accept the invitation
+                below to set up your account.
+            </p>
+
+            <div class="details">
+                <div class="detail-row">
+                    <p class="detail-label">Application</p>
+                    <p class="detail-value">{{appName}} &mdash; {{portalName}}</p>
+                </div>
+                <div class="detail-row">
+                    <p class="detail-label">Your email</p>
+                    <p class="detail-value">{{inviteeEmail}}</p>
+                </div>
+                <div class="detail-row">
+                    <p class="detail-label">Your role</p>
+                    <p class="detail-value">{{roleLabel}}</p>
+                </div>
+                <div class="detail-row">
+                    <p class="detail-label">Invitation expires</p>
+                    <p class="detail-value">{{expiresOn}}</p>
+                </div>
+            </div>
+
+            <div class="cta-wrapper">
+                <a href="{{inviteLink}}" class="cta-button">Accept invitation</a>
+            </div>
+
+            <p class="fallback">
+                If the button does not work, copy and paste this link into your browser:<br>
+                <a href="{{inviteLink}}">{{inviteLink}}</a>
+            </p>
+
+            <p class="note">
+                You will be asked to add your name, phone number and a password. Your email
+                address is fixed by this invitation and cannot be changed. If you were not
+                expecting this invitation, you can safely ignore this email.
+            </p>
+        </div>
+
+        <div class="footer">
+            <p style="margin:0 0 6px 0;">Sent by {{appName}}</p>
+            <p style="margin:0;">Need help? Contact us at <a href="mailto:support@sellerqi.com">support@sellerqi.com</a></p>
+        </div>
+    </div>
+</body>
+</html>
