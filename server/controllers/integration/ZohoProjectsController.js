@@ -3,13 +3,13 @@
  *
  * HTTP surface for the org-wide Zoho Projects connection.
  *
- * Admin lifecycle (superAdminAuth):
- *   GET    /api/zoho/status
- *   GET    /api/zoho/auth/url
- *   GET    /api/zoho/auth/callback   <- no auth: this is a browser redirect from Zoho
- *   DELETE /api/zoho/disconnect
+ * Everything except the OAuth callback sits behind esfAuth; connect/disconnect are
+ * further limited to owner/admin. See zoho.routes.js for the reasoning.
  *
- * Project operations (normal cookie auth):
+ *   GET    /api/zoho/status
+ *   GET    /api/zoho/auth/url        (owner/admin)
+ *   GET    /api/zoho/auth/callback   <- no auth: a browser redirect from Zoho
+ *   DELETE /api/zoho/disconnect      (owner/admin)
  *   GET    /api/zoho/projects
  *   POST   /api/zoho/projects
  *   GET    /api/zoho/projects/:projectId/updates
@@ -24,6 +24,39 @@ const ZohoAuth = require('../../Services/Zoho/ZohoAuth.js');
 const ZohoProjectsService = require('../../Services/Zoho/ZohoProjectsService.js');
 const ZohoConnection = require('../../models/system/ZohoConnectionModel.js');
 const { MAX_TASKS_DEFAULT } = require('../../Services/Zoho/config.js');
+const { canManageTeam } = require('../../Services/User/esfRoles.js');
+
+/**
+ * Where to send the browser after the OAuth round-trip.
+ * The portal runs on the frontend origin, which is not necessarily this API's origin.
+ */
+const portalOrigin = () =>
+    (process.env.ESF_PORTAL_URL || process.env.FRONTEND_URL || process.env.CLIENT_URL || 'http://localhost:3000')
+        .replace(/\/+$/, '');
+
+const portalRedirect = (params) =>
+    `${portalOrigin()}/esf/settings?tab=integrations&${new URLSearchParams(params).toString()}`;
+
+/**
+ * Connecting and disconnecting touch ONE shared company credential, so they are limited
+ * to owner/admin — the same bar as team management. A member reconnecting would silently
+ * repoint every other staff member's project data at a different Zoho account.
+ *
+ * Returns true when the request may proceed; otherwise it has already responded.
+ */
+const requireZohoManager = (req, res) => {
+    // canManageTeam resolves anyone without an esfRole to 'member', which would lock out
+    // a platform superAdmin — the very account esfAuth admits "so platform admins can
+    // service the portal". Allow them explicitly rather than requiring an esfRole
+    // backfill on every superAdmin.
+    if (req.esfUser?.accessType === 'superAdmin') return true;
+    if (canManageTeam(req.esfUser)) return true;
+    logger.warn(`ESF user ${req.esfUserId} (${req.esfRole}) attempted to change the Zoho connection`);
+    res.status(403).json(
+        new ApiResponse(403, '', 'Only the portal owner and admins can change the Zoho connection')
+    );
+    return false;
+};
 
 const STATE_PREFIX = 'sqi:zoho:oauth_state:';
 const STATE_TTL_SECONDS = 600; // 10 minutes — long enough to click through consent
@@ -112,9 +145,11 @@ const getZohoStatus = asyncHandler(async (req, res) => {
  * @route GET /api/zoho/auth/url
  */
 const startZohoAuth = asyncHandler(async (req, res) => {
+    if (!requireZohoManager(req, res)) return;
+
     const state = crypto.randomBytes(32).toString('hex');
 
-    await storeState(state, req.SuperAdminId);
+    await storeState(state, req.esfUserId);
     const authorizationUrl = ZohoAuth.buildAuthorizationUrl(state);
 
     logger.info('[ZohoProjects] Generated Zoho authorization URL');
@@ -140,49 +175,57 @@ const handleZohoCallback = asyncHandler(async (req, res) => {
     const { code, state, location, error: zohoError } = req.query;
     const accountsServer = req.query['accounts-server'];
 
+    // Every exit below is a redirect, not JSON: a real browser is sitting on this URL
+    // mid-flow, and raw JSON in the window reads as a crash.
     if (zohoError) {
         logger.error(new ApiError(400, `Zoho authorization was denied: ${zohoError}`));
-        return res.status(400).json(new ApiResponse(400, { connected: false }, `Zoho authorization was denied: ${zohoError}`));
+        return res.redirect(portalRedirect({ zoho: 'error', reason: `Zoho authorization was denied (${zohoError})` }));
     }
 
     const storedBy = await consumeState(state);
     if (!storedBy) {
         logger.error(new ApiError(400, 'Zoho OAuth state is invalid, expired, or already used'));
-        return res.status(400).json(
-            new ApiResponse(400, { connected: false }, 'Zoho OAuth state is invalid, expired, or already used. Restart the connect flow.')
-        );
+        return res.redirect(portalRedirect({
+            zoho: 'error',
+            reason: 'The connect link expired or was already used. Please start again.'
+        }));
     }
 
     const connectedBy = /^[0-9a-fA-F]{24}$/.test(storedBy) ? storedBy : null;
 
-    const { connection } = await ZohoAuth.exchangeAuthorizationCode({
-        code,
-        location,
-        accountsServer,
-        connectedBy
-    });
+    let connection;
+    try {
+        ({ connection } = await ZohoAuth.exchangeAuthorizationCode({
+            code,
+            location,
+            accountsServer,
+            connectedBy
+        }));
+    } catch (error) {
+        // Bad redirect URI, wrong data center, revoked client — all land here, and the
+        // message is the only thing that tells the operator which.
+        logger.error(new ApiError(error.statusCode || 502, `Zoho code exchange failed: ${error.message}`));
+        return res.redirect(portalRedirect({ zoho: 'error', reason: error.message }));
+    }
 
     // Resolve the portal now so every later call has one. The token is already valid at
-    // this point, so a failure here is a real problem worth surfacing — but the
-    // connection itself is saved, and /status will show connected with a null portalId.
+    // this point, so the connection stays saved even if this lookup fails.
     let portals = [];
     try {
         portals = await ZohoProjectsService.listPortals();
     } catch (error) {
         logger.error(new ApiError(502, `Zoho connected but portal lookup failed: ${error.message}`));
-        return res.status(502).json(
-            new ApiResponse(
-                502,
-                { connected: true, portalId: null },
-                `Zoho connected, but the portal list could not be read: ${error.message}`
-            )
-        );
+        return res.redirect(portalRedirect({
+            zoho: 'partial',
+            reason: `Connected, but the portal list could not be read: ${error.message}`
+        }));
     }
 
     if (portals.length === 0) {
-        return res.status(502).json(
-            new ApiResponse(502, { connected: true, portalId: null }, 'Zoho connected, but this account has no accessible portals')
-        );
+        return res.redirect(portalRedirect({
+            zoho: 'partial',
+            reason: 'Connected, but this Zoho account has no accessible portals.'
+        }));
     }
 
     const chosen = portals.find((p) => p.isDefault) || portals[0];
@@ -192,21 +235,9 @@ const handleZohoCallback = asyncHandler(async (req, res) => {
         { $set: { portalId: chosen.id, portalName: chosen.name } }
     );
 
-    logger.info(`[ZohoProjects] Connected portal ${chosen.id} (${chosen.name})`);
+    logger.info(`[ZohoProjects] Connected portal ${chosen.id} (${chosen.name}) by ESF user ${connectedBy}`);
 
-    return res.status(200).json(
-        new ApiResponse(
-            200,
-            {
-                connected: true,
-                portalId: chosen.id,
-                portalName: chosen.name,
-                apiDomain: connection.apiDomain,
-                availablePortals: portals
-            },
-            'Zoho Projects connected successfully'
-        )
-    );
+    return res.redirect(portalRedirect({ zoho: 'connected', portal: chosen.name || chosen.id }));
 });
 
 /**
@@ -216,6 +247,8 @@ const handleZohoCallback = asyncHandler(async (req, res) => {
  * @route DELETE /api/zoho/disconnect
  */
 const disconnectZoho = asyncHandler(async (req, res) => {
+    if (!requireZohoManager(req, res)) return;
+
     const removed = await ZohoAuth.disconnect();
 
     return res.status(200).json(
@@ -252,7 +285,7 @@ const createProject = asyncHandler(async (req, res) => {
 
     const project = await ZohoProjectsService.createProject({ name, description, startDate, endDate, ownerId });
 
-    logger.info(`[ZohoProjects] Project created via API by user ${req.userId}: ${project.id}`);
+    logger.info(`[ZohoProjects] Project created by ESF user ${req.esfUserId}: ${project.id}`);
 
     return res.status(201).json(new ApiResponse(201, { project }, 'Zoho project created successfully'));
 });

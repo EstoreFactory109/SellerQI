@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, useLocation, useNavigate, NavLink } from 'react-router-dom';
-import { Users, UserCog, LogOut, Menu, User, Key, HelpCircle } from 'lucide-react';
+import { Users, UserCog, LogOut, Menu, User, Key, HelpCircle, Plug } from 'lucide-react';
 import axiosInstance from '../config/axios.config.js';
 import { useEsfUser } from '../contexts/EsfUserContext.js';
 import sellerQILogo from '../assets/Logo/sellerQILogo.png';
@@ -90,6 +90,10 @@ const EsfLayout = () => {
             <NavLink to="/esf/settings?tab=password" className={({ isActive }) => navItemClass(isActive)}>
               <Key className="w-5 h-5 shrink-0" />
               <span className="text-sm font-medium">Update password</span>
+            </NavLink>
+            <NavLink to="/esf/settings?tab=integrations" className={({ isActive }) => navItemClass(isActive)}>
+              <Plug className="w-5 h-5 shrink-0" />
+              <span className="text-sm font-medium">Integrations</span>
             </NavLink>
             <NavLink to="/esf/settings?tab=support" className={({ isActive }) => navItemClass(isActive)}>
               <HelpCircle className="w-5 h-5 shrink-0" />
