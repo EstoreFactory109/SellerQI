@@ -32,6 +32,10 @@ const INTENTIONALLY_EXCLUDED = {
     // FBAReimbursementsItemModel) and those ARE listed in the purge service, so this scan still
     // covers every collection that actually holds rows.
     'batchedItemModel.js': 'schema factory - the models it builds are listed individually',
+    // A single org-wide row, not per-user data. `connectedBy` is an audit stamp recording
+    // which admin ran the connect flow; purging on that user's deletion would tear down
+    // the whole company's Zoho integration for everyone else.
+    'ZohoConnectionModel.js': 'org-wide singleton - connectedBy is an audit stamp, not ownership',
 };
 
 /** Purged only when the caller passes includeBillingHistory (admin manual delete). */
