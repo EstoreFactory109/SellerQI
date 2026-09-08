@@ -448,7 +448,7 @@ const LeftNavSection = () => {
                         <div>
                             <NavGroupLabel>Estore Factory</NavGroupLabel>
                             <div className="space-y-0.5">
-                                <NavItem to="/seller-central-checker/client-dashboard" icon={Building2} label="Client Dashboard" />
+                                <NavItem to="/seller-central-checker/client-dashboard" icon={Building2} label="Overview" />
                             </div>
                         </div>
                         )}

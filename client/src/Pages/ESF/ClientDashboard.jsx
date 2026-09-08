@@ -185,7 +185,7 @@ const ClientDashboard = () => {
         <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-4 mb-6">
           <div>
             <h1 className={TYPOGRAPHY.pageTitle} style={{ color: COLORS.textPrimary }}>
-              Client Dashboard
+              Overview
             </h1>
             <p className="mt-1 text-sm" style={{ color: COLORS.textSecondary }}>
               {user?.firstName ? `${user.firstName} ${user.lastName || ''} — ` : ''}
