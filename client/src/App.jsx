@@ -71,6 +71,7 @@ import EsfClientConnectToAmazon from './Pages/ESF/Client/EsfClientConnectToAmazo
 import EsfClientConnectAccounts from './Pages/ESF/Client/EsfClientConnectAccounts.jsx';
 import EsfClientProfileSelection from './Pages/ESF/Client/EsfClientProfileSelection.jsx';
 import EsfClientDashboard from './Pages/ESF/ClientDashboard.jsx';
+import EsfEstoreFactoryZoho from './Pages/ESF/EsfEstoreFactoryZoho.jsx';
 import EsfPageAccessGuard from './Layout/EsfPageAccessGuard.jsx';
 import AdminSubscription from './Pages/Admin/Subscription.jsx';
 import AdminEmailLogs from './Pages/Admin/EmailLogs.jsx';
@@ -173,6 +174,7 @@ const App = () => {
             <Route index element={<Navigate to="clients" replace />} />
             <Route path='clients' element={<EsfClients />} />
             <Route path='users' element={<EsfUsers />} />
+            <Route path='estore-factory/zoho-projects' element={<EsfEstoreFactoryZoho />} />
             <Route path='settings' element={<EsfSettings />} />
           </Route>
           <Route path='/esf/client/:clientId' element={<EsfClientLayout />}>

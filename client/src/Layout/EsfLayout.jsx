@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, useLocation, useNavigate, NavLink } from 'react-router-dom';
-import { Users, UserCog, LogOut, Menu, User, Key, HelpCircle, Plug } from 'lucide-react';
+import { Users, UserCog, LogOut, Menu, User, Key, HelpCircle, Building2 } from 'lucide-react';
 import axiosInstance from '../config/axios.config.js';
 import { useEsfUser } from '../contexts/EsfUserContext.js';
 import sellerQILogo from '../assets/Logo/sellerQILogo.png';
@@ -8,6 +8,7 @@ import sellerQILogo from '../assets/Logo/sellerQILogo.png';
 const PAGE_TITLES = {
   '/esf/clients': { title: 'Manage client', subtitle: 'Manage all clients onboarded by the team' },
   '/esf/users': { title: 'Team members', subtitle: 'Manage who can access this portal' },
+  '/esf/estore-factory/zoho-projects': { title: 'Zoho Projects', subtitle: 'Connect and manage the shared Zoho Projects account' },
   '/esf/settings': { title: 'Settings', subtitle: 'Your profile and preferences' },
 };
 
@@ -82,6 +83,14 @@ const EsfLayout = () => {
           </nav>
 
           <div className="p-3 border-t border-white/10 space-y-0.5">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 px-3">Estore Factory</p>
+            <NavLink to="/esf/estore-factory/zoho-projects" className={({ isActive }) => navItemClass(isActive)}>
+              <Building2 className="w-5 h-5 shrink-0" />
+              <span className="text-sm font-medium">Zoho Projects</span>
+            </NavLink>
+          </div>
+
+          <div className="p-3 border-t border-white/10 space-y-0.5">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 px-3">Settings</p>
             <NavLink to="/esf/settings" end className={({ isActive }) => navItemClass(isActive)}>
               <User className="w-5 h-5 shrink-0" />
@@ -90,10 +99,6 @@ const EsfLayout = () => {
             <NavLink to="/esf/settings?tab=password" className={({ isActive }) => navItemClass(isActive)}>
               <Key className="w-5 h-5 shrink-0" />
               <span className="text-sm font-medium">Update password</span>
-            </NavLink>
-            <NavLink to="/esf/settings?tab=integrations" className={({ isActive }) => navItemClass(isActive)}>
-              <Plug className="w-5 h-5 shrink-0" />
-              <span className="text-sm font-medium">Integrations</span>
             </NavLink>
             <NavLink to="/esf/settings?tab=support" className={({ isActive }) => navItemClass(isActive)}>
               <HelpCircle className="w-5 h-5 shrink-0" />

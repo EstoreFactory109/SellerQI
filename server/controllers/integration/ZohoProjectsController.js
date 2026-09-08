@@ -35,7 +35,7 @@ const portalOrigin = () =>
         .replace(/\/+$/, '');
 
 const portalRedirect = (params) =>
-    `${portalOrigin()}/esf/settings?tab=integrations&${new URLSearchParams(params).toString()}`;
+    `${portalOrigin()}/esf/estore-factory/zoho-projects?${new URLSearchParams(params).toString()}`;
 
 /**
  * Connecting and disconnecting touch ONE shared company credential, so they are limited

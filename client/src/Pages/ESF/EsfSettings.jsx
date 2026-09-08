@@ -3,7 +3,6 @@ import { useSearchParams } from 'react-router-dom';
 import EsfProfile from '../../Components/ESF/EsfProfile.jsx';
 import EsfPassword from '../../Components/ESF/EsfPassword.jsx';
 import Support from '../../Components/settings/Support/Support.jsx';
-import EsfZohoIntegration from '../../Components/ESF/EsfZohoIntegration.jsx';
 
 const EsfSettings = () => {
   const [searchParams] = useSearchParams();
@@ -15,8 +14,6 @@ const EsfSettings = () => {
         return <EsfProfile />;
       case 'password':
         return <EsfPassword />;
-      case 'integrations':
-        return <EsfZohoIntegration />;
       case 'support':
         return <Support />;
       default:
