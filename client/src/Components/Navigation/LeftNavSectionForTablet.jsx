@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import {LayoutDashboard,Activity,BadgeAlert, ClipboardPlus,Clock8,ChartLine,LaptopMinimalCheck, ChevronRight, X, Calendar, DollarSign, Lock, Package, LogOut, Bot, BarChart3, User, Link2, LifeBuoy, CreditCard} from 'lucide-react'
+import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,ChartLine,LaptopMinimalCheck, ChevronRight, X, Calendar, DollarSign, Lock, Package, LogOut, Bot, BarChart3, User, Link2, LifeBuoy, CreditCard, Building2} from 'lucide-react'
 import useEsfPageAccess from '../../hooks/useEsfPageAccess.js';
 import { logout } from '../../redux/slices/authSlice.js'
 import { clearCogsData } from '../../redux/slices/cogsSlice.js'
@@ -311,9 +311,6 @@ const LeftNavSection = () => {
                             {(!isLiteUser || isPremiumLocked) && (
                                 <NavItem to="/seller-central-checker/dashboard" icon={LayoutDashboard} label="Dashboard" locked={isPremiumLocked} onNavigate={closeMenu} />
                             )}
-                            {isEsfClient && (
-                                <NavItem to="/seller-central-checker/client-dashboard" icon={Activity} label="Client Dashboard" onNavigate={closeMenu} />
-                            )}
                             {(!isLiteUser || isPremiumLocked) && (
                                 <NavItem to="/seller-central-checker/qmate" icon={Bot} label="Amazon Copilot" locked={isPremiumLocked} onNavigate={closeMenu} tag="AI" />
                             )}
@@ -430,6 +427,16 @@ const LeftNavSection = () => {
                         <span className="font-semibold flex-1">Need Help?</span>
                         <div className="w-1.5 h-1.5 bg-orange-400 rounded-full animate-pulse group-hover:bg-yellow-300 transition-colors duration-300"></div>
                     </NavLink>
+                </div>
+                )}
+
+                {/* Estore Factory - ESF-only pages, kept out of the personal Overview group */}
+                {isEsfClient && (
+                <div className="px-3 mb-4">
+                    <NavGroupLabel>Estore Factory</NavGroupLabel>
+                    <div className="space-y-1">
+                        <NavItem to="/seller-central-checker/client-dashboard" icon={Building2} label="Client Dashboard" onNavigate={closeMenu} />
+                    </div>
                 </div>
                 )}
 

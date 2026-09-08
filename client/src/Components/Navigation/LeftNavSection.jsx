@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BadgeAlert, ClipboardPlus, Clock8, ChartLine, LaptopMinimalCheck, ChevronRight, Activity, Calendar, DollarSign, Lock, Package, BarChart3, LogOut, Bot, User, Link2, LifeBuoy, CreditCard } from 'lucide-react';
+import { LayoutDashboard, BadgeAlert, ClipboardPlus, Clock8, ChartLine, LaptopMinimalCheck, ChevronRight, Activity, Calendar, DollarSign, Lock, Package, BarChart3, LogOut, Bot, User, Link2, LifeBuoy, CreditCard, Building2 } from 'lucide-react';
 import useEsfPageAccess from '../../hooks/useEsfPageAccess.js';
 import { useDispatch, useSelector } from 'react-redux';
 import { logout } from '../../redux/slices/authSlice.js'
@@ -304,9 +304,6 @@ const LeftNavSection = () => {
                                 {(!isLiteUser || isPremiumLocked) && (
                                     <NavItem to="/seller-central-checker/dashboard" icon={LayoutDashboard} label="Dashboard" locked={isPremiumLocked} />
                                 )}
-                                {isEsfClient && (
-                                    <NavItem to="/seller-central-checker/client-dashboard" icon={Activity} label="Client Dashboard" />
-                                )}
                                 {(!isLiteUser || isPremiumLocked) && (
                                     <NavItem to="/seller-central-checker/qmate" icon={Bot} label="Amazon Copilot" locked={isPremiumLocked} tag="AI" />
                                 )}
@@ -445,6 +442,16 @@ const LeftNavSection = () => {
                                 )}
                             </div>
                         </div>
+
+                        {/* Estore Factory - ESF-only pages, kept out of the personal Overview group */}
+                        {isEsfClient && (
+                        <div>
+                            <NavGroupLabel>Estore Factory</NavGroupLabel>
+                            <div className="space-y-0.5">
+                                <NavItem to="/seller-central-checker/client-dashboard" icon={Building2} label="Client Dashboard" />
+                            </div>
+                        </div>
+                        )}
 
                         {/* Account & Settings - flat list like the other categories, no dropdown */}
                         {!isAgencyAdminViewingClient && (
