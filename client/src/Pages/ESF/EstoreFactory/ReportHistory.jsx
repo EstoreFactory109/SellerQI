@@ -33,7 +33,7 @@ const LATEST_ROWS = [
 
 const STATUS_STYLE = {
     Losing: { bg: 'rgba(245,166,35,.13)', color: PALETTE.amberValue },
-    Winning: { bg: 'rgba(95,211,196,.11)', color: PALETTE.teal },
+    Winning: { bg: 'rgba(34,197,94,.11)', color: PALETTE.good },
 };
 
 const ReportHistory = () => {

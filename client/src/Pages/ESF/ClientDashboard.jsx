@@ -4,14 +4,12 @@ import { PALETTE } from '../../Components/ESF/estoreFactoryTheme.js';
 
 /**
  * "Overview" — the landing page of the Estore Factory section on a client's own
- * account (nav: Estore Factory > Overview). Recreates the design in
- * deploy/index.html exactly: same layout, copy and color tokens.
- *
- * This design is visually distinct from the rest of the app on purpose — it uses
- * its own near-black/orange palette (Components/ESF/estoreFactoryTheme.js), not
- * Shared/tokens.js's blue-accented redesign tokens, matching the mock file-for-file.
- * Shared with the rest of the Estore Factory section (Status, Untapped, Reports,
- * Messages, Billing) so the palette lives in one place.
+ * account (nav: Estore Factory > Overview). Recreates the layout and copy of
+ * deploy/index.html, but recolored to the app's own blue-accented dark theme
+ * (Components/ESF/estoreFactoryTheme.js, sourced from Shared/tokens.js) rather
+ * than the mock's original near-black/orange scheme, so this section reads as
+ * part of SellerQI. Shared with the rest of the Estore Factory section
+ * (Status, Untapped, Reports, Messages, Billing) so the palette lives in one place.
  *
  * Data reality check: only the header (brand name, connected marketplaces) has a
  * real backend source today — both already ship on state.Auth.user via
@@ -53,8 +51,8 @@ const StatCard = ({ label, value, valueColor, sub, subColor, tone, href }) => (
 );
 
 const STATUS_BADGE = {
-    'In progress': { bg: 'rgba(95,211,196,.11)', color: PALETTE.teal },
-    'In review': { bg: 'rgba(95,211,196,.11)', color: PALETTE.teal },
+    'In progress': { bg: 'rgba(34,197,94,.11)', color: PALETTE.good },
+    'In review': { bg: 'rgba(34,197,94,.11)', color: PALETTE.good },
     'Waiting on Amazon': { bg: 'rgba(255,255,255,.06)', color: PALETTE.textTertiary },
     'Waiting on you': { bg: 'rgba(245,166,35,.13)', color: PALETTE.amberValue },
 };
@@ -77,12 +75,12 @@ const WorkItemRow = ({ text, status, time }) => (
  * system, just enough variety to distinguish activity types at a glance. */
 const ActivityGlyph = ({ kind }) => {
     const glyphs = {
-        dot: <span className="w-[9px] h-[9px] rounded-full" style={{ background: PALETTE.teal }} />,
+        dot: <span className="w-[9px] h-[9px] rounded-full" style={{ background: PALETTE.good }} />,
         reply: <span className="w-2 h-2 rotate-45" style={{ background: PALETTE.textTertiary }} />,
         square: <span className="w-2 h-2 rounded-[1px]" style={{ background: '#8FA0B8' }} />,
         bar: <span className="w-[11px] h-1 rounded-[1px]" style={{ background: PALETTE.textTertiary }} />,
     };
-    const bg = kind === 'dot' ? 'rgba(95,211,196,.1)' : 'rgba(255,255,255,.05)';
+    const bg = kind === 'dot' ? 'rgba(34,197,94,.1)' : 'rgba(255,255,255,.05)';
     return (
         <span className="flex-none w-[26px] h-[26px] rounded-md flex items-center justify-center" style={{ background: bg }}>
             {glyphs[kind]}
@@ -162,7 +160,7 @@ const ClientDashboard = () => {
                                             border: `1px solid ${connected ? 'rgba(255,255,255,.12)' : 'rgba(255,255,255,.08)'}`,
                                         }}
                                     >
-                                        <span className="w-[5px] h-[5px] rounded-full" style={{ background: connected ? PALETTE.teal : PALETTE.textMuted }} />
+                                        <span className="w-[5px] h-[5px] rounded-full" style={{ background: connected ? PALETTE.good : PALETTE.textMuted }} />
                                         {domain}{acc.country ? ` · ${acc.country}` : ''}
                                     </span>
                                 );
@@ -173,7 +171,7 @@ const ClientDashboard = () => {
 
                 {/* Stat row */}
                 <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                    <StatCard label="Tasks in progress" value="7" valueColor={PALETTE.teal} sub="Your team is handling this" />
+                    <StatCard label="Tasks in progress" value="7" valueColor={PALETTE.good} sub="Your team is handling this" />
                     <StatCard label="Waiting on you" value="1" valueColor={PALETTE.amberValue} sub="1 item needs your reply" subColor={PALETTE.amberSub} tone="alert" />
                     <StatCard label="Open tickets" value="1" valueColor={PALETTE.textPrimary} sub="Last reply 4 hours ago" />
                     <StatCard label="Next report" value="Oct 3" valueColor={PALETTE.textPrimary} sub="September performance" />
@@ -218,7 +216,7 @@ const ClientDashboard = () => {
                                 href="#"
                                 onClick={(e) => e.preventDefault()}
                                 className="text-center text-[13.5px] font-semibold py-3 rounded-lg transition-colors"
-                                style={{ background: PALETTE.accent, color: '#141414' }}
+                                style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}
                                 onMouseEnter={(e) => { e.currentTarget.style.background = PALETTE.accentHover; }}
                                 onMouseLeave={(e) => { e.currentTarget.style.background = PALETTE.accent; }}
                             >

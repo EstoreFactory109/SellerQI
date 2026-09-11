@@ -12,7 +12,7 @@ import { PALETTE } from '../../../Components/ESF/estoreFactoryTheme.js';
  * regardless of which report card it's on).
  */
 const INSIGHT_COLOR = {
-    good: PALETTE.teal,
+    good: PALETTE.good,
     watch: PALETTE.amberValue,
     neutral: PALETTE.textBody,
 };
@@ -57,7 +57,7 @@ const Reports = () => {
                     <div className="flex-1 min-w-0 flex flex-col gap-[18px]">
                         <div className="flex flex-col gap-[9px]">
                             <div className="flex items-center gap-[11px]">
-                                <span className="text-[11px] font-bold tracking-[.05em] rounded-[5px] px-2 py-1" style={{ color: PALETTE.teal, background: 'rgba(95,211,196,.12)' }}>NEW</span>
+                                <span className="text-[11px] font-bold tracking-[.05em] rounded-[5px] px-2 py-1" style={{ color: PALETTE.good, background: 'rgba(34,197,94,.12)' }}>NEW</span>
                                 <span className="text-[12.5px]" style={{ color: PALETTE.textSecondary }}>Published 1 September, 6:04 am</span>
                             </div>
                             <h2 className="m-0 text-[22px] font-bold tracking-[-0.02em]">Weekly Sales Summary</h2>
@@ -73,17 +73,17 @@ const Reports = () => {
                             <div className="flex flex-col gap-1.5">
                                 <span className="text-[11.5px] tracking-[.04em]" style={{ color: PALETTE.textMuted }}>TOTAL SALES</span>
                                 <span className="text-2xl font-semibold tracking-[-0.02em] tabular-nums">$184,220</span>
-                                <span className="text-xs" style={{ color: PALETTE.teal }}>▲ 2.4% week on week</span>
+                                <span className="text-xs" style={{ color: PALETTE.good }}>▲ 2.4% week on week</span>
                             </div>
                             <div className="flex flex-col gap-1.5">
                                 <span className="text-[11.5px] tracking-[.04em]" style={{ color: PALETTE.textMuted }}>UNITS SOLD</span>
                                 <span className="text-2xl font-semibold tracking-[-0.02em] tabular-nums">3,981</span>
-                                <span className="text-xs" style={{ color: PALETTE.teal }}>▲ 1.1% week on week</span>
+                                <span className="text-xs" style={{ color: PALETTE.good }}>▲ 1.1% week on week</span>
                             </div>
                             <div className="flex flex-col gap-1.5">
                                 <span className="text-[11.5px] tracking-[.04em]" style={{ color: PALETTE.textMuted }}>ACOS</span>
                                 <span className="text-2xl font-semibold tracking-[-0.02em] tabular-nums">31.6%</span>
-                                <span className="text-xs" style={{ color: PALETTE.teal }}>▼ 1.8 pts, improved</span>
+                                <span className="text-xs" style={{ color: PALETTE.good }}>▼ 1.8 pts, improved</span>
                             </div>
                         </div>
 
@@ -92,7 +92,7 @@ const Reports = () => {
                                 href="#"
                                 onClick={(e) => e.preventDefault()}
                                 className="text-[13px] font-bold px-5 py-[11px] rounded-lg"
-                                style={{ background: PALETTE.accent, color: '#141414' }}
+                                style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}
                                 onMouseEnter={(e) => { e.currentTarget.style.background = PALETTE.accentHover; }}
                                 onMouseLeave={(e) => { e.currentTarget.style.background = PALETTE.accent; }}
                             >
@@ -128,7 +128,7 @@ const Reports = () => {
                                 onMouseLeave={(e) => { e.currentTarget.style.borderColor = PALETTE.border; }}
                             >
                                 {r.isNew && (
-                                    <span className="absolute top-[14px] right-[14px] text-[10px] font-bold tracking-[.05em] rounded px-1.5 py-[3px]" style={{ color: PALETTE.teal, background: 'rgba(95,211,196,.12)' }}>NEW</span>
+                                    <span className="absolute top-[14px] right-[14px] text-[10px] font-bold tracking-[.05em] rounded px-1.5 py-[3px]" style={{ color: PALETTE.good, background: 'rgba(34,197,94,.12)' }}>NEW</span>
                                 )}
                                 <div className="flex flex-col gap-[9px]">
                                     <span className="text-[13.5px] font-semibold" style={{ color: PALETTE.textBody }}>{r.name}</span>

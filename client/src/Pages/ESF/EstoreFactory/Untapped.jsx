@@ -79,8 +79,8 @@ const SMALLER = [
 ];
 
 const LEGEND = [
-    { label: 'Brand store', amount: '$3,800', color: '#5FD3C4', width: 26.3 },
-    { label: 'Brand website', amount: '$3,600', color: '#4E9E97', width: 24.9 },
+    { label: 'Brand store', amount: '$3,800', color: PALETTE.accent, width: 26.3 },
+    { label: 'Brand website', amount: '$3,600', color: '#2F5FCB', width: 24.9 },
     { label: 'External traffic', amount: '$2,400', color: '#6B7684', width: 16.6 },
     { label: 'A+ content', amount: '$2,100', color: '#4A525C', width: 14.5 },
     { label: 'Listing video', amount: '$1,450', color: '#3B424B', width: 10 },
@@ -159,7 +159,7 @@ const OpportunityCard = ({ opp, raised }) => {
                             type="button"
                             onClick={() => setMode('sent')}
                             className="text-[12.5px] font-bold px-[15px] py-2 rounded-lg"
-                            style={{ background: PALETTE.accent, color: '#141414' }}
+                            style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}
                         >
                             Send to {opp.sendTo}
                         </button>
@@ -170,8 +170,8 @@ const OpportunityCard = ({ opp, raised }) => {
 
             {mode === 'sent' && (
                 <div className="flex items-center gap-2.5 pt-3.5" style={dividerStyle('rgba(255,255,255,.06)')}>
-                    <span className="w-[7px] h-[7px] rounded-full" style={{ background: PALETTE.teal }} />
-                    <span className="text-[12.5px]" style={{ color: PALETTE.teal }}>Sent — {opp.sendTo} will pick this up in your next check-in</span>
+                    <span className="w-[7px] h-[7px] rounded-full" style={{ background: PALETTE.good }} />
+                    <span className="text-[12.5px]" style={{ color: PALETTE.good }}>Sent — {opp.sendTo} will pick this up in your next check-in</span>
                 </div>
             )}
         </CardShell>
@@ -216,7 +216,7 @@ const Untapped = () => {
 
                 <section
                     className="rounded-lg flex flex-col md:flex-row md:items-end gap-[52px]"
-                    style={{ background: `radial-gradient(120% 180% at 0% 0%, rgba(95,211,196,.07) 0%, rgba(20,22,26,0) 55%), ${PALETTE.surface}`, border: `1px solid ${PALETTE.borderHover}`, padding: '26px 28px 24px' }}
+                    style={{ background: `radial-gradient(120% 180% at 0% 0%, rgba(59,130,246,.08) 0%, rgba(20,22,26,0) 55%), ${PALETTE.surface}`, border: `1px solid ${PALETTE.borderHover}`, padding: '26px 28px 24px' }}
                 >
                     <div className="flex-none flex flex-col gap-[7px]">
                         <span className="text-[11.5px] tracking-[.06em]" style={{ color: PALETTE.textMuted }}>IDENTIFIED UPSIDE</span>

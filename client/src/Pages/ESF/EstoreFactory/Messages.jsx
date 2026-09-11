@@ -10,12 +10,12 @@ import { PALETTE } from '../../../Components/ESF/estoreFactoryTheme.js';
  * data-reality note in ClientDashboard.jsx), so replies and new messages only
  * ever live in this page's own state and vanish on refresh, same as the mock.
  */
-const CLIENT_AVATAR = 'rgba(255,122,26,.16)';
+const CLIENT_AVATAR = 'rgba(59,130,246,.16)';
 const AGENCY_AVATAR = 'repeating-linear-gradient(135deg, #1E2228 0 4px, #252A31 4px 8px)';
 
 const PILL = {
     'Awaiting your reply': { bg: 'rgba(245,166,35,.13)', color: PALETTE.amberValue },
-    Open: { bg: 'rgba(95,211,196,.11)', color: PALETTE.teal },
+    Open: { bg: 'rgba(34,197,94,.11)', color: PALETTE.good },
     Resolved: { bg: 'rgba(255,255,255,.06)', color: PALETTE.textTertiary },
 };
 
@@ -165,7 +165,7 @@ const Messages = () => {
                             <h2 className="m-0 flex-1 text-[15px] font-bold tracking-[-0.01em]">Conversations</h2>
                             <span className="text-[11.5px]" style={{ color: PALETTE.textMuted }}>2 unread</span>
                         </div>
-                        <button type="button" onClick={() => setComposing(true)} className="text-[13px] font-bold py-2.5 rounded-lg" style={{ background: PALETTE.accent, color: '#141414' }}>
+                        <button type="button" onClick={() => setComposing(true)} className="text-[13px] font-bold py-2.5 rounded-lg" style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}>
                             New message
                         </button>
                     </div>
@@ -233,7 +233,7 @@ const Messages = () => {
                             <div className="flex flex-col gap-2.5" style={{ padding: '14px 26px 20px', borderTop: `1px solid rgba(255,255,255,.06)` }}>
                                 <span className="text-[11.5px]" style={{ color: PALETTE.textMuted }}>A copy goes to hello@kesslerhome.com so you can follow up from your inbox.</span>
                                 <div className="flex items-center gap-3">
-                                    <button type="button" onClick={sendNew} className="text-[13px] font-bold px-[22px] py-3 rounded-lg" style={{ background: PALETTE.accent, color: '#141414' }}>Send message</button>
+                                    <button type="button" onClick={sendNew} className="text-[13px] font-bold px-[22px] py-3 rounded-lg" style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}>Send message</button>
                                     <span className="text-xs" style={{ color: PALETTE.textMuted }}>Typical first reply: a few hours.</span>
                                 </div>
                             </div>
@@ -267,8 +267,8 @@ const Messages = () => {
                                             <div
                                                 className="rounded-lg px-4 py-3.5 text-[13px] leading-[1.65]"
                                                 style={{
-                                                    background: m.side === 'client' ? 'rgba(255,122,26,.05)' : 'rgba(255,255,255,.035)',
-                                                    border: `1px solid ${m.side === 'client' ? 'rgba(255,122,26,.18)' : 'rgba(255,255,255,.07)'}`,
+                                                    background: m.side === 'client' ? 'rgba(59,130,246,.05)' : 'rgba(255,255,255,.035)',
+                                                    border: `1px solid ${m.side === 'client' ? 'rgba(59,130,246,.18)' : 'rgba(255,255,255,.07)'}`,
                                                     color: '#C6CBD2',
                                                 }}
                                             >
@@ -300,7 +300,7 @@ const Messages = () => {
                                         +
                                         <input type="file" className="hidden" onChange={(e) => attachFile((e.target.files || [])[0])} />
                                     </label>
-                                    <button type="button" onClick={sendReply} className="flex-none text-[13px] font-bold px-[22px] py-3 rounded-lg" style={{ background: PALETTE.accent, color: '#141414' }}>Send reply</button>
+                                    <button type="button" onClick={sendReply} className="flex-none text-[13px] font-bold px-[22px] py-3 rounded-lg" style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}>Send reply</button>
                                 </div>
                             </div>
                         </div>

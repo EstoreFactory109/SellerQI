@@ -16,7 +16,7 @@ const inputStyle = { background: PALETTE.input, border: `1px solid ${PALETTE.bor
 
 const fileSize = (bytes) => (bytes > 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 
-const CommentThread = ({ comments, draft, onDraftChange, onPost, placeholder = 'Add a comment or question for your team…', tint = 'rgba(255,122,26,.16)' }) => (
+const CommentThread = ({ comments, draft, onDraftChange, onPost, placeholder = 'Add a comment or question for your team…', tint = 'rgba(59,130,246,.16)' }) => (
     <div className="flex flex-col gap-3 pt-3.5" style={dividerStyle()}>
         {comments.map((c, i) => (
             <div key={i} className="flex gap-2.5 items-start">
@@ -56,19 +56,19 @@ const PhotoWaitingItem = () => {
     const post = () => {
         const t = draft.trim();
         if (!t) return;
-        setComments((c) => [...c, { who: 'You', time: 'Just now', text: t, tint: 'rgba(255,122,26,.16)' }]);
+        setComments((c) => [...c, { who: 'You', time: 'Just now', text: t, tint: 'rgba(59,130,246,.16)' }]);
         setDraft('');
     };
 
     if (mode === 'done') {
         return (
             <div className="flex items-center gap-3.5">
-                <span className="w-[22px] h-[22px] flex-none rounded-md flex items-center justify-center" style={{ background: 'rgba(95,211,196,.12)' }}>
-                    <span className="w-[9px] h-[9px] rounded-full" style={{ background: PALETTE.teal }} />
+                <span className="w-[22px] h-[22px] flex-none rounded-md flex items-center justify-center" style={{ background: 'rgba(34,197,94,.12)' }}>
+                    <span className="w-[9px] h-[9px] rounded-full" style={{ background: PALETTE.good }} />
                 </span>
                 <div className="flex-1 flex flex-col gap-1">
                     <span className="text-sm font-semibold line-through" style={{ color: '#C6CBD2', textDecorationColor: 'rgba(255,255,255,.2)' }}>We need your product photos for the espresso tamper</span>
-                    <span className="text-[12.5px]" style={{ color: PALETTE.teal }}>{files.length} photos sent to your team — Priya is picking the hero shot</span>
+                    <span className="text-[12.5px]" style={{ color: PALETTE.good }}>{files.length} photos sent to your team — Priya is picking the hero shot</span>
                 </div>
                 <button type="button" onClick={() => setMode('open')} className="flex-none text-[12.5px]" style={{ color: PALETTE.textSecondary }}>View thread</button>
             </div>
@@ -89,7 +89,7 @@ const PhotoWaitingItem = () => {
                     type="button"
                     onClick={() => setMode(mode === 'open' ? 'pending' : 'open')}
                     className="flex-none text-[12.5px] font-bold px-4 py-2.5 rounded-lg"
-                    style={{ background: PALETTE.accent, color: '#141414' }}
+                    style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}
                 >
                     Upload photos
                 </button>
@@ -125,7 +125,7 @@ const PhotoWaitingItem = () => {
                     )}
                     {files.length > 0 && (
                         <div className="flex items-center gap-3">
-                            <button type="button" onClick={() => setMode('done')} className="text-[12.5px] font-bold px-[18px] py-2.5 rounded-lg" style={{ background: PALETTE.accent, color: '#141414' }}>
+                            <button type="button" onClick={() => setMode('done')} className="text-[12.5px] font-bold px-[18px] py-2.5 rounded-lg" style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}>
                                 Send {files.length === 1 ? '1 photo' : `${files.length} photos`} to your team
                             </button>
                             <span className="text-xs" style={{ color: PALETTE.textSecondary }}>Priya is notified the moment these land.</span>
@@ -144,25 +144,25 @@ const BudgetWaitingItem = () => {
     const [mode, setMode] = useState('pending'); // pending | open | done
     const [draft, setDraft] = useState('');
     const [comments, setComments] = useState([
-        { who: 'Marcus Oyelaran', time: 'Aug 31', text: 'Happy to walk through the forecast on a call if that is easier — the increase pays for itself at a 2.4 ROAS.', tint: 'rgba(95,211,196,.16)' },
+        { who: 'Marcus Oyelaran', time: 'Aug 31', text: 'Happy to walk through the forecast on a call if that is easier — the increase pays for itself at a 2.4 ROAS.', tint: 'rgba(34,197,94,.16)' },
     ]);
 
     const post = () => {
         const t = draft.trim();
         if (!t) return;
-        setComments((c) => [...c, { who: 'You', time: 'Just now', text: t, tint: 'rgba(255,122,26,.16)' }]);
+        setComments((c) => [...c, { who: 'You', time: 'Just now', text: t, tint: 'rgba(59,130,246,.16)' }]);
         setDraft('');
     };
 
     if (mode === 'done') {
         return (
             <div className="flex items-center gap-3.5">
-                <span className="w-[22px] h-[22px] flex-none rounded-md flex items-center justify-center" style={{ background: 'rgba(95,211,196,.12)' }}>
-                    <span className="w-[9px] h-[9px] rounded-full" style={{ background: PALETTE.teal }} />
+                <span className="w-[22px] h-[22px] flex-none rounded-md flex items-center justify-center" style={{ background: 'rgba(34,197,94,.12)' }}>
+                    <span className="w-[9px] h-[9px] rounded-full" style={{ background: PALETTE.good }} />
                 </span>
                 <div className="flex-1 flex flex-col gap-1">
                     <span className="text-sm font-semibold line-through" style={{ color: '#C6CBD2', textDecorationColor: 'rgba(255,255,255,.2)' }}>Approve the Q4 ad budget increase to $9,500 / month</span>
-                    <span className="text-[12.5px]" style={{ color: PALETTE.teal }}>Approved — Marcus is applying it to your campaigns</span>
+                    <span className="text-[12.5px]" style={{ color: PALETTE.good }}>Approved — Marcus is applying it to your campaigns</span>
                 </div>
                 <button type="button" onClick={() => setMode('open')} className="flex-none text-[12.5px]" style={{ color: PALETTE.textSecondary }}>View thread</button>
             </div>
@@ -183,7 +183,7 @@ const BudgetWaitingItem = () => {
                     type="button"
                     onClick={() => setMode(mode === 'open' ? 'pending' : 'open')}
                     className="flex-none text-[12.5px] font-bold px-4 py-2.5 rounded-lg"
-                    style={{ background: PALETTE.accent, color: '#141414' }}
+                    style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}
                 >
                     Review budget
                 </button>
@@ -206,7 +206,7 @@ const BudgetWaitingItem = () => {
                         </p>
                     </div>
                     <div className="flex items-center gap-3">
-                        <button type="button" onClick={() => setMode('done')} className="text-[12.5px] font-bold px-[18px] py-2.5 rounded-lg" style={{ background: PALETTE.accent, color: '#141414' }}>
+                        <button type="button" onClick={() => setMode('done')} className="text-[12.5px] font-bold px-[18px] py-2.5 rounded-lg" style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}>
                             Approve $9,500 / month
                         </button>
                         <button
@@ -231,8 +231,8 @@ const PRIORITY_STYLE = {
     High: { bg: PALETTE.amberBg.replace('.07', '.13'), color: PALETTE.amberValue },
 };
 const TASK_STATUS_STYLE = {
-    'In progress': { bg: 'rgba(95,211,196,.11)', color: PALETTE.teal },
-    'In review': { bg: 'rgba(95,211,196,.11)', color: PALETTE.teal },
+    'In progress': { bg: 'rgba(34,197,94,.11)', color: PALETTE.good },
+    'In review': { bg: 'rgba(34,197,94,.11)', color: PALETTE.good },
     'Waiting on Amazon': { bg: 'rgba(255,255,255,.06)', color: PALETTE.textTertiary },
     'Waiting on you': { bg: PALETTE.amberBg.replace('.07', '.13'), color: PALETTE.amberValue },
 };
@@ -411,14 +411,14 @@ const Status = () => {
                             type="button"
                             onClick={() => setFormOpen((v) => !v)}
                             className="flex-none text-[12.5px] font-bold px-[15px] py-2.5 rounded-lg"
-                            style={{ background: PALETTE.accent, color: '#141414' }}
+                            style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}
                         >
                             ＋ Request a task
                         </button>
                     </div>
 
                     {formOpen && (
-                        <div className="rounded-lg flex flex-col gap-3.5" style={{ background: PALETTE.surface, border: '1px solid rgba(255,122,26,.24)', padding: '20px 24px' }}>
+                        <div className="rounded-lg flex flex-col gap-3.5" style={{ background: PALETTE.surface, border: '1px solid rgba(59,130,246,.24)', padding: '20px 24px' }}>
                             <div className="flex flex-col gap-1">
                                 <span className="text-sm font-semibold">Request a task</span>
                                 <span className="text-[12.5px]" style={{ color: PALETTE.textSecondary }}>Your account manager reviews requests and confirms the timeline.</span>
@@ -444,7 +444,7 @@ const Status = () => {
                                         style={{ ...inputStyle, colorScheme: 'dark' }}
                                     />
                                 </label>
-                                <button type="button" onClick={addTask} className="flex-none text-[12.5px] font-bold px-[18px] py-2.5 rounded-lg" style={{ background: PALETTE.accent, color: '#141414' }}>Send request</button>
+                                <button type="button" onClick={addTask} className="flex-none text-[12.5px] font-bold px-[18px] py-2.5 rounded-lg" style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}>Send request</button>
                                 <button type="button" onClick={() => setFormOpen(false)} className="flex-none text-[12.5px] px-4 py-2.5 rounded-lg" style={{ color: PALETTE.textSecondary, border: `1px solid ${PALETTE.border}` }}>Cancel</button>
                             </div>
                         </div>
@@ -460,7 +460,7 @@ const Status = () => {
                                         <span className="text-xs" style={{ color: PALETTE.textMuted }}>{r.due}</span>
                                     </span>
                                     <span />
-                                    <span className="justify-self-start text-[11.5px] font-semibold rounded-md px-[10px] py-1" style={{ background: 'rgba(255,122,26,.12)', color: '#FF9A4D' }}>Requested by you</span>
+                                    <span className="justify-self-start text-[11.5px] font-semibold rounded-md px-[10px] py-1" style={{ background: 'rgba(59,130,246,.12)', color: '#7EA8F8' }}>Requested by you</span>
                                     <span className="text-[12.5px]" style={{ color: PALETTE.textMuted }}>Awaiting confirm</span>
                                     <span className="text-xs text-right" style={{ color: PALETTE.textMuted }}>Just now</span>
                                     <span />
