@@ -13,14 +13,16 @@ import {
   UserPlus,
   ChevronLeft,
   ChevronRight,
+  FolderGit2,
 } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 import EsfAddClientForm from '../../Components/ESF/EsfAddClientForm.jsx';
 import EsfExistingUsersPicker from '../../Components/ESF/EsfExistingUsersPicker.jsx';
+import EsfConnectProjectModal from '../../Components/ESF/EsfConnectProjectModal.jsx';
 import { useEsfUser } from '../../contexts/EsfUserContext.js';
 
 const ITEMS_PER_PAGE = 10;
-const DROPDOWN_MENU_WIDTH = 160;
+const DROPDOWN_MENU_WIDTH = 180;
 const DROPDOWN_MENU_ITEM_HEIGHT = 45;
 
 const EsfClients = () => {
@@ -29,7 +31,7 @@ const EsfClients = () => {
   // Members may open a client, but only the owner and admins may detach one.
   // The server enforces the same rule on DELETE /app/esf/clients/:id.
   const canRemoveClients = signedInUser?.esfRole === 'owner' || signedInUser?.esfRole === 'admin';
-  const menuHeight = canRemoveClients ? DROPDOWN_MENU_ITEM_HEIGHT * 2 : DROPDOWN_MENU_ITEM_HEIGHT;
+  const menuHeight = DROPDOWN_MENU_ITEM_HEIGHT * (canRemoveClients ? 3 : 2);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -44,6 +46,7 @@ const EsfClients = () => {
   const [openDropdownId, setOpenDropdownId] = useState(null);
   const [dropdownPosition, setDropdownPosition] = useState(null);
   const [showAddClientModal, setShowAddClientModal] = useState(false);
+  const [projectModalClient, setProjectModalClient] = useState(null);
   const [addClientTab, setAddClientTab] = useState('new'); // 'new' | 'existing'
   const dropdownRef = useRef(null);
   const openDropdownButtonRef = useRef(null);
@@ -284,6 +287,7 @@ const EsfClients = () => {
                     <tr className="border-b border-white/10 bg-[#080c12]/90">
                       <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider min-w-[150px]">Client</th>
                       <th className="px-2 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Brand</th>
+                      <th className="px-2 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Project</th>
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">SpAPI</th>
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Ads</th>
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Added By</th>
@@ -317,6 +321,21 @@ const EsfClients = () => {
                           </td>
                           <td className="px-2 py-2.5 text-xs text-gray-400">
                             <span className="line-clamp-2">{client.brandName || '—'}</span>
+                          </td>
+                          <td className="px-2 py-2.5 text-xs">
+                            {client.zohoProject?.projectId ? (
+                              <span className="line-clamp-2 text-gray-300" title={client.zohoProject.projectName}>
+                                {client.zohoProject.projectName}
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setProjectModalClient(client)}
+                                className="text-gray-500 hover:text-blue-400 transition-colors"
+                              >
+                                Connect
+                              </button>
+                            )}
                           </td>
                           <td className="px-2 py-2.5 text-center text-xs">
                             {connectionCell(client.hasSpApi === true, 'Seller account')}
@@ -519,7 +538,7 @@ const EsfClients = () => {
               return createPortal(
                 <div
                   ref={dropdownRef}
-                  className="fixed z-[100] min-w-[160px] w-[160px] py-1 rounded-lg bg-[#1a1a1a] border border-[#252525] shadow-lg"
+                  className="fixed z-[100] min-w-[180px] w-[180px] py-1 rounded-lg bg-[#1a1a1a] border border-[#252525] shadow-lg"
                   style={{
                     left: dropdownPosition.left,
                     top: Math.max(8, Math.min(dropdownPosition.top, window.innerHeight - menuHeight - 8)),
@@ -537,6 +556,18 @@ const EsfClients = () => {
                   >
                     <LogIn className="w-3.5 h-3.5" />
                     Login as client
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenDropdownId(null);
+                      setDropdownPosition(null);
+                      setProjectModalClient(client);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-gray-300 hover:bg-[#252525] hover:text-gray-100"
+                  >
+                    <FolderGit2 className="w-3.5 h-3.5" />
+                    {client.zohoProject?.projectId ? 'Change project' : 'Connect a project'}
                   </button>
                   {canRemoveClients && (
                   <button
@@ -599,6 +630,16 @@ const EsfClients = () => {
               </div>
             )}
           </>
+        )}
+
+        {/* Connect this client to an existing Zoho project. Refetches the list on
+            success so the Project column reflects the change immediately. */}
+        {projectModalClient && (
+          <EsfConnectProjectModal
+            client={projectModalClient}
+            onClose={() => setProjectModalClient(null)}
+            onChanged={fetchClients}
+          />
         )}
       </div>
     </div>

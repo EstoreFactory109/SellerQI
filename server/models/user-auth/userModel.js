@@ -158,6 +158,20 @@ const userSchema = new mongoose.Schema(
         required: false,
         default: null,
       },
+      // The Zoho project this client's work is tracked in. Projects are created
+      // in Zoho, never here — the portal only ever LINKS an existing one, so
+      // these fields mirror a Zoho project rather than owning it. A plain nested
+      // path (not a sub-schema) so no stray _id is added.
+      // See Services/Zoho/ZohoProjectLinks.js.
+      zohoProject: {
+        projectId: { type: String, default: null },
+        projectName: { type: String, default: null },
+        // Captured at link time so a later portal switch is detectable rather
+        // than silently pointing the id at a different Zoho account.
+        portalId: { type: String, default: null },
+        linkedAt: { type: Date, default: null },
+        linkedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      },
       // Role inside the ESF staff portal. Only meaningful when
       // accessType === 'esfUser'. See Services/User/esfRoles.js for the rules.
       // 'owner' is never assignable through the API - it is seeded.
@@ -327,6 +341,9 @@ userSchema.index({ agencyId: 1, isAgencyClient: 1 });
 userSchema.index({ 'additionalEmails.email': 1 });
 // ESF portal: list all staff-managed clients, newest first
 userSchema.index({ isEsfClient: 1, createdAt: -1 });
+// ESF portal: "which client is this Zoho project already linked to?" — asked for
+// every row of the project picker, so it must not be a collection scan.
+userSchema.index({ 'zohoProject.projectId': 1 });
 // ESF portal: list staff accounts
 userSchema.index({ accessType: 1 });
 // Used by the six-month inactivity cleanup cron to scan candidates efficiently

@@ -29,6 +29,11 @@ const {
     getInviteByToken,
     acceptInvite,
 } = require('../controllers/esf/esfInvites.js');
+const {
+    getClientProjectOptions,
+    linkClientProject,
+    unlinkClientProject,
+} = require('../controllers/esf/esfProjects.js');
 const esfAuth = require('../middlewares/Auth/esfAuth.js');
 const { authRateLimiter, registerRateLimiter } = require('../middlewares/rateLimiting.js');
 const {
@@ -38,6 +43,7 @@ const {
     validateEsfInviteAccept,
     validateEsfRole,
     validateEsfProfile,
+    validateLinkProject,
 } = require('../middlewares/validator/esfValidate.js');
 
 // Public
@@ -68,6 +74,12 @@ router.get('/linkable-users', esfAuth, listLinkableUsers);
 router.post('/clients/link', esfAuth, linkExistingUsers);
 router.post('/clients/:clientId/set-password', esfAuth, setEsfClientPassword);
 router.delete('/clients/:clientId', esfAuth, removeEsfClient);
+
+// Connecting a client to an existing Zoho project. Projects are created in
+// Zoho, never here — see controllers/esf/esfProjects.js.
+router.get('/clients/:clientId/project-options', esfAuth, getClientProjectOptions);
+router.post('/clients/:clientId/project', esfAuth, validateLinkProject, linkClientProject);
+router.delete('/clients/:clientId/project', esfAuth, unlinkClientProject);
 
 // Team members
 router.get('/users', esfAuth, getEsfUsers);

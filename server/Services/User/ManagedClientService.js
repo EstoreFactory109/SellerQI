@@ -110,7 +110,7 @@ const createManagedClient = async ({
  */
 const listManagedClients = async (matchQuery, options = {}) => {
     const select = options.select
-        || 'firstName lastName email phone createdAt subscriptionStatus packageType agencyId isAgencyClient isEsfClient esfAddedBy';
+        || 'firstName lastName email phone createdAt subscriptionStatus packageType agencyId isAgencyClient isEsfClient esfAddedBy zohoProject';
 
     const clients = await UserModel.find(matchQuery).select(select).sort({ createdAt: -1 }).lean();
     if (!clients.length) return [];

@@ -121,7 +121,22 @@ const validateEsfProfile = [
     handleValidation,
 ];
 
+/**
+ * POST /app/esf/clients/:clientId/project
+ * Only the id is accepted — the project's name is resolved from Zoho at link
+ * time (Services/Zoho/ZohoProjectLinks.js), never taken from the request, so a
+ * stale or spoofed label can't be stored.
+ */
+const validateLinkProject = [
+    body("projectId")
+        .trim()
+        .notEmpty().withMessage("A project must be selected")
+        .isLength({ max: 64 }).withMessage("Invalid project id"),
+    handleValidation,
+];
+
 module.exports = {
+    validateLinkProject,
     validateEsfLogin,
     validateEsfClient,
     validateEsfInvite,
