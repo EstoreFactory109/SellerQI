@@ -14,6 +14,7 @@
 const logger = require('../../utils/Logger.js');
 const { ApiError } = require('../../utils/ApiError.js');
 const { zohoRequest, paginate, unwrap, resolvePortalId } = require('./ZohoProjectsClient.js');
+const { toPlainText } = require('./zohoRichText.js');
 const {
     PATHS,
     PAGE_SIZE,
@@ -104,29 +105,63 @@ const normaliseProject = (project = {}) => ({
     url: (project.link && project.link.self && project.link.self.url) || project.url || null
 });
 
+/**
+ * Field names verified against a live v3 payload — the docs' flat names are not
+ * what the API actually returns. Owners live under `owners_and_work.owners`
+ * (not `details.owners`), percent is `completion_percentage` (not
+ * `percent_complete`), and the modified stamp is `last_modified_time` (not
+ * `last_updated_time`). All three silently returned empty before this.
+ */
 const normaliseTask = (task = {}) => ({
     id: asId(task.id, task.id_string),
     key: task.key || null,
     name: task.name || null,
     description: task.description || null,
     status: (task.status && (task.status.name || task.status)) || null,
+    // Whether the task's status counts as "done" in this portal. Portals define
+    // their own status names (this one uses Open/Content/Design), so the boolean
+    // is the only portable signal — never match on the name.
+    statusIsClosed: Boolean(task.status && task.status.is_closed_type),
+    isCompleted: Boolean(task.is_completed),
     priority: task.priority || null,
-    percentComplete: task.percent_complete !== undefined ? Number(task.percent_complete) : null,
-    ownerNames: Array.isArray(task.details && task.details.owners)
-        ? task.details.owners.map((o) => o.name).filter(Boolean)
+    percentComplete: task.completion_percentage !== undefined
+        ? Number(task.completion_percentage)
+        : (task.percent_complete !== undefined ? Number(task.percent_complete) : null),
+    ownerNames: Array.isArray(task.owners_and_work && task.owners_and_work.owners)
+        ? task.owners_and_work.owners
+            // Task owners carry first_name/last_name but no full_name (unlike
+            // comment authors), and `name` is often a username — "suyog1987"
+            // rather than "Suyog Athavale".
+            .map((o) => o.full_name || `${o.first_name || ''} ${o.last_name || ''}`.trim() || o.name)
+            // Zoho uses a literal "Unassigned User" placeholder rather than an empty list.
+            .filter((name) => name && name !== 'Unassigned User')
         : [],
-    createdAt: asDate(task.created_time_long, task.created_time, task.created_date),
-    lastUpdatedAt: asDate(task.last_updated_time_long, task.last_updated_time),
-    startDate: asDate(task.start_date_long, task.start_date),
-    endDate: asDate(task.end_date_long, task.end_date),
+    tasklist: (task.tasklist && task.tasklist.name) || null,
+    // "None" is Zoho's placeholder milestone, not a real one.
+    milestone: (task.milestone && task.milestone.name !== 'None' && task.milestone.name) || null,
+    createdByName: (task.created_by && (task.created_by.full_name || task.created_by.name)) || null,
+    updatedByName: (task.updated_by && (task.updated_by.full_name || task.updated_by.name)) || null,
+    hasComments: Boolean(task.association_info && task.association_info.has_comments),
+    hasAttachments: Boolean(task.association_info && task.association_info.has_attachments),
+    createdAt: asDate(task.created_time, task.created_time_long, task.created_date),
+    lastUpdatedAt: asDate(task.last_modified_time, task.last_updated_time_long, task.last_updated_time),
+    startDate: asDate(task.start_date, task.start_date_long),
+    endDate: asDate(task.end_date, task.end_date_long),
     url: (task.link && task.link.self && task.link.self.url) || null
 });
 
+/**
+ * The body arrives as `comment` (not `content`) and is HTML carrying Zoho's own
+ * inline styling and `zp[@zpuser#id#Name]zp` mention markup. It is converted to
+ * plain text here so nothing downstream ever stores or renders third-party HTML
+ * — see zohoRichText.js.
+ */
 const normaliseComment = (comment = {}) => ({
     id: asId(comment.id, comment.id_string),
-    content: comment.content || comment.comment || null,
-    authorName: comment.added_by_name || comment.added_by || null,
-    createdAt: asDate(comment.created_time_long, comment.created_time, comment.added_time),
+    content: toPlainText(comment.comment || comment.content || ''),
+    authorName: (comment.created_by && (comment.created_by.full_name || comment.created_by.name))
+        || comment.added_by_name || comment.added_by || null,
+    createdAt: asDate(comment.created_time, comment.created_time_long, comment.added_time),
     attachmentCount: Array.isArray(comment.attachments) ? comment.attachments.length : 0
 });
 

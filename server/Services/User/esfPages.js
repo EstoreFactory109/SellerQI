@@ -65,6 +65,7 @@ const sanitizeDeniedPages = (keys) =>
  */
 const API_PATH_TO_PAGE = [
     ['/api/pagewise/esf/client-dashboard', 'client-dashboard'],
+    ['/api/pagewise/esf/project-status', 'status'],
 
     ['/api/pagewise/dashboard', 'dashboard'],
     ['/api/pagewise/product-checker', 'dashboard'],

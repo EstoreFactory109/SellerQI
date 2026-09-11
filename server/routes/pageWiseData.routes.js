@@ -99,6 +99,7 @@ const {
 
 const { getAsinDailyAggregation } = require('../controllers/analytics/ProductWiseAsinDailyController.js');
 const { getEsfClientDashboard } = require('../controllers/analytics/EsfClientDashboardController.js');
+const { getEsfProjectStatus } = require('../controllers/analytics/EsfProjectStatusController.js');
 const esfClientOnly = require('../middlewares/Auth/esfClientOnly.js');
 
 const { pauseKeyword, pauseKeywordsBulk } = require('../controllers/analytics/PauseKeywordController.js');
@@ -293,6 +294,11 @@ router.post('/ads/pause-and-add-to-negative-bulk', auth, getLocation, pauseAndAd
 // Query params: startDate, endDate, compareStartDate, compareEndDate (YYYY-MM-DD)
 // Cache TTL: 10 minutes (keyed per date range by the cache middleware)
 router.get('/esf/client-dashboard', auth, esfClientOnly, getLocation, analyseDataCache(600, 'esf-client-dashboard'), getEsfClientDashboard);
+
+// The Status page reads the nightly Zoho task sync. No getLocation: this is
+// project data, not marketplace data, so it has no country/region dimension.
+// Cached briefly because the underlying rows only change once a day anyway.
+router.get('/esf/project-status', auth, esfClientOnly, analyseDataCache(300, 'esf-project-status'), getEsfProjectStatus);
 
 // ===== ISSUES PAGE =====
 // Returns issues summary data
