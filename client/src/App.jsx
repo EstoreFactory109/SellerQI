@@ -71,6 +71,12 @@ import EsfClientConnectToAmazon from './Pages/ESF/Client/EsfClientConnectToAmazo
 import EsfClientConnectAccounts from './Pages/ESF/Client/EsfClientConnectAccounts.jsx';
 import EsfClientProfileSelection from './Pages/ESF/Client/EsfClientProfileSelection.jsx';
 import EsfClientDashboard from './Pages/ESF/ClientDashboard.jsx';
+import EstoreFactoryStatus from './Pages/ESF/EstoreFactory/Status.jsx';
+import EstoreFactoryUntapped from './Pages/ESF/EstoreFactory/Untapped.jsx';
+import EstoreFactoryReports from './Pages/ESF/EstoreFactory/Reports.jsx';
+import EstoreFactoryReportHistory from './Pages/ESF/EstoreFactory/ReportHistory.jsx';
+import EstoreFactoryMessages from './Pages/ESF/EstoreFactory/Messages.jsx';
+import EstoreFactoryBilling from './Pages/ESF/EstoreFactory/Billing.jsx';
 import EsfEstoreFactoryZoho from './Pages/ESF/EsfEstoreFactoryZoho.jsx';
 import EsfPageAccessGuard from './Layout/EsfPageAccessGuard.jsx';
 import AdminSubscription from './Pages/Admin/Subscription.jsx';
@@ -236,9 +242,17 @@ const App = () => {
                 client. No-ops for everyone else. */}
             <Route element={<EsfPageAccessGuard />}>
             <Route path='dashboard' element={<DashBoard />} />
-            {/* ESF-only page. Server returns 403 for non-ESF accounts and the
-                page redirects away, so it stays invisible to everyone else. */}
+            {/* ESF-only pages. Server returns 403 for non-ESF accounts (client-dashboard;
+                the rest are static/local-state so far, see the note in ClientDashboard.jsx)
+                and the guard above redirects away, so this whole group stays invisible
+                to everyone else. */}
             <Route path='client-dashboard' element={<EsfClientDashboard />} />
+            <Route path='estore-factory/status' element={<EstoreFactoryStatus />} />
+            <Route path='estore-factory/untapped' element={<EstoreFactoryUntapped />} />
+            <Route path='estore-factory/reports' element={<EstoreFactoryReports />} />
+            <Route path='estore-factory/report-history' element={<EstoreFactoryReportHistory />} />
+            <Route path='estore-factory/messages' element={<EstoreFactoryMessages />} />
+            <Route path='estore-factory/billing' element={<EstoreFactoryBilling />} />
             <Route path='review-request' element={<RecentOrders />} />
             <Route path='qmate' element={<QMate />} />
             <Route path='profitibility-dashboard' element={<ProfitibilityDashboard />} />

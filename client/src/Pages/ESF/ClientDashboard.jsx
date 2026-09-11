@@ -1,5 +1,6 @@
 import { useSelector } from 'react-redux';
 import { Navigate } from 'react-router-dom';
+import { PALETTE } from '../../Components/ESF/estoreFactoryTheme.js';
 
 /**
  * "Overview" — the landing page of the Estore Factory section on a client's own
@@ -7,9 +8,10 @@ import { Navigate } from 'react-router-dom';
  * deploy/index.html exactly: same layout, copy and color tokens.
  *
  * This design is visually distinct from the rest of the app on purpose — it uses
- * its own near-black/orange palette (not Shared/tokens.js's blue-accented
- * redesign tokens), matching the mock file-for-file. Kept local rather than
- * merged into the shared token set so a change to one doesn't drift the other.
+ * its own near-black/orange palette (Components/ESF/estoreFactoryTheme.js), not
+ * Shared/tokens.js's blue-accented redesign tokens, matching the mock file-for-file.
+ * Shared with the rest of the Estore Factory section (Status, Untapped, Reports,
+ * Messages, Billing) so the palette lives in one place.
  *
  * Data reality check: only the header (brand name, connected marketplaces) has a
  * real backend source today — both already ship on state.Auth.user via
@@ -22,29 +24,6 @@ import { Navigate } from 'react-router-dom';
  * content verbatim so the page matches the design exactly; wiring them to real
  * data needs that backend built first.
  */
-const PALETTE = {
-    bg: '#0B0C0E',
-    surface: '#14161A',
-    surfaceHover: '#171A1F',
-    border: 'rgba(255,255,255,.07)',
-    borderHover: 'rgba(255,255,255,.16)',
-    divider: 'rgba(255,255,255,.05)',
-    textPrimary: '#F2F4F7',
-    textBody: '#DCE0E6',
-    textSecondary: '#8A9099',
-    textTertiary: '#9BA1AB',
-    textMuted: '#6E747E',
-    textFaint: '#787E88',
-    accent: '#FF7A1A',
-    accentHover: '#FF8A2B',
-    teal: '#5FD3C4',
-    amberBg: 'rgba(245,166,35,.07)',
-    amberBorder: 'rgba(245,166,35,.34)',
-    amberLabel: '#E8B457',
-    amberValue: '#F7B750',
-    amberSub: '#C99B48',
-};
-
 /** Country code -> Amazon storefront domain. Matches the codes used at connect
  * time in Pages/Onboarding/ConnectToAmazon.jsx (UK, not GB). Extend as more
  * marketplaces are onboarded; unlisted codes fall back to a generic label. */

@@ -17,7 +17,16 @@
 
 /** Pages the owner can switch on/off, grouped for the permissions UI. */
 const ESF_CLIENT_PAGES = [
-    { key: 'client-dashboard', label: 'Client Dashboard', group: 'ESF-only pages' },
+    // "Overview" here is the label shown in the client's own nav (renamed from
+    // "Client Dashboard"); the key is unchanged so any already-persisted
+    // esfDeniedPages entry for it keeps working.
+    { key: 'client-dashboard', label: 'Overview', group: 'Estore Factory' },
+    { key: 'status', label: 'Status', group: 'Estore Factory' },
+    { key: 'untapped', label: 'Untapped', group: 'Estore Factory' },
+    { key: 'reports', label: 'Reports', group: 'Estore Factory' },
+    { key: 'report-history', label: 'Report History', group: 'Estore Factory' },
+    { key: 'messages', label: 'Messages', group: 'Estore Factory' },
+    { key: 'billing', label: 'Billing', group: 'Estore Factory' },
 
     { key: 'dashboard', label: 'Dashboard', group: 'Overview' },
     { key: 'qmate', label: 'Amazon Copilot', group: 'Overview' },
