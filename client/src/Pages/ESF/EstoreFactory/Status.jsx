@@ -16,13 +16,11 @@ import axiosInstance from '../../../config/axios.config.js';
 const inputStyle = { background: PALETTE.input, border: `1px solid ${PALETTE.borderHover}`, color: PALETTE.textBody };
 
 /**
- * One thing the team is blocked on.
+ * One thing the team is blocked on, and the form to clear it.
  *
- * Read-only on purpose: what the client supplies has to land back in the Zoho
- * task to be worth anything, and that write path does not exist yet — the
- * OAuth scopes are task-READ and the connected Zoho account has the Read Only
- * profile. An upload button here would be a button that silently loses files.
- * See the note in Services/AI/ZohoTaskSummaryService.js on how these are found.
+ * What the client types and attaches is posted straight onto the Zoho task, so
+ * the team sees it in the thread they already work in rather than in a second
+ * inbox. See Services/AI/ZohoTaskSummaryService.js for how these asks are found.
  */
 const ASK_LABEL = {
     photos: 'Photos needed',
@@ -43,28 +41,225 @@ const waitingSince = (value) => {
     return `Waiting ${days} days`;
 };
 
-const WaitingItem = ({ item, isFirst }) => (
-    <div
-        className="flex flex-wrap items-start gap-x-5 gap-y-2 py-4"
-        style={isFirst ? undefined : { borderTop: '1px solid rgba(245,166,35,.16)' }}
-    >
-        <div className="flex-1 min-w-[260px] flex flex-col gap-1.5">
-            <span className="text-[11.5px] font-semibold tracking-[.04em]" style={{ color: '#9C8354' }}>
-                {(ASK_LABEL[item.kind] || ASK_LABEL.other).toUpperCase()}
-            </span>
-            <span className="text-sm font-semibold" style={{ color: PALETTE.textPrimary }}>{item.ask}</span>
-            <span className="text-[12.5px]" style={{ color: '#B99A63' }}>
-                Blocking: {String(item.taskName || '').replace(/\s+/g, ' ').trim()}
-                {item.owners?.length ? ` · ${item.owners.join(', ')}` : ''}
-            </span>
+/** What this kind of ask is usually answered with, used to label the file picker. */
+const ASK_ACCEPT = {
+    photos: 'image/*',
+    video: 'video/*,image/*',
+};
+
+const MAX_REPLY_FILES = 5;
+const MAX_REPLY_FILE_MB = 50;
+
+const repliedWhen = (value) => {
+    const at = new Date(value);
+    if (Number.isNaN(at.getTime())) return '';
+    const days = Math.floor((Date.now() - at.getTime()) / 86400000);
+    if (days <= 0) return 'today';
+    if (days === 1) return 'yesterday';
+    return at.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+
+const WaitingItem = ({ item, isFirst, onReplied }) => {
+    const [open, setOpen] = useState(false);
+    const [message, setMessage] = useState('');
+    const [files, setFiles] = useState([]);
+    const [sending, setSending] = useState(false);
+    const [error, setError] = useState('');
+    const [note, setNote] = useState('');
+
+    const replies = item.yourReplies || [];
+    const nothingToSend = !message.trim() && files.length === 0;
+
+    const pickFiles = (event) => {
+        setError('');
+        const chosen = Array.from(event.target.files || []);
+        const tooBig = chosen.find((f) => f.size > MAX_REPLY_FILE_MB * 1024 * 1024);
+
+        // Caught here as well as on the server so a client on a slow connection is not
+        // told about the size limit only after uploading the whole file.
+        if (tooBig) {
+            setError(`"${tooBig.name}" is larger than ${MAX_REPLY_FILE_MB}MB`);
+            return;
+        }
+        if (chosen.length + files.length > MAX_REPLY_FILES) {
+            setError(`Please attach at most ${MAX_REPLY_FILES} files`);
+            return;
+        }
+        setFiles((current) => [...current, ...chosen]);
+        event.target.value = '';
+    };
+
+    const send = async () => {
+        if (nothingToSend || sending) return;
+
+        setSending(true);
+        setError('');
+        setNote('');
+
+        try {
+            const payload = new FormData();
+            if (message.trim()) payload.append('message', message.trim());
+            files.forEach((file) => payload.append('files', file));
+
+            const res = await axiosInstance.post(
+                `/api/pagewise/esf/project-status/tasks/${encodeURIComponent(item.taskId)}/reply`,
+                payload
+            );
+
+            const data = res.data?.data || {};
+            const failed = data.attachmentsFailed || [];
+
+            // The GET is cached for 300s, so refetching here could show a board that
+            // predates this reply. The reply is folded into local state instead.
+            onReplied(item.taskId, {
+                text: message.trim(),
+                at: data.respondedAt || new Date().toISOString(),
+                attachments: data.attachmentsSent || [],
+            });
+
+            setMessage('');
+            setFiles([]);
+            if (failed.length > 0) {
+                setNote(`Your reply was sent, but we could not upload: ${failed.join(', ')}`);
+            } else {
+                setOpen(false);
+            }
+        } catch (err) {
+            setError(err.response?.data?.message || 'We could not send your reply. Please try again.');
+        } finally {
+            setSending(false);
+        }
+    };
+
+    return (
+        <div
+            className="flex flex-col gap-3 py-4"
+            style={isFirst ? undefined : { borderTop: '1px solid rgba(245,166,35,.16)' }}
+        >
+            <div className="flex flex-wrap items-start gap-x-5 gap-y-2">
+                <div className="flex-1 min-w-[260px] flex flex-col gap-1.5">
+                    <span className="text-[11.5px] font-semibold tracking-[.04em]" style={{ color: '#9C8354' }}>
+                        {(ASK_LABEL[item.kind] || ASK_LABEL.other).toUpperCase()}
+                    </span>
+                    <span className="text-sm font-semibold" style={{ color: PALETTE.textPrimary }}>{item.ask}</span>
+                    <span className="text-[12.5px]" style={{ color: '#B99A63' }}>
+                        Blocking: {String(item.taskName || '').replace(/\s+/g, ' ').trim()}
+                        {item.owners?.length ? ` · ${item.owners.join(', ')}` : ''}
+                    </span>
+                </div>
+                <div className="flex-none flex items-center gap-3 pt-1">
+                    {waitingSince(item.since) && (
+                        <span className="text-[12.5px]" style={{ color: PALETTE.amberSub }}>
+                            {waitingSince(item.since)}
+                        </span>
+                    )}
+                    <button
+                        type="button"
+                        onClick={() => { setOpen((v) => !v); setError(''); setNote(''); }}
+                        className="text-[12.5px] font-semibold rounded-md px-3 py-1.5 transition-colors"
+                        style={{ background: open ? 'transparent' : PALETTE.accent, color: open ? PALETTE.amberSub : PALETTE.onAccentText, border: open ? `1px solid ${PALETTE.amberBorder}` : 'none' }}
+                    >
+                        {open ? 'Cancel' : replies.length > 0 ? 'Send more' : 'Respond'}
+                    </button>
+                </div>
+            </div>
+
+            {/* Their own earlier replies. Shown because the ask itself stays put until
+                the next nightly sync re-reads the thread, and without this the page
+                would keep asking for something they already sent. */}
+            {replies.length > 0 && (
+                <div className="flex flex-col gap-1.5 rounded-md px-3 py-2.5" style={{ background: 'rgba(255,255,255,.03)' }}>
+                    {replies.map((reply, i) => (
+                        <div key={i} className="flex flex-col gap-0.5">
+                            <span className="text-[11.5px] font-semibold" style={{ color: PALETTE.good }}>
+                                You replied {repliedWhen(reply.at)}
+                            </span>
+                            {reply.text && (
+                                <span className="text-[12.5px] whitespace-pre-wrap" style={{ color: PALETTE.textSecondary }}>{reply.text}</span>
+                            )}
+                            {reply.attachments?.length > 0 && (
+                                <span className="text-[11.5px]" style={{ color: PALETTE.textMuted }}>
+                                    Sent: {reply.attachments.join(', ')}
+                                </span>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {open && (
+                <div className="flex flex-col gap-2.5">
+                    <textarea
+                        value={message}
+                        onChange={(e) => setMessage(e.target.value)}
+                        rows={3}
+                        placeholder="Add anything your team should know…"
+                        className="w-full rounded-md px-3 py-2.5 text-[13px] outline-none resize-y"
+                        style={inputStyle}
+                    />
+
+                    {files.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                            {files.map((file, i) => (
+                                <span
+                                    key={`${file.name}-${i}`}
+                                    className="flex items-center gap-2 text-[11.5px] rounded-md px-2.5 py-1"
+                                    style={{ background: PALETTE.input, color: PALETTE.textSecondary, border: `1px solid ${PALETTE.border}` }}
+                                >
+                                    {file.name}
+                                    <button
+                                        type="button"
+                                        aria-label={`Remove ${file.name}`}
+                                        onClick={() => setFiles((current) => current.filter((_, idx) => idx !== i))}
+                                        style={{ color: PALETTE.textMuted }}
+                                    >
+                                        ×
+                                    </button>
+                                </span>
+                            ))}
+                        </div>
+                    )}
+
+                    <div className="flex flex-wrap items-center gap-3">
+                        <label
+                            className="text-[12.5px] font-medium rounded-md px-3 py-1.5 cursor-pointer"
+                            style={{ border: `1px solid ${PALETTE.borderHover}`, color: PALETTE.textSecondary }}
+                        >
+                            Attach files
+                            <input
+                                type="file"
+                                multiple
+                                accept={ASK_ACCEPT[item.kind] || undefined}
+                                onChange={pickFiles}
+                                className="hidden"
+                            />
+                        </label>
+                        <button
+                            type="button"
+                            onClick={send}
+                            disabled={nothingToSend || sending}
+                            className="text-[12.5px] font-semibold rounded-md px-4 py-1.5 transition-opacity"
+                            style={{
+                                background: PALETTE.accent,
+                                color: PALETTE.onAccentText,
+                                opacity: nothingToSend || sending ? 0.5 : 1,
+                                cursor: nothingToSend || sending ? 'not-allowed' : 'pointer',
+                            }}
+                        >
+                            {sending ? 'Sending…' : 'Send to team'}
+                        </button>
+                        <span className="text-[11.5px]" style={{ color: PALETTE.textMuted }}>
+                            Goes straight onto this task in your project.
+                        </span>
+                    </div>
+
+                    {error && <span className="text-[12px]" style={{ color: '#F87171' }}>{error}</span>}
+                    {note && <span className="text-[12px]" style={{ color: PALETTE.amberSub }}>{note}</span>}
+                </div>
+            )}
         </div>
-        {waitingSince(item.since) && (
-            <span className="flex-none text-[12.5px] pt-5" style={{ color: PALETTE.amberSub }}>
-                {waitingSince(item.since)}
-            </span>
-        )}
-    </div>
-);
+    );
+};
 
 /** Zoho portals name their own statuses (this one uses Open/Content/Design), so
  *  the badge falls back to neutral for anything not explicitly mapped rather
@@ -219,6 +414,29 @@ const Status = () => {
     const [requests, setRequests] = useState([]);
     const [doneOpen, setDoneOpen] = useState(false);
 
+    /**
+     * Fold a just-sent reply into the board in place.
+     *
+     * Not a refetch: the GET is cached for 300s server-side, so re-reading it here
+     * would very often return a board captured before this reply existed and the
+     * client's own message would appear to vanish.
+     */
+    const recordReply = useCallback((taskId, reply) => {
+        setBoard((current) => {
+            if (!current) return current;
+            const append = (task) => (task.taskId === taskId || task.id === taskId
+                ? { ...task, yourReplies: [...(task.yourReplies || []), reply] }
+                : task);
+
+            return {
+                ...current,
+                waitingOnYou: (current.waitingOnYou || []).map(append),
+                inProgress: (current.inProgress || []).map(append),
+                comingUp: (current.comingUp || []).map(append),
+            };
+        });
+    }, []);
+
     const waitingOnYou = board?.waitingOnYou || [];
     const inProgress = board?.inProgress || [];
     const comingUp = board?.comingUp || [];
@@ -269,15 +487,19 @@ const Status = () => {
                         </div>
                         <div style={{ borderTop: '1px solid rgba(245,166,35,.16)' }}>
                             {waitingOnYou.map((item, i) => (
-                                <WaitingItem key={`${item.taskId}-${i}`} item={item} isFirst={i === 0} />
+                                <WaitingItem
+                                    key={`${item.taskId}-${i}`}
+                                    item={item}
+                                    isFirst={i === 0}
+                                    onReplied={recordReply}
+                                />
                             ))}
                         </div>
-                        {/* Said plainly rather than offering an upload button that
-                            cannot deliver: replying into Zoho needs write scopes
-                            and a non-read-only Zoho account, neither of which
-                            exists yet. */}
+                        {/* The ask stays listed until the next nightly sync re-reads the
+                            thread and decides it is satisfied — said out loud so a client
+                            who just replied does not think it failed to register. */}
                         <p className="m-0 pb-4 pt-1 text-xs" style={{ color: PALETTE.amberSub }}>
-                            Send these to your account manager and we will pick them up from there.
+                            Replies go straight to your team on the task. Items clear from this list after tonight&apos;s update.
                         </p>
                     </section>
                 )}

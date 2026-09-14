@@ -80,6 +80,22 @@ const PATHS = {
         envelope: 'comments'
     },
 
+    /**
+     * Attachments are v2-only, unlike comments right above them.
+     *
+     * The v3 path exists and routes, but every multipart POST to it comes back
+     * 400 UPLOAD_RULE_NOT_CONFIGURED with an empty details array regardless of the
+     * field name. v2 accepts the same upload as `uploaddoc`. Verified against the
+     * live portal; the trailing slash is required.
+     */
+    taskAttachments: {
+        version: 'v2',
+        path: (portalId, projectId, taskId) =>
+            `/portal/${portalId}/projects/${projectId}/tasks/${taskId}/attachments/`,
+        envelope: 'attachments',
+        fileField: 'uploaddoc'
+    },
+
     activities: {
         version: 'v2',
         path: (portalId, projectId) => `/portal/${portalId}/projects/${projectId}/activities/`,

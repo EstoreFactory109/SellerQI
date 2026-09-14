@@ -5,6 +5,8 @@
  *   listProjects()            all projects in the connected portal
  *   createProject()           create a new project
  *   getProjectTaskUpdates()   tasks + their comments + activity feed + status posts
+ *   postTaskComment()        write a comment onto a task
+ *   uploadTaskAttachment()   attach one file to a task
  *
  * Everything returns a normalised shape rather than raw Zoho payloads, so a future UI
  * is not coupled to Zoho's field naming (which differs between v2 and v3 for the same
@@ -372,10 +374,96 @@ const getProjectTaskUpdates = async (projectId, { includeComments = true, maxTas
     };
 };
 
+/**
+ * Post a comment onto a task.
+ *
+ * The field is `comment`, not `content` — sending `content` returns a
+ * FIELDS_VALIDATION_ERROR naming the missing `comment`. This matches the read side,
+ * where normaliseComment() already reads comment.comment.
+ *
+ * Everything written here is authored in Zoho by the single org-wide connected
+ * account, so the CALLER is responsible for putting attribution in the text. Nothing
+ * in Zoho will otherwise say a client wrote it.
+ */
+const postTaskComment = async ({ projectId, taskId, comment, portalId }) => {
+    if (!projectId || !taskId) {
+        throw new ApiError(400, 'A project and task are required to post a comment');
+    }
+
+    const text = typeof comment === 'string' ? comment.trim() : '';
+    if (!text) {
+        throw new ApiError(400, 'Comment text is required');
+    }
+
+    const resolvedPortal = await resolvePortalId(portalId);
+    const spec = PATHS.taskComments;
+
+    const response = await zohoRequest({
+        method: 'POST',
+        path: spec.path(resolvedPortal, projectId, taskId),
+        version: spec.version,
+        data: { comment: text },
+        context: `Posting a comment on Zoho task ${taskId}`
+    });
+
+    const posted = unwrap(response, spec.envelope);
+    const created = Array.isArray(posted) ? posted[0] : posted;
+
+    return {
+        commentId: created ? String(created.id_string || created.id || '') || null : null,
+        raw: created || null
+    };
+};
+
+/**
+ * Attach one file to a task.
+ *
+ * v2 only. The v3 attachments path routes but rejects every multipart POST with
+ * 400 UPLOAD_RULE_NOT_CONFIGURED regardless of field name; v2 takes the same upload
+ * as `uploaddoc`. Both verified against the live portal.
+ *
+ * `file` is { blob, filename } — a Blob rather than a Buffer so a large upload can be
+ * backed by the file on disk (fs.openAsBlob) instead of being held in memory.
+ */
+const uploadTaskAttachment = async ({ projectId, taskId, file, portalId, timeout }) => {
+    if (!projectId || !taskId) {
+        throw new ApiError(400, 'A project and task are required to attach a file');
+    }
+    if (!file || !file.blob || !file.filename) {
+        throw new ApiError(400, 'A file is required');
+    }
+
+    const resolvedPortal = await resolvePortalId(portalId);
+    const spec = PATHS.taskAttachments;
+
+    const form = new FormData();
+    form.append(spec.fileField, file.blob, file.filename);
+
+    const response = await zohoRequest({
+        method: 'POST',
+        path: spec.path(resolvedPortal, projectId, taskId),
+        version: spec.version,
+        data: form,
+        multipart: true,
+        timeout,
+        context: `Attaching ${file.filename} to Zoho task ${taskId}`
+    });
+
+    const attached = unwrap(response, spec.envelope);
+    const created = Array.isArray(attached) ? attached[0] : attached;
+
+    return {
+        attachmentId: created ? String(created.id_string || created.id || '') || null : null,
+        raw: created || null
+    };
+};
+
 module.exports = {
     listPortals,
     listProjects,
     createProject,
     getProjectTaskUpdates,
+    postTaskComment,
+    uploadTaskAttachment,
     mapWithConcurrency
 };

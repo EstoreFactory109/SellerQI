@@ -98,6 +98,37 @@ const ZohoProjectTaskSchema = new mongoose.Schema({
         since: { type: Date, default: null },
     },
 
+    /**
+     * What the client sent back from the Status page, in order.
+     *
+     * TOP-LEVEL ON PURPOSE, not nested inside waitingOnClient: the nightly sync $sets
+     * that whole object every run, so anything stored in there would be silently erased
+     * the same night it was written. Nothing in ZohoTaskSync touches this field.
+     *
+     * This is a local record of what we sent to Zoho, not a second source of truth —
+     * Zoho holds the real comment. It exists so the page can say "you already answered
+     * this" before the next sync, and so a failed upload leaves a trace.
+     */
+    clientResponses: {
+        type: [new mongoose.Schema({
+            text: { type: String, default: '' },
+            attachments: {
+                type: [new mongoose.Schema({
+                    name: { type: String, default: null },
+                    size: { type: Number, default: null },
+                    // False when Zoho rejected this one file but the reply itself landed.
+                    uploaded: { type: Boolean, default: true },
+                }, { _id: false })],
+                default: [],
+            },
+            zohoCommentId: { type: String, default: null },
+            respondedAt: { type: Date, default: Date.now },
+            respondedByUserId: { type: mongoose.Schema.Types.ObjectId, default: null },
+            respondedByName: { type: String, default: null },
+        }, { _id: false })],
+        default: [],
+    },
+
     syncedAt: { type: Date, default: Date.now },
 }, { timestamps: true });
 

@@ -362,3 +362,99 @@ describe('Zoho error messages', () => {
         });
     });
 });
+
+/**
+ * Writing back to a task.
+ *
+ * The field names and API generations below were established by probing the live
+ * portal, and both differ from what the surrounding code would suggest: comments take
+ * `comment` (not `content`, the name used almost everywhere else for body text), and
+ * attachments are v2-only even though comments on the same task are v3. Getting either
+ * wrong fails at runtime with a validation error that reads like a bug in the caller.
+ */
+describe('postTaskComment', () => {
+    beforeEach(() => {
+        axios.mockReset();
+        axios.mockResolvedValue({ status: 200, data: { comments: [{ id_string: 'c-1' }] } });
+    });
+
+    test('sends the body as `comment`, the name Zoho actually requires', async () => {
+        await ZohoProjectsService.postTaskComment({
+            projectId: 'proj-1', taskId: 'task-1', comment: 'Photos attached.',
+        });
+
+        const sent = axios.mock.calls[0][0];
+        expect(sent.method).toBe('POST');
+        expect(sent.data).toEqual({ comment: 'Photos attached.' });
+        // `content` is what the read side normalises TO, and sending it back returns
+        // FIELDS_VALIDATION_ERROR / Input Parameter Missing.
+        expect(sent.data).not.toHaveProperty('content');
+    });
+
+    test('posts to the v3 task-comments path', async () => {
+        await ZohoProjectsService.postTaskComment({ projectId: 'p', taskId: 't', comment: 'x' });
+
+        expect(axios.mock.calls[0][0].url).toBe(
+            'https://projectsapi.zoho.com/api/v3/portal/portal-1/projects/p/tasks/t/comments'
+        );
+    });
+
+    test('returns the new comment id so the reply can be recorded locally', async () => {
+        const out = await ZohoProjectsService.postTaskComment({ projectId: 'p', taskId: 't', comment: 'x' });
+        expect(out.commentId).toBe('c-1');
+    });
+
+    test('refuses empty text rather than posting a blank comment', async () => {
+        await expect(
+            ZohoProjectsService.postTaskComment({ projectId: 'p', taskId: 't', comment: '   ' })
+        ).rejects.toThrow(/required/i);
+        expect(axios).not.toHaveBeenCalled();
+    });
+});
+
+describe('uploadTaskAttachment', () => {
+    const file = () => ({ blob: new Blob(['x']), filename: 'front.jpg' });
+
+    beforeEach(() => {
+        axios.mockReset();
+        axios.mockResolvedValue({ status: 200, data: { attachments: [{ id_string: 'a-1' }] } });
+    });
+
+    test('uploads on v2 — the v3 path rejects every multipart POST', async () => {
+        await ZohoProjectsService.uploadTaskAttachment({ projectId: 'p', taskId: 't', file: file() });
+
+        // /api/v3/...  returns 400 UPLOAD_RULE_NOT_CONFIGURED whatever the field name.
+        expect(axios.mock.calls[0][0].url).toBe(
+            'https://projectsapi.zoho.com/restapi/portal/portal-1/projects/p/tasks/t/attachments/'
+        );
+    });
+
+    test('sends the file as `uploaddoc` in multipart form data', async () => {
+        await ZohoProjectsService.uploadTaskAttachment({ projectId: 'p', taskId: 't', file: file() });
+
+        const sent = axios.mock.calls[0][0];
+        expect(sent.data).toBeInstanceOf(FormData);
+        expect(sent.data.get('uploaddoc')).toBeTruthy();
+    });
+
+    test('never sets Content-Type by hand — that would strip the boundary', async () => {
+        await ZohoProjectsService.uploadTaskAttachment({ projectId: 'p', taskId: 't', file: file() });
+
+        expect(axios.mock.calls[0][0].headers['Content-Type']).toBeUndefined();
+    });
+
+    test('uses the caller\'s longer timeout for uploads', async () => {
+        await ZohoProjectsService.uploadTaskAttachment({
+            projectId: 'p', taskId: 't', file: file(), timeout: 180000,
+        });
+
+        expect(axios.mock.calls[0][0].timeout).toBe(180000);
+    });
+
+    test('refuses a missing file instead of posting an empty upload', async () => {
+        await expect(
+            ZohoProjectsService.uploadTaskAttachment({ projectId: 'p', taskId: 't', file: null })
+        ).rejects.toThrow(/file is required/i);
+        expect(axios).not.toHaveBeenCalled();
+    });
+});

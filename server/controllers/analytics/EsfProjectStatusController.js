@@ -53,6 +53,17 @@ const toClientTask = (task) => {
         waitingOnYou: task.waitingOnClient?.ask
             ? { ask: task.waitingOnClient.ask, kind: task.waitingOnClient.kind, since: task.waitingOnClient.since }
             : null,
+        // The client's own replies, so the page can show that an ask was already
+        // answered. Safe to return in full: this is the client's own text, not the
+        // agency's internal discussion. The ask itself is left in place until the next
+        // sync re-reads the thread and decides it is satisfied.
+        yourReplies: (task.clientResponses || [])
+            .map((r) => ({
+                text: r.text || '',
+                at: r.respondedAt,
+                attachments: (r.attachments || []).filter((a) => a.uploaded).map((a) => a.name),
+            }))
+            .sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0)),
     };
 };
 
@@ -100,6 +111,7 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
                 tasklist: t.tasklist,
                 owners: t.owners,
                 ...t.waitingOnYou,
+                yourReplies: t.yourReplies,
             }))
             .sort((a, b) => new Date(a.since || 0) - new Date(b.since || 0));
 

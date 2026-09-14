@@ -168,6 +168,8 @@ const retryAfterMs = (headers) => {
  * @param {Object}  options.params    query string
  * @param {Object}  options.data      request body
  * @param {boolean} options.form      send the body form-encoded (required by v2 writes)
+ * @param {boolean} options.multipart send `data` as-is as FormData (required by uploads)
+ * @param {number}  options.timeout   override the default timeout, for slow uploads
  * @param {string}  options.context   phrase used in error messages
  */
 const zohoRequest = async ({
@@ -177,6 +179,8 @@ const zohoRequest = async ({
     params,
     data,
     form = false,
+    multipart = false,
+    timeout,
     context = 'Zoho Projects request'
 }) => {
     const apiDomain = await resolveApiDomain();
@@ -197,7 +201,12 @@ const zohoRequest = async ({
 
         let body = data;
         if (data !== undefined) {
-            if (form) {
+            if (multipart) {
+                // Deliberately sets no Content-Type: the boundary is generated with the
+                // FormData and setting the header by hand drops it, which Zoho rejects as
+                // a malformed upload rather than a missing field.
+                body = data;
+            } else if (form) {
                 headers['Content-Type'] = 'application/x-www-form-urlencoded';
                 body = new URLSearchParams(data);
             } else {
@@ -212,7 +221,11 @@ const zohoRequest = async ({
                 params,
                 data: body,
                 headers,
-                timeout: REQUEST_TIMEOUT_MS
+                // An upload of a client's video is not comparable to a JSON read, so the
+                // shared timeout is overridable rather than generous for every call.
+                timeout: timeout || REQUEST_TIMEOUT_MS,
+                maxBodyLength: Infinity,
+                maxContentLength: Infinity
             });
 
             return response.data;

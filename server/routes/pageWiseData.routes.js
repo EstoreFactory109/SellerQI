@@ -100,6 +100,9 @@ const {
 const { getAsinDailyAggregation } = require('../controllers/analytics/ProductWiseAsinDailyController.js');
 const { getEsfClientDashboard } = require('../controllers/analytics/EsfClientDashboardController.js');
 const { getEsfProjectStatus } = require('../controllers/analytics/EsfProjectStatusController.js');
+const { postEsfTaskReply } = require('../controllers/analytics/EsfProjectReplyController.js');
+const { zohoUpload, MAX_FILES, MAX_FILE_BYTES } = require('../middlewares/multer/zohoUpload.js');
+const { ApiResponse } = require('../utils/ApiResponse.js');
 const esfClientOnly = require('../middlewares/Auth/esfClientOnly.js');
 
 const { pauseKeyword, pauseKeywordsBulk } = require('../controllers/analytics/PauseKeywordController.js');
@@ -299,6 +302,39 @@ router.get('/esf/client-dashboard', auth, esfClientOnly, getLocation, analyseDat
 // project data, not marketplace data, so it has no country/region dimension.
 // Cached briefly because the underlying rows only change once a day anyway.
 router.get('/esf/project-status', auth, esfClientOnly, analyseDataCache(300, 'esf-project-status'), getEsfProjectStatus);
+
+/**
+ * Reply to a task from the Status page — text, files, or both, sent on to Zoho.
+ *
+ * Not cached, obviously, and deliberately not behind analyseDataCache: the GET above
+ * caches for 300s, so a client can briefly still see "waiting on you" after replying.
+ * The response carries the new state so the page can update without a refetch.
+ *
+ * Multer errors (too large, too many, wrong type) arrive as thrown errors rather than
+ * validation results, so they are translated here instead of in the controller — the
+ * request never reaches it.
+ */
+router.post(
+    '/esf/project-status/tasks/:taskId/reply',
+    auth,
+    esfClientOnly,
+    (req, res, next) => zohoUpload.array('files', MAX_FILES)(req, res, (error) => {
+        if (!error) {
+            return next();
+        }
+
+        const message = error.code === 'LIMIT_FILE_SIZE'
+            ? `Each file must be under ${Math.round(MAX_FILE_BYTES / (1024 * 1024))}MB`
+            : error.code === 'LIMIT_FILE_COUNT'
+                ? `Please attach at most ${MAX_FILES} files`
+                : error.code === 'UNSUPPORTED_FILE_TYPE'
+                    ? error.message
+                    : 'We could not read that upload';
+
+        return res.status(400).json(new ApiResponse(400, '', message));
+    }),
+    postEsfTaskReply
+);
 
 // ===== ISSUES PAGE =====
 // Returns issues summary data
