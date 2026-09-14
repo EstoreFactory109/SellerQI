@@ -75,8 +75,27 @@ const ZohoProjectTaskSchema = new mongoose.Schema({
         generatedBy: { type: String, default: null },
         model: { type: String, default: null },
         sourceHash: { type: String, default: null },
+        // Which prompt produced this. Reuse requires it to match the current
+        // one, so a prompt change regenerates instead of serving stale readings
+        // of an unchanged thread.
+        promptVersion: { type: Number, default: null },
         commentCount: { type: Number, default: 0 },
         generatedAt: { type: Date, default: null },
+    },
+
+    /**
+     * What the discussion says the agency is waiting on the CLIENT for —
+     * photos, an approval, information. Null is the common and correct answer;
+     * the prompt is deliberately strict because a false "you're blocking us" is
+     * worse than a missed one.
+     *
+     * `since` is computed server-side from the latest comment, never asked of
+     * the model — LLMs are unreliable with dates.
+     */
+    waitingOnClient: {
+        ask: { type: String, default: null },
+        kind: { type: String, default: null },
+        since: { type: Date, default: null },
     },
 
     syncedAt: { type: Date, default: Date.now },

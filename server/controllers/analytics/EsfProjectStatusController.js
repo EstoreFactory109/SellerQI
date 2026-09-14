@@ -50,6 +50,9 @@ const toClientTask = (task) => {
         summary: task.commentSummary?.text || null,
         updateCount: comments.length,
         lastUpdateAt: latest?.createdAt || null,
+        waitingOnYou: task.waitingOnClient?.ask
+            ? { ask: task.waitingOnClient.ask, kind: task.waitingOnClient.kind, since: task.waitingOnClient.since }
+            : null,
     };
 };
 
@@ -71,6 +74,7 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
             return res.status(200).json(new ApiResponse(200, {
                 linked: false,
                 projectName: null,
+                waitingOnYou: [],
                 inProgress: [],
                 comingUp: [],
                 completed: [],
@@ -80,11 +84,31 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
 
         const board = await ZohoTaskSync.getTaskBoard(projectId);
 
+        const inProgress = board.inProgress.map(toClientTask);
+        const comingUp = board.comingUp.map(toClientTask);
+
+        // Tasks blocked on the client, surfaced as their own list AND left in
+        // place below — the same task legitimately appears in both, which is
+        // what the design intends: the banner is the call to action, the table
+        // is where the work lives. Completed tasks are excluded: whatever was
+        // once needed clearly arrived.
+        const waitingOnYou = [...inProgress, ...comingUp]
+            .filter((t) => t.waitingOnYou)
+            .map((t) => ({
+                taskId: t.id,
+                taskName: t.name,
+                tasklist: t.tasklist,
+                owners: t.owners,
+                ...t.waitingOnYou,
+            }))
+            .sort((a, b) => new Date(a.since || 0) - new Date(b.since || 0));
+
         return res.status(200).json(new ApiResponse(200, {
             linked: true,
             projectName: user.zohoProject.projectName || null,
-            inProgress: board.inProgress.map(toClientTask),
-            comingUp: board.comingUp.map(toClientTask),
+            waitingOnYou,
+            inProgress,
+            comingUp,
             completed: board.completed.map(toClientTask),
             // Surfaced so the page can say how fresh this is — it is a nightly
             // sync, and silently showing day-old data as live would be worse.

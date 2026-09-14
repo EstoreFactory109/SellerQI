@@ -15,216 +15,56 @@ import axiosInstance from '../../../config/axios.config.js';
  */
 const inputStyle = { background: PALETTE.input, border: `1px solid ${PALETTE.borderHover}`, color: PALETTE.textBody };
 
-const fileSize = (bytes) => (bytes > 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
+/**
+ * One thing the team is blocked on.
+ *
+ * Read-only on purpose: what the client supplies has to land back in the Zoho
+ * task to be worth anything, and that write path does not exist yet — the
+ * OAuth scopes are task-READ and the connected Zoho account has the Read Only
+ * profile. An upload button here would be a button that silently loses files.
+ * See the note in Services/AI/ZohoTaskSummaryService.js on how these are found.
+ */
+const ASK_LABEL = {
+    photos: 'Photos needed',
+    video: 'Video needed',
+    approval: 'Approval needed',
+    information: 'Information needed',
+    content: 'Content needed',
+    access: 'Access needed',
+    other: 'Needs your input',
+};
 
-const CommentThread = ({ comments, draft, onDraftChange, onPost, placeholder = 'Add a comment or question for your team…', tint = 'rgba(59,130,246,.16)' }) => (
-    <div className="flex flex-col gap-3 pt-3.5" style={dividerStyle()}>
-        {comments.map((c, i) => (
-            <div key={i} className="flex gap-2.5 items-start">
-                <span className="w-[22px] h-[22px] flex-none rounded-full" style={{ background: c.tint || tint, border: '1px solid rgba(255,255,255,.12)' }} />
-                <div className="flex flex-col gap-[3px]">
-                    <span className="text-xs" style={{ color: PALETTE.textSecondary }}>
-                        <span className="font-semibold" style={{ color: PALETTE.textBody }}>{c.who}</span> · {c.time}
-                    </span>
-                    <span className="text-[12.5px] leading-[1.55]" style={{ color: PALETTE.textInputBody }}>{c.text}</span>
-                </div>
-            </div>
-        ))}
-        <div className="flex gap-2.5 items-start">
-            <textarea
-                value={draft}
-                onChange={(e) => onDraftChange(e.target.value)}
-                placeholder={placeholder}
-                className="flex-1 rounded-lg px-3 py-2.5 text-[12.5px] leading-[1.5] outline-none resize-y"
-                style={{ ...inputStyle, minHeight: 40 }}
-            />
-            <button type="button" onClick={onPost} className="flex-none text-[12.5px] font-semibold px-4 py-2.5 rounded-lg" style={{ color: PALETTE.amberLabel, border: `1px solid ${PALETTE.amberBorder}` }}>
-                Comment
-            </button>
+const waitingSince = (value) => {
+    if (!value) return null;
+    const days = Math.floor((Date.now() - new Date(value).getTime()) / 86400000);
+    if (Number.isNaN(days)) return null;
+    if (days <= 0) return 'Asked today';
+    if (days === 1) return 'Waiting 1 day';
+    return `Waiting ${days} days`;
+};
+
+const WaitingItem = ({ item, isFirst }) => (
+    <div
+        className="flex flex-wrap items-start gap-x-5 gap-y-2 py-4"
+        style={isFirst ? undefined : { borderTop: '1px solid rgba(245,166,35,.16)' }}
+    >
+        <div className="flex-1 min-w-[260px] flex flex-col gap-1.5">
+            <span className="text-[11.5px] font-semibold tracking-[.04em]" style={{ color: '#9C8354' }}>
+                {(ASK_LABEL[item.kind] || ASK_LABEL.other).toUpperCase()}
+            </span>
+            <span className="text-sm font-semibold" style={{ color: PALETTE.textPrimary }}>{item.ask}</span>
+            <span className="text-[12.5px]" style={{ color: '#B99A63' }}>
+                Blocking: {String(item.taskName || '').replace(/\s+/g, ' ').trim()}
+                {item.owners?.length ? ` · ${item.owners.join(', ')}` : ''}
+            </span>
         </div>
+        {waitingSince(item.since) && (
+            <span className="flex-none text-[12.5px] pt-5" style={{ color: PALETTE.amberSub }}>
+                {waitingSince(item.since)}
+            </span>
+        )}
     </div>
 );
-
-/** "Waiting on you" #1 — needs product photos. */
-const PhotoWaitingItem = () => {
-    const [mode, setMode] = useState('pending'); // pending | open | done
-    const [files, setFiles] = useState([]);
-    const [draft, setDraft] = useState('');
-    const [comments, setComments] = useState([
-        { who: 'You', time: 'Aug 31', text: 'Please keep the phrase "dishwasher safe" in the second bullet — customers ask about it constantly.' },
-    ]);
-
-    const post = () => {
-        const t = draft.trim();
-        if (!t) return;
-        setComments((c) => [...c, { who: 'You', time: 'Just now', text: t, tint: 'rgba(59,130,246,.16)' }]);
-        setDraft('');
-    };
-
-    if (mode === 'done') {
-        return (
-            <div className="flex items-center gap-3.5">
-                <span className="w-[22px] h-[22px] flex-none rounded-md flex items-center justify-center" style={{ background: 'rgba(34,197,94,.12)' }}>
-                    <span className="w-[9px] h-[9px] rounded-full" style={{ background: PALETTE.good }} />
-                </span>
-                <div className="flex-1 flex flex-col gap-1">
-                    <span className="text-sm font-semibold line-through" style={{ color: '#C6CBD2', textDecorationColor: 'rgba(255,255,255,.2)' }}>We need your product photos for the espresso tamper</span>
-                    <span className="text-[12.5px]" style={{ color: PALETTE.good }}>{files.length} photos sent to your team — Priya is picking the hero shot</span>
-                </div>
-                <button type="button" onClick={() => setMode('open')} className="flex-none text-[12.5px]" style={{ color: PALETTE.textSecondary }}>View thread</button>
-            </div>
-        );
-    }
-
-    return (
-        <>
-            <div className="flex items-center gap-5 flex-wrap">
-                <div className="flex-1 min-w-[240px] flex flex-col gap-[5px]">
-                    <span className="text-[11.5px]" style={{ color: '#9C8354', fontFamily: 'ui-monospace, Menlo, monospace' }}>EF-1028</span>
-                    <span className="text-sm font-semibold" style={{ color: PALETTE.textPrimary }}>We need your product photos for the espresso tamper</span>
-                    <span className="text-[12.5px]" style={{ color: '#B99A63' }}>Blocking: Building A+ content for the espresso tamper</span>
-                </div>
-                <span className="flex-none text-[12.5px]" style={{ color: PALETTE.amberSub }}>Waiting 5 days</span>
-                <button type="button" onClick={() => setMode(mode === 'open' ? 'pending' : 'open')} className="flex-none text-[12.5px]" style={{ color: PALETTE.amberSub }}>Comment</button>
-                <button
-                    type="button"
-                    onClick={() => setMode(mode === 'open' ? 'pending' : 'open')}
-                    className="flex-none text-[12.5px] font-bold px-4 py-2.5 rounded-lg"
-                    style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}
-                >
-                    Upload photos
-                </button>
-            </div>
-
-            {mode === 'open' && (
-                <div className="rounded-lg flex flex-col gap-4 mt-4" style={{ background: 'rgba(0,0,0,.24)', border: `1px solid ${PALETTE.amberBorder}`, padding: '18px 20px' }}>
-                    <label
-                        className="flex flex-col items-center gap-[7px] rounded-lg py-[26px] px-5 cursor-pointer"
-                        style={{ border: `1px dashed ${PALETTE.amberBorder}`, background: 'rgba(245,166,35,.03)' }}
-                    >
-                        <span className="text-[13.5px] font-semibold" style={{ color: PALETTE.textPrimary }}>Choose photos, or drop them here</span>
-                        <span className="text-xs" style={{ color: '#B99A63' }}>JPG or PNG, at least 1600px on the long edge — four lifestyle shots is ideal</span>
-                        <input
-                            type="file" multiple accept="image/*" className="hidden"
-                            onChange={(e) => {
-                                const list = Array.from(e.target.files || []).map((f) => ({ name: f.name, size: fileSize(f.size) }));
-                                if (list.length) setFiles((prev) => [...prev, ...list]);
-                            }}
-                        />
-                    </label>
-
-                    {files.length > 0 && (
-                        <div className="flex flex-wrap gap-2">
-                            {files.map((f, i) => (
-                                <span key={i} className="flex items-center gap-2.5 rounded-md px-3 py-2" style={{ background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.1)' }}>
-                                    <span className="w-3.5 h-3.5 rounded-sm" style={{ background: '#8FA0B8' }} />
-                                    <span className="text-[12.5px]" style={{ color: PALETTE.textBody }}>{f.name}</span>
-                                    <span className="text-[11.5px]" style={{ color: PALETTE.textMuted }}>{f.size}</span>
-                                </span>
-                            ))}
-                        </div>
-                    )}
-                    {files.length > 0 && (
-                        <div className="flex items-center gap-3">
-                            <button type="button" onClick={() => setMode('done')} className="text-[12.5px] font-bold px-[18px] py-2.5 rounded-lg" style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}>
-                                Send {files.length === 1 ? '1 photo' : `${files.length} photos`} to your team
-                            </button>
-                            <span className="text-xs" style={{ color: PALETTE.textSecondary }}>Priya is notified the moment these land.</span>
-                        </div>
-                    )}
-
-                    <CommentThread comments={comments} draft={draft} onDraftChange={setDraft} onPost={post} />
-                </div>
-            )}
-        </>
-    );
-};
-
-/** "Waiting on you" #2 — needs Q4 ad budget approval. */
-const BudgetWaitingItem = () => {
-    const [mode, setMode] = useState('pending'); // pending | open | done
-    const [draft, setDraft] = useState('');
-    const [comments, setComments] = useState([
-        { who: 'Marcus Oyelaran', time: 'Aug 31', text: 'Happy to walk through the forecast on a call if that is easier — the increase pays for itself at a 2.4 ROAS.', tint: 'rgba(34,197,94,.16)' },
-    ]);
-
-    const post = () => {
-        const t = draft.trim();
-        if (!t) return;
-        setComments((c) => [...c, { who: 'You', time: 'Just now', text: t, tint: 'rgba(59,130,246,.16)' }]);
-        setDraft('');
-    };
-
-    if (mode === 'done') {
-        return (
-            <div className="flex items-center gap-3.5">
-                <span className="w-[22px] h-[22px] flex-none rounded-md flex items-center justify-center" style={{ background: 'rgba(34,197,94,.12)' }}>
-                    <span className="w-[9px] h-[9px] rounded-full" style={{ background: PALETTE.good }} />
-                </span>
-                <div className="flex-1 flex flex-col gap-1">
-                    <span className="text-sm font-semibold line-through" style={{ color: '#C6CBD2', textDecorationColor: 'rgba(255,255,255,.2)' }}>Approve the Q4 ad budget increase to $9,500 / month</span>
-                    <span className="text-[12.5px]" style={{ color: PALETTE.good }}>Approved — Marcus is applying it to your campaigns</span>
-                </div>
-                <button type="button" onClick={() => setMode('open')} className="flex-none text-[12.5px]" style={{ color: PALETTE.textSecondary }}>View thread</button>
-            </div>
-        );
-    }
-
-    return (
-        <>
-            <div className="flex items-center gap-5 flex-wrap">
-                <div className="flex-1 min-w-[240px] flex flex-col gap-[5px]">
-                    <span className="text-[11.5px]" style={{ color: '#9C8354', fontFamily: 'ui-monospace, Menlo, monospace' }}>EF-1039</span>
-                    <span className="text-sm font-semibold" style={{ color: PALETTE.textPrimary }}>Approve the Q4 ad budget increase to $9,500 / month</span>
-                    <span className="text-[12.5px]" style={{ color: '#B99A63' }}>Blocking: Restructuring your Sponsored Products campaigns</span>
-                </div>
-                <span className="flex-none text-[12.5px]" style={{ color: PALETTE.amberSub }}>Waiting 2 days</span>
-                <button type="button" onClick={() => setMode(mode === 'open' ? 'pending' : 'open')} className="flex-none text-[12.5px]" style={{ color: PALETTE.amberSub }}>Comment</button>
-                <button
-                    type="button"
-                    onClick={() => setMode(mode === 'open' ? 'pending' : 'open')}
-                    className="flex-none text-[12.5px] font-bold px-4 py-2.5 rounded-lg"
-                    style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}
-                >
-                    Review budget
-                </button>
-            </div>
-
-            {mode === 'open' && (
-                <div className="rounded-lg flex flex-col gap-4 mt-4" style={{ background: 'rgba(0,0,0,.24)', border: `1px solid ${PALETTE.amberBorder}`, padding: '18px 20px' }}>
-                    <div className="flex items-end gap-[34px] flex-wrap">
-                        <div className="flex flex-col gap-[5px]">
-                            <span className="text-[11.5px] tracking-[.04em]" style={{ color: '#8A7654' }}>CURRENT</span>
-                            <span className="text-[22px] font-semibold tracking-[-0.02em]" style={{ color: PALETTE.textTertiary }}>$7,200<span className="text-[13px] font-medium"> /mo</span></span>
-                        </div>
-                        <span className="text-base pb-1" style={{ color: PALETTE.textMuted }}>→</span>
-                        <div className="flex flex-col gap-[5px]">
-                            <span className="text-[11.5px] tracking-[.04em]" style={{ color: PALETTE.amberSub }}>PROPOSED FOR Q4</span>
-                            <span className="text-[26px] font-bold tracking-[-0.02em]" style={{ color: PALETTE.textPrimary }}>$9,500<span className="text-sm font-medium" style={{ color: PALETTE.textTertiary }}> /mo</span></span>
-                        </div>
-                        <p className="m-0 flex-1 text-[12.5px] leading-[1.6] max-w-[420px]" style={{ color: '#B7BDC6' }}>
-                            Marcus wants the extra spend on the three keyword groups that already convert above 14%, running from Oct 1 to Dec 24. It is reversible at any point.
-                        </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                        <button type="button" onClick={() => setMode('done')} className="text-[12.5px] font-bold px-[18px] py-2.5 rounded-lg" style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}>
-                            Approve $9,500 / month
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setDraft((d) => d || 'We could do $8,400 — tell me what that buys.')}
-                            className="text-[12.5px] px-4 py-2.5 rounded-lg"
-                            style={{ color: PALETTE.textBody, border: `1px solid ${PALETTE.borderHover}` }}
-                        >
-                            Suggest a different amount
-                        </button>
-                    </div>
-                    <CommentThread comments={comments} draft={draft} onDraftChange={setDraft} onPost={post} />
-                </div>
-            )}
-        </>
-    );
-};
 
 /** Zoho portals name their own statuses (this one uses Open/Content/Design), so
  *  the badge falls back to neutral for anything not explicitly mapped rather
@@ -379,6 +219,7 @@ const Status = () => {
     const [requests, setRequests] = useState([]);
     const [doneOpen, setDoneOpen] = useState(false);
 
+    const waitingOnYou = board?.waitingOnYou || [];
     const inProgress = board?.inProgress || [];
     const comingUp = board?.comingUp || [];
     const completed = board?.completed || [];
@@ -412,19 +253,34 @@ const Status = () => {
                     </p>
                 </header>
 
-                <section className="rounded-lg" style={{ background: PALETTE.amberBg, border: `1px solid ${PALETTE.amberBorder}`, padding: '20px 24px 8px' }}>
-                    <div className="flex items-center gap-2.5 pb-1.5">
-                        <span className="w-[7px] h-[7px] rounded-full" style={{ background: PALETTE.amberValue }} />
-                        <h2 className="m-0 text-[15px] font-bold tracking-[-0.01em]" style={{ color: '#F7C173' }}>Waiting on you</h2>
-                        <span className="text-xs" style={{ color: PALETTE.amberSub }}>Work is paused until these come back</span>
-                    </div>
-                    <div className="flex flex-col gap-4 py-4" style={{ borderTop: `1px solid rgba(245,166,35,.16)` }}>
-                        <PhotoWaitingItem />
-                    </div>
-                    <div className="flex flex-col gap-4 py-4" style={{ borderTop: `1px solid rgba(245,166,35,.16)` }}>
-                        <BudgetWaitingItem />
-                    </div>
-                </section>
+                {/* Only rendered when something is actually outstanding — an
+                    empty amber "Waiting on you" banner reads as a warning about
+                    nothing. */}
+                {waitingOnYou.length > 0 && (
+                    <section className="rounded-lg" style={{ background: PALETTE.amberBg, border: `1px solid ${PALETTE.amberBorder}`, padding: '20px 24px 8px' }}>
+                        <div className="flex items-center gap-2.5 pb-1.5 flex-wrap">
+                            <span className="w-[7px] h-[7px] rounded-full" style={{ background: PALETTE.amberValue }} />
+                            <h2 className="m-0 text-[15px] font-bold tracking-[-0.01em]" style={{ color: '#F7C173' }}>Waiting on you</h2>
+                            <span className="text-xs" style={{ color: PALETTE.amberSub }}>
+                                {waitingOnYou.length === 1
+                                    ? 'Work is paused until this comes back'
+                                    : `Work is paused on ${waitingOnYou.length} items until these come back`}
+                            </span>
+                        </div>
+                        <div style={{ borderTop: '1px solid rgba(245,166,35,.16)' }}>
+                            {waitingOnYou.map((item, i) => (
+                                <WaitingItem key={`${item.taskId}-${i}`} item={item} isFirst={i === 0} />
+                            ))}
+                        </div>
+                        {/* Said plainly rather than offering an upload button that
+                            cannot deliver: replying into Zoho needs write scopes
+                            and a non-read-only Zoho account, neither of which
+                            exists yet. */}
+                        <p className="m-0 pb-4 pt-1 text-xs" style={{ color: PALETTE.amberSub }}>
+                            Send these to your account manager and we will pick them up from there.
+                        </p>
+                    </section>
+                )}
 
                 <section className="flex flex-col gap-3">
                     <div className="flex items-center gap-2.5 flex-wrap">

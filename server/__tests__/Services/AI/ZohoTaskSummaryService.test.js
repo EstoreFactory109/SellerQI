@@ -35,7 +35,12 @@ const THREAD = [
     comment(3, 'Waiting on the client for product photos.'),
 ];
 
-const aiReplies = (text) => mockCreate.mockResolvedValue({ choices: [{ message: { content: text } }] });
+/** The model now answers with JSON: a summary plus an optional pending ask. */
+const aiReplies = (summary, waitingOnClient = null) =>
+    mockCreate.mockResolvedValue({
+        choices: [{ message: { content: JSON.stringify({ summary, waitingOnClient }) } }],
+    });
+const aiRepliesRaw = (content) => mockCreate.mockResolvedValue({ choices: [{ message: { content } }] });
 
 afterAll(() => {
     if (ORIGINAL_KEY === undefined) delete process.env.OPENAPI_KEY;
@@ -65,7 +70,7 @@ describe('summariseTask — reuse', () => {
 
         const out = await svc.summariseTask(
             { name: 'T', comments: THREAD },
-            { previousHash: hash, previousText: 'Stored summary.' }
+            { previousHash: hash, previousText: 'Stored summary.', previousVersion: svc.PROMPT_VERSION }
         );
 
         expect(out.reused).toBe(true);
@@ -79,7 +84,7 @@ describe('summariseTask — reuse', () => {
 
         const out = await svc.summariseTask(
             { name: 'T', comments: [...THREAD, comment(4, 'Photos received.')] },
-            { previousHash: svc.hashThread(THREAD), previousText: 'Stored summary.' }
+            { previousHash: svc.hashThread(THREAD), previousText: 'Stored summary.', previousVersion: svc.PROMPT_VERSION }
         );
 
         expect(out.reused).toBe(false);
@@ -110,7 +115,7 @@ describe('summariseTask — never hard-fails', () => {
 
     test('falls back when the model returns empty content', async () => {
         const svc = loadService('key');
-        aiReplies('   ');
+        aiRepliesRaw('   ');
 
         const out = await svc.summariseTask({ name: 'T', comments: THREAD });
         expect(out.generatedBy).toBe('fallback');
@@ -184,5 +189,92 @@ describe('summariseTask — prompt', () => {
         await svc.summariseTask({ name: 'Rewriting bullet points', comments: THREAD });
 
         expect(mockCreate.mock.calls[0][0].messages[1].content).toContain('Rewriting bullet points');
+    });
+});
+
+describe('summariseTask — prompt versioning', () => {
+    test('an unchanged thread is re-summarised when the prompt version moved on', async () => {
+        const svc = loadService('key');
+        aiReplies('Regenerated.');
+
+        const out = await svc.summariseTask(
+            { name: 'T', comments: THREAD },
+            {
+                previousHash: svc.hashThread(THREAD),
+                previousText: 'Written by the old prompt.',
+                previousVersion: svc.PROMPT_VERSION - 1,
+            }
+        );
+
+        // The thread is identical, so the hash alone would have served stale text
+        // produced by a prompt we no longer use.
+        expect(out.reused).toBe(false);
+        expect(out.text).toBe('Regenerated.');
+    });
+
+    test('reuse carries the previously detected ask, not just the summary', async () => {
+        const svc = loadService('key');
+        const ask = { ask: 'Send four lifestyle photos', kind: 'photos' };
+
+        const out = await svc.summariseTask(
+            { name: 'T', comments: THREAD },
+            {
+                previousHash: svc.hashThread(THREAD),
+                previousText: 'Stored.',
+                previousVersion: svc.PROMPT_VERSION,
+                previousAsk: ask,
+            }
+        );
+
+        // Dropping it on reuse would make the Waiting-on-you banner empty itself
+        // on the first night nothing changed.
+        expect(out.waitingOnClient).toEqual(ask);
+        expect(mockCreate).not.toHaveBeenCalled();
+    });
+});
+
+describe('waitingOnClient extraction', () => {
+    test('passes through a well-formed ask', async () => {
+        const svc = loadService('key');
+        aiReplies('We need photos.', { ask: 'Send four lifestyle photos', kind: 'photos' });
+
+        const out = await svc.summariseTask({ name: 'T', comments: THREAD });
+        expect(out.waitingOnClient).toEqual({ ask: 'Send four lifestyle photos', kind: 'photos' });
+    });
+
+    test('null is a normal answer, not a failure', async () => {
+        const svc = loadService('key');
+        aiReplies('Work is progressing.', null);
+
+        const out = await svc.summariseTask({ name: 'T', comments: THREAD });
+        expect(out.waitingOnClient).toBeNull();
+        expect(out.generatedBy).toBe('ai');
+    });
+
+    test('an unknown kind is coerced rather than shown raw', async () => {
+        const svc = loadService('key');
+        aiReplies('S.', { ask: 'Do the thing', kind: 'wildly-invented-kind' });
+
+        // The UI maps kind to a label; an unmapped value would render blank.
+        expect((await svc.summariseTask({ name: 'T', comments: THREAD })).waitingOnClient)
+            .toEqual({ ask: 'Do the thing', kind: 'other' });
+    });
+
+    test('drops a malformed or empty ask instead of showing an empty banner row', async () => {
+        const svc = loadService('key');
+        for (const bad of [{ kind: 'photos' }, { ask: '', kind: 'photos' }, 'not an object', { ask: 'x'.repeat(400) }]) {
+            aiReplies('S.', bad);
+            expect((await svc.summariseTask({ name: 'T', comments: THREAD })).waitingOnClient).toBeNull();
+        }
+    });
+
+    test('falls back with no ask when the model returns unparseable JSON', async () => {
+        const svc = loadService('key');
+        aiRepliesRaw('this is not json');
+
+        const out = await svc.summariseTask({ name: 'T', comments: THREAD });
+        expect(out.generatedBy).toBe('fallback');
+        expect(out.waitingOnClient).toBeNull();
+        expect(out.text.length).toBeGreaterThan(0);
     });
 });

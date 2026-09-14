@@ -91,9 +91,12 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
     // summary instead of paying to regenerate identical text.
     const existing = tasks.length
         ? await ZohoProjectTask.find({ projectId, taskId: { $in: tasks.map((t) => t.id) } })
-            .select('taskId commentSummary').lean()
+            .select('taskId commentSummary waitingOnClient').lean()
         : [];
-    const priorByTask = new Map(existing.map((row) => [row.taskId, row.commentSummary || {}]));
+    const priorByTask = new Map(existing.map((row) => [row.taskId, {
+        ...(row.commentSummary || {}),
+        ask: row.waitingOnClient?.ask ? row.waitingOnClient : null,
+    }]));
 
     // Bounded concurrency: these are network calls to OpenAI, and a 200-task
     // project firing them all at once would hit rate limits rather than finish
@@ -103,6 +106,8 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
         return ZohoTaskSummaryService.summariseTask(task, {
             previousHash: prior.sourceHash,
             previousText: prior.text,
+            previousVersion: prior.promptVersion,
+            previousAsk: prior.ask,
         });
     });
     const summaryByTask = new Map(tasks.map((task, i) => [task.id, summaries[i]]));
@@ -145,11 +150,23 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
                                         : sum.generatedBy,
                                     model: sum.model || priorByTask.get(task.id)?.model || null,
                                     sourceHash: sum.sourceHash,
+                                    promptVersion: sum.promptVersion,
                                     commentCount: sum.commentCount,
                                     generatedAt: sum.reused
                                         ? (priorByTask.get(task.id)?.generatedAt || new Date())
                                         : new Date(),
                                 } : undefined;
+                            })(),
+                            waitingOnClient: (() => {
+                                const ask = summaryByTask.get(task.id)?.waitingOnClient;
+                                if (!ask) return { ask: null, kind: null, since: null };
+                                // Dated from the thread itself rather than asked of
+                                // the model, which cannot be trusted with dates.
+                                const latest = (task.comments || []).reduce(
+                                    (newest, c) => (!newest || new Date(c.createdAt || 0) > new Date(newest.createdAt || 0) ? c : newest),
+                                    null
+                                );
+                                return { ask: ask.ask, kind: ask.kind, since: latest?.createdAt || null };
                             })(),
                             comments: (task.comments || []).map((c) => ({
                                 commentId: c.id,
@@ -182,6 +199,7 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
         tasks: tasks.length,
         comments: tasks.reduce((sum, t) => sum + (t.comments?.length || 0), 0),
         summarised: summaries.filter((s) => s.generatedBy === 'ai').length,
+        waitingOnClient: summaries.filter((s) => s.waitingOnClient).length,
         summariesReused: summaries.filter((s) => s.reused).length,
         removed: removed.deletedCount || 0,
         truncated: Boolean(updates.truncated),
@@ -231,7 +249,8 @@ const syncAllProjects = async ({ deadlineAt = null } = {}) => {
             logger.info(
                 `[ZohoTaskSync] ${summary.projectName || summary.projectId}: `
                 + `${summary.tasks} tasks, ${summary.comments} comments, `
-                + `${summary.summarised} summarised (${summary.summariesReused} reused)`
+                + `${summary.summarised} summarised (${summary.summariesReused} reused), `
+                + `${summary.waitingOnClient} waiting on the client`
                 + `${summary.removed ? `, ${summary.removed} removed` : ''}`
                 + `${summary.truncated ? ' (TRUNCATED at the per-project cap)' : ''}`
             );
@@ -257,6 +276,7 @@ const syncAllProjects = async ({ deadlineAt = null } = {}) => {
         tasks: results.reduce((sum, r) => sum + (r.tasks || 0), 0),
         comments: results.reduce((sum, r) => sum + (r.comments || 0), 0),
         summarised: results.reduce((sum, r) => sum + (r.summarised || 0), 0),
+        waitingOnClient: results.reduce((sum, r) => sum + (r.waitingOnClient || 0), 0),
         summariesReused: results.reduce((sum, r) => sum + (r.summariesReused || 0), 0),
         results,
     };
