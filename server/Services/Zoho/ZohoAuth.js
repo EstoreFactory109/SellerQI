@@ -135,17 +135,28 @@ const mapTokenError = (zohoErrorCode, fallbackMessage, httpStatus) => {
 
 /** POST to the Zoho token endpoint. Shared by the auth-code and refresh-token grants. */
 const postToken = async (accountsDomain, params) => {
-    const response = await axios.post(
-        `${accountsDomain}/oauth/v2/token`,
-        new URLSearchParams(params),
-        {
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            // Explicit timeout: axios has no default, and a socket that connects but never
-            // responds would hang this request forever. The same omission previously froze
-            // the daily pipeline for hours (see Services/AmazonAds/GenerateToken.js).
-            timeout: TOKEN_REQUEST_TIMEOUT_MS
-        }
-    );
+    const url = `${accountsDomain}/oauth/v2/token`;
+    let response;
+
+    try {
+        response = await axios.post(
+            url,
+            new URLSearchParams(params),
+            {
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                // Explicit timeout: axios has no default, and a socket that connects but never
+                // responds would hang this request forever. The same omission previously froze
+                // the daily pipeline for hours (see Services/AmazonAds/GenerateToken.js).
+                timeout: TOKEN_REQUEST_TIMEOUT_MS
+            }
+        );
+    } catch (error) {
+        // Which data center we were talking to is not recoverable further up — the domain
+        // is resolved from the redirect's `location`/`accounts-server` and never stored on
+        // a failed connect, so tag it here or it is lost.
+        error.zohoTokenUrl = url;
+        throw error;
+    }
 
     if (!response || !response.data) {
         throw new ApiError(500, 'No response body received from the Zoho token endpoint');
@@ -174,8 +185,15 @@ const normaliseTokenError = (error, context) => {
     }
 
     if (error.request) {
-        logger.error(new ApiError(504, `${context}: no response received from Zoho`));
-        return new ApiError(504, `${context}: no response received from Zoho`);
+        // The transport code and the host are the entire diagnosis here, and both used to
+        // be discarded: ENOTFOUND means the DC host is wrong, ECONNREFUSED/ECONNRESET
+        // means something local is intercepting (proxy, VPN, firewall), and ECONNABORTED
+        // means Zoho was simply slow. "No response received" alone is unactionable.
+        const where = error.zohoTokenUrl ? ` from ${error.zohoTokenUrl}` : ' from Zoho';
+        const why = error.code ? ` (${error.code}: ${error.message})` : '';
+        const message = `${context}: no response received${where}${why}`;
+        logger.error(new ApiError(504, message), { code: error.code, url: error.zohoTokenUrl });
+        return new ApiError(504, message);
     }
 
     logger.error(new ApiError(500, `${context}: ${error.message}`));
@@ -201,6 +219,13 @@ const exchangeAuthorizationCode = async ({ code, location, accountsServer, conne
 
     const dc = (location || '').toLowerCase();
     const accountsDomain = accountsServer || DC_ACCOUNTS_DOMAIN[dc] || configuredAccounts || DEFAULT_ACCOUNTS_DOMAIN;
+
+    // Logged before the call, not after: if the exchange fails at the transport level this
+    // is the only record of what Zoho's redirect actually said versus what we resolved.
+    logger.info(
+        `[ZohoAuth] Exchanging code (location=${location || 'absent'}, `
+        + `accounts-server=${accountsServer || 'absent'}) against ${accountsDomain}`
+    );
 
     try {
         const data = await postToken(accountsDomain, {
