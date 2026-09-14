@@ -326,3 +326,39 @@ describe('mapWithConcurrency', () => {
         await expect(ZohoProjectsService.mapWithConcurrency([], 5, async (x) => x)).resolves.toEqual([]);
     });
 });
+
+describe('Zoho error messages', () => {
+    test('surfaces an OAuth-scope failure instead of "[object Object]"', async () => {
+        // The real body from a write attempt on read-only scopes. The old
+        // extraction fell through to `data.error` — an object — and stringified
+        // it, so a fixable scope problem reported itself as "[object Object]".
+        axios.mockRejectedValue(httpError(401, {
+            error: {
+                status_code: '401',
+                title: 'INVALID_OAUTHSCOPE',
+                error_type: 'FIELDS_VALIDATION_ERROR',
+                details: [{ message: 'Invalid OAuth scope.' }],
+            },
+        }));
+
+        await expect(zohoRequest({ method: 'POST', path: '/x', context: 'Posting a comment' }))
+            .rejects.toMatchObject({
+                statusCode: 401,
+                message: expect.stringContaining('INVALID_OAUTHSCOPE'),
+            });
+        await expect(zohoRequest({ method: 'POST', path: '/x', context: 'Posting a comment' }))
+            .rejects.toMatchObject({ message: expect.not.stringContaining('[object Object]') });
+    });
+
+    test('still reads the simpler v2 and v3 error shapes', async () => {
+        axios.mockRejectedValue(httpError(400, { error: 'plain v2 text' }));
+        await expect(zohoRequest({ path: '/x', context: 'C' })).rejects.toMatchObject({
+            message: expect.stringContaining('plain v2 text'),
+        });
+
+        axios.mockRejectedValue(httpError(400, { error: { code: 6500, message: 'v3 message' } }));
+        await expect(zohoRequest({ path: '/x', context: 'C' })).rejects.toMatchObject({
+            message: expect.stringContaining('v3 message'),
+        });
+    });
+});

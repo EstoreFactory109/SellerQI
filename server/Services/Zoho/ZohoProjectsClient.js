@@ -74,6 +74,39 @@ const resolveApiDomain = async () => {
     return connection.apiDomain;
 };
 
+/**
+ * Pull a human-readable message out of a Zoho error body.
+ *
+ * Zoho uses at least four shapes, and the naive `data.error.message || data.error`
+ * silently stringified the fourth one as "[object Object]" — which is how a real
+ * scope failure reported itself as `Zoho rejected the request ([object Object])`
+ * instead of `Invalid OAuth scope`:
+ *
+ *   v2      { error: "some text" }
+ *   v3      { error: { code, message } }
+ *   v3 alt  { message: "..." }
+ *   OAuth   { error: { title, error_type, details: [{ message }] } }   <-- was lost
+ */
+const zohoErrorMessage = (data) => {
+    if (!data) return null;
+    if (typeof data === 'string') return data;
+
+    const err = data.error;
+    if (typeof err === 'string') return err;
+
+    if (err && typeof err === 'object') {
+        const detail = Array.isArray(err.details)
+            ? err.details.map((d) => d && d.message).filter(Boolean).join('; ')
+            : null;
+        // Title first: "Invalid OAuth scope." is the detail, "INVALID_OAUTHSCOPE"
+        // is the part that tells you which scope list to go and fix.
+        const parts = [err.message, err.title, detail].filter(Boolean);
+        if (parts.length) return [...new Set(parts)].join(' — ');
+    }
+
+    return data.message || null;
+};
+
 /** Turn a Zoho API failure into an ApiError carrying Zoho's own message where available. */
 const toApiError = (error, context) => {
     if (error instanceof ApiError) {
@@ -83,11 +116,7 @@ const toApiError = (error, context) => {
     if (error.response) {
         const status = error.response.status;
         const data = error.response.data;
-        // Zoho errors arrive as {error: {code, message}} on v3 and {error: "..."} on v2.
-        const zohoMessage =
-            (data && data.error && (data.error.message || data.error)) ||
-            (data && data.message) ||
-            error.message;
+        const zohoMessage = zohoErrorMessage(data) || error.message;
 
         logger.error(new ApiError(status, `${context}: ${zohoMessage}`), { status, zohoResponse: data });
 
