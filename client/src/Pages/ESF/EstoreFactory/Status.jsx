@@ -265,16 +265,16 @@ const shortDate = (value) => {
 };
 
 /**
- * One task row, expanding to its Zoho comment thread.
+ * One task row, expanding to the AI progress summary of its Zoho discussion.
  *
- * Read-only by design: these comments are synced FROM Zoho nightly and there is
- * no write path back, so the row shows the thread rather than offering a
- * composer that would go nowhere.
+ * The raw thread is never sent to the browser — it is the agency's internal
+ * chatter. The server ships a summary generated at sync time plus a count, so
+ * the client sees what happened without reading how it was discussed.
  */
 const TaskRow = ({ task, isFirst }) => {
     const [open, setOpen] = useState(false);
     const priority = badgeFor(PRIORITY_STYLE, task.priority);
-    const hasDetail = (task.comments || []).length > 0;
+    const hasDetail = Boolean(task.summary) || task.updateCount > 0;
 
     return (
         <>
@@ -312,28 +312,24 @@ const TaskRow = ({ task, isFirst }) => {
             </div>
 
             {open && (
-                <div className="flex flex-col gap-3.5 pb-5" style={dividerStyle()}>
-                    {hasDetail ? (
-                        task.comments.map((c) => (
-                            <div key={c.id} className="flex gap-3.5 text-[12.5px] leading-[1.55]">
-                                <span className="flex-none w-[96px]" style={{ color: PALETTE.textMuted }}>{shortDate(c.createdAt) || '—'}</span>
-                                <span className="min-w-0" style={{ color: '#B7BDC6' }}>
-                                    <span className="font-semibold" style={{ color: PALETTE.textBody }}>{c.author || 'Your team'}</span>
-                                    {'  '}
-                                    {/* Plain text: converted from Zoho's HTML at sync time, so
-                                        newlines are the only formatting to preserve. */}
-                                    <span className="whitespace-pre-line">{c.content}</span>
-                                </span>
-                            </div>
-                        ))
+                <div className="flex flex-col gap-3 pb-5" style={dividerStyle()}>
+                    {task.summary ? (
+                        <p className="m-0 text-[13px] leading-[1.65] max-w-[80ch] whitespace-pre-line" style={{ color: '#B7BDC6' }}>
+                            {task.summary}
+                        </p>
                     ) : (
-                        <p className="ml-[96px] text-[12.5px]" style={{ color: PALETTE.textMuted }}>No updates on this task yet.</p>
+                        <p className="m-0 text-[12.5px]" style={{ color: PALETTE.textMuted }}>No updates on this task yet.</p>
                     )}
 
-                    <div className="ml-[96px] flex flex-wrap items-center gap-x-4 gap-y-1 text-xs" style={{ color: PALETTE.textMuted }}>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs" style={{ color: PALETTE.textMuted }}>
+                        {task.updateCount > 0 && (
+                            <span>
+                                Summarised from {task.updateCount} update{task.updateCount === 1 ? '' : 's'}
+                                {task.lastUpdateAt ? `, latest ${shortDate(task.lastUpdateAt)}` : ''}
+                            </span>
+                        )}
                         {task.endDate && <span>Due {shortDate(task.endDate)}</span>}
                         {task.hasAttachments && <span>Has attachments in Zoho</span>}
-                        <span>Mention this task by name when you message us about it</span>
                     </div>
                 </div>
             )}

@@ -27,6 +27,8 @@
 const UserModel = require('../../models/user-auth/userModel.js');
 const ZohoProjectTask = require('../../models/system/ZohoProjectTaskModel.js');
 const ZohoProjectsService = require('./ZohoProjectsService.js');
+const { mapWithConcurrency } = ZohoProjectsService;
+const ZohoTaskSummaryService = require('../AI/ZohoTaskSummaryService.js');
 const ZohoAuth = require('./ZohoAuth.js');
 const { ApiError } = require('../../utils/ApiError.js');
 const logger = require('../../utils/Logger.js');
@@ -39,6 +41,9 @@ const SECTIONS = {
 
 /** Safety net: one runaway project must not stall the whole nightly run. */
 const MAX_TASKS_PER_PROJECT = 200;
+
+/** How many comment threads are summarised at once. These are OpenAI calls. */
+const SUMMARY_CONCURRENCY = 4;
 
 /**
  * Which of the three lists a task belongs in.
@@ -82,6 +87,26 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
 
     const tasks = updates.tasks || [];
 
+    // What we already hold, so an unchanged comment thread reuses its stored
+    // summary instead of paying to regenerate identical text.
+    const existing = tasks.length
+        ? await ZohoProjectTask.find({ projectId, taskId: { $in: tasks.map((t) => t.id) } })
+            .select('taskId commentSummary').lean()
+        : [];
+    const priorByTask = new Map(existing.map((row) => [row.taskId, row.commentSummary || {}]));
+
+    // Bounded concurrency: these are network calls to OpenAI, and a 200-task
+    // project firing them all at once would hit rate limits rather than finish
+    // faster.
+    const summaries = await mapWithConcurrency(tasks, SUMMARY_CONCURRENCY, async (task) => {
+        const prior = priorByTask.get(task.id) || {};
+        return ZohoTaskSummaryService.summariseTask(task, {
+            previousHash: prior.sourceHash,
+            previousText: prior.text,
+        });
+    });
+    const summaryByTask = new Map(tasks.map((task, i) => [task.id, summaries[i]]));
+
     if (tasks.length) {
         // One round trip for the whole project rather than a write per task.
         await ZohoProjectTask.bulkWrite(
@@ -110,6 +135,22 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
                             taskCreatedAt: task.createdAt,
                             taskUpdatedAt: task.lastUpdatedAt,
                             hasAttachments: task.hasAttachments,
+                            commentSummary: (() => {
+                                const sum = summaryByTask.get(task.id);
+                                return sum ? {
+                                    text: sum.text,
+                                    // A reused summary keeps whatever produced it originally.
+                                    generatedBy: sum.reused
+                                        ? (priorByTask.get(task.id)?.generatedBy || 'reused')
+                                        : sum.generatedBy,
+                                    model: sum.model || priorByTask.get(task.id)?.model || null,
+                                    sourceHash: sum.sourceHash,
+                                    commentCount: sum.commentCount,
+                                    generatedAt: sum.reused
+                                        ? (priorByTask.get(task.id)?.generatedAt || new Date())
+                                        : new Date(),
+                                } : undefined;
+                            })(),
                             comments: (task.comments || []).map((c) => ({
                                 commentId: c.id,
                                 content: c.content,
@@ -140,6 +181,8 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
         projectName,
         tasks: tasks.length,
         comments: tasks.reduce((sum, t) => sum + (t.comments?.length || 0), 0),
+        summarised: summaries.filter((s) => s.generatedBy === 'ai').length,
+        summariesReused: summaries.filter((s) => s.reused).length,
         removed: removed.deletedCount || 0,
         truncated: Boolean(updates.truncated),
     };
@@ -187,7 +230,8 @@ const syncAllProjects = async ({ deadlineAt = null } = {}) => {
             results.push({ ok: true, ...summary });
             logger.info(
                 `[ZohoTaskSync] ${summary.projectName || summary.projectId}: `
-                + `${summary.tasks} tasks, ${summary.comments} comments`
+                + `${summary.tasks} tasks, ${summary.comments} comments, `
+                + `${summary.summarised} summarised (${summary.summariesReused} reused)`
                 + `${summary.removed ? `, ${summary.removed} removed` : ''}`
                 + `${summary.truncated ? ' (TRUNCATED at the per-project cap)' : ''}`
             );
@@ -212,6 +256,8 @@ const syncAllProjects = async ({ deadlineAt = null } = {}) => {
         pruned,
         tasks: results.reduce((sum, r) => sum + (r.tasks || 0), 0),
         comments: results.reduce((sum, r) => sum + (r.comments || 0), 0),
+        summarised: results.reduce((sum, r) => sum + (r.summarised || 0), 0),
+        summariesReused: results.reduce((sum, r) => sum + (r.summariesReused || 0), 0),
         results,
     };
 };

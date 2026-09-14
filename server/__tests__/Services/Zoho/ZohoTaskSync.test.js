@@ -9,6 +9,13 @@
 
 jest.mock('../../../Services/Zoho/ZohoProjectsService.js', () => ({
     getProjectTaskUpdates: jest.fn(),
+    // ZohoTaskSync destructures this to bound summariser concurrency; a simple
+    // sequential stand-in keeps the test deterministic.
+    mapWithConcurrency: async (items, _limit, fn) => {
+        const out = [];
+        for (let i = 0; i < items.length; i += 1) out.push(await fn(items[i], i));
+        return out;
+    },
 }));
 jest.mock('../../../Services/Zoho/ZohoAuth.js', () => ({
     getConnection: jest.fn(),
@@ -18,6 +25,14 @@ jest.mock('../../../models/system/ZohoProjectTaskModel.js', () => ({
     find: jest.fn(),
     bulkWrite: jest.fn().mockResolvedValue({}),
     deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }),
+}));
+// Summarising is its own service with its own tests; here it only needs to not
+// make a network call.
+jest.mock('../../../Services/AI/ZohoTaskSummaryService.js', () => ({
+    summariseTask: jest.fn().mockResolvedValue({
+        text: 'A summary.', generatedBy: 'ai', model: 'gpt-4o-mini',
+        sourceHash: 'hash', commentCount: 1, reused: false,
+    }),
 }));
 
 const ZohoProjectsService = require('../../../Services/Zoho/ZohoProjectsService.js');
@@ -30,7 +45,12 @@ const NOW = new Date('2026-09-11T12:00:00.000Z');
 const mockClients = (docs) => UserModel.find.mockReturnValue({
     select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(docs) }),
 });
-const mockRows = (rows) => ZohoProjectTask.find.mockReturnValue({ lean: jest.fn().mockResolvedValue(rows) });
+// getTaskBoard calls .find().lean(); syncProject calls .find().select().lean()
+// to read prior summaries. One mock serves both shapes.
+const mockRows = (rows) => ZohoProjectTask.find.mockReturnValue({
+    lean: jest.fn().mockResolvedValue(rows),
+    select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(rows) }),
+});
 
 beforeEach(() => {
     ZohoAuth.getConnection.mockResolvedValue({ portalId: '851273093', portalName: 'estorefactory' });

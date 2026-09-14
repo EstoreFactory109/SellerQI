@@ -17,32 +17,41 @@ const UserModel = require('../../models/user-auth/userModel.js');
 const ZohoTaskSync = require('../../Services/Zoho/ZohoTaskSync.js');
 
 /**
- * Only what the page renders. Notably this never ships portalId or any Zoho
- * identifier the client has no use for, and comments are already plain text
- * (converted at sync time, so no third-party HTML reaches the browser).
+ * Only what the page renders.
+ *
+ * The raw comment thread is deliberately NOT shipped. It is the agency's own
+ * internal discussion — staff coordination, half-finished thoughts, @mentions —
+ * and the client is shown the AI progress summary generated at sync time
+ * instead (Services/AI/ZohoTaskSummaryService.js). Only `updateCount` and the
+ * date of the latest update leak out, so the page can say how much activity
+ * sits behind the summary without reproducing any of it.
+ *
+ * Also never ships portalId or any Zoho identifier the client has no use for.
  */
-const toClientTask = (task) => ({
-    id: task.taskId,
-    name: task.name,
-    status: task.status,
-    priority: task.priority && task.priority !== 'none' ? task.priority : null,
-    percentComplete: task.percentComplete,
-    owners: task.ownerNames || [],
-    tasklist: task.tasklist,
-    startDate: task.startDate,
-    endDate: task.endDate,
-    updatedAt: task.taskUpdatedAt,
-    hasAttachments: task.hasAttachments,
-    comments: (task.comments || [])
-        .slice()
-        .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0))
-        .map((c) => ({
-            id: c.commentId,
-            content: c.content,
-            author: c.authorName,
-            createdAt: c.createdAt,
-        })),
-});
+const toClientTask = (task) => {
+    const comments = task.comments || [];
+    const latest = comments.reduce(
+        (newest, c) => (!newest || new Date(c.createdAt || 0) > new Date(newest.createdAt || 0) ? c : newest),
+        null
+    );
+
+    return {
+        id: task.taskId,
+        name: task.name,
+        status: task.status,
+        priority: task.priority && task.priority !== 'none' ? task.priority : null,
+        percentComplete: task.percentComplete,
+        owners: task.ownerNames || [],
+        tasklist: task.tasklist,
+        startDate: task.startDate,
+        endDate: task.endDate,
+        updatedAt: task.taskUpdatedAt,
+        hasAttachments: task.hasAttachments,
+        summary: task.commentSummary?.text || null,
+        updateCount: comments.length,
+        lastUpdateAt: latest?.createdAt || null,
+    };
+};
 
 /**
  * GET /api/pagewise/esf/project-status

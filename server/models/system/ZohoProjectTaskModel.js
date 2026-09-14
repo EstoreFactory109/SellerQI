@@ -59,7 +59,25 @@ const ZohoProjectTaskSchema = new mongoose.Schema({
     taskUpdatedAt: { type: Date, default: null },
 
     hasAttachments: { type: Boolean, default: false },
+    // Kept even though the client is shown only the summary: it is the input the
+    // summary is derived from, so without it a re-summarise (prompt change,
+    // model change) would need a full re-fetch from Zoho.
     comments: { type: [CommentSchema], default: [] },
+
+    /**
+     * AI progress summary of `comments`, generated at sync time — the client
+     * sees this instead of the agency's raw internal discussion.
+     * `sourceHash` is what lets an unchanged thread skip a paid regeneration.
+     */
+    commentSummary: {
+        text: { type: String, default: null },
+        // 'ai' | 'fallback' (no key / call failed / thread too thin) | 'reused'
+        generatedBy: { type: String, default: null },
+        model: { type: String, default: null },
+        sourceHash: { type: String, default: null },
+        commentCount: { type: Number, default: 0 },
+        generatedAt: { type: Date, default: null },
+    },
 
     syncedAt: { type: Date, default: Date.now },
 }, { timestamps: true });
