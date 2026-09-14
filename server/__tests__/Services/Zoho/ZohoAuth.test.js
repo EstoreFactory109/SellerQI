@@ -84,9 +84,21 @@ describe('buildAuthorizationUrl', () => {
             expect.arrayContaining([
                 'ZohoProjects.portals.READ',
                 'ZohoProjects.projects.ALL',
-                'ZohoProjects.tasks.READ'
+                'ZohoProjects.tasks.ALL'
             ])
         );
+    });
+
+    test('asks for write access on tasks, not just read', () => {
+        const url = new URL(ZohoAuth.buildAuthorizationUrl('state-123'));
+        const scopes = url.searchParams.get('scope').split(',');
+
+        // Narrowing this back to tasks.READ silently breaks posting a client's reply
+        // onto a task, and the failure surfaces only as a 401 at write time — long
+        // after the consent that caused it. Re-widening it needs a fresh consent from
+        // an admin, so this is worth failing loudly in CI instead.
+        expect(scopes).toContain('ZohoProjects.tasks.ALL');
+        expect(scopes).not.toContain('ZohoProjects.tasks.READ');
     });
 
     test('refuses to build a URL without a CSRF state', () => {

@@ -39,7 +39,12 @@ const getCredentials = () => ({
 const SCOPES = [
     'ZohoProjects.portals.READ',
     'ZohoProjects.projects.ALL',
-    'ZohoProjects.tasks.READ',
+    // ALL, not READ: posting a client's reply back onto a task and attaching their
+    // files both write through the tasks module (comments and attachments are
+    // sub-resources of a task, see PATHS below). With READ these return 401
+    // INVALID_OAUTHSCOPE, which is indistinguishable from a bad token until you read
+    // the error body.
+    'ZohoProjects.tasks.ALL',
     'ZohoProjects.activities.READ',
     'ZohoProjects.status.READ'
 ];
