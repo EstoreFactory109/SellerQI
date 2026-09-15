@@ -15,6 +15,7 @@ const asyncHandler = require('../../utils/AsyncHandler.js');
 const logger = require('../../utils/Logger.js');
 const UserModel = require('../../models/user-auth/userModel.js');
 const ZohoTaskSync = require('../../Services/Zoho/ZohoTaskSync.js');
+const { ATTACHMENTS_ENABLED } = require('../../Services/Zoho/config.js');
 
 /**
  * Only what the page renders.
@@ -90,6 +91,7 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
                 comingUp: [],
                 completed: [],
                 syncedAt: null,
+                canAttachFiles: ATTACHMENTS_ENABLED,
             }, 'No Zoho project is linked to this account'));
         }
 
@@ -163,6 +165,10 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
             // sync, and silently showing day-old data as live would be worse.
             syncedAt: board.syncedAt,
             totalTasks: board.totalTasks,
+            // Drives whether the reply box offers a file picker at all — see
+            // ATTACHMENTS_ENABLED. Sent rather than hardcoded so turning uploads on is
+            // an env change, not a release.
+            canAttachFiles: ATTACHMENTS_ENABLED,
         }, 'Project status fetched successfully'));
     } catch (error) {
         logger.error(new ApiError(500, `[EsfProjectStatus] ${error.message}`));

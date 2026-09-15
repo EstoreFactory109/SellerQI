@@ -13,6 +13,7 @@
  * resource — e.g. `created_time` vs `created_time_long`).
  */
 
+const FormData = require('form-data');
 const logger = require('../../utils/Logger.js');
 const { ApiError } = require('../../utils/ApiError.js');
 const { zohoRequest, paginate, unwrap, resolvePortalId } = require('./ZohoProjectsClient.js');
@@ -422,14 +423,19 @@ const postTaskComment = async ({ projectId, taskId, comment, portalId }) => {
  * 400 UPLOAD_RULE_NOT_CONFIGURED regardless of field name; v2 takes the same upload
  * as `uploaddoc`. Both verified against the live portal.
  *
- * `file` is { blob, filename } — a Blob rather than a Buffer so a large upload can be
- * backed by the file on disk (fs.openAsBlob) instead of being held in memory.
+ * `file` is { buffer, filename, contentType }.
+ *
+ * Built with the form-data package rather than Node's global FormData: this v2 endpoint
+ * answers 6500 General Error to what axios produces from a native FormData/Blob, and
+ * accepts the classic multipart body form-data emits. A Buffer rather than a stream
+ * because zohoRequest replays the request once on a 401, and a consumed stream would
+ * replay as an empty upload; files here are capped at 50MB and sent one at a time.
  */
 const uploadTaskAttachment = async ({ projectId, taskId, file, portalId, timeout }) => {
     if (!projectId || !taskId) {
         throw new ApiError(400, 'A project and task are required to attach a file');
     }
-    if (!file || !file.blob || !file.filename) {
+    if (!file || !file.buffer || !file.filename) {
         throw new ApiError(400, 'A file is required');
     }
 
@@ -437,7 +443,11 @@ const uploadTaskAttachment = async ({ projectId, taskId, file, portalId, timeout
     const spec = PATHS.taskAttachments;
 
     const form = new FormData();
-    form.append(spec.fileField, file.blob, file.filename);
+    form.append(spec.fileField, file.buffer, {
+        filename: file.filename,
+        contentType: file.contentType || 'application/octet-stream',
+        knownLength: file.buffer.length
+    });
 
     const response = await zohoRequest({
         method: 'POST',
@@ -445,6 +455,8 @@ const uploadTaskAttachment = async ({ projectId, taskId, file, portalId, timeout
         version: spec.version,
         data: form,
         multipart: true,
+        // Carries the generated boundary; without it Zoho rejects the body.
+        headers: form.getHeaders(),
         timeout,
         context: `Attaching ${file.filename} to Zoho task ${taskId}`
     });

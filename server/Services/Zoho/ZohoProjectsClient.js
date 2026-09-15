@@ -181,6 +181,7 @@ const zohoRequest = async ({
     form = false,
     multipart = false,
     timeout,
+    headers: extraHeaders,
     context = 'Zoho Projects request'
 }) => {
     const apiDomain = await resolveApiDomain();
@@ -196,15 +197,16 @@ const zohoRequest = async ({
         const headers = {
             // Zoho's own scheme. `Bearer` here fails with an opaque 401.
             Authorization: `Zoho-oauthtoken ${accessToken}`,
-            Accept: 'application/json'
+            Accept: 'application/json',
+            ...(extraHeaders || {})
         };
 
         let body = data;
         if (data !== undefined) {
             if (multipart) {
-                // Deliberately sets no Content-Type: the boundary is generated with the
-                // FormData and setting the header by hand drops it, which Zoho rejects as
-                // a malformed upload rather than a missing field.
+                // The caller supplies Content-Type via `headers` (form-data's
+                // getHeaders(), which carries the generated boundary). Setting it here
+                // would drop the boundary and Zoho answers 6500 General Error.
                 body = data;
             } else if (form) {
                 headers['Content-Type'] = 'application/x-www-form-urlencoded';

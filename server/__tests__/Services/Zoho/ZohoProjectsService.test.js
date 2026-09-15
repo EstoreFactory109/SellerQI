@@ -413,7 +413,7 @@ describe('postTaskComment', () => {
 });
 
 describe('uploadTaskAttachment', () => {
-    const file = () => ({ blob: new Blob(['x']), filename: 'front.jpg' });
+    const file = () => ({ buffer: Buffer.from('x'), filename: 'front.jpg', contentType: 'image/jpeg' });
 
     beforeEach(() => {
         axios.mockReset();
@@ -429,18 +429,28 @@ describe('uploadTaskAttachment', () => {
         );
     });
 
-    test('sends the file as `uploaddoc` in multipart form data', async () => {
+    test('sends the file as `uploaddoc` in a classic multipart body', async () => {
         await ZohoProjectsService.uploadTaskAttachment({ projectId: 'p', taskId: 't', file: file() });
 
         const sent = axios.mock.calls[0][0];
-        expect(sent.data).toBeInstanceOf(FormData);
-        expect(sent.data.get('uploaddoc')).toBeTruthy();
+        // The form-data package, not Node's global FormData: this endpoint answers
+        // 6500 General Error to what axios makes of a native FormData/Blob.
+        expect(typeof sent.data.getHeaders).toBe('function');
+        expect(sent.data.getBuffer().toString()).toContain('name="uploaddoc"');
+        expect(sent.data.getBuffer().toString()).toContain('filename="front.jpg"');
     });
 
-    test('never sets Content-Type by hand — that would strip the boundary', async () => {
+    test('sends the multipart boundary, without which Zoho rejects the body', async () => {
         await ZohoProjectsService.uploadTaskAttachment({ projectId: 'p', taskId: 't', file: file() });
 
-        expect(axios.mock.calls[0][0].headers['Content-Type']).toBeUndefined();
+        const contentType = axios.mock.calls[0][0].headers['content-type'];
+        expect(contentType).toMatch(/^multipart\/form-data; boundary=/);
+    });
+
+    test('refuses a file with no buffer', async () => {
+        await expect(
+            ZohoProjectsService.uploadTaskAttachment({ projectId: 'p', taskId: 't', file: { filename: 'a.jpg' } })
+        ).rejects.toThrow(/file is required/i);
     });
 
     test('uses the caller\'s longer timeout for uploads', async () => {

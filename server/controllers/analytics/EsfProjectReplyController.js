@@ -27,6 +27,7 @@ const logger = require('../../utils/Logger.js');
 const UserModel = require('../../models/user-auth/userModel.js');
 const ZohoProjectTask = require('../../models/system/ZohoProjectTaskModel.js');
 const ZohoProjectsService = require('../../Services/Zoho/ZohoProjectsService.js');
+const { ATTACHMENTS_ENABLED } = require('../../Services/Zoho/config.js');
 
 const MAX_MESSAGE_CHARS = 5000;
 // Uploads are minutes-scale on a client's home connection, unlike every read in this
@@ -84,6 +85,14 @@ const postEsfTaskReply = asyncHandler(async (req, res) => {
             return res.status(400).json(new ApiResponse(400, '', 'Write a message or attach a file'));
         }
 
+        // Refused up front rather than attempted and reported as failed: Zoho is not
+        // provisioned for API uploads (see ATTACHMENTS_ENABLED), so every one of these
+        // would fail, and a reply that claims to carry photos but does not is worse
+        // than a clear refusal.
+        if (files.length > 0 && !ATTACHMENTS_ENABLED) {
+            return res.status(400).json(new ApiResponse(400, '', 'Sending files here is not available yet — please write a message, or send files to your account manager'));
+        }
+
         if (message.length > MAX_MESSAGE_CHARS) {
             return res.status(400).json(
                 new ApiResponse(400, '', `Please keep your message under ${MAX_MESSAGE_CHARS} characters`)
@@ -127,15 +136,17 @@ const postEsfTaskReply = asyncHandler(async (req, res) => {
         const attachments = [];
         for (const file of files) {
             try {
-                const blob = typeof fs.openAsBlob === 'function'
-                    // Backed by the file on disk rather than read into memory.
-                    ? await fs.openAsBlob(file.path, { type: file.mimetype })
-                    : new Blob([await fsp.readFile(file.path)], { type: file.mimetype });
-
+                // Read one at a time, not all up front: a buffer is needed because the
+                // client replays the upload once on a 401 and a consumed stream would
+                // replay empty, but holding five 50MB files at once is not.
                 await ZohoProjectsService.uploadTaskAttachment({
                     projectId,
                     taskId,
-                    file: { blob, filename: file.originalname },
+                    file: {
+                        buffer: await fsp.readFile(file.path),
+                        filename: file.originalname,
+                        contentType: file.mimetype,
+                    },
                     timeout: UPLOAD_TIMEOUT_MS,
                 });
 

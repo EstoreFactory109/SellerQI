@@ -109,6 +109,22 @@ const PATHS = {
     }
 };
 
+/**
+ * Whether clients may attach files to a task reply. DEFAULT OFF, and off for a reason
+ * that is not in our code.
+ *
+ * Every upload shape Zoho documents was tried against a live scratch task: v3 answers
+ * UPLOAD_RULE_NOT_CONFIGURED and v2 answers 6500 General Error, for both `uploaddoc`
+ * and `file`, with a well-formed multipart body from the form-data package. The path
+ * and field are right — the same v2 path cleanly returns 6404 for a task that does not
+ * exist — so the portal or the grant is simply not provisioned for API uploads.
+ *
+ * Posting a COMMENT works and is verified end to end, so text replies ship; the upload
+ * button stays hidden until this flips. Flip it once uploads are provisioned (most
+ * likely a documents scope plus a reconnect) — no code change needed.
+ */
+const ATTACHMENTS_ENABLED = process.env.ZOHO_TASK_ATTACHMENTS_ENABLED === 'true';
+
 // Zoho caps page size per resource; these are the documented maxima.
 const PAGE_SIZE = {
     projects: 200,
@@ -129,6 +145,7 @@ const TOKEN_REQUEST_TIMEOUT_MS = 15000;
 module.exports = {
     getCredentials,
     SCOPES,
+    ATTACHMENTS_ENABLED,
     PATHS,
     PAGE_SIZE,
     MAX_TASKS_DEFAULT,

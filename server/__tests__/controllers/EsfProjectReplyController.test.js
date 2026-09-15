@@ -30,12 +30,17 @@ jest.mock('../../models/system/ZohoProjectTaskModel.js', () => ({
 
 jest.mock('../../utils/Logger.js', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }));
 
-const fsp = require('fs/promises');
-jest.mock('fs/promises', () => ({ unlink: jest.fn().mockResolvedValue(undefined), readFile: jest.fn() }));
+// Uploads are gated off in production until Zoho is provisioned for them. Enabled here
+// so the attachment paths stay under test; the gate itself is covered separately below.
+jest.mock('../../Services/Zoho/config.js', () => ({ ATTACHMENTS_ENABLED: true }));
 
-// The controller turns each temp file into a Blob before uploading it; without this the
-// blob step throws on the fake paths below and every upload "fails" for the wrong reason.
-jest.mock('fs', () => ({ openAsBlob: jest.fn().mockResolvedValue({ size: 1, type: 'image/jpeg' }) }));
+const fsp = require('fs/promises');
+jest.mock('fs/promises', () => ({
+    unlink: jest.fn().mockResolvedValue(undefined),
+    // The controller reads each temp file into a buffer before uploading; without this
+    // the read throws on the fake paths below and uploads "fail" for the wrong reason.
+    readFile: jest.fn().mockResolvedValue(Buffer.from('file bytes')),
+}));
 
 const { postEsfTaskReply, buildComment } = require('../../controllers/analytics/EsfProjectReplyController.js');
 
@@ -228,5 +233,44 @@ describe('recording the reply', () => {
         // $set here would erase the history the page uses to show what was already sent.
         expect(mockTaskUpdateOne.mock.calls[0][1]).toHaveProperty('$push');
         expect(mockTaskUpdateOne.mock.calls[0][1]).not.toHaveProperty('$set');
+    });
+});
+
+describe('the attachment gate', () => {
+    /**
+     * Zoho rejects every API upload on this portal (v3 UPLOAD_RULE_NOT_CONFIGURED,
+     * v2 6500), so files are refused before anything is posted. Attempting them instead
+     * would put a comment in the thread promising photos that never arrive.
+     */
+    test('refuses files outright when uploads are disabled', async () => {
+        jest.resetModules();
+        jest.doMock('../../Services/Zoho/config.js', () => ({ ATTACHMENTS_ENABLED: false }));
+        const { postEsfTaskReply: gated } = require('../../controllers/analytics/EsfProjectReplyController.js');
+
+        const res = mockRes();
+        gated(baseReq({
+            files: [{ originalname: 'a.jpg', path: '/tmp/x', size: 1, mimetype: 'image/jpeg' }],
+        }), res, jest.fn());
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(res.status.mock.calls[0][0]).toBe(400);
+        expect(res.json.mock.calls[0][0].message).toMatch(/not available yet/i);
+        // Nothing reaches Zoho: no half-sent reply claiming attachments.
+        expect(mockPostTaskComment).not.toHaveBeenCalled();
+    });
+
+    test('a text-only reply is unaffected by the gate', async () => {
+        jest.resetModules();
+        jest.doMock('../../Services/Zoho/config.js', () => ({ ATTACHMENTS_ENABLED: false }));
+        const { postEsfTaskReply: gated } = require('../../controllers/analytics/EsfProjectReplyController.js');
+
+        const res = mockRes();
+        gated(baseReq(), res, jest.fn());
+        await new Promise((resolve) => setImmediate(resolve));
+
+        // Text replies are verified working against the live portal and must keep
+        // working while uploads are switched off.
+        expect(res.status.mock.calls[0][0]).toBe(200);
+        expect(mockPostTaskComment).toHaveBeenCalled();
     });
 });

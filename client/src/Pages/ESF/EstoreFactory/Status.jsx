@@ -76,7 +76,7 @@ const repliedWhen = (value) => {
     return at.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
-const WaitingItem = ({ item, isFirst, onReplied }) => {
+const WaitingItem = ({ item, isFirst, onReplied, canAttachFiles }) => {
     const [open, setOpen] = useState(false);
     const [message, setMessage] = useState('');
     const [files, setFiles] = useState([]);
@@ -238,19 +238,24 @@ const WaitingItem = ({ item, isFirst, onReplied }) => {
                     )}
 
                     <div className="flex flex-wrap items-center gap-3">
-                        <label
-                            className="text-[12.5px] font-medium rounded-md px-3 py-1.5 cursor-pointer"
-                            style={{ border: `1px solid ${PALETTE.borderHover}`, color: PALETTE.textSecondary }}
-                        >
-                            Attach files
-                            <input
-                                type="file"
-                                multiple
-                                accept={ASK_ACCEPT[item.kind] || undefined}
-                                onChange={pickFiles}
-                                className="hidden"
-                            />
-                        </label>
+                        {/* Hidden while Zoho is not provisioned for API uploads — a picker
+                            that always fails is worse than no picker. Server-driven, so
+                            enabling uploads needs no release. */}
+                        {canAttachFiles && (
+                            <label
+                                className="text-[12.5px] font-medium rounded-md px-3 py-1.5 cursor-pointer"
+                                style={{ border: `1px solid ${PALETTE.borderHover}`, color: PALETTE.textSecondary }}
+                            >
+                                Attach files
+                                <input
+                                    type="file"
+                                    multiple
+                                    accept={ASK_ACCEPT[item.kind] || undefined}
+                                    onChange={pickFiles}
+                                    className="hidden"
+                                />
+                            </label>
+                        )}
                         <button
                             type="button"
                             onClick={send}
@@ -266,7 +271,9 @@ const WaitingItem = ({ item, isFirst, onReplied }) => {
                             {sending ? 'Sending…' : 'Send to team'}
                         </button>
                         <span className="text-[11.5px]" style={{ color: PALETTE.textMuted }}>
-                            Goes straight onto this task in your project.
+                            {canAttachFiles
+                                ? 'Goes straight onto this task in your project.'
+                                : 'Goes straight onto this task. To send files, reply to your account manager.'}
                         </span>
                     </div>
 
@@ -509,6 +516,7 @@ const Status = () => {
                                     item={item}
                                     isFirst={i === 0}
                                     onReplied={recordReply}
+                                    canAttachFiles={Boolean(board?.canAttachFiles)}
                                 />
                             ))}
                         </div>
