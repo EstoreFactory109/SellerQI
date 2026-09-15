@@ -3,6 +3,10 @@ import { useSelector } from 'react-redux';
 import { Navigate, Link } from 'react-router-dom';
 import { PALETTE } from '../../Components/ESF/estoreFactoryTheme.js';
 import axiosInstance from '../../config/axios.config.js';
+// Read from the pages these cards summarise, so Overview can never show a number
+// that page disagrees with.
+import { INITIAL_THREADS, openThreadCount } from './EstoreFactory/Messages.jsx';
+import { NEXT_REPORT } from './EstoreFactory/Reports.jsx';
 
 /**
  * "Overview" — the landing page of the Estore Factory section on a client's own
@@ -40,10 +44,11 @@ const MARKETPLACE_DOMAIN = {
     IN: 'Amazon.in', JP: 'Amazon.co.jp', AU: 'Amazon.com.au', SG: 'Amazon.sg', AE: 'Amazon.ae',
 };
 
+/** Each card is a doorway to the section it summarises — the mock's cards looked
+ *  clickable but swallowed the click, so they now actually navigate. */
 const StatCard = ({ label, value, valueColor, sub, subColor, tone, href }) => (
-    <a
-        href={href}
-        onClick={(e) => e.preventDefault()}
+    <Link
+        to={href}
         className="flex flex-col gap-3 rounded-lg p-5 pb-[18px] transition-colors"
         style={{
             background: tone === 'alert' ? PALETTE.amberBg : PALETTE.surface,
@@ -55,7 +60,7 @@ const StatCard = ({ label, value, valueColor, sub, subColor, tone, href }) => (
         <span className="text-[12.5px]" style={{ color: tone === 'alert' ? PALETTE.amberLabel : PALETTE.textSecondary }}>{label}</span>
         <span className="text-[34px] font-semibold leading-none tracking-[-0.02em]" style={{ color: valueColor }}>{value}</span>
         <span className="text-xs" style={{ color: subColor || PALETTE.textMuted }}>{sub}</span>
-    </a>
+    </Link>
 );
 
 const STATUS_BADGE = {
@@ -65,6 +70,8 @@ const STATUS_BADGE = {
 };
 
 const STATUS_PAGE = '/seller-central-checker/estore-factory/status';
+const MESSAGES_PAGE = '/seller-central-checker/estore-factory/messages';
+const REPORTS_PAGE = '/seller-central-checker/estore-factory/reports';
 
 const EmptyLine = ({ children }) => (
     <div className="py-[15px] text-[13px]" style={{ borderTop: `1px solid ${PALETTE.divider}`, color: PALETTE.textMuted }}>
@@ -182,6 +189,8 @@ const ClientDashboard = () => {
 
     const marketplaces = (user?.sellerCentral?.sellerAccount || []).filter((acc) => acc.country);
 
+    const openTickets = openThreadCount(INITIAL_THREADS);
+
     const linked = Boolean(board?.linked);
     const inProgress = board?.inProgress || [];
     const waitingOnYou = board?.waitingOnYou || [];
@@ -255,9 +264,11 @@ const ClientDashboard = () => {
                 </header>
 
                 {/* Stat row */}
-                {/* Four counts, all real. "Open tickets" and "Next report" used to sit
-                    here with invented values; there is no ticketing or reporting backend,
-                    so they are replaced by two figures this page can actually stand behind. */}
+                {/* This page summarises the whole Estore Factory section, not just Status,
+                    so the row spans it: two counts from Status, one from Messages, one from
+                    Reports. The last two have no backend yet and are read from those pages'
+                    own data rather than hardcoded again here — a summary that contradicts
+                    the page it links to is worse than no summary. */}
                 <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                     <StatCard
                         label="Tasks in progress"
@@ -280,18 +291,18 @@ const ClientDashboard = () => {
                         href={STATUS_PAGE}
                     />
                     <StatCard
-                        label="Coming up"
-                        value={loading ? '—' : String(comingUp.length)}
+                        label="Open tickets"
+                        value={String(openTickets)}
                         valueColor={PALETTE.textPrimary}
-                        sub="Not started yet"
-                        href={STATUS_PAGE}
+                        sub={openTickets === 0 ? 'Nothing open' : `${openTickets} conversation${openTickets === 1 ? '' : 's'} in progress`}
+                        href={MESSAGES_PAGE}
                     />
                     <StatCard
-                        label="Completed"
-                        value={loading ? '—' : String(completed.length)}
+                        label="Next report"
+                        value={NEXT_REPORT.due}
                         valueColor={PALETTE.textPrimary}
-                        sub="In the last 30 days"
-                        href={STATUS_PAGE}
+                        sub={NEXT_REPORT.name}
+                        href={REPORTS_PAGE}
                     />
                 </section>
 

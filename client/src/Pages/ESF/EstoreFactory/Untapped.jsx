@@ -7,7 +7,7 @@ import { PALETTE, dividerStyle } from '../../../Components/ESF/estoreFactoryThem
  * Every "Discuss this" / "Not interested" interaction here is local UI state
  * only, exactly matching the mock's own Component class (a plain in-memory
  * `cards` dictionary, no API calls) — there is no untapped-opportunity model
- * on the backend, so "Send to Priya" only flips this card's own local state
+ * on the backend, so "Send to your account manager" only flips this card's own local state
  * to "sent"; nothing is actually delivered anywhere yet.
  */
 const OPPORTUNITIES = [
@@ -17,7 +17,7 @@ const OPPORTUNITIES = [
         amount: '$2,100', amountSuffix: '/mo', amountLabel: 'estimated upside',
         body: 'These nine ASINs get 31,000 views a month between them and convert about 3 points below your listings that do have A+ modules. It is usually the last thing added when a catalogue grows quickly.',
         meta: ['Medium effort', 'About 3 weeks', '9 listings'],
-        sendTo: 'Priya', hiddenLabel: 'Nine of your listings have no A+ content — hidden',
+        sendTo: 'your account manager', hiddenLabel: 'Nine of your listings have no A+ content — hidden',
     },
     {
         id: 'a2', eyebrow: 'From your account data',
@@ -25,7 +25,7 @@ const OPPORTUNITIES = [
         amount: '$1,450', amountSuffix: '/mo', amountLabel: 'estimated upside',
         body: 'Kitchen products with a short demo video hold shoppers on the page noticeably longer. Your kettle and frother are the two where a 20-second clip would answer the questions your reviews keep raising.',
         meta: ['Medium effort', 'About 4 weeks', 'Kettle + frother first'],
-        sendTo: 'Priya', hiddenLabel: 'No video on your top five products — hidden',
+        sendTo: 'your account manager', hiddenLabel: 'No video on your top five products — hidden',
     },
     {
         id: 'a3', eyebrow: 'From your account data',
@@ -33,7 +33,7 @@ const OPPORTUNITIES = [
         amount: '$4,380', amountLabel: 'recoverable, one-off',
         body: 'Sixty-two units were damaged or lost in fulfilment centres before we started working together. Amazon’s claim window closes 18 months after the event, so the oldest of these expire in November.',
         meta: ['Light effort', 'Filed within a week', 'Oldest expire in November'],
-        sendTo: 'Priya', hiddenLabel: 'Unclaimed 2024 reimbursements — hidden',
+        sendTo: 'your account manager', hiddenLabel: 'Unclaimed 2024 reimbursements — hidden',
     },
     {
         id: 'a4', eyebrow: 'From your account data',
@@ -41,7 +41,7 @@ const OPPORTUNITIES = [
         amount: '$3,800', amountSuffix: '/mo', amountLabel: 'estimated upside',
         body: 'Shoppers who land on a brand store browse more of the catalogue than they do from a single listing, and it is the only place your range reads as one brand. Brand Registry is already in place, so the store is available to build whenever you want it.',
         meta: ['Larger project', '4 to 5 weeks', 'Brand Registry in place'],
-        sendTo: 'Priya', hiddenLabel: 'Brand store not built — hidden',
+        sendTo: 'your account manager', hiddenLabel: 'Brand store not built — hidden',
     },
 ];
 
@@ -52,7 +52,7 @@ const OFF_AMAZON = [
         amount: '$3,600', amountSuffix: '/mo', amountLabel: 'estimated upside',
         body: 'People search "Kessler kitchen scale" about 2,900 times a month and land on retailers reselling you. A simple brand site that pushes those searches to your Amazon listings would keep that demand yours, and it makes Brand Referral Bonus credits available.',
         meta: ['Larger project', '6 to 8 weeks', 'Unlocks referral credits'],
-        sendTo: 'Priya', hiddenLabel: 'No brand website — hidden',
+        sendTo: 'your account manager', hiddenLabel: 'No brand website — hidden',
     },
     {
         id: 't2', eyebrow: 'Noted by your team',
@@ -60,7 +60,7 @@ const OFF_AMAZON = [
         amount: '$2,400', amountSuffix: '/mo', amountLabel: 'estimated upside',
         body: 'Every sale you make right now comes from inside Amazon. Your unboxing photos do well on Pinterest for competitors in this category, and off-Amazon traffic also improves how your listings rank organically.',
         meta: ['Light to start', 'Ongoing', 'Pinterest and email first'],
-        sendTo: 'Marcus', hiddenLabel: 'No external traffic — hidden',
+        sendTo: 'the Advertising team', hiddenLabel: 'No external traffic — hidden',
     },
     {
         id: 't3', eyebrow: 'Noted by your team',
@@ -68,7 +68,7 @@ const OFF_AMAZON = [
         amount: '$1,100', amountSuffix: '/mo', amountLabel: 'estimated upside',
         body: 'Kitchen gear does well in short-form video, and right now there is nowhere for a curious shopper to look you up. A modest, consistent account gives the external traffic work somewhere to send people back from.',
         meta: ['Light to start', 'Ongoing', 'Instagram first'],
-        sendTo: 'Priya', hiddenLabel: 'No social presence — hidden',
+        sendTo: 'your account manager', hiddenLabel: 'No social presence — hidden',
     },
 ];
 
@@ -194,7 +194,7 @@ const SmallerOpportunityRow = ({ item, withDivider }) => {
                 className="flex-none text-xs px-3.5 py-2 rounded-lg"
                 style={{ color: PALETTE.textBody, border: `1px solid ${PALETTE.border}` }}
             >
-                {sent ? 'Sent to Priya' : 'Discuss this'}
+                {sent ? 'Sent to your account manager' : 'Discuss this'}
             </button>
         </div>
     );

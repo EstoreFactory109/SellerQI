@@ -17,6 +17,13 @@ const INSIGHT_COLOR = {
     neutral: PALETTE.textBody,
 };
 
+/**
+ * The next scheduled report. Exported so the Overview card and this page's header
+ * read from one place rather than each hardcoding a date — there is no recurring
+ * report model yet, and when there is, this is the single line that changes.
+ */
+export const NEXT_REPORT = { name: 'Weekly Sales Summary', due: 'Monday' };
+
 const REPORTS = [
     { name: 'Weekly Sales Summary', isNew: true, cadence: 'WEEKLY', date: 'Week of 25 Apr 2026', insight: 'Total sales up 2.4% across 7 marketplaces', tone: 'good' },
     { name: 'Weekly Account Overview', cadence: 'WEEKLY', date: 'Week of 26 Aug 2025', insight: '76 of 209 listings out of stock', tone: 'watch' },
@@ -41,7 +48,7 @@ const Reports = () => {
                         <p className="m-0 text-[13.5px]" style={{ color: PALETTE.textSecondary }}>Every recurring report we publish on your account, kept by report type.</p>
                     </div>
                     <span className="flex-none text-[12.5px] pb-[3px]" style={{ color: PALETTE.textSecondary }}>
-                        Next report: <span style={{ color: PALETTE.textBody }}>Weekly Sales Summary</span>, Monday
+                        Next report: <span style={{ color: PALETTE.textBody }}>{NEXT_REPORT.name}</span>, {NEXT_REPORT.due}
                     </span>
                 </header>
 
@@ -66,7 +73,7 @@ const Reports = () => {
 
                         <p className="m-0 text-[13.5px] leading-[1.65] max-w-[660px]" style={{ color: PALETTE.textInputBody }}>
                             Sales held steady through a quiet week, with the kitchen scale carrying most of the growth. Ad spend
-                            came down slightly because we paused two campaigns while the new structure is in review. — Priya
+                            came down slightly because we paused two campaigns while the new structure is in review. — your account manager
                         </p>
 
                         <div className="flex gap-10 flex-wrap">

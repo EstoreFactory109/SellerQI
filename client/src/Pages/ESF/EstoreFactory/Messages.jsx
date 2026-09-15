@@ -13,89 +13,97 @@ import { PALETTE } from '../../../Components/ESF/estoreFactoryTheme.js';
 const CLIENT_AVATAR = 'rgba(59,130,246,.16)';
 const AGENCY_AVATAR = 'repeating-linear-gradient(135deg, #1E2228 0 4px, #252A31 4px 8px)';
 
+/**
+ * Threads not yet resolved. Exported because the Overview page shows this count and
+ * must not arrive at its own number — when a real ticketing backend lands, both
+ * surfaces change together.
+ */
+export const openThreadCount = (threads = INITIAL_THREADS) =>
+    threads.filter((t) => t.status !== 'Resolved').length;
+
 const PILL = {
     'Awaiting your reply': { bg: 'rgba(245,166,35,.13)', color: PALETTE.amberValue },
     Open: { bg: 'rgba(34,197,94,.11)', color: PALETTE.good },
     Resolved: { bg: 'rgba(255,255,255,.06)', color: PALETTE.textTertiary },
 };
 
-const INITIAL_THREADS = [
+export const INITIAL_THREADS = [
     {
         id: 1, subject: 'Can we change the title on the kitchen scale?', ref: 'EF-1184', opened: '28 Aug',
-        status: 'Awaiting your reply', time: '4h', unread: false, owner: 'Priya Raghavan', role: 'Senior Account Manager',
+        status: 'Awaiting your reply', time: '4h', unread: false, role: 'Senior Account Manager',
         preview: 'That title change is fine, but we’d lose the "11 lb" claim…',
         messages: [
             { who: 'You', side: 'client', time: '28 Aug, 9:14 am', body: 'Our supplier wants us to lead with "professional grade" in the title. Is that going to hurt anything?' },
-            { who: 'Priya Raghavan', side: 'agency', time: '28 Aug, 11:02 am', body: 'It won’t hurt, but the title is capped at 200 characters and something has to come out. My suggestion is to drop the colour word rather than the capacity — "11 lb" is the term people search.' },
+            { who: 'Account management', side: 'agency', time: '28 Aug, 11:02 am', body: 'It won’t hurt, but the title is capped at 200 characters and something has to come out. My suggestion is to drop the colour word rather than the capacity — "11 lb" is the term people search.' },
             { who: 'You', side: 'client', time: '29 Aug, 8:40 am', body: 'Makes sense. Can you show me both versions side by side before it goes live?' },
-            { who: 'Priya Raghavan', side: 'agency', time: '29 Aug, 2:31 pm', body: 'Here they are. The second one keeps capacity and adds the phrase your supplier asked for.', file: { name: 'kitchen-scale-titles.pdf', size: '84 KB' } },
+            { who: 'Account management', side: 'agency', time: '29 Aug, 2:31 pm', body: 'Here they are. The second one keeps capacity and adds the phrase your supplier asked for.', file: { name: 'kitchen-scale-titles.pdf', size: '84 KB' } },
             { who: 'You', side: 'client', time: 'Yesterday, 5:12 pm', body: 'Version two looks right to me. One question — does changing the title reset any of the ranking we’ve built?' },
         ],
     },
     {
         id: 2, subject: 'Approving the Q4 ad budget', ref: 'EF-1179', opened: '26 Aug',
-        status: 'Open', time: '1d', unread: true, owner: 'Marcus Oyelaran', role: 'Paid Media Lead',
+        status: 'Open', time: '1d', unread: true, role: 'Paid Media Lead',
         preview: 'The increase pays for itself at a 2.4 ROAS — happy to walk through it.',
         messages: [
-            { who: 'Marcus Oyelaran', side: 'agency', time: '26 Aug, 10:05 am', body: 'Ahead of Q4 I’d like to take monthly spend from $7,200 to $9,500, concentrated on the three keyword groups already converting above 14%.' },
+            { who: 'Advertising team', side: 'agency', time: '26 Aug, 10:05 am', body: 'Ahead of Q4 I’d like to take monthly spend from $7,200 to $9,500, concentrated on the three keyword groups already converting above 14%.' },
             { who: 'You', side: 'client', time: '27 Aug, 7:58 am', body: 'What happens if the season underperforms? I don’t want to be locked in.' },
-            { who: 'Marcus Oyelaran', side: 'agency', time: '27 Aug, 12:22 pm', body: 'Nothing is locked. We review weekly and can pull spend back the same day. The increase pays for itself at a 2.4 ROAS and you’re currently at 3.1.' },
+            { who: 'Advertising team', side: 'agency', time: '27 Aug, 12:22 pm', body: 'Nothing is locked. We review weekly and can pull spend back the same day. The increase pays for itself at a 2.4 ROAS and you’re currently at 3.1.' },
         ],
     },
     {
         id: 3, subject: 'When should we ship the next container?', ref: 'EF-1176', opened: '22 Aug',
-        status: 'Open', time: '2d', unread: true, owner: 'Devika Shah', role: 'Inventory Analyst',
+        status: 'Open', time: '2d', unread: true, role: 'Inventory Analyst',
         preview: 'Aim to have units in the fulfilment centre by 20 October.',
         messages: [
             { who: 'You', side: 'client', time: '22 Aug, 4:41 pm', body: 'Our factory needs a production slot booked this week. When do you need the stock landed for Q4?' },
-            { who: 'Devika Shah', side: 'agency', time: '23 Aug, 9:16 am', body: 'Aim for units checked in at the fulfilment centre by 20 October. Amazon’s cut-off is later, but check-in times slip badly in November.' },
+            { who: 'Seller Central team', side: 'agency', time: '23 Aug, 9:16 am', body: 'Aim for units checked in at the fulfilment centre by 20 October. Amazon’s cut-off is later, but check-in times slip badly in November.' },
         ],
     },
     {
         id: 4, subject: 'Invoice EF-2041 — what is the setup line?', ref: 'EF-1170', opened: '18 Aug',
-        status: 'Resolved', time: '6d', unread: false, owner: 'Priya Raghavan', role: 'Senior Account Manager',
+        status: 'Resolved', time: '6d', unread: false, role: 'Senior Account Manager',
         preview: 'That was the one-off A+ content build — it won’t repeat next month.',
         messages: [
             { who: 'You', side: 'client', time: '18 Aug, 11:20 am', body: 'There’s a $400 setup line on this month’s invoice that I wasn’t expecting.' },
-            { who: 'Priya Raghavan', side: 'agency', time: '18 Aug, 1:44 pm', body: 'That’s the one-off A+ content build for the kitchen scale, agreed in July. It won’t appear again next month.' },
+            { who: 'Account management', side: 'agency', time: '18 Aug, 1:44 pm', body: 'That’s the one-off A+ content build for the kitchen scale, agreed in July. It won’t appear again next month.' },
             { who: 'You', side: 'client', time: '19 Aug, 8:02 am', body: 'Understood, thanks for clearing that up.' },
         ],
     },
     {
         id: 5, subject: 'Two reviews mention a broken lid', ref: 'EF-1166', opened: '14 Aug',
-        status: 'Resolved', time: '12d', unread: false, owner: 'Priya Raghavan', role: 'Senior Account Manager',
+        status: 'Resolved', time: '12d', unread: false, role: 'Senior Account Manager',
         preview: 'Both were from the same batch — we’ve flagged it in the listing Q&A.',
         messages: [
-            { who: 'Priya Raghavan', side: 'agency', time: '14 Aug, 3:12 pm', body: 'Two one-star reviews on the frother both mention the lid cracking. Worth checking with your factory — they look like the same batch.' },
+            { who: 'Account management', side: 'agency', time: '14 Aug, 3:12 pm', body: 'Two one-star reviews on the frother both mention the lid cracking. Worth checking with your factory — they look like the same batch.' },
             { who: 'You', side: 'client', time: '15 Aug, 9:31 am', body: 'Confirmed with the factory, it was a mould issue in June. Fixed now.' },
         ],
     },
     {
         id: 6, subject: 'Adding the espresso tamper to Subscribe & Save', ref: 'EF-1159', opened: '6 Aug',
-        status: 'Resolved', time: '26 Aug', unread: false, owner: 'Devika Shah', role: 'Inventory Analyst',
+        status: 'Resolved', time: '26 Aug', unread: false, role: 'Inventory Analyst',
         preview: 'Enrolled — first subscriptions should appear within two weeks.',
         messages: [
             { who: 'You', side: 'client', time: '6 Aug, 10:12 am', body: 'Can the tamper go into Subscribe & Save, or does that only make sense for consumables?' },
-            { who: 'Devika Shah', side: 'agency', time: '6 Aug, 4:03 pm', body: 'It’s better suited to your cleaning refills, but there’s no downside to enrolling. I’ve done it — expect the first subscriptions within a fortnight.' },
+            { who: 'Seller Central team', side: 'agency', time: '6 Aug, 4:03 pm', body: 'It’s better suited to your cleaning refills, but there’s no downside to enrolling. I’ve done it — expect the first subscriptions within a fortnight.' },
         ],
     },
     {
         id: 7, subject: 'Trademark certificate for Brand Registry', ref: 'EF-1150', opened: '29 Jul',
-        status: 'Resolved', time: '5 Aug', unread: false, owner: 'Priya Raghavan', role: 'Senior Account Manager',
+        status: 'Resolved', time: '5 Aug', unread: false, role: 'Senior Account Manager',
         preview: 'Received — Brand Registry approved on 4 August.',
         messages: [
-            { who: 'Priya Raghavan', side: 'agency', time: '29 Jul, 8:22 am', body: 'We need the trademark certificate PDF to finish the Brand Registry application.' },
+            { who: 'Account management', side: 'agency', time: '29 Jul, 8:22 am', body: 'We need the trademark certificate PDF to finish the Brand Registry application.' },
             { who: 'You', side: 'client', time: '30 Jul, 7:15 pm', body: 'Attached.', file: { name: 'kessler-trademark.pdf', size: '1.2 MB' } },
-            { who: 'Priya Raghavan', side: 'agency', time: '4 Aug, 10:41 am', body: 'Approved this morning. That unlocks A+ content and the brand store.' },
+            { who: 'Account management', side: 'agency', time: '4 Aug, 10:41 am', body: 'Approved this morning. That unlocks A+ content and the brand store.' },
         ],
     },
     {
         id: 8, subject: 'Do we need a separate listing for the gift set?', ref: 'EF-1141', opened: '21 Jul',
-        status: 'Resolved', time: '28 Jul', unread: false, owner: 'Priya Raghavan', role: 'Senior Account Manager',
+        status: 'Resolved', time: '28 Jul', unread: false, role: 'Senior Account Manager',
         preview: 'Yes — a parent listing with variations is the cleaner route.',
         messages: [
             { who: 'You', side: 'client', time: '21 Jul, 2:03 pm', body: 'We’re bundling the frother and tamper for Christmas. New listing or a variation?' },
-            { who: 'Priya Raghavan', side: 'agency', time: '22 Jul, 9:48 am', body: 'A variation under a parent listing. It inherits reviews, which matters more than anything else in Q4.' },
+            { who: 'Account management', side: 'agency', time: '22 Jul, 9:48 am', body: 'A variation under a parent listing. It inherits reviews, which matters more than anything else in Q4.' },
         ],
     },
 ];
@@ -145,7 +153,7 @@ const Messages = () => {
         const id = 900 + added.length;
         setAdded((a) => [{
             id, subject, ref: `EF-${1190 + a.length}`, opened: 'Just now', status: 'Open', time: 'now',
-            owner: 'Priya Raghavan', role: 'Senior Account Manager', preview: body,
+            role: 'Senior Account Manager', preview: body,
             messages: [{ who: 'You', side: 'client', time: 'Just now', body }],
         }, ...a]);
         setOpenId(id);
@@ -224,7 +232,7 @@ const Messages = () => {
                                     <textarea
                                         value={newBody}
                                         onChange={(e) => setNewBody(e.target.value)}
-                                        placeholder="Priya and the team see this straight away."
+                                        placeholder="Your team see this straight away."
                                         className="flex-1 rounded-lg px-3.5 py-3 text-[13px] leading-[1.6] outline-none resize-none"
                                         style={{ background: PALETTE.input, border: `1px solid ${PALETTE.borderHover}`, color: PALETTE.textBody }}
                                     />
