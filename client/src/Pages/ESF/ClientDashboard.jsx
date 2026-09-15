@@ -1,6 +1,8 @@
+import { useCallback, useEffect, useState } from 'react';
 import { useSelector } from 'react-redux';
-import { Navigate } from 'react-router-dom';
+import { Navigate, Link } from 'react-router-dom';
 import { PALETTE } from '../../Components/ESF/estoreFactoryTheme.js';
+import axiosInstance from '../../config/axios.config.js';
 
 /**
  * "Overview" — the landing page of the Estore Factory section on a client's own
@@ -11,16 +13,22 @@ import { PALETTE } from '../../Components/ESF/estoreFactoryTheme.js';
  * part of SellerQI. Shared with the rest of the Estore Factory section
  * (Status, Untapped, Reports, Messages, Billing) so the palette lives in one place.
  *
- * Data reality check: only the header (brand name, connected marketplaces) has a
- * real backend source today — both already ship on state.Auth.user via
- * getUserById (server/Services/User/userServices.js). Everything below the
- * header (tasks in progress, tickets, next report, "what we're working on",
- * account manager, recent activity, the opportunity callout) describes an
- * ESF-staff-driven account-management workflow that has no backend yet — no
- * assigned-manager model, no client activity log, no staff task queue distinct
- * from the seller's own Tasks page. Those sections render the mock's own sample
- * content verbatim so the page matches the design exactly; wiring them to real
- * data needs that backend built first.
+ * Everything here is real now. The counts, the work list, the teams engaged, the
+ * recent activity and the opportunity callout all come from the same nightly Zoho
+ * sync the Status page reads (GET /api/pagewise/esf/project-status), so this page
+ * is a SUMMARY of that one and the two can never disagree.
+ *
+ * It calls the Status endpoint rather than growing its own: that response is already
+ * cached server-side for 300s, and a second endpoint returning a subset of the same
+ * rows is how two surfaces drift apart.
+ *
+ * The one rule this page inherits and must keep: no individual is ever named. The
+ * work is attributed to a TEAM (see ZohoProjectTaskModel.team), and the summaries
+ * are redacted at sync time. The mock this page was built from named an account
+ * manager and quoted staff by first name in the activity feed; both are gone.
+ *
+ * Sections with no backend at all — open support tickets, the next report date —
+ * were dropped rather than left showing invented numbers.
  */
 /** Country code -> Amazon storefront domain. Matches the codes used at connect
  * time in Pages/Onboarding/ConnectToAmazon.jsx (UK, not GB). Extend as more
@@ -52,73 +60,116 @@ const StatCard = ({ label, value, valueColor, sub, subColor, tone, href }) => (
 
 const STATUS_BADGE = {
     'In progress': { bg: 'rgba(34,197,94,.11)', color: PALETTE.good },
-    'In review': { bg: 'rgba(34,197,94,.11)', color: PALETTE.good },
-    'Waiting on Amazon': { bg: 'rgba(255,255,255,.06)', color: PALETTE.textTertiary },
     'Waiting on you': { bg: 'rgba(245,166,35,.13)', color: PALETTE.amberValue },
+    'Starting soon': { bg: 'rgba(255,255,255,.06)', color: PALETTE.textTertiary },
 };
 
-const WorkItemRow = ({ text, status, time }) => (
-    <div className="flex items-center gap-4 py-[15px]" style={{ borderTop: `1px solid ${PALETTE.divider}` }}>
-        <span className="flex-1 text-[13.5px]" style={{ color: PALETTE.textBody }}>{text}</span>
+const STATUS_PAGE = '/seller-central-checker/estore-factory/status';
+
+const EmptyLine = ({ children }) => (
+    <div className="py-[15px] text-[13px]" style={{ borderTop: `1px solid ${PALETTE.divider}`, color: PALETTE.textMuted }}>
+        {children}
+    </div>
+);
+
+/** "2 hours ago" / "Yesterday" / "Aug 24" — same scale as the Status page. */
+const relativeTime = (value) => {
+    if (!value) return '';
+    const then = new Date(value);
+    if (Number.isNaN(then.getTime())) return '';
+    const mins = Math.round((Date.now() - then.getTime()) / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins} min ago`;
+    if (mins < 1440) return `${Math.round(mins / 60)}h ago`;
+    if (mins < 2880) return 'Yesterday';
+    if (mins < 10080) return `${Math.round(mins / 1440)}d ago`;
+    return then.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+
+const money = (amount, currencyCode = 'USD') => {
+    try {
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency', currency: currencyCode || 'USD', maximumFractionDigits: 0,
+        }).format(amount);
+    } catch {
+        return `${Math.round(amount).toLocaleString('en-US')}`;
+    }
+};
+
+/** Clamp to two lines without depending on a Tailwind plugin being enabled. */
+const CLAMP_2 = { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' };
+
+/**
+ * One line of "What we're working on".
+ *
+ * Carries the AI progress summary, which is the whole point of this section — the
+ * task NAME alone ("Details", "Progress update") tells a client nothing, and the
+ * summary is what turns it into an update they can actually read.
+ */
+const WorkItemRow = ({ task, status }) => (
+    <div className="flex items-start gap-4 py-[15px]" style={{ borderTop: `1px solid ${PALETTE.divider}` }}>
+        <div className="flex-1 min-w-0 flex flex-col gap-[5px]">
+            <span className="text-[13.5px]" style={{ color: PALETTE.textBody }}>{task.name}</span>
+            {task.summary && (
+                <span className="text-[12.5px] leading-[1.55]" style={{ color: PALETTE.textTertiary, ...CLAMP_2 }}>
+                    {task.summary}
+                </span>
+            )}
+            {task.team && (
+                <span className="text-[11.5px]" style={{ color: PALETTE.textMuted }}>{task.team}</span>
+            )}
+        </div>
         <span
             className="flex-none text-[11.5px] font-semibold px-2.5 py-1 rounded-md"
             style={{ background: STATUS_BADGE[status]?.bg, color: STATUS_BADGE[status]?.color }}
         >
             {status}
         </span>
-        <span className="flex-none w-[88px] text-right text-xs" style={{ color: PALETTE.textMuted }}>{time}</span>
+        <span className="flex-none w-[88px] text-right text-xs" style={{ color: PALETTE.textMuted }}>
+            {relativeTime(task.lastUpdateAt || task.updatedAt)}
+        </span>
     </div>
 );
 
-/** Small icon glyph for a Recent Activity row. `kind` picks a shape + color to
- * match the mock's mix of dots, diamonds and bars — not meant to be a full icon
- * system, just enough variety to distinguish activity types at a glance. */
-const ActivityGlyph = ({ kind }) => {
-    const glyphs = {
-        dot: <span className="w-[9px] h-[9px] rounded-full" style={{ background: PALETTE.good }} />,
-        reply: <span className="w-2 h-2 rotate-45" style={{ background: PALETTE.textTertiary }} />,
-        square: <span className="w-2 h-2 rounded-[1px]" style={{ background: '#8FA0B8' }} />,
-        bar: <span className="w-[11px] h-1 rounded-[1px]" style={{ background: PALETTE.textTertiary }} />,
-    };
-    const bg = kind === 'dot' ? 'rgba(34,197,94,.1)' : 'rgba(255,255,255,.05)';
-    return (
-        <span className="flex-none w-[26px] h-[26px] rounded-md flex items-center justify-center" style={{ background: bg }}>
-            {glyphs[kind]}
-        </span>
-    );
-};
+/** Small icon glyph for a Recent Activity row. */
+/** Every activity row is a completion, so there is one glyph rather than the mock's
+ *  assortment of shapes for event types that do not exist here. */
+const ActivityGlyph = () => (
+    <span className="flex-none w-[26px] h-[26px] rounded-md flex items-center justify-center" style={{ background: 'rgba(34,197,94,.1)' }}>
+        <span className="w-[9px] h-[9px] rounded-full" style={{ background: PALETTE.good }} />
+    </span>
+);
 
-const ActivityRow = ({ kind, text, time }) => (
+const ActivityRow = ({ text, time }) => (
     <div className="flex items-center gap-3.5 py-[13px]" style={{ borderTop: `1px solid ${PALETTE.divider}` }}>
-        <ActivityGlyph kind={kind} />
-        <span className="flex-1 text-[13.5px]" style={{ color: PALETTE.textBody }}>{text}</span>
+        <ActivityGlyph />
+        <span className="flex-1 min-w-0 text-[13.5px] truncate" style={{ color: PALETTE.textBody }}>{text}</span>
         <span className="flex-none text-xs" style={{ color: PALETTE.textMuted }}>{time}</span>
     </div>
 );
 
-// Sample content — see the file header note. Kept verbatim from deploy/index.html
-// so the page matches the design; replace once a real work-item / activity-log
-// backend exists.
-const SAMPLE_WORK_ITEMS = [
-    { text: 'Rewriting the bullet points on your digital kitchen scale listing', status: 'In progress', time: '2 hours ago' },
-    { text: 'Restructuring your Sponsored Products campaigns around top converting keywords', status: 'In review', time: 'Yesterday' },
-    { text: 'Filing reimbursement claims for 214 units lost in Amazon’s warehouses', status: 'Waiting on Amazon', time: '3 days ago' },
-    { text: 'Building A+ content for the espresso tamper — we need your product photos', status: 'Waiting on you', time: '5 days ago' },
-];
-
-const SAMPLE_ACTIVITY = [
-    { kind: 'dot', text: 'Keyword research finished for your milk frother line — 41 new terms added', time: '2h ago' },
-    { kind: 'reply', text: 'Priya replied to your question about raising the PPC budget for Q4', time: '4h ago' },
-    { kind: 'dot', text: 'Backend search terms updated across 12 ASINs', time: 'Yesterday' },
-    { kind: 'square', text: 'August performance report published', time: '2d ago' },
-    { kind: 'bar', text: 'Invoice EF-2041 paid — $2,400.00', time: '4d ago' },
-    { kind: 'dot', text: 'Negative keywords added to 6 campaigns to cut wasted ad spend', time: '5d ago' },
-    { kind: 'reply', text: 'Marcus answered your question about restock timing before Prime Day', time: '6d ago' },
-    { kind: 'dot', text: 'Main image on the stainless steel kettle replaced with the new hero shot', time: 'Aug 24' },
-];
-
 const ClientDashboard = () => {
     const user = useSelector((state) => state.Auth?.user);
+
+    // The same payload the Status page renders. Read once here and summarised below,
+    // so the two pages cannot report different numbers for the same work.
+    const [board, setBoard] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+    const loadBoard = useCallback(async () => {
+        try {
+            const res = await axiosInstance.get('/api/pagewise/esf/project-status');
+            setBoard(res.data?.data || null);
+        } catch {
+            // Fails quiet: the header above still renders, and every section below
+            // degrades to its own empty state rather than the page erroring out.
+            setBoard(null);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { loadBoard(); }, [loadBoard]);
 
     // Same admission rule as the backend's esfClientOnly middleware (server/middlewares/
     // Auth/esfClientOnly.js): isEsfClient, or a superAdmin servicing the account.
@@ -130,6 +181,40 @@ const ClientDashboard = () => {
     }
 
     const marketplaces = (user?.sellerCentral?.sellerAccount || []).filter((acc) => acc.country);
+
+    const linked = Boolean(board?.linked);
+    const inProgress = board?.inProgress || [];
+    const waitingOnYou = board?.waitingOnYou || [];
+    const completed = board?.completed || [];
+    const comingUp = board?.comingUp || [];
+
+    // Tasks the client is blocking, first — that is the only part of this page that
+    // asks something of them. The rest is newest-activity-first.
+    const blockedIds = new Set(waitingOnYou.map((w) => w.taskId));
+    const workItems = [...inProgress]
+        .sort((a, b) => {
+            const blocked = Number(blockedIds.has(b.id)) - Number(blockedIds.has(a.id));
+            if (blocked !== 0) return blocked;
+            return new Date(b.lastUpdateAt || b.updatedAt || 0) - new Date(a.lastUpdateAt || a.updatedAt || 0);
+        })
+        .slice(0, 4);
+
+    // Distinct teams actually engaged, replacing the named account manager the mock
+    // had here. Never an individual.
+    const teams = [...new Set(inProgress.map((t) => t.team).filter(Boolean))];
+
+    // Recently finished work, newest first — a real activity feed in place of the
+    // invented one.
+    const activity = [...completed]
+        .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
+        .slice(0, 6)
+        .map((t) => ({ text: `${t.name} — completed`, time: relativeTime(t.updatedAt) }));
+
+    // The biggest thing nobody has picked up yet, straight from the audit. Already
+    // filtered against open Zoho tasks at sync time, so it is never something the
+    // team is quietly already doing.
+    const topFinding = comingUp.find((t) => t.source === 'suggested' && t.amount > 0)
+        || comingUp.find((t) => t.source === 'suggested');
 
     return (
         <div className="min-h-full w-full" style={{ background: PALETTE.bg, color: PALETTE.textPrimary, fontFamily: "system-ui, -apple-system, 'Helvetica Neue', Helvetica, sans-serif" }}>
@@ -170,11 +255,44 @@ const ClientDashboard = () => {
                 </header>
 
                 {/* Stat row */}
+                {/* Four counts, all real. "Open tickets" and "Next report" used to sit
+                    here with invented values; there is no ticketing or reporting backend,
+                    so they are replaced by two figures this page can actually stand behind. */}
                 <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                    <StatCard label="Tasks in progress" value="7" valueColor={PALETTE.good} sub="Your team is handling this" />
-                    <StatCard label="Waiting on you" value="1" valueColor={PALETTE.amberValue} sub="1 item needs your reply" subColor={PALETTE.amberSub} tone="alert" />
-                    <StatCard label="Open tickets" value="1" valueColor={PALETTE.textPrimary} sub="Last reply 4 hours ago" />
-                    <StatCard label="Next report" value="Oct 3" valueColor={PALETTE.textPrimary} sub="September performance" />
+                    <StatCard
+                        label="Tasks in progress"
+                        value={loading ? '—' : String(inProgress.length)}
+                        valueColor={PALETTE.good}
+                        sub="Your team is handling this"
+                        href={STATUS_PAGE}
+                    />
+                    <StatCard
+                        label="Waiting on you"
+                        value={loading ? '—' : String(waitingOnYou.length)}
+                        valueColor={waitingOnYou.length > 0 ? PALETTE.amberValue : PALETTE.textPrimary}
+                        sub={waitingOnYou.length === 0
+                            ? 'Nothing needs your reply'
+                            : `${waitingOnYou.length} item${waitingOnYou.length === 1 ? '' : 's'} need${waitingOnYou.length === 1 ? 's' : ''} your reply`}
+                        subColor={waitingOnYou.length > 0 ? PALETTE.amberSub : undefined}
+                        // Amber only when something is actually outstanding — a permanent
+                        // warning colour over a zero trains people to ignore it.
+                        tone={waitingOnYou.length > 0 ? 'alert' : undefined}
+                        href={STATUS_PAGE}
+                    />
+                    <StatCard
+                        label="Coming up"
+                        value={loading ? '—' : String(comingUp.length)}
+                        valueColor={PALETTE.textPrimary}
+                        sub="Not started yet"
+                        href={STATUS_PAGE}
+                    />
+                    <StatCard
+                        label="Completed"
+                        value={loading ? '—' : String(completed.length)}
+                        valueColor={PALETTE.textPrimary}
+                        sub="In the last 30 days"
+                        href={STATUS_PAGE}
+                    />
                 </section>
 
                 {/* What we're working on | Your team */}
@@ -182,47 +300,73 @@ const ClientDashboard = () => {
 
                     <div className="rounded-lg flex flex-col gap-1" style={{ background: PALETTE.surface, border: `1px solid ${PALETTE.border}`, padding: '22px 24px 16px' }}>
                         <h2 className="m-0 mb-3 text-[15px] font-semibold tracking-[-0.01em]">What we&rsquo;re working on</h2>
-                        {SAMPLE_WORK_ITEMS.map((item) => (
-                            <WorkItemRow key={item.text} {...item} />
+
+                        {loading && <EmptyLine>Loading…</EmptyLine>}
+                        {!loading && !linked && <EmptyLine>No project is connected to your account yet.</EmptyLine>}
+                        {!loading && linked && workItems.length === 0 && <EmptyLine>Nothing is in progress right now.</EmptyLine>}
+
+                        {workItems.map((task) => (
+                            <WorkItemRow
+                                key={task.id}
+                                task={task}
+                                status={blockedIds.has(task.id) ? 'Waiting on you' : 'In progress'}
+                            />
                         ))}
-                        <div className="pt-3.5 pb-1.5" style={{ borderTop: `1px solid ${PALETTE.divider}` }}>
-                            <a href="#" onClick={(e) => e.preventDefault()} className="text-[12.5px]" style={{ color: PALETTE.textSecondary }}>
-                                View all 7 tasks →
-                            </a>
-                        </div>
+
+                        {inProgress.length > 0 && (
+                            <div className="pt-3.5 pb-1.5" style={{ borderTop: `1px solid ${PALETTE.divider}` }}>
+                                <Link to={STATUS_PAGE} className="text-[12.5px]" style={{ color: PALETTE.textSecondary }}>
+                                    View all {inProgress.length} task{inProgress.length === 1 ? '' : 's'} →
+                                </Link>
+                            </div>
+                        )}
                     </div>
 
+                    {/* Was a named account manager with a photo placeholder. Individuals
+                        are never identified to a client, so this shows which teams are
+                        actually engaged on the account instead — real, and useful in a way
+                        a single name was not. */}
                     <div className="rounded-lg flex flex-col gap-[18px]" style={{ background: PALETTE.surface, border: `1px solid ${PALETTE.border}`, padding: '22px 24px 24px' }}>
                         <h2 className="m-0 text-[15px] font-semibold tracking-[-0.01em]">Your team</h2>
-                        <div className="flex items-center gap-3.5">
-                            <div
-                                className="w-14 h-14 rounded-full flex-none flex items-center justify-center text-[8px] font-medium"
-                                style={{
-                                    background: 'repeating-linear-gradient(135deg, #1E2228 0 6px, #252A31 6px 12px)',
-                                    border: '1px solid rgba(255,255,255,.09)',
-                                    color: '#7A8189',
-                                    fontFamily: 'ui-monospace, Menlo, monospace',
-                                }}
-                            >
-                                photo
+
+                        {teams.length === 0 ? (
+                            <span className="text-[13px]" style={{ color: PALETTE.textMuted }}>
+                                {loading ? 'Loading…' : 'No work is assigned right now.'}
+                            </span>
+                        ) : (
+                            <div className="flex flex-col gap-2.5">
+                                <span className="text-[12.5px]" style={{ color: PALETTE.textSecondary }}>
+                                    {teams.length} team{teams.length === 1 ? '' : 's'} working on your account
+                                </span>
+                                <div className="flex flex-wrap gap-2">
+                                    {teams.map((team) => (
+                                        <span
+                                            key={team}
+                                            className="text-[12.5px] px-[11px] py-[5px] rounded-md"
+                                            style={{ background: 'rgba(255,255,255,.06)', border: `1px solid ${PALETTE.border}`, color: PALETTE.textTertiary }}
+                                        >
+                                            {team}
+                                        </span>
+                                    ))}
+                                </div>
                             </div>
-                            <div className="flex flex-col gap-[5px]">
-                                <span className="text-[15px] font-semibold">Priya Raghavan</span>
-                                <span className="text-[12.5px]" style={{ color: PALETTE.textSecondary }}>Your account manager</span>
-                            </div>
-                        </div>
+                        )}
+
                         <div className="flex flex-col gap-[9px]">
-                            <a
-                                href="#"
-                                onClick={(e) => e.preventDefault()}
+                            <Link
+                                to={STATUS_PAGE}
                                 className="text-center text-[13.5px] font-semibold py-3 rounded-lg transition-colors"
                                 style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}
                                 onMouseEnter={(e) => { e.currentTarget.style.background = PALETTE.accentHover; }}
                                 onMouseLeave={(e) => { e.currentTarget.style.background = PALETTE.accent; }}
                             >
-                                Start a conversation
-                            </a>
-                            <span className="text-center text-xs" style={{ color: PALETTE.textMuted }}>Usually replies within a few hours</span>
+                                {waitingOnYou.length > 0
+                                    ? `Respond to ${waitingOnYou.length} item${waitingOnYou.length === 1 ? '' : 's'}`
+                                    : 'See what we\u2019re working on'}
+                            </Link>
+                            <span className="text-center text-xs" style={{ color: PALETTE.textMuted }}>
+                                {board?.syncedAt ? `Updated ${relativeTime(board.syncedAt)}` : 'Updated daily'}
+                            </span>
                         </div>
                     </div>
                 </section>
@@ -230,49 +374,67 @@ const ClientDashboard = () => {
                 {/* Recent activity */}
                 <section className="rounded-lg flex flex-col" style={{ background: PALETTE.surface, border: `1px solid ${PALETTE.border}`, padding: '22px 24px 12px' }}>
                     <h2 className="m-0 mb-2 text-[15px] font-semibold tracking-[-0.01em]">Recent activity</h2>
-                    {SAMPLE_ACTIVITY.map((item) => (
-                        <ActivityRow key={item.text} {...item} />
-                    ))}
-                    <div className="py-3.5" style={{ borderTop: `1px solid ${PALETTE.divider}` }}>
-                        <a href="#" onClick={(e) => e.preventDefault()} className="text-[12.5px]" style={{ color: PALETTE.textSecondary }}>
-                            See full activity history →
-                        </a>
-                    </div>
+
+                    {/* Real completions from the nightly sync. The mock's version quoted
+                        staff by first name ("<name> replied to your question…"); this names
+                        only the work. */}
+                    {activity.length === 0 ? (
+                        <EmptyLine>{loading ? 'Loading…' : 'Nothing completed in the last 30 days.'}</EmptyLine>
+                    ) : (
+                        activity.map((item, i) => <ActivityRow key={`${item.text}-${i}`} {...item} />)
+                    )}
+
+                    {completed.length > activity.length && (
+                        <div className="py-3.5" style={{ borderTop: `1px solid ${PALETTE.divider}` }}>
+                            <Link to={STATUS_PAGE} className="text-[12.5px]" style={{ color: PALETTE.textSecondary }}>
+                                See all {completed.length} completed →
+                            </Link>
+                        </div>
+                    )}
                 </section>
 
-                {/* One thing worth looking at */}
-                <section className="rounded-lg flex flex-col gap-[18px]" style={{ background: PALETTE.surface, border: `1px solid ${PALETTE.border}`, padding: '24px 26px 26px' }}>
-                    <h2 className="m-0 text-[15px] font-semibold tracking-[-0.01em]">One thing worth looking at</h2>
-                    <div className="flex flex-col md:flex-row items-start gap-8 md:gap-12">
-                        <div className="flex-1 flex flex-col gap-2.5 max-w-[640px]">
-                            <span className="text-[10.5px]" style={{ color: PALETTE.textFaint }}>From your account data · Within Amazon</span>
-                            <span className="text-[17px] font-semibold tracking-[-0.015em]" style={{ color: PALETTE.textPrimary }}>Your brand store has never been built</span>
-                            <p className="m-0 text-[13.5px] leading-[1.65]" style={{ color: PALETTE.textTertiary }}>
-                                Shoppers who click your brand name from a listing land on a generic search page instead of a store.
-                                That traffic already exists — roughly 6,400 clicks last month — and it converts about 18% better
-                                when it reaches a proper store.
-                            </p>
-                        </div>
-                        <div className="flex-none flex flex-col gap-3.5 items-start min-w-[190px]">
-                            <div className="flex flex-col gap-1">
-                                <span className="text-[11.5px] tracking-[.04em]" style={{ color: PALETTE.textMuted }}>ESTIMATED UPSIDE</span>
-                                <span className="text-2xl font-semibold leading-none tracking-[-0.02em] tabular-nums">
-                                    $3,800<span className="text-sm font-medium" style={{ color: PALETTE.textSecondary }}>/mo</span>
+                {/* One thing worth looking at — the top unaddressed audit finding, with
+                    the figure the Dashboard already reports. Hidden entirely when the team
+                    has everything covered, rather than padded with a filler suggestion. */}
+                {topFinding && (
+                    <section className="rounded-lg flex flex-col gap-[18px]" style={{ background: PALETTE.surface, border: `1px solid ${PALETTE.border}`, padding: '24px 26px 26px' }}>
+                        <h2 className="m-0 text-[15px] font-semibold tracking-[-0.01em]">One thing worth looking at</h2>
+                        <div className="flex flex-col md:flex-row items-start gap-8 md:gap-12">
+                            <div className="flex-1 flex flex-col gap-2.5 max-w-[640px]">
+                                <span className="text-[10.5px]" style={{ color: PALETTE.textFaint }}>
+                                    From your account data · Nobody is working on this yet
                                 </span>
+                                <span className="text-[17px] font-semibold tracking-[-0.015em]" style={{ color: PALETTE.textPrimary }}>
+                                    {topFinding.name}
+                                </span>
+                                {topFinding.action && (
+                                    <p className="m-0 text-[13.5px] leading-[1.65]" style={{ color: PALETTE.textTertiary }}>
+                                        {topFinding.action}
+                                    </p>
+                                )}
                             </div>
-                            <a
-                                href="#"
-                                onClick={(e) => e.preventDefault()}
-                                className="text-[13px] font-medium px-[18px] py-2.5 rounded-lg transition-colors"
-                                style={{ border: '1px solid rgba(255,255,255,.16)', color: '#E8EAED' }}
-                                onMouseEnter={(e) => { e.currentTarget.style.borderColor = PALETTE.accent; e.currentTarget.style.color = PALETTE.accentHover; }}
-                                onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,.16)'; e.currentTarget.style.color = '#E8EAED'; }}
-                            >
-                                Discuss this
-                            </a>
+                            {topFinding.amount > 0 && (
+                                <div className="flex-none flex flex-col gap-3.5 items-start min-w-[190px]">
+                                    <div className="flex flex-col gap-1">
+                                        <span className="text-[11.5px] tracking-[.04em]" style={{ color: PALETTE.textMuted }}>ESTIMATED UPSIDE</span>
+                                        <span className="text-2xl font-semibold leading-none tracking-[-0.02em] tabular-nums">
+                                            {money(topFinding.amount, topFinding.currencyCode)}
+                                        </span>
+                                    </div>
+                                    <Link
+                                        to={STATUS_PAGE}
+                                        className="text-[13px] font-medium px-[18px] py-2.5 rounded-lg transition-colors"
+                                        style={{ border: '1px solid rgba(255,255,255,.16)', color: '#E8EAED' }}
+                                        onMouseEnter={(e) => { e.currentTarget.style.borderColor = PALETTE.accent; e.currentTarget.style.color = PALETTE.accentHover; }}
+                                        onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,.16)'; e.currentTarget.style.color = '#E8EAED'; }}
+                                    >
+                                        Discuss this
+                                    </Link>
+                                </div>
+                            )}
                         </div>
-                    </div>
-                </section>
+                    </section>
+                )}
 
             </div>
         </div>

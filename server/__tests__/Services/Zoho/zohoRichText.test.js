@@ -71,3 +71,25 @@ describe('toSummary', () => {
         expect(out.endsWith('…')).toBe(true);
     });
 });
+
+describe('toPlainLabel', () => {
+    const { toPlainLabel } = require('../../../Services/Zoho/zohoRichText.js');
+
+    test('decodes entities in a task name', () => {
+        // Zoho stores names HTML-escaped, so this reached the client's page verbatim
+        // as "Mice &amp; Rats".
+        expect(toPlainLabel('Morgan&rsquo;s Repellent For Mice &amp; Rats'))
+            .toBe('Morgan’s Repellent For Mice & Rats');
+    });
+
+    test('collapses newlines and runs of spaces onto one line', () => {
+        // A name with a stray newline broke the grid row it was rendered in.
+        expect(toPlainLabel('Project Details\n')).toBe('Project Details');
+        expect(toPlainLabel('EBC   -   Squirrel')).toBe('EBC - Squirrel');
+    });
+
+    test('returns null for nothing, rather than an empty label', () => {
+        expect(toPlainLabel(null)).toBeNull();
+        expect(toPlainLabel('   ')).toBeNull();
+    });
+});

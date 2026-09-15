@@ -17,7 +17,7 @@ const FormData = require('form-data');
 const logger = require('../../utils/Logger.js');
 const { ApiError } = require('../../utils/ApiError.js');
 const { zohoRequest, paginate, unwrap, resolvePortalId } = require('./ZohoProjectsClient.js');
-const { toPlainText } = require('./zohoRichText.js');
+const { toPlainText, toPlainLabel } = require('./zohoRichText.js');
 const {
     PATHS,
     PAGE_SIZE,
@@ -118,7 +118,7 @@ const normaliseProject = (project = {}) => ({
 const normaliseTask = (task = {}) => ({
     id: asId(task.id, task.id_string),
     key: task.key || null,
-    name: task.name || null,
+    name: toPlainLabel(task.name),
     description: task.description || null,
     status: (task.status && (task.status.name || task.status)) || null,
     // Whether the task's status counts as "done" in this portal. Portals define
@@ -139,9 +139,9 @@ const normaliseTask = (task = {}) => ({
             // Zoho uses a literal "Unassigned User" placeholder rather than an empty list.
             .filter((name) => name && name !== 'Unassigned User')
         : [],
-    tasklist: (task.tasklist && task.tasklist.name) || null,
+    tasklist: toPlainLabel(task.tasklist && task.tasklist.name),
     // "None" is Zoho's placeholder milestone, not a real one.
-    milestone: (task.milestone && task.milestone.name !== 'None' && task.milestone.name) || null,
+    milestone: toPlainLabel((task.milestone && task.milestone.name !== 'None' && task.milestone.name) || null),
     createdByName: (task.created_by && (task.created_by.full_name || task.created_by.name)) || null,
     updatedByName: (task.updated_by && (task.updated_by.full_name || task.updated_by.name)) || null,
     hasComments: Boolean(task.association_info && task.association_info.has_comments),

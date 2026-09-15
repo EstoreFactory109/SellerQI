@@ -66,10 +66,23 @@ const toPlainText = (html) => {
         .trim();
 };
 
+/**
+ * A single-line label: entities decoded, whitespace collapsed, no markup.
+ *
+ * Task and tasklist NAMES need this as much as comment bodies do, and used not to get
+ * it. Zoho stores them HTML-escaped, so a task really called "Morgan's Repellent For
+ * Mice & Rats" reached the client's page as "... Mice &amp; Rats", and names carrying
+ * a stray newline broke the row layout.
+ */
+const toPlainLabel = (value) => {
+    if (!value || typeof value !== 'string') return value || null;
+    return toPlainText(value).replace(/\s+/g, ' ').trim() || null;
+};
+
 /** First line, clipped — used for list previews. */
 const toSummary = (html, max = 160) => {
     const text = toPlainText(html).split('\n').find((line) => line.trim()) || '';
     return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
 };
 
-module.exports = { toPlainText, toSummary };
+module.exports = { toPlainText, toPlainLabel, toSummary };
