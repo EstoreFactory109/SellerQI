@@ -44,7 +44,22 @@ const ZohoProjectTaskSchema = new mongoose.Schema({
     priority: { type: String, default: null },
     percentComplete: { type: Number, default: null },
 
+    /**
+     * Real names of the Zoho assignees. INTERNAL ONLY — never sent to a client.
+     * Kept because the summariser needs them to redact itself (see redactNames), and
+     * because staff-facing tooling may want them later. `team` below is what the
+     * client is shown instead.
+     */
     ownerNames: { type: [String], default: [] },
+
+    /**
+     * Which agency team the work belongs to, e.g. "Design team".
+     *
+     * This exists so the client can be told who is handling something without being
+     * told WHICH PERSON. Assigned at sync time from a fixed vocabulary
+     * (ZohoTaskSummaryService.TEAMS) so the label stays stable night to night.
+     */
+    team: { type: String, default: null },
     tasklist: { type: String, default: null },
     milestone: { type: String, default: null },
     createdByName: { type: String, default: null },

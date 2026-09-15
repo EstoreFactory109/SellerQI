@@ -42,7 +42,9 @@ const toClientTask = (task) => {
         status: task.status,
         priority: task.priority && task.priority !== 'none' ? task.priority : null,
         percentComplete: task.percentComplete,
-        owners: task.ownerNames || [],
+        // Deliberately NOT task.ownerNames. The client is told which team is handling
+        // the work, never which individual — see ZohoProjectTaskModel.team.
+        team: task.team || 'Your eStore Factory team',
         tasklist: task.tasklist,
         startDate: task.startDate,
         endDate: task.endDate,
@@ -119,7 +121,7 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
                 action: s.action || null,
                 tasklist: 'Recommended',
                 priority: null,
-                owners: [],
+                team: null,
                 startDate: null,
                 endDate: null,
                 percentComplete: null,
@@ -148,7 +150,7 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
                 taskId: t.id,
                 taskName: t.name,
                 tasklist: t.tasklist,
-                owners: t.owners,
+                team: t.team,
                 ...t.waitingOnYou,
                 yourReplies: t.yourReplies,
             }))

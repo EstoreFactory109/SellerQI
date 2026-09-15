@@ -278,3 +278,157 @@ describe('waitingOnClient extraction', () => {
         expect(out.text.length).toBeGreaterThan(0);
     });
 });
+
+/**
+ * No individual's name may reach the client.
+ *
+ * The prompt asks the model not to name people, but a prompt is an instruction and
+ * this is a requirement — so the output is redacted against the staff names we
+ * already hold, whatever the model returns. These tests pin the guarantee, not the
+ * instruction.
+ */
+describe('staff names never reach the client', () => {
+    test('redacts full names, mentions and possessives', () => {
+        const svc = loadService('key');
+        const out = svc.redactNames(
+            "Bhavdeep Lalakiya uploaded the labels, @Nora Shah will review Priya's draft.",
+            ['Bhavdeep Lalakiya', 'Nora Shah', 'Priya Sharma']
+        );
+
+        expect(out).not.toMatch(/Bhavdeep|Lalakiya|Nora|Shah|Priya/i);
+        expect(out).toContain('the team');
+    });
+
+    test('redacts a surname used on its own', () => {
+        const svc = loadService('key');
+        // The model may well shorten "Priya Sharma" to "Sharma" — matching only the
+        // full name would let that through.
+        expect(svc.redactNames('Sharma sent the files.', ['Priya Sharma'])).not.toMatch(/Sharma/i);
+    });
+
+    test('leaves short fragments alone rather than mangling ordinary words', () => {
+        const svc = loadService('key');
+        // A two-letter name part would match inside unrelated words.
+        expect(svc.redactNames('We will do it in a bit.', ['Jo Li'])).toBe('We will do it in a bit.');
+    });
+
+    test('the deterministic fallback attributes to a team, not the author', () => {
+        const svc = loadService('key');
+        const out = svc.deterministicSummary(
+            [comment(1, 'Drafted the copy.', 'Bhavdeep Lalakiya'), comment(2, 'Sent for review.', 'Nora Shah')],
+            'Content team'
+        );
+
+        expect(out).not.toMatch(/Bhavdeep|Lalakiya|Nora|Shah/i);
+        expect(out).toContain('Content team');
+    });
+
+    test('scrubs a name the model put in the summary anyway', async () => {
+        const svc = loadService('key');
+        mockCreate.mockResolvedValue({
+            choices: [{ message: { content: JSON.stringify({
+                summary: 'Priya Sharma finished the bullets and Marcus is reviewing.',
+                team: 'Content team',
+                waitingOnClient: null,
+            }) } }],
+        });
+
+        const out = await svc.summariseTask({
+            name: 'Bullets', comments: THREAD, ownerNames: ['Priya Sharma'], updatedByName: 'Marcus',
+        });
+
+        expect(out.text).not.toMatch(/Priya|Sharma|Marcus/i);
+    });
+
+    test('scrubs a name from the pending ask too', async () => {
+        const svc = loadService('key');
+        mockCreate.mockResolvedValue({
+            choices: [{ message: { content: JSON.stringify({
+                summary: 'Waiting on photos.',
+                team: 'Photography team',
+                waitingOnClient: { ask: 'Send the photos to Priya Sharma', kind: 'photos' },
+            }) } }],
+        });
+
+        const out = await svc.summariseTask({ name: 'Photos', comments: THREAD, ownerNames: ['Priya Sharma'] });
+
+        expect(out.waitingOnClient.ask).not.toMatch(/Priya|Sharma/i);
+    });
+
+    test('redacts an owner who never commented', async () => {
+        const svc = loadService('key');
+        mockCreate.mockResolvedValue({
+            choices: [{ message: { content: JSON.stringify({
+                summary: 'Assigned to Devendra Joshi.', team: 'Design team', waitingOnClient: null,
+            }) } }],
+        });
+
+        // Gathering names from the thread alone would miss an assignee who never
+        // posted — which is exactly who an "assigned to" sentence names.
+        const out = await svc.summariseTask({ name: 'T', comments: THREAD, ownerNames: ['Devendra Joshi'] });
+
+        expect(out.text).not.toMatch(/Devendra|Joshi/i);
+    });
+});
+
+describe('team assignment', () => {
+    test('accepts a team from the fixed vocabulary', async () => {
+        const svc = loadService('key');
+        mockCreate.mockResolvedValue({
+            choices: [{ message: { content: JSON.stringify({
+                summary: 'Ads are running.', team: 'Advertising team', waitingOnClient: null,
+            }) } }],
+        });
+
+        expect((await svc.summariseTask({ name: 'PPC', comments: THREAD })).team).toBe('Advertising team');
+    });
+
+    test('an invented team falls back rather than reaching the client', async () => {
+        const svc = loadService('key');
+        mockCreate.mockResolvedValue({
+            choices: [{ message: { content: JSON.stringify({
+                summary: 'Work continues.', team: 'The Bullet Squad', waitingOnClient: null,
+            }) } }],
+        });
+
+        // A label outside the vocabulary reads as disorganised next to the others.
+        const out = await svc.summariseTask({ name: 'A+ content', comments: THREAD });
+        expect(svc.TEAMS).toContain(out.team);
+        expect(out.team).toBe('Design team');
+    });
+
+    test('reuse keeps the stored team', async () => {
+        const svc = loadService('key');
+
+        const out = await svc.summariseTask(
+            { name: 'T', comments: THREAD },
+            {
+                previousHash: svc.hashThread(THREAD),
+                previousText: 'Stored.',
+                previousVersion: svc.PROMPT_VERSION,
+                previousTeam: 'SEO team',
+            }
+        );
+
+        expect(out.team).toBe('SEO team');
+        expect(mockCreate).not.toHaveBeenCalled();
+    });
+});
+
+describe('role accounts are not treated as people', () => {
+    test('does not redact a shared role name out of ordinary prose', () => {
+        const svc = loadService('key');
+        // This portal really does have a Zoho user called "Support".
+        const out = svc.redactNames('Contact Amazon support to resolve the account health issue.', ['Support']);
+
+        expect(out).toBe('Contact Amazon support to resolve the account health issue.');
+    });
+
+    test('still redacts a real person who shares a task with a role account', () => {
+        const svc = loadService('key');
+        const out = svc.redactNames('Support raised it and Bhavdeep fixed it.', ['Support', 'Bhavdeep Lalakiya']);
+
+        expect(out).toMatch(/support/i);
+        expect(out).not.toMatch(/Bhavdeep/i);
+    });
+});

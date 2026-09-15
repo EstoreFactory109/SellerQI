@@ -94,11 +94,12 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
     // summary instead of paying to regenerate identical text.
     const existing = tasks.length
         ? await ZohoProjectTask.find({ projectId, taskId: { $in: tasks.map((t) => t.id) } })
-            .select('taskId commentSummary waitingOnClient').lean()
+            .select('taskId commentSummary waitingOnClient team').lean()
         : [];
     const priorByTask = new Map(existing.map((row) => [row.taskId, {
         ...(row.commentSummary || {}),
         ask: row.waitingOnClient?.ask ? row.waitingOnClient : null,
+        team: row.team || null,
     }]));
 
     // Bounded concurrency: these are network calls to OpenAI, and a 200-task
@@ -111,6 +112,7 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
             previousText: prior.text,
             previousVersion: prior.promptVersion,
             previousAsk: prior.ask,
+            previousTeam: prior.team,
         });
     });
     const summaryByTask = new Map(tasks.map((task, i) => [task.id, summaries[i]]));
@@ -134,6 +136,7 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
                             priority: task.priority,
                             percentComplete: task.percentComplete,
                             ownerNames: task.ownerNames || [],
+                            team: summaryByTask.get(task.id)?.team || null,
                             tasklist: task.tasklist,
                             milestone: task.milestone,
                             createdByName: task.createdByName,
