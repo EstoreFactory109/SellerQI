@@ -299,6 +299,15 @@ const badgeFor = (map, value) => map[String(value || '').toLowerCase()] || NEUTR
 
 const GRID_COLS = '96px minmax(0,1fr) 96px 120px 150px 110px 20px';
 
+/**
+ * Coming up carries neither a start date nor a team.
+ *
+ * A task leaves this list the moment it starts, so "starts" only ever says "later"
+ * and the team that will pick it up is not settled until then — both columns were
+ * a dash or a guess. The audit recommendations below have neither by definition.
+ */
+const COMING_UP_COLS = '110px minmax(0,1fr) 140px';
+
 /** "2 hours ago" / "Yesterday" / "Aug 24" — matching the mock's relative style. */
 const relativeTime = (value) => {
     if (!value) return '—';
@@ -635,9 +644,9 @@ const Status = () => {
                         </span>
                     </div>
                     <div className="rounded-lg overflow-x-auto" style={{ border: `1px solid ${PALETTE.dividerFaint}`, background: 'rgba(255,255,255,.012)', padding: '2px 24px 4px' }}>
-                        <div className="min-w-[760px]">
-                            <div className="grid items-center gap-[18px] py-[13px] pb-[10px] text-[11px] tracking-[.09em]" style={{ gridTemplateColumns: GRID_COLS, borderBottom: `1px solid ${PALETTE.dividerFaint}`, color: PALETTE.textDim }}>
-                                <span>LIST</span><span>TASK</span><span>PRIORITY</span><span>STARTS</span><span>TEAM</span><span /><span />
+                        <div className="min-w-[440px]">
+                            <div className="grid items-center gap-[18px] py-[13px] pb-[10px] text-[11px] tracking-[.09em]" style={{ gridTemplateColumns: COMING_UP_COLS, borderBottom: `1px solid ${PALETTE.dividerFaint}`, color: PALETTE.textDim }}>
+                                <span>LIST</span><span>TASK</span><span>PRIORITY</span>
                             </div>
                             {comingUp.length === 0 ? (
                                 <SectionEmpty>{board?.linked ? 'Nothing scheduled to start yet.' : ' '}</SectionEmpty>
@@ -647,7 +656,7 @@ const Status = () => {
                                     const suggested = t.source === 'suggested';
 
                                     return (
-                                        <div key={t.id} className="grid items-center gap-[18px] py-[14px]" style={{ gridTemplateColumns: GRID_COLS, ...(i > 0 ? dividerStyle('rgba(255,255,255,.04)') : undefined) }}>
+                                        <div key={t.id} className="grid items-center gap-[18px] py-[14px]" style={{ gridTemplateColumns: COMING_UP_COLS, ...(i > 0 ? dividerStyle('rgba(255,255,255,.04)') : undefined) }}>
                                             <span className="text-xs truncate" style={{ color: suggested ? PALETTE.accentLight : PALETTE.textDim }}>
                                                 {suggested ? 'Recommended' : (t.tasklist || '—')}
                                             </span>
@@ -666,15 +675,6 @@ const Status = () => {
                                             ) : (
                                                 <span className="justify-self-start text-[11.5px] font-semibold rounded-md px-[10px] py-1" style={{ background: priority.bg, color: priority.color }}>{t.priority || 'Normal'}</span>
                                             )}
-                                            {/* Deliberately blank, not a fake date: nobody has scheduled
-                                                these yet, and inventing a start would misrepresent them. */}
-                                            <span className="text-xs" style={{ color: PALETTE.textMuted }}>
-                                                {suggested ? 'Not scheduled' : (shortDate(t.startDate) || '—')}
-                                            </span>
-                                            <span className="text-[12.5px] truncate" style={{ color: PALETTE.textMuted }}>
-                                                {suggested ? '—' : (t.team || '—')}
-                                            </span>
-                                            <span /><span />
                                         </div>
                                     );
                                 })
