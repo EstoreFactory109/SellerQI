@@ -361,7 +361,7 @@ const TaskRow = ({ task, isFirst }) => {
                 <span className="flex items-center gap-2 min-w-0">
                     <span className="w-[22px] h-[22px] flex-none rounded-full" style={{ background: 'repeating-linear-gradient(135deg, #1E2228 0 4px, #252A31 4px 8px)', border: '1px solid rgba(255,255,255,.09)' }} />
                     <span className="text-[12.5px] truncate" style={{ color: PALETTE.textTertiary }}>
-                        {task.team || 'Your eStore Factory team'}
+                        {task.team || '—'}
                     </span>
                 </span>
                 <span className="text-xs text-right" style={{ color: PALETTE.textMuted }}>{relativeTime(task.updatedAt)}</span>
@@ -672,7 +672,7 @@ const Status = () => {
                                                 {suggested ? 'Not scheduled' : (shortDate(t.startDate) || '—')}
                                             </span>
                                             <span className="text-[12.5px] truncate" style={{ color: PALETTE.textMuted }}>
-                                                {suggested ? '—' : (t.team || 'Your eStore Factory team')}
+                                                {suggested ? '—' : (t.team || '—')}
                                             </span>
                                             <span /><span />
                                         </div>

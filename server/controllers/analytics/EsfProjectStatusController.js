@@ -44,7 +44,7 @@ const toClientTask = (task) => {
         percentComplete: task.percentComplete,
         // Deliberately NOT task.ownerNames. The client is told which team is handling
         // the work, never which individual — see ZohoProjectTaskModel.team.
-        team: task.team || 'Your eStore Factory team',
+        team: task.team || null,
         tasklist: task.tasklist,
         startDate: task.startDate,
         endDate: task.endDate,
