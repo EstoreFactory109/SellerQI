@@ -20,12 +20,29 @@ jest.mock('../../../Services/Zoho/ZohoProjectsService.js', () => ({
 jest.mock('../../../Services/Zoho/ZohoAuth.js', () => ({
     getConnection: jest.fn(),
 }));
-jest.mock('../../../models/user-auth/userModel.js', () => ({ find: jest.fn() }));
+jest.mock('../../../models/user-auth/userModel.js', () => ({ find: jest.fn(), findOne: jest.fn() }));
 jest.mock('../../../models/system/ZohoProjectTaskModel.js', () => ({
     find: jest.fn(),
     bulkWrite: jest.fn().mockResolvedValue({}),
     deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }),
 }));
+// Matching audit findings against open tasks is its own service with its own tests.
+// Stubbed to "nothing linked" so getTaskBoard and syncProject stay focused on tasks;
+// without these the models would reach for a real database and the suite would hang.
+jest.mock('../../../models/system/EsfSuggestedWorkModel.js', () => ({
+    findOne: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }),
+    updateOne: jest.fn().mockResolvedValue({}),
+    deleteOne: jest.fn().mockResolvedValue({}),
+}));
+jest.mock('../../../models/system/TopOpportunitiesModel.js', () => ({
+    findOne: jest.fn().mockReturnValue({
+        sort: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }),
+    }),
+}));
+jest.mock('../../../Services/AI/ZohoOpportunityMatchService.js', () => ({
+    matchOpportunities: jest.fn().mockResolvedValue({ matches: [], generatedBy: 'fallback' }),
+}));
+
 // Summarising is its own service with its own tests; here it only needs to not
 // make a network call.
 jest.mock('../../../Services/AI/ZohoTaskSummaryService.js', () => ({
@@ -39,6 +56,8 @@ const ZohoProjectsService = require('../../../Services/Zoho/ZohoProjectsService.
 const ZohoAuth = require('../../../Services/Zoho/ZohoAuth.js');
 const UserModel = require('../../../models/user-auth/userModel.js');
 const ZohoProjectTask = require('../../../models/system/ZohoProjectTaskModel.js');
+const EsfSuggestedWork = require('../../../models/system/EsfSuggestedWorkModel.js');
+const TopOpportunities = require('../../../models/system/TopOpportunitiesModel.js');
 const Sync = require('../../../Services/Zoho/ZohoTaskSync.js');
 
 const NOW = new Date('2026-09-11T12:00:00.000Z');
@@ -56,6 +75,15 @@ beforeEach(() => {
     ZohoAuth.getConnection.mockResolvedValue({ portalId: '851273093', portalName: 'estorefactory' });
     ZohoProjectTask.deleteMany.mockResolvedValue({ deletedCount: 0 });
     ZohoProjectTask.bulkWrite.mockResolvedValue({});
+    // jest.config sets resetMocks, which strips the return values declared in the
+    // module factories above — so the query chains have to be rebuilt each test.
+    EsfSuggestedWork.findOne.mockReturnValue({ lean: jest.fn().mockResolvedValue(null) });
+    EsfSuggestedWork.updateOne.mockResolvedValue({});
+    EsfSuggestedWork.deleteOne.mockResolvedValue({});
+    UserModel.findOne.mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }) });
+    TopOpportunities.findOne.mockReturnValue({
+        sort: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }),
+    });
     mockClients([]);
     mockRows([]);
 });

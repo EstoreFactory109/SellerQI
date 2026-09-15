@@ -26,6 +26,9 @@
 
 const UserModel = require('../../models/user-auth/userModel.js');
 const ZohoProjectTask = require('../../models/system/ZohoProjectTaskModel.js');
+const EsfSuggestedWork = require('../../models/system/EsfSuggestedWorkModel.js');
+const TopOpportunities = require('../../models/system/TopOpportunitiesModel.js');
+const ZohoOpportunityMatchService = require('../AI/ZohoOpportunityMatchService.js');
 const ZohoProjectsService = require('./ZohoProjectsService.js');
 const { mapWithConcurrency } = ZohoProjectsService;
 const ZohoTaskSummaryService = require('../AI/ZohoTaskSummaryService.js');
@@ -193,10 +196,13 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
         ...(liveIds.length ? { taskId: { $nin: liveIds } } : {}),
     });
 
+    const suggested = await refreshSuggestedWork(projectId, tasks);
+
     return {
         projectId,
         projectName,
         tasks: tasks.length,
+        suggested,
         comments: tasks.reduce((sum, t) => sum + (t.comments?.length || 0), 0),
         summarised: summaries.filter((s) => s.generatedBy === 'ai').length,
         waitingOnClient: summaries.filter((s) => s.waitingOnClient).length,
@@ -204,6 +210,123 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
         removed: removed.deletedCount || 0,
         truncated: Boolean(updates.truncated),
     };
+};
+
+/**
+ * Work out which of the Dashboard's "Top things to fix" the team is NOT already on,
+ * and store them for this project's Coming up list.
+ *
+ * Runs here rather than at request time for the usual reason — it costs an LLM call,
+ * and the Status page is meant to be a plain database read.
+ *
+ * Matched against OPEN tasks only, never completed ones. If the team finished a piece
+ * of work and the audit still reports the problem, that is worth surfacing again
+ * rather than suppressing as "already done".
+ *
+ * Never throws: a failure here must not take down a task sync that already succeeded.
+ */
+const refreshSuggestedWork = async (projectId, tasks, now = new Date()) => {
+    try {
+        const client = await UserModel.findOne({
+            isEsfClient: true,
+            'zohoProject.projectId': projectId,
+        }).select('_id').lean();
+
+        if (!client) return { skipped: 'no linked client' };
+
+        /*
+         * TopOpportunities is stored per (user, country, region) but the Status page has
+         * no marketplace dimension, so take the most recently written one. For a typical
+         * ESF client that is their only marketplace; for a multi-marketplace seller it is
+         * the one whose data moved last, which is the closest thing to "current" available
+         * without inventing a primary-marketplace concept here.
+         */
+        const opportunityDoc = await TopOpportunities.findOne({ userId: client._id })
+            .sort({ updatedAt: -1 })
+            .lean();
+
+        const opportunities = (opportunityDoc?.opportunities || []).map((o) => ({
+            candidateId: o.candidateId,
+            rank: o.rank,
+            title: o.title,
+            action: o.action,
+            category: o.category,
+            issueType: o.issueType,
+            amount: o.amount,
+            count: o.count,
+        }));
+
+        if (opportunities.length === 0) {
+            await EsfSuggestedWork.deleteOne({ projectId });
+            return { suggestions: 0, skipped: 'no opportunities' };
+        }
+
+        const openTasks = (tasks || [])
+            .filter((task) => classifyTask({
+                isCompleted: task.isCompleted,
+                statusIsClosed: task.statusIsClosed,
+                startDate: task.startDate,
+            }, now) !== SECTIONS.COMPLETED)
+            .map((task) => ({ taskId: task.id, name: task.name, tasklist: task.tasklist }));
+
+        const prior = await EsfSuggestedWork.findOne({ projectId }).lean();
+        const result = await ZohoOpportunityMatchService.matchOpportunities({
+            opportunities,
+            tasks: openTasks,
+            previous: {
+                hash: prior?.sourceHash,
+                version: prior?.promptVersion,
+                matches: prior?.suggestions?.map((s) => ({
+                    candidateId: s.candidateId,
+                    covered: s.covered,
+                    coveredByTaskId: s.coveredByTaskId,
+                    coveredByTaskName: s.coveredByTaskName,
+                    matchedBy: s.matchedBy,
+                })),
+            },
+        });
+
+        const matchById = new Map(result.matches.map((m) => [String(m.candidateId), m]));
+
+        await EsfSuggestedWork.updateOne(
+            { projectId },
+            {
+                $set: {
+                    projectId,
+                    userId: client._id,
+                    country: opportunityDoc?.country || null,
+                    region: opportunityDoc?.region || null,
+                    currencyCode: opportunityDoc?.currencyCode || 'USD',
+                    suggestions: opportunities.map((o) => {
+                        const match = matchById.get(String(o.candidateId)) || {};
+                        return {
+                            ...o,
+                            covered: Boolean(match.covered),
+                            coveredByTaskId: match.coveredByTaskId || null,
+                            coveredByTaskName: match.coveredByTaskName || null,
+                            matchedBy: match.matchedBy || 'none',
+                        };
+                    }),
+                    sourceHash: result.sourceHash,
+                    promptVersion: result.promptVersion,
+                    generatedBy: result.generatedBy,
+                    generatedAt: new Date(),
+                },
+            },
+            { upsert: true }
+        );
+
+        const covered = result.matches.filter((m) => m.covered).length;
+        return {
+            suggestions: opportunities.length,
+            covered,
+            surfaced: opportunities.length - covered,
+            matchedBy: result.generatedBy,
+        };
+    } catch (error) {
+        logger.warn(`[ZohoTaskSync] Suggested work for project ${projectId} failed: ${error.message}`);
+        return { error: error.message };
+    }
 };
 
 /**
@@ -312,8 +435,17 @@ const getTaskBoard = async (projectId, { now = new Date(), completedSinceDays = 
     board.completed.sort(byUpdated);
     board.comingUp.sort((a, b) => new Date(a.startDate || 0) - new Date(b.startDate || 0));
 
+    // Audit findings the team has no open task for. Stored by the nightly sync, so
+    // this stays a plain read — see refreshSuggestedWork.
+    const suggestedDoc = await EsfSuggestedWork.findOne({ projectId }).lean();
+    const suggested = (suggestedDoc?.suggestions || [])
+        .filter((s) => !s.covered)
+        .sort((a, b) => (a.rank || 99) - (b.rank || 99))
+        .map((s) => ({ ...s, currencyCode: suggestedDoc?.currencyCode || 'USD' }));
+
     return {
         ...board,
+        suggested,
         syncedAt: rows.reduce(
             (latest, r) => (!latest || (r.syncedAt && r.syncedAt > latest) ? r.syncedAt : latest),
             null
@@ -328,6 +460,7 @@ module.exports = {
     classifyTask,
     linkedProjects,
     pruneUnlinkedProjects,
+    refreshSuggestedWork,
     syncProject,
     syncAllProjects,
     getTaskBoard,

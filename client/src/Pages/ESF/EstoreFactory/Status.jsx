@@ -32,6 +32,23 @@ const ASK_LABEL = {
     other: 'Needs your input',
 };
 
+/**
+ * Marketplace-local money. The currency travels with the amount from the audit rather
+ * than being assumed, so a EU seller's figures are not rendered in dollars.
+ */
+const money = (amount, currencyCode = 'USD') => {
+    try {
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: currencyCode || 'USD',
+            maximumFractionDigits: 0,
+        }).format(amount);
+    } catch {
+        // An unrecognised currency code must not blank the row.
+        return `${Math.round(amount).toLocaleString('en-US')}`;
+    }
+};
+
 const waitingSince = (value) => {
     if (!value) return null;
     const days = Math.floor((Date.now() - new Date(value).getTime()) / 86400000);
@@ -600,7 +617,13 @@ const Status = () => {
                     <div className="flex items-baseline gap-2.5">
                         <h2 className="m-0 text-[14.5px] font-semibold tracking-[-0.01em]" style={{ color: PALETTE.textTertiary }}>Coming up</h2>
                         <span className="text-[12.5px]" style={{ color: PALETTE.textDim }}>
-                            {comingUp.length ? 'Scheduled to start later' : 'Not started yet'}
+                            {(() => {
+                                if (!comingUp.length) return 'Not started yet';
+                                const recommended = comingUp.filter((t) => t.source === 'suggested').length;
+                                if (recommended === 0) return 'Scheduled to start later';
+                                if (recommended === comingUp.length) return 'Found in your audit, not scheduled yet';
+                                return `Scheduled work, plus ${recommended} found in your audit`;
+                            })()}
                         </span>
                     </div>
                     <div className="rounded-lg overflow-x-auto" style={{ border: `1px solid ${PALETTE.dividerFaint}`, background: 'rgba(255,255,255,.012)', padding: '2px 24px 4px' }}>
@@ -613,13 +636,36 @@ const Status = () => {
                             ) : (
                                 comingUp.map((t, i) => {
                                     const priority = badgeFor(PRIORITY_STYLE, t.priority);
+                                    const suggested = t.source === 'suggested';
+
                                     return (
                                         <div key={t.id} className="grid items-center gap-[18px] py-[14px]" style={{ gridTemplateColumns: GRID_COLS, ...(i > 0 ? dividerStyle('rgba(255,255,255,.04)') : undefined) }}>
-                                            <span className="text-xs truncate" style={{ color: PALETTE.textDim }}>{t.tasklist || '—'}</span>
-                                            <span className="text-[13px] min-w-0 truncate" style={{ color: PALETTE.textTertiary }} title={t.name}>{t.name}</span>
-                                            <span className="justify-self-start text-[11.5px] font-semibold rounded-md px-[10px] py-1" style={{ background: priority.bg, color: priority.color }}>{t.priority || 'Normal'}</span>
-                                            <span className="text-xs" style={{ color: PALETTE.textMuted }}>{shortDate(t.startDate) || '—'}</span>
-                                            <span className="text-[12.5px] truncate" style={{ color: PALETTE.textMuted }}>{t.owners?.length ? t.owners.join(', ') : 'Unassigned'}</span>
+                                            <span className="text-xs truncate" style={{ color: suggested ? PALETTE.accentLight : PALETTE.textDim }}>
+                                                {suggested ? 'Recommended' : (t.tasklist || '—')}
+                                            </span>
+                                            <span className="text-[13px] min-w-0 truncate" style={{ color: PALETTE.textTertiary }} title={t.action || t.name}>
+                                                {t.name}
+                                                {/* The money is why this is worth doing — the same figure the
+                                                    Dashboard already shows, so the two cannot disagree. */}
+                                                {suggested && t.amount > 0 && (
+                                                    <span style={{ color: PALETTE.good }}> · {money(t.amount, t.currencyCode)}</span>
+                                                )}
+                                            </span>
+                                            {suggested ? (
+                                                <span className="justify-self-start text-[11.5px] font-semibold rounded-md px-[10px] py-1" style={{ background: 'rgba(59,130,246,.13)', color: PALETTE.accentLight }}>
+                                                    From your audit
+                                                </span>
+                                            ) : (
+                                                <span className="justify-self-start text-[11.5px] font-semibold rounded-md px-[10px] py-1" style={{ background: priority.bg, color: priority.color }}>{t.priority || 'Normal'}</span>
+                                            )}
+                                            {/* Deliberately blank, not a fake date: nobody has scheduled
+                                                these yet, and inventing a start would misrepresent them. */}
+                                            <span className="text-xs" style={{ color: PALETTE.textMuted }}>
+                                                {suggested ? 'Not scheduled' : (shortDate(t.startDate) || '—')}
+                                            </span>
+                                            <span className="text-[12.5px] truncate" style={{ color: PALETTE.textMuted }}>
+                                                {suggested ? '—' : (t.owners?.length ? t.owners.join(', ') : 'Unassigned')}
+                                            </span>
                                             <span /><span />
                                         </div>
                                     );

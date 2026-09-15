@@ -34,6 +34,7 @@ const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js')
 const IssuesData = require('../../models/system/IssuesDataModel.js');
 const IssueSummary = require('../../models/system/IssueSummaryModel.js');
 const TopOpportunities = require('../../models/system/TopOpportunitiesModel.js');
+const EsfSuggestedWork = require('../../models/system/EsfSuggestedWorkModel.js');
 const TopProducts = require('../../models/system/TopProductsModel.js');
 const Cogs = require('../../models/finance/CogsModel.js');
 const ProductWiseStorageFees = require('../../models/finance/ProductWiseStorageFees.js');
@@ -211,6 +212,10 @@ const collectionsWithUserId = [
     // same way anything else keyed by userId would if left off this list.
     { model: TopOpportunities, key: 'userId' },
     { model: TopProducts, key: 'userId' },
+    // The ESF client's audit findings matched against their agency's Zoho tasks.
+    // Derived and rebuildable, but it copies the opportunity titles and dollar
+    // amounts, so it leaks exactly like the two rows above if left off this list.
+    { model: EsfSuggestedWork, key: 'userId' },
     { model: Cogs, key: 'userId' },
     { model: ProductWiseStorageFees, key: 'userId' },
     { model: FBAFees, key: 'userId' },

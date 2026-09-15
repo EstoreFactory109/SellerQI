@@ -96,7 +96,44 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
         const board = await ZohoTaskSync.getTaskBoard(projectId);
 
         const inProgress = board.inProgress.map(toClientTask);
-        const comingUp = board.comingUp.map(toClientTask);
+
+        /**
+         * Coming up is two different things in one list: work the team has actually
+         * scheduled in Zoho, and problems the audit found that nobody has picked up
+         * yet. They are merged because the client's question is the same for both
+         * ("what happens next?"), but `source` keeps them honestly distinguishable —
+         * a recommendation has no owner and no start date, and showing one as though
+         * it were booked work would be a lie.
+         *
+         * Anything the team already has an open task for was filtered out at sync
+         * time (see ZohoTaskSync.refreshSuggestedWork), so this list cannot repeat
+         * what is already underway.
+         */
+        const comingUp = [
+            ...board.comingUp.map(toClientTask).map((t) => ({ ...t, source: 'scheduled' })),
+            ...(board.suggested || []).map((s) => ({
+                id: `suggested:${s.candidateId}`,
+                name: s.title,
+                action: s.action || null,
+                tasklist: 'Recommended',
+                priority: null,
+                owners: [],
+                startDate: null,
+                endDate: null,
+                percentComplete: null,
+                summary: null,
+                updateCount: 0,
+                lastUpdateAt: null,
+                waitingOnYou: null,
+                yourReplies: [],
+                source: 'suggested',
+                // What the Dashboard already tells them this is worth, carried over
+                // rather than recomputed so the two surfaces cannot disagree.
+                amount: s.amount || 0,
+                count: s.count || 0,
+                currencyCode: s.currencyCode || 'USD',
+            })),
+        ];
 
         // Tasks blocked on the client, surfaced as their own list AND left in
         // place below — the same task legitimately appears in both, which is
