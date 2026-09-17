@@ -182,10 +182,17 @@ const zohoRequest = async ({
     multipart = false,
     timeout,
     headers: extraHeaders,
+    // Full base URL override, for Zoho products that do NOT live on the Projects
+    // host — Billing is served from www.zohoapis.com/billing/v1, not projectsapi.
+    // Everything else here (token minting, the 401 replay, 429 backoff, error
+    // normalisation) applies unchanged, which is why this is an override rather
+    // than a second client.
+    baseUrl,
     context = 'Zoho Projects request'
 }) => {
-    const apiDomain = await resolveApiDomain();
-    const url = `${baseUrlFor(apiDomain, version)}${path}`;
+    const url = baseUrl
+        ? `${baseUrl}${path}`
+        : `${baseUrlFor(await resolveApiDomain(), version)}${path}`;
 
     let triedTokenRefresh = false;
     let rateLimitRetries = 0;

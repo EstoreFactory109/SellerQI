@@ -172,6 +172,20 @@ const userSchema = new mongoose.Schema(
         linkedAt: { type: Date, default: null },
         linkedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
       },
+      // The Zoho Billing customer this client is invoiced as. Resolved ONCE by
+      // email and then pinned by id, because the two systems disagree about
+      // identity: a client's SellerQI login is a person's address while their
+      // Billing record is often a shared company/channel alias. Matching by email
+      // on every sync would silently lose a client's invoice history the day
+      // either address changes. See Services/Zoho/ZohoBillingSync.js.
+      zohoBilling: {
+        customerId: { type: String, default: null },
+        customerName: { type: String, default: null },
+        // Which address resolved the match, kept so a later mismatch is
+        // explainable rather than mysterious.
+        matchedEmail: { type: String, default: null },
+        linkedAt: { type: Date, default: null },
+      },
       // Role inside the ESF staff portal. Only meaningful when
       // accessType === 'esfUser'. See Services/User/esfRoles.js for the rules.
       // 'owner' is never assignable through the API - it is seeded.

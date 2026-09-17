@@ -101,6 +101,7 @@ const { getAsinDailyAggregation } = require('../controllers/analytics/ProductWis
 const { getEsfClientDashboard } = require('../controllers/analytics/EsfClientDashboardController.js');
 const { getEsfProjectStatus } = require('../controllers/analytics/EsfProjectStatusController.js');
 const { postEsfTaskReply } = require('../controllers/analytics/EsfProjectReplyController.js');
+const { getEsfBilling } = require('../controllers/analytics/EsfBillingController.js');
 const { zohoUpload, MAX_FILES, MAX_FILE_BYTES } = require('../middlewares/multer/zohoUpload.js');
 const { ApiResponse } = require('../utils/ApiResponse.js');
 const esfClientOnly = require('../middlewares/Auth/esfClientOnly.js');
@@ -302,6 +303,11 @@ router.get('/esf/client-dashboard', auth, esfClientOnly, getLocation, analyseDat
 // project data, not marketplace data, so it has no country/region dimension.
 // Cached briefly because the underlying rows only change once a day anyway.
 router.get('/esf/project-status', auth, esfClientOnly, analyseDataCache(300, 'esf-project-status'), getEsfProjectStatus);
+
+// Invoices + the card on file, from the nightly Zoho Billing sync. Same shape as the
+// Status route above: no getLocation (billing has no marketplace dimension) and a
+// short cache, since the rows only change once a day.
+router.get('/esf/billing', auth, esfClientOnly, analyseDataCache(300, 'esf-billing'), getEsfBilling);
 
 /**
  * Reply to a task from the Status page — text, files, or both, sent on to Zoho.

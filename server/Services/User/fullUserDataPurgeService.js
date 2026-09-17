@@ -35,6 +35,7 @@ const IssuesData = require('../../models/system/IssuesDataModel.js');
 const IssueSummary = require('../../models/system/IssueSummaryModel.js');
 const TopOpportunities = require('../../models/system/TopOpportunitiesModel.js');
 const EsfSuggestedWork = require('../../models/system/EsfSuggestedWorkModel.js');
+const { EsfBillingProfile, EsfBillingInvoice } = require('../../models/system/EsfBillingModels.js');
 const TopProducts = require('../../models/system/TopProductsModel.js');
 const Cogs = require('../../models/finance/CogsModel.js');
 const ProductWiseStorageFees = require('../../models/finance/ProductWiseStorageFees.js');
@@ -216,6 +217,12 @@ const collectionsWithUserId = [
     // Derived and rebuildable, but it copies the opportunity titles and dollar
     // amounts, so it leaks exactly like the two rows above if left off this list.
     { model: EsfSuggestedWork, key: 'userId' },
+    // Synced Zoho Billing. Rebuildable from Zoho, but these hold a company's billing
+    // ADDRESS, invoice amounts and the last four digits of a card — the most
+    // sensitive rows this integration stores, and the least defensible to leave
+    // behind after a deletion request.
+    { model: EsfBillingProfile, key: 'userId' },
+    { model: EsfBillingInvoice, key: 'userId' },
     { model: Cogs, key: 'userId' },
     { model: ProductWiseStorageFees, key: 'userId' },
     { model: FBAFees, key: 'userId' },

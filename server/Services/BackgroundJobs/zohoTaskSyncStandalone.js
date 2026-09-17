@@ -142,7 +142,28 @@ async function runSyncTick() {
         logger.warn(`[ZohoTaskSync] Tick budget exceeded — ${summary.skippedForTime} project(s) not started this run`);
     }
 
-    return { enabled: true, ...summary, durationMs: Date.now() - startedAt };
+    /*
+     * Billing rides the same tick rather than taking its own cron.
+     *
+     * It is a handful of calls per client against a different Zoho product, and
+     * ecosystem.config.js is already at 12.75GB of its 12.8GB budget — the same
+     * constraint that put this whole job in cronProducerStandalone instead of its own
+     * PM2 app. Wrapped separately so a Billing failure cannot lose a task sync that
+     * already succeeded.
+     */
+    let billing = null;
+    try {
+        const ZohoBillingSync = require('../Zoho/ZohoBillingSync.js');
+        billing = await ZohoBillingSync.syncAllBilling();
+        logger.info('[ZohoBillingSync] Complete', {
+            clients: billing.clients, linked: billing.linked, invoices: billing.invoices, failed: billing.failed,
+        });
+    } catch (error) {
+        logger.error('[ZohoBillingSync] Failed', { error: error?.message });
+        billing = { error: error?.message };
+    }
+
+    return { enabled: true, ...summary, billing, durationMs: Date.now() - startedAt };
 }
 
 function setupCron() {

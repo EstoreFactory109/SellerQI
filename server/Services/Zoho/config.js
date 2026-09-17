@@ -144,6 +144,33 @@ const PATHS = {
  */
 const ATTACHMENTS_ENABLED = process.env.ZOHO_TASK_ATTACHMENTS_ENABLED === 'true';
 
+/**
+ * Zoho Billing is a different product on a different host from Projects.
+ *
+ * Projects has its own dedicated hostname (projectsapi.zoho.com); Billing is served
+ * from the shared Zoho API gateway. Per-DC the TLD changes the same way the accounts
+ * domain does, so this follows ZOHO_ACCOUNTS_DOMAIN rather than hardcoding .com.
+ */
+const DEFAULT_BILLING_API_DOMAIN = 'https://www.zohoapis.com';
+const getBillingBaseUrl = () =>
+    `${process.env.ZOHO_BILLING_API_DOMAIN || DEFAULT_BILLING_API_DOMAIN}/billing/v1`;
+
+/**
+ * Billing paths. Verified against the live account — the field names these return
+ * are NOT what the docs imply, so see ZohoBillingService for the mapping:
+ *   - the invoice date is `invoice_date`, not `date`
+ *   - the customer record carries NO card data; cards are their own sub-resource
+ *   - a human-readable description lives on invoice LINE ITEMS, so it needs the
+ *     per-invoice detail call, not the list
+ */
+const BILLING_PATHS = {
+    customers: () => '/customers',
+    customer: (customerId) => `/customers/${customerId}`,
+    customerCards: (customerId) => `/customers/${customerId}/cards`,
+    invoices: () => '/invoices',
+    invoice: (invoiceId) => `/invoices/${invoiceId}`
+};
+
 // Zoho caps page size per resource; these are the documented maxima.
 const PAGE_SIZE = {
     projects: 200,
@@ -165,6 +192,8 @@ module.exports = {
     getCredentials,
     SCOPES,
     ATTACHMENTS_ENABLED,
+    BILLING_PATHS,
+    getBillingBaseUrl,
     PATHS,
     PAGE_SIZE,
     MAX_TASKS_DEFAULT,
