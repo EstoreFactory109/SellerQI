@@ -107,6 +107,39 @@ const normaliseInvoice = (invoice = {}) => ({
 });
 
 /**
+ * When the period an invoice paid for runs out.
+ *
+ * Zoho writes the service window into the line item description — the only place it
+ * appears, since the subscriptions endpoint (which would give next_billing_at
+ * directly) is 401 under our scopes and reading it would need another consent.
+ *
+ *   "Charges for this duration (from 22-June-2026 to 21-July-2026)"  ->  2026-07-21
+ *
+ * Returns null when nothing parses. Callers must treat that as "unknown", never as
+ * "no renewal due" — a client whose description format changes must fall back to
+ * being checked periodically, not silently stop being checked at all.
+ */
+const MONTHS = {
+    january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
+    july: 6, august: 7, september: 8, october: 9, november: 10, december: 11,
+};
+
+const parseCoveragePeriodEnd = (description) => {
+    if (!description || typeof description !== 'string') return null;
+
+    // "... to 21-July-2026)" — the SECOND date in the phrase is the period end.
+    const match = description.match(/to\s+(\d{1,2})-([A-Za-z]+)-(\d{4})/);
+    if (!match) return null;
+
+    const [, day, monthName, year] = match;
+    const month = MONTHS[monthName.toLowerCase()];
+    if (month === undefined) return null;
+
+    const date = new Date(Date.UTC(Number(year), month, Number(day)));
+    return Number.isNaN(date.getTime()) ? null : date;
+};
+
+/**
  * Find the Billing customer for an email address.
  *
  * Returns null rather than throwing when there is no match: plenty of ESF clients
@@ -214,6 +247,12 @@ const getInvoice = async (invoiceId) => {
         description: items.map((i) => i.name).filter(Boolean).join(', ')
             || invoice.reference_number
             || null,
+        // The latest period end across this invoice's line items — what the client
+        // has already paid to be covered until.
+        coversUntil: items
+            .map((i) => parseCoveragePeriodEnd(i.description))
+            .filter(Boolean)
+            .sort((a, b) => b - a)[0] || null,
         billingAddress: invoice.billing_address
             ? {
                 street: invoice.billing_address.street || invoice.billing_address.address || null,
@@ -259,6 +298,7 @@ const getInvoicePdf = async (invoiceId) => {
 };
 
 module.exports = {
+    parseCoveragePeriodEnd,
     getInvoicePdf,
     findCustomerByEmail,
     getCustomer,

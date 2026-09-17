@@ -52,6 +52,21 @@ const EsfBillingProfileSchema = new mongoose.Schema({
         status: { type: String, default: null },
     },
 
+    /**
+     * When the period the client has paid for runs out — i.e. when the next invoice
+     * is expected. Derived from the newest invoice's line-item service window, since
+     * the subscriptions endpoint that would state it outright is outside our scopes.
+     *
+     * This is what makes the nightly billing sweep cheap: a client is only called out
+     * to Zoho for once this date has passed. Null means "unknown", which is treated
+     * as due — never as "nothing to do".
+     */
+    nextRenewalAt: { type: Date, default: null },
+    // Distinct from syncedAt: this records the last time we LOOKED, whether or not
+    // anything had changed, so the backstop below cannot be defeated by a client
+    // whose invoices never move.
+    lastCheckedAt: { type: Date, default: null },
+
     syncedAt: { type: Date, default: Date.now },
 }, { timestamps: true });
 
@@ -73,6 +88,8 @@ const EsfBillingInvoiceSchema = new mongoose.Schema({
     // Zoho's own lowercase vocabulary (paid | sent | overdue | draft | void).
     // Never matched on for meaning beyond display; `balance` is the reliable signal.
     status: { type: String, default: null },
+    // End of the service period this invoice paid for, parsed from its line items.
+    coversUntil: { type: Date, default: null },
 
     syncedAt: { type: Date, default: Date.now },
 }, { timestamps: true });

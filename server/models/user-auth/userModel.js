@@ -185,6 +185,10 @@ const userSchema = new mongoose.Schema(
         // explainable rather than mysterious.
         matchedEmail: { type: String, default: null },
         linkedAt: { type: Date, default: null },
+        // When we last ASKED Zoho who this client is, whether or not we found
+        // anyone. Without it a client with no Billing record is re-looked-up every
+        // night forever, which is the one cost the due-rule exists to avoid.
+        lastLookupAt: { type: Date, default: null },
       },
       // Role inside the ESF staff portal. Only meaningful when
       // accessType === 'esfUser'. See Services/User/esfRoles.js for the rules.

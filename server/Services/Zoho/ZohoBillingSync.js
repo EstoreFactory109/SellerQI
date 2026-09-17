@@ -25,6 +25,62 @@ const logger = require('../../utils/Logger.js');
 const DETAIL_CONCURRENCY = 4;
 
 /**
+ * Longest a client may go unchecked, however far off their renewal is.
+ *
+ * Renewal is the PRIMARY trigger, but not everything billing-related follows it: a
+ * card can be replaced, expire or be declined, and a billing address can change,
+ * mid-cycle and with no renewal anywhere near. Without this backstop a client on an
+ * annual plan would show a stale card for eleven months.
+ */
+const MAX_DAYS_BETWEEN_CHECKS = 7;
+
+/**
+ * Should this client be called out to Zoho for tonight?
+ *
+ * The rule, in priority order:
+ *   never synced / no profile        -> yes, we know nothing
+ *   renewal date unknown             -> yes, treat unknown as due rather than done
+ *   renewal has passed               -> yes, a new invoice is expected
+ *   not looked at in a week          -> yes, catches card/address changes
+ *   otherwise                        -> no, and that is the saving
+ */
+const isDueForSync = (profile, now = new Date(), user = null) => {
+    if (!profile) {
+        /*
+         * No profile can mean two different things, and conflating them is expensive:
+         * a client we have never looked at, or one we HAVE looked at and who simply
+         * has no Zoho Billing record. The second is permanent for most clients, so
+         * re-asking every night is a wasted call per client per night, forever.
+         */
+        const lookedAt = user?.zohoBilling?.lastLookupAt;
+        if (lookedAt) {
+            const days = (now - new Date(lookedAt)) / 86400000;
+            if (days < MAX_DAYS_BETWEEN_CHECKS) {
+                return { due: false, reason: `no billing record (rechecked in ${Math.ceil(MAX_DAYS_BETWEEN_CHECKS - days)}d)` };
+            }
+            return { due: true, reason: 'rechecking for a billing record' };
+        }
+        return { due: true, reason: 'never synced' };
+    }
+    if (!profile.nextRenewalAt) return { due: true, reason: 'renewal date unknown' };
+
+    if (new Date(profile.nextRenewalAt) <= now) {
+        return { due: true, reason: `renewal passed (${new Date(profile.nextRenewalAt).toISOString().slice(0, 10)})` };
+    }
+
+    const lastLooked = profile.lastCheckedAt || profile.syncedAt;
+    const staleDays = lastLooked ? (now - new Date(lastLooked)) / 86400000 : Infinity;
+    if (staleDays >= MAX_DAYS_BETWEEN_CHECKS) {
+        return { due: true, reason: `${Math.floor(staleDays)}d since last check` };
+    }
+
+    return {
+        due: false,
+        reason: `next renewal ${new Date(profile.nextRenewalAt).toISOString().slice(0, 10)}`,
+    };
+};
+
+/**
  * Resolve which Billing customer a client is, preferring the pinned id.
  * Returns null when the client simply has no Billing record — a normal state.
  */
@@ -34,7 +90,14 @@ const resolveCustomerId = async (user) => {
     }
 
     const customer = await ZohoBillingService.findCustomerByEmail(user.email);
-    if (!customer) return null;
+
+    if (!customer) {
+        // Stamp the failed lookup so the sweep can back off rather than asking again
+        // tomorrow. A client who is onboarded to Billing later is picked up at the
+        // next recheck.
+        await UserModel.updateOne({ _id: user._id }, { $set: { 'zohoBilling.lastLookupAt': new Date() } });
+        return null;
+    }
 
     await UserModel.updateOne(
         { _id: user._id },
@@ -112,11 +175,15 @@ const syncClient = async (user) => {
         const detailed = await mapWithConcurrency(invoices, DETAIL_CONCURRENCY, async (invoice) => {
             try {
                 const full = await ZohoBillingService.getInvoice(invoice.invoiceId);
-                return { ...invoice, description: full?.description || null };
+                return {
+                    ...invoice,
+                    description: full?.description || null,
+                    coversUntil: full?.coversUntil || null,
+                };
             } catch (error) {
                 // Keep the invoice; lose only its description.
                 logger.warn(`[ZohoBillingSync] Could not read invoice ${invoice.invoiceNumber}: ${error.message}`);
-                return { ...invoice, description: null };
+                return { ...invoice, description: null, coversUntil: null };
             }
         });
 
@@ -139,6 +206,7 @@ const syncClient = async (user) => {
                                 total: invoice.total,
                                 balance: invoice.balance,
                                 status: invoice.status,
+                                coversUntil: invoice.coversUntil,
                                 syncedAt: new Date(),
                             },
                         },
@@ -157,7 +225,22 @@ const syncClient = async (user) => {
             ...(liveIds.length ? { invoiceId: { $nin: liveIds } } : {}),
         });
 
+        /*
+         * When to look again. The furthest-out period any invoice has paid for is the
+         * point a new one is expected; the day AFTER it is the first day worth asking.
+         * Null when nothing parsed, which isDueForSync reads as "check again", not as
+         * "nothing due".
+         */
+        const covered = detailed.map((i) => i.coversUntil).filter(Boolean).sort((a, b) => b - a)[0] || null;
+        const nextRenewalAt = covered ? new Date(new Date(covered).getTime() + 86400000) : null;
+
+        await EsfBillingProfile.updateOne(
+            { userId: user._id },
+            { $set: { nextRenewalAt, lastCheckedAt: new Date() } }
+        );
+
         return {
+            nextRenewalAt,
             userId: String(user._id),
             email: user.email,
             customerId,
@@ -172,21 +255,49 @@ const syncClient = async (user) => {
     }
 };
 
-/** Every ESF client. Billing is per-client, unlike projects which several may share. */
-const syncAllBilling = async () => {
+/**
+ * Sweep every ESF client, but only CALL ZOHO for the ones actually due.
+ *
+ * Billing barely moves: a monthly client gets one new invoice every ~30 days, so
+ * fetching all of them every night is ~29 wasted round trips per client per month
+ * against an API that rate-limits. The due check is a single Mongo read; a skip costs
+ * nothing.
+ *
+ * `force` bypasses the rule, for a manual "refresh everything now".
+ */
+const syncAllBilling = async ({ force = false, now = new Date() } = {}) => {
     const clients = await UserModel.find({ isEsfClient: true })
         .select('_id email zohoBilling')
         .lean();
 
+    const profiles = await EsfBillingProfile
+        .find({ userId: { $in: clients.map((c) => c._id) } })
+        .select('userId nextRenewalAt lastCheckedAt syncedAt')
+        .lean();
+    const profileByUser = new Map(profiles.map((p) => [String(p.userId), p]));
+
     const results = [];
     for (const client of clients) {
-        results.push(await syncClient(client));
+        const verdict = isDueForSync(profileByUser.get(String(client._id)), now, client);
+
+        if (!force && !verdict.due) {
+            results.push({
+                userId: String(client._id), email: client.email, notDue: true, reason: verdict.reason,
+            });
+            continue;
+        }
+
+        results.push({ ...(await syncClient(client)), reason: force ? 'forced' : verdict.reason });
     }
 
-    const linked = results.filter((r) => r.customerId).length;
+    const checked = results.filter((r) => !r.notDue).length;
+    logger.info(`[ZohoBillingSync] ${checked}/${clients.length} client(s) were due; ${clients.length - checked} skipped`);
+
     return {
         clients: clients.length,
-        linked,
+        checked,
+        notDue: results.filter((r) => r.notDue).length,
+        linked: results.filter((r) => r.customerId).length,
         skipped: results.filter((r) => r.skipped).length,
         failed: results.filter((r) => r.error).length,
         invoices: results.reduce((sum, r) => sum + (r.invoices || 0), 0),
@@ -204,4 +315,7 @@ const getBillingView = async (userId) => {
     return { profile: profile || null, invoices };
 };
 
-module.exports = { syncClient, syncAllBilling, getBillingView, resolveCustomerId };
+module.exports = {
+    syncClient, syncAllBilling, getBillingView, resolveCustomerId,
+    isDueForSync, MAX_DAYS_BETWEEN_CHECKS,
+};
