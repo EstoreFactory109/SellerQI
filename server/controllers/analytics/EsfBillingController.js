@@ -8,6 +8,11 @@
  * Access is gated by esfClientOnly on the route, and the query is scoped to req.userId
  * — a client can only ever read their own billing, and there is no id in the URL to
  * tamper with.
+ *
+ * Sends the plan's renewal state (next charge date, or cancelled and what it is paid
+ * up to) but nothing else about the subscription — no pricing, no term history, no
+ * subscription id. The subscriptions scope is read for scheduling; this is the narrow
+ * slice of it a client has a right to see.
  */
 
 const { ApiError } = require('../../utils/ApiError.js');
@@ -78,6 +83,28 @@ const getEsfBilling = asyncHandler(async (req, res) => {
                     expiryMonth: profile.card.expiryMonth,
                     expiryYear: profile.card.expiryYear,
                     gateway: profile.card.gateway,
+                }
+                : null,
+            /**
+             * The plan's renewal state. Shown to the client on request — a client is
+             * entitled to know when they next get charged, and a cancelled plan is
+             * something they should see plainly rather than infer from invoices
+             * quietly stopping.
+             *
+             * Only the renewal-relevant fields are sent: no pricing, no term history,
+             * no subscription id.
+             */
+            plan: profile.subscription?.status
+                ? {
+                    name: profile.subscription.planName || null,
+                    status: profile.subscription.status,
+                    ended: Boolean(profile.subscription.hasEnded),
+                    // Only meaningful on a live plan; Zoho omits it once cancelled.
+                    renewsOn: profile.subscription.nextBillingAt || null,
+                    // What the client actually paid up to, which stays true after
+                    // cancellation and is the honest "covered until" date.
+                    coveredUntil: profile.subscription.currentTermEndsAt || null,
+                    cancelledOn: profile.subscription.cancelledAt || null,
                 }
                 : null,
             outstanding: profile.outstanding ?? 0,

@@ -183,3 +183,74 @@ describe('invoice download', () => {
         expect(res.status).toHaveBeenCalledWith(502);
     });
 });
+
+describe('the plan block', () => {
+    const base = { companyName: 'Acme', card: { lastFour: '2718' }, currencyCode: 'USD', syncedAt: new Date() };
+
+    test('a live plan sends its next charge date', async () => {
+        mockGetBillingView.mockResolvedValue({
+            profile: {
+                ...base,
+                subscription: {
+                    planName: 'Walmart Account Management', status: 'live', hasEnded: false,
+                    nextBillingAt: new Date('2026-12-16'), currentTermEndsAt: new Date('2026-12-16'),
+                },
+            },
+            invoices: [],
+        });
+
+        const { body } = await run({ userId: 'u1' });
+
+        expect(body.data.plan).toMatchObject({ status: 'live', ended: false });
+        expect(body.data.plan.renewsOn).toEqual(new Date('2026-12-16'));
+    });
+
+    test('a cancelled plan says so, and still says what it is paid up to', async () => {
+        // "Cancelled" on its own leaves a client wondering whether they still have
+        // cover; the covered-until date is the half that answers it.
+        mockGetBillingView.mockResolvedValue({
+            profile: {
+                ...base,
+                subscription: {
+                    planName: 'Walmart Account Management', status: 'cancelled', hasEnded: true,
+                    nextBillingAt: null,
+                    currentTermEndsAt: new Date('2026-07-22'),
+                    cancelledAt: new Date('2026-07-03'),
+                },
+            },
+            invoices: [],
+        });
+
+        const { body } = await run({ userId: 'u1' });
+
+        expect(body.data.plan).toMatchObject({ status: 'cancelled', ended: true, renewsOn: null });
+        expect(body.data.plan.cancelledOn).toEqual(new Date('2026-07-03'));
+        expect(body.data.plan.coveredUntil).toEqual(new Date('2026-07-22'));
+    });
+
+    test('sends no pricing or subscription id with the plan', async () => {
+        mockGetBillingView.mockResolvedValue({
+            profile: {
+                ...base,
+                subscription: {
+                    planName: 'X', status: 'live', hasEnded: false, nextBillingAt: new Date(),
+                    // fields the sync stores but a client has no use for
+                    amount: 399, subscriptionId: '3921939000005968085',
+                },
+            },
+            invoices: [],
+        });
+
+        const { body } = await run({ userId: 'u1' });
+
+        expect(Object.keys(body.data.plan).sort())
+            .toEqual(['cancelledOn', 'coveredUntil', 'ended', 'name', 'renewsOn', 'status']);
+        expect(JSON.stringify(body.data)).not.toContain('3921939000005968085');
+    });
+
+    test('no subscription at all is null, not an empty plan card', async () => {
+        mockGetBillingView.mockResolvedValue({ profile: { ...base, subscription: {} }, invoices: [] });
+
+        expect((await run({ userId: 'u1' })).body.data.plan).toBeNull();
+    });
+});

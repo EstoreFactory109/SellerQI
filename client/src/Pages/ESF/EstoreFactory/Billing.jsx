@@ -9,7 +9,13 @@ import axiosInstance from '../../../config/axios.config.js';
  * (server/Services/Zoho/ZohoBillingSync.js) — never Zoho directly, so the page is a
  * database read and survives Zoho being slow.
  *
- * TWO THINGS THE MOCK SHOWED THAT REAL DATA CANNOT SUPPORT, both removed rather than
+ * Shows the plan's renewal state as well as invoices: an active plan shows when it
+ * next charges, a cancelled one says so plainly along with what it is paid up to.
+ * A client is entitled to see that rather than infer it from invoices quietly
+ * stopping. No pricing or term history is sent — only what answers "am I still on
+ * this, and when am I next billed".
+ *
+ * ONE THING THE MOCK SHOWED THAT REAL DATA CANNOT SUPPORT, removed rather than
  * faked:
  *   - a card BRAND ("VISA"). Zoho exposes no network/brand for a saved card on this
  *     account — `funding` comes back empty — so the badge shows the last four only.
@@ -21,6 +27,22 @@ const STATUS_STYLE = {
     Paid: { bg: 'rgba(255,255,255,.06)', color: PALETTE.textTertiary },
     Due: { bg: 'rgba(245,166,35,.13)', color: PALETTE.amberValue },
 };
+
+/**
+ * How a plan's state reads to the client.
+ *
+ * Zoho's own vocabulary is live/cancelled/expired/paused; only "cancelled" is a word
+ * a client would use unprompted, so the rest are relabelled. A cancelled or expired
+ * plan is shown in amber rather than red — it is a fact to notice, not an error.
+ */
+const PLAN_STATUS = {
+    live: { label: 'Active', bg: 'rgba(34,197,94,.11)', color: PALETTE.good },
+    cancelled: { label: 'Cancelled', bg: 'rgba(245,166,35,.13)', color: PALETTE.amberValue },
+    expired: { label: 'Ended', bg: 'rgba(245,166,35,.13)', color: PALETTE.amberValue },
+    paused: { label: 'Paused', bg: 'rgba(255,255,255,.06)', color: PALETTE.textTertiary },
+};
+const planStatusOf = (status) => PLAN_STATUS[status]
+    || { label: status || 'Unknown', bg: 'rgba(255,255,255,.06)', color: PALETTE.textTertiary };
 
 const GRID = '118px 118px 1fr 118px 104px 40px';
 
@@ -102,6 +124,7 @@ const Billing = () => {
     const card = data?.card || null;
     const billedTo = data?.billedTo || null;
     const cardExpiry = card ? expiry(card.expiryMonth, card.expiryYear) : null;
+    const plan = data?.plan || null;
 
     return (
     <div className="min-h-full w-full" style={{ background: PALETTE.bg, color: PALETTE.textPrimary, fontFamily: "system-ui, -apple-system, 'Helvetica Neue', Helvetica, sans-serif" }}>
@@ -166,20 +189,57 @@ const Billing = () => {
                         )}
                     </div>
 
-                    <div className="flex flex-col gap-[9px] items-start">
-                        {/* Kept as prose, not a button: there is no payment portal wired
-                            up, and a dead "Update payment method" link is worse than
-                            telling them who can actually change it. */}
-                        <span className="text-[12.5px] leading-[1.6]" style={{ color: PALETTE.textSecondary }}>
-                            To change the card we bill, message your account manager.
-                        </span>
+                    <div className="flex flex-col gap-[5px]">
+                        <span className="text-[11.5px] tracking-[.04em]" style={{ color: PALETTE.textMuted }}>PLAN</span>
+                        {plan ? (
+                            <>
+                                <span className="flex items-center gap-2 flex-wrap">
+                                    {plan.name && (
+                                        <span className="text-[13.5px]" style={{ color: PALETTE.textBody }}>{plan.name}</span>
+                                    )}
+                                    <span
+                                        className="text-[11.5px] font-semibold rounded-md px-[9px] py-[3px]"
+                                        style={{ background: planStatusOf(plan.status).bg, color: planStatusOf(plan.status).color }}
+                                    >
+                                        {planStatusOf(plan.status).label}
+                                    </span>
+                                </span>
+                                {/* An active plan gets its next charge date. A cancelled one
+                                    gets the date it was cancelled AND what it is paid up to —
+                                    "cancelled" alone leaves a client wondering whether they
+                                    still have cover. */}
+                                <span className="text-[12.5px] leading-[1.55]" style={{ color: PALETTE.textSecondary }}>
+                                    {plan.renewsOn && !plan.ended
+                                        ? `Renews ${shortDate(plan.renewsOn)}`
+                                        : plan.cancelledOn
+                                            ? `Cancelled ${shortDate(plan.cancelledOn)}`
+                                            : 'No renewal scheduled'}
+                                    {plan.ended && plan.coveredUntil && (
+                                        <>
+                                            <br />
+                                            Covered until {shortDate(plan.coveredUntil)}
+                                        </>
+                                    )}
+                                </span>
+                            </>
+                        ) : (
+                            <span className="text-[13px]" style={{ color: PALETTE.textMuted }}>
+                                {loading ? 'Loading…' : 'No plan on file.'}
+                            </span>
+                        )}
                         {data?.outstanding > 0 && (
-                            <span className="text-[12.5px] font-semibold" style={{ color: PALETTE.amberValue }}>
+                            <span className="text-[12.5px] font-semibold pt-1" style={{ color: PALETTE.amberValue }}>
                                 {money(data.outstanding, data.currencyCode)} outstanding
                             </span>
                         )}
                     </div>
                 </div>
+
+                {/* Prose, not a button: there is no payment portal wired up, and a dead
+                    "Update payment method" link is worse than naming who can change it. */}
+                <span className="text-[12.5px]" style={{ color: PALETTE.textMuted }}>
+                    To change the card we bill or your plan, message your account manager.
+                </span>
             </section>
 
             <section className="rounded-lg flex flex-col" style={{ background: PALETTE.surface, border: `1px solid ${PALETTE.border}`, padding: '22px 26px 14px' }}>
