@@ -46,7 +46,26 @@ const SCOPES = [
     // the error body.
     'ZohoProjects.tasks.ALL',
     'ZohoProjects.activities.READ',
-    'ZohoProjects.status.READ'
+    'ZohoProjects.status.READ',
+
+    /**
+     * For the client Billing page (currently mock — see client/src/Pages/ESF/
+     * EstoreFactory/Billing.jsx). That page shows only invoice history and the card
+     * on file; it explicitly does NOT show plan/subscription terms ("Anything about
+     * your plan itself goes through your account manager"), so subscriptions/plans
+     * scopes are deliberately left out — least privilege, same principle as
+     * tasks.ALL above being scoped to only what write-back needs.
+     *
+     * NAMING CAVEAT: Zoho's own docs (zoho.com/billing/api/v1/oauth/) still use the
+     * legacy `ZohoSubscriptions.*` prefix for what is now branded "Zoho Billing" —
+     * confirmed 2026-09 against the live doc page, not assumed. But as with the
+     * Projects scopes, Zoho's consent URL accepts ANY scope string without
+     * validating it — the only real proof is whether Zoho Billing actually appears
+     * on the consent screen at reconnect time. If it doesn't, either this org has
+     * no Zoho Billing organization provisioned, or the scope name is wrong.
+     */
+    'ZohoSubscriptions.invoices.READ',
+    'ZohoSubscriptions.customers.READ'
 ];
 
 /**
