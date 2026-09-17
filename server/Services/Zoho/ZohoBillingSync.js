@@ -62,6 +62,26 @@ const isDueForSync = (profile, now = new Date(), user = null) => {
         }
         return { due: true, reason: 'never synced' };
     }
+    /*
+     * A plan that has ended is the single biggest saving here, and it needs its own
+     * branch BEFORE the null check below: a cancelled subscription has no next
+     * billing date, so "no renewal date" would otherwise read as "unknown, go and
+     * ask" — and we would chase an invoice that is never going to be raised, every
+     * night, for the rest of the account's life. 124 of 182 subscriptions on the
+     * live account are in exactly this state.
+     *
+     * The weekly backstop below still applies, so a client who resubscribes is
+     * picked up within 7 days.
+     */
+    if (profile.subscription?.hasEnded && !profile.nextRenewalAt) {
+        const lookedAt = profile.lastCheckedAt || profile.syncedAt;
+        const staleDays = lookedAt ? (now - new Date(lookedAt)) / 86400000 : Infinity;
+        if (staleDays < MAX_DAYS_BETWEEN_CHECKS) {
+            return { due: false, reason: `plan ${profile.subscription.status} — no invoice expected` };
+        }
+        return { due: true, reason: `rechecking a ${profile.subscription.status} plan` };
+    }
+
     if (!profile.nextRenewalAt) return { due: true, reason: 'renewal date unknown' };
 
     if (new Date(profile.nextRenewalAt) <= now) {
@@ -128,11 +148,14 @@ const syncClient = async (user) => {
 
         const { customerId } = resolved;
 
-        const [customer, cards, invoices] = await Promise.all([
+        const [customer, cards, invoices, subscriptions] = await Promise.all([
             ZohoBillingService.getCustomer(customerId),
             ZohoBillingService.getCustomerCards(customerId),
             ZohoBillingService.listInvoices(customerId),
+            ZohoBillingService.listSubscriptions(customerId),
         ]);
+
+        const governing = ZohoBillingService.governingSubscription(subscriptions);
 
         // The primary card if one is flagged, else whichever is active. Zoho exposes
         // no brand at all, so nothing here can claim one.
@@ -160,6 +183,16 @@ const syncClient = async (user) => {
                             status: card.status,
                         }
                         : { lastFour: null, expiryMonth: null, expiryYear: null, gateway: null, status: null },
+                    subscription: governing
+                        ? {
+                            planName: governing.planName,
+                            status: governing.status,
+                            hasEnded: governing.hasEnded,
+                            nextBillingAt: governing.nextBillingAt,
+                            currentTermEndsAt: governing.currentTermEndsAt,
+                            cancelledAt: governing.cancelledAt,
+                        }
+                        : { planName: null, status: null, hasEnded: false, nextBillingAt: null, currentTermEndsAt: null, cancelledAt: null },
                     syncedAt: new Date(),
                 },
             },
@@ -231,8 +264,20 @@ const syncClient = async (user) => {
          * Null when nothing parsed, which isDueForSync reads as "check again", not as
          * "nothing due".
          */
+        /*
+         * When to look again, best source first:
+         *   1. the subscription's own next_billing_at — authoritative, but only ever
+         *      present on a LIVE plan
+         *   2. nothing at all if the plan has ended — no invoice is coming, so there
+         *      is no renewal to wait for, and the weekly backstop takes over
+         *   3. otherwise infer it from the furthest period an invoice has paid for,
+         *      which is all we had before this endpoint was in scope
+         */
         const covered = detailed.map((i) => i.coversUntil).filter(Boolean).sort((a, b) => b - a)[0] || null;
-        const nextRenewalAt = covered ? new Date(new Date(covered).getTime() + 86400000) : null;
+        const inferred = covered ? new Date(new Date(covered).getTime() + 86400000) : null;
+
+        const nextRenewalAt = governing?.nextBillingAt
+            || (governing?.hasEnded ? null : inferred);
 
         await EsfBillingProfile.updateOne(
             { userId: user._id },
@@ -272,7 +317,11 @@ const syncAllBilling = async ({ force = false, now = new Date() } = {}) => {
 
     const profiles = await EsfBillingProfile
         .find({ userId: { $in: clients.map((c) => c._id) } })
-        .select('userId nextRenewalAt lastCheckedAt syncedAt')
+        // `subscription` is NOT optional here: isDueForSync reads subscription.hasEnded
+        // to tell a lapsed plan from an unknown renewal date. Omitting it from this
+        // projection does not fail — the rule just silently takes the wrong branch and
+        // chases cancelled plans nightly, which is most of what this rule exists to stop.
+        .select('userId nextRenewalAt lastCheckedAt syncedAt subscription')
         .lean();
     const profileByUser = new Map(profiles.map((p) => [String(p.userId), p]));
 

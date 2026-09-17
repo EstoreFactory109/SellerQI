@@ -109,3 +109,48 @@ describe('clients with no Zoho Billing record', () => {
         expect(out.reason).toMatch(/rechecking/);
     });
 });
+
+describe('a plan that has ended', () => {
+    test('is NOT chased nightly for an invoice that will never come', () => {
+        // The live account has 124 cancelled subscriptions against 26 live ones. A
+        // cancelled plan has no next_billing_at, so without this branch every one of
+        // them reads as "renewal date unknown" and gets fetched every single night.
+        const out = isDueForSync({
+            nextRenewalAt: null,
+            subscription: { status: 'cancelled', hasEnded: true },
+            lastCheckedAt: daysFromNow(-1),
+        }, NOW);
+
+        expect(out.due).toBe(false);
+        expect(out.reason).toMatch(/no invoice expected/);
+    });
+
+    test('is still rechecked weekly, so resubscribing is picked up', () => {
+        const out = isDueForSync({
+            nextRenewalAt: null,
+            subscription: { status: 'cancelled', hasEnded: true },
+            lastCheckedAt: daysFromNow(-MAX_DAYS_BETWEEN_CHECKS),
+        }, NOW);
+
+        expect(out.due).toBe(true);
+        expect(out.reason).toMatch(/rechecking a cancelled plan/);
+    });
+
+    test('a live plan with a future billing date is still skipped on its own terms', () => {
+        expect(isDueForSync({
+            nextRenewalAt: daysFromNow(30),
+            subscription: { status: 'live', hasEnded: false },
+            lastCheckedAt: NOW,
+        }, NOW).due).toBe(false);
+    });
+
+    test('an ended plan that somehow still has a renewal date falls through to the date', () => {
+        // Defensive: if both are set, the date wins rather than the status silently
+        // suppressing a fetch that is genuinely due.
+        expect(isDueForSync({
+            nextRenewalAt: daysFromNow(-1),
+            subscription: { status: 'expired', hasEnded: true },
+            lastCheckedAt: NOW,
+        }, NOW).due).toBe(true);
+    });
+});

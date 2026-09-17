@@ -62,6 +62,25 @@ const EsfBillingProfileSchema = new mongoose.Schema({
      * as due — never as "nothing to do".
      */
     nextRenewalAt: { type: Date, default: null },
+
+    /**
+     * The subscription that governs when to look again — NOT shown to the client.
+     * The Billing page still displays no plan terms; this exists purely so the sweep
+     * can tell "an invoice is due any day" from "this plan ended, nothing is coming".
+     * On the live account 124 of 182 subscriptions are cancelled, so that distinction
+     * is most of the saving.
+     */
+    subscription: {
+        planName: { type: String, default: null },
+        // live | cancelled | expired | paused
+        status: { type: String, default: null },
+        // True once no further invoice can be expected. Read by the due rule, which
+        // must NOT treat a lapsed plan as an overdue renewal.
+        hasEnded: { type: Boolean, default: false },
+        nextBillingAt: { type: Date, default: null },
+        currentTermEndsAt: { type: Date, default: null },
+        cancelledAt: { type: Date, default: null },
+    },
     // Distinct from syncedAt: this records the last time we LOOKED, whether or not
     // anything had changed, so the backstop below cannot be defeated by a client
     // whose invoices never move.

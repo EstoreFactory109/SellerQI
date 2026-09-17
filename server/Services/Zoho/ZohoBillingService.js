@@ -140,6 +140,79 @@ const parseCoveragePeriodEnd = (description) => {
 };
 
 /**
+ * Statuses that mean no further invoice is coming.
+ *
+ * On the live account 124 of 182 subscriptions are cancelled and 20 expired — so for
+ * most customers there IS no next billing date, and treating a lapsed plan as "renewal
+ * overdue" means chasing an invoice forever that will never be raised.
+ */
+const TERMINAL_STATUSES = new Set(['cancelled', 'expired', 'dunning', 'unpaid']);
+
+/**
+ * A customer's subscriptions.
+ *
+ * `next_billing_at` is only present on LIVE subscriptions; a cancelled one carries
+ * current_term_ends_at and cancelled_at instead. That asymmetry is the whole point of
+ * reading this endpoint — it is what distinguishes "an invoice is due any day now"
+ * from "this plan ended and nothing further is coming".
+ */
+const normaliseSubscription = (sub = {}) => ({
+    subscriptionId: sub.subscription_id ? String(sub.subscription_id) : null,
+    number: sub.subscription_number || null,
+    planName: sub.plan_name || sub.name || null,
+    status: sub.status || null,
+    isLive: sub.status === 'live',
+    hasEnded: TERMINAL_STATUSES.has(sub.status),
+    nextBillingAt: asDate(sub.next_billing_at),
+    currentTermEndsAt: asDate(sub.current_term_ends_at),
+    lastBillingAt: asDate(sub.last_billing_at),
+    cancelledAt: asDate(sub.cancelled_at),
+    interval: asNumber(sub.interval),
+    intervalUnit: sub.interval_unit || null,
+    amount: asNumber(sub.amount) ?? 0,
+    currencyCode: sub.currency_code || 'USD',
+});
+
+const listSubscriptions = async (customerId) => {
+    if (!customerId) throw new ApiError(400, 'A Zoho Billing customer id is required');
+
+    try {
+        const response = await billingRequest({
+            path: BILLING_PATHS.subscriptions(),
+            params: { customer_id: customerId, per_page: PAGE_SIZE },
+            context: `Listing Zoho Billing subscriptions for customer ${customerId}`,
+        });
+        return (response.subscriptions || []).map(normaliseSubscription);
+    } catch (error) {
+        // Scheduling detail only — never worth losing the invoices over. Falls back to
+        // inferring the renewal from invoice line items.
+        logger.warn(`[ZohoBilling] Could not read subscriptions for ${customerId}: ${error.message}`);
+        return [];
+    }
+};
+
+/**
+ * The subscription that decides when to look again.
+ *
+ * A customer can hold several — typically old cancelled plans alongside a current one.
+ * A LIVE plan always wins, and among live ones the soonest billing date, because that
+ * is the first moment a new invoice can appear. With none live, the most recently
+ * ended one is what tells us billing has stopped.
+ */
+const governingSubscription = (subscriptions = []) => {
+    const live = subscriptions.filter((s) => s.isLive && s.nextBillingAt);
+    if (live.length) {
+        return live.sort((a, b) => a.nextBillingAt - b.nextBillingAt)[0];
+    }
+    if (subscriptions.some((s) => s.isLive)) {
+        return subscriptions.find((s) => s.isLive);
+    }
+    return [...subscriptions].sort(
+        (a, b) => (b.currentTermEndsAt || 0) - (a.currentTermEndsAt || 0)
+    )[0] || null;
+};
+
+/**
  * Find the Billing customer for an email address.
  *
  * Returns null rather than throwing when there is no match: plenty of ESF clients
@@ -298,6 +371,10 @@ const getInvoicePdf = async (invoiceId) => {
 };
 
 module.exports = {
+    listSubscriptions,
+    normaliseSubscription,
+    governingSubscription,
+    TERMINAL_STATUSES,
     parseCoveragePeriodEnd,
     getInvoicePdf,
     findCustomerByEmail,

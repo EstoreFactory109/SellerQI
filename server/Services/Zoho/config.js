@@ -190,7 +190,8 @@ const BILLING_PATHS = {
     customer: (customerId) => `/customers/${customerId}`,
     customerCards: (customerId) => `/customers/${customerId}/cards`,
     invoices: () => '/invoices',
-    invoice: (invoiceId) => `/invoices/${invoiceId}`
+    invoice: (invoiceId) => `/invoices/${invoiceId}`,
+    subscriptions: () => '/subscriptions'
 };
 
 // Zoho caps page size per resource; these are the documented maxima.
