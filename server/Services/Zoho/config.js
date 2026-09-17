@@ -65,7 +65,29 @@ const SCOPES = [
      * no Zoho Billing organization provisioned, or the scope name is wrong.
      */
     'ZohoSubscriptions.invoices.READ',
-    'ZohoSubscriptions.customers.READ'
+    'ZohoSubscriptions.customers.READ',
+
+    /**
+     * Read-only on subscriptions, for SCHEDULING rather than display.
+     *
+     * The Billing page still shows no plan terms — that is unchanged and deliberate
+     * ("Anything about your plan itself goes through your account manager"). This
+     * scope exists so the nightly sweep can read Zoho's own `next_billing_at`
+     * instead of inferring the renewal date by parsing invoice line-item text:
+     *
+     *     "Charges for this duration (from 22-June-2026 to 21-July-2026)"
+     *
+     * That inference works (see ZohoBillingService.parseCoveragePeriodEnd) but is
+     * hostage to ESF's invoice wording — change the template and every renewal date
+     * silently becomes null, which degrades to fetching every client every night. An
+     * authoritative field removes that fragility.
+     *
+     * Same caveat as every scope here: Zoho's consent URL accepts any string without
+     * validating it, so this is only proven by Zoho Billing appearing on the consent
+     * screen and by the subscriptions endpoint answering 200 afterwards. It currently
+     * answers 401.
+     */
+    'ZohoSubscriptions.subscriptions.READ'
 ];
 
 /**
