@@ -131,15 +131,22 @@ async function runSyncTick() {
         return { enabled: false, projects: projects.length, durationMs: Date.now() - startedAt };
     }
 
+    /*
+     * Tasks and billing are INDEPENDENT. A client can be invoiced without anyone
+     * having linked a Zoho project for them, so an early return here for "no linked
+     * projects" would silently stop their invoices syncing too — which is exactly
+     * what this block used to do.
+     */
+    let summary = { projects: 0 };
+
     if (!projects.length) {
-        logger.info('[ZohoTaskSync] No clients are linked to a Zoho project — nothing to sync');
-        return { enabled: true, projects: 0, durationMs: Date.now() - startedAt };
-    }
+        logger.info('[ZohoTaskSync] No clients are linked to a Zoho project — skipping tasks, still syncing billing');
+    } else {
+        summary = await ZohoTaskSync.syncAllProjects({ deadlineAt: startedAt + TICK_BUDGET_MS });
 
-    const summary = await ZohoTaskSync.syncAllProjects({ deadlineAt: startedAt + TICK_BUDGET_MS });
-
-    if (summary.skippedForTime) {
-        logger.warn(`[ZohoTaskSync] Tick budget exceeded — ${summary.skippedForTime} project(s) not started this run`);
+        if (summary.skippedForTime) {
+            logger.warn(`[ZohoTaskSync] Tick budget exceeded — ${summary.skippedForTime} project(s) not started this run`);
+        }
     }
 
     /*
