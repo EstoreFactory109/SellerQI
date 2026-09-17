@@ -13,15 +13,16 @@ import axiosInstance from '../../../config/axios.config.js';
  * faked:
  *   - a card BRAND ("VISA"). Zoho exposes no network/brand for a saved card on this
  *     account — `funding` comes back empty — so the badge shows the last four only.
- *   - per-invoice PDF download and "Download all invoices". Nothing serves those
- *     files; the scope granted is read-only on invoice DATA, not documents.
+ *
+ * Invoice PDFs ARE available — Zoho renders them from the same invoices.READ scope
+ * via ?accept=pdf, so each row downloads the real document.
  */
 const STATUS_STYLE = {
     Paid: { bg: 'rgba(255,255,255,.06)', color: PALETTE.textTertiary },
     Due: { bg: 'rgba(245,166,35,.13)', color: PALETTE.amberValue },
 };
 
-const GRID = '118px 118px 1fr 118px 104px';
+const GRID = '118px 118px 1fr 118px 104px 40px';
 
 const money = (amount, currencyCode = 'USD') => {
     try {
@@ -63,6 +64,38 @@ const Billing = () => {
     }, []);
 
     useEffect(() => { load(); }, [load]);
+
+    const [downloading, setDownloading] = useState(null);
+    const [downloadError, setDownloadError] = useState('');
+
+    /**
+     * Fetched through axios rather than a plain <a href>, because the endpoint is
+     * cookie-authenticated and a bare link would not reliably carry credentials
+     * cross-origin. The blob is handed to a throwaway anchor, then revoked.
+     */
+    const download = useCallback(async (invoiceNumber) => {
+        setDownloading(invoiceNumber);
+        setDownloadError('');
+        try {
+            const res = await axiosInstance.get(
+                `/api/pagewise/esf/billing/invoices/${encodeURIComponent(invoiceNumber)}/pdf`,
+                { responseType: 'blob' }
+            );
+
+            const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `${invoiceNumber}.pdf`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
+        } catch {
+            setDownloadError(`Could not download ${invoiceNumber}. Please try again.`);
+        } finally {
+            setDownloading(null);
+        }
+    }, []);
 
     const linked = Boolean(data?.linked);
     const invoices = data?.invoices || [];
@@ -165,6 +198,9 @@ const Billing = () => {
                 {loadError && (
                     <div className="py-4 text-[13px]" style={{ color: PALETTE.amberValue }}>{loadError}</div>
                 )}
+                {downloadError && (
+                    <div className="py-2 text-[12.5px]" style={{ color: '#F87171' }}>{downloadError}</div>
+                )}
 
                 {!loading && !loadError && !linked && (
                     <div className="py-6 text-[13px]" style={{ color: PALETTE.textMuted }}>
@@ -180,7 +216,7 @@ const Billing = () => {
                     <div className="overflow-x-auto">
                         <div className="min-w-[660px]">
                             <div className="grid gap-[18px] items-center pb-[11px] text-[11px] tracking-[.05em]" style={{ gridTemplateColumns: GRID, borderBottom: `1px solid ${PALETTE.borderHover}`, color: PALETTE.textMuted }}>
-                                <span>INVOICE</span><span>DATE</span><span>DESCRIPTION</span><span className="text-right">AMOUNT</span><span>STATUS</span>
+                                <span>INVOICE</span><span>DATE</span><span>DESCRIPTION</span><span className="text-right">AMOUNT</span><span>STATUS</span><span />
                             </div>
 
                             {invoices.map((inv) => {
@@ -204,6 +240,22 @@ const Billing = () => {
                                                 {label}
                                             </span>
                                         </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => download(inv.number)}
+                                            disabled={downloading === inv.number}
+                                            title={`Download ${inv.number}`}
+                                            aria-label={`Download invoice ${inv.number}`}
+                                            className="w-[28px] h-[28px] rounded-md flex items-center justify-center text-xs transition-colors"
+                                            style={{
+                                                border: `1px solid ${PALETTE.border}`,
+                                                color: PALETTE.textTertiary,
+                                                cursor: downloading === inv.number ? 'wait' : 'pointer',
+                                                opacity: downloading === inv.number ? 0.5 : 1,
+                                            }}
+                                        >
+                                            {downloading === inv.number ? '…' : '↓'}
+                                        </button>
                                     </div>
                                 );
                             })}

@@ -188,6 +188,9 @@ const zohoRequest = async ({
     // normalisation) applies unchanged, which is why this is an override rather
     // than a second client.
     baseUrl,
+    // 'arraybuffer' for binary responses (invoice PDFs). Left undefined everywhere
+    // else so axios keeps parsing JSON as before.
+    responseType,
     context = 'Zoho Projects request'
 }) => {
     const url = baseUrl
@@ -233,6 +236,7 @@ const zohoRequest = async ({
                 // An upload of a client's video is not comparable to a JSON read, so the
                 // shared timeout is overridable rather than generous for every call.
                 timeout: timeout || REQUEST_TIMEOUT_MS,
+                ...(responseType ? { responseType } : {}),
                 maxBodyLength: Infinity,
                 maxContentLength: Infinity
             });

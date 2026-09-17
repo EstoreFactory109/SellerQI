@@ -97,3 +97,89 @@ describe('paid status comes from the balance', () => {
         expect(out.status).toBe('sent');
     });
 });
+
+describe('invoice download', () => {
+    const mockFindOne = jest.fn();
+    const mockGetPdf = jest.fn();
+
+    beforeAll(() => {
+        jest.resetModules();
+        jest.doMock('../../models/system/EsfBillingModels.js', () => ({
+            EsfBillingInvoice: { findOne: mockFindOne },
+            EsfBillingProfile: {},
+        }));
+        jest.doMock('../../Services/Zoho/ZohoBillingService.js', () => ({ getInvoicePdf: mockGetPdf }));
+        jest.doMock('../../Services/Zoho/ZohoBillingSync.js', () => ({ getBillingView: jest.fn() }));
+        jest.doMock('../../utils/Logger.js', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }));
+    });
+
+    const load = () => require('../../controllers/analytics/EsfBillingController.js').downloadEsfInvoice;
+
+    const chain = (result) => ({ select: () => ({ lean: () => Promise.resolve(result) }) });
+
+    const runDownload = async (req) => {
+        const res = mockRes();
+        res.setHeader = jest.fn();
+        res.send = jest.fn().mockReturnValue(res);
+        load()(req, res, jest.fn());
+        await new Promise((r) => setImmediate(r));
+        return res;
+    };
+
+    beforeEach(() => {
+        mockFindOne.mockReset();
+        mockGetPdf.mockReset();
+    });
+
+    test('refuses an invoice that is not the caller\'s', async () => {
+        // Scoped by userId, so another client's invoice number resolves to nothing —
+        // the number being guessable is fine because the query is not.
+        mockFindOne.mockReturnValue(chain(null));
+
+        const res = await runDownload({ userId: 'u1', params: { invoiceNumber: 'ESFI9999' } });
+
+        expect(res.status).toHaveBeenCalledWith(404);
+        expect(mockGetPdf).not.toHaveBeenCalled();
+    });
+
+    test('looks the invoice up by caller AND number, never number alone', async () => {
+        mockFindOne.mockReturnValue(chain({ invoiceId: 'z1', invoiceNumber: 'ESFI3635' }));
+        mockGetPdf.mockResolvedValue(Buffer.from('%PDF-1.4 test'));
+
+        await runDownload({ userId: 'u1', params: { invoiceNumber: 'ESFI3635' } });
+
+        expect(mockFindOne).toHaveBeenCalledWith({ userId: 'u1', invoiceNumber: 'ESFI3635' });
+    });
+
+    test('sends the PDF with a filename the client recognises', async () => {
+        mockFindOne.mockReturnValue(chain({ invoiceId: 'z1', invoiceNumber: 'ESFI3635' }));
+        mockGetPdf.mockResolvedValue(Buffer.from('%PDF-1.4 test'));
+
+        const res = await runDownload({ userId: 'u1', params: { invoiceNumber: 'ESFI3635' } });
+
+        expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/pdf');
+        expect(res.setHeader).toHaveBeenCalledWith('Content-Disposition', 'attachment; filename="ESFI3635.pdf"');
+    });
+
+    test('strips anything header-unsafe out of the filename', async () => {
+        // The number reaches a response header, so a crafted one must not be able to
+        // inject into it.
+        mockFindOne.mockReturnValue(chain({ invoiceId: 'z1', invoiceNumber: 'ES"I\r\n-evil' }));
+        mockGetPdf.mockResolvedValue(Buffer.from('%PDF-1.4 test'));
+
+        const res = await runDownload({ userId: 'u1', params: { invoiceNumber: 'x' } });
+
+        const disposition = res.setHeader.mock.calls.find((c) => c[0] === 'Content-Disposition')[1];
+        expect(disposition).toBe('attachment; filename="ESI-evil.pdf"');
+        expect(disposition).not.toMatch(/[\r\n"]evil/);
+    });
+
+    test('a Zoho failure is a clean 502, not a broken file', async () => {
+        mockFindOne.mockReturnValue(chain({ invoiceId: 'z1', invoiceNumber: 'ESFI3635' }));
+        mockGetPdf.mockRejectedValue(new Error('Zoho did not return a PDF for this invoice'));
+
+        const res = await runDownload({ userId: 'u1', params: { invoiceNumber: 'ESFI3635' } });
+
+        expect(res.status).toHaveBeenCalledWith(502);
+    });
+});

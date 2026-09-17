@@ -226,7 +226,40 @@ const getInvoice = async (invoiceId) => {
     };
 };
 
+/**
+ * The invoice as a PDF, exactly as Zoho renders it.
+ *
+ * `?accept=pdf` on the normal detail endpoint — there is no /pdf sub-path (that 404s
+ * with "Invalid URL Passed"). Covered by the invoices.READ scope we already hold, so
+ * this needed no new consent.
+ *
+ * Returned as a Buffer rather than streamed: these are ~60KB, they are fetched one at
+ * a time on a user click, and a Buffer survives the client's 401 refresh-and-replay
+ * where a consumed stream would replay empty.
+ */
+const getInvoicePdf = async (invoiceId) => {
+    if (!invoiceId) throw new ApiError(400, 'A Zoho Billing invoice id is required');
+
+    const response = await billingRequest({
+        path: BILLING_PATHS.invoice(invoiceId),
+        params: { accept: 'pdf' },
+        responseType: 'arraybuffer',
+        context: `Downloading Zoho Billing invoice ${invoiceId}`,
+    });
+
+    const buffer = Buffer.from(response);
+
+    // Zoho answers errors as JSON with a 200 in some paths, so confirm this really is
+    // a PDF rather than handing the browser a renamed error body.
+    if (buffer.slice(0, 5).toString() !== '%PDF-') {
+        throw new ApiError(502, 'Zoho did not return a PDF for this invoice');
+    }
+
+    return buffer;
+};
+
 module.exports = {
+    getInvoicePdf,
     findCustomerByEmail,
     getCustomer,
     getCustomerCards,

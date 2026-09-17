@@ -15,6 +15,8 @@ const { ApiResponse } = require('../../utils/ApiResponse.js');
 const asyncHandler = require('../../utils/AsyncHandler.js');
 const logger = require('../../utils/Logger.js');
 const ZohoBillingSync = require('../../Services/Zoho/ZohoBillingSync.js');
+const ZohoBillingService = require('../../Services/Zoho/ZohoBillingService.js');
+const { EsfBillingInvoice } = require('../../models/system/EsfBillingModels.js');
 
 /**
  * Only what the page renders.
@@ -90,4 +92,47 @@ const getEsfBilling = asyncHandler(async (req, res) => {
     }
 });
 
-module.exports = { getEsfBilling, toClientInvoice };
+/**
+ * GET /api/pagewise/esf/billing/invoices/:invoiceNumber/pdf
+ *
+ * Streams the invoice PDF Zoho renders.
+ *
+ * ADDRESSED BY INVOICE NUMBER, NOT ZOHO'S INVOICE ID — deliberately. The id is never
+ * sent to the client (see toClientInvoice), so the number is the only handle they
+ * have, and the lookup below is scoped by the caller's own userId: another client's
+ * invoice simply is not found. That scoping, not the obscurity of the identifier, is
+ * what makes this safe.
+ *
+ * Not cached: it is binary, fetched on a click, and the JSON cache in front of the
+ * other route would corrupt it.
+ */
+const downloadEsfInvoice = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const { invoiceNumber } = req.params;
+
+    try {
+        const invoice = await EsfBillingInvoice
+            .findOne({ userId, invoiceNumber })
+            .select('invoiceId invoiceNumber')
+            .lean();
+
+        if (!invoice) {
+            return res.status(404).json(new ApiResponse(404, '', 'That invoice is not on your account'));
+        }
+
+        const pdf = await ZohoBillingService.getInvoicePdf(invoice.invoiceId);
+
+        res.setHeader('Content-Type', 'application/pdf');
+        // The invoice number is what the client sees on the page, so it is what the
+        // saved file should be called. Sanitised because it lands in a header.
+        const safeName = String(invoice.invoiceNumber || 'invoice').replace(/[^A-Za-z0-9._-]/g, '');
+        res.setHeader('Content-Disposition', `attachment; filename="${safeName}.pdf"`);
+        res.setHeader('Content-Length', pdf.length);
+        return res.status(200).send(pdf);
+    } catch (error) {
+        logger.error(new ApiError(502, `[EsfBilling] PDF for ${invoiceNumber} failed: ${error.message}`));
+        return res.status(502).json(new ApiResponse(502, '', 'Could not download that invoice'));
+    }
+});
+
+module.exports = { getEsfBilling, downloadEsfInvoice, toClientInvoice };
