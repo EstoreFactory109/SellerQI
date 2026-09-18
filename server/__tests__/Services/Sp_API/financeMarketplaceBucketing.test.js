@@ -405,6 +405,86 @@ describe('resolveDatesToClear — a fully-cancelled day must drop to $0', () => 
     expect(datesToClear.sort()).toEqual(['2026-07-12', '2026-07-13']);
   });
 
+  describe('★ interior gap — a day whose orders ALL shifted away must not keep its stale row', () => {
+    // The orphan that motivated this. On AU account 69f0600ca71f2bd802bba27c the marketplace-local
+    // fix moved 2026-08-25's only order onto 2026-08-26. Case 2 keys off `daysSeen`, which is built
+    // from each row's NEW day key — so 08-25 vanished from it entirely and looked exactly like a day
+    // the report never mentioned. Its pre-fix row survived and the same $69.99 was counted twice.
+    const AU_START = '2026-08-24';
+    const AU_END = '2026-08-26';
+    const auRow = (iso) => ({
+      'purchase-date': iso, 'order-status': 'Shipped', 'item-status': 'Shipped',
+      'item-price': '69.99', quantity: '1', sku: 'M', 'sales-channel': 'Amazon.com.au',
+    });
+    // Both land on their own AU day; nothing lands on 08-25.
+    const aug24 = auRow('2026-08-24T04:00:00Z');
+    const aug26 = auRow('2026-08-26T04:00:00Z');
+
+    test('the gap day IS cleared when rows bracket it on both sides', () => {
+      const { datesToClear, zeroedDays } = resolveDatesToClear({
+        reportRows: [aug24, aug26], country: 'AU',
+        startDate: AU_START, endDate: AU_END,
+        bucketDates: new Set(['2026-08-24', '2026-08-26']),
+      });
+      expect(zeroedDays).toEqual(['2026-08-25']);
+      expect(datesToClear).toContain('2026-08-25');
+    });
+
+    test('a trailing gap is NOT cleared — that is indistinguishable from truncation', () => {
+      // Only 08-24 came back. 08-25 and 08-26 might genuinely be empty, or the report might have
+      // been cut short; nothing here can tell them apart, so both keep their data.
+      const { datesToClear, zeroedDays } = resolveDatesToClear({
+        reportRows: [aug24], country: 'AU',
+        startDate: AU_START, endDate: AU_END, bucketDates: new Set(['2026-08-24']),
+      });
+      expect(zeroedDays).toEqual([]);
+      expect(datesToClear).not.toContain('2026-08-25');
+      expect(datesToClear).not.toContain('2026-08-26');
+    });
+
+    test('a two-day gap is NOT cleared — only the exact one-day shift signature qualifies', () => {
+      // Deliberately conservative: leaving stale data is recoverable, deleting real revenue is not.
+      const aug27 = auRow('2026-08-27T04:00:00Z');
+      const { zeroedDays } = resolveDatesToClear({
+        reportRows: [aug24, aug27], country: 'AU',
+        startDate: '2026-08-24', endDate: '2026-08-27',
+        bucketDates: new Set(['2026-08-24', '2026-08-27']),
+      });
+      expect(zeroedDays).toEqual([]);
+    });
+
+    test('a single row at each end of a long window clears nothing in between', () => {
+      // The span-based version of this rule would zero 28 days from two rows. It must not.
+      const far = auRow('2026-09-22T04:00:00Z');
+      const { zeroedDays } = resolveDatesToClear({
+        reportRows: [aug24, far], country: 'AU',
+        startDate: '2026-08-24', endDate: '2026-09-22',
+        bucketDates: new Set(['2026-08-24', '2026-09-22']),
+      });
+      // Only the two days that actually produced rows are in play; the 28 days between them keep
+      // whatever they hold.
+      expect(zeroedDays).toEqual([]);
+    });
+
+    test('a gap outside the requested range is not cleared (chunk-safety invariant)', () => {
+      const { datesToClear } = resolveDatesToClear({
+        reportRows: [aug24, aug26], country: 'AU',
+        startDate: '2026-08-26', endDate: '2026-08-26', bucketDates: new Set(),
+      });
+      expect(datesToClear).not.toContain('2026-08-25');
+      for (const d of datesToClear) expect(d >= '2026-08-26' && d <= '2026-08-26').toBe(true);
+    });
+
+    test('a gap day that produced its own bucket is untouched, not double-counted as zeroed', () => {
+      const { zeroedDays } = resolveDatesToClear({
+        reportRows: [aug24, aug26], country: 'AU',
+        startDate: AU_START, endDate: AU_END,
+        bucketDates: new Set(['2026-08-24', '2026-08-25', '2026-08-26']),
+      });
+      expect(zeroedDays).toEqual([]);
+    });
+  });
+
   test('the day key is marketplace-local, so a boundary row lands on the right day', () => {
     // 2026-07-12T02:00Z is still 2026-07-11 in Los Angeles.
     const { zeroedDays } = resolveDatesToClear({
