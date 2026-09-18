@@ -14,7 +14,10 @@ const isValidEmail = (email) => {
 };
 
 const sendEmailResetLink = async (email, firstName, link, userId = null) => {
-    email = await resolveRecipientEmail(email, userId);
+    // fanOut:false on purpose — a reset link goes to the exact address the user
+    // typed, even if they have muted it. Muting an address must not remove it as
+    // a way back into the account. Agency redirection still applies.
+    email = await resolveRecipientEmail(email, userId, { fanOut: false });
 
     // Get first email from ADMIN_EMAIL_ID (handle comma-separated values)
     const adminEmail = process.env.ADMIN_EMAIL_ID 

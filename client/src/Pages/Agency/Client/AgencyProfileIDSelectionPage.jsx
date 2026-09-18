@@ -33,7 +33,9 @@ const FLAG_MAP = {
 
 const getCountryFlag = (country) => FLAG_MAP[country] || '\u{1F30D}';
 
-const AgencyProfileIDSelectionPage = () => {
+// `analysingPath` lets other portals (e.g. the ESF staff portal) reuse this
+// screen and return to their own "analysing account" page.
+const AgencyProfileIDSelectionPage = ({ analysingPath = '/agency-analysing-account' }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [searchParams] = useSearchParams();
@@ -181,7 +183,7 @@ const AgencyProfileIDSelectionPage = () => {
             if (['active', 'running', 'waiting', 'delayed'].includes(existingStatus)) {
               console.log('[AgencyProfileID] Job already in progress');
               setWaitingForAnalysis(false);
-              window.location.href = '/agency-analysing-account';
+              window.location.href = analysingPath;
               return;
             }
           }
@@ -202,7 +204,7 @@ const AgencyProfileIDSelectionPage = () => {
         }
 
         setWaitingForAnalysis(false);
-        window.location.href = '/agency-analysing-account';
+        window.location.href = analysingPath;
       }
     } catch (error) {
       console.error('Error saving profile ID:', error);

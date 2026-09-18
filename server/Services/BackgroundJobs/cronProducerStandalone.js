@@ -20,6 +20,7 @@
  *   - `jobScheduler.initialize`            → cache cleanup, health check,
  *                                             weekly email, trial reminders
  *   - `initializeEmailReminderJob`         → 48-hour reactivation emails
+ *   - `zohoTaskSyncStandalone.setupCron`   → nightly Zoho project-task sync
  *
  * Safety
  *   - Wraps the hourly daily-update tick with an `OrchestrationCronLock`
@@ -187,6 +188,18 @@ async function start() {
         logger.info(`[CronProducerStandalone] Email reminder cron ${ok ? 'initialized' : 'failed to initialize'}`);
     } catch (error) {
         logger.error('[CronProducerStandalone] Email reminder init failed', { error: error?.message });
+    }
+
+    // Nightly Zoho project-task sync (02:00 UTC). Lives here rather than in its
+    // own PM2 app because the ecosystem memory budget has no room for one — see
+    // the header of zohoTaskSyncStandalone.js. Its own distributed lock means
+    // hosting it here is safe even if this process were ever scaled past 1.
+    try {
+        const { setupCron: setupZohoTaskSyncCron } = require('./zohoTaskSyncStandalone.js');
+        setupZohoTaskSyncCron();
+        logger.info('[CronProducerStandalone] Zoho task sync cron initialized');
+    } catch (error) {
+        logger.error('[CronProducerStandalone] Zoho task sync init failed', { error: error?.message });
     }
 
     logger.info('[CronProducerStandalone] Started successfully — running all cron schedules');

@@ -98,6 +98,13 @@ const {
 } = require('../controllers/analytics/PPCCampaignAnalysisController.js');
 
 const { getAsinDailyAggregation } = require('../controllers/analytics/ProductWiseAsinDailyController.js');
+const { getEsfClientDashboard } = require('../controllers/analytics/EsfClientDashboardController.js');
+const { getEsfProjectStatus } = require('../controllers/analytics/EsfProjectStatusController.js');
+const { postEsfTaskReply } = require('../controllers/analytics/EsfProjectReplyController.js');
+const { getEsfBilling, downloadEsfInvoice } = require('../controllers/analytics/EsfBillingController.js');
+const { zohoUpload, MAX_FILES, MAX_FILE_BYTES } = require('../middlewares/multer/zohoUpload.js');
+const { ApiResponse } = require('../utils/ApiResponse.js');
+const esfClientOnly = require('../middlewares/Auth/esfClientOnly.js');
 
 const { pauseKeyword, pauseKeywordsBulk } = require('../controllers/analytics/PauseKeywordController.js');
 const { addToNegativeKeywords } = require('../controllers/analytics/AddToNegativeController.js');
@@ -283,6 +290,61 @@ router.post('/ads/pause-keywords', auth, getLocation, pauseKeywordsBulk);
 
 // Bulk: pause then add to negative for multiple keywords. POST body: { keywords: [{ keywordId, campaignId, adGroupId, keywordText, matchType? }], adType? }
 router.post('/ads/pause-and-add-to-negative-bulk', auth, getLocation, pauseAndAddToNegativeBulk);
+
+// ===== ESF-ONLY CLIENT DASHBOARD =====
+// Total Sales / PPC Sales / ACOS charted and tabled by day, with the selected
+// window compared against a previous one.
+// Visible ONLY to ESF-managed clients - esfClientOnly returns 403 otherwise.
+// Query params: startDate, endDate, compareStartDate, compareEndDate (YYYY-MM-DD)
+// Cache TTL: 10 minutes (keyed per date range by the cache middleware)
+router.get('/esf/client-dashboard', auth, esfClientOnly, getLocation, analyseDataCache(600, 'esf-client-dashboard'), getEsfClientDashboard);
+
+// The Status page reads the nightly Zoho task sync. No getLocation: this is
+// project data, not marketplace data, so it has no country/region dimension.
+// Cached briefly because the underlying rows only change once a day anyway.
+router.get('/esf/project-status', auth, esfClientOnly, analyseDataCache(300, 'esf-project-status'), getEsfProjectStatus);
+
+// Invoices + the card on file, from the nightly Zoho Billing sync. Same shape as the
+// Status route above: no getLocation (billing has no marketplace dimension) and a
+// short cache, since the rows only change once a day.
+router.get('/esf/billing', auth, esfClientOnly, analyseDataCache(300, 'esf-billing'), getEsfBilling);
+
+// The invoice PDF. Deliberately NOT behind analyseDataCache — that cache serves JSON
+// and would corrupt a binary body. Scoped to the caller inside the controller.
+router.get('/esf/billing/invoices/:invoiceNumber/pdf', auth, esfClientOnly, downloadEsfInvoice);
+
+/**
+ * Reply to a task from the Status page — text, files, or both, sent on to Zoho.
+ *
+ * Not cached, obviously, and deliberately not behind analyseDataCache: the GET above
+ * caches for 300s, so a client can briefly still see "waiting on you" after replying.
+ * The response carries the new state so the page can update without a refetch.
+ *
+ * Multer errors (too large, too many, wrong type) arrive as thrown errors rather than
+ * validation results, so they are translated here instead of in the controller — the
+ * request never reaches it.
+ */
+router.post(
+    '/esf/project-status/tasks/:taskId/reply',
+    auth,
+    esfClientOnly,
+    (req, res, next) => zohoUpload.array('files', MAX_FILES)(req, res, (error) => {
+        if (!error) {
+            return next();
+        }
+
+        const message = error.code === 'LIMIT_FILE_SIZE'
+            ? `Each file must be under ${Math.round(MAX_FILE_BYTES / (1024 * 1024))}MB`
+            : error.code === 'LIMIT_FILE_COUNT'
+                ? `Please attach at most ${MAX_FILES} files`
+                : error.code === 'UNSUPPORTED_FILE_TYPE'
+                    ? error.message
+                    : 'We could not read that upload';
+
+        return res.status(400).json(new ApiResponse(400, '', message));
+    }),
+    postEsfTaskReply
+);
 
 // ===== ISSUES PAGE =====
 // Returns issues summary data

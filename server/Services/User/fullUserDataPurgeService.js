@@ -34,6 +34,8 @@ const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js')
 const IssuesData = require('../../models/system/IssuesDataModel.js');
 const IssueSummary = require('../../models/system/IssueSummaryModel.js');
 const TopOpportunities = require('../../models/system/TopOpportunitiesModel.js');
+const EsfSuggestedWork = require('../../models/system/EsfSuggestedWorkModel.js');
+const { EsfBillingProfile, EsfBillingInvoice } = require('../../models/system/EsfBillingModels.js');
 const TopProducts = require('../../models/system/TopProductsModel.js');
 const Cogs = require('../../models/finance/CogsModel.js');
 const ProductWiseStorageFees = require('../../models/finance/ProductWiseStorageFees.js');
@@ -122,12 +124,20 @@ const ReviewOrderItem = require('../../models/review/ReviewOrderItemModel.js');
 const ReviewOrder = require('../../models/review/ReviewOrderModel.js');
 const ListingFixStatus = require('../../models/system/ListingFixStatusModel.js');
 const WhatsAppLink = require('../../models/user-auth/WhatsAppLinkModel.js');
+const EsfInvite = require('../../models/user-auth/EsfInviteModel.js');
+
 // Billing history — purged only for an admin's manual delete, see below.
 const Subscription = require('../../models/user-auth/SubscriptionModel.js');
 const PaymentLogs = require('../../models/system/PaymentLogsModel.js');
 
 /** @type {{ model: import('mongoose').Model, key: string }[]} Collections with User (ObjectId) */
 const collectionsWithUser = [
+    // ESF portal invitations. Listed twice because the collection references a
+    // user two ways: invitations this person SENT, and the invitation they
+    // accepted to join. Deleting the inviter must also kill their outstanding
+    // invite links.
+    { model: EsfInvite, key: 'invitedBy' },
+    { model: EsfInvite, key: 'acceptedUserId' },
     { model: ListingItemsKeyword, key: 'User' },
     { model: ListingItems, key: 'User' },
     { model: BuyBoxData, key: 'User' },
@@ -203,6 +213,16 @@ const collectionsWithUserId = [
     // same way anything else keyed by userId would if left off this list.
     { model: TopOpportunities, key: 'userId' },
     { model: TopProducts, key: 'userId' },
+    // The ESF client's audit findings matched against their agency's Zoho tasks.
+    // Derived and rebuildable, but it copies the opportunity titles and dollar
+    // amounts, so it leaks exactly like the two rows above if left off this list.
+    { model: EsfSuggestedWork, key: 'userId' },
+    // Synced Zoho Billing. Rebuildable from Zoho, but these hold a company's billing
+    // ADDRESS, invoice amounts and the last four digits of a card — the most
+    // sensitive rows this integration stores, and the least defensible to leave
+    // behind after a deletion request.
+    { model: EsfBillingProfile, key: 'userId' },
+    { model: EsfBillingInvoice, key: 'userId' },
     { model: Cogs, key: 'userId' },
     { model: ProductWiseStorageFees, key: 'userId' },
     { model: FBAFees, key: 'userId' },

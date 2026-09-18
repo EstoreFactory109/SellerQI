@@ -43,9 +43,11 @@ transporter.verify((err) => {
     }
 });
 
-const sendEmail = async (email, firstName, otp, userId = null) => {
+const sendEmail = async (email, firstName, otp, userId = null, options = {}) => {
     const originalEmail = email;
-    email = await resolveRecipientEmail(email, userId);
+    // `options` lets callers pin the code to one address — adding a new email
+    // must send its code only there, not to every address on the account.
+    email = await resolveRecipientEmail(email, userId, options);
 
     // Log if email was changed by resolver
     if (originalEmail !== email) {

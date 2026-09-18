@@ -59,6 +59,22 @@ import AgencyClientProfileSelection from './Pages/Agency/Client/AgencyClientProf
 import AgencyAnalysingAccount from './Pages/Agency/Client/AgencyAnalysingAccount.jsx';
 import ManageAccountsLayout from './Layout/ManageAccountsLayout.jsx';
 import ManageAccounts from './Pages/Account/ManageAccounts.jsx';
+import EsfLayout from './Layout/EsfLayout.jsx';
+import EsfClientLayout from './Layout/EsfClientLayout.jsx';
+import ProtectedEsfRouteWrapper from './Layout/ProtectedEsfRouteWrapper.jsx';
+import EsfLogin from './Pages/ESF/EsfLogin.jsx';
+import EsfAcceptInvite from './Pages/ESF/EsfAcceptInvite.jsx';
+import EsfClients from './Pages/ESF/EsfClients.jsx';
+import EsfUsers from './Pages/ESF/EsfUsers.jsx';
+import EsfSettings from './Pages/ESF/EsfSettings.jsx';
+import EsfClientConnectToAmazon from './Pages/ESF/Client/EsfClientConnectToAmazon.jsx';
+import EsfClientConnectAccounts from './Pages/ESF/Client/EsfClientConnectAccounts.jsx';
+import EsfClientProfileSelection from './Pages/ESF/Client/EsfClientProfileSelection.jsx';
+import EsfClientDashboard from './Pages/ESF/ClientDashboard.jsx';
+import EstoreFactoryStatus from './Pages/ESF/EstoreFactory/Status.jsx';
+import EstoreFactoryBilling from './Pages/ESF/EstoreFactory/Billing.jsx';
+import EsfEstoreFactoryZoho from './Pages/ESF/EsfEstoreFactoryZoho.jsx';
+import EsfPageAccessGuard from './Layout/EsfPageAccessGuard.jsx';
 import AdminSubscription from './Pages/Admin/Subscription.jsx';
 import AdminEmailLogs from './Pages/Admin/EmailLogs.jsx';
 import AdminPaymentLogs from './Pages/Admin/PaymentLogs.jsx';
@@ -144,6 +160,32 @@ const App = () => {
           <Route path='profile-selection' element={<AgencyClientProfileSelection />} />
         </Route>
         <Route path='/agency-analysing-account' element={<AgencyAnalysingAccount />} />
+        {/* eStore Factory internal staff portal. Guarded server-side by
+            GET /app/esf/me, so a stale localStorage flag cannot render it. */}
+        <Route path='/esf-login' element={<EsfLogin />} />
+        {/* Public — the invitee has no account yet; the token is the credential. */}
+        <Route path='/esf-invite/:token' element={<EsfAcceptInvite />} />
+        <Route
+          element={
+            <ProtectedEsfRouteWrapper>
+              <Outlet />
+            </ProtectedEsfRouteWrapper>
+          }
+        >
+          <Route path='/esf' element={<EsfLayout />}>
+            <Route index element={<Navigate to="clients" replace />} />
+            <Route path='clients' element={<EsfClients />} />
+            <Route path='users' element={<EsfUsers />} />
+            <Route path='estore-factory/zoho-projects' element={<EsfEstoreFactoryZoho />} />
+            <Route path='settings' element={<EsfSettings />} />
+          </Route>
+          <Route path='/esf/client/:clientId' element={<EsfClientLayout />}>
+            <Route index element={<Navigate to="connect-to-amazon" replace />} />
+            <Route path='connect-to-amazon' element={<EsfClientConnectToAmazon />} />
+            <Route path='connect-accounts' element={<EsfClientConnectAccounts />} />
+            <Route path='profile-selection' element={<EsfClientProfileSelection />} />
+          </Route>
+        </Route>
         <Route path='/manage-accounts' element={<ManageAccountsLayout />}>
           <Route index element={<ManageAccounts />} />
           <Route path='subscription' element={<AdminSubscription />} />
@@ -192,7 +234,22 @@ const App = () => {
             </PackageRouteWrapper>
           }>
 
+            {/* Blocks pages an ESF staff member is not allowed to open for this
+                client. No-ops for everyone else. */}
+            <Route element={<EsfPageAccessGuard />}>
             <Route path='dashboard' element={<DashBoard />} />
+            {/* ESF-only pages. Server returns 403 for non-ESF accounts (client-dashboard;
+                the rest are static/local-state so far, see the note in ClientDashboard.jsx)
+                and the guard above redirects away, so this whole group stays invisible
+                to everyone else. */}
+            <Route path='client-dashboard' element={<EsfClientDashboard />} />
+            <Route path='estore-factory/status' element={<EstoreFactoryStatus />} />
+            {/* estore-factory/untapped, /reports, /report-history and /messages are
+                withheld deliberately: those pages still show the design mock's sample
+                content, and serving invented invoices or messages to a real client is
+                worse than the page not existing. The components remain in the tree;
+                restore a route here once each has a backend. */}
+            <Route path='estore-factory/billing' element={<EstoreFactoryBilling />} />
             <Route path='review-request' element={<RecentOrders />} />
             <Route path='qmate' element={<QMate />} />
             <Route path='profitibility-dashboard' element={<ProfitibilityDashboard />} />
@@ -213,6 +270,7 @@ const App = () => {
             <Route path='consultation' element={<CalendlyWidget />} />
             {/* Product detail (ASIN) - must be last so fixed paths are matched first */}
             <Route path=':asin' element={<ProductDetails />} />
+            </Route>
           </Route>
         </Route>
         <Route path='/demo' element={<DemoAutoLogin />} />

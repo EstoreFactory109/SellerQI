@@ -3,6 +3,7 @@ const SellerCentralModel = require('../../models/user-auth/sellerCentralModel.js
 const { ApiError } = require("../../utils/ApiError.js");
 const { hashPassword } = require("../../utils/HashPassword.js");
 const logger = require("../../utils/Logger.js");
+const { findUserByAnyEmail, normalizeEmail } = require("./emailAccounts.js");
 
 
 const createUser = async (firstname, lastname, phone, whatsapp, email, password, otp, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate, agencyName = null) => {
@@ -65,13 +66,18 @@ const createUser = async (firstname, lastname, phone, whatsapp, email, password,
     }
 }
 
+/**
+ * Look a user up by ANY of their addresses - primary, or a verified additional
+ * one. Sign-in, duplicate checks and password recovery all go through here, so
+ * every address a user has proved they own behaves the same way.
+ */
 const getUserByEmail =async(email)=>{
     
     if(!email){
         logger.error(new ApiError(404,"Email is missing"));
         return false;
     }
-    return await UserModel.findOne({ email }).select('+password');
+    return await findUserByAnyEmail(email, { withPassword: true });
 
     
 }
@@ -81,7 +87,7 @@ const getUserById =async(id)=>{
         logger.error(new ApiError(404,"Id is missing"));
         return false;
     }
-    const user=await UserModel.findOne({_id:id}).select("firstName lastName phone whatsapp email profilePic packageType subscriptionStatus isInTrialPeriod trialEndsDate accessType servedTrial agencyName agencyId isAgencyClient needsPhoneUpdate phoneUpdateReason isVerified");
+    const user=await UserModel.findOne({_id:id}).select("firstName lastName phone whatsapp email profilePic packageType subscriptionStatus isInTrialPeriod trialEndsDate accessType servedTrial agencyName agencyId isAgencyClient isEsfClient needsPhoneUpdate phoneUpdateReason isVerified");
     if(!user){
         logger.error(new ApiError(404,"User not found"));
         return false;
@@ -108,6 +114,8 @@ const getUserById =async(id)=>{
         agencyName: user.agencyName || null,
         agencyId: user.agencyId || null,
         isAgencyClient: user.isAgencyClient || false,
+        // Drives the ESF-only pages in the client's sidebar
+        isEsfClient: user.isEsfClient || false,
         // Drives the phone-collection modal on the frontend
         needsPhoneUpdate: user.needsPhoneUpdate || false,
         phoneUpdateReason: user.phoneUpdateReason || null,
@@ -218,7 +226,9 @@ const updatePassword = async (email, newPassword) => {
     }
 
     try {
-        const user = await UserModel.findOne({ email: email });
+        // Match any of the user's addresses - a reset started from a secondary
+        // address must still find (and update) the right account.
+        const user = await findUserByAnyEmail(email);
         
         if (!user) {
             logger.error(new ApiError(404, "User not found"));

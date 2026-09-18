@@ -1,0 +1,158 @@
+/**
+ * ZohoProjectTaskModel.js
+ *
+ * Tasks synced nightly from the Zoho projects that ESF clients are linked to
+ * (see Services/Zoho/ZohoTaskSync.js). The client's Status page reads from here,
+ * never from Zoho directly — so the page stays fast and keeps working when Zoho
+ * is slow, rate-limiting, or briefly down.
+ *
+ * ONE DOCUMENT PER TASK, deliberately.
+ * The obvious alternative — one document per project holding a tasks array —
+ * would grow without bound as comment threads accumulate, and this repo has
+ * already been bitten by 16MB-document failures (ERR_OUT_OF_RANGE). A task's
+ * own comment list is naturally bounded; a project's is not.
+ *
+ * Nothing here is a source of truth. The whole collection is derivable from
+ * Zoho, so a wipe-and-resync is always a safe recovery.
+ */
+
+const mongoose = require('mongoose');
+
+const CommentSchema = new mongoose.Schema({
+    commentId: { type: String, required: true },
+    // Plain text, converted at sync time from Zoho's HTML — see zohoRichText.js.
+    // Storing text rather than HTML is what keeps third-party markup out of the
+    // browser entirely.
+    content: { type: String, default: '' },
+    authorName: { type: String, default: null },
+    createdAt: { type: Date, default: null },
+    attachmentCount: { type: Number, default: 0 },
+}, { _id: false });
+
+const ZohoProjectTaskSchema = new mongoose.Schema({
+    portalId: { type: String, required: true },
+    projectId: { type: String, required: true, index: true },
+    projectName: { type: String, default: null },
+    taskId: { type: String, required: true },
+
+    name: { type: String, default: null },
+    // The portal's own status label (this portal uses Open/Content/Design).
+    // Never matched on by name — statusIsClosed/isCompleted carry the meaning.
+    status: { type: String, default: null },
+    statusIsClosed: { type: Boolean, default: false },
+    isCompleted: { type: Boolean, default: false },
+    priority: { type: String, default: null },
+    percentComplete: { type: Number, default: null },
+
+    /**
+     * Real names of the Zoho assignees. INTERNAL ONLY — never sent to a client.
+     * Kept because the summariser needs them to redact itself (see redactNames), and
+     * because staff-facing tooling may want them later. `team` below is what the
+     * client is shown instead.
+     */
+    ownerNames: { type: [String], default: [] },
+
+    /**
+     * Which agency team the work belongs to, e.g. "Design team".
+     *
+     * This exists so the client can be told who is handling something without being
+     * told WHICH PERSON. Assigned at sync time from a fixed vocabulary
+     * (ZohoTaskSummaryService.TEAMS) so the label stays stable night to night.
+     */
+    team: { type: String, default: null },
+    tasklist: { type: String, default: null },
+    milestone: { type: String, default: null },
+    createdByName: { type: String, default: null },
+    updatedByName: { type: String, default: null },
+
+    // Drives the In progress / Coming Up split: a start date in the future means
+    // the work has not begun. Absent means started (a task with no dates but
+    // active comments is real work, not a plan).
+    startDate: { type: Date, default: null },
+    endDate: { type: Date, default: null },
+    taskCreatedAt: { type: Date, default: null },
+    taskUpdatedAt: { type: Date, default: null },
+
+    hasAttachments: { type: Boolean, default: false },
+    // Kept even though the client is shown only the summary: it is the input the
+    // summary is derived from, so without it a re-summarise (prompt change,
+    // model change) would need a full re-fetch from Zoho.
+    comments: { type: [CommentSchema], default: [] },
+
+    /**
+     * AI progress summary of `comments`, generated at sync time — the client
+     * sees this instead of the agency's raw internal discussion.
+     * `sourceHash` is what lets an unchanged thread skip a paid regeneration.
+     */
+    commentSummary: {
+        text: { type: String, default: null },
+        // 'ai' | 'fallback' (no key / call failed / thread too thin) | 'reused'
+        generatedBy: { type: String, default: null },
+        model: { type: String, default: null },
+        sourceHash: { type: String, default: null },
+        // Which prompt produced this. Reuse requires it to match the current
+        // one, so a prompt change regenerates instead of serving stale readings
+        // of an unchanged thread.
+        promptVersion: { type: Number, default: null },
+        commentCount: { type: Number, default: 0 },
+        generatedAt: { type: Date, default: null },
+    },
+
+    /**
+     * What the discussion says the agency is waiting on the CLIENT for —
+     * photos, an approval, information. Null is the common and correct answer;
+     * the prompt is deliberately strict because a false "you're blocking us" is
+     * worse than a missed one.
+     *
+     * `since` is computed server-side from the latest comment, never asked of
+     * the model — LLMs are unreliable with dates.
+     */
+    waitingOnClient: {
+        ask: { type: String, default: null },
+        kind: { type: String, default: null },
+        since: { type: Date, default: null },
+    },
+
+    /**
+     * What the client sent back from the Status page, in order.
+     *
+     * TOP-LEVEL ON PURPOSE, not nested inside waitingOnClient: the nightly sync $sets
+     * that whole object every run, so anything stored in there would be silently erased
+     * the same night it was written. Nothing in ZohoTaskSync touches this field.
+     *
+     * This is a local record of what we sent to Zoho, not a second source of truth —
+     * Zoho holds the real comment. It exists so the page can say "you already answered
+     * this" before the next sync, and so a failed upload leaves a trace.
+     */
+    clientResponses: {
+        type: [new mongoose.Schema({
+            text: { type: String, default: '' },
+            attachments: {
+                type: [new mongoose.Schema({
+                    name: { type: String, default: null },
+                    size: { type: Number, default: null },
+                    // False when Zoho rejected this one file but the reply itself landed.
+                    uploaded: { type: Boolean, default: true },
+                }, { _id: false })],
+                default: [],
+            },
+            zohoCommentId: { type: String, default: null },
+            respondedAt: { type: Date, default: Date.now },
+            respondedByUserId: { type: mongoose.Schema.Types.ObjectId, default: null },
+            respondedByName: { type: String, default: null },
+        }, { _id: false })],
+        default: [],
+    },
+
+    syncedAt: { type: Date, default: Date.now },
+}, { timestamps: true });
+
+// The upsert key for every sync write.
+ZohoProjectTaskSchema.index({ projectId: 1, taskId: 1 }, { unique: true });
+// The Status page's read: every task for one project, newest activity first.
+ZohoProjectTaskSchema.index({ projectId: 1, taskUpdatedAt: -1 });
+
+const ZohoProjectTask = mongoose.models.ZohoProjectTask
+    || mongoose.model('ZohoProjectTask', ZohoProjectTaskSchema);
+
+module.exports = ZohoProjectTask;

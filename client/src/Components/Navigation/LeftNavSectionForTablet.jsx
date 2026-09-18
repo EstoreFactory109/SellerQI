@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,ChartLine,LaptopMinimalCheck, ChevronRight, X, Calendar, DollarSign, Lock, Package, LogOut, Bot, BarChart3, User, Link2, LifeBuoy, CreditCard} from 'lucide-react'
+import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,ChartLine,LaptopMinimalCheck, ChevronRight, X, Calendar, DollarSign, Lock, Package, LogOut, Bot, BarChart3, User, Link2, LifeBuoy, CreditCard, Building2, ListChecks, Receipt} from 'lucide-react'
+import useEsfPageAccess from '../../hooks/useEsfPageAccess.js';
 import { logout } from '../../redux/slices/authSlice.js'
 import { clearCogsData } from '../../redux/slices/cogsSlice.js'
 import axios from 'axios';
@@ -26,7 +27,21 @@ const PLAN_LABELS = { LITE: 'Lite', PRO: 'Pro', AGENCY: 'Agency' };
 // Same category-grouped nav item pattern as the desktop sidebar (LeftNavSection.jsx),
 // duplicated here since this component already duplicates the desktop nav's logic
 // for its own mobile-drawer chrome (backdrop, close button, slide position).
+// The ESF page-permission key is the route segment, so a nav link carries its
+// own key and no second mapping can drift out of sync with the server's list.
+const pageKeyFromPath = (to) => {
+    if (typeof to !== 'string') return null;
+    const clean = to.split('?')[0];
+    const segments = clean.split('/').filter(Boolean);
+    return segments.length ? segments[segments.length - 1] : null;
+};
+
 const NavItem = ({ to, icon: Icon, label, isActive: isActiveOverride, locked, onClick, expanded, onNavigate, tag, count, countTone = 'fix' }) => {
+    // Hidden when the ESF staff member driving this session is blocked from the
+    // page. Non-ESF sessions and the owner always pass.
+    const { isPageAllowed } = useEsfPageAccess();
+    if (to && !isPageAllowed(pageKeyFromPath(to))) return null;
+
     const countStyle = countTone === 'watch'
         ? { background: 'rgba(245,166,35,.14)', color: COLORS.watch }
         : { background: 'rgba(239,68,68,.14)', color: COLORS.fix };
@@ -108,6 +123,9 @@ const LeftNavSection = () => {
 
     // Get user subscription plan from Redux store
     const user = useSelector((state) => state.Auth?.user);
+    const { isPageAllowed } = useEsfPageAccess();
+    // ESF-managed clients get extra internal pages that no other account sees.
+    const isEsfClient = user?.isEsfClient === true;
     const userPlan = user?.packageType || 'LITE';
     const isAgencyUser = userPlan === 'AGENCY';
 
@@ -309,7 +327,8 @@ const LeftNavSection = () => {
                             <NavItem to="/seller-central-checker/pre-analysis" icon={BarChart3} label="Listing Analyzer" onNavigate={closeMenu} />
 
                             {/* Sponsored Ads with Dropdown */}
-                            {(!isLiteUser || isPremiumLocked) && (
+                            {(!isLiteUser || isPremiumLocked) &&
+                             (isPageAllowed('ppc-dashboard') || isPageAllowed('keyword-analysis')) && (
                                 <div className="space-y-1">
                                     <NavItem
                                         icon={LaptopMinimalCheck}
@@ -328,18 +347,22 @@ const LeftNavSection = () => {
                                                 transition={{ duration: 0.3, ease: "easeInOut", opacity: { duration: 0.2 } }}
                                                 className="ml-5 space-y-1 overflow-hidden"
                                             >
+                                                {isPageAllowed('ppc-dashboard') && (
                                                 <motion.div initial={{ y: -10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }} transition={{ delay: 0.15, duration: 0.2 }}>
                                                     <NavLink to="/seller-central-checker/ppc-dashboard" onClick={closeMenu} className={dropdownItemClass} style={({ isActive }) => dropdownItemStyle(isActive)}>
                                                         <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
                                                         Campaign Audit
                                                     </NavLink>
                                                 </motion.div>
+                                                )}
+                                                {isPageAllowed('keyword-analysis') && (
                                                 <motion.div initial={{ y: -10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }} transition={{ delay: 0.175, duration: 0.2 }}>
                                                     <NavLink to="/seller-central-checker/keyword-analysis" onClick={closeMenu} className={dropdownItemClass} style={({ isActive }) => dropdownItemStyle(isActive)}>
                                                         <div className="w-1 h-1 bg-current rounded-full opacity-60"></div>
                                                         Keyword Opportunities
                                                     </NavLink>
                                                 </motion.div>
+                                                )}
                                             </motion.div>
                                         )}
                                     </AnimatePresence>
@@ -404,6 +427,23 @@ const LeftNavSection = () => {
                         <span className="font-semibold flex-1">Need Help?</span>
                         <div className="w-1.5 h-1.5 bg-orange-400 rounded-full animate-pulse group-hover:bg-yellow-300 transition-colors duration-300"></div>
                     </NavLink>
+                </div>
+                )}
+
+                {/* Estore Factory - ESF-only pages, kept out of the personal Overview group */}
+                {isEsfClient && (
+                <div className="px-3 mb-4">
+                    <NavGroupLabel>Estore Factory</NavGroupLabel>
+                    <div className="space-y-1">
+                        <NavItem to="/seller-central-checker/client-dashboard" icon={Building2} label="Overview" onNavigate={closeMenu} />
+                        <NavItem to="/seller-central-checker/estore-factory/status" icon={ListChecks} label="Status" onNavigate={closeMenu} />
+                                                        {/* Untapped, Reports and Messages are hidden until they have a
+                                    backend: all three still render the design mock's sample
+                                    content, and a client cannot tell invented data from real.
+                                    Their pages and routes are still in the tree — re-adding a
+                                    line here and the route in App.jsx brings each one back. */}
+                                <NavItem to="/seller-central-checker/estore-factory/billing" icon={Receipt} label="Billing" onNavigate={closeMenu} />
+                    </div>
                 </div>
                 )}
 
