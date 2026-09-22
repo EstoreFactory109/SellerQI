@@ -78,6 +78,7 @@ import EstoreFactoryReportHistory from './Pages/ESF/EstoreFactory/ReportHistory.
 import EstoreFactoryMessages from './Pages/ESF/EstoreFactory/Messages.jsx';
 import EstoreFactoryBilling from './Pages/ESF/EstoreFactory/Billing.jsx';
 import EsfEstoreFactoryZoho from './Pages/ESF/EsfEstoreFactoryZoho.jsx';
+import EsfMessages from './Pages/ESF/EsfMessages.jsx';
 import EsfPageAccessGuard from './Layout/EsfPageAccessGuard.jsx';
 import AdminSubscription from './Pages/Admin/Subscription.jsx';
 import AdminEmailLogs from './Pages/Admin/EmailLogs.jsx';
@@ -181,6 +182,7 @@ const App = () => {
             <Route path='clients' element={<EsfClients />} />
             <Route path='users' element={<EsfUsers />} />
             <Route path='estore-factory/zoho-projects' element={<EsfEstoreFactoryZoho />} />
+            <Route path='estore-factory/messages' element={<EsfMessages />} />
             <Route path='settings' element={<EsfSettings />} />
           </Route>
           <Route path='/esf/client/:clientId' element={<EsfClientLayout />}>
