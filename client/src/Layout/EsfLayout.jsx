@@ -9,7 +9,7 @@ const PAGE_TITLES = {
   '/esf/clients': { title: 'Manage client', subtitle: 'Manage all clients onboarded by the team' },
   '/esf/users': { title: 'Team members', subtitle: 'Manage who can access this portal' },
   '/esf/estore-factory/zoho-projects': { title: 'Zoho Projects', subtitle: 'Connect and manage the shared Zoho Projects account' },
-  '/esf/estore-factory/messages': { title: 'Messages', subtitle: 'Client conversations — shown by project, never by name' },
+  '/esf/messages': { title: 'Messages', subtitle: 'Client conversations — shown by project, never by name' },
   '/esf/settings': { title: 'Settings', subtitle: 'Your profile and preferences' },
 };
 
@@ -81,6 +81,13 @@ const EsfLayout = () => {
               <UserCog className="w-5 h-5 shrink-0" />
               <span className="text-sm font-medium">Team members</span>
             </button>
+            {/* NavLink rather than the navTo buttons above: this path needs no custom
+                active matching, so isActive is enough and there is no extra boolean to
+                keep in sync at the top of the file. */}
+            <NavLink to="/esf/messages" className={({ isActive }) => navItemClass(isActive)}>
+              <MessageSquare className="w-5 h-5 shrink-0" />
+              <span className="text-sm font-medium">Messages</span>
+            </NavLink>
           </nav>
 
           <div className="p-3 border-t border-white/10 space-y-0.5">
@@ -88,10 +95,6 @@ const EsfLayout = () => {
             <NavLink to="/esf/estore-factory/zoho-projects" className={({ isActive }) => navItemClass(isActive)}>
               <Building2 className="w-5 h-5 shrink-0" />
               <span className="text-sm font-medium">Zoho Projects</span>
-            </NavLink>
-            <NavLink to="/esf/estore-factory/messages" className={({ isActive }) => navItemClass(isActive)}>
-              <MessageSquare className="w-5 h-5 shrink-0" />
-              <span className="text-sm font-medium">Messages</span>
             </NavLink>
           </div>
 

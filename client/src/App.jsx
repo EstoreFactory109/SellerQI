@@ -181,8 +181,8 @@ const App = () => {
             <Route index element={<Navigate to="clients" replace />} />
             <Route path='clients' element={<EsfClients />} />
             <Route path='users' element={<EsfUsers />} />
+            <Route path='messages' element={<EsfMessages />} />
             <Route path='estore-factory/zoho-projects' element={<EsfEstoreFactoryZoho />} />
-            <Route path='estore-factory/messages' element={<EsfMessages />} />
             <Route path='settings' element={<EsfSettings />} />
           </Route>
           <Route path='/esf/client/:clientId' element={<EsfClientLayout />}>
