@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { MessageSquare, CheckCircle2, RotateCcw, Search, Send, Paperclip, Lock } from 'lucide-react';
+import { MessageSquare, CheckCircle2, RotateCcw, Search, Send, Paperclip, Lock, Check, CheckCheck } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 
 /**
@@ -58,6 +58,28 @@ const Avatar = ({ label, size = 'md' }) => (
         {initialsOf(label)}
     </span>
 );
+
+/**
+ * The read receipt on a message we sent.
+ *
+ * ── READ THIS BEFORE TRUSTING A SINGLE TICK ──
+ * The only read signal that exists is the client OPENING THE THREAD IN THE PORTAL.
+ * Most of this conversation happens in their mail client, and someone who reads every
+ * message in Gmail and replies from their phone shows a single tick forever.
+ *
+ * So one tick means "we have not seen them open it here", NOT "they have not read it".
+ * That is why the labels are Sent / Opened rather than WhatsApp's delivered / read,
+ * and why the conversation carries a standing note saying so — a staff member who
+ * reads one tick as "they are ignoring me" is being misled by the UI.
+ */
+const Receipt = ({ seen }) => {
+    if (seen === null || seen === undefined) return null;
+    return seen ? (
+        <CheckCheck className="h-3.5 w-3.5 shrink-0 text-sky-400" aria-label="Opened in the client portal" />
+    ) : (
+        <Check className="h-3.5 w-3.5 shrink-0 text-gray-500" aria-label="Sent" />
+    );
+};
 
 /** WhatsApp shows a time for today, a weekday this week, then a date. */
 const listTime = (value) => {
@@ -236,7 +258,10 @@ const EsfMessages = () => {
                                         </span>
                                     </span>
 
-                                    <span className="mt-0.5 flex items-center gap-2">
+                                    <span className="mt-0.5 flex items-center gap-1.5">
+                                        {/* Only when we spoke last — the row tick describes our
+                                            message, exactly as the bubble tick does. */}
+                                        <Receipt seen={thread.lastSeenByClient} />
                                         <span className="min-w-0 flex-1 truncate text-[12.5px] text-gray-400" title={thread.subject}>
                                             {thread.subject || '(no subject)'}
                                         </span>
@@ -302,6 +327,17 @@ const EsfMessages = () => {
 
                             {/* Messages */}
                             <div className="flex-1 space-y-1 overflow-y-auto px-4 py-4 md:px-8">
+                                {/* The slot WhatsApp gives its encryption notice, used for the
+                                    same kind of statement: what the ticks can actually tell you. */}
+                                <div className="flex justify-center pb-1">
+                                    <span className="max-w-md rounded-md bg-amber-500/[0.07] px-3 py-1.5 text-center text-[10.5px] leading-relaxed text-amber-200/70">
+                                        <CheckCheck className="mr-1 inline h-3 w-3" />
+                                        Two ticks mean the client opened this in the portal. Reading it
+                                        in their own email is not tracked, so one tick is not proof
+                                        they haven&apos;t seen it.
+                                    </span>
+                                </div>
+
                                 {dayGroups.map((group) => (
                                     <div key={group.key} className="space-y-1">
                                         <div className="flex justify-center py-3">
@@ -341,12 +377,21 @@ const EsfMessages = () => {
                                                             </div>
                                                         )}
 
-                                                        {/* Time sits inside the bubble, bottom-right. */}
-                                                        <span className="mt-1 flex items-center justify-end gap-1.5 text-[10.5px] text-gray-500">
+                                                        {/* Time sits inside the bubble, bottom-right,
+                                                            receipt after it — the WhatsApp ordering. */}
+                                                        <span
+                                                            className="mt-1 flex items-center justify-end gap-1.5 text-[10.5px] text-gray-500"
+                                                            title={mine
+                                                                ? (message.seenByClient
+                                                                    ? 'Opened in the client portal'
+                                                                    : 'Sent. Not opened in the portal — opens in their own email are not tracked.')
+                                                                : undefined}
+                                                        >
                                                             {message.redactedBy === 'deterministic' && (
                                                                 <span title="Some detail was removed automatically">limited detail</span>
                                                             )}
                                                             {bubbleTime(message.sentAt)}
+                                                            <Receipt seen={message.seenByClient} />
                                                         </span>
                                                     </div>
                                                 </div>

@@ -230,6 +230,87 @@ describe('listing', () => {
     });
 });
 
+describe('read receipts', () => {
+    /**
+     * The receipt answers "has the client opened this in the portal", and nothing
+     * wider. These tests pin the two things that would quietly make it lie: a tick on
+     * a message the receipt cannot describe, and a comparison that drifts to the wrong
+     * timestamp.
+     */
+    const OUTBOUND = { ...MESSAGE, _id: 'm-out', direction: 'outbound' };
+
+    test('an outbound message the client opened afterwards shows as seen', async () => {
+        mockThreadFindById.mockReturnValue(chain({
+            ...THREAD, lastClientReadAt: new Date('2026-09-22T11:00:00Z'),
+        }));
+        mockMessageFind.mockReturnValue(chain([OUTBOUND])); // sent 10:00
+
+        const { body } = await run(getStaffThread, staffReq({ params: { threadId: 't1' } }));
+
+        expect(body.data.messages[0].seenByClient).toBe(true);
+    });
+
+    test('one sent after their last visit does not', async () => {
+        mockThreadFindById.mockReturnValue(chain({
+            ...THREAD, lastClientReadAt: new Date('2026-09-22T09:00:00Z'),
+        }));
+        mockMessageFind.mockReturnValue(chain([OUTBOUND])); // sent 10:00
+
+        const { body } = await run(getStaffThread, staffReq({ params: { threadId: 't1' } }));
+
+        expect(body.data.messages[0].seenByClient).toBe(false);
+    });
+
+    test('a client who has never opened the portal shows as not seen, not as unknown', async () => {
+        mockThreadFindById.mockReturnValue(chain({ ...THREAD, lastClientReadAt: null }));
+        mockMessageFind.mockReturnValue(chain([OUTBOUND]));
+
+        const { body } = await run(getStaffThread, staffReq({ params: { threadId: 't1' } }));
+
+        expect(body.data.messages[0].seenByClient).toBe(false);
+    });
+
+    test("the client's own messages carry no receipt at all", async () => {
+        // Null rather than false: a tick here would be telling staff whether staff
+        // have read it, which is both useless and easily misread as being about the
+        // client. The UI renders nothing for null.
+        mockThreadFindById.mockReturnValue(chain({
+            ...THREAD, lastClientReadAt: new Date('2026-09-22T11:00:00Z'),
+        }));
+
+        const { body } = await run(getStaffThread, staffReq({ params: { threadId: 't1' } }));
+
+        expect(body.data.messages[0].direction).toBe('inbound');
+        expect(body.data.messages[0].seenByClient).toBeNull();
+    });
+
+    test('the list row ticks only when the team spoke last', async () => {
+        mockThreadFind.mockReturnValue(chain([
+            { ...THREAD, _id: 't-ours', lastMessageDirection: 'outbound', lastClientReadAt: null },
+            { ...THREAD, _id: 't-theirs', lastMessageDirection: 'inbound' },
+        ]));
+
+        const { body } = await run(listStaffThreads, staffReq());
+        const byId = Object.fromEntries(body.data.threads.map((t) => [t.id, t]));
+
+        expect(byId['t-ours'].lastSeenByClient).toBe(false);
+        expect(byId['t-theirs'].lastSeenByClient).toBeNull();
+    });
+
+    test('opening the thread as staff does not mark it seen by the client', async () => {
+        // getStaffThread writes lastStaffReadAt on the way out. Reading the receipt
+        // from that write instead of from lastClientReadAt would make every message
+        // show as seen the moment a staff member opened it.
+        mockThreadFindById.mockReturnValue(chain({ ...THREAD, lastClientReadAt: null }));
+        mockMessageFind.mockReturnValue(chain([OUTBOUND]));
+
+        const { body } = await run(getStaffThread, staffReq({ params: { threadId: 't1' } }));
+
+        expect(mockThreadUpdateOne).toHaveBeenCalled();
+        expect(body.data.messages[0].seenByClient).toBe(false);
+    });
+});
+
 describe('opening a thread', () => {
     test('clears the staff unread count and not the client one', async () => {
         // Two counters exist precisely so opening it here does not mark it read for

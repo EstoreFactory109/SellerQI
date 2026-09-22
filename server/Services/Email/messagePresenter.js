@@ -27,6 +27,26 @@ const EMAIL_SHAPE = /[\w.+-]+@[\w-]+\.[\w.-]+/;
 const LONG_DIGITS = /(?<![\w.])\d[\d\s.\-()]{8,}\d(?![\w.])/;
 
 /**
+ * Whether the other side has opened a message, for the read receipt on each bubble.
+ *
+ * ── WHAT THIS CAN AND CANNOT KNOW, AND WHY THE UI MUST SAY SO ──
+ * The only read signal that exists is someone opening the thread IN THE PORTAL. This
+ * is an email-backed conversation: a client who reads the mail in Gmail and replies
+ * from their phone never touches the portal, and this returns false for every message
+ * they have in fact read. Open tracking (a pixel) is the usual answer and is not one
+ * here — it is a third-party beacon on client mail, and it fails against every mail
+ * client that blocks remote images anyway.
+ *
+ * So `false` means "not opened in the portal", NOT "unread". Only `true` is a claim.
+ * The staff page therefore renders the two states as sent/opened rather than as
+ * delivered/read — a staff member who read a single tick as "they are ignoring me"
+ * would be acting on something this function cannot support.
+ */
+const seenBy = (message, readAt) => Boolean(
+    readAt && message.sentAt && new Date(readAt) >= new Date(message.sentAt)
+);
+
+/**
  * Last-resort scan of a finished staff payload.
  *
  * Deterministic, cheap, and aimed at the failure the other two layers cannot catch:
@@ -77,13 +97,19 @@ const toClientThread = (thread) => {
  * a second raw copy kept only for the client would be exactly the raw field this
  * design removed on purpose.
  */
-const toClientMessage = (message) => ({
+const toClientMessage = (message, { staffReadAt = null } = {}) => ({
     id: String(message._id),
     direction: message.direction,
     // "You" vs the agency. No individual is named in either direction.
     author: message.direction === 'inbound' ? 'You' : 'eStore Factory',
     body: message.bodyRedacted,
     sentAt: message.sentAt,
+    /**
+     * Only for the client's OWN messages — a receipt on the agency's message would be
+     * telling them whether they themselves have read it. Null, not false, so the UI
+     * renders nothing rather than an empty tick. See seenBy() on what false means.
+     */
+    seenByTeam: message.direction === 'inbound' ? seenBy(message, staffReadAt) : null,
     truncated: Boolean(message.bodyTruncated),
     quotedTrimmed: Boolean(message.quotedTrimmed),
     attachments: (message.attachments || []).map((a) => ({
@@ -119,12 +145,20 @@ const toStaffThread = (thread, label) => {
          * with one. A count carries no identity.
          */
         unreadCount: thread.staffUnreadCount || 0,
+        /**
+         * The receipt for the LAST message, so the list can tick a row the way the
+         * conversation ticks a bubble. Null when the client spoke last — there is
+         * nothing of ours awaiting their eyes.
+         */
+        lastSeenByClient: thread.lastMessageDirection === 'outbound'
+            ? seenBy({ sentAt: thread.lastMessageAt }, thread.lastClientReadAt)
+            : null,
         resolved: Boolean(thread.resolvedAt),
     };
 };
 
 /** One message, as STAFF see it. */
-const toStaffMessage = (message) => ({
+const toStaffMessage = (message, { clientReadAt = null } = {}) => ({
     id: String(message._id),
     direction: message.direction,
     // The client is the label, never a person; ESF is "your team", never an individual
@@ -132,6 +166,12 @@ const toStaffMessage = (message) => ({
     author: message.direction === 'inbound' ? 'Client' : 'Your team',
     body: message.bodyRedacted,
     sentAt: message.sentAt,
+    /**
+     * Only for the team's OWN messages. Null, not false, on the client's — staff
+     * already read those by definition, and a tick there would read as a claim about
+     * the client. See seenBy() for why false is not "unread".
+     */
+    seenByClient: message.direction === 'outbound' ? seenBy(message, clientReadAt) : null,
     truncated: Boolean(message.bodyTruncated),
     quotedTrimmed: Boolean(message.quotedTrimmed),
     /**
@@ -157,7 +197,9 @@ const toStaffMessage = (message) => ({
  * an error report or a debugger.
  */
 const PROJECTION = {
-    thread: 'displaySubject lastMessageAt lastMessageDirection messageCount resolvedAt clientUnreadCount staffUnreadCount userId',
+    // The two readAt timestamps are here for the per-message read receipts. They are
+    // timestamps, not identity — nothing about them says who the client is.
+    thread: 'displaySubject lastMessageAt lastMessageDirection messageCount resolvedAt clientUnreadCount staffUnreadCount lastClientReadAt lastStaffReadAt userId',
     message: 'direction bodyRedacted sentAt bodyTruncated quotedTrimmed redactedBy attachments threadId userId',
 };
 

@@ -140,7 +140,12 @@ const getStaffThread = asyncHandler(async (req, res) => {
 
         const payload = {
             thread: toStaffThread(thread, labels.get(String(thread.userId)) || 'Unknown client'),
-            messages: messages.map(toStaffMessage),
+            // Read from the thread fetched BEFORE the updateOne below — that write
+            // touches the staff side only, but reading after it would make the receipt
+            // depend on statement order rather than on the client's behaviour.
+            messages: messages.map((message) => toStaffMessage(message, {
+                clientReadAt: thread.lastClientReadAt,
+            })),
         };
 
         assertNoIdentityLeak(payload, { logger });
