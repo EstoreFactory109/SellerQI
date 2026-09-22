@@ -66,6 +66,9 @@ const sanitizeDeniedPages = (keys) =>
 const API_PATH_TO_PAGE = [
     ['/api/pagewise/esf/client-dashboard', 'client-dashboard'],
     ['/api/pagewise/esf/project-status', 'status'],
+    // Covers the invoice PDF route too — matching is by longest prefix, so
+    // /esf/billing/invoices/:number/pdf resolves to this same entry.
+    ['/api/pagewise/esf/billing', 'billing'],
 
     ['/api/pagewise/dashboard', 'dashboard'],
     ['/api/pagewise/product-checker', 'dashboard'],
