@@ -211,6 +211,15 @@ describe('listing', () => {
         expect(body.data.threads[0].needsReply).toBe(true);
     });
 
+    test('the unread badge counts unread messages, not the whole thread', async () => {
+        // THREAD has three messages and one unread. Badging messageCount would tell
+        // staff there are three new ones.
+        const { body } = await run(listStaffThreads, staffReq());
+
+        expect(body.data.threads[0].unreadCount).toBe(1);
+        expect(body.data.threads[0].messageCount).toBe(3);
+    });
+
     test('labels fall back when a client has no project or brand', async () => {
         mockUserFind.mockReturnValue(chain([{ _id: 'u1', esfClientRef: 'EF-3310', sellerCentral: null }]));
         mockSellerFind.mockReturnValue(chain([]));

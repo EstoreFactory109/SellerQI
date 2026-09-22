@@ -113,6 +113,12 @@ const toStaffThread = (thread, label) => {
         lastMessageAt: thread.lastMessageAt,
         messageCount: thread.messageCount,
         unread: thread.staffUnreadCount > 0,
+        /**
+         * How many are unread, not how many exist — the inbox badges this, and
+         * badging messageCount instead would claim five new messages on a thread
+         * with one. A count carries no identity.
+         */
+        unreadCount: thread.staffUnreadCount || 0,
         resolved: Boolean(thread.resolvedAt),
     };
 };

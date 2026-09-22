@@ -1,52 +1,106 @@
-import { useCallback, useEffect, useState } from 'react';
-import { MessageSquare, CheckCircle2, RotateCcw } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { MessageSquare, CheckCircle2, RotateCcw, Search, Send, Paperclip, Lock } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 
 /**
- * "Estore Factory" section > Messages — the staff inbox.
+ * "Estore Factory" > Messages — the staff inbox.
  *
- * Client email, answered from inside the portal. The page title comes from
- * PAGE_TITLES in EsfLayout, matching EsfClients/EsfUsers, so no local heading.
+ * Laid out like a chat client (WhatsApp Web): conversation list on the left with
+ * search and unread badges, conversation on the right with bubbles that hug their
+ * content, date separators, and a composer pinned to the bottom. The app's own dark
+ * palette throughout — the borrowing is structural, not visual.
  *
  * ── THE CLIENT IS NEVER NAMED HERE ──
- * A conversation is labelled with the client's Zoho project, else their brand, else a
- * stored reference like "EF-1184" — never their name, address or phone. That is not a
- * presentational choice this page is free to revisit: the API does not send those
- * fields at all (server/Services/Email/messagePresenter.js), message bodies arrive
- * already redacted, and a runtime scan rejects a payload containing anything
- * address- or phone-shaped. If you find yourself wanting the client's name on this
- * screen, the answer is in the plan, not in this file.
+ * A conversation shows the client's Zoho project, else brand, else a stored reference
+ * like "EF-1184". Never their name, address or phone. That is not this file's choice
+ * to revisit: the API does not send those fields (server/Services/Email/
+ * messagePresenter.js), bodies arrive already redacted, and a runtime scan rejects any
+ * payload containing something address- or phone-shaped.
  *
- * Known and accepted exception: attachment CONTENTS are not redactable — a PDF
- * letterhead or a photographed business card identifies the sender — and staff can
- * still download them.
+ * The avatar is initials of THE LABEL for the same reason — a person's initials would
+ * be a small, steady leak, and two clients sharing "NK" would be worse than useless.
+ *
+ * Known exception, decided knowingly: attachment CONTENTS are not redactable (a PDF
+ * letterhead, a photographed business card), and staff can still download them.
  */
-const CARD = 'rounded-xl border border-white/10 bg-white/[0.03]';
 
 const STATUS_STYLE = {
     'Needs a reply': 'bg-amber-500/15 text-amber-300',
-    'Waiting on client': 'bg-white/10 text-gray-300',
+    'Waiting on client': 'bg-white/10 text-gray-400',
     Resolved: 'bg-emerald-500/15 text-emerald-300',
 };
 
-const relativeTime = (value) => {
+/** Initials of the LABEL, never of a person. */
+const initialsOf = (label = '') => {
+    const words = String(label).replace(/[^\w\s-]/g, ' ').trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) return '—';
+    return (words[0][0] + (words[1]?.[0] || '')).toUpperCase();
+};
+
+/** A stable tint per conversation so the list is scannable without naming anyone. */
+const AVATAR_TINTS = [
+    'bg-blue-500/20 text-blue-200', 'bg-emerald-500/20 text-emerald-200',
+    'bg-violet-500/20 text-violet-200', 'bg-amber-500/20 text-amber-200',
+    'bg-rose-500/20 text-rose-200', 'bg-cyan-500/20 text-cyan-200',
+];
+const tintFor = (key = '') => {
+    let hash = 0;
+    for (let i = 0; i < key.length; i += 1) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+    return AVATAR_TINTS[hash % AVATAR_TINTS.length];
+};
+
+const Avatar = ({ label, size = 'md' }) => (
+    <span
+        className={`flex shrink-0 items-center justify-center rounded-full font-semibold ${tintFor(label)} ${
+            size === 'sm' ? 'h-10 w-10 text-[12px]' : 'h-11 w-11 text-[13px]'
+        }`}
+    >
+        {initialsOf(label)}
+    </span>
+);
+
+/** WhatsApp shows a time for today, a weekday this week, then a date. */
+const listTime = (value) => {
     if (!value) return '';
     const then = new Date(value);
     if (Number.isNaN(then.getTime())) return '';
-    const mins = Math.round((Date.now() - then.getTime()) / 60000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins}m ago`;
-    if (mins < 1440) return `${Math.round(mins / 60)}h ago`;
-    if (mins < 2880) return 'yesterday';
-    if (mins < 10080) return `${Math.round(mins / 1440)}d ago`;
-    return then.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const days = Math.floor((Date.now() - then.getTime()) / 86400000);
+    if (days === 0) return then.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    if (days === 1) return 'Yesterday';
+    if (days < 7) return then.toLocaleDateString('en-US', { weekday: 'short' });
+    return then.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
 };
 
-const StatusPill = ({ status }) => (
-    <span className={`shrink-0 rounded-md px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[status] || 'bg-white/10 text-gray-300'}`}>
-        {status}
-    </span>
-);
+const bubbleTime = (value) => {
+    const then = new Date(value);
+    return Number.isNaN(then.getTime())
+        ? ''
+        : then.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+};
+
+/** The centred pill between days. */
+const dayLabel = (value) => {
+    const then = new Date(value);
+    if (Number.isNaN(then.getTime())) return '';
+    const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const days = Math.round((startOfDay(new Date()) - startOfDay(then)) / 86400000);
+    if (days === 0) return 'Today';
+    if (days === 1) return 'Yesterday';
+    if (days < 7) return then.toLocaleDateString('en-US', { weekday: 'long' });
+    return then.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
+};
+
+/** Group consecutive messages by calendar day, so separators can be interleaved. */
+const groupByDay = (messages) => {
+    const groups = [];
+    messages.forEach((message) => {
+        const key = new Date(message.sentAt).toDateString();
+        const last = groups[groups.length - 1];
+        if (last && last.key === key) last.messages.push(message);
+        else groups.push({ key, day: dayLabel(message.sentAt), messages: [message] });
+    });
+    return groups;
+};
 
 const EsfMessages = () => {
     const [threads, setThreads] = useState([]);
@@ -56,6 +110,7 @@ const EsfMessages = () => {
     const [error, setError] = useState('');
     const [showResolved, setShowResolved] = useState(false);
     const [busy, setBusy] = useState(false);
+    const [search, setSearch] = useState('');
 
     const loadThreads = useCallback(async () => {
         try {
@@ -80,8 +135,6 @@ const EsfMessages = () => {
         try {
             const res = await axiosInstance.get(`/app/esf/messages/${id}`);
             setConversation(res.data?.data || null);
-            // Opening clears the staff unread flag server-side; mirror it here so the
-            // dot clears without refetching the whole list.
             setThreads((current) => current.map((t) => (t.id === id ? { ...t, unread: false } : t)));
         } catch (err) {
             setError(err.response?.data?.message || 'Could not open that conversation');
@@ -96,8 +149,6 @@ const EsfMessages = () => {
             setThreads((current) => (
                 showResolved
                     ? current.map((t) => (t.id === id ? updated : t))
-                    // Resolving from the default view removes it from the list, which
-                    // is the point of the view.
                     : current.filter((t) => t.id !== id || !resolved)
             ));
             setConversation((c) => (c && c.thread.id === id ? { ...c, thread: updated } : c));
@@ -108,78 +159,117 @@ const EsfMessages = () => {
         }
     }, [showResolved]);
 
+    /**
+     * Filtering happens here, over data the server already redacted.
+     *
+     * Deliberately client-side: a server-side search over raw text would be a
+     * de-anonymisation oracle — type a name, see which threads come back.
+     */
+    const visible = useMemo(() => {
+        const needle = search.trim().toLowerCase();
+        if (!needle) return threads;
+        return threads.filter((t) => `${t.client} ${t.subject || ''}`.toLowerCase().includes(needle));
+    }, [threads, search]);
+
     const open = conversation?.thread;
+    const dayGroups = useMemo(() => groupByDay(conversation?.messages || []), [conversation]);
 
     return (
-        <div className="relative min-h-full w-full overflow-hidden bg-[#0b0f17] p-4 md:p-6">
-            <div className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.18),transparent_34%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.12),transparent_30%)]" />
+        <div className="h-[calc(100vh-132px)] w-full bg-[#0b0f17] p-4 md:p-6">
+            <div className="mx-auto flex h-full max-w-[1600px] overflow-hidden rounded-xl border border-white/10">
 
-            <div className="relative max-w-[1600px] w-full grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4">
-
-                {/* Conversation list */}
-                <section className={`${CARD} flex flex-col overflow-hidden`} style={{ maxHeight: 'calc(100vh - 150px)' }}>
-                    <div className="flex items-center gap-2 border-b border-white/10 px-4 py-3">
-                        <h2 className="flex-1 text-sm font-semibold text-gray-200">Conversations</h2>
+                {/* ── Conversation list ── */}
+                <aside className="flex w-full max-w-[380px] shrink-0 flex-col border-r border-white/10 bg-white/[0.02]">
+                    <div className="flex items-center gap-2 px-4 py-3">
+                        <h2 className="flex-1 text-sm font-semibold text-gray-200">Chats</h2>
                         <button
                             type="button"
                             onClick={() => setShowResolved((v) => !v)}
-                            className="rounded-md px-2 py-1 text-[11px] font-medium text-gray-400 hover:text-gray-200 hover:bg-white/5"
+                            className="rounded-md px-2 py-1 text-[11px] font-medium text-gray-400 transition-colors hover:bg-white/5 hover:text-gray-200"
                         >
                             {showResolved ? 'Hide resolved' : 'Show resolved'}
                         </button>
                     </div>
 
+                    <div className="px-3 pb-3">
+                        <div className="flex items-center gap-2 rounded-lg bg-white/[0.06] px-3 py-2">
+                            <Search className="h-4 w-4 shrink-0 text-gray-500" />
+                            <input
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                                placeholder="Search by project or subject"
+                                className="w-full bg-transparent text-[13px] text-gray-200 placeholder:text-gray-600 focus:outline-none"
+                            />
+                        </div>
+                    </div>
+
                     <div className="flex-1 overflow-y-auto">
                         {loading && <p className="px-4 py-6 text-sm text-gray-500">Loading…</p>}
 
-                        {!loading && threads.length === 0 && (
-                            <div className="px-4 py-8 text-center">
+                        {!loading && visible.length === 0 && (
+                            <div className="px-4 py-10 text-center">
                                 <MessageSquare className="mx-auto mb-2 h-6 w-6 text-gray-600" />
                                 <p className="text-sm text-gray-500">
-                                    {showResolved ? 'No conversations yet.' : 'Nothing needs a reply.'}
+                                    {search ? 'No conversations match.' : showResolved ? 'No conversations yet.' : 'Nothing needs a reply.'}
                                 </p>
                             </div>
                         )}
 
-                        {threads.map((thread) => (
+                        {visible.map((thread) => (
                             <button
                                 key={thread.id}
                                 type="button"
                                 onClick={() => openThread(thread.id)}
-                                className={`w-full border-b border-white/5 px-4 py-3 text-left transition-colors hover:bg-white/5 ${
-                                    openId === thread.id ? 'bg-white/[0.06]' : ''
+                                className={`flex w-full items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-white/[0.04] ${
+                                    openId === thread.id ? 'bg-white/[0.07]' : ''
                                 }`}
                             >
-                                <div className="flex items-start gap-2">
-                                    {/* The label, never a person. */}
-                                    <span className="flex-1 truncate text-[13px] font-medium text-gray-200" title={thread.client}>
-                                        {thread.client}
+                                <Avatar label={thread.client} />
+
+                                <span className="min-w-0 flex-1">
+                                    <span className="flex items-baseline gap-2">
+                                        <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-gray-100" title={thread.client}>
+                                            {thread.client}
+                                        </span>
+                                        <span className={`shrink-0 text-[11px] ${thread.unread ? 'text-emerald-300' : 'text-gray-500'}`}>
+                                            {listTime(thread.lastMessageAt)}
+                                        </span>
                                     </span>
-                                    {thread.unread && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-blue-400" />}
-                                </div>
-                                <p className="mt-0.5 truncate text-xs text-gray-400" title={thread.subject}>
-                                    {thread.subject || '(no subject)'}
-                                </p>
-                                <div className="mt-1.5 flex items-center gap-2">
-                                    <StatusPill status={thread.status} />
-                                    <span className="text-[11px] text-gray-500">{relativeTime(thread.lastMessageAt)}</span>
-                                </div>
+
+                                    <span className="mt-0.5 flex items-center gap-2">
+                                        <span className="min-w-0 flex-1 truncate text-[12.5px] text-gray-400" title={thread.subject}>
+                                            {thread.subject || '(no subject)'}
+                                        </span>
+                                        {thread.unread ? (
+                                            /* The count is UNREAD, not total — a "5" here on a
+                                               thread with one new message would be a lie. */
+                                            <span className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-emerald-500/80 px-1 text-[10px] font-bold text-[#0b0f17]">
+                                                {thread.unreadCount > 99 ? '99+' : thread.unreadCount || 1}
+                                            </span>
+                                        ) : thread.needsReply ? (
+                                            <span className="h-2 w-2 shrink-0 rounded-full bg-amber-400/80" title="Needs a reply" />
+                                        ) : null}
+                                    </span>
+                                </span>
                             </button>
                         ))}
                     </div>
-                </section>
+                </aside>
 
-                {/* Conversation detail */}
-                <section className={`${CARD} flex flex-col overflow-hidden`} style={{ maxHeight: 'calc(100vh - 150px)' }}>
-                    {error && <p className="border-b border-white/10 px-5 py-3 text-sm text-amber-300">{error}</p>}
+                {/* ── Conversation ── */}
+                <section className="flex min-w-0 flex-1 flex-col bg-white/[0.01]">
+                    {error && (
+                        <p className="border-b border-white/10 bg-amber-500/5 px-5 py-2.5 text-sm text-amber-300">{error}</p>
+                    )}
 
                     {!open && (
                         <div className="flex flex-1 items-center justify-center p-10 text-center">
-                            <div>
-                                <MessageSquare className="mx-auto mb-3 h-7 w-7 text-gray-600" />
-                                <p className="text-sm text-gray-500">Choose a conversation to read it.</p>
-                                <p className="mt-1 text-xs text-gray-600">
-                                    Clients are shown by project or reference — never by name.
+                            <div className="max-w-sm">
+                                <MessageSquare className="mx-auto mb-3 h-8 w-8 text-gray-700" />
+                                <p className="text-sm text-gray-400">Choose a conversation to read it.</p>
+                                <p className="mt-1.5 text-xs leading-relaxed text-gray-600">
+                                    Clients appear by project or reference. Names, addresses and phone
+                                    numbers are removed before a message reaches this screen.
                                 </p>
                             </div>
                         </div>
@@ -187,19 +277,22 @@ const EsfMessages = () => {
 
                     {open && (
                         <>
-                            <div className="flex items-start gap-3 border-b border-white/10 px-5 py-4">
+                            {/* Header */}
+                            <div className="flex items-center gap-3 border-b border-white/10 bg-white/[0.03] px-4 py-2.5">
+                                <Avatar label={open.client} size="sm" />
                                 <div className="min-w-0 flex-1">
-                                    <h2 className="truncate text-base font-semibold text-gray-100">
-                                        {open.subject || '(no subject)'}
-                                    </h2>
-                                    <p className="mt-0.5 truncate text-xs text-gray-400">{open.client}</p>
+                                    <p className="truncate text-[14px] font-semibold text-gray-100">{open.client}</p>
+                                    <p className="truncate text-[11.5px] text-gray-500">{open.subject || '(no subject)'}</p>
                                 </div>
-                                <StatusPill status={open.status} />
+                                <span className={`shrink-0 rounded-md px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[open.status] || 'bg-white/10 text-gray-400'}`}>
+                                    {open.status}
+                                </span>
                                 <button
                                     type="button"
                                     disabled={busy}
                                     onClick={() => toggleResolved(open.id, !open.resolved)}
-                                    className="flex shrink-0 items-center gap-1.5 rounded-lg border border-white/15 px-3 py-1.5 text-xs font-medium text-gray-300 hover:bg-white/5 disabled:opacity-50"
+                                    title={open.resolved ? 'Reopen this conversation' : 'Mark resolved'}
+                                    className="flex shrink-0 items-center gap-1.5 rounded-lg border border-white/15 px-2.5 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:bg-white/5 disabled:opacity-50"
                                 >
                                     {open.resolved
                                         ? <><RotateCcw className="h-3.5 w-3.5" /> Reopen</>
@@ -207,55 +300,79 @@ const EsfMessages = () => {
                                 </button>
                             </div>
 
-                            <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
-                                {conversation.messages.map((message) => (
-                                    <div key={message.id} className={message.direction === 'inbound' ? '' : 'pl-8'}>
-                                        <div className="mb-1 flex items-center gap-2">
-                                            <span className="text-[11px] font-semibold text-gray-300">{message.author}</span>
-                                            <span className="text-[11px] text-gray-500">{relativeTime(message.sentAt)}</span>
-                                            {/* Said plainly: a message that lost detail to the
-                                                deterministic fallback reads thinly, and a staff
-                                                member should know that is why rather than assume
-                                                the client was terse. */}
-                                            {message.redactedBy === 'deterministic' && (
-                                                <span className="text-[10px] text-gray-600">limited detail</span>
-                                            )}
-                                        </div>
-                                        <div className={`rounded-lg px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap ${
-                                            message.direction === 'inbound'
-                                                ? 'bg-white/[0.05] text-gray-200'
-                                                : 'bg-blue-500/10 text-gray-200'
-                                        }`}>
-                                            {message.body || <span className="text-gray-500">(no readable content)</span>}
+                            {/* Messages */}
+                            <div className="flex-1 space-y-1 overflow-y-auto px-4 py-4 md:px-8">
+                                {dayGroups.map((group) => (
+                                    <div key={group.key} className="space-y-1">
+                                        <div className="flex justify-center py-3">
+                                            <span className="rounded-md bg-white/[0.07] px-2.5 py-1 text-[10.5px] font-medium uppercase tracking-wide text-gray-400">
+                                                {group.day}
+                                            </span>
                                         </div>
 
-                                        {message.quotedTrimmed && (
-                                            <p className="mt-1 text-[10px] text-gray-600">Earlier messages in this thread are above.</p>
-                                        )}
-
-                                        {message.attachments?.length > 0 && (
-                                            <div className="mt-2 flex flex-wrap gap-2">
-                                                {message.attachments.map((file) => (
-                                                    <span
-                                                        key={file.id || file.name}
-                                                        className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-gray-300"
+                                        {group.messages.map((message) => {
+                                            const mine = message.direction === 'outbound';
+                                            return (
+                                                <div key={message.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                                                    {/* Bubbles hug their content and cap at ~68%, which is
+                                                        what stops a chat reading like a document. */}
+                                                    <div
+                                                        className={`relative max-w-[68%] rounded-lg px-3 py-2 text-[13.5px] leading-[1.5] ${
+                                                            mine
+                                                                ? 'rounded-tr-sm bg-blue-500/15 text-gray-100'
+                                                                : 'rounded-tl-sm bg-white/[0.07] text-gray-100'
+                                                        }`}
                                                     >
-                                                        {file.name || 'Attachment'}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        )}
+                                                        <p className="whitespace-pre-wrap break-words">
+                                                            {message.body || <span className="text-gray-500">(no readable content)</span>}
+                                                        </p>
+
+                                                        {message.attachments?.length > 0 && (
+                                                            <div className="mt-2 flex flex-wrap gap-1.5">
+                                                                {message.attachments.map((file) => (
+                                                                    <span
+                                                                        key={file.id || file.name}
+                                                                        className="flex items-center gap-1.5 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-[11px] text-gray-300"
+                                                                    >
+                                                                        <Paperclip className="h-3 w-3" />
+                                                                        {file.name || 'Attachment'}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        )}
+
+                                                        {/* Time sits inside the bubble, bottom-right. */}
+                                                        <span className="mt-1 flex items-center justify-end gap-1.5 text-[10.5px] text-gray-500">
+                                                            {message.redactedBy === 'deterministic' && (
+                                                                <span title="Some detail was removed automatically">limited detail</span>
+                                                            )}
+                                                            {bubbleTime(message.sentAt)}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 ))}
+
+                                {conversation?.messages?.some((m) => m.quotedTrimmed) && (
+                                    <p className="pt-2 text-center text-[10.5px] text-gray-600">
+                                        Quoted history is trimmed — earlier messages appear above.
+                                    </p>
+                                )}
                             </div>
 
-                            {/* Reply lands in a later phase — the send path needs the Gmail
-                                connection, which is not wired yet. Saying so is better than a
-                                box that looks like it works. */}
-                            <div className="border-t border-white/10 px-5 py-3">
-                                <p className="text-xs text-gray-500">
-                                    Replying from here arrives with Gmail sending — not connected yet.
-                                </p>
+                            {/* Composer — present, and honest about not being wired yet. */}
+                            <div className="border-t border-white/10 bg-white/[0.03] px-4 py-3">
+                                <div className="flex items-center gap-2 rounded-lg bg-white/[0.05] px-3 py-2 opacity-60">
+                                    <Lock className="h-4 w-4 shrink-0 text-gray-500" />
+                                    <input
+                                        disabled
+                                        placeholder="Replying from here arrives with Gmail sending"
+                                        className="w-full cursor-not-allowed bg-transparent text-[13px] text-gray-300 placeholder:text-gray-500 focus:outline-none"
+                                    />
+                                    <Send className="h-4 w-4 shrink-0 text-gray-600" />
+                                </div>
                             </div>
                         </>
                     )}
