@@ -55,11 +55,16 @@
  * Usage:
  *   node server/scripts/cleanOrphanedPreFixFinanceDays.js                      # dry run, all accounts
  *   node server/scripts/cleanOrphanedPreFixFinanceDays.js --user-id=<id>       # dry run, one account
+ *   node server/scripts/cleanOrphanedPreFixFinanceDays.js --country=IN         # dry run, one marketplace
  *   node server/scripts/cleanOrphanedPreFixFinanceDays.js --confirm            # actually delete
  *   node server/scripts/cleanOrphanedPreFixFinanceDays.js --days=180           # widen the lookback
+ *
+ * Every deleted row is written to a timestamped JSON backup first (path printed at startup), so a
+ * mistaken run can be reconstructed. The delete is otherwise irreversible.
  */
 
 const path = require('path');
+const fs = require('fs');
 const mongoose = require('mongoose');
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 
@@ -81,10 +86,19 @@ function getArg(name) {
   return m ? m.split('=')[1].trim() : null;
 }
 const FILTER_USER_ID = getArg('user-id');
+const FILTER_COUNTRY = (getArg('country') || '').toUpperCase() || null;
 const CONFIRM = process.argv.slice(2).includes('--confirm');
 const LOOKBACK_DAYS = parseInt(getArg('days') || '120', 10);
+const BACKUP_PATH = path.resolve(__dirname, `../../orphan-clean-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
 
 const round2 = (v) => Math.round(v * 100) / 100;
+
+/** Append rows to the backup file before they are deleted, so a bad run can be reconstructed. */
+const backup = [];
+function backupRows(meta, rows) {
+  backup.push({ ...meta, rows });
+  fs.writeFileSync(BACKUP_PATH, JSON.stringify(backup, null, 2));
+}
 
 /**
  * Amazon's own per-day orderedProductSales for a window — the figure Seller Central shows, already
@@ -121,10 +135,13 @@ async function main() {
   await mongoose.connect(MONGODB_URI);
   console.log(`[orphan-clean] Connected to ${dbConsts.dbName || MONGODB_URI}`);
   console.log(`[orphan-clean] ${CONFIRM ? '*** LIVE RUN — rows WILL be deleted ***' : 'DRY RUN — nothing will be deleted'}`);
+  if (FILTER_COUNTRY) console.log(`[orphan-clean] marketplace filter: ${FILTER_COUNTRY}`);
+  if (CONFIRM) console.log(`[orphan-clean] backup of deleted rows: ${BACKUP_PATH}`);
 
   const since = addDaysToDateStr(new Date().toISOString().slice(0, 10), -LOOKBACK_DAYS);
   const logMatch = { date: { $gte: since } };
   if (FILTER_USER_ID) logMatch.User = new mongoose.Types.ObjectId(FILTER_USER_ID);
+  if (FILTER_COUNTRY) logMatch.country = FILTER_COUNTRY;
 
   // Pre-fix days are those whose sync log never got a bucketTimezone stamp.
   const logs = await FinanceSyncLog.find(logMatch, { User: 1, country: 1, region: 1, date: 1, bucketTimezone: 1 }).lean();
@@ -207,9 +224,10 @@ async function main() {
         console.log(`  ✓ ${day}: $${stored.toFixed(2)} stored, Data Kiosk says $0.00 — orphaned, ${rows.length} row(s) to delete`);
         for (const r of rows) console.log(`      ${r.sku} $${(r.productSales || 0).toFixed(2)} x${r.units}`);
         if (CONFIRM) {
+          backupRows({ userId, country, region, date: day, storedTotal: stored, dataKiosk: truth }, rows);
           const res = await DailySkuFinance.deleteMany({ ...acctFilter, date: day });
           await FinanceSyncLog.updateOne({ ...acctFilter, date: day }, { $set: { bucketTimezone: 'cleaned-orphan' } });
-          console.log(`      deleted ${res.deletedCount} row(s)`);
+          console.log(`      deleted ${res.deletedCount} row(s)  (backed up)`);
         }
       } else if (Math.abs(stored - truth) >= 0.005) {
         totals.mismatch++; totals.mismatchDollars += Math.abs(stored - truth);
