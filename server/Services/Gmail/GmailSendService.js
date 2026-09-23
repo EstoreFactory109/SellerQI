@@ -1,17 +1,28 @@
 /**
  * GmailSendService.js — replies, from both sides.
  *
- * Two paths that look similar and are not:
+ * Two paths:
  *
- *   STAFF reply  → users.messages.send    the email actually goes to the client
- *   CLIENT reply → users.messages.insert  files into the Gmail thread, transmits nothing
+ *   STAFF reply             → send to the client
+ *   CLIENT ticket or reply  → send to OUR OWN inbox, Reply-To the client
  *
- * ── WHY THE CLIENT'S REPLY IS INSERTED, NOT SENT ──
- * `send` would mail the ESF inbox from itself. The client's words would arrive looking
- * like ESF's own, the thread would read as the agency talking to itself, and we would
- * be generating real outbound mail — deliverability surface, SPF alignment, the lot —
- * for a message that never needs to leave the building. `insert` preserves
- * `From: <the client>` and stays put.
+ * ── WHY A CLIENT'S PORTAL MESSAGE IS MAILED TO OURSELVES ──
+ * This used `users.messages.insert`, which files a message into the mailbox with
+ * `From: <the client>` preserved and transmits nothing. Faithful as a record, and wrong
+ * in practice: an inserted message is synthetic, so Gmail raises no new-mail
+ * notification for it. The admin is never told. A client raises a ticket, it sits
+ * silently in a mailbox nobody was alerted to, and the portal reports it delivered.
+ *
+ * So these are genuinely sent now, to our own inbox. Real delivery means the admin's
+ * ordinary email life works — phone notification, desktop alert, filters, the lot.
+ *
+ * Gmail only lets us send AS an address we own, so `From` has to be the inbox rather
+ * than the client. `Reply-To: <the client>` is what carries the identity and makes the
+ * admin's Reply reach the person who actually wrote. Without it the reply would come
+ * straight back to ourselves — a loop, with the client hearing nothing.
+ *
+ * Mailing ourselves from ourselves has no deliverability cost: same domain, our own
+ * SPF and DKIM, no external hop.
  *
  * ── BOTH WRITES COME BACK, AND BOTH GUARDS ARE REQUIRED ──
  * Anything we put into Gmail is reported by our own watch and re-ingested. The message
@@ -35,6 +46,9 @@ const { getCredentials, isMessagingEnabled, ORIGIN_HEADER } = require('./config.
 
 /** The name the client sees on every reply. Never an individual. */
 const AGENCY_DISPLAY_NAME = process.env.GMAIL_SENDER_NAME || 'eStore Factory';
+
+/** What the admin sees in their Gmail list for a message raised in the portal. */
+const PORTAL_SENDER_NAME = process.env.GMAIL_PORTAL_SENDER_NAME || 'SellerQI Portal';
 
 const MAX_REPLY_CHARS = 10000;
 
@@ -134,6 +148,55 @@ const recordSentMessage = async ({
 };
 
 /**
+ * The footer on a portal message, so the admin reading it in Gmail knows where it came
+ * from and who they are actually replying to.
+ *
+ * The client's address appears here deliberately. The admin has full Gmail access and
+ * needs to know who wrote in — this is outside the staff-portal boundary, not a breach
+ * of it. Nothing in this footer ever reaches the portal: the portal stores its own
+ * redacted copy, built separately from the raw text.
+ */
+const portalFooter = (fromAddress) => [
+    '',
+    '—',
+    `Sent from the SellerQI client portal by ${fromAddress}`,
+    'Reply to this email and your reply goes straight to them.',
+].join('\n');
+
+/**
+ * Deliver a client's portal message into our own inbox.
+ *
+ * Shared by tickets and replies because the only difference between them is whether a
+ * Gmail thread already exists.
+ */
+const deliverClientMessage = async ({
+    text, rawSubject, fromAddress, gmailThreadId = null, inReplyTo = null, references = [],
+    isNewThread = false,
+}) => {
+    const { inboxAddress } = getCredentials();
+    const messageId = generateMessageId(String(inboxAddress).split('@')[1]);
+
+    const { raw } = buildMimeMessage({
+        // Our own address, because Gmail will not let us send as anyone else.
+        from: { name: PORTAL_SENDER_NAME, email: inboxAddress },
+        to: { email: inboxAddress },
+        // The header that makes "Reply" in Gmail reach the client instead of looping
+        // back to us.
+        replyTo: { email: fromAddress },
+        rawSubject,
+        isNewThread,
+        bodyText: `${text}\n${portalFooter(fromAddress)}`,
+        inReplyTo,
+        references,
+        origin: 'portal-client',
+        messageId,
+    });
+
+    const sent = await GmailClient.sendMessage({ raw, ...(gmailThreadId ? { threadId: gmailThreadId } : {}) });
+    return { sent, messageId };
+};
+
+/**
  * A staff member replies. The email is genuinely sent to the client.
  *
  * @param {object} args
@@ -201,21 +264,15 @@ const insertClientReply = async ({ threadId, body, user }) => {
     const thread = await loadThreadForSend(threadId, user._id);
 
     const fromAddress = thread.clientEmail || user.email;
-    const messageId = generateMessageId(String(fromAddress).split('@')[1]);
 
-    const { raw } = buildMimeMessage({
-        // `From: <the client>`, preserved — which is the entire reason this is an insert.
-        from: { email: fromAddress },
-        to: { email: inboxAddress },
+    const { sent, messageId } = await deliverClientMessage({
+        text,
         rawSubject: thread.rawSubject,
-        bodyText: text,
+        fromAddress,
+        gmailThreadId: thread.gmailThreadId,
         inReplyTo: thread.rfc822MessageIdOfLast,
         references: thread.referencesTail || [],
-        messageId,
-        origin: 'portal-client',
     });
-
-    const inserted = await GmailClient.insertMessage({ raw, threadId: thread.gmailThreadId });
 
     /**
      * Redacted like any other client message.
@@ -235,18 +292,18 @@ const insertClientReply = async ({ threadId, body, user }) => {
         origin: 'portal-client',
         bodyRedacted,
         messageId,
-        gmailMessageId: inserted.id,
+        gmailMessageId: sent.id,
     });
 
-    logger.info(`[GmailSend] client reply inserted on thread ${thread._id}`);
-    return { id: inserted.id, sentAt: new Date() };
+    logger.info(`[GmailSend] client reply delivered on thread ${thread._id}`);
+    return { id: sent.id, sentAt: new Date() };
 };
 
 /**
  * A client raises a ticket — the only way to START a conversation from the portal.
  *
  * Same mechanism as a client reply (insert, not send), with one difference: there is no
- * thread yet, so `insertMessage` is called without a threadId and Gmail opens one. The
+ * thread yet, so it is sent without a threadId and Gmail opens one. The
  * id it returns becomes our `gmailThreadId`, and every later message on both sides
  * threads onto it exactly as if the client had emailed in.
  *
@@ -286,26 +343,16 @@ const startClientTicket = async ({ subject, body, user }) => {
         );
     }
 
-    const { inboxAddress } = getCredentials();
     const fromAddress = user.email;
-    const messageId = generateMessageId(String(fromAddress).split('@')[1]);
 
-    const { raw } = buildMimeMessage({
-        // `From: <the client>` — this has to look to the admin exactly like an email
-        // the client sent, because as far as the conversation is concerned, it is one.
-        from: { email: fromAddress },
-        to: { email: inboxAddress },
+    // No threadId — Gmail opens the conversation, and the id it returns becomes ours.
+    const { sent, messageId } = await deliverClientMessage({
+        text,
         rawSubject,
+        fromAddress,
         // No "Re:" — this opens the conversation rather than continuing one.
         isNewThread: true,
-        bodyText: text,
-        messageId,
-        origin: 'portal-client',
     });
-
-    // No threadId: Gmail creates the thread. UNREAD so it visibly arrives for the admin
-    // working in Gmail rather than only in the portal.
-    const inserted = await GmailClient.insertMessage({ raw, labelIds: ['INBOX', 'UNREAD'] });
 
     const bundle = buildIdentityBundle(user);
     const { text: bodyRedacted } = redactAll(text, bundle);
@@ -314,10 +361,10 @@ const startClientTicket = async ({ subject, body, user }) => {
     const sentAt = new Date();
 
     const thread = await EmailThread.findOneAndUpdate(
-        { gmailThreadId: inserted.threadId },
+        { gmailThreadId: sent.threadId },
         {
             $setOnInsert: {
-                gmailThreadId: inserted.threadId,
+                gmailThreadId: sent.threadId,
                 userId: user._id,
                 clientEmail: fromAddress,
                 rawSubject,
@@ -340,11 +387,11 @@ const startClientTicket = async ({ subject, body, user }) => {
     );
 
     await EmailMessage.updateOne(
-        { gmailMessageId: inserted.id },
+        { gmailMessageId: sent.id },
         {
             $setOnInsert: {
-                gmailMessageId: inserted.id,
-                gmailThreadId: inserted.threadId,
+                gmailMessageId: sent.id,
+                gmailThreadId: sent.threadId,
                 threadId: thread._id,
                 userId: user._id,
                 direction: 'inbound',

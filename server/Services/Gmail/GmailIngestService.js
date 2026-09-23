@@ -165,6 +165,24 @@ const ingestMessage = async (gmailMessageId) => {
     const raw = await GmailClient.getMessage(gmailMessageId);
     const parsed = parseMessage(raw);
 
+    /**
+     * The SECOND echo guard, and it must run BEFORE the routing decision below.
+     *
+     * A message we send to our own inbox exists in Gmail twice — the sent copy and the
+     * delivered copy — under two different message ids but ONE Message-ID header. The
+     * id check above only catches the copy we recorded. Reaching the portal-echo branch
+     * with the other copy would defer it, and keep deferring it forever, because its
+     * gmailMessageId is never going to match the one we stored.
+     *
+     * Together with the X-SellerQI-Origin header this is why a portal message is never
+     * stored twice: the header is lost if a client strips unknown headers on a round
+     * trip, and the id alone cannot help while our own write has not landed yet.
+     */
+    if (parsed.rfc822MessageId) {
+        const alreadyOurs = await EmailMessage.exists({ rfc822MessageId: parsed.rfc822MessageId });
+        if (alreadyOurs) return { status: 'duplicate' };
+    }
+
     const decision = routeMessage(parsed, { inboxAddress });
     if (decision.action === 'skip') {
         /**
@@ -185,20 +203,6 @@ const ingestMessage = async (gmailMessageId) => {
             return { status: 'deferred', reason: 'portal-echo-without-local-copy' };
         }
         return { status: 'skipped', reason: decision.reason };
-    }
-
-    /**
-     * The SECOND echo guard: a message we wrote, recognised by the Message-ID we
-     * generated before sending it.
-     *
-     * The X-SellerQI-Origin header in routeMessage above is the first. Neither is
-     * redundant — the header is lost if a mail client strips unknown headers on a
-     * round trip, and the id alone cannot help while our own write has not landed yet.
-     * Between them, a portal reply is never stored twice.
-     */
-    if (parsed.rfc822MessageId) {
-        const alreadyOurs = await EmailMessage.exists({ rfc822MessageId: parsed.rfc822MessageId });
-        if (alreadyOurs) return { status: 'duplicate' };
     }
 
     const match = await resolveClient(decision.lookup);

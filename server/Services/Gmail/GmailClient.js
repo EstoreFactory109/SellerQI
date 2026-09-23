@@ -265,9 +265,14 @@ const sendMessage = async ({ raw, threadId }) => gmailRequest({
 /**
  * File a message into the mailbox WITHOUT transmitting it.
  *
- * This is how a client's portal reply joins the Gmail thread with `From: <the client>`
- * preserved. `send` would mail our own inbox from itself, making the client's words look
- * like ours and creating real deliverability surface for no benefit.
+ * CURRENTLY UNUSED, and kept deliberately. Client portal messages were filed this way
+ * so the Gmail record could keep `From: <the client>` — faithful, but an inserted
+ * message is synthetic, so Gmail raises no new-mail notification and the admin was
+ * never told a client had written. They are sent for real now, with `Reply-To` carrying
+ * the client's address (see GmailSendService).
+ *
+ * Retained because the scope grants it and it is the only way to add a message to a
+ * mailbox without delivery — worth having if an import or migration ever needs it.
  */
 const insertMessage = async ({ raw, threadId, labelIds = ['INBOX'] }) => gmailRequest({
     method: 'POST',

@@ -66,7 +66,7 @@ beforeEach(() => {
     });
     mockThreadUpdateOne.mockResolvedValue({});
     mockMsgUpdateOne.mockResolvedValue({});
-    mockSendMessage.mockResolvedValue({ id: 'sent-1' });
+    mockSendMessage.mockResolvedValue({ id: 'sent-1', threadId: 'gt-new' });
     mockInsertMessage.mockResolvedValue({ id: 'ins-1', threadId: 'gt-new' });
     mockThreadCount.mockResolvedValue(0);
     mockThreadFindOneAndUpdate.mockResolvedValue({ _id: 't-new', displaySubject: 'Listing issue' });
@@ -121,22 +121,43 @@ describe('a staff reply', () => {
 });
 
 describe('a client reply', () => {
-    test('is INSERTED, never sent', async () => {
-        // send would mail our own inbox from itself: the client's words would arrive
-        // looking like ours, and we would generate real outbound mail for a message
-        // that never needs to leave the building.
+    test('is actually DELIVERED, not filed silently into the mailbox', async () => {
+        // This used insert, which files a message without transmitting it. Faithful as
+        // a record and useless in practice: an inserted message is synthetic, so Gmail
+        // raises no new-mail notification and the admin is never told a client wrote.
         await GmailSend.insertClientReply({ threadId: 't1', body: 'Any update?', user: CLIENT });
 
-        expect(mockInsertMessage).toHaveBeenCalled();
-        expect(mockSendMessage).not.toHaveBeenCalled();
+        expect(mockSendMessage).toHaveBeenCalled();
+        expect(mockInsertMessage).not.toHaveBeenCalled();
     });
 
-    test('keeps the client as the From address', async () => {
-        // The entire reason this is an insert.
+    test('goes to our own inbox, because Gmail will not let us send as the client', async () => {
         await GmailSend.insertClientReply({ threadId: 't1', body: 'x', user: CLIENT });
 
-        expect(decodeRaw(mockInsertMessage.mock.calls[0][0].raw))
-            .toContain('From: walmart@morgansrepellent.com');
+        const raw = decodeRaw(mockSendMessage.mock.calls[0][0].raw);
+        expect(raw).toContain('To: hello@estorefactory.com');
+        expect(raw).toContain('From: "SellerQI Portal" <hello@estorefactory.com>');
+    });
+
+    test('carries Reply-To: the client, or the admin replies to us and they hear nothing', async () => {
+        // The single header this redesign turns on. Without it, hitting Reply in Gmail
+        // sends the answer straight back to our own inbox — a loop the client is not
+        // part of, and no error anywhere.
+        await GmailSend.insertClientReply({ threadId: 't1', body: 'x', user: CLIENT });
+
+        expect(decodeRaw(mockSendMessage.mock.calls[0][0].raw))
+            .toContain('Reply-To: walmart@morgansrepellent.com');
+    });
+
+    test('tells the admin in the body who wrote it', async () => {
+        await GmailSend.insertClientReply({ threadId: 't1', body: 'x', user: CLIENT });
+
+        const body = Buffer.from(
+            decodeRaw(mockSendMessage.mock.calls[0][0].raw).split('\r\n\r\n').slice(1).join('').replace(/\r\n/g, ''),
+            'base64'
+        ).toString('utf8');
+        expect(body).toContain('walmart@morgansrepellent.com');
+        expect(body).toContain('client portal');
     });
 
     test('is redacted before staff can read it', async () => {
@@ -172,7 +193,7 @@ describe('a client reply', () => {
 describe('the echo guards', () => {
     test.each([
         ['staff', () => GmailSend.sendStaffReply({ threadId: 't1', body: 'x' }), () => mockSendMessage],
-        ['client', () => GmailSend.insertClientReply({ threadId: 't1', body: 'x', user: CLIENT }), () => mockInsertMessage],
+        ['client', () => GmailSend.insertClientReply({ threadId: 't1', body: 'x', user: CLIENT }), () => mockSendMessage],
     ])('a %s reply is stamped with its origin', async (_label, act, getMock) => {
         // Anything we put into Gmail is reported by our own watch and re-ingested.
         // Without the header the message appears twice.
@@ -221,8 +242,21 @@ describe('raising a ticket', () => {
         await ticket();
 
         // No threadId passed — that is what makes Gmail create the conversation.
-        expect(mockInsertMessage.mock.calls[0][0].threadId).toBeUndefined();
-        expect(mockSendMessage).not.toHaveBeenCalled();
+        expect(mockSendMessage.mock.calls[0][0].threadId).toBeUndefined();
+    });
+
+    test('is delivered, so the admin is actually notified a ticket was raised', async () => {
+        await ticket();
+
+        expect(mockSendMessage).toHaveBeenCalled();
+        expect(mockInsertMessage).not.toHaveBeenCalled();
+    });
+
+    test('is replyable straight from Gmail', async () => {
+        await ticket();
+
+        expect(decodeRaw(mockSendMessage.mock.calls[0][0].raw))
+            .toContain('Reply-To: walmart@morgansrepellent.com');
     });
 
     test('adopts the thread id Gmail hands back', async () => {
@@ -236,15 +270,9 @@ describe('raising a ticket', () => {
         // something they sent, so it reads as a reply nobody wrote.
         await ticket();
 
-        const raw = decodeRaw(mockInsertMessage.mock.calls[0][0].raw);
+        const raw = decodeRaw(mockSendMessage.mock.calls[0][0].raw);
         expect(raw).toContain('Subject: Listing issue');
         expect(raw).not.toContain('Subject: Re:');
-    });
-
-    test('arrives as unread, so the admin notices it in Gmail too', async () => {
-        await ticket();
-
-        expect(mockInsertMessage.mock.calls[0][0].labelIds).toEqual(['INBOX', 'UNREAD']);
     });
 
     test('opens needing a staff reply', async () => {
@@ -282,12 +310,12 @@ describe('raising a ticket', () => {
     test('a subject with a newline cannot inject headers', async () => {
         await ticket({ subject: 'Hello\r\nBcc: attacker@evil.com' });
 
-        expect(decodeRaw(mockInsertMessage.mock.calls[0][0].raw)).not.toMatch(/^Bcc:/m);
+        expect(decodeRaw(mockSendMessage.mock.calls[0][0].raw)).not.toMatch(/^Bcc:/m);
     });
 
     test('refuses an empty subject', async () => {
         await expect(ticket({ subject: '   ' })).rejects.toThrow(/needs a subject/);
-        expect(mockInsertMessage).not.toHaveBeenCalled();
+        expect(mockSendMessage).not.toHaveBeenCalled();
     });
 
     test('refuses a subject longer than the cap', async () => {
@@ -300,7 +328,7 @@ describe('raising a ticket', () => {
         mockThreadCount.mockResolvedValue(10);
 
         await expect(ticket()).rejects.toThrow(/already have 10 open/);
-        expect(mockInsertMessage).not.toHaveBeenCalled();
+        expect(mockSendMessage).not.toHaveBeenCalled();
     });
 });
 
