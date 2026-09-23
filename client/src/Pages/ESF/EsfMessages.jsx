@@ -63,11 +63,14 @@ const Avatar = ({ label, size = 'md' }) => (
  * The read receipt on a message we sent.
  *
  * ── READ THIS BEFORE TRUSTING A SINGLE TICK ──
- * The only read signal that exists is the client OPENING THE THREAD IN THE PORTAL.
- * Most of this conversation happens in their mail client, and someone who reads every
- * message in Gmail and replies from their phone shows a single tick forever.
+ * Two signals count as read: the client opening the thread in the portal, and the
+ * client REPLYING. A reply is proof — someone answering at 11:57 has read what arrived
+ * at 11:56 — and it is the signal that matters, because a client who lives in their
+ * mail app never opens the portal at all and would otherwise show a single tick on
+ * messages they had demonstrably read.
  *
- * So one tick means "we have not seen them open it here", NOT "they have not read it".
+ * What still leaves no trace is a silent read in their own mail client. So one tick
+ * means "no evidence either way", NOT "they have not read it".
  * That is why the labels are Sent / Opened rather than WhatsApp's delivered / read,
  * and why the conversation carries a standing note saying so — a staff member who
  * reads one tick as "they are ignoring me" is being misled by the UI.
@@ -75,7 +78,7 @@ const Avatar = ({ label, size = 'md' }) => (
 const Receipt = ({ seen }) => {
     if (seen === null || seen === undefined) return null;
     return seen ? (
-        <CheckCheck className="h-3.5 w-3.5 shrink-0 text-sky-400" aria-label="Opened in the client portal" />
+        <CheckCheck className="h-3.5 w-3.5 shrink-0 text-sky-400" aria-label="Seen by the client" />
     ) : (
         <Check className="h-3.5 w-3.5 shrink-0 text-gray-500" aria-label="Sent" />
     );
@@ -367,9 +370,9 @@ const EsfMessages = () => {
                                 <div className="flex justify-center pb-1">
                                     <span className="max-w-md rounded-md bg-amber-500/[0.07] px-3 py-1.5 text-center text-[10.5px] leading-relaxed text-amber-200/70">
                                         <CheckCheck className="mr-1 inline h-3 w-3" />
-                                        Two ticks mean the client opened this in the portal. Reading it
-                                        in their own email is not tracked, so one tick is not proof
-                                        they haven&apos;t seen it.
+                                        Two ticks mean the client opened this in the portal, or replied
+                                        after it. Simply reading it in their own email leaves no trace,
+                                        so one tick is not proof they haven&apos;t seen it.
                                     </span>
                                 </div>
 

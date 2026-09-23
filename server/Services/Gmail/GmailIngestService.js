@@ -302,6 +302,37 @@ const refreshThreadCounters = async (threadId, parsed, decision) => {
 
     const thread = await EmailThread.findById(threadId).select('lastClientReadAt lastStaffReadAt').lean();
 
+    /**
+     * ── A REPLY IS PROOF OF READING ──
+     *
+     * The read receipt originally listened for one thing: the client opening the thread
+     * in the portal. But this is an email conversation, and a client who lives in their
+     * mail app never produces that signal at all — so every message we sent showed a
+     * single tick forever, including ones they had demonstrably read, because they
+     * answered them. The receipt was decoration, and a staff member reading it as "they
+     * are ignoring me" was being actively misled.
+     *
+     * Someone replying at 11:57 has read what arrived at 11:56. That is not an
+     * inference, it is what a reply means. Taking the newest inbound timestamp as a read
+     * marker makes the tick reflect reality rather than portal habits, and fixes the
+     * unread count in the same stroke — a client who answered by email had their reply
+     * still counted as something they had not seen.
+     *
+     * Only ever moves FORWARD. Backfill walks old mail, so an ancient inbound message
+     * ingested late must not drag the marker backwards and resurrect read messages as
+     * unread.
+     */
+    const [newestInbound] = await EmailMessage.find({ threadId, direction: 'inbound' })
+        .select('sentAt')
+        .sort({ sentAt: -1 })
+        .limit(1)
+        .lean();
+
+    const clientReadAt = [thread?.lastClientReadAt, newestInbound?.sentAt]
+        .filter(Boolean)
+        .map((value) => new Date(value))
+        .sort((a, b) => b - a)[0] || null;
+
     const [messageCount, staffUnread, clientUnread] = await Promise.all([
         EmailMessage.countDocuments({ threadId }),
         // Unread for staff means inbound messages since staff last opened it.
@@ -313,7 +344,7 @@ const refreshThreadCounters = async (threadId, parsed, decision) => {
         EmailMessage.countDocuments({
             threadId,
             direction: 'outbound',
-            ...(thread?.lastClientReadAt ? { sentAt: { $gt: thread.lastClientReadAt } } : {}),
+            ...(clientReadAt ? { sentAt: { $gt: clientReadAt } } : {}),
         }),
     ]);
 
@@ -324,6 +355,7 @@ const refreshThreadCounters = async (threadId, parsed, decision) => {
             messageCount,
             staffUnreadCount: staffUnread,
             clientUnreadCount: clientUnread,
+            ...(clientReadAt ? { lastClientReadAt: clientReadAt } : {}),
         },
     });
 };

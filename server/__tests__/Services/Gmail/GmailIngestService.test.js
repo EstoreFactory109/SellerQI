@@ -410,6 +410,57 @@ describe('matching', () => {
     });
 });
 
+describe('a reply counts as having read what came before it', () => {
+    /**
+     * The read receipt originally listened only for the client opening the thread in
+     * the portal. This is an email conversation: a client living in their mail app
+     * never produces that signal, so every message we sent showed a single tick
+     * forever — including ones they had demonstrably read, because they answered them.
+     */
+    test('an inbound message advances lastClientReadAt to its own timestamp', async () => {
+        const replyAt = new Date('2026-09-23T11:57:00Z');
+        mockMsgFind.mockReturnValue(chain([{ direction: 'inbound', sentAt: replyAt }]));
+        mockThreadFindById.mockReturnValue(chain({ lastClientReadAt: null, lastStaffReadAt: null }));
+
+        await GmailIngest.ingestMessage('msg-1');
+
+        expect(mockThreadUpdateOne.mock.calls.at(-1)[1].$set.lastClientReadAt).toEqual(replyAt);
+    });
+
+    test('so a staff message sent before their reply reads as seen', async () => {
+        // The whole point: staff wrote at 11:56, client answered at 11:57. Two ticks.
+        const replyAt = new Date('2026-09-23T11:57:00Z');
+        mockMsgFind.mockReturnValue(chain([{ direction: 'inbound', sentAt: replyAt }]));
+        mockThreadFindById.mockReturnValue(chain({ lastClientReadAt: null, lastStaffReadAt: null }));
+
+        await GmailIngest.ingestMessage('msg-1');
+
+        const readAt = mockThreadUpdateOne.mock.calls.at(-1)[1].$set.lastClientReadAt;
+        expect(new Date(readAt) >= new Date('2026-09-23T11:56:00Z')).toBe(true);
+    });
+
+    test('never moves the marker BACKWARDS', async () => {
+        // Backfill walks old mail. An ancient inbound message ingested late must not
+        // drag the marker back and resurrect read messages as unread.
+        const already = new Date('2026-09-23T12:00:00Z');
+        mockMsgFind.mockReturnValue(chain([{ direction: 'inbound', sentAt: new Date('2026-09-01T09:00:00Z') }]));
+        mockThreadFindById.mockReturnValue(chain({ lastClientReadAt: already, lastStaffReadAt: null }));
+
+        await GmailIngest.ingestMessage('msg-1');
+
+        expect(mockThreadUpdateOne.mock.calls.at(-1)[1].$set.lastClientReadAt).toEqual(already);
+    });
+
+    test('a thread with no inbound message leaves the marker alone', async () => {
+        mockMsgFind.mockReturnValue(chain([]));
+        mockThreadFindById.mockReturnValue(chain({ lastClientReadAt: null, lastStaffReadAt: null }));
+
+        await GmailIngest.ingestMessage('msg-1');
+
+        expect(mockThreadUpdateOne.mock.calls.at(-1)[1].$set.lastClientReadAt).toBeUndefined();
+    });
+});
+
 describe('thread counters', () => {
     test('are recounted, not incremented', async () => {
         // Increments drift the moment anything is ingested twice or out of order — and

@@ -146,6 +146,14 @@ const recordSentMessage = async ({
             // The side that did NOT send now has something unread.
             ...(direction === 'outbound' ? { clientUnreadCount: 1 } : { staffUnreadCount: 1 }),
         },
+        /**
+         * Whoever just sent has, by definition, read everything before it. Holds the
+         * invariant on this path too, so it does not depend on the portal having
+         * happened to mark the thread read on the way in.
+         */
+        ...(direction === 'inbound'
+            ? { $max: { lastClientReadAt: sentAt } }
+            : { $max: { lastStaffReadAt: sentAt } }),
     });
 
     return sentAt;
