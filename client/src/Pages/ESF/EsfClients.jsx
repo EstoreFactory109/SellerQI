@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FolderGit2,
+  Lock,
 } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 import EsfAddClientForm from '../../Components/ESF/EsfAddClientForm.jsx';
@@ -94,7 +95,8 @@ const EsfClients = () => {
   }, []);
 
   const filteredClients = clients.filter((c) => {
-    const name = `${c.firstName || ''} ${c.lastName || ''}`.toLowerCase();
+    // Includes the label so search still works for a member, who has no name to match on.
+    const name = `${c.firstName || ''} ${c.lastName || ''} ${c.label || ''}`.toLowerCase();
     const email = (c.email || '').toLowerCase();
     const brand = (c.brandName || '').toLowerCase();
     const q = searchQuery.toLowerCase().trim();
@@ -304,19 +306,42 @@ const EsfClients = () => {
                             <div className="flex items-center gap-2">
                               <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-sm border bg-sky-500/10 border-sky-400/20">
                                 <span className="text-gray-100 text-xs font-semibold">
-                                  {(client.firstName?.[0] || '') + (client.lastName?.[0] || '')}
+                                  {client.identityRedacted
+                                    ? (client.label?.[0] || '?').toUpperCase()
+                                    : (client.firstName?.[0] || '') + (client.lastName?.[0] || '')}
                                 </span>
                               </div>
-                              <div className="min-w-0">
-                                <p className="text-sm font-medium text-gray-100 break-words">
-                                  {client.firstName} {client.lastName}
-                                </p>
-                                <p className="text-xs text-gray-500 break-all flex items-center gap-1 mt-0.5">
-                                  <Mail className="w-3 h-3 shrink-0" />
-                                  {client.email}
-                                </p>
-                                <p className="text-xs text-gray-500">{client.phone || '—'}</p>
-                              </div>
+
+                              {/*
+                                Members see the client's label — the same Zoho project or
+                                brand the Messages page uses — never their name, email or
+                                phone. The server has already withheld those fields; this
+                                only decides what to show in their place. Reading the label
+                                in the inbox and then finding the person here would have made
+                                that redaction pointless.
+                              */}
+                              {client.identityRedacted ? (
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-gray-100 break-words">
+                                    {client.label || '—'}
+                                  </p>
+                                  <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                                    <Lock className="w-3 h-3 shrink-0" />
+                                    Contact details hidden
+                                  </p>
+                                </div>
+                              ) : (
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-gray-100 break-words">
+                                    {client.firstName} {client.lastName}
+                                  </p>
+                                  <p className="text-xs text-gray-500 break-all flex items-center gap-1 mt-0.5">
+                                    <Mail className="w-3 h-3 shrink-0" />
+                                    {client.email}
+                                  </p>
+                                  <p className="text-xs text-gray-500">{client.phone || '—'}</p>
+                                </div>
+                              )}
                             </div>
                           </td>
                           <td className="px-2 py-2.5 text-xs text-gray-400">

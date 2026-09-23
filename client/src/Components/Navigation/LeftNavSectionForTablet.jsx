@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,ChartLine,LaptopMinimalCheck, ChevronRight, X, Calendar, DollarSign, Lock, Package, LogOut, Bot, BarChart3, User, Link2, LifeBuoy, CreditCard, Building2, ListChecks, Receipt} from 'lucide-react'
+import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,ChartLine,LaptopMinimalCheck, ChevronRight, X, Calendar, DollarSign, Lock, Package, LogOut, Bot, BarChart3, User, Link2, LifeBuoy, CreditCard, Building2, ListChecks, TrendingUp, FileText, MessageSquare, Receipt} from 'lucide-react'
 import useEsfPageAccess from '../../hooks/useEsfPageAccess.js';
 import { logout } from '../../redux/slices/authSlice.js'
 import { clearCogsData } from '../../redux/slices/cogsSlice.js'
@@ -437,12 +437,10 @@ const LeftNavSection = () => {
                     <div className="space-y-1">
                         <NavItem to="/seller-central-checker/client-dashboard" icon={Building2} label="Overview" onNavigate={closeMenu} />
                         <NavItem to="/seller-central-checker/estore-factory/status" icon={ListChecks} label="Status" onNavigate={closeMenu} />
-                                                        {/* Untapped, Reports and Messages are hidden until they have a
-                                    backend: all three still render the design mock's sample
-                                    content, and a client cannot tell invented data from real.
-                                    Their pages and routes are still in the tree — re-adding a
-                                    line here and the route in App.jsx brings each one back. */}
-                                <NavItem to="/seller-central-checker/estore-factory/billing" icon={Receipt} label="Billing" onNavigate={closeMenu} />
+                        <NavItem to="/seller-central-checker/estore-factory/untapped" icon={TrendingUp} label="Untapped" onNavigate={closeMenu} />
+                        <NavItem to="/seller-central-checker/estore-factory/reports" icon={FileText} label="Reports" onNavigate={closeMenu} />
+                        <NavItem to="/seller-central-checker/estore-factory/messages" icon={MessageSquare} label="Messages" onNavigate={closeMenu} />
+                        <NavItem to="/seller-central-checker/estore-factory/billing" icon={Receipt} label="Billing" onNavigate={closeMenu} />
                     </div>
                 </div>
                 )}

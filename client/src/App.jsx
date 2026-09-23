@@ -72,8 +72,13 @@ import EsfClientConnectAccounts from './Pages/ESF/Client/EsfClientConnectAccount
 import EsfClientProfileSelection from './Pages/ESF/Client/EsfClientProfileSelection.jsx';
 import EsfClientDashboard from './Pages/ESF/ClientDashboard.jsx';
 import EstoreFactoryStatus from './Pages/ESF/EstoreFactory/Status.jsx';
+import EstoreFactoryUntapped from './Pages/ESF/EstoreFactory/Untapped.jsx';
+import EstoreFactoryReports from './Pages/ESF/EstoreFactory/Reports.jsx';
+import EstoreFactoryReportHistory from './Pages/ESF/EstoreFactory/ReportHistory.jsx';
+import EstoreFactoryMessages from './Pages/ESF/EstoreFactory/Messages.jsx';
 import EstoreFactoryBilling from './Pages/ESF/EstoreFactory/Billing.jsx';
 import EsfEstoreFactoryZoho from './Pages/ESF/EsfEstoreFactoryZoho.jsx';
+import EsfMessages from './Pages/ESF/EsfMessages.jsx';
 import EsfPageAccessGuard from './Layout/EsfPageAccessGuard.jsx';
 import AdminSubscription from './Pages/Admin/Subscription.jsx';
 import AdminEmailLogs from './Pages/Admin/EmailLogs.jsx';
@@ -176,6 +181,7 @@ const App = () => {
             <Route index element={<Navigate to="clients" replace />} />
             <Route path='clients' element={<EsfClients />} />
             <Route path='users' element={<EsfUsers />} />
+            <Route path='messages' element={<EsfMessages />} />
             <Route path='estore-factory/zoho-projects' element={<EsfEstoreFactoryZoho />} />
             <Route path='settings' element={<EsfSettings />} />
           </Route>
@@ -244,11 +250,10 @@ const App = () => {
                 to everyone else. */}
             <Route path='client-dashboard' element={<EsfClientDashboard />} />
             <Route path='estore-factory/status' element={<EstoreFactoryStatus />} />
-            {/* estore-factory/untapped, /reports, /report-history and /messages are
-                withheld deliberately: those pages still show the design mock's sample
-                content, and serving invented invoices or messages to a real client is
-                worse than the page not existing. The components remain in the tree;
-                restore a route here once each has a backend. */}
+            <Route path='estore-factory/untapped' element={<EstoreFactoryUntapped />} />
+            <Route path='estore-factory/reports' element={<EstoreFactoryReports />} />
+            <Route path='estore-factory/report-history' element={<EstoreFactoryReportHistory />} />
+            <Route path='estore-factory/messages' element={<EstoreFactoryMessages />} />
             <Route path='estore-factory/billing' element={<EstoreFactoryBilling />} />
             <Route path='review-request' element={<RecentOrders />} />
             <Route path='qmate' element={<QMate />} />

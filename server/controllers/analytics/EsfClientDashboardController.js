@@ -35,7 +35,27 @@ const getEsfClientDashboard = asyncHandler(async (req, res) => {
             compareEndDate: req.query.compareEndDate || null,
         });
 
-        return res.status(200).json(new ApiResponse(200, data, 'Client dashboard data retrieved successfully'));
+        /**
+         * The Overview card's "open messages" count.
+         *
+         * Computed here rather than on the page so both surfaces cannot disagree —
+         * the Messages page and this card must never arrive at different numbers by
+         * counting differently. One cheap count, and a failure degrades to 0 rather
+         * than taking the whole dashboard down over a badge.
+         */
+        let openMessageCount = 0;
+        try {
+            const { EmailThread } = require('../../models/system/EmailThreadModels.js');
+            openMessageCount = await EmailThread.countDocuments({ userId, resolvedAt: null });
+        } catch (error) {
+            logger.warn(`[EsfClientDashboard] open message count failed (non-fatal): ${error.message}`);
+        }
+
+        return res.status(200).json(new ApiResponse(
+            200,
+            { ...data, openMessageCount },
+            'Client dashboard data retrieved successfully'
+        ));
     } catch (error) {
         logger.error('[EsfClientDashboard] Error building dashboard:', error);
         return res.status(500).json(new ApiError(500, `Error fetching client dashboard: ${error.message}`));

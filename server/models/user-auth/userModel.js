@@ -190,6 +190,22 @@ const userSchema = new mongoose.Schema(
         // night forever, which is the one cost the due-rule exists to avoid.
         lastLookupAt: { type: Date, default: null },
       },
+      /**
+       * Stable anonymous reference for this client, e.g. "EF-1184".
+       *
+       * Used to label their conversations where neither a Zoho project nor a brand
+       * exists — which on the live data is most clients. RANDOM, never derived from
+       * the email, name or _id: staff can list every client's address from the
+       * Clients page, and a derived code could be recomputed for all of them and
+       * joined back to the inbox, de-anonymising every thread in one script.
+       *
+       * Assigned once, on first need, and never changed — it is how a client is
+       * recognised across conversations. See Services/User/esfClientLabel.js.
+       */
+      esfClientRef: {
+        type: String,
+        default: null,
+      },
       // Role inside the ESF staff portal. Only meaningful when
       // accessType === 'esfUser'. See Services/User/esfRoles.js for the rules.
       // 'owner' is never assignable through the API - it is seeded.

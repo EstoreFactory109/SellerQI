@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BadgeAlert, ClipboardPlus, Clock8, ChartLine, LaptopMinimalCheck, ChevronRight, Activity, Calendar, DollarSign, Lock, Package, BarChart3, LogOut, Bot, User, Link2, LifeBuoy, CreditCard, Building2, ListChecks, Receipt } from 'lucide-react';
+import { LayoutDashboard, BadgeAlert, ClipboardPlus, Clock8, ChartLine, LaptopMinimalCheck, ChevronRight, Activity, Calendar, DollarSign, Lock, Package, BarChart3, LogOut, Bot, User, Link2, LifeBuoy, CreditCard, Building2, ListChecks, TrendingUp, FileText, MessageSquare, Receipt } from 'lucide-react';
 import useEsfPageAccess from '../../hooks/useEsfPageAccess.js';
 import { useDispatch, useSelector } from 'react-redux';
 import { logout } from '../../redux/slices/authSlice.js'
@@ -450,11 +450,9 @@ const LeftNavSection = () => {
                             <div className="space-y-0.5">
                                 <NavItem to="/seller-central-checker/client-dashboard" icon={Building2} label="Overview" />
                                 <NavItem to="/seller-central-checker/estore-factory/status" icon={ListChecks} label="Status" />
-                                {/* Untapped, Reports and Messages are hidden until they have a
-                                    backend: all three still render the design mock's sample
-                                    content, and a client cannot tell invented data from real.
-                                    Their pages and routes are still in the tree — re-adding a
-                                    line here and the route in App.jsx brings each one back. */}
+                                <NavItem to="/seller-central-checker/estore-factory/untapped" icon={TrendingUp} label="Untapped" />
+                                <NavItem to="/seller-central-checker/estore-factory/reports" icon={FileText} label="Reports" />
+                                <NavItem to="/seller-central-checker/estore-factory/messages" icon={MessageSquare} label="Messages" />
                                 <NavItem to="/seller-central-checker/estore-factory/billing" icon={Receipt} label="Billing" />
                             </div>
                         </div>

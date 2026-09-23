@@ -5,7 +5,6 @@ import { PALETTE } from '../../Components/ESF/estoreFactoryTheme.js';
 import axiosInstance from '../../config/axios.config.js';
 // Read from the pages these cards summarise, so Overview can never show a number
 // that page disagrees with.
-import { INITIAL_THREADS, openThreadCount } from './EstoreFactory/Messages.jsx';
 import { NEXT_REPORT } from './EstoreFactory/Reports.jsx';
 
 /**
@@ -189,7 +188,9 @@ const ClientDashboard = () => {
 
     const marketplaces = (user?.sellerCentral?.sellerAccount || []).filter((acc) => acc.country);
 
-    const openTickets = openThreadCount(INITIAL_THREADS);
+    // From the dashboard API, not counted on this page: the Messages page and this
+    // card must never disagree by counting differently.
+    const openTickets = board?.openMessageCount ?? 0;
 
     const linked = Boolean(board?.linked);
     const inProgress = board?.inProgress || [];

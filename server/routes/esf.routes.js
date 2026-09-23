@@ -34,6 +34,12 @@ const {
     linkClientProject,
     unlinkClientProject,
 } = require('../controllers/esf/esfProjects.js');
+const {
+    listStaffThreads,
+    getStaffThread,
+    setThreadResolved,
+    postStaffReply,
+} = require('../controllers/esf/esfMessages.js');
 const esfAuth = require('../middlewares/Auth/esfAuth.js');
 const { authRateLimiter, registerRateLimiter } = require('../middlewares/rateLimiting.js');
 const {
@@ -93,5 +99,19 @@ router.patch('/users/:userId/role', esfAuth, validateEsfRole, updateEsfUserRole)
 router.put('/users/:userId/permissions', esfAuth, updateEsfUserPermissions);
 router.post('/users/:userId/reset-password', esfAuth, resetEsfUserPassword);
 router.delete('/users/:userId', esfAuth, removeEsfUser);
+
+/**
+ * The staff inbox — client email, with the client's identity removed.
+ *
+ * esfAuth only. There is no per-client scoping to apply here because this portal has
+ * none anywhere; the access question is whether this staff member may open the
+ * Messages page, and that check is made explicitly inside the controller. esfPageGuard
+ * does NOT cover these routes — it engages only on /api/pagewise inside an
+ * impersonated client session.
+ */
+router.get('/messages', esfAuth, listStaffThreads);
+router.get('/messages/:threadId', esfAuth, getStaffThread);
+router.patch('/messages/:threadId/resolve', esfAuth, setThreadResolved);
+router.post('/messages/:threadId/reply', esfAuth, postStaffReply);
 
 module.exports = router;
