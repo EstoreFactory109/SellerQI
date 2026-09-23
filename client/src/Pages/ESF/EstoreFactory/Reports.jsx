@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { PALETTE } from '../../../Components/ESF/estoreFactoryTheme.js';
 import axiosInstance from '../../../config/axios.config.js';
+import ReportDocumentPreview from '../../../Components/ESF/ReportDocumentPreview.jsx';
 
 /**
  * Estore Factory > Reports.
@@ -65,19 +66,19 @@ const DeltaCaption = ({ stat }) => {
     const suffix = stat.deltaFormat === 'percent' ? '%' : stat.deltaFormat === 'points' ? ' pts' : '';
     return (
         <span
-            className="text-xs"
+            className="text-[10.5px] whitespace-nowrap"
             style={{ color: unchanged ? PALETTE.textMuted : improved ? PALETTE.good : PALETTE.amberValue }}
         >
-            {unchanged ? '—' : `${stat.delta > 0 ? '▲' : '▼'} ${Math.abs(stat.delta)}${suffix}`} vs previous
+            {unchanged ? '— no change' : `${stat.delta > 0 ? '▲' : '▼'} ${Math.abs(stat.delta)}${suffix}`}
         </span>
     );
 };
 
 const Stat = ({ stat, currency }) => (
-    <div className="flex flex-col gap-1.5 min-w-[112px]">
-        <span className="text-[11.5px] tracking-[.04em] uppercase" style={{ color: PALETTE.textMuted }}>{stat.label}</span>
+    <div className="flex flex-col gap-1 flex-none min-w-[86px]">
+        <span className="text-[10.5px] tracking-[.04em] uppercase whitespace-nowrap" style={{ color: PALETTE.textMuted }}>{stat.label}</span>
         <span
-            className="text-[22px] font-semibold tracking-[-0.02em] tabular-nums leading-none"
+            className="text-[18px] font-semibold tracking-[-0.02em] tabular-nums leading-none"
             style={{ color: stat.tone ? TONE_COLOR[stat.tone] : PALETTE.textPrimary }}
         >
             {formatValue(stat.value, stat.format, currency)}
@@ -86,33 +87,101 @@ const Stat = ({ stat, currency }) => (
     </div>
 );
 
-/** The preview table. Scrolls sideways on narrow screens rather than squashing. */
-const PreviewTable = ({ summary, currency }) => {
+/**
+ * The data table, paged.
+ *
+ * Page 1 comes free with the card payload; every later page is fetched from
+ * /esf/reports/:key/rows. Rows stay mounted while a page loads (dimmed rather
+ * than replaced by a spinner) so the table does not collapse and jump the page
+ * on every click.
+ */
+const PagedTable = ({ report, currency }) => {
+    // Memoised: a fresh [] each render would give goTo a new identity every time
+    // and re-fire the reset effect below on every parent render.
+    const firstPage = useMemo(() => report.summary?.rows || [], [report.summary]);
+    const columns = report.summary?.columns || [];
+    const pageSize = report.pageSize || firstPage.length || 10;
+    const totalRows = report.summary?.totalRows || 0;
+    const totalPages = Math.max(Math.ceil(totalRows / pageSize), 1);
+
+    const [page, setPage] = useState(1);
+    const [rows, setRows] = useState(firstPage);
+    const [loading, setLoading] = useState(false);
+    const [failed, setFailed] = useState(false);
+
+    // Switching report resets the table; page 1 is already in hand.
+    useEffect(() => {
+        setPage(1);
+        setRows(firstPage);
+        setFailed(false);
+    }, [report.key, firstPage]);
+
+    const goTo = useCallback(async (next) => {
+        if (next < 1 || next > totalPages || next === page) return;
+        if (next === 1) {
+            setPage(1);
+            setRows(firstPage);
+            setFailed(false);
+            return;
+        }
+        setLoading(true);
+        try {
+            const res = await axiosInstance.get(
+                `/api/pagewise/esf/reports/${report.key}/rows`,
+                { params: { page: next, limit: pageSize } }
+            );
+            const data = res.data?.data;
+            if (data?.rows) {
+                setRows(data.rows);
+                setPage(data.page || next);
+                setFailed(false);
+            } else {
+                setFailed(true);
+            }
+        } catch {
+            // Keep the rows already on screen; only the pager reports the failure.
+            setFailed(true);
+        } finally {
+            setLoading(false);
+        }
+    }, [report.key, page, totalPages, pageSize, firstPage]);
+
     // A report can legitimately have nothing to list — no ASIN losing the Buy
     // Box, no stock ageing. That is a result, not an absence, so it is stated
     // rather than left as blank space under the stats.
-    if (!summary?.rows?.length) {
-        if (!summary?.emptyMessage) return null;
+    if (!firstPage.length) {
+        if (!report.summary?.emptyMessage) return null;
         return (
             <p
                 className="m-0 text-[13px] rounded-md"
                 style={{ color: PALETTE.good, background: 'rgba(34,197,94,.08)', padding: '12px 14px' }}
             >
-                {summary.emptyMessage}
+                {report.summary.emptyMessage}
             </p>
         );
     }
+
+    const from = (page - 1) * pageSize + 1;
+    const to = Math.min(from + rows.length - 1, totalRows);
+
     return (
-        <div className="flex flex-col gap-2">
-            <div className="w-full overflow-x-auto">
-                <table className="w-full border-collapse text-[12.5px] min-w-[560px]">
+        <div className="flex flex-col gap-2 min-h-0 h-full">
+            {/* Only the rows scroll. The pager below stays put, so Next is always
+                one click away rather than something you scroll down to find. */}
+            <div
+                className="w-full overflow-auto flex-1 min-h-0"
+                style={{ opacity: loading ? 0.45 : 1, transition: 'opacity .15s ease' }}
+            >
+                <table className="w-full border-collapse text-[12px] min-w-[460px]">
                     <thead>
                         <tr>
-                            {summary.columns.map((column) => (
+                            {columns.map((column) => (
                                 <th
                                     key={column.key}
-                                    className="text-left font-medium py-2 pr-4 whitespace-nowrap"
-                                    style={{ color: PALETTE.textMuted, borderBottom: `1px solid ${PALETTE.border}` }}
+                                    className="text-left font-medium py-1.5 pr-4 whitespace-nowrap sticky top-0"
+                                    // Sticky so the headers survive scrolling the rows;
+                                    // needs its own background or rows show through.
+                                    style={{ color: PALETTE.textMuted, borderBottom: `1px solid ${PALETTE.border}`, background: PALETTE.surface }}
                                 >
                                     {column.label}
                                 </th>
@@ -120,12 +189,12 @@ const PreviewTable = ({ summary, currency }) => {
                         </tr>
                     </thead>
                     <tbody>
-                        {summary.rows.map((row, index) => (
-                            <tr key={index}>
-                                {summary.columns.map((column) => (
+                        {rows.map((row, index) => (
+                            <tr key={`${page}-${index}`}>
+                                {columns.map((column) => (
                                     <td
                                         key={column.key}
-                                        className="py-[9px] pr-4 align-top"
+                                        className="py-[7px] pr-4 align-top"
                                         style={{ color: PALETTE.textInputBody, borderBottom: `1px solid ${PALETTE.dividerFaint}` }}
                                     >
                                         {formatValue(row[column.key], column.format, currency)}
@@ -136,39 +205,151 @@ const PreviewTable = ({ summary, currency }) => {
                     </tbody>
                 </table>
             </div>
-            {summary.totalRows > summary.rows.length && (
-                <span className="text-xs" style={{ color: PALETTE.textDim }}>
-                    Showing {summary.rows.length} of {summary.totalRows.toLocaleString()} rows
+
+            <div className="flex items-center gap-3 flex-wrap flex-none">
+                <span className="flex-1 text-[11px]" style={{ color: PALETTE.textDim }}>
+                    {failed
+                        ? 'Could not load that page.'
+                        : `${from.toLocaleString()}–${to.toLocaleString()} of ${totalRows.toLocaleString()} rows`}
                 </span>
-            )}
+                {totalPages > 1 && (
+                    <div className="flex items-center gap-2">
+                        <PagerButton onClick={() => goTo(page - 1)} disabled={page <= 1 || loading}>Previous</PagerButton>
+                        <span className="text-xs tabular-nums" style={{ color: PALETTE.textSecondary }}>
+                            Page {page} of {totalPages}
+                        </span>
+                        <PagerButton onClick={() => goTo(page + 1)} disabled={page >= totalPages || loading}>Next</PagerButton>
+                    </div>
+                )}
+            </div>
         </div>
     );
 };
 
-/** What the top panel shows before any data has loaded. */
+const PagerButton = ({ onClick, disabled, children }) => (
+    <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        className="text-xs px-3 py-[6px] rounded-md"
+        style={{
+            border: `1px solid ${PALETTE.border}`,
+            color: disabled ? PALETTE.textDim : PALETTE.textBody,
+            cursor: disabled ? 'default' : 'pointer',
+            opacity: disabled ? 0.5 : 1,
+        }}
+    >
+        {children}
+    </button>
+);
+
+/** What the top panel shows before any data has loaded — same shape as the real one. */
 const PanelSkeleton = () => (
     <section
-        className="rounded-lg animate-pulse"
-        style={{ background: PALETTE.surface, border: `1px solid ${PALETTE.border}`, padding: 24, minHeight: 232 }}
+        className="rounded-lg animate-pulse flex flex-col md:flex-row gap-7"
+        style={{ background: PALETTE.surface, border: `1px solid ${PALETTE.border}`, padding: 24 }}
     >
-        <div className="h-4 w-40 rounded" style={{ background: PALETTE.border }} />
-        <div className="h-7 w-72 rounded mt-4" style={{ background: PALETTE.border }} />
-        <div className="flex gap-10 mt-7">
-            {[0, 1, 2, 3].map((index) => (
-                <div key={index} className="flex flex-col gap-2">
-                    <div className="h-3 w-20 rounded" style={{ background: PALETTE.border }} />
-                    <div className="h-6 w-16 rounded" style={{ background: PALETTE.border }} />
-                </div>
-            ))}
+        <div
+            className="flex-none rounded-md"
+            style={{ width: DOC_TILE_WIDTH, height: DOC_TILE_HEIGHT, background: PALETTE.border }}
+        />
+        <div className="flex-1 flex flex-col gap-4">
+            <div className="h-4 w-32 rounded" style={{ background: PALETTE.border }} />
+            <div className="h-6 w-64 rounded" style={{ background: PALETTE.border }} />
+            <div className="flex gap-7">
+                {[0, 1, 2, 3].map((index) => (
+                    <div key={index} className="flex flex-col gap-2">
+                        <div className="h-3 w-16 rounded" style={{ background: PALETTE.border }} />
+                        <div className="h-5 w-12 rounded" style={{ background: PALETTE.border }} />
+                    </div>
+                ))}
+            </div>
+            <div className="h-24 w-full rounded" style={{ background: PALETTE.border }} />
         </div>
     </section>
 );
 
 /**
- * The selected report, expanded. This is the only place stats, the preview
- * table and the caveats appear — the cards below stay one line each.
+ * The document thumbnail's box, matching the mock's preview tile.
+ * DOC_TILE_HEIGHT is mirrored by the `md:max-h-[300px]` on the detail column —
+ * change both together, or the two halves stop lining up.
  */
-const SummaryPanel = ({ report, currency, failed }) => {
+const DOC_TILE_WIDTH = 236;
+const DOC_TILE_HEIGHT = 300;
+/** Width the document is laid out at before being scaled down into the tile. */
+const DOC_NATURAL_WIDTH = 640;
+const DOC_SCALE = DOC_TILE_WIDTH / DOC_NATURAL_WIDTH;
+
+/**
+ * The document, shrunk to a page thumbnail you can scroll.
+ *
+ * `transform: scale` does not affect layout, so scaling alone would leave the
+ * scroll container thinking the content is still full height — you would scroll
+ * three screens of blank space past the end of the page. The content is
+ * therefore measured and given a spacer of its *scaled* height, which is what
+ * the container actually scrolls.
+ */
+const ScaledDocument = ({ children }) => {
+    const innerRef = useRef(null);
+    const [height, setHeight] = useState(0);
+
+    useEffect(() => {
+        const node = innerRef.current;
+        if (!node) return undefined;
+        // The document reflows as fonts load and as rows change, so measure
+        // continuously rather than once on mount.
+        if (typeof ResizeObserver === 'undefined') {
+            setHeight(node.offsetHeight);
+            return undefined;
+        }
+        const observer = new ResizeObserver(([entry]) => {
+            setHeight(entry.contentRect.height);
+        });
+        observer.observe(node);
+        return () => observer.disconnect();
+    }, []);
+
+    return (
+        <div
+            className="overflow-y-auto overflow-x-hidden rounded-md"
+            style={{
+                width: DOC_TILE_WIDTH,
+                height: DOC_TILE_HEIGHT,
+                border: `1px solid ${PALETTE.border}`,
+                background: '#fff',
+            }}
+        >
+            <div style={{ position: 'relative', height: height * DOC_SCALE }}>
+                <div
+                    ref={innerRef}
+                    style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: DOC_NATURAL_WIDTH,
+                        transform: `scale(${DOC_SCALE})`,
+                        transformOrigin: 'top left',
+                    }}
+                >
+                    {children}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+/**
+ * The selected report, expanded.
+ *
+ * Keeps the mock's proportions: a small document thumbnail on the left, the
+ * report's details and data to its right, and the whole panel short enough that
+ * the report cards below stay above the fold. Anything taller than its box
+ * scrolls inside that box rather than growing the panel.
+ *
+ * Both halves read from one payload, so the preview can never show a figure the
+ * table disagrees with.
+ */
+const SummaryPanel = ({ report, currency, failed, marketplace }) => {
     // Nothing selectable: every report is still waiting on data, or the fetch
     // failed. Say so here rather than leaving the top of the page blank, which
     // reads as a broken panel.
@@ -192,51 +373,81 @@ const SummaryPanel = ({ report, currency, failed }) => {
 
     return (
         <section
-            className="rounded-lg flex flex-col gap-[18px]"
+            className="rounded-lg flex flex-col md:flex-row gap-7"
             style={{ background: PALETTE.surface, border: `1px solid ${PALETTE.borderHover}`, padding: 24 }}
         >
-            <div className="flex flex-col gap-[9px]">
-                <div className="flex items-center gap-[11px] flex-wrap">
-                    <span
-                        className="text-[10.5px] font-bold tracking-[.05em] rounded-[5px] px-2 py-1"
-                        style={{ color: PALETTE.textTertiary, border: `1px solid ${PALETTE.borderHover}` }}
-                    >
-                        {report.cadence}
-                    </span>
-                    <span className="text-[12.5px]" style={{ color: PALETTE.textSecondary }}>{report.date}</span>
-                </div>
-                <h2 className="m-0 text-[22px] font-bold tracking-[-0.02em]">{report.name}</h2>
-                {report.summary?.headline && (
-                    <span className="text-[13px]" style={{ color: PALETTE.textTertiary }}>{report.summary.headline}</span>
-                )}
+            {/* Left: the document as it will be sent, as a scrollable thumbnail. */}
+            <div className="flex-none flex flex-col gap-2">
+                <ScaledDocument>
+                    <ReportDocumentPreview report={report} marketplace={marketplace} currency={currency} />
+                </ScaledDocument>
+                <span className="text-[10.5px] tracking-[.04em]" style={{ color: PALETTE.textFaint, fontFamily: 'ui-monospace, Menlo, monospace' }}>
+                    report preview &middot; scroll to read
+                </span>
             </div>
 
-            {report.summary?.stats?.length > 0 && (
-                <div className="flex gap-x-10 gap-y-6 flex-wrap">
-                    {report.summary.stats.map((stat) => (
-                        <Stat key={stat.label} stat={stat} currency={currency} />
-                    ))}
+            {/* Right: the same data, worked through. Capped to the thumbnail's
+                height so the panel stays short and the cards below stay in view;
+                the table scrolls within it rather than stretching the page. */}
+            {/* max-h matches DOC_TILE_HEIGHT, but only from md up: stacked on a
+                phone the column sits under the thumbnail with the page to grow
+                into, and capping it there would squeeze the table for no reason.
+                Written as a literal because Tailwind cannot read a JS constant. */}
+            <div className="flex-1 min-w-0 flex flex-col gap-3 md:max-h-[300px]">
+                <div className="flex flex-col gap-1.5">
+                    <div className="flex items-center gap-[10px] flex-wrap">
+                        <span
+                            className="text-[10px] font-bold tracking-[.05em] rounded px-1.5 py-[3px]"
+                            style={{ color: PALETTE.textTertiary, border: `1px solid ${PALETTE.borderHover}` }}
+                        >
+                            {report.cadence}
+                        </span>
+                        <span className="text-[12px]" style={{ color: PALETTE.textSecondary }}>{report.date}</span>
+                    </div>
+                    <h2 className="m-0 text-[19px] font-bold tracking-[-0.02em] leading-tight">{report.name}</h2>
+                    {report.summary?.headline && (
+                        <span className="text-[12.5px]" style={{ color: PALETTE.textTertiary }}>{report.summary.headline}</span>
+                    )}
                 </div>
-            )}
 
-            <PreviewTable summary={report.summary} currency={currency} />
+                {report.summary?.stats?.length > 0 && (
+                    // One row, scrolled sideways when there are more stats than fit,
+                    // so a six-stat report cannot push the table off the panel.
+                    <div className="flex gap-x-7 overflow-x-auto pb-1 flex-none">
+                        {report.summary.stats.map((stat) => (
+                            <Stat key={stat.label} stat={stat} currency={currency} />
+                        ))}
+                    </div>
+                )}
 
-            {/* Rendered verbatim from the API: what this report cannot show, and why. */}
-            {report.caveats?.length > 0 && (
-                <div
-                    className="flex flex-col gap-2 rounded-md"
-                    style={{ background: PALETTE.amberBg, border: `1px solid ${PALETTE.amberBorder}`, padding: '12px 14px' }}
-                >
-                    <span className="text-[11px] font-bold tracking-[.05em]" style={{ color: PALETTE.amberLabel }}>
-                        NOT INCLUDED
-                    </span>
-                    {report.caveats.map((caveat) => (
-                        <p key={caveat} className="m-0 text-[12.5px] leading-[1.55]" style={{ color: PALETTE.amberSub }}>
-                            {caveat}
-                        </p>
-                    ))}
+                <div className="flex-1 min-h-0">
+                    <PagedTable report={report} currency={currency} />
                 </div>
-            )}
+
+                {/* Rendered verbatim from the API: what this report cannot show, and
+                    why. Capped and scrollable so a long caveat cannot squeeze the
+                    table out of the panel. */}
+                {report.caveats?.length > 0 && (
+                    <div
+                        className="flex-none flex flex-col gap-1 rounded-md overflow-y-auto"
+                        style={{
+                            background: PALETTE.amberBg,
+                            border: `1px solid ${PALETTE.amberBorder}`,
+                            padding: '8px 11px',
+                            maxHeight: 74,
+                        }}
+                    >
+                        <span className="text-[10px] font-bold tracking-[.05em]" style={{ color: PALETTE.amberLabel }}>
+                            NOT INCLUDED
+                        </span>
+                        {report.caveats.map((caveat) => (
+                            <p key={caveat} className="m-0 text-[11.5px] leading-[1.45]" style={{ color: PALETTE.amberSub }}>
+                                {caveat}
+                            </p>
+                        ))}
+                    </div>
+                )}
+            </div>
         </section>
     );
 };
@@ -387,7 +598,9 @@ const Reports = () => {
                     </span>
                 </header>
 
-                {loading ? <PanelSkeleton /> : <SummaryPanel report={selected} currency={currency} failed={failed} />}
+                {loading
+                    ? <PanelSkeleton />
+                    : <SummaryPanel report={selected} currency={currency} failed={failed} marketplace={data?.marketplace} />}
 
                 <section className="flex flex-col gap-4">
                     <div className="flex items-baseline gap-[10px] flex-wrap">

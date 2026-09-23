@@ -102,7 +102,7 @@ const { getEsfClientDashboard } = require('../controllers/analytics/EsfClientDas
 const { getEsfProjectStatus } = require('../controllers/analytics/EsfProjectStatusController.js');
 const { postEsfTaskReply } = require('../controllers/analytics/EsfProjectReplyController.js');
 const { getEsfBilling, downloadEsfInvoice } = require('../controllers/analytics/EsfBillingController.js');
-const { getEsfReportsData } = require('../controllers/analytics/EsfReportsController.js');
+const { getEsfReportsData, getEsfReportRowsData } = require('../controllers/analytics/EsfReportsController.js');
 const { zohoUpload, MAX_FILES, MAX_FILE_BYTES } = require('../middlewares/multer/zohoUpload.js');
 const { ApiResponse } = require('../utils/ApiResponse.js');
 const esfClientOnly = require('../middlewares/Auth/esfClientOnly.js');
@@ -319,6 +319,14 @@ router.get('/esf/billing/invoices/:invoiceNumber/pdf', auth, esfClientOnly, down
 // the underlying snapshots are refreshed hourly at most, and the fan-out here touches
 // eight collections, so re-running it per page view would be wasteful.
 router.get('/esf/reports', auth, esfClientOnly, getLocation, analyseDataCache(600, 'esf-reports'), getEsfReportsData);
+
+// One page of a single report's table, for the preview panel's pagination.
+// Deliberately NOT behind analyseDataCache: that middleware builds its key from
+// pageType + user + marketplace only, adding page/limit for a hardcoded list of
+// pageTypes (see redisCache.js). This route would therefore serve page 1 of the
+// first report for every page of every report. Rebuilding one report costs a
+// couple of Mongo reads against snapshots, which is cheaper than the bug.
+router.get('/esf/reports/:reportKey/rows', auth, esfClientOnly, getLocation, getEsfReportRowsData);
 
 /**
  * Reply to a task from the Status page — text, files, or both, sent on to Zoho.

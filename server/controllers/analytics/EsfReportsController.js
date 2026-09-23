@@ -8,7 +8,7 @@ const { ApiError } = require('../../utils/ApiError.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
 const asyncHandler = require('../../utils/AsyncHandler.js');
 const logger = require('../../utils/Logger.js');
-const { getEsfReports } = require('../../Services/Calculations/EsfReportsService.js');
+const { getEsfReports, getEsfReportRows } = require('../../Services/Calculations/EsfReportsService.js');
 
 /**
  * GET /api/pagewise/esf/reports
@@ -36,4 +36,39 @@ const getEsfReportsData = asyncHandler(async (req, res) => {
     }
 });
 
-module.exports = { getEsfReportsData };
+/**
+ * GET /api/pagewise/esf/reports/:reportKey/rows?page=1&limit=10
+ *
+ * One page of a single report's table. The card payload carries only the first
+ * screenful, so this is what the preview panel walks through.
+ */
+const getEsfReportRowsData = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const country = req.country;
+    const region = req.region;
+
+    if (!userId || !country || !region) {
+        logger.error('[EsfReports] Missing required parameters', { userId, country, region });
+        return res.status(400).json(new ApiError(400, 'User ID, Country, and Region are required'));
+    }
+
+    try {
+        const data = await getEsfReportRows(userId, country, region, req.params.reportKey, {
+            page: req.query.page,
+            limit: req.query.limit,
+        });
+
+        // null means the key is not one of ours — a 404 rather than an empty page,
+        // so a typo in the URL is not mistaken for a report with no rows.
+        if (!data) {
+            return res.status(404).json(new ApiError(404, `Unknown report: ${req.params.reportKey}`));
+        }
+
+        return res.status(200).json(new ApiResponse(200, data, 'Report rows retrieved successfully'));
+    } catch (error) {
+        logger.error('[EsfReports] Error fetching report rows:', error);
+        return res.status(500).json(new ApiError(500, `Error fetching report rows: ${error.message}`));
+    }
+});
+
+module.exports = { getEsfReportsData, getEsfReportRowsData };

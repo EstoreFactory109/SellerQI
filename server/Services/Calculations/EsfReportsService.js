@@ -118,6 +118,18 @@ const pctChange = (current, previous) => {
 };
 
 /**
+ * One bullet in a report's Performance Highlights block.
+ *
+ * `tone` maps onto the shared report stylesheet the whole family uses:
+ *   good/neutral -> plain bullet, watch -> red "flag" text,
+ *   fill -> blue italic, the account manager's own copy for this cycle.
+ */
+const highlight = (text, tone = 'neutral') => ({ text, tone });
+
+/** Bullets every report ends on: what a person still has to write. */
+const MANAGER_NOTE = highlight('[Account manager commentary for this cycle]', 'fill');
+
+/**
  * A report that exists but has nothing behind it yet.
  * `reason` is shown to the client, so it says what is missing in their terms.
  */
@@ -238,6 +250,16 @@ const buildRestock = async (userId, country, region) => {
             ],
             rows,
         },
+        highlights: [
+            urgent
+                ? highlight(`${plural(urgent, 'SKU')} flagged urgent by Amazon and ${outOfStock} already out of stock.`, 'watch')
+                : highlight(`No SKU is flagged urgent; ${needsRestock} are due a routine replenishment.`, 'good'),
+            highlight(`Replenishing everything Amazon recommends is about ${Math.round(reorderValue).toLocaleString()} at current prices.`),
+            ...(rows[0]?.isUrgent
+                ? [highlight(`${rows[0].sku || rows[0].asin} carries the largest urgent reorder at ${Math.round(rows[0].reorderValue).toLocaleString()}.`, 'watch')]
+                : []),
+            highlight('[Purchase orders raised this cycle]', 'fill'),
+        ],
         caveats: [],
     };
 };
@@ -336,8 +358,24 @@ const buildAccountOverview = async (userId, country, region) => {
                 productsWithIssues: num(entry.ProductsWithIssues),
                 totalIssues: num(entry.TotalNumberOfIssues),
             })),
-
+            emptyMessage: 'No weekly history has been recorded for this account yet.',
         },
+        highlights: [
+            outOfStock
+                ? highlight(`${outOfStock} of ${products.length} listings are active but out of stock.`, 'watch')
+                : highlight(`All ${active} active listings are carrying stock.`, 'good'),
+            ...(current && previous
+                ? [(() => {
+                    const delta = num(current.TotalNumberOfIssues) - num(previous.TotalNumberOfIssues);
+                    if (delta === 0) return highlight('Open issues are unchanged week on week.');
+                    return highlight(
+                        `Open issues ${delta < 0 ? 'fell' : 'rose'} by ${Math.abs(delta)} week on week.`,
+                        delta < 0 ? 'good' : 'watch'
+                    );
+                })()]
+                : []),
+            highlight('[Observation / remarks for this week]', 'fill'),
+        ],
         caveats,
     };
 };
@@ -446,6 +484,18 @@ const buildBuyBox = async (userId, country, region) => {
             // otherwise the panel renders stats above blank space.
             emptyMessage: 'Every tracked ASIN currently holds the Buy Box. Nothing to action.',
         },
+        highlights: [
+            losing.length
+                ? highlight(`${plural(losing.length, 'ASIN')} of ${total} lost the Buy Box in the latest snapshot.`, 'watch')
+                : highlight(`All ${total} tracked ASINs held the Buy Box in the latest snapshot.`, 'good'),
+            ...(rows[0]?.periodsLosing > 1
+                ? [highlight(`${rows[0].sku !== '—' ? rows[0].sku : rows[0].asin} has been losing for ${rows[0].periodsLosing} consecutive snapshots — the longest run on the account.`, 'watch')]
+                : []),
+            ...((latest.productsWithLowBuyBox || 0) > 0
+                ? [highlight(`${plural(latest.productsWithLowBuyBox, 'ASIN')} held the Buy Box less than half the time.`, 'watch')]
+                : []),
+            highlight('[Pricing or fulfilment action taken on the contested listings]', 'fill'),
+        ],
         caveats: [
             'The competing seller and their price are not tracked. Amazon\'s offer-level pricing feed is not connected, so "who is winning it and at what price" cannot be shown yet.',
         ],
@@ -533,11 +583,20 @@ const buildAgedInventory = async (userId, country, region) => {
                     unfulfillable: num(item.unfulfillable_quantity),
                 }))
                 .filter((row) => row.band181to270 || row.band271to365 || row.band365plus || row.unfulfillable)
-                .sort((a, b) => b.band365plus - a.band365plus || b.band271to365 - a.band271to365)
-                ,
+                .sort((a, b) => b.band365plus - a.band365plus || b.band271to365 - a.band271to365),
             // Also a good outcome: tracked stock exists, none of it is ageing.
             emptyMessage: 'No tracked ASIN is carrying stock older than 180 days.',
         },
+        highlights: [
+            band365plus
+                ? highlight(`${plural(band365plus, 'unit')} have been in FBA for over a year and are accruing the highest storage rate.`, 'watch')
+                : highlight('No stock has passed the 365-day mark.', 'good'),
+            highlight(`${plural(aged, 'unit')} across ${items.length} ASINs are past 180 days and now incurring aged-storage fees.`, aged ? 'watch' : 'good'),
+            ...(unfulfillable
+                ? [highlight(`${plural(unfulfillable, 'unit')} are unfulfillable and should be removed or disposed of.`, 'watch')]
+                : []),
+            highlight('[Removal or liquidation plan for aged stock]', 'fill'),
+        ],
         caveats: [
             'The 0–90 and 91–180 day bands are not shown. Amazon reports them, but only the storage-fee bands (181 days and older) are stored today, so younger stock is not counted here.',
         ],
@@ -651,6 +710,25 @@ const buildListingsAudit = async (userId, country, region) => {
             ],
             rows,
         },
+        highlights: [
+            highlight(
+                `Catalogue is ${completion}% complete against the ${AUDIT_CHECKS.length} content checks.`,
+                completion >= 80 ? 'good' : 'watch'
+            ),
+            // The check that fails most often is the single most useful line here.
+            ...(() => {
+                const worst = [...AUDIT_CHECKS]
+                    .map((check) => ({ check, missing: products.length - passCount[check.key] }))
+                    .sort((a, b) => b.missing - a.missing)[0];
+                return worst && worst.missing > 0
+                    ? [highlight(`${worst.check.label} is the widest gap — missing on ${worst.missing} of ${products.length} listings.`, 'watch')]
+                    : [highlight('Every listing passes all content checks.', 'good')];
+            })(),
+            ...(rows[0]?.gaps
+                ? [highlight(`${rows[0].sku || rows[0].asin} needs the most work, failing ${rows[0].gaps} of ${AUDIT_CHECKS.length} checks.`, 'watch')]
+                : []),
+            highlight('[Listings scheduled for content work this quarter]', 'fill'),
+        ],
         caveats: [
             'Premium A+ is not distinguished from standard A+, and Storefront presence and content language are not audited — none of the three is available from the data we hold.',
         ],
@@ -746,6 +824,16 @@ const buildReviewRequests = async (userId, country, region) => {
                 { stage: 'Failed', orders: failed, note: 'Rejected by Amazon or errored on send' },
             ],
         },
+        highlights: [
+            highlight(`${plural(sent, 'review request')} sent from ${totalOrders} orders checked in the week to ${formatDate(anchor)}.`, sent ? 'good' : 'neutral'),
+            highlight(
+                `${ineligible} orders were not eligible — typically outside Amazon's 5 to 30 day solicitation window, or already requested.`
+            ),
+            ...(failed
+                ? [highlight(`${plural(failed, 'request')} failed on send and should be retried.`, 'watch')]
+                : []),
+            MANAGER_NOTE,
+        ],
         caveats: daysBehind > 10
             ? [`This is the most recent week with order data. The newest order we hold is from ${formatDate(anchor)}, ${daysBehind} days ago — order ingestion has not run since.`]
             : [],
@@ -901,6 +989,24 @@ const buildMonthlyPerformance = async (userId, country, region) => {
                 },
             ],
         },
+        highlights: [
+            ...(salesChange !== null
+                ? [highlight(
+                    `Total sales ${salesChange >= 0 ? 'grew' : 'fell'} ${Math.abs(salesChange)}% against ${comparisonLabel}.`,
+                    salesChange >= 0 ? 'good' : 'watch'
+                )]
+                : []),
+            ...(acosDelta !== null
+                ? [highlight(
+                    `ACOS moved from ${ppcPrevious.acos}% to ${ppcCurrent.acos}% — ${acosDelta <= 0 ? 'an improvement' : 'a decline'} of ${Math.abs(acosDelta)} points.`,
+                    acosDelta <= 0 ? 'good' : 'watch'
+                )]
+                : []),
+            ...(ppcCurrent.adSales && current.totalSales
+                ? [highlight(`Advertising drove ${round((ppcCurrent.adSales / current.totalSales) * 100, 1)}% of total sales this period.`)]
+                : []),
+            highlight('[Actions taken this month and focus areas planned for next]', 'fill'),
+        ],
         caveats: [
             ...(partial
                 ? [`${formatMonth(currentStart)} is still incomplete — this covers the ${spanDays + 1} days to ${formatDate(currentEnd)}, compared against the same ${spanDays + 1} days of ${formatMonth(previousStart)} so the two are like for like.`]
@@ -913,6 +1019,44 @@ const buildMonthlyPerformance = async (userId, country, region) => {
 /* --------------------------------------------------------------- assembly */
 
 /**
+ * Rows sent with the card payload. The page shows one screenful and pages the
+ * rest through getEsfReportRows — a catalogue of 27,000 listings must never be
+ * serialised into a cached JSON blob just to fill a preview table.
+ */
+const PREVIEW_ROWS = 10;
+
+/** Hard ceiling on a single page, so a crafted ?limit cannot dump the catalogue. */
+const MAX_PAGE_ROWS = 100;
+
+/** Builders keyed the way the route addresses them. */
+const BUILDERS = {
+    [REPORT_RESTOCK.key]: { meta: REPORT_RESTOCK, build: buildRestock },
+    [REPORT_ACCOUNT.key]: { meta: REPORT_ACCOUNT, build: buildAccountOverview },
+    [REPORT_BUYBOX.key]: { meta: REPORT_BUYBOX, build: buildBuyBox },
+    [REPORT_AGED.key]: { meta: REPORT_AGED, build: buildAgedInventory },
+    [REPORT_AUDIT.key]: { meta: REPORT_AUDIT, build: buildListingsAudit },
+    [REPORT_REVIEWS.key]: { meta: REPORT_REVIEWS, build: buildReviewRequests },
+    [REPORT_MONTHLY.key]: { meta: REPORT_MONTHLY, build: buildMonthlyPerformance },
+};
+
+/**
+ * Trim a built report down to what the card payload carries.
+ *
+ * Builders return every row they found; this is the ONLY place that decides how
+ * many travel, so the preview and the paged fetch can never disagree about the
+ * total.
+ */
+const toCard = (report) => {
+    if (!report.available || !report.summary) return report;
+    const rows = report.summary.rows || [];
+    return {
+        ...report,
+        summary: { ...report.summary, rows: rows.slice(0, PREVIEW_ROWS), totalRows: rows.length },
+        pageSize: PREVIEW_ROWS,
+    };
+};
+
+/**
  * Build every report card for one marketplace.
  *
  * @param {string} userId  The client whose account is being viewed.
@@ -922,15 +1066,10 @@ const buildMonthlyPerformance = async (userId, country, region) => {
 const getEsfReports = async (userId, country, region) => {
     const startTime = Date.now();
 
-    const reports = await Promise.all([
-        settle(REPORT_RESTOCK, () => buildRestock(userId, country, region)),
-        settle(REPORT_ACCOUNT, () => buildAccountOverview(userId, country, region)),
-        settle(REPORT_BUYBOX, () => buildBuyBox(userId, country, region)),
-        settle(REPORT_AGED, () => buildAgedInventory(userId, country, region)),
-        settle(REPORT_AUDIT, () => buildListingsAudit(userId, country, region)),
-        settle(REPORT_REVIEWS, () => buildReviewRequests(userId, country, region)),
-        settle(REPORT_MONTHLY, () => buildMonthlyPerformance(userId, country, region)),
-    ]);
+    const built = await Promise.all(
+        Object.values(BUILDERS).map(({ meta, build }) => settle(meta, () => build(userId, country, region)))
+    );
+    const reports = built.map(toCard);
 
     const available = reports.filter((report) => report.available);
 
@@ -951,9 +1090,52 @@ const getEsfReports = async (userId, country, region) => {
     };
 };
 
+/**
+ * One page of a single report's rows.
+ *
+ * Runs only that report's builder rather than all seven, then slices. The rows
+ * are derived from snapshots already in Mongo, so rebuilding per page is
+ * cheaper than holding tens of thousands of rows in the Redis-cached card
+ * payload — and the route caches each page anyway.
+ *
+ * @returns {Promise<{rows, columns, page, pageSize, totalRows, totalPages}>}
+ */
+const getEsfReportRows = async (userId, country, region, reportKey, { page = 1, limit = PREVIEW_ROWS } = {}) => {
+    const entry = BUILDERS[reportKey];
+    if (!entry) return null;
+
+    const report = await settle(entry.meta, () => entry.build(userId, country, region));
+    if (!report.available || !report.summary) {
+        return { key: reportKey, available: false, reason: report.reason, rows: [], columns: [], page: 1, pageSize: limit, totalRows: 0, totalPages: 0 };
+    }
+
+    const allRows = report.summary.rows || [];
+    const pageSize = Math.min(Math.max(parseInt(limit, 10) || PREVIEW_ROWS, 1), MAX_PAGE_ROWS);
+    const totalPages = Math.max(Math.ceil(allRows.length / pageSize), 1);
+    // Clamp rather than 404 on an out-of-range page: the row count can shrink
+    // between the page being opened and a later page being asked for.
+    const current = Math.min(Math.max(parseInt(page, 10) || 1, 1), totalPages);
+    const start = (current - 1) * pageSize;
+
+    return {
+        key: reportKey,
+        available: true,
+        columns: report.summary.columns || [],
+        rows: allRows.slice(start, start + pageSize),
+        emptyMessage: report.summary.emptyMessage || null,
+        page: current,
+        pageSize,
+        totalRows: allRows.length,
+        totalPages,
+    };
+};
+
 module.exports = {
     getEsfReports,
+    getEsfReportRows,
     // exported for tests
     num,
     pctChange,
+    PREVIEW_ROWS,
+    MAX_PAGE_ROWS,
 };

@@ -44,7 +44,14 @@ const ReviewOrder = require('../../../models/review/ReviewOrderModel.js');
 const SalesOnlyMetrics = require('../../../models/MCP/SalesOnlyMetricsModel.js');
 const PPCMetrics = require('../../../models/amazon-ads/PPCMetricsModel.js');
 
-const { getEsfReports, num, pctChange } = require('../../../Services/Calculations/EsfReportsService.js');
+const {
+    getEsfReports,
+    getEsfReportRows,
+    num,
+    pctChange,
+    PREVIEW_ROWS,
+    MAX_PAGE_ROWS,
+} = require('../../../Services/Calculations/EsfReportsService.js');
 
 const USER = '507f1f77bcf86cd799439011';
 
@@ -532,5 +539,135 @@ describe('getEsfReports', () => {
         const payload = await getEsfReports(USER, 'US', 'NA');
         expect(payload.featuredKey).toBe('fba-aged-inventory');
         expect(payload.counts.available).toBe(2);
+    });
+});
+
+/**
+ * Pagination.
+ *
+ * The card payload carries only the first page, and the total row count travels
+ * with it. If those two ever disagree the pager shows the wrong number of pages,
+ * so the truncation point is pinned here rather than left to each builder.
+ */
+describe('report row pagination', () => {
+    /** N restock products, enough to span several pages. */
+    const withManyProducts = (count) => Restock.findOne.mockReturnValue(mockFindOne({
+        createdAt: new Date('2026-04-25T00:00:00Z'),
+        Products: Array.from({ length: count }, (_, i) => ({
+            asin: `B${i}`,
+            merchantSku: `SKU-${i}`,
+            price: '10',
+            // Descending qty so the sort order is deterministic and checkable.
+            recommendedReplenishmentQty: String(count - i),
+            available: '5',
+        })),
+    }));
+
+    it('sends only a preview page on the card, but the true total alongside it', async () => {
+        withManyProducts(57);
+        const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'inventory-restock');
+
+        expect(report.summary.rows).toHaveLength(PREVIEW_ROWS);
+        expect(report.summary.totalRows).toBe(57);
+        expect(report.pageSize).toBe(PREVIEW_ROWS);
+    });
+
+    it('walks the full set page by page without gaps or repeats', async () => {
+        withManyProducts(25);
+
+        const seen = [];
+        for (let page = 1; page <= 3; page += 1) {
+            const result = await getEsfReportRows(USER, 'US', 'NA', 'inventory-restock', { page, limit: 10 });
+            expect(result.totalRows).toBe(25);
+            expect(result.totalPages).toBe(3);
+            seen.push(...result.rows.map((row) => row.sku));
+        }
+
+        expect(seen).toHaveLength(25);
+        expect(new Set(seen).size).toBe(25);   // every row exactly once
+    });
+
+    it('page 1 of the paged endpoint matches what the card already showed', async () => {
+        withManyProducts(30);
+        const card = byKey(await getEsfReports(USER, 'US', 'NA'), 'inventory-restock');
+        const paged = await getEsfReportRows(USER, 'US', 'NA', 'inventory-restock', { page: 1, limit: PREVIEW_ROWS });
+
+        expect(paged.rows).toEqual(card.summary.rows);
+    });
+
+    it('clamps a page beyond the end instead of returning nothing', async () => {
+        withManyProducts(12);
+        const result = await getEsfReportRows(USER, 'US', 'NA', 'inventory-restock', { page: 999, limit: 10 });
+
+        expect(result.page).toBe(2);
+        expect(result.rows).toHaveLength(2);
+    });
+
+    it('clamps a hostile limit so one request cannot dump the catalogue', async () => {
+        withManyProducts(500);
+        const result = await getEsfReportRows(USER, 'US', 'NA', 'inventory-restock', { page: 1, limit: 100000 });
+
+        expect(result.pageSize).toBe(MAX_PAGE_ROWS);
+        expect(result.rows).toHaveLength(MAX_PAGE_ROWS);
+    });
+
+    it('survives junk page and limit values', async () => {
+        withManyProducts(15);
+        const result = await getEsfReportRows(USER, 'US', 'NA', 'inventory-restock', { page: 'abc', limit: -5 });
+
+        expect(result.page).toBe(1);
+        expect(result.rows.length).toBeGreaterThan(0);
+    });
+
+    it('returns null for a report key that does not exist', async () => {
+        expect(await getEsfReportRows(USER, 'US', 'NA', 'not-a-report', {})).toBeNull();
+    });
+
+    it('reports unavailability rather than an empty page when the report has no data', async () => {
+        const result = await getEsfReportRows(USER, 'US', 'NA', 'inventory-restock', { page: 1 });
+
+        expect(result.available).toBe(false);
+        expect(result.rows).toEqual([]);
+        expect(result.reason).toEqual(expect.any(String));
+    });
+});
+
+/**
+ * Highlights are the bullets on the document preview. They are prose built from
+ * real figures, so the risk is a sentence that contradicts the table beside it.
+ */
+describe('document highlights', () => {
+    it('states the good outcome when no ASIN is losing the Buy Box', async () => {
+        BuyBoxData.find.mockReturnValue({
+            sort: () => ({
+                limit: () => ({
+                    lean: () => Promise.resolve([{
+                        createdAt: new Date('2026-01-30'),
+                        date: '2026-01-30',
+                        totalProducts: 4,
+                        productsWithBuyBox: 4,
+                        productsWithLowBuyBox: 0,
+                        asinBuyBoxData: [{ childAsin: 'B1', buyBoxPercentage: 100, sessions: 1 }],
+                    }]),
+                }),
+            }),
+        });
+
+        const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'buybox');
+        const texts = report.highlights.map((h) => h.text).join(' ');
+
+        expect(texts).toMatch(/All 4 tracked ASINs held the Buy Box/);
+        // A healthy report must not carry a red flag bullet.
+        expect(report.highlights.some((h) => h.tone === 'watch')).toBe(false);
+    });
+
+    it('always leaves one blue fill-in bullet for the account manager', async () => {
+        Restock.findOne.mockReturnValue(mockFindOne({
+            createdAt: new Date('2026-04-25T00:00:00Z'),
+            Products: [{ asin: 'B1', merchantSku: 'S1', price: '10', recommendedReplenishmentQty: '4', available: '2' }],
+        }));
+
+        const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'inventory-restock');
+        expect(report.highlights.filter((h) => h.tone === 'fill')).toHaveLength(1);
     });
 });
