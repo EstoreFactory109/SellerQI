@@ -28,6 +28,42 @@
  * ROLLBACK
  *   - GMAIL_MESSAGING_ENABLED is OFF by default; both ticks no-op while it is.
  *   - To stop it entirely: remove the setupCron call in cronProducerStandalone.js.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * WHEN MAIL STOPS
+ * ═══════════════════════════════════════════════════════════════════════════════
+ *
+ * The symptom is always the same and always ambiguous: a quiet inbox, which is
+ * indistinguishable from a quiet week. That ambiguity is the whole reason
+ * GET /api/gmail/status exists — read it first, not the logs.
+ *
+ *   lastError mentions invalid_grant
+ *       The refresh token is dead, almost always the 7-day expiry that applies while
+ *       the OAuth app is in "Testing" publishing status (see Services/Gmail/config.js).
+ *       Fix the status, then reconnect.
+ *
+ *   lastError mentions a backfill
+ *       The history cursor is older than Gmail's ~1 week window. It cannot be recovered
+ *       by retrying and every later run will 404 too. POST /api/gmail/backfill.
+ *
+ *   lastError mentions "failing to ingest"
+ *       The retry backlog passed its cap. That is systemic rather than bad luck — read
+ *       the logs for the repeated failure rather than waiting it out.
+ *
+ *   watchHealthy: false
+ *       Push has lapsed and only polling is delivering, so mail is arriving up to
+ *       GMAIL_POLL_MINUTES late. POST /api/gmail/watch.
+ *
+ *   minutesSinceSync far exceeds pollMinutes
+ *       This cron is not running at all. Check the cron-producer process.
+ *
+ *   everything healthy, still nothing
+ *       Probably genuinely quiet — or senders are going unmatched, which is the quiet
+ *       failure worth checking first. A client mailing from an address we do not hold
+ *       is ignored by design: they get no reply and nobody learns they wrote. The count
+ *       is in every sync summary; grep "[GmailIngest] no client matched" for the rest.
+ *       The address itself is deliberately NOT logged, because utils/Logger.js writes
+ *       unrotated to logs.txt and that would put client addresses on disk permanently.
  */
 
 require('dotenv').config();

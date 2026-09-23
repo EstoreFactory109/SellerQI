@@ -271,8 +271,34 @@ const handlePubSubPush = asyncHandler(async (req, res) => {
     return res.status(204).send();
 });
 
+/**
+ * POST /api/gmail/backfill
+ *
+ * Recovery for an expired history cursor, and the only way to pull in mail that arrived
+ * while the integration was disconnected.
+ *
+ * Deliberately manual and owner/admin only. The window is a guess, so a wide one means
+ * re-ingesting hundreds of messages — each an AI redaction call, each potentially
+ * resurfacing a conversation the client considers closed. /status is what tells someone
+ * this is needed; it is not something runSync falls into on its own.
+ */
+const runGmailBackfill = asyncHandler(async (req, res) => {
+    if (!requireGmailManager(req, res)) return undefined;
+
+    const { runBackfill, MAX_MESSAGES } = require('../../Services/Gmail/GmailBackfillService.js');
+
+    const days = Math.min(Math.max(parseInt(req.body?.days, 10) || 7, 1), 30);
+    const limit = Math.min(parseInt(req.body?.limit, 10) || MAX_MESSAGES, MAX_MESSAGES);
+
+    const summary = await runBackfill({ days, limit });
+    logger.info(`[GmailController] backfill by ${req.esfUserId}: ${JSON.stringify(summary)}`);
+
+    return res.status(200).json(new ApiResponse(200, summary, 'Backfill complete'));
+});
+
 module.exports = {
     getGmailStatus,
+    runGmailBackfill,
     startGmailAuth,
     handleGmailCallback,
     disconnectGmail,

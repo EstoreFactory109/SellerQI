@@ -28,6 +28,60 @@
  * client that powers Google sign-in would drag the entire sign-in flow into
  * restricted-scope verification, and a verification problem would then take login down
  * with it. Two clients, two blast radii.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * ONE-TIME GOOGLE CLOUD SETUP
+ * ═══════════════════════════════════════════════════════════════════════════════
+ *
+ * 1. A NEW OAuth 2.0 Client ID (Web application), separate from Google sign-in for the
+ *    reason above. Authorized redirect URI exactly:
+ *        https://members.sellerqi.com/api/gmail/auth/callback
+ *
+ * 2. PUBLISHING STATUS MUST BE "IN PRODUCTION", not "Testing" — even unverified.
+ *
+ *    This is the one with a deadline. In "Testing", Google expires refresh tokens
+ *    after SEVEN DAYS. The integration works perfectly for a week and then dies with
+ *    `invalid_grant`, which reads like a revoked credential rather than a setting
+ *    nobody touched. GmailAuth.mapTokenError says so explicitly, but avoiding it is
+ *    far cheaper than diagnosing it. Start verification early — it is wall-clock time,
+ *    not work, and nothing else here is blocked on it.
+ *
+ * 3. Pub/Sub:
+ *        gcloud pubsub topics create gmail-inbox
+ *
+ *        # THE STEP THAT IS ALWAYS MISSED. Without it users.watch fails with an
+ *        # error pointing nowhere near Pub/Sub.
+ *        gcloud pubsub topics add-iam-policy-binding gmail-inbox \
+ *          --member=serviceAccount:gmail-api-push@system.gserviceaccount.com \
+ *          --role=roles/pubsub.publisher
+ *
+ *        gcloud pubsub subscriptions create gmail-inbox-push \
+ *          --topic=gmail-inbox \
+ *          --push-endpoint=https://members.sellerqi.com/api/gmail/pubsub/push \
+ *          --push-auth-service-account=<push-sa>@<project>.iam.gserviceaccount.com \
+ *          --push-auth-token-audience=https://members.sellerqi.com/api/gmail/pubsub/push
+ *
+ *    The push auth service account is not optional, and GMAIL_PUBSUB_SERVICE_ACCOUNT
+ *    must match it. See Services/Gmail/pubsubVerifier.js for why a valid signature
+ *    alone proves nothing.
+ *
+ * ── TURNING IT ON ──
+ * Deploy with GMAIL_MESSAGING_ENABLED=false. Sign in as owner/admin, GET
+ * /api/gmail/auth/url, consent AS THE SHARED INBOX. Check /api/gmail/status shows
+ * `connected: true` with the right `inbox`. Set the flag true and restart — polling
+ * begins. POST /api/gmail/watch to start push. Then email the inbox from a linked
+ * client's address and confirm the thread appears on both Messages pages, labelled by
+ * project, with no name, address or phone anywhere.
+ *
+ * EIGHT DAYS LATER, confirm /api/gmail/status still shows no lastError. That is the
+ * Testing-mode expiry above, and it is the one failure that looks like success until
+ * it suddenly doesn't.
+ *
+ * ── ROLLBACK ──
+ * GMAIL_MESSAGING_ENABLED=false stops ingestion and sending; nothing is deleted and
+ * the connection survives. To stop the crons entirely, remove setupGmailInboxCron()
+ * from cronProducerStandalone.js. DELETE /api/gmail/disconnect forgets the credential
+ * and revokes at Google, leaving stored conversations untouched.
  */
 
 /**
