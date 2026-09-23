@@ -128,4 +128,35 @@ const postEsfMessageReply = asyncHandler(async (req, res) => {
     }
 });
 
-module.exports = { getEsfMessages, getEsfMessageThread, postEsfMessageReply };
+/**
+ * POST /api/pagewise/esf/messages
+ *
+ * Raise a ticket — the only way a client can START a conversation from the portal.
+ *
+ * Inserted into Gmail rather than emailed, exactly like a reply, so the admin sees it
+ * arrive in the shared inbox as though the client had written in directly, and Gmail
+ * holds the whole conversation from its first message onward.
+ */
+const postEsfNewTicket = asyncHandler(async (req, res) => {
+    try {
+        const { startClientTicket } = require('../../Services/Gmail/GmailSendService.js');
+
+        const result = await startClientTicket({
+            subject: req.body?.subject,
+            body: req.body?.body,
+            user: req.user,
+        });
+
+        return res.status(201).json(new ApiResponse(201, result, 'Ticket raised'));
+    } catch (error) {
+        // 4xx messages here describe our own rules ("too many open conversations",
+        // "subject too long") and are safe to show. Anything else is generic.
+        if (error.statusCode && error.statusCode < 500) {
+            return res.status(error.statusCode).json(new ApiResponse(error.statusCode, '', error.message));
+        }
+        logger.error(new ApiError(500, `[EsfClientMessages] ticket failed: ${error.message}`));
+        return res.status(500).json(new ApiResponse(500, '', 'Could not raise that ticket'));
+    }
+});
+
+module.exports = { getEsfMessages, getEsfMessageThread, postEsfMessageReply, postEsfNewTicket };

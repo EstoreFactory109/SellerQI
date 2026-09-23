@@ -19,10 +19,14 @@ jest.mock('../../../Services/Gmail/GmailClient.js', () => ({
 const mockThreadFindOne = jest.fn();
 const mockThreadUpdateOne = jest.fn();
 const mockMsgUpdateOne = jest.fn();
+const mockThreadCount = jest.fn();
+const mockThreadFindOneAndUpdate = jest.fn();
 jest.mock('../../../models/system/EmailThreadModels.js', () => ({
     EmailThread: {
         findOne: (...a) => mockThreadFindOne(...a),
         updateOne: (...a) => mockThreadUpdateOne(...a),
+        countDocuments: (...a) => mockThreadCount(...a),
+        findOneAndUpdate: (...a) => mockThreadFindOneAndUpdate(...a),
     },
     EmailMessage: { updateOne: (...a) => mockMsgUpdateOne(...a) },
 }));
@@ -63,7 +67,9 @@ beforeEach(() => {
     mockThreadUpdateOne.mockResolvedValue({});
     mockMsgUpdateOne.mockResolvedValue({});
     mockSendMessage.mockResolvedValue({ id: 'sent-1' });
-    mockInsertMessage.mockResolvedValue({ id: 'ins-1' });
+    mockInsertMessage.mockResolvedValue({ id: 'ins-1', threadId: 'gt-new' });
+    mockThreadCount.mockResolvedValue(0);
+    mockThreadFindOneAndUpdate.mockResolvedValue({ _id: 't-new', displaySubject: 'Listing issue' });
 });
 
 describe('a staff reply', () => {
@@ -200,6 +206,101 @@ describe('the echo guards', () => {
 
         const stored = mockMsgUpdateOne.mock.calls[0][1].$setOnInsert.rfc822MessageId;
         expect(mockThreadUpdateOne.mock.calls[0][1].$set.rfc822MessageIdOfLast).toBe(stored);
+    });
+});
+
+describe('raising a ticket', () => {
+    const ticket = (over = {}) => GmailSend.startClientTicket({
+        subject: 'Listing issue',
+        body: 'The kitchen scale title is wrong.',
+        user: CLIENT,
+        ...over,
+    });
+
+    test('opens a NEW Gmail thread rather than joining one', async () => {
+        await ticket();
+
+        // No threadId passed — that is what makes Gmail create the conversation.
+        expect(mockInsertMessage.mock.calls[0][0].threadId).toBeUndefined();
+        expect(mockSendMessage).not.toHaveBeenCalled();
+    });
+
+    test('adopts the thread id Gmail hands back', async () => {
+        await ticket();
+
+        expect(mockThreadFindOneAndUpdate.mock.calls[0][0]).toEqual({ gmailThreadId: 'gt-new' });
+    });
+
+    test('does NOT prefix the subject with Re:', async () => {
+        // "Re:" on a brand-new ticket tells the recipient's mail client this answers
+        // something they sent, so it reads as a reply nobody wrote.
+        await ticket();
+
+        const raw = decodeRaw(mockInsertMessage.mock.calls[0][0].raw);
+        expect(raw).toContain('Subject: Listing issue');
+        expect(raw).not.toContain('Subject: Re:');
+    });
+
+    test('arrives as unread, so the admin notices it in Gmail too', async () => {
+        await ticket();
+
+        expect(mockInsertMessage.mock.calls[0][0].labelIds).toEqual(['INBOX', 'UNREAD']);
+    });
+
+    test('opens needing a staff reply', async () => {
+        await ticket();
+
+        const { $set } = mockThreadFindOneAndUpdate.mock.calls[0][1];
+        expect($set.lastMessageDirection).toBe('inbound');
+        expect($set.staffUnreadCount).toBe(1);
+    });
+
+    test('REDACTS THE SUBJECT, which staff see at the top of their inbox', async () => {
+        // A subject is displayed to staff, so it leaks identity exactly as a body does —
+        // and it is the more visible of the two, sitting in the conversation list.
+        await ticket({ subject: 'Nitesh Kumar - urgent' });
+
+        const stored = mockThreadFindOneAndUpdate.mock.calls[0][1].$setOnInsert.displaySubject;
+        expect(stored).not.toContain('Nitesh');
+        expect(stored).toContain('[name]');
+    });
+
+    test('keeps the raw subject, because Gmail needs it to thread replies', async () => {
+        await ticket({ subject: 'Nitesh Kumar - urgent' });
+
+        // select:false on the model — stored for sending, never served to staff.
+        expect(mockThreadFindOneAndUpdate.mock.calls[0][1].$setOnInsert.rawSubject)
+            .toBe('Nitesh Kumar - urgent');
+    });
+
+    test('redacts the body too', async () => {
+        await ticket({ body: 'Call me on 913-269-8400' });
+
+        expect(mockMsgUpdateOne.mock.calls[0][1].$setOnInsert.bodyRedacted).not.toContain('913-269-8400');
+    });
+
+    test('a subject with a newline cannot inject headers', async () => {
+        await ticket({ subject: 'Hello\r\nBcc: attacker@evil.com' });
+
+        expect(decodeRaw(mockInsertMessage.mock.calls[0][0].raw)).not.toMatch(/^Bcc:/m);
+    });
+
+    test('refuses an empty subject', async () => {
+        await expect(ticket({ subject: '   ' })).rejects.toThrow(/needs a subject/);
+        expect(mockInsertMessage).not.toHaveBeenCalled();
+    });
+
+    test('refuses a subject longer than the cap', async () => {
+        await expect(ticket({ subject: 'x'.repeat(200) })).rejects.toThrow(/longer than/);
+    });
+
+    test('refuses once too many conversations are already open', async () => {
+        // Sprawl, not speed, is the thing worth preventing: twenty threads about one
+        // problem is worse for the client than one, and it buries the staff inbox.
+        mockThreadCount.mockResolvedValue(10);
+
+        await expect(ticket()).rejects.toThrow(/already have 10 open/);
+        expect(mockInsertMessage).not.toHaveBeenCalled();
     });
 });
 

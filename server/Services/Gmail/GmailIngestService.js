@@ -167,6 +167,23 @@ const ingestMessage = async (gmailMessageId) => {
 
     const decision = routeMessage(parsed, { inboxAddress });
     if (decision.action === 'skip') {
+        /**
+         * "We wrote this ourselves" is a claim about a row that should already exist —
+         * and the duplicate check above proved it does not.
+         *
+         * Two things reach here. Either the push beat our own write by milliseconds (a
+         * race, and the row is about to appear), or that write FAILED and the message
+         * now exists only in Gmail. Skipping unconditionally is right for the first and
+         * loses the message permanently for the second, because nothing will ever look
+         * at it again — not a later sync, not even a backfill, since the header keeps
+         * saying "already handled".
+         *
+         * Deferring costs one retry in the common case and is the difference between
+         * losing a client's message and not, in the rare one.
+         */
+        if (decision.reason === 'portal-echo') {
+            return { status: 'deferred', reason: 'portal-echo-without-local-copy' };
+        }
         return { status: 'skipped', reason: decision.reason };
     }
 
@@ -325,7 +342,7 @@ const runSync = async ({ reason = 'poll' } = {}) => {
     }
 
     const summary = {
-        reason, pages: 0, seen: 0, ingested: 0, duplicate: 0, skipped: 0, unmatched: 0, failed: 0, retried: 0,
+        reason, pages: 0, seen: 0, ingested: 0, duplicate: 0, skipped: 0, unmatched: 0, failed: 0, retried: 0, deferred: 0,
     };
 
     let cursor = String(connection.historyId);
@@ -379,6 +396,13 @@ const runSync = async ({ reason = 'poll' } = {}) => {
                     // eslint-disable-next-line no-await-in-loop
                     const result = await ingestMessage(messageId);
                     summary[result.status === 'ingested' ? 'ingested' : result.status] += 1;
+                    /**
+                     * Our own write has not landed yet — or never will. Held for retry
+                     * rather than skipped, so the message cannot be lost if it was the
+                     * latter. The next run either finds our row (duplicate, cleared) or
+                     * defers again, which is visible in the backlog.
+                     */
+                    if (result.status === 'deferred') pending.add(messageId);
                 } catch (error) {
                     // One bad message must not stop the mailbox, and must not be lost
                     // either. Held in `pending` so the cursor can advance while this
