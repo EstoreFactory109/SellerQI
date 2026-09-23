@@ -70,9 +70,17 @@ const generateMessageId = (domain) => {
     return `<${crypto.randomUUID()}@${host}>`;
 };
 
-/** Gmail rejects a threaded send whose subject does not match the thread's. */
+/**
+ * Gmail rejects a threaded send whose subject does not match the thread's.
+ *
+ * An empty subject therefore has to stay empty. Substituting a friendly placeholder
+ * would produce "Re: (no subject)" against a thread whose subject is genuinely blank,
+ * and Gmail refuses the send — so a client who emails in without a subject could never
+ * be replied to. Real clients do this constantly.
+ */
 const replySubject = (rawSubject) => {
-    const subject = sanitizeHeader(rawSubject) || '(no subject)';
+    const subject = sanitizeHeader(rawSubject);
+    if (!subject) return '';
     return /^re:/i.test(subject) ? subject : `Re: ${subject}`;
 };
 
@@ -126,6 +134,15 @@ const buildMimeMessage = ({
     date = new Date(),
     // true when this message opens a conversation rather than continuing one.
     isNewThread = false,
+    /**
+     * Where a human hitting "Reply" should end up.
+     *
+     * Load-bearing for portal messages. Gmail only lets us send AS an address we own,
+     * so a client's portal message has to go out `From: <our inbox>` — which would send
+     * the admin's reply straight back to ourselves, into a loop, with the client never
+     * hearing anything. Reply-To is what redirects it to the person who actually wrote.
+     */
+    replyTo = null,
 }) => {
     const ownMessageId = messageId || generateMessageId(String(from?.email || '').split('@')[1]);
     const referenceChain = buildReferences(references, inReplyTo);
@@ -136,6 +153,7 @@ const buildMimeMessage = ({
         'Message-ID': ownMessageId,
         From: formatAddress(from),
         To: formatAddress(to),
+        ...(replyTo ? { 'Reply-To': formatAddress(replyTo) } : {}),
         Subject: encodeHeaderValue(isNewThread ? newSubject(rawSubject) : replySubject(rawSubject)),
         ...(inReplyTo ? { 'In-Reply-To': sanitizeHeader(inReplyTo) } : {}),
         ...(referenceChain.length ? { References: referenceChain.map(sanitizeHeader).join(' ') } : {}),

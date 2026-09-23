@@ -87,13 +87,19 @@
 /**
  * `gmail.modify` — a superset of readonly + send + insert.
  *
- * `insert` is the reason a narrower scope will not do: it is what puts a client's
- * portal reply into the Gmail thread without actually mailing anyone, so Gmail stays
- * the complete record of the conversation. `gmail.send` alone cannot do that, and
- * sending it instead would email our own inbox from itself.
+ * All three are used: reading history and messages to ingest, sending for replies in
+ * both directions, and modify-level access for `users.watch`.
+ *
+ * NOTE: an earlier version of this comment claimed `insert` was the sole reason a
+ * narrower scope would not do, because client portal messages were filed into the
+ * mailbox rather than mailed. They are genuinely sent now — an inserted message is
+ * synthetic and raises no Gmail notification, so the admin was never told a client had
+ * written (see GmailSendService). `insert` is still granted and still wrapped in
+ * GmailClient, but nothing calls it today.
  *
  * Changing this list invalidates the existing grant — Google requires fresh consent for
- * a widened scope, so a reconnect is mandatory after any edit here.
+ * a widened scope, so a reconnect is mandatory after any edit here. That cost is why
+ * the scope has not been narrowed to match current usage.
  */
 const SCOPES = [
     'https://www.googleapis.com/auth/gmail.modify',
