@@ -55,6 +55,22 @@ const GmailConnectionSchema = new mongoose.Schema({
     historyId: { type: String, default: null },
     lastSyncAt: { type: Date, default: null },
 
+    /**
+     * Messages that failed to ingest, retried on every subsequent run.
+     *
+     * This exists to resolve a genuine conflict. The cursor must not advance past a
+     * message that was never stored, or `history.list` — which only moves forward —
+     * loses it permanently. But holding the cursor at the first failure means one
+     * unparseable message stops ALL client mail indefinitely, which for a support inbox
+     * is its own outage.
+     *
+     * Tracking the failures durably lets the cursor advance without losing anything:
+     * the mailbox keeps flowing and the stragglers are retried until they succeed.
+     * Capped, because an unbounded list here would mean a systemic failure quietly
+     * growing a document instead of raising an alarm.
+     */
+    pendingMessageIds: { type: [String], default: [] },
+
     /** Gmail expires a watch after ~7 days; the renewal cron reads this. */
     watchExpiration: { type: Date, default: null },
     watchTopic: { type: String, default: null },

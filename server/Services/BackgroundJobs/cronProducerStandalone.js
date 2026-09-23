@@ -21,6 +21,7 @@
  *                                             weekly email, trial reminders
  *   - `initializeEmailReminderJob`         → 48-hour reactivation emails
  *   - `zohoTaskSyncStandalone.setupCron`   → nightly Zoho project-task sync
+ *   - `gmailInboxStandalone.setupCron`     → ESF inbox poll + watch renewal
  *
  * Safety
  *   - Wraps the hourly daily-update tick with an `OrchestrationCronLock`
@@ -200,6 +201,19 @@ async function start() {
         logger.info('[CronProducerStandalone] Zoho task sync cron initialized');
     } catch (error) {
         logger.error('[CronProducerStandalone] Zoho task sync init failed', { error: error?.message });
+    }
+
+    // Shared ESF inbox: a mail poll every GMAIL_POLL_MINUTES and a daily watch
+    // renewal (03:00 UTC). Same reasoning as the Zoho block above — no room in the
+    // ecosystem memory budget for another PM2 app, and its own distributed locks
+    // make hosting it here safe. Both ticks no-op while GMAIL_MESSAGING_ENABLED is
+    // off, which is the default.
+    try {
+        const { setupCron: setupGmailInboxCron } = require('./gmailInboxStandalone.js');
+        setupGmailInboxCron();
+        logger.info('[CronProducerStandalone] Gmail inbox crons initialized');
+    } catch (error) {
+        logger.error('[CronProducerStandalone] Gmail inbox init failed', { error: error?.message });
     }
 
     logger.info('[CronProducerStandalone] Started successfully — running all cron schedules');
