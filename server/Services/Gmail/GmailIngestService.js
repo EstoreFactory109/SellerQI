@@ -170,6 +170,20 @@ const ingestMessage = async (gmailMessageId) => {
         return { status: 'skipped', reason: decision.reason };
     }
 
+    /**
+     * The SECOND echo guard: a message we wrote, recognised by the Message-ID we
+     * generated before sending it.
+     *
+     * The X-SellerQI-Origin header in routeMessage above is the first. Neither is
+     * redundant — the header is lost if a mail client strips unknown headers on a
+     * round trip, and the id alone cannot help while our own write has not landed yet.
+     * Between them, a portal reply is never stored twice.
+     */
+    if (parsed.rfc822MessageId) {
+        const alreadyOurs = await EmailMessage.exists({ rfc822MessageId: parsed.rfc822MessageId });
+        if (alreadyOurs) return { status: 'duplicate' };
+    }
+
     const match = await resolveClient(decision.lookup);
     if (!match) {
         /**

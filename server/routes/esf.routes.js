@@ -38,6 +38,7 @@ const {
     listStaffThreads,
     getStaffThread,
     setThreadResolved,
+    postStaffReply,
 } = require('../controllers/esf/esfMessages.js');
 const esfAuth = require('../middlewares/Auth/esfAuth.js');
 const { authRateLimiter, registerRateLimiter } = require('../middlewares/rateLimiting.js');
@@ -111,5 +112,6 @@ router.delete('/users/:userId', esfAuth, removeEsfUser);
 router.get('/messages', esfAuth, listStaffThreads);
 router.get('/messages/:threadId', esfAuth, getStaffThread);
 router.patch('/messages/:threadId/resolve', esfAuth, setThreadResolved);
+router.post('/messages/:threadId/reply', esfAuth, postStaffReply);
 
 module.exports = router;

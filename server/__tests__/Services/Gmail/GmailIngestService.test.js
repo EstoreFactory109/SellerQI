@@ -259,6 +259,19 @@ describe('ingesting one message', () => {
         expect(update.$setOnInsert.userId).toBe('u1');
     });
 
+    test('a portal reply echoed back is recognised by our own Message-ID', async () => {
+        // The second echo guard. The origin header is the first, and it is lost if a
+        // mail client strips unknown headers on a round trip; the id alone cannot help
+        // while our own write has not landed yet. Between them a portal reply is never
+        // stored twice.
+        mockMsgExists.mockImplementation((query) => Promise.resolve(
+            query.rfc822MessageId === '<abc@x.com>' ? { _id: 'ours' } : null
+        ));
+
+        expect((await GmailIngest.ingestMessage('msg-1')).status).toBe('duplicate');
+        expect(mockMsgUpdateOne).not.toHaveBeenCalled();
+    });
+
     test('a redelivery is a no-op, not a duplicate in the thread', async () => {
         // Pub/Sub delivers at least once, so this is the normal case, not an edge one.
         mockMsgExists.mockResolvedValue({ _id: 'existing' });

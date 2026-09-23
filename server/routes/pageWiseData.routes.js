@@ -102,7 +102,7 @@ const { getEsfClientDashboard } = require('../controllers/analytics/EsfClientDas
 const { getEsfProjectStatus } = require('../controllers/analytics/EsfProjectStatusController.js');
 const { postEsfTaskReply } = require('../controllers/analytics/EsfProjectReplyController.js');
 const { getEsfBilling, downloadEsfInvoice } = require('../controllers/analytics/EsfBillingController.js');
-const { getEsfMessages, getEsfMessageThread } = require('../controllers/analytics/EsfClientMessagesController.js');
+const { getEsfMessages, getEsfMessageThread, postEsfMessageReply } = require('../controllers/analytics/EsfClientMessagesController.js');
 const { zohoUpload, MAX_FILES, MAX_FILE_BYTES } = require('../middlewares/multer/zohoUpload.js');
 const { ApiResponse } = require('../utils/ApiResponse.js');
 const esfClientOnly = require('../middlewares/Auth/esfClientOnly.js');
@@ -318,6 +318,7 @@ router.get('/esf/billing/invoices/:invoiceNumber/pdf', auth, esfClientOnly, down
 // on a chat surface that makes a reply appear to vanish for five minutes.
 router.get('/esf/messages', auth, esfClientOnly, getEsfMessages);
 router.get('/esf/messages/:threadId', auth, esfClientOnly, getEsfMessageThread);
+router.post('/esf/messages/:threadId/reply', auth, esfClientOnly, postEsfMessageReply);
 
 /**
  * Reply to a task from the Status page — text, files, or both, sent on to Zoho.

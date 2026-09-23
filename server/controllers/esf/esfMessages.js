@@ -199,4 +199,37 @@ const setThreadResolved = asyncHandler(async (req, res) => {
     }
 });
 
-module.exports = { listStaffThreads, getStaffThread, setThreadResolved };
+/**
+ * POST /app/esf/messages/:threadId/reply
+ *
+ * The email is genuinely sent to the client, from the shared inbox under a single
+ * agency identity — never under the individual staff member's name. Who sent it is
+ * recorded on the message for our own audit and is never shown to the client.
+ */
+const postStaffReply = asyncHandler(async (req, res) => {
+    try {
+        if (denied(req)) {
+            return res.status(403).json(new ApiResponse(403, '', 'You do not have access to Messages'));
+        }
+
+        const { sendStaffReply } = require('../../Services/Gmail/GmailSendService.js');
+
+        const result = await sendStaffReply({
+            threadId: req.params.threadId,
+            body: req.body?.body,
+            staffUserId: req.esfUserId,
+        });
+
+        return res.status(201).json(new ApiResponse(201, result, 'Reply sent'));
+    } catch (error) {
+        // A validation failure is the sender's to fix and its message is safe — it
+        // describes our own rules, never the client. Anything else is generic.
+        if (error.statusCode && error.statusCode < 500) {
+            return res.status(error.statusCode).json(new ApiResponse(error.statusCode, '', error.message));
+        }
+        logger.error(new ApiError(500, `[EsfMessages] reply failed: ${error.message}`));
+        return res.status(500).json(new ApiResponse(500, '', 'Could not send that reply'));
+    }
+});
+
+module.exports = { listStaffThreads, getStaffThread, setThreadResolved, postStaffReply };

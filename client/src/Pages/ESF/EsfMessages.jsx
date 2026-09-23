@@ -133,6 +133,8 @@ const EsfMessages = () => {
     const [showResolved, setShowResolved] = useState(false);
     const [busy, setBusy] = useState(false);
     const [search, setSearch] = useState('');
+    const [draft, setDraft] = useState('');
+    const [sending, setSending] = useState(false);
 
     const loadThreads = useCallback(async () => {
         try {
@@ -154,6 +156,9 @@ const EsfMessages = () => {
     const openThread = useCallback(async (id) => {
         setOpenId(id);
         setConversation(null);
+        // Per-conversation, so a half-written reply is never delivered to whoever is
+        // opened next.
+        setDraft('');
         try {
             const res = await axiosInstance.get(`/app/esf/messages/${id}`);
             setConversation(res.data?.data || null);
@@ -180,6 +185,27 @@ const EsfMessages = () => {
             setBusy(false);
         }
     }, [showResolved]);
+
+    const sendReply = useCallback(async () => {
+        const text = draft.trim();
+        if (!text || sending || !openId) return;
+
+        setSending(true);
+        try {
+            await axiosInstance.post(`/app/esf/messages/${openId}/reply`, { body: text });
+            // Cleared only after the request succeeds. Clearing optimistically loses
+            // what someone just wrote when the send fails, and there is nowhere to get
+            // it back from.
+            setDraft('');
+            const res = await axiosInstance.get(`/app/esf/messages/${openId}`);
+            setConversation(res.data?.data || null);
+            loadThreads();
+        } catch (err) {
+            setError(err.response?.data?.message || 'Could not send that reply');
+        } finally {
+            setSending(false);
+        }
+    }, [draft, sending, openId, loadThreads]);
 
     /**
      * Filtering happens here, over data the server already redacted.
@@ -407,17 +433,45 @@ const EsfMessages = () => {
                                 )}
                             </div>
 
-                            {/* Composer — present, and honest about not being wired yet. */}
+                            {/* Composer */}
                             <div className="border-t border-white/10 bg-white/[0.03] px-4 py-3">
-                                <div className="flex items-center gap-2 rounded-lg bg-white/[0.05] px-3 py-2 opacity-60">
-                                    <Lock className="h-4 w-4 shrink-0 text-gray-500" />
-                                    <input
-                                        disabled
-                                        placeholder="Replying from here arrives with Gmail sending"
-                                        className="w-full cursor-not-allowed bg-transparent text-[13px] text-gray-300 placeholder:text-gray-500 focus:outline-none"
+                                <div className="flex items-end gap-2 rounded-lg bg-white/[0.05] px-3 py-2">
+                                    <textarea
+                                        rows={1}
+                                        value={draft}
+                                        disabled={sending}
+                                        onChange={(e) => setDraft(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            // Enter sends, Shift+Enter breaks the line — the
+                                            // convention every chat client shares, and the one
+                                            // people's hands already expect.
+                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                                e.preventDefault();
+                                                sendReply();
+                                            }
+                                        }}
+                                        placeholder="Write a reply…"
+                                        className="max-h-32 w-full resize-none bg-transparent py-1 text-[13.5px] leading-relaxed text-gray-100 placeholder:text-gray-500 focus:outline-none disabled:opacity-50"
                                     />
-                                    <Send className="h-4 w-4 shrink-0 text-gray-600" />
+                                    <button
+                                        type="button"
+                                        onClick={sendReply}
+                                        disabled={sending || !draft.trim()}
+                                        title="Send"
+                                        className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500/80 text-[#0b0f17] transition-opacity hover:bg-emerald-500 disabled:opacity-30"
+                                    >
+                                        <Send className="h-4 w-4" />
+                                    </button>
                                 </div>
+                                {/*
+                                    Said plainly, because it is not obvious from a chat UI:
+                                    this reply is a real email leaving the shared inbox, and it
+                                    goes out as the agency rather than as the person typing.
+                                */}
+                                <p className="mt-1.5 flex items-center gap-1.5 px-1 text-[10.5px] text-gray-600">
+                                    <Lock className="h-3 w-3 shrink-0" />
+                                    Sent by email from the ESF inbox, as eStore Factory — your name is not shown.
+                                </p>
                             </div>
                         </>
                     )}

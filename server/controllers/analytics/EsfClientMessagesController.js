@@ -101,4 +101,31 @@ const getEsfMessageThread = asyncHandler(async (req, res) => {
     }
 });
 
-module.exports = { getEsfMessages, getEsfMessageThread };
+/**
+ * POST /api/pagewise/esf/messages/:threadId/reply
+ *
+ * The client's reply is INSERTED into the Gmail thread, not sent. Gmail stays the
+ * complete record of the conversation and nothing leaves the building — see the header
+ * of Services/Gmail/GmailSendService.js for why sending here would be wrong.
+ */
+const postEsfMessageReply = asyncHandler(async (req, res) => {
+    try {
+        const { insertClientReply } = require('../../Services/Gmail/GmailSendService.js');
+
+        const result = await insertClientReply({
+            threadId: req.params.threadId,
+            body: req.body?.body,
+            user: req.user,
+        });
+
+        return res.status(201).json(new ApiResponse(201, result, 'Reply sent'));
+    } catch (error) {
+        if (error.statusCode && error.statusCode < 500) {
+            return res.status(error.statusCode).json(new ApiResponse(error.statusCode, '', error.message));
+        }
+        logger.error(new ApiError(500, `[EsfClientMessages] reply failed: ${error.message}`));
+        return res.status(500).json(new ApiResponse(500, '', 'Could not send that reply'));
+    }
+});
+
+module.exports = { getEsfMessages, getEsfMessageThread, postEsfMessageReply };
