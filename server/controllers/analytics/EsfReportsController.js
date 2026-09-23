@@ -8,7 +8,7 @@ const { ApiError } = require('../../utils/ApiError.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
 const asyncHandler = require('../../utils/AsyncHandler.js');
 const logger = require('../../utils/Logger.js');
-const { getEsfReports, getEsfReportRows } = require('../../Services/Calculations/EsfReportsService.js');
+const { getEsfReports, getEsfReportRows, getEsfReportHistory } = require('../../Services/Calculations/EsfReportsService.js');
 
 /**
  * GET /api/pagewise/esf/reports
@@ -71,4 +71,32 @@ const getEsfReportRowsData = asyncHandler(async (req, res) => {
     }
 });
 
-module.exports = { getEsfReportsData, getEsfReportRowsData };
+/**
+ * GET /api/pagewise/esf/reports/:reportKey/history
+ *
+ * Every captured edition of one report, newest first, for the Report History
+ * page.
+ */
+const getEsfReportHistoryData = asyncHandler(async (req, res) => {
+    const userId = req.userId;
+    const country = req.country;
+    const region = req.region;
+
+    if (!userId || !country || !region) {
+        logger.error('[EsfReports] Missing required parameters', { userId, country, region });
+        return res.status(400).json(new ApiError(400, 'User ID, Country, and Region are required'));
+    }
+
+    try {
+        const data = await getEsfReportHistory(userId, country, region, req.params.reportKey);
+        if (!data) {
+            return res.status(404).json(new ApiError(404, `Unknown report: ${req.params.reportKey}`));
+        }
+        return res.status(200).json(new ApiResponse(200, data, 'Report history retrieved successfully'));
+    } catch (error) {
+        logger.error('[EsfReports] Error fetching report history:', error);
+        return res.status(500).json(new ApiError(500, `Error fetching report history: ${error.message}`));
+    }
+});
+
+module.exports = { getEsfReportsData, getEsfReportRowsData, getEsfReportHistoryData };

@@ -102,7 +102,7 @@ const { getEsfClientDashboard } = require('../controllers/analytics/EsfClientDas
 const { getEsfProjectStatus } = require('../controllers/analytics/EsfProjectStatusController.js');
 const { postEsfTaskReply } = require('../controllers/analytics/EsfProjectReplyController.js');
 const { getEsfBilling, downloadEsfInvoice } = require('../controllers/analytics/EsfBillingController.js');
-const { getEsfReportsData, getEsfReportRowsData } = require('../controllers/analytics/EsfReportsController.js');
+const { getEsfReportsData, getEsfReportRowsData, getEsfReportHistoryData } = require('../controllers/analytics/EsfReportsController.js');
 const { zohoUpload, MAX_FILES, MAX_FILE_BYTES } = require('../middlewares/multer/zohoUpload.js');
 const { ApiResponse } = require('../utils/ApiResponse.js');
 const esfClientOnly = require('../middlewares/Auth/esfClientOnly.js');
@@ -327,6 +327,12 @@ router.get('/esf/reports', auth, esfClientOnly, getLocation, analyseDataCache(60
 // first report for every page of every report. Rebuilding one report costs a
 // couple of Mongo reads against snapshots, which is cheaper than the bug.
 router.get('/esf/reports/:reportKey/rows', auth, esfClientOnly, getLocation, getEsfReportRowsData);
+
+// Every captured edition of one report, for the Report History page. Cached for
+// 10 minutes and keyed per report by the path, which analyseDataCache does not
+// see — so, like the rows route above, it is left uncached rather than served
+// the wrong report's history.
+router.get('/esf/reports/:reportKey/history', auth, esfClientOnly, getLocation, getEsfReportHistoryData);
 
 /**
  * Reply to a task from the Status page — text, files, or both, sent on to Zoho.

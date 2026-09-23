@@ -47,6 +47,7 @@ const PPCMetrics = require('../../../models/amazon-ads/PPCMetricsModel.js');
 const {
     getEsfReports,
     getEsfReportRows,
+    getEsfReportHistory,
     num,
     pctChange,
     PREVIEW_ROWS,
@@ -669,5 +670,104 @@ describe('document highlights', () => {
 
         const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'inventory-restock');
         expect(report.highlights.filter((h) => h.tone === 'fill')).toHaveLength(1);
+    });
+});
+
+/**
+ * Report history.
+ *
+ * An "edition" is a captured snapshot, not a published document — nothing
+ * stores publications. The risks pinned here: claiming editions exist when the
+ * collection is empty, and the buy box losing-streak counter, which must count
+ * a CONSECUTIVE run and reset the moment an ASIN wins the box back.
+ */
+describe('getEsfReportHistory', () => {
+    const buyBoxSnapshots = (perSnapshotLosingAsins) => BuyBoxData.find.mockReturnValue({
+        sort: () => ({
+            limit: () => ({
+                lean: () => Promise.resolve(perSnapshotLosingAsins.map((losing, i) => ({
+                    createdAt: new Date(Date.UTC(2026, 0, 30 - i)),
+                    date: `2026-01-${String(30 - i).padStart(2, '0')}`,
+                    totalProducts: 3,
+                    asinBuyBoxData: ['A', 'B', 'C'].map((asin) => ({
+                        childAsin: asin,
+                        buyBoxPercentage: losing.includes(asin) ? 0 : 100,
+                        sessions: 1,
+                    })),
+                }))),
+            }),
+        }),
+    });
+
+    it('returns null for a key that is not one of our reports', async () => {
+        expect(await getEsfReportHistory(USER, 'US', 'NA', 'not-a-report')).toBeNull();
+    });
+
+    it('reports no editions rather than inventing them', async () => {
+        const history = await getEsfReportHistory(USER, 'US', 'NA', 'buybox');
+
+        expect(history.available).toBe(false);
+        expect(history.editions).toEqual([]);
+        expect(history.totalEditions).toBe(0);
+        expect(history.reason).toMatch(/no editions/i);
+    });
+
+    it('turns each snapshot into an edition, newest first', async () => {
+        buyBoxSnapshots([['A'], [], ['A', 'B']]);
+
+        const history = await getEsfReportHistory(USER, 'US', 'NA', 'buybox');
+
+        expect(history.available).toBe(true);
+        expect(history.name).toBe('Weekly Buybox Report');
+        expect(history.totalEditions).toBe(3);
+        expect(history.editions[0].summary).toBe('1 of 3 ASINs losing buy box');
+        expect(history.editions[1].summary).toBe('0 of 3 ASINs losing buy box');
+        expect(history.editions[1].tone).toBe('good');
+        expect(history.editions[2].tone).toBe('watch');
+        // Newest first, so the dates descend.
+        expect(history.editions[0].iso > history.editions[2].iso).toBe(true);
+    });
+
+    it('counts the longest CONSECUTIVE losing run, not the total', async () => {
+        // A loses in the newest three, wins in the fourth, loses again in the
+        // fifth. A naive total would say 4; the run is 3.
+        buyBoxSnapshots([['A'], ['A'], ['A'], [], ['A']]);
+
+        const history = await getEsfReportHistory(USER, 'US', 'NA', 'buybox');
+        const streak = history.stats.find((s) => s.label === 'Longest losing run');
+
+        expect(streak.value).toBe(3);
+    });
+
+    it('says an edition is a capture, not a publication', async () => {
+        buyBoxSnapshots([[]]);
+        const history = await getEsfReportHistory(USER, 'US', 'NA', 'buybox');
+
+        expect(history.capturedNote).toMatch(/capture of your account data/i);
+        expect(history.editions[0].capturedAt).toEqual(expect.any(String));
+    });
+
+    it('builds account overview editions from the weekly history array', async () => {
+        AccountHistory.findOne.mockReturnValue(mockFindOne({
+            accountHistory: [
+                { Date: new Date('2026-08-01'), HealthScore: '70', TotalProducts: 10, ProductsWithIssues: 4, TotalNumberOfIssues: 9 },
+                { Date: new Date('2026-08-08'), HealthScore: '80', TotalProducts: 10, ProductsWithIssues: 2, TotalNumberOfIssues: 5 },
+            ],
+        }));
+
+        const history = await getEsfReportHistory(USER, 'US', 'NA', 'account-overview');
+
+        expect(history.totalEditions).toBe(2);
+        // Newest first, and the delta compares it against the week before.
+        expect(history.editions[0].date).toBe('8 Aug 2026');
+        expect(history.stats.find((s) => s.label === 'Health score').delta).toBe(10);
+        expect(history.stats.find((s) => s.label === 'Open issues').delta).toBe(-4);
+    });
+
+    it('degrades to unavailable when a history builder throws', async () => {
+        BuyBoxData.find.mockImplementation(() => { throw new Error('collection exploded'); });
+
+        const history = await getEsfReportHistory(USER, 'US', 'NA', 'buybox');
+        expect(history.available).toBe(false);
     });
 });

@@ -1130,9 +1130,343 @@ const getEsfReportRows = async (userId, country, region, reportKey, { page = 1, 
     };
 };
 
+/* ----------------------------------------------------------------- history */
+
+/**
+ * Editions of one report over time.
+ *
+ * There is still no recurring-report model — nothing stores a "published
+ * edition". What DOES exist is the snapshot trail: every fetcher writes a new
+ * document per run with `.create()`, and none of those collections has a TTL or
+ * a prune, so the history is genuinely there to be read. One snapshot is one
+ * edition, and its date is when we captured it, not when anyone published it.
+ *
+ * That distinction is why nothing here says "Published 6:02 am": the editions
+ * are as frequent as the underlying sync, which is hourly for some reports and
+ * far rarer for others. Calling a capture a publication would be inventing a
+ * schedule that does not exist.
+ */
+const HISTORY_LIMIT = 40;
+
+/**
+ * One row in the editions list.
+ *
+ * `when` is what the edition COVERS (a day, or a month); `capturedAt` is when
+ * we actually took the snapshot, and the two are not the same thing. Several
+ * captures can land on one day, and deriving the timestamp from the day would
+ * collapse them into rows the reader cannot tell apart — which is exactly what
+ * happened to Buy Box, where 23 of 35 editions rendered identically.
+ *
+ * A malformed date yields null rather than throwing: one bad row in a
+ * collection must not take a whole history down (a single short `date` string
+ * threw RangeError and made monthly performance unavailable for an account).
+ */
+const edition = (when, summary, tone = 'neutral', { capturedAt = null, showCapturedTime = true } = {}) => {
+    const covers = new Date(when);
+    if (Number.isNaN(covers.getTime())) return null;
+
+    const captured = capturedAt ? new Date(capturedAt) : covers;
+    const capturedValid = !Number.isNaN(captured.getTime());
+
+    return {
+        iso: covers.toISOString().slice(0, 10),
+        date: formatDate(covers),
+        capturedAt: capturedValid ? captured.toISOString() : null,
+        // Only true where a clock time is meaningful. A month-grained edition
+        // has no capture time worth printing, and printing 00:00 implies one.
+        showCapturedTime: showCapturedTime && capturedValid,
+        summary,
+        tone,
+    };
+};
+
+const historyBuilders = {
+    [REPORT_BUYBOX.key]: async (userId, country, region) => {
+        const snapshots = await BuyBoxData.find({ User: userId, country, region })
+            .sort({ createdAt: -1 }).limit(HISTORY_LIMIT).lean();
+        if (!snapshots.length) return null;
+
+        const editions = snapshots.map((snapshot) => {
+            const losing = snapshot.asinBuyBoxData?.filter((r) => num(r.buyBoxPercentage) === 0).length || 0;
+            const total = snapshot.totalProducts || snapshot.asinBuyBoxData?.length || 0;
+            return edition(
+                snapshot.date ? `${snapshot.date}T00:00:00.000Z` : snapshot.createdAt,
+                `${losing} of ${total} ASINs losing buy box`,
+                losing > 0 ? 'watch' : 'good',
+                // createdAt, not the covered day: several captures share a day.
+                { capturedAt: snapshot.createdAt }
+            );
+        }).filter(Boolean);
+
+        // Longest run of consecutive snapshots in which any one ASIN held 0%.
+        const streaks = new Map();
+        let longest = 0;
+        for (const snapshot of snapshots) {
+            const losingNow = new Set(
+                (snapshot.asinBuyBoxData || []).filter((r) => num(r.buyBoxPercentage) === 0).map((r) => r.childAsin)
+            );
+            for (const asin of losingNow) {
+                const next = (streaks.get(asin) || 0) + 1;
+                streaks.set(asin, next);
+                if (next > longest) longest = next;
+            }
+            for (const asin of [...streaks.keys()]) if (!losingNow.has(asin)) streaks.delete(asin);
+        }
+
+        const latest = snapshots[0];
+        return {
+            editions,
+            stats: [
+                { label: 'ASINs tracked', value: latest.totalProducts || 0 },
+                { label: 'Currently losing', value: latest.asinBuyBoxData?.filter((r) => num(r.buyBoxPercentage) === 0).length || 0, tone: 'watch' },
+                { label: 'Longest losing run', value: longest, suffix: longest === 1 ? 'snapshot' : 'snapshots' },
+            ],
+        };
+    },
+
+    [REPORT_RESTOCK.key]: async (userId, country, region) => {
+        const snapshots = await RestockInventoryRecommendations.find({ User: userId, country, region })
+            .sort({ createdAt: -1 }).limit(HISTORY_LIMIT).lean();
+        if (!snapshots.length) return null;
+
+        const editions = snapshots.map((snapshot) => {
+            const products = snapshot.Products || [];
+            const urgent = products.filter((p) => /urgent|out of stock/i.test(String(p.alert || ''))).length;
+            const needed = products.filter((p) => num(p.recommendedReplenishmentQty) > 0).length;
+            return edition(
+                snapshot.createdAt,
+                urgent ? `${urgent} urgent, ${needed} need restock` : `${needed} need restock, none urgent`,
+                urgent > 0 ? 'watch' : 'good'
+            );
+        }).filter(Boolean);
+
+        const latest = snapshots[0].Products || [];
+        return {
+            editions,
+            stats: [
+                { label: 'SKUs tracked', value: latest.length },
+                { label: 'Urgent now', value: latest.filter((p) => /urgent|out of stock/i.test(String(p.alert || ''))).length, tone: 'watch' },
+                { label: 'Editions on file', value: snapshots.length },
+            ],
+        };
+    },
+
+    [REPORT_AGED.key]: async (userId, country, region) => {
+        const snapshots = await FbaInventoryPlanningData.find({ User: userId, country, region })
+            .sort({ createdAt: -1 }).limit(HISTORY_LIMIT).lean();
+        if (!snapshots.length) return null;
+
+        const over365 = (snapshot) => (snapshot.data || [])
+            .reduce((sum, item) => sum + num(item.quantity_to_be_charged_ais_365_plus_days), 0);
+
+        const editions = snapshots.map((snapshot) => edition(
+            snapshot.createdAt,
+            `${plural(over365(snapshot), 'unit')} over 365 days across ${plural((snapshot.data || []).length, 'ASIN')}`,
+            over365(snapshot) > 0 ? 'watch' : 'good'
+        )).filter(Boolean);
+
+        return {
+            editions,
+            stats: [
+                { label: 'ASINs tracked', value: (snapshots[0].data || []).length },
+                { label: 'Units over 365 days', value: over365(snapshots[0]), tone: over365(snapshots[0]) > 0 ? 'watch' : 'good' },
+                { label: 'Editions on file', value: snapshots.length },
+            ],
+        };
+    },
+
+    [REPORT_ACCOUNT.key]: async (userId, country, region) => {
+        const history = await AccountHistory.findOne({ User: userId, country, region }).lean();
+        const entries = [...(history?.accountHistory || [])]
+            .filter((entry) => entry?.Date)
+            .sort((a, b) => new Date(b.Date) - new Date(a.Date))
+            .slice(0, HISTORY_LIMIT);
+        if (!entries.length) return null;
+
+        const editions = entries.map((entry) => edition(
+            entry.Date,
+            `Health ${num(entry.HealthScore)}, ${plural(num(entry.TotalNumberOfIssues), 'issue')} across ${plural(num(entry.TotalProducts), 'listing')}`,
+            num(entry.TotalNumberOfIssues) > 0 ? 'watch' : 'good'
+        )).filter(Boolean);
+
+        const current = entries[0];
+        const previous = entries[1];
+        return {
+            editions,
+            stats: [
+                { label: 'Health score', value: num(current.HealthScore), delta: previous ? round(num(current.HealthScore) - num(previous.HealthScore), 1) : null },
+                { label: 'Open issues', value: num(current.TotalNumberOfIssues), tone: 'watch', delta: previous ? num(current.TotalNumberOfIssues) - num(previous.TotalNumberOfIssues) : null, deltaGoodWhen: 'down' },
+                { label: 'Weeks recorded', value: entries.length },
+            ],
+        };
+    },
+
+    [REPORT_AUDIT.key]: async (userId, country, region) => {
+        const snapshots = await NumberOfProductReviews.find({ User: userId, country, region })
+            .sort({ createdAt: -1 }).limit(HISTORY_LIMIT).lean();
+        if (!snapshots.length) return null;
+
+        // Scored against the five checks each snapshot carries on its own. A+ is
+        // in a separate collection with no history of its own, so it is left out
+        // here rather than scored as absent, which would understate every edition.
+        const SNAPSHOT_CHECKS = 5;
+        const completionOf = (snapshot) => {
+            const products = snapshot.Products || [];
+            if (!products.length) return 0;
+            let passed = 0;
+            for (const p of products) {
+                if (p.about_product?.length) passed += 1;
+                if (p.product_description?.length) passed += 1;
+                if ((p.product_photos?.length || 0) >= 5) passed += 1;
+                if (p.video_url?.length) passed += 1;
+                if (p.has_brandstory) passed += 1;
+            }
+            return Math.round((passed / (products.length * SNAPSHOT_CHECKS)) * 100);
+        };
+
+        const editions = snapshots.map((snapshot) => edition(
+            snapshot.createdAt,
+            `${completionOf(snapshot)}% content completion across ${plural((snapshot.Products || []).length, 'listing')}`,
+            completionOf(snapshot) >= 80 ? 'good' : 'neutral'
+        )).filter(Boolean);
+
+        return {
+            editions,
+            stats: [
+                { label: 'Content completion', value: completionOf(snapshots[0]), format: 'percent' },
+                { label: 'Listings captured', value: (snapshots[0].Products || []).length },
+                { label: 'Editions on file', value: snapshots.length },
+            ],
+            note: 'Completion here covers the five checks each capture carries (bullets, description, images, video, Brand Story). A+ Content is stored separately with no history of its own, so it is not scored in these editions.',
+        };
+    },
+
+    [REPORT_REVIEWS.key]: async (userId, country, region) => {
+        // Orders grouped into weeks — one week is one edition.
+        const rows = await ReviewOrder.aggregate([
+            { $match: { User: toObjectId(userId), country, region, purchaseDate: { $ne: null } } },
+            {
+                $group: {
+                    _id: { $dateToString: { format: '%G-W%V', date: '$purchaseDate' } },
+                    weekStart: { $min: '$purchaseDate' },
+                    orders: { $sum: 1 },
+                    sent: { $sum: { $cond: [{ $eq: ['$reviewRequestStatus', 'sent'] }, 1, 0] } },
+                    failed: { $sum: { $cond: [{ $eq: ['$reviewRequestStatus', 'failed'] }, 1, 0] } },
+                },
+            },
+            { $sort: { weekStart: -1 } },
+            { $limit: HISTORY_LIMIT },
+        ]);
+        if (!rows.length) return null;
+
+        const editions = rows.map((row) => edition(
+            row.weekStart,
+            `${plural(row.sent, 'request')} sent from ${plural(row.orders, 'order')} checked`,
+            row.failed > 0 ? 'watch' : 'neutral'
+        )).filter(Boolean);
+
+        return {
+            editions,
+            stats: [
+                { label: 'Requests sent', value: rows.reduce((n, r) => n + r.sent, 0) },
+                { label: 'Orders checked', value: rows.reduce((n, r) => n + r.orders, 0) },
+                { label: 'Weeks on file', value: rows.length },
+            ],
+        };
+    },
+
+    [REPORT_MONTHLY.key]: async (userId, country, region) => {
+        const rows = await SalesOnlyMetrics.aggregate([
+            { $match: { User: toObjectId(userId), country, region } },
+            {
+                $group: {
+                    _id: { $substr: ['$date', 0, 7] },
+                    sales: { $sum: { $ifNull: ['$sales.amount', 0] } },
+                    units: { $sum: { $ifNull: ['$unitsSold', 0] } },
+                    days: { $sum: 1 },
+                },
+            },
+            { $sort: { _id: -1 } },
+            { $limit: HISTORY_LIMIT },
+        ]);
+        if (!rows.length) return null;
+
+        const editions = rows.map((row, index) => {
+            // _id is a YYYY-MM slice of the stored date; a short or malformed
+            // date string yields something that is not a month, and one such row
+            // must not sink the whole history.
+            if (!/^\d{4}-\d{2}$/.test(String(row._id || ''))) return null;
+            const previous = rows[index + 1];
+            const change = previous ? pctChange(row.sales, previous.sales) : null;
+            return {
+                ...edition(
+                    `${row._id}-01T00:00:00.000Z`,
+                    `${formatMonth(`${row._id}-01T00:00:00.000Z`)}: ${round(row.sales)} sales over ${plural(row.days, 'day')}`
+                        + (change === null ? '' : `, ${change >= 0 ? 'up' : 'down'} ${Math.abs(change)}%`),
+                    change === null ? 'neutral' : change >= 0 ? 'good' : 'watch',
+                    // A month has no capture time worth showing.
+                    { showCapturedTime: false }
+                ),
+                // Whole months read better than a day for this one.
+                date: formatMonth(`${row._id}-01T00:00:00.000Z`),
+            };
+        }).filter(Boolean);
+
+        return {
+            editions,
+            stats: [
+                { label: 'Latest month sales', value: round(rows[0].sales), format: 'currency' },
+                { label: 'Units', value: rows[0].units },
+                { label: 'Months on file', value: rows.length },
+            ],
+        };
+    },
+};
+
+/**
+ * Every recorded edition of one report.
+ *
+ * @returns {Promise<object|null>} null when the key is not a report we publish
+ */
+const getEsfReportHistory = async (userId, country, region, reportKey) => {
+    const entry = BUILDERS[reportKey];
+    if (!entry) return null;
+
+    const meta = {
+        key: entry.meta.key,
+        name: entry.meta.name,
+        cadence: entry.meta.cadence,
+        marketplace: { country, region },
+    };
+
+    let built = null;
+    try {
+        built = await historyBuilders[reportKey]?.(userId, country, region);
+    } catch (error) {
+        logger.error(`[EsfReports] history for ${reportKey} failed: ${error.message}`, { stack: error.stack });
+    }
+
+    if (!built) {
+        return { ...meta, available: false, editions: [], totalEditions: 0, stats: [], reason: 'No editions of this report have been captured for this marketplace yet.' };
+    }
+
+    return {
+        ...meta,
+        available: true,
+        editions: built.editions,
+        totalEditions: built.editions.length,
+        stats: built.stats || [],
+        note: built.note || null,
+        // Said once, here, because every editions list is capture times rather
+        // than publication times and the difference matters to a reader.
+        capturedNote: 'Each edition is a capture of your account data at that moment. There is no separate publishing schedule behind these yet.',
+    };
+};
+
 module.exports = {
     getEsfReports,
     getEsfReportRows,
+    getEsfReportHistory,
     // exported for tests
     num,
     pctChange,

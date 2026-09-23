@@ -109,12 +109,27 @@ const banner = (report, subtitle) => ({
     margin: [0, 0, 0, 14],
 });
 
-/** Up to four stat tiles across, matching the template's flex row. */
+/** Tiles per row, matching the template's four-across stat band. */
+const TILES_PER_ROW = 4;
+
+/**
+ * The stat tiles, wrapped onto as many rows of four as the report needs.
+ *
+ * It used to render `stats.slice(0, 4)`, which silently dropped everything
+ * past the fourth tile — and what got dropped was not filler: the Monthly
+ * Performance report lost ACOS, Listings Audit lost four of its six content
+ * checks, and Inventory Restock lost the total reorder value. The figures were
+ * right; they simply never reached the page.
+ *
+ * The last row is padded with blank cells so a row of two does not stretch its
+ * tiles to twice the width of the row above.
+ */
 const statTiles = (stats, currency) => {
-    const tiles = (stats || []).slice(0, 4);
-    if (!tiles.length) return null;
+    const all = stats || [];
+    if (!all.length) return null;
 
     const cell = (stat) => {
+        if (!stat) return { text: '', border: [false, false, false, false] };
         const hasDelta = stat.delta !== null && stat.delta !== undefined;
         const improved = stat.deltaGoodWhen === 'down' ? stat.delta < 0 : stat.delta > 0;
         const suffix = stat.deltaFormat === 'percent' ? '%' : stat.deltaFormat === 'points' ? ' pts' : '';
@@ -124,7 +139,7 @@ const statTiles = (stats, currency) => {
         ];
         if (hasDelta) {
             stack.push({
-                text: stat.delta === 0 ? '—' : `${stat.delta > 0 ? '▲' : '▼'} ${Math.abs(stat.delta)}${suffix}`,
+                text: stat.delta === 0 ? '\u2014' : `${stat.delta > 0 ? '\u25B2' : '\u25BC'} ${Math.abs(stat.delta)}${suffix}`,
                 fontSize: 8,
                 bold: true,
                 color: stat.delta === 0 ? DOC.muted : improved ? DOC.green : DOC.red,
@@ -135,8 +150,15 @@ const statTiles = (stats, currency) => {
         return { stack, fillColor: DOC.light, margin: [2, 8, 2, 8] };
     };
 
-    return {
-        table: { widths: tiles.map(() => '*'), body: [tiles.map(cell)] },
+    const rows = [];
+    for (let i = 0; i < all.length; i += TILES_PER_ROW) {
+        const slice = all.slice(i, i + TILES_PER_ROW);
+        while (slice.length < TILES_PER_ROW) slice.push(null);
+        rows.push(slice.map(cell));
+    }
+
+    return rows.map((body, index) => ({
+        table: { widths: new Array(TILES_PER_ROW).fill('*'), body: [body] },
         // Thin white gutters between tiles, as the template's 2px gap does.
         layout: {
             hLineWidth: () => 0,
@@ -147,8 +169,8 @@ const statTiles = (stats, currency) => {
             paddingTop: () => 0,
             paddingBottom: () => 0,
         },
-        margin: [0, 0, 0, 16],
-    };
+        margin: [0, 0, 0, index === rows.length - 1 ? 16 : 2],
+    }));
 };
 
 /** Teal rule + uppercase heading, the template's section marker. */
@@ -242,7 +264,7 @@ const buildReportDocDefinition = (report, { marketplace, currency = '$', clientN
     const content = [banner(report, subtitle)];
 
     const tiles = statTiles(report.summary?.stats, currency);
-    if (tiles) content.push(tiles);
+    if (tiles) content.push(...tiles);
 
     content.push(sectionHeading(report.summary?.headline ? 'Summary' : 'Detail'));
     if (report.summary?.headline) {

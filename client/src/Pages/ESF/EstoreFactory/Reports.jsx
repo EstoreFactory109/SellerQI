@@ -26,9 +26,10 @@ import ReportDocumentPreview from '../../../Components/ESF/ReportDocumentPreview
  * Download produces the PDF in the browser from the document component itself
  * (see printReportDocument) rather than fetching a stored file — there is still
  * no recurring-report model, no generated files and no publishing schedule, so
- * what a client saves is this live edition, not an archived one. For the same
- * reason there is no per-report edition history: "View history" still points at
- * the one static Report History page, unchanged.
+ * what a client saves is this live edition, not an archived one.
+ *
+ * "View history" opens that report's own editions, read from the snapshot trail
+ * each fetcher leaves behind (see the history section of EsfReportsService).
  */
 
 /**
@@ -749,7 +750,7 @@ const Reports = () => {
                                     report={report}
                                     selected={selected?.key === report.key}
                                     onSelect={setSelectedKey}
-                                    onViewHistory={() => navigate('/seller-central-checker/estore-factory/report-history')}
+                                    onViewHistory={() => navigate(`/seller-central-checker/estore-factory/report-history/${report.key}`)}
                                     onDownload={setPendingDownload}
                                 />
                             ))}
