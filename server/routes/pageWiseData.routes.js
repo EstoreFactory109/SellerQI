@@ -102,6 +102,7 @@ const { getEsfClientDashboard } = require('../controllers/analytics/EsfClientDas
 const { getEsfProjectStatus } = require('../controllers/analytics/EsfProjectStatusController.js');
 const { postEsfTaskReply } = require('../controllers/analytics/EsfProjectReplyController.js');
 const { getEsfBilling, downloadEsfInvoice } = require('../controllers/analytics/EsfBillingController.js');
+const { getEsfReportsData } = require('../controllers/analytics/EsfReportsController.js');
 const { zohoUpload, MAX_FILES, MAX_FILE_BYTES } = require('../middlewares/multer/zohoUpload.js');
 const { ApiResponse } = require('../utils/ApiResponse.js');
 const esfClientOnly = require('../middlewares/Auth/esfClientOnly.js');
@@ -312,6 +313,12 @@ router.get('/esf/billing', auth, esfClientOnly, analyseDataCache(300, 'esf-billi
 // The invoice PDF. Deliberately NOT behind analyseDataCache — that cache serves JSON
 // and would corrupt a binary body. Scoped to the caller inside the controller.
 router.get('/esf/billing/invoices/:invoiceNumber/pdf', auth, esfClientOnly, downloadEsfInvoice);
+
+// Every recurring report type, each computed live from the collection that backs it.
+// getLocation because every report is scoped to one marketplace. Cached for 10 minutes:
+// the underlying snapshots are refreshed hourly at most, and the fan-out here touches
+// eight collections, so re-running it per page view would be wasteful.
+router.get('/esf/reports', auth, esfClientOnly, getLocation, analyseDataCache(600, 'esf-reports'), getEsfReportsData);
 
 /**
  * Reply to a task from the Status page — text, files, or both, sent on to Zoho.
