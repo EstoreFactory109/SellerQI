@@ -332,6 +332,85 @@ describe('raising a ticket', () => {
     });
 });
 
+describe('the acknowledgement back to the client', () => {
+    const ticket2 = () => GmailSend.startClientTicket({
+        subject: 'Listing issue', body: 'The title is wrong.', user: CLIENT,
+    });
+
+    test('gives the client an email they can reply to', async () => {
+        // Without it the ticket notification exists only in OUR inbox, so a client
+        // following up by email has to compose a fresh one — which Gmail files as a new
+        // thread and which therefore arrives as a SECOND ticket about the same issue.
+        await ticket2();
+
+        expect(mockSendMessage).toHaveBeenCalledTimes(2);
+        const ack = decodeRaw(mockSendMessage.mock.calls[1][0].raw);
+        expect(ack).toContain('To: walmart@morgansrepellent.com');
+    });
+
+    test('lands inside the same Gmail thread, not a separate one', async () => {
+        await ticket2();
+
+        expect(mockSendMessage.mock.calls[1][0].threadId).toBe('gt-new');
+    });
+
+    test('comes from the agency, never an individual', async () => {
+        await ticket2();
+
+        expect(decodeRaw(mockSendMessage.mock.calls[1][0].raw))
+            .toContain('From: "eStore Factory" <hello@estorefactory.com>');
+    });
+
+    test('does NOT carry Reply-To the client, which would point them at themselves', async () => {
+        // The notification needs Reply-To so the ADMIN reaches the client. This one is
+        // addressed TO the client, so the same header would send their reply to their
+        // own inbox.
+        await ticket2();
+
+        // Anchored to the line start: "In-Reply-To:" contains "Reply-To:" as a
+        // substring, so a plain toContain check passes on a message that threads
+        // correctly and has no Reply-To at all.
+        expect(decodeRaw(mockSendMessage.mock.calls[1][0].raw)).not.toMatch(/^Reply-To:/m);
+    });
+
+    test('failing does not fail the ticket', async () => {
+        // The ticket is already raised and visible in the portal. Losing it because a
+        // courtesy email bounced would be the wrong trade.
+        mockSendMessage
+            .mockResolvedValueOnce({ id: 'sent-1', threadId: 'gt-new' })
+            .mockRejectedValueOnce(new Error('SMTP exploded'));
+
+        await expect(ticket2()).resolves.toMatchObject({ threadId: 't-new' });
+    });
+
+    test('becomes what the next reply threads off', async () => {
+        // It is the message the client actually holds, so replies must chain from it.
+        await ticket2();
+
+        const update = mockThreadUpdateOne.mock.calls.at(-1)[1];
+        expect(update.$set.rfc822MessageIdOfLast).toMatch(/^<[0-9a-f-]+@estorefactory\.com>$/);
+    });
+});
+
+describe('a client who emails without a subject', () => {
+    test('can still be replied to', async () => {
+        // Gmail rejects a threaded send whose subject does not match the thread's. A
+        // blank subject substituted with "(no subject)" produces "Re: (no subject)"
+        // against a genuinely blank thread — mismatch, refused, and that client could
+        // never be answered. Real senders do this constantly.
+        mockThreadFindOne.mockReturnValue({
+            select: function () { return this; },
+            lean: () => Promise.resolve({ ...THREAD, rawSubject: '' }),
+        });
+
+        await GmailSend.sendStaffReply({ threadId: 't1', body: 'On it.' });
+
+        const raw = decodeRaw(mockSendMessage.mock.calls[0][0].raw);
+        expect(raw).toContain('Subject: \r\n');
+        expect(raw).not.toContain('(no subject)');
+    });
+});
+
 describe('what is refused', () => {
     test('an empty reply', async () => {
         await expect(GmailSend.sendStaffReply({ threadId: 't1', body: '   ' }))

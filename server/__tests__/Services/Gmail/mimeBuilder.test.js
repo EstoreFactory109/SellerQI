@@ -10,7 +10,7 @@
  */
 
 const {
-    buildMimeMessage, generateMessageId, replySubject, buildReferences,
+    buildMimeMessage, generateMessageId, replySubject, newSubject, buildReferences,
     formatAddress, encodeHeaderValue, sanitizeHeader,
 } = require('../../../Services/Gmail/mimeBuilder.js');
 
@@ -91,8 +91,19 @@ describe('subjects', () => {
         expect(replySubject('Re: Walmart listings')).toBe('Re: Walmart listings');
     });
 
-    test('fall back rather than sending an empty header', async () => {
-        expect(replySubject('')).toBe('Re: (no subject)');
+    test('an empty subject STAYS empty on a reply', async () => {
+        // Gmail rejects a threaded send whose subject does not match the thread's, so a
+        // friendly placeholder here is actively harmful: "Re: (no subject)" against a
+        // genuinely blank thread is a mismatch, the send is refused, and a client who
+        // emailed in without a subject could never be answered at all.
+        expect(replySubject('')).toBe('');
+        expect(replySubject('   ')).toBe('');
+    });
+
+    test('a message that OPENS a thread does get the placeholder', async () => {
+        // Nothing to match against here, and a blank subject in the client's inbox is
+        // just unhelpful.
+        expect(newSubject('')).toBe('(no subject)');
     });
 
     test('are encoded when they contain non-ASCII', async () => {

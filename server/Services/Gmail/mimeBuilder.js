@@ -70,9 +70,17 @@ const generateMessageId = (domain) => {
     return `<${crypto.randomUUID()}@${host}>`;
 };
 
-/** Gmail rejects a threaded send whose subject does not match the thread's. */
+/**
+ * Gmail rejects a threaded send whose subject does not match the thread's.
+ *
+ * An empty subject therefore has to stay empty. Substituting a friendly placeholder
+ * would produce "Re: (no subject)" against a thread whose subject is genuinely blank,
+ * and Gmail refuses the send — so a client who emails in without a subject could never
+ * be replied to. Real clients do this constantly.
+ */
 const replySubject = (rawSubject) => {
-    const subject = sanitizeHeader(rawSubject) || '(no subject)';
+    const subject = sanitizeHeader(rawSubject);
+    if (!subject) return '';
     return /^re:/i.test(subject) ? subject : `Re: ${subject}`;
 };
 

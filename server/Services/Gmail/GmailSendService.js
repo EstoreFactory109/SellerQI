@@ -197,6 +197,77 @@ const deliverClientMessage = async ({
 };
 
 /**
+ * Acknowledge a ticket back to the client, inside the same Gmail thread.
+ *
+ * ── WHY THIS IS NOT A COURTESY, IT IS THE FIX FOR A STRUCTURAL GAP ──
+ * The ticket notification goes to OUR inbox only, so until someone replies the client
+ * has nothing in their own mailbox belonging to this conversation. If they then decide
+ * to follow up by email, they have no choice but to compose a fresh one — which Gmail
+ * quite correctly files as a new thread, and which therefore arrives here as a SECOND
+ * ticket about the same issue. The client did nothing wrong; there was simply nothing
+ * to reply to.
+ *
+ * One email, addressed to them, inside the same thread, closes that gap: from now on
+ * "reply" does the right thing from either side.
+ *
+ * It cannot be folded into the notification. One message cannot serve both audiences —
+ * the admin's Reply must reach the client, so Reply-To is the client, and the client's
+ * Reply would then go to themselves.
+ */
+const acknowledgeTicket = async ({ thread, rawSubject, text, fromAddress, gmailThreadId, inReplyTo }) => {
+    const { inboxAddress } = getCredentials();
+    const messageId = generateMessageId(String(inboxAddress).split('@')[1]);
+
+    const body = [
+        'Thanks — we have this, and your account team will reply shortly.',
+        '',
+        'You can reply to this email to add to the conversation, or continue in your portal.',
+        '',
+        '--- your message ---',
+        text,
+    ].join('\n');
+
+    const { raw } = buildMimeMessage({
+        // The agency, never an individual — the same rule every outbound message follows.
+        from: { name: AGENCY_DISPLAY_NAME, email: inboxAddress },
+        to: { email: fromAddress },
+        rawSubject,
+        bodyText: body,
+        inReplyTo,
+        messageId,
+        origin: 'portal-ack',
+    });
+
+    const sent = await GmailClient.sendMessage({ raw, threadId: gmailThreadId });
+
+    await EmailMessage.updateOne(
+        { gmailMessageId: sent.id },
+        {
+            $setOnInsert: {
+                gmailMessageId: sent.id,
+                gmailThreadId,
+                threadId: thread._id,
+                userId: thread.userId,
+                direction: 'outbound',
+                origin: 'portal-ack',
+                rfc822MessageId: messageId,
+                sentAt: new Date(),
+                // Written by us from a fixed template, so there was never anything of
+                // the client's in it to remove.
+                bodyRedacted: 'Thanks — we have this, and your account team will reply shortly.',
+                bodyTruncated: false,
+                quotedTrimmed: false,
+                redactedBy: 'portal',
+                syncedAt: new Date(),
+            },
+        },
+        { upsert: true }
+    );
+
+    return messageId;
+};
+
+/**
  * A staff member replies. The email is genuinely sent to the client.
  *
  * @param {object} args
@@ -408,6 +479,32 @@ const startClientTicket = async ({ subject, body, user }) => {
         },
         { upsert: true }
     );
+
+    /**
+     * Non-fatal. The ticket itself is already raised and visible in the portal; failing
+     * the whole request because a courtesy email did not go would be the wrong trade.
+     * It is logged, because its absence is what pushes the client back to composing a
+     * fresh email — which arrives as a second ticket.
+     */
+    try {
+        const ackMessageId = await acknowledgeTicket({
+            thread,
+            rawSubject,
+            text,
+            fromAddress,
+            gmailThreadId: sent.threadId,
+            inReplyTo: messageId,
+        });
+        // The next reply threads off the acknowledgement, since that is the message the
+        // client actually holds.
+        await EmailThread.updateOne({ _id: thread._id }, {
+            $set: { rfc822MessageIdOfLast: ackMessageId },
+            $push: { referencesTail: { $each: [ackMessageId], $slice: -10 } },
+            $inc: { messageCount: 1 },
+        });
+    } catch (error) {
+        logger.error(`[GmailSend] ticket ${thread._id} raised but acknowledgement failed: ${error.message}`);
+    }
 
     logger.info(`[GmailSend] client opened ticket ${thread._id}`);
     return { threadId: String(thread._id), subject: thread.displaySubject, sentAt };
