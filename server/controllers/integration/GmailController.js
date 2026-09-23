@@ -233,10 +233,49 @@ const startGmailWatch = asyncHandler(async (req, res) => {
     }, 'Gmail watch started'));
 });
 
+/**
+ * POST /api/gmail/pubsub/push
+ *
+ * Google calls this. No auth middleware by necessity — the protection is the OIDC token
+ * check in pubsubVerifier.js, which is where the reasoning lives.
+ *
+ * ── ALWAYS ANSWER 204, EVEN ON REJECTION ──
+ * Pub/Sub retries anything that is not a prompt 2xx, with backoff, for days. A 401 to a
+ * misconfigured subscription therefore becomes an unbounded retry storm against a public
+ * endpoint, and a 500 for a message we cannot use means Google redelivers it forever.
+ * Nothing here is worth a retry: a genuine notification we drop is picked up by the next
+ * poll, and a forged one must not be retried at all. The reason is logged instead.
+ */
+const handlePubSubPush = asyncHandler(async (req, res) => {
+    const { verifyPush } = require('../../Services/Gmail/pubsubVerifier.js');
+
+    const result = await verifyPush(req);
+    if (!result.ok) {
+        logger.warn(`[GmailPush] rejected: ${result.reason}`);
+        return res.status(204).send();
+    }
+
+    if (!isMessagingEnabled()) return res.status(204).send();
+
+    try {
+        const { enqueueGmailSync } = require('../../Services/BackgroundJobs/gmailInboxQueue.js');
+        // The announced historyId is recorded for diagnostics only. It is a doorbell,
+        // never a cursor — Pub/Sub delivers out of order and at least once.
+        await enqueueGmailSync({ reason: 'push', historyId: result.notification.historyId });
+    } catch (error) {
+        // Enqueue failing is ours to fix, not Google's to retry. The poll is the
+        // backstop, which is exactly why it stays on in production.
+        logger.error(new ApiError(500, `[GmailPush] enqueue failed: ${error.message}`));
+    }
+
+    return res.status(204).send();
+});
+
 module.exports = {
     getGmailStatus,
     startGmailAuth,
     handleGmailCallback,
     disconnectGmail,
     startGmailWatch,
+    handlePubSubPush,
 };

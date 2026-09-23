@@ -143,6 +143,43 @@ async function runWatchTick() {
     return { expiration: result.expiration, labelIds: WATCH_LABEL_IDS };
 }
 
+/**
+ * The worker behind the push queue.
+ *
+ * CONCURRENCY 1, and not for throughput: the history cursor is a single serialised
+ * value, so two syncs advancing it at once loses mail exactly as advancing past a
+ * failure would. It is a correctness constraint.
+ *
+ * The distributed lock is shared with the poll for the same reason — a push arriving
+ * mid-poll must wait, not run alongside. When it cannot get the lock it returns rather
+ * than retrying, because whichever sync holds it walks history to the present and will
+ * pick up the same message.
+ */
+function setupWorker() {
+    const { Worker } = require('bullmq');
+    const { GMAIL_INBOX_QUEUE_NAME, queueConfig } = require('./gmailInboxQueue.js');
+
+    const worker = new Worker(GMAIL_INBOX_QUEUE_NAME, async (job) => {
+        const lockKey = pollLockKey();
+        if (!await acquireLock(lockKey, POLL_LOCK_TTL_MS)) {
+            return { skipped: 'sync-already-running' };
+        }
+        try {
+            const { runSync } = require('../Gmail/GmailIngestService.js');
+            return await runSync({ reason: job.data?.reason || 'push' });
+        } finally {
+            await releaseLock(lockKey);
+        }
+    }, { connection: queueConfig.connection, prefix: 'bullmq', concurrency: 1 });
+
+    worker.on('failed', (job, error) => {
+        logger.error('[GmailInbox] Sync job failed', { jobId: job?.id, error: error?.message });
+    });
+
+    logger.info('[GmailInbox] Sync worker started (concurrency 1)');
+    return worker;
+}
+
 function setupCron() {
     const cron = require('node-cron');
 
@@ -177,11 +214,22 @@ function setupCron() {
     pollJob.start();
     watchJob.start();
 
+    // The push worker lives beside the crons so push and poll share one lock holder
+    // and one process — two syncs must never advance the cursor concurrently.
+    let worker = null;
+    try {
+        worker = setupWorker();
+    } catch (error) {
+        // A missing queue Redis must not take the poll down with it: polling alone
+        // still delivers every message, just up to GMAIL_POLL_MINUTES later.
+        logger.error('[GmailInbox] Sync worker failed to start — polling continues', { error: error?.message });
+    }
+
     logger.info(`[GmailInbox] Crons registered (poll "${POLL_CRON}", watch "${WATCH_CRON}")`);
-    return { pollJob, watchJob };
+    return { pollJob, watchJob, worker };
 }
 
-module.exports = { setupCron, runPollTick, runWatchTick, pollLockKey, watchLockKey };
+module.exports = { setupCron, setupWorker, runPollTick, runWatchTick, pollLockKey, watchLockKey };
 
 // Standalone: `node gmailInboxStandalone.js`
 if (require.main === module) {

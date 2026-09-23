@@ -14,6 +14,7 @@
  * - GET    /api/gmail/auth/callback  OAuth redirect target (NO auth — see below)
  * - DELETE /api/gmail/disconnect     forget the connection (owner/admin)
  * - POST   /api/gmail/watch          start or renew the push watch (owner/admin)
+ * - POST   /api/gmail/pubsub/push    Google's push target (NO auth — OIDC verified)
  */
 
 const express = require('express');
@@ -25,6 +26,7 @@ const {
     handleGmailCallback,
     disconnectGmail,
     startGmailWatch,
+    handlePubSubPush,
 } = require('../controllers/integration/GmailController.js');
 
 router.get('/status', esfAuth, getGmailStatus);
@@ -36,5 +38,16 @@ router.get('/auth/callback', handleGmailCallback);
 
 router.delete('/disconnect', esfAuth, disconnectGmail);
 router.post('/watch', esfAuth, startGmailWatch);
+
+/**
+ * Google's push notifications. Unauthenticated by necessity, like the OAuth callback —
+ * Google's servers carry none of our cookies. The protection is the OIDC token check in
+ * Services/Gmail/pubsubVerifier.js.
+ *
+ * NO raw-body mount is needed, unlike the Stripe and WhatsApp webhooks in api/app.js:
+ * Pub/Sub's authenticity is a JWT in the Authorization header, not a signature over the
+ * body, so the ordinary JSON parser is correct here.
+ */
+router.post('/pubsub/push', handlePubSubPush);
 
 module.exports = router;
