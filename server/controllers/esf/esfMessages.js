@@ -218,6 +218,8 @@ const postStaffReply = asyncHandler(async (req, res) => {
             threadId: req.params.threadId,
             body: req.body?.body,
             staffUserId: req.esfUserId,
+            // multer puts them here; the service reads them off disk and unlinks them.
+            files: req.files || [],
         });
 
         return res.status(201).json(new ApiResponse(201, result, 'Reply sent'));
@@ -232,4 +234,37 @@ const postStaffReply = asyncHandler(async (req, res) => {
     }
 });
 
-module.exports = { listStaffThreads, getStaffThread, setThreadResolved, postStaffReply };
+/**
+ * GET /app/esf/messages/:threadId/attachments/:messageId/:index
+ *
+ * The filename served is the redacted one. The CONTENTS are not redactable and never
+ * will be — a letterhead, EXIF owner data, a photographed business card. That exception
+ * was accepted knowingly; this route is where it takes effect.
+ */
+const downloadStaffAttachment = asyncHandler(async (req, res) => {
+    try {
+        if (denied(req)) {
+            return res.status(403).json(new ApiResponse(403, '', 'You do not have access to Messages'));
+        }
+
+        const { fetchAttachment, sendAttachment } = require('../../Services/Gmail/GmailAttachmentService.js');
+
+        const file = await fetchAttachment({
+            messageId: req.params.messageId,
+            threadId: req.params.threadId,
+            index: req.params.index,
+        });
+
+        return sendAttachment(res, file);
+    } catch (error) {
+        if (error.statusCode && error.statusCode < 500) {
+            return res.status(error.statusCode).json(new ApiResponse(error.statusCode, '', error.message));
+        }
+        logger.error(new ApiError(500, `[EsfMessages] attachment failed: ${error.message}`));
+        return res.status(500).json(new ApiResponse(500, '', 'Could not download that file'));
+    }
+});
+
+module.exports = {
+    listStaffThreads, getStaffThread, setThreadResolved, postStaffReply, downloadStaffAttachment,
+};

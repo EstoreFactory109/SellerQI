@@ -134,6 +134,7 @@ const postEsfMessageReply = asyncHandler(async (req, res) => {
             threadId: req.params.threadId,
             body: req.body?.body,
             user: await loadClient(req.userId),
+            files: req.files || [],
         });
 
         return res.status(201).json(new ApiResponse(201, result, 'Reply sent'));
@@ -163,6 +164,7 @@ const postEsfNewTicket = asyncHandler(async (req, res) => {
             subject: req.body?.subject,
             body: req.body?.body,
             user: await loadClient(req.userId),
+            files: req.files || [],
         });
 
         return res.status(201).json(new ApiResponse(201, result, 'Ticket raised'));
@@ -177,4 +179,32 @@ const postEsfNewTicket = asyncHandler(async (req, res) => {
     }
 });
 
-module.exports = { getEsfMessages, getEsfMessageThread, postEsfMessageReply, postEsfNewTicket };
+/**
+ * GET /api/pagewise/esf/messages/:threadId/attachments/:messageId/:index
+ *
+ * Scoped to this client, so a message id from another account resolves to nothing.
+ */
+const downloadEsfAttachment = asyncHandler(async (req, res) => {
+    try {
+        const { fetchAttachment, sendAttachment } = require('../../Services/Gmail/GmailAttachmentService.js');
+
+        const file = await fetchAttachment({
+            messageId: req.params.messageId,
+            threadId: req.params.threadId,
+            index: req.params.index,
+            userId: req.userId,
+        });
+
+        return sendAttachment(res, file);
+    } catch (error) {
+        if (error.statusCode && error.statusCode < 500) {
+            return res.status(error.statusCode).json(new ApiResponse(error.statusCode, '', error.message));
+        }
+        logger.error(new ApiError(500, `[EsfClientMessages] attachment failed: ${error.message}`));
+        return res.status(500).json(new ApiResponse(500, '', 'Could not download that file'));
+    }
+});
+
+module.exports = {
+    getEsfMessages, getEsfMessageThread, postEsfMessageReply, postEsfNewTicket, downloadEsfAttachment,
+};

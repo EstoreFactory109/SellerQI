@@ -85,6 +85,8 @@ const Messages = () => {
     const [error, setError] = useState('');
     const [draft, setDraft] = useState('');
     const [sending, setSending] = useState(false);
+    const [files, setFiles] = useState([]);
+    const [ticketFiles, setTicketFiles] = useState([]);
     const [ticketOpen, setTicketOpen] = useState(false);
     const [ticketSubject, setTicketSubject] = useState('');
     const [ticketBody, setTicketBody] = useState('');
@@ -109,6 +111,7 @@ const Messages = () => {
         setOpenId(id);
         setConversation(null);
         setDraft('');
+        setFiles([]);
         try {
             const res = await axiosInstance.get(`/api/pagewise/esf/messages/${id}`);
             setConversation(res.data?.data || null);
@@ -124,10 +127,16 @@ const Messages = () => {
 
         setSending(true);
         try {
-            await axiosInstance.post(`/api/pagewise/esf/messages/${openId}/reply`, { body: text });
+            // multipart, because the body may carry files. Content-Type is left to the
+            // browser: setting it by hand drops the boundary and multer sees nothing.
+            const form = new FormData();
+            form.append('body', text);
+            files.forEach((file) => form.append('files', file));
+            await axiosInstance.post(`/api/pagewise/esf/messages/${openId}/reply`, form);
             // Cleared only once the request succeeds — clearing optimistically loses
             // what someone just wrote when the send fails, with nowhere to get it back.
             setDraft('');
+            setFiles([]);
             const res = await axiosInstance.get(`/api/pagewise/esf/messages/${openId}`);
             setConversation(res.data?.data || null);
             loadThreads();
@@ -136,7 +145,7 @@ const Messages = () => {
         } finally {
             setSending(false);
         }
-    }, [draft, sending, openId, loadThreads]);
+    }, [draft, files, sending, openId, loadThreads]);
 
     const raiseTicket = useCallback(async () => {
         const subject = ticketSubject.trim();
@@ -146,12 +155,17 @@ const Messages = () => {
         setRaising(true);
         setError('');
         try {
-            const res = await axiosInstance.post('/api/pagewise/esf/messages', { subject, body });
+            const form = new FormData();
+            form.append('subject', subject);
+            form.append('body', body);
+            ticketFiles.forEach((file) => form.append('files', file));
+            const res = await axiosInstance.post('/api/pagewise/esf/messages', form);
             const newId = res.data?.data?.threadId;
 
             setTicketOpen(false);
             setTicketSubject('');
             setTicketBody('');
+            setTicketFiles([]);
             await loadThreads();
             // Drop straight into the conversation they just started, so it is obviously
             // a conversation rather than a form that vanished.
@@ -163,7 +177,7 @@ const Messages = () => {
         } finally {
             setRaising(false);
         }
-    }, [ticketSubject, ticketBody, raising, loadThreads, openThread]);
+    }, [ticketSubject, ticketBody, ticketFiles, raising, loadThreads, openThread]);
 
     const open = conversation?.thread;
     const dayGroups = useMemo(() => groupByDay(conversation?.messages || []), [conversation]);
@@ -328,14 +342,17 @@ const Messages = () => {
 
                                                         {message.attachments?.length > 0 && (
                                                             <div className="mt-2 flex flex-wrap gap-1.5">
-                                                                {message.attachments.map((file) => (
-                                                                    <span
-                                                                        key={file.id || file.name}
-                                                                        className="rounded px-2 py-1 text-[11px]"
+                                                                {message.attachments.map((file, i) => (
+                                                                    <a
+                                                                        key={file.id || `${file.name}-${i}`}
+                                                                        href={`/api/pagewise/esf/messages/${open.id}/attachments/${message.id}/${i}`}
+                                                                        target="_blank"
+                                                                        rel="noreferrer"
+                                                                        className="rounded px-2 py-1 text-[11px] underline-offset-2 hover:underline"
                                                                         style={{ background: 'rgba(0,0,0,.25)', color: PALETTE.textSecondary }}
                                                                     >
                                                                         {file.name || 'Attachment'}
-                                                                    </span>
+                                                                    </a>
                                                                 ))}
                                                             </div>
                                                         )}
@@ -355,10 +372,49 @@ const Messages = () => {
                             </div>
 
                             <div className="border-t px-4 py-3" style={{ borderColor: PALETTE.border }}>
+                                {files.length > 0 && (
+                                    <div className="mb-2 flex flex-wrap gap-1.5">
+                                        {files.map((file, i) => (
+                                            <span
+                                                key={`${file.name}-${i}`}
+                                                className="flex items-center gap-1.5 rounded px-2 py-1 text-[11px]"
+                                                style={{ background: 'rgba(255,255,255,.07)', color: PALETTE.textSecondary }}
+                                            >
+                                                <span className="max-w-[160px] truncate">{file.name}</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setFiles((c) => c.filter((_, j) => j !== i))}
+                                                    style={{ color: PALETTE.textTertiary }}
+                                                >
+                                                    ×
+                                                </button>
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
                                 <div
                                     className="flex items-end gap-2 rounded-lg px-3 py-2"
                                     style={{ background: 'rgba(255,255,255,.05)' }}
                                 >
+                                    <label
+                                        className="mb-0.5 shrink-0 cursor-pointer text-[16px] leading-none"
+                                        style={{ color: PALETTE.textTertiary }}
+                                        title="Attach files"
+                                    >
+                                        📎
+                                        <input
+                                            type="file"
+                                            multiple
+                                            hidden
+                                            disabled={sending}
+                                            onChange={(e) => {
+                                                // Capped here too, so picking ten says so now
+                                                // rather than after the upload finishes.
+                                                setFiles((c) => [...c, ...Array.from(e.target.files || [])].slice(0, 5));
+                                                e.target.value = '';
+                                            }}
+                                        />
+                                    </label>
                                     <textarea
                                         rows={1}
                                         value={draft}
@@ -448,6 +504,41 @@ const Messages = () => {
                             className="mt-1 w-full resize-none rounded-lg px-3 py-2 text-[13.5px] leading-relaxed focus:outline-none disabled:opacity-50"
                             style={{ background: 'rgba(255,255,255,.05)', color: PALETTE.textPrimary }}
                         />
+
+                        <label className="mt-3 block text-[11.5px] font-medium" style={{ color: PALETTE.textSecondary }}>
+                            Attachments (optional)
+                        </label>
+                        <input
+                            type="file"
+                            multiple
+                            disabled={raising}
+                            onChange={(e) => {
+                                setTicketFiles((c) => [...c, ...Array.from(e.target.files || [])].slice(0, 5));
+                                e.target.value = '';
+                            }}
+                            className="mt-1 w-full text-[11.5px]"
+                            style={{ color: PALETTE.textTertiary }}
+                        />
+                        {ticketFiles.length > 0 && (
+                            <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                {ticketFiles.map((file, i) => (
+                                    <span
+                                        key={`${file.name}-${i}`}
+                                        className="flex items-center gap-1.5 rounded px-2 py-1 text-[11px]"
+                                        style={{ background: 'rgba(255,255,255,.07)', color: PALETTE.textSecondary }}
+                                    >
+                                        <span className="max-w-[160px] truncate">{file.name}</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setTicketFiles((c) => c.filter((_, j) => j !== i))}
+                                            style={{ color: PALETTE.textTertiary }}
+                                        >
+                                            ×
+                                        </button>
+                                    </span>
+                                ))}
+                            </div>
+                        )}
 
                         {/*
                             Said before they type it rather than after: contact details get

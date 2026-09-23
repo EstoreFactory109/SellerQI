@@ -180,6 +180,57 @@ async function runWatchTick() {
 }
 
 /**
+ * Delete uploads left behind in public/temp.
+ *
+ * The send path unlinks its own files on every outcome, success or failure. What it
+ * cannot cover is the process dying in between — a deploy restart mid-send, an OOM
+ * kill — which leaves the file there with nothing that will ever look at it again.
+ *
+ * One orphan is nothing. The problem is the shape of the failure: it accumulates
+ * silently for months and then presents as a full disk, which looks like anything
+ * except an attachment feature. Cheap to prevent, unpleasant to diagnose.
+ *
+ * Six hours, because a send takes seconds — anything older than that is certainly not
+ * in flight, and the margin means a genuinely slow upload is never deleted underneath
+ * itself.
+ */
+const TEMP_ORPHAN_AGE_MS = 6 * 60 * 60 * 1000;
+
+async function sweepTempUploads() {
+    const fs = require('fs/promises');
+    const path = require('path');
+    const tempDir = path.resolve(__dirname, '../../public/temp');
+
+    let removed = 0;
+    try {
+        const entries = await fs.readdir(tempDir);
+        const cutoff = Date.now() - TEMP_ORPHAN_AGE_MS;
+
+        for (const name of entries) {
+            const full = path.join(tempDir, name);
+            try {
+                // eslint-disable-next-line no-await-in-loop
+                const stat = await fs.stat(full);
+                if (stat.isFile() && stat.mtimeMs < cutoff) {
+                    // eslint-disable-next-line no-await-in-loop
+                    await fs.unlink(full);
+                    removed += 1;
+                }
+            } catch (_) {
+                // Raced with the send path unlinking it. Nothing to do.
+            }
+        }
+    } catch (error) {
+        if (error.code !== 'ENOENT') {
+            logger.warn('[GmailInbox] temp sweep failed', { error: error.message });
+        }
+    }
+
+    if (removed > 0) logger.info(`[GmailInbox] removed ${removed} orphaned upload(s) from public/temp`);
+    return { removed };
+}
+
+/**
  * The worker behind the push queue.
  *
  * CONCURRENCY 1, and not for throughput: the history cursor is a single serialised
@@ -238,6 +289,11 @@ function setupCron() {
         const lockKey = watchLockKey();
         if (!await acquireLock(lockKey, WATCH_LOCK_TTL_MS)) return;
         try {
+            // Runs regardless of GMAIL_MESSAGING_ENABLED: files can be orphaned by a
+            // crash and then the feature switched off, and they would never be
+            // collected at all.
+            await sweepTempUploads();
+
             const result = await runWatchTick();
             logger.info('[GmailInbox] Watch renewal', result);
         } catch (error) {
@@ -265,7 +321,9 @@ function setupCron() {
     return { pollJob, watchJob, worker };
 }
 
-module.exports = { setupCron, setupWorker, runPollTick, runWatchTick, pollLockKey, watchLockKey };
+module.exports = {
+    setupCron, setupWorker, runPollTick, runWatchTick, sweepTempUploads, pollLockKey, watchLockKey,
+};
 
 // Standalone: `node gmailInboxStandalone.js`
 if (require.main === module) {

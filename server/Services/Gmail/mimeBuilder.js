@@ -108,6 +108,48 @@ const buildReferences = (existing = [], inReplyTo = null) => {
 };
 
 /**
+ * A boundary that cannot collide with the content it separates.
+ *
+ * If a boundary string appears anywhere inside a part, the receiving parser truncates
+ * the message there — the body ends mid-sentence, or an attachment arrives corrupt,
+ * with nothing to indicate why. Random and long enough that it will not.
+ *
+ * 12 bytes rather than 16: 96 bits is still far beyond any chance of colliding with
+ * content, and it keeps the Content-Type header inside the 78-character line length
+ * RFC 5322 recommends. Longer is legal but gets folded by some agents, and a folded
+ * boundary parameter is read wrongly by a stubborn minority of clients.
+ */
+const generateBoundary = () => `----=_SQI_${crypto.randomBytes(12).toString('hex')}`;
+
+/**
+ * A filename as it appears in Content-Disposition.
+ *
+ * Quotes are stripped rather than escaped: a quote inside a quoted-string parameter
+ * ends it early, and everything after would be read as another parameter.
+ */
+const formatFilename = (name) => {
+    const clean = sanitizeHeader(name).replace(/["\\]/g, '').slice(0, 200) || 'attachment';
+    return needsEncoding(clean) ? encodeHeaderValue(clean) : clean;
+};
+
+/** One attachment as a MIME part. `content` is a Buffer. */
+const attachmentPart = (file, boundary) => {
+    const filename = formatFilename(file.filename);
+    const mimeType = sanitizeHeader(file.mimeType) || 'application/octet-stream';
+
+    return [
+        `--${boundary}`,
+        `Content-Type: ${mimeType}; name="${filename}"`,
+        `Content-Disposition: attachment; filename="${filename}"`,
+        'Content-Transfer-Encoding: base64',
+        '',
+        // Wrapped at 76, same RFC 2045 rule as the body — and far more likely to bite
+        // here, because an attachment is megabytes of base64 rather than a few lines.
+        file.content.toString('base64').replace(/(.{76})/g, `$1${CRLF}`),
+    ].join(CRLF);
+};
+
+/**
  * Build a complete RFC 822 message, base64url encoded for the Gmail API.
  *
  * @param {object} options
@@ -134,6 +176,8 @@ const buildMimeMessage = ({
     date = new Date(),
     // true when this message opens a conversation rather than continuing one.
     isNewThread = false,
+    /** `[{ filename, mimeType, content: Buffer }]`. Omitted or empty keeps the message text-only. */
+    attachments = [],
     /**
      * Where a human hitting "Reply" should end up.
      *
@@ -161,23 +205,53 @@ const buildMimeMessage = ({
         // come back through the watch looking like new mail; without this every portal
         // message would appear twice.
         ...(origin ? { 'X-SellerQI-Origin': sanitizeHeader(origin) } : {}),
+    };
+
+    const files = (attachments || []).filter((file) => file && file.content);
+
+    // Wrapped at 76 characters: RFC 2045 requires base64 lines not exceed 76, and a
+    // single long line is rejected outright by some servers.
+    const encodedText = Buffer.from(String(bodyText || ''), 'utf8')
+        .toString('base64')
+        .replace(/(.{76})/g, `$1${CRLF}`);
+
+    let body;
+    if (files.length === 0) {
         // base64 rather than 8bit: the body is arbitrary user text and may contain
         // anything, and some relays still mangle raw 8-bit content.
-        'Content-Type': 'text/plain; charset="UTF-8"',
-        'Content-Transfer-Encoding': 'base64',
-    };
+        headers['Content-Type'] = 'text/plain; charset="UTF-8"';
+        headers['Content-Transfer-Encoding'] = 'base64';
+        body = encodedText;
+    } else {
+        /**
+         * multipart/mixed: the message text as the first part, then one part per file.
+         *
+         * The transfer-encoding header belongs to each PART, never to the multipart
+         * container — a Content-Transfer-Encoding on the container tells the parser the
+         * boundaries themselves are base64, and the whole message is discarded as
+         * malformed.
+         */
+        const boundary = generateBoundary();
+        headers['Content-Type'] = `multipart/mixed; boundary="${boundary}"`;
+
+        body = [
+            `--${boundary}`,
+            'Content-Type: text/plain; charset="UTF-8"',
+            'Content-Transfer-Encoding: base64',
+            '',
+            encodedText,
+            ...files.map((file) => attachmentPart(file, boundary)),
+            // The closing boundary needs its trailing "--". Without it the message is
+            // unterminated and some clients drop the final attachment.
+            `--${boundary}--`,
+        ].join(CRLF);
+    }
 
     const headerBlock = Object.entries(headers)
         .map(([name, value]) => `${name}: ${value}`)
         .join(CRLF);
 
-    // Wrapped at 76 characters: RFC 2045 requires base64 lines not exceed 76, and a
-    // single long line is rejected outright by some servers.
-    const encodedBody = Buffer.from(String(bodyText || ''), 'utf8')
-        .toString('base64')
-        .replace(/(.{76})/g, `$1${CRLF}`);
-
-    const message = `${headerBlock}${CRLF}${CRLF}${encodedBody}`;
+    const message = `${headerBlock}${CRLF}${CRLF}${body}`;
 
     return {
         // base64url, per the Gmail API — standard base64 is rejected.
@@ -192,6 +266,8 @@ module.exports = {
     generateMessageId,
     replySubject,
     newSubject,
+    generateBoundary,
+    formatFilename,
     buildReferences,
     formatAddress,
     encodeHeaderValue,

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { MessageSquare, CheckCircle2, RotateCcw, Search, Send, Paperclip, Lock, Check, CheckCheck } from 'lucide-react';
+import { MessageSquare, CheckCircle2, RotateCcw, Search, Send, Paperclip, Lock, Check, CheckCheck, X } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 
 /**
@@ -135,6 +135,7 @@ const EsfMessages = () => {
     const [search, setSearch] = useState('');
     const [draft, setDraft] = useState('');
     const [sending, setSending] = useState(false);
+    const [files, setFiles] = useState([]);
 
     const loadThreads = useCallback(async () => {
         try {
@@ -156,9 +157,10 @@ const EsfMessages = () => {
     const openThread = useCallback(async (id) => {
         setOpenId(id);
         setConversation(null);
-        // Per-conversation, so a half-written reply is never delivered to whoever is
-        // opened next.
+        // Per-conversation, so a half-written reply and its attachments are never
+        // delivered to whoever is opened next.
         setDraft('');
+        setFiles([]);
         try {
             const res = await axiosInstance.get(`/app/esf/messages/${id}`);
             setConversation(res.data?.data || null);
@@ -192,11 +194,18 @@ const EsfMessages = () => {
 
         setSending(true);
         try {
-            await axiosInstance.post(`/app/esf/messages/${openId}/reply`, { body: text });
+            // multipart, because the body may carry files. Content-Type is left to the
+            // browser: setting it by hand drops the boundary and multer sees nothing.
+            const form = new FormData();
+            form.append('body', text);
+            files.forEach((file) => form.append('files', file));
+
+            await axiosInstance.post(`/app/esf/messages/${openId}/reply`, form);
             // Cleared only after the request succeeds. Clearing optimistically loses
             // what someone just wrote when the send fails, and there is nowhere to get
             // it back from.
             setDraft('');
+            setFiles([]);
             const res = await axiosInstance.get(`/app/esf/messages/${openId}`);
             setConversation(res.data?.data || null);
             loadThreads();
@@ -205,7 +214,7 @@ const EsfMessages = () => {
         } finally {
             setSending(false);
         }
-    }, [draft, sending, openId, loadThreads]);
+    }, [draft, files, sending, openId, loadThreads]);
 
     /**
      * Filtering happens here, over data the server already redacted.
@@ -391,14 +400,23 @@ const EsfMessages = () => {
 
                                                         {message.attachments?.length > 0 && (
                                                             <div className="mt-2 flex flex-wrap gap-1.5">
-                                                                {message.attachments.map((file) => (
-                                                                    <span
-                                                                        key={file.id || file.name}
-                                                                        className="flex items-center gap-1.5 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-[11px] text-gray-300"
+                                                                {message.attachments.map((file, i) => (
+                                                                    /*
+                                                                        The filename is redacted; the FILE is not.
+                                                                        A letterhead or a photographed card still
+                                                                        identifies the client — the accepted
+                                                                        exception, made concrete here.
+                                                                    */
+                                                                    <a
+                                                                        key={file.id || `${file.name}-${i}`}
+                                                                        href={`/app/esf/messages/${open.id}/attachments/${message.id}/${i}`}
+                                                                        target="_blank"
+                                                                        rel="noreferrer"
+                                                                        className="flex items-center gap-1.5 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-[11px] text-gray-300 transition-colors hover:border-white/25 hover:text-gray-100"
                                                                     >
                                                                         <Paperclip className="h-3 w-3" />
                                                                         {file.name || 'Attachment'}
-                                                                    </span>
+                                                                    </a>
                                                                 ))}
                                                             </div>
                                                         )}
@@ -435,7 +453,49 @@ const EsfMessages = () => {
 
                             {/* Composer */}
                             <div className="border-t border-white/10 bg-white/[0.03] px-4 py-3">
+                                {/* Chosen files, before sending */}
+                                {files.length > 0 && (
+                                    <div className="mb-2 flex flex-wrap gap-1.5">
+                                        {files.map((file, i) => (
+                                            <span
+                                                key={`${file.name}-${i}`}
+                                                className="flex items-center gap-1.5 rounded-md border border-white/10 bg-white/[0.06] px-2 py-1 text-[11px] text-gray-300"
+                                            >
+                                                <Paperclip className="h-3 w-3 shrink-0" />
+                                                <span className="max-w-[180px] truncate">{file.name}</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setFiles((c) => c.filter((_, j) => j !== i))}
+                                                    className="text-gray-500 hover:text-gray-200"
+                                                    title="Remove"
+                                                >
+                                                    <X className="h-3 w-3" />
+                                                </button>
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+
                                 <div className="flex items-end gap-2 rounded-lg bg-white/[0.05] px-3 py-2">
+                                    <label
+                                        className="mb-0.5 flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-white/5 hover:text-gray-200"
+                                        title="Attach files"
+                                    >
+                                        <Paperclip className="h-4 w-4" />
+                                        <input
+                                            type="file"
+                                            multiple
+                                            hidden
+                                            disabled={sending}
+                                            onChange={(e) => {
+                                                // Capped here as well as server-side, so picking
+                                                // ten files says so now rather than after the
+                                                // upload finishes.
+                                                setFiles((current) => [...current, ...Array.from(e.target.files || [])].slice(0, 5));
+                                                e.target.value = '';
+                                            }}
+                                        />
+                                    </label>
                                     <textarea
                                         rows={1}
                                         value={draft}

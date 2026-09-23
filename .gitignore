@@ -59,3 +59,8 @@ yarn.lock
 
 # Migration backups (contain sensitive payment/subscription data)
 server/scripts/migrations/backups/
+
+# Uploaded files awaiting relay to Gmail or Zoho. Transient — written by multer and
+# unlinked as soon as the send completes — but a `git add -A` during that window would
+# commit a CLIENT'S OWN FILE into the repository permanently.
+server/public/temp/

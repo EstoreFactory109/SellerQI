@@ -102,7 +102,8 @@ const { getEsfClientDashboard } = require('../controllers/analytics/EsfClientDas
 const { getEsfProjectStatus } = require('../controllers/analytics/EsfProjectStatusController.js');
 const { postEsfTaskReply } = require('../controllers/analytics/EsfProjectReplyController.js');
 const { getEsfBilling, downloadEsfInvoice } = require('../controllers/analytics/EsfBillingController.js');
-const { getEsfMessages, getEsfMessageThread, postEsfMessageReply, postEsfNewTicket } = require('../controllers/analytics/EsfClientMessagesController.js');
+const { getEsfMessages, getEsfMessageThread, postEsfMessageReply, postEsfNewTicket, downloadEsfAttachment } = require('../controllers/analytics/EsfClientMessagesController.js');
+const gmailUpload = require('../middlewares/multer/gmailUpload.js');
 const { zohoUpload, MAX_FILES, MAX_FILE_BYTES } = require('../middlewares/multer/zohoUpload.js');
 const { ApiResponse } = require('../utils/ApiResponse.js');
 const esfClientOnly = require('../middlewares/Auth/esfClientOnly.js');
@@ -319,9 +320,10 @@ router.get('/esf/billing/invoices/:invoiceNumber/pdf', auth, esfClientOnly, down
 router.get('/esf/messages', auth, esfClientOnly, getEsfMessages);
 // Raise a ticket. The open-ticket cap lives in the service rather than here, because
 // the thing worth preventing is sprawl (twenty threads about one problem), not speed.
-router.post('/esf/messages', auth, esfClientOnly, postEsfNewTicket);
+router.post('/esf/messages', auth, esfClientOnly, gmailUpload.array('files', 5), postEsfNewTicket);
 router.get('/esf/messages/:threadId', auth, esfClientOnly, getEsfMessageThread);
-router.post('/esf/messages/:threadId/reply', auth, esfClientOnly, postEsfMessageReply);
+router.post('/esf/messages/:threadId/reply', auth, esfClientOnly, gmailUpload.array('files', 5), postEsfMessageReply);
+router.get('/esf/messages/:threadId/attachments/:messageId/:index', auth, esfClientOnly, downloadEsfAttachment);
 
 /**
  * Reply to a task from the Status page — text, files, or both, sent on to Zoho.

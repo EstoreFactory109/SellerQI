@@ -192,6 +192,67 @@ describe('the echo guard', () => {
     });
 });
 
+describe('attachments', () => {
+    const withFiles = (files) => message({
+        isNewThread: true,
+        attachments: files,
+    });
+
+    const pdf = { filename: 'invoice.pdf', mimeType: 'application/pdf', content: Buffer.alloc(300, 7) };
+
+    test('switch the message to multipart/mixed', async () => {
+        expect(decode(withFiles([pdf]).raw)).toContain('Content-Type: multipart/mixed; boundary=');
+    });
+
+    test('no attachments keeps it plain text, not an empty multipart', async () => {
+        const raw = decode(message().raw);
+
+        expect(raw).toContain('Content-Type: text/plain');
+        expect(raw).not.toContain('multipart');
+    });
+
+    test('the closing boundary carries its trailing --', async () => {
+        // Without it the message is unterminated and some clients silently drop the
+        // final attachment.
+        const raw = decode(withFiles([pdf]).raw);
+        const boundary = raw.match(/boundary="([^"]+)"/)[1];
+
+        expect(raw.trimEnd().endsWith(`--${boundary}--`)).toBe(true);
+    });
+
+    test('transfer-encoding sits on the parts, never the container', async () => {
+        // A Content-Transfer-Encoding on the multipart container tells the parser the
+        // boundaries themselves are base64, and the whole message is discarded.
+        const raw = decode(withFiles([pdf]).raw);
+        const headerBlock = raw.split('\r\n\r\n')[0];
+
+        expect(headerBlock).not.toContain('Content-Transfer-Encoding');
+    });
+
+    test('a non-ASCII filename is encoded rather than emitted raw', async () => {
+        const raw = decode(withFiles([{ ...pdf, filename: 'Café note.pdf' }]).raw);
+
+        expect(raw).toMatch(/filename="=\?UTF-8\?B\?/);
+    });
+
+    test('a quote in a filename cannot end the parameter early', async () => {
+        // An unescaped quote closes the quoted-string, and everything after it is read
+        // as another parameter.
+        const raw = decode(withFiles([{ ...pdf, filename: 'in"voice.pdf' }]).raw);
+
+        expect(raw).toContain('filename="invoice.pdf"');
+    });
+
+    test('attachment base64 is wrapped at 76, like the body', async () => {
+        // Far more likely to bite here: an attachment is megabytes of base64 rather
+        // than a few lines.
+        const raw = decode(withFiles([{ ...pdf, content: Buffer.alloc(9000, 3) }]).raw);
+        const longest = Math.max(...raw.split('\r\n').map((l) => l.length));
+
+        expect(longest).toBeLessThanOrEqual(78);
+    });
+});
+
 describe('encoding for the API', () => {
     test('the payload is base64url, which is what Gmail requires', async () => {
         // Standard base64 is rejected. '+' and '/' must not appear.

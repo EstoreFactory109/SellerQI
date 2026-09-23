@@ -9,6 +9,13 @@
 
 jest.mock('../../../utils/Logger.js', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }));
 
+const mockReadFile = jest.fn();
+const mockUnlink = jest.fn();
+jest.mock('fs/promises', () => ({
+    readFile: (...a) => mockReadFile(...a),
+    unlink: (...a) => mockUnlink(...a),
+}));
+
 const mockSendMessage = jest.fn();
 const mockInsertMessage = jest.fn();
 jest.mock('../../../Services/Gmail/GmailClient.js', () => ({
@@ -69,6 +76,8 @@ beforeEach(() => {
     mockSendMessage.mockResolvedValue({ id: 'sent-1', threadId: 'gt-new' });
     mockInsertMessage.mockResolvedValue({ id: 'ins-1', threadId: 'gt-new' });
     mockThreadCount.mockResolvedValue(0);
+    mockReadFile.mockResolvedValue(Buffer.from('%PDF-1.4 pretend'));
+    mockUnlink.mockResolvedValue(undefined);
     mockThreadFindOneAndUpdate.mockResolvedValue({ _id: 't-new', displaySubject: 'Listing issue' });
 });
 
@@ -408,6 +417,79 @@ describe('a client who emails without a subject', () => {
         const raw = decodeRaw(mockSendMessage.mock.calls[0][0].raw);
         expect(raw).toContain('Subject: \r\n');
         expect(raw).not.toContain('(no subject)');
+    });
+});
+
+describe('attachments', () => {
+    const upload = (over = {}) => ({
+        originalname: 'invoice.pdf',
+        mimetype: 'application/pdf',
+        path: '/tmp/gmail-abc.pdf',
+        size: 1024,
+        ...over,
+    });
+
+    test('are carried on a staff reply as a real MIME part', async () => {
+        await GmailSend.sendStaffReply({ threadId: 't1', body: 'See attached.', files: [upload()] });
+
+        const raw = decodeRaw(mockSendMessage.mock.calls[0][0].raw);
+        expect(raw).toContain('Content-Type: multipart/mixed');
+        expect(raw).toContain('Content-Disposition: attachment; filename="invoice.pdf"');
+    });
+
+    test('the temp file is removed after a successful send', async () => {
+        await GmailSend.sendStaffReply({ threadId: 't1', body: 'x', files: [upload()] });
+
+        expect(mockUnlink).toHaveBeenCalledWith('/tmp/gmail-abc.pdf');
+    });
+
+    test('AND after a failed one', async () => {
+        // These land in public/temp. A send that throws must not leave the file behind,
+        // or a disk fills up over months from nothing but failed replies — and the
+        // symptom is the whole server dying for reasons pointing nowhere near Messages.
+        mockSendMessage.mockRejectedValue(new Error('Gmail exploded'));
+
+        await expect(GmailSend.sendStaffReply({ threadId: 't1', body: 'x', files: [upload()] }))
+            .rejects.toThrow();
+        expect(mockUnlink).toHaveBeenCalledWith('/tmp/gmail-abc.pdf');
+    });
+
+    test('a client filename is redacted, since it can carry their name', async () => {
+        await GmailSend.insertClientReply({
+            threadId: 't1', body: 'x', user: CLIENT, files: [upload({ originalname: 'Nitesh Kumar CV.pdf' })],
+        });
+
+        const [stored] = mockMsgUpdateOne.mock.calls[0][1].$setOnInsert.attachments;
+        expect(stored.filenameRedacted).not.toContain('Nitesh');
+        expect(stored.filenameRedacted).toContain('[name]');
+    });
+
+    test('metadata is stored but never the bytes', async () => {
+        await GmailSend.sendStaffReply({ threadId: 't1', body: 'x', files: [upload()] });
+
+        const [stored] = mockMsgUpdateOne.mock.calls[0][1].$setOnInsert.attachments;
+        expect(stored).toMatchObject({ mimeType: 'application/pdf', size: 1024 });
+        expect(stored).not.toHaveProperty('content');
+        expect(stored).not.toHaveProperty('data');
+    });
+
+    test('a total over the cap is refused BEFORE anything is sent', async () => {
+        // multer caps each file but cannot see the sum, so five legal files can still
+        // exceed Gmail's 25MB message ceiling — and Gmail would reject it at the very
+        // end, after the client had waited through the whole upload.
+        const big = [upload({ size: 8 * 1024 * 1024 }), upload({ size: 9 * 1024 * 1024 })];
+
+        await expect(GmailSend.sendStaffReply({ threadId: 't1', body: 'x', files: big }))
+            .rejects.toThrow(/limit is 15MB/);
+        expect(mockSendMessage).not.toHaveBeenCalled();
+    });
+
+    test('a message with no files stays plain text, not an empty multipart', async () => {
+        await GmailSend.sendStaffReply({ threadId: 't1', body: 'x' });
+
+        const raw = decodeRaw(mockSendMessage.mock.calls[0][0].raw);
+        expect(raw).toContain('Content-Type: text/plain');
+        expect(raw).not.toContain('multipart/mixed');
     });
 });
 
