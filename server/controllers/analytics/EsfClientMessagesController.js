@@ -2,11 +2,11 @@
  * EsfClientMessagesController.js — the CLIENT's own Messages page.
  *
  * The mirror of controllers/esf/esfMessages.js, with the audiences swapped: this one is
- * scoped hard to `req.user._id` and shows the client their own conversations, labelled
+ * scoped hard to `req.userId` and shows the client their own conversations, labelled
  * by subject rather than by anything identifying the agency staff who replied.
  *
  * ── SCOPING IS THE SECURITY PROPERTY HERE ──
- * Every query filters on `userId: req.user._id`. Unlike the staff controller, where
+ * Every query filters on `userId: req.userId`. Unlike the staff controller, where
  * "every ESF staff member sees every ESF client" is the documented model, a client must
  * never reach another client's thread — so the id comes from the authenticated session
  * and never from a parameter. A thread id in the URL is used only to narrow within that
@@ -25,10 +25,28 @@ const { ApiError } = require('../../utils/ApiError.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
 const asyncHandler = require('../../utils/AsyncHandler.js');
 const logger = require('../../utils/Logger.js');
+const UserModel = require('../../models/user-auth/userModel.js');
 const { EmailThread, EmailMessage } = require('../../models/system/EmailThreadModels.js');
 const { toClientThread, toClientMessage, PROJECTION } = require('../../Services/Email/messagePresenter.js');
 
 const THREADS_PER_PAGE = 50;
+
+/**
+ * `auth` attaches only `req.userId` — there is no `req.user` on this stack, and
+ * `esfClientOnly` loads the account purely to check `isEsfClient` without exposing it.
+ *
+ * Sending needs the whole identity, because the redaction bundle is built from it: the
+ * client's own name, addresses and numbers are exactly what gets stripped out of what
+ * they wrote before staff can read it. A reply redacted against an empty bundle would
+ * pass straight through with their details intact.
+ */
+const CLIENT_IDENTITY_FIELDS = 'firstName lastName email additionalEmails phone whatsapp';
+
+const loadClient = async (userId) => {
+    const user = await UserModel.findById(userId).select(CLIENT_IDENTITY_FIELDS).lean();
+    if (!user) throw new ApiError(401, 'Your account could not be found');
+    return user;
+};
 
 /**
  * GET /api/pagewise/esf/messages
@@ -37,7 +55,7 @@ const THREADS_PER_PAGE = 50;
  */
 const getEsfMessages = asyncHandler(async (req, res) => {
     try {
-        const userId = req.user._id;
+        const userId = req.userId;
 
         const threads = await EmailThread.find({ userId })
             .select(PROJECTION.thread)
@@ -66,7 +84,7 @@ const getEsfMessages = asyncHandler(async (req, res) => {
  */
 const getEsfMessageThread = asyncHandler(async (req, res) => {
     try {
-        const userId = req.user._id;
+        const userId = req.userId;
 
         // Scoped by userId in the same query as the id, not checked afterwards: a
         // find-then-compare invites the version of this code where the compare is
@@ -115,7 +133,7 @@ const postEsfMessageReply = asyncHandler(async (req, res) => {
         const result = await insertClientReply({
             threadId: req.params.threadId,
             body: req.body?.body,
-            user: req.user,
+            user: await loadClient(req.userId),
         });
 
         return res.status(201).json(new ApiResponse(201, result, 'Reply sent'));
@@ -144,7 +162,7 @@ const postEsfNewTicket = asyncHandler(async (req, res) => {
         const result = await startClientTicket({
             subject: req.body?.subject,
             body: req.body?.body,
-            user: req.user,
+            user: await loadClient(req.userId),
         });
 
         return res.status(201).json(new ApiResponse(201, result, 'Ticket raised'));
