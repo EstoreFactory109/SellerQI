@@ -85,6 +85,10 @@ const Messages = () => {
     const [error, setError] = useState('');
     const [draft, setDraft] = useState('');
     const [sending, setSending] = useState(false);
+    const [ticketOpen, setTicketOpen] = useState(false);
+    const [ticketSubject, setTicketSubject] = useState('');
+    const [ticketBody, setTicketBody] = useState('');
+    const [raising, setRaising] = useState(false);
 
     const loadThreads = useCallback(async () => {
         try {
@@ -134,6 +138,33 @@ const Messages = () => {
         }
     }, [draft, sending, openId, loadThreads]);
 
+    const raiseTicket = useCallback(async () => {
+        const subject = ticketSubject.trim();
+        const body = ticketBody.trim();
+        if (!subject || !body || raising) return;
+
+        setRaising(true);
+        setError('');
+        try {
+            const res = await axiosInstance.post('/api/pagewise/esf/messages', { subject, body });
+            const newId = res.data?.data?.threadId;
+
+            setTicketOpen(false);
+            setTicketSubject('');
+            setTicketBody('');
+            await loadThreads();
+            // Drop straight into the conversation they just started, so it is obviously
+            // a conversation rather than a form that vanished.
+            if (newId) openThread(newId);
+        } catch (err) {
+            // The server's 4xx messages describe our own rules ("too many open
+            // conversations") and are worth showing verbatim.
+            setError(err.response?.data?.message || 'Could not raise that ticket');
+        } finally {
+            setRaising(false);
+        }
+    }, [ticketSubject, ticketBody, raising, loadThreads, openThread]);
+
     const open = conversation?.thread;
     const dayGroups = useMemo(() => groupByDay(conversation?.messages || []), [conversation]);
 
@@ -149,15 +180,26 @@ const Messages = () => {
                     style={{ borderColor: PALETTE.border }}
                 >
                     <div className="px-4 py-3">
-                        <h2 className="text-sm font-semibold" style={{ color: PALETTE.textPrimary }}>Messages</h2>
+                        <div className="flex items-center gap-2">
+                            <h2 className="flex-1 text-sm font-semibold" style={{ color: PALETTE.textPrimary }}>Messages</h2>
+                            <button
+                                type="button"
+                                onClick={() => setTicketOpen(true)}
+                                className="rounded-md px-2.5 py-1 text-[11.5px] font-semibold transition-opacity hover:opacity-90"
+                                style={{ background: PALETTE.good, color: PALETTE.bg }}
+                            >
+                                + Raise a ticket
+                            </button>
+                        </div>
                         {/*
-                            The client cannot start a thread from here in v1, so the page
-                            says how to start one rather than offering a button that is
-                            not there.
+                            Emailing in still works and always will — a ticket raised here
+                            lands in the same inbox as a conversation. Worth saying, so
+                            someone who already emailed does not think they used the wrong
+                            channel.
                         */}
                         {inboxAddress && (
-                            <p className="mt-0.5 text-[11px]" style={{ color: PALETTE.textTertiary }}>
-                                Email {inboxAddress} to start a new conversation
+                            <p className="mt-1 text-[11px]" style={{ color: PALETTE.textTertiary }}>
+                                Or email {inboxAddress} — both arrive in the same place
                             </p>
                         )}
                     </div>
@@ -358,6 +400,89 @@ const Messages = () => {
                     )}
                 </section>
             </div>
+
+            {/* Raise a ticket */}
+            {ticketOpen && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center p-4"
+                    style={{ background: 'rgba(0,0,0,.6)' }}
+                    onClick={() => !raising && setTicketOpen(false)}
+                >
+                    <div
+                        className="w-full max-w-lg rounded-xl border p-5"
+                        style={{ background: PALETTE.bg, borderColor: PALETTE.border }}
+                        // Without this, a click anywhere inside the form bubbles up to the
+                        // backdrop and closes the dialog mid-sentence.
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h3 className="text-[15px] font-semibold" style={{ color: PALETTE.textPrimary }}>
+                            Raise a ticket
+                        </h3>
+                        <p className="mt-1 text-[11.5px]" style={{ color: PALETTE.textTertiary }}>
+                            This starts a conversation with your account team. It stays open until
+                            they resolve it, and you can keep replying in the meantime.
+                        </p>
+
+                        <label className="mt-4 block text-[11.5px] font-medium" style={{ color: PALETTE.textSecondary }}>
+                            Subject
+                        </label>
+                        <input
+                            value={ticketSubject}
+                            disabled={raising}
+                            maxLength={150}
+                            onChange={(e) => setTicketSubject(e.target.value)}
+                            placeholder="Short summary of the issue"
+                            className="mt-1 w-full rounded-lg px-3 py-2 text-[13.5px] focus:outline-none disabled:opacity-50"
+                            style={{ background: 'rgba(255,255,255,.05)', color: PALETTE.textPrimary }}
+                        />
+
+                        <label className="mt-3 block text-[11.5px] font-medium" style={{ color: PALETTE.textSecondary }}>
+                            What is happening?
+                        </label>
+                        <textarea
+                            rows={5}
+                            value={ticketBody}
+                            disabled={raising}
+                            onChange={(e) => setTicketBody(e.target.value)}
+                            placeholder="Describe the issue. Include ASINs or order IDs if they help."
+                            className="mt-1 w-full resize-none rounded-lg px-3 py-2 text-[13.5px] leading-relaxed focus:outline-none disabled:opacity-50"
+                            style={{ background: 'rgba(255,255,255,.05)', color: PALETTE.textPrimary }}
+                        />
+
+                        {/*
+                            Said before they type it rather than after: contact details get
+                            stripped, so leaving a phone number here does not reach anyone.
+                            Finding that out afterwards, having waited for a call, would be
+                            considerably worse.
+                        */}
+                        <p className="mt-2 text-[10.5px]" style={{ color: PALETTE.textTertiary }}>
+                            Contact details are removed automatically — your team will reply in this
+                            conversation and by email.
+                        </p>
+
+                        <div className="mt-4 flex justify-end gap-2">
+                            <button
+                                type="button"
+                                disabled={raising}
+                                onClick={() => setTicketOpen(false)}
+                                className="rounded-lg px-3 py-1.5 text-[12.5px] font-medium disabled:opacity-50"
+                                style={{ color: PALETTE.textSecondary }}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={raiseTicket}
+                                disabled={raising || !ticketSubject.trim() || !ticketBody.trim()}
+                                className="rounded-lg px-4 py-1.5 text-[12.5px] font-semibold transition-opacity disabled:opacity-30"
+                                style={{ background: PALETTE.good, color: PALETTE.bg }}
+                            >
+                                {raising ? 'Sending…' : 'Raise ticket'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

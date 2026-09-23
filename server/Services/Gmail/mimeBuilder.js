@@ -77,6 +77,15 @@ const replySubject = (rawSubject) => {
 };
 
 /**
+ * The subject for a message that STARTS a conversation.
+ *
+ * Kept separate from replySubject because prefixing "Re:" onto a brand-new ticket is
+ * not cosmetic — it tells the recipient's mail client this is a response to something
+ * they sent, so it reads as a reply nobody wrote and threads oddly in some clients.
+ */
+const newSubject = (rawSubject) => sanitizeHeader(rawSubject) || '(no subject)';
+
+/**
  * `References` accumulates the whole chain, and some clients never trim it.
  *
  * Capped at the RFC-suggested shape: keep the first (the conversation root, which is
@@ -115,6 +124,8 @@ const buildMimeMessage = ({
     messageId = null,
     origin = null,
     date = new Date(),
+    // true when this message opens a conversation rather than continuing one.
+    isNewThread = false,
 }) => {
     const ownMessageId = messageId || generateMessageId(String(from?.email || '').split('@')[1]);
     const referenceChain = buildReferences(references, inReplyTo);
@@ -125,7 +136,7 @@ const buildMimeMessage = ({
         'Message-ID': ownMessageId,
         From: formatAddress(from),
         To: formatAddress(to),
-        Subject: encodeHeaderValue(replySubject(rawSubject)),
+        Subject: encodeHeaderValue(isNewThread ? newSubject(rawSubject) : replySubject(rawSubject)),
         ...(inReplyTo ? { 'In-Reply-To': sanitizeHeader(inReplyTo) } : {}),
         ...(referenceChain.length ? { References: referenceChain.map(sanitizeHeader).join(' ') } : {}),
         // The first of the two echo guards. Both portal paths write into Gmail and both
@@ -162,6 +173,7 @@ module.exports = {
     buildMimeMessage,
     generateMessageId,
     replySubject,
+    newSubject,
     buildReferences,
     formatAddress,
     encodeHeaderValue,

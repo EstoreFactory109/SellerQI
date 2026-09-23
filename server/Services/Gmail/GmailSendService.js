@@ -30,12 +30,19 @@ const { EmailThread, EmailMessage } = require('../../models/system/EmailThreadMo
 const GmailClient = require('./GmailClient.js');
 const { buildMimeMessage, generateMessageId } = require('./mimeBuilder.js');
 const { buildIdentityBundle, redactAll } = require('../Email/identityRedaction.js');
+const { toPlainLabel } = require('../Email/emailRichText.js');
 const { getCredentials, isMessagingEnabled, ORIGIN_HEADER } = require('./config.js');
 
 /** The name the client sees on every reply. Never an individual. */
 const AGENCY_DISPLAY_NAME = process.env.GMAIL_SENDER_NAME || 'eStore Factory';
 
 const MAX_REPLY_CHARS = 10000;
+
+/** A subject line, not a paragraph — long ones are unreadable in a conversation list. */
+const MAX_SUBJECT_CHARS = 150;
+
+/** How many conversations one client may have open at once. See startClientTicket. */
+const MAX_OPEN_TICKETS = 10;
 
 /**
  * The thread, including the fields kept behind `select: false`.
@@ -235,10 +242,137 @@ const insertClientReply = async ({ threadId, body, user }) => {
     return { id: inserted.id, sentAt: new Date() };
 };
 
+/**
+ * A client raises a ticket — the only way to START a conversation from the portal.
+ *
+ * Same mechanism as a client reply (insert, not send), with one difference: there is no
+ * thread yet, so `insertMessage` is called without a threadId and Gmail opens one. The
+ * id it returns becomes our `gmailThreadId`, and every later message on both sides
+ * threads onto it exactly as if the client had emailed in.
+ *
+ * ── THE SUBJECT IS UNTRUSTED CLIENT TEXT, IN TWO DIFFERENT WAYS ──
+ * It goes into an email header, so it is a header-injection vector (handled by
+ * mimeBuilder's sanitizeHeader). And it is displayed to STAFF, so it is an identity
+ * leak vector — "Nitesh Kumar - urgent" as a subject would put the client's name at the
+ * top of the staff inbox, above a body that was carefully redacted. Both apply; neither
+ * is optional.
+ *
+ * The raw subject is still stored, because Gmail rejects a threaded reply whose subject
+ * does not match the thread's — but it is `select: false` and staff never receive it.
+ */
+const startClientTicket = async ({ subject, body, user }) => {
+    const text = assertSendable(body);
+
+    const rawSubject = String(subject || '').trim().replace(/\s+/g, ' ');
+    if (!rawSubject) throw new ApiError(400, 'A ticket needs a subject');
+    if (rawSubject.length > MAX_SUBJECT_CHARS) {
+        throw new ApiError(400, `A subject cannot be longer than ${MAX_SUBJECT_CHARS} characters`);
+    }
+
+    /**
+     * A cap on OPEN tickets, not on tickets per hour.
+     *
+     * The thing worth preventing is not speed, it is sprawl: twenty open threads about
+     * the same problem is worse for the client than one, and it buries the staff inbox.
+     * Hitting this means "reply to an existing ticket instead", which is the behaviour
+     * we actually want.
+     */
+    const openTickets = await EmailThread.countDocuments({ userId: user._id, resolvedAt: null });
+    if (openTickets >= MAX_OPEN_TICKETS) {
+        throw new ApiError(
+            409,
+            `You already have ${openTickets} open conversations. Please continue one of those `
+            + 'rather than starting another, or wait until some are resolved.'
+        );
+    }
+
+    const { inboxAddress } = getCredentials();
+    const fromAddress = user.email;
+    const messageId = generateMessageId(String(fromAddress).split('@')[1]);
+
+    const { raw } = buildMimeMessage({
+        // `From: <the client>` — this has to look to the admin exactly like an email
+        // the client sent, because as far as the conversation is concerned, it is one.
+        from: { email: fromAddress },
+        to: { email: inboxAddress },
+        rawSubject,
+        // No "Re:" — this opens the conversation rather than continuing one.
+        isNewThread: true,
+        bodyText: text,
+        messageId,
+        origin: 'portal-client',
+    });
+
+    // No threadId: Gmail creates the thread. UNREAD so it visibly arrives for the admin
+    // working in Gmail rather than only in the portal.
+    const inserted = await GmailClient.insertMessage({ raw, labelIds: ['INBOX', 'UNREAD'] });
+
+    const bundle = buildIdentityBundle(user);
+    const { text: bodyRedacted } = redactAll(text, bundle);
+    const { text: subjectRedacted } = redactAll(rawSubject, bundle);
+
+    const sentAt = new Date();
+
+    const thread = await EmailThread.findOneAndUpdate(
+        { gmailThreadId: inserted.threadId },
+        {
+            $setOnInsert: {
+                gmailThreadId: inserted.threadId,
+                userId: user._id,
+                clientEmail: fromAddress,
+                rawSubject,
+                displaySubject: toPlainLabel(subjectRedacted) || '(no subject)',
+                firstMessageAt: sentAt,
+            },
+            $set: {
+                lastMessageAt: sentAt,
+                // Inbound: the client spoke last, so staff owe a reply and the thread
+                // opens as "Needs a reply" on their side.
+                lastMessageDirection: 'inbound',
+                messageCount: 1,
+                staffUnreadCount: 1,
+                clientUnreadCount: 0,
+                rfc822MessageIdOfLast: messageId,
+                referencesTail: [messageId],
+            },
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    await EmailMessage.updateOne(
+        { gmailMessageId: inserted.id },
+        {
+            $setOnInsert: {
+                gmailMessageId: inserted.id,
+                gmailThreadId: inserted.threadId,
+                threadId: thread._id,
+                userId: user._id,
+                direction: 'inbound',
+                origin: 'portal-client',
+                rfc822MessageId: messageId,
+                fromEmail: fromAddress,
+                sentAt,
+                bodyRedacted,
+                bodyTruncated: false,
+                quotedTrimmed: false,
+                redactedBy: 'portal',
+                syncedAt: sentAt,
+            },
+        },
+        { upsert: true }
+    );
+
+    logger.info(`[GmailSend] client opened ticket ${thread._id}`);
+    return { threadId: String(thread._id), subject: thread.displaySubject, sentAt };
+};
+
 module.exports = {
     sendStaffReply,
     insertClientReply,
+    startClientTicket,
     MAX_REPLY_CHARS,
+    MAX_SUBJECT_CHARS,
+    MAX_OPEN_TICKETS,
     AGENCY_DISPLAY_NAME,
     ORIGIN_HEADER,
 };
