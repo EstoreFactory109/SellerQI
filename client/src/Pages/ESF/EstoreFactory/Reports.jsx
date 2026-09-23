@@ -23,10 +23,12 @@ import ReportDocumentPreview from '../../../Components/ESF/ReportDocumentPreview
  * are waiting on data. That follows the rule the ESF Overview page already
  * keeps (see ClientDashboard.jsx): never show an invented number.
  *
- * Still no backend for publishing: there is no recurring-report model, no
- * generated files and no schedule, so there is no "open"/"download" action and
- * no per-report edition history. "View history" still points at the one static
- * Report History page, unchanged.
+ * Download produces the PDF in the browser from the document component itself
+ * (see printReportDocument) rather than fetching a stored file — there is still
+ * no recurring-report model, no generated files and no publishing schedule, so
+ * what a client saves is this live edition, not an archived one. For the same
+ * reason there is no per-report edition history: "View history" still points at
+ * the one static Report History page, unchanged.
  */
 
 /**
@@ -42,6 +44,66 @@ const TONE_COLOR = {
     watch: PALETTE.amberValue,
     neutral: PALETTE.textBody,
 };
+
+/**
+ * Send one rendered report document to the printer, which is how a client saves
+ * it as a PDF.
+ *
+ * Printing rather than rasterising with a PDF library is deliberate. The report
+ * template already ships `@media print` rules, so print is the output path it
+ * was designed for; the text stays selectable and vector-sharp instead of
+ * becoming a screenshot; and it adds no dependency to a bundle that already
+ * warns about its size. The markup handed in is the SAME component the preview
+ * panel renders, so the saved file cannot drift from what was on screen.
+ *
+ * @param {string} html   outerHTML of the rendered document
+ * @param {string} title  becomes the print dialog's default filename
+ */
+const printReportDocument = (html, title) => {
+    const frame = document.createElement('iframe');
+    // Off-screen rather than display:none — a hidden frame does not lay out, and
+    // an unlaid-out document prints blank.
+    frame.setAttribute('aria-hidden', 'true');
+    Object.assign(frame.style, {
+        position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0',
+    });
+    document.body.appendChild(frame);
+
+    const doc = frame.contentWindow.document;
+    doc.open();
+    doc.write(
+        '<!doctype html><html><head><meta charset="utf-8">'
+        + `<title>${title.replace(/[<>]/g, '')}</title>`
+        + '<style>'
+        // Browsers drop background colours when printing unless told otherwise,
+        // which would strip the navy banner and every flagged cell.
+        + '@page{margin:14mm}'
+        + 'html,body{margin:0;padding:0;background:#fff;'
+        + '-webkit-print-color-adjust:exact;print-color-adjust:exact}'
+        + 'table{page-break-inside:auto}tr{page-break-inside:avoid}'
+        + '</style></head><body>'
+        + html
+        + '</body></html>'
+    );
+    doc.close();
+
+    const done = () => {
+        frame.contentWindow.focus();
+        frame.contentWindow.print();
+        // Left long enough for the print dialog to take its snapshot; removing
+        // the frame too early cancels the job in some browsers.
+        setTimeout(() => frame.remove(), 1500);
+    };
+
+    // about:blank documents written this way are usually ready immediately, but
+    // wait for load where the browser reports one.
+    if (frame.contentWindow.document.readyState === 'complete') done();
+    else frame.contentWindow.addEventListener('load', done, { once: true });
+};
+
+/** "Inventory Restock - US - Fetched 25 Apr 2026" */
+const downloadName = (report, marketplace) =>
+    [report.name, marketplace?.country, report.date].filter(Boolean).join(' - ');
 
 /** Formats a stat or cell according to the `format` the API tagged it with. */
 const formatValue = (value, format, currency) => {
@@ -169,7 +231,7 @@ const PagedTable = ({ report, currency }) => {
             {/* Only the rows scroll. The pager below stays put, so Next is always
                 one click away rather than something you scroll down to find. */}
             <div
-                className="w-full overflow-auto flex-1 min-h-0"
+                className="w-full overflow-auto flex-1 min-h-0 esf-scroll"
                 style={{ opacity: loading ? 0.45 : 1, transition: 'opacity .15s ease' }}
             >
                 <table className="w-full border-collapse text-[12px] min-w-[460px]">
@@ -311,7 +373,7 @@ const ScaledDocument = ({ children }) => {
 
     return (
         <div
-            className="overflow-y-auto overflow-x-hidden rounded-md"
+            className="overflow-y-auto overflow-x-hidden rounded-md esf-scroll esf-scroll--light"
             style={{
                 width: DOC_TILE_WIDTH,
                 height: DOC_TILE_HEIGHT,
@@ -413,7 +475,7 @@ const SummaryPanel = ({ report, currency, failed, marketplace }) => {
                 {report.summary?.stats?.length > 0 && (
                     // One row, scrolled sideways when there are more stats than fit,
                     // so a six-stat report cannot push the table off the panel.
-                    <div className="flex gap-x-7 overflow-x-auto pb-1 flex-none">
+                    <div className="flex gap-x-7 overflow-x-auto pb-1 flex-none esf-scroll">
                         {report.summary.stats.map((stat) => (
                             <Stat key={stat.label} stat={stat} currency={currency} />
                         ))}
@@ -429,7 +491,7 @@ const SummaryPanel = ({ report, currency, failed, marketplace }) => {
                     table out of the panel. */}
                 {report.caveats?.length > 0 && (
                     <div
-                        className="flex-none flex flex-col gap-1 rounded-md overflow-y-auto"
+                        className="flex-none flex flex-col gap-1 rounded-md overflow-y-auto esf-scroll"
                         style={{
                             background: PALETTE.amberBg,
                             border: `1px solid ${PALETTE.amberBorder}`,
@@ -457,7 +519,7 @@ const SummaryPanel = ({ report, currency, failed, marketplace }) => {
  * above. An unavailable report cannot be selected — it carries no data to show —
  * so it is dimmed and does not respond to hover either.
  */
-const ReportCard = ({ report, selected, onSelect, onViewHistory }) => {
+const ReportCard = ({ report, selected, onSelect, onViewHistory, onDownload }) => {
     const [hovered, setHovered] = useState(false);
     const interactive = report.available;
     const lifted = interactive && (hovered || selected);
@@ -521,8 +583,8 @@ const ReportCard = ({ report, selected, onSelect, onViewHistory }) => {
                 {report.available ? report.insight : report.reason}
             </p>
 
-            <div className="mt-auto flex items-center pt-3" style={{ borderTop: `1px solid ${PALETTE.divider}` }}>
-                <span className="flex-1 text-xs" style={{ color: PALETTE.textDim }}>
+            <div className="mt-auto flex items-center gap-2 pt-3" style={{ borderTop: `1px solid ${PALETTE.divider}` }}>
+                <span className="flex-1 text-xs truncate" style={{ color: PALETTE.textDim }}>
                     {report.available ? (selected ? 'Shown above' : 'Click to view summary') : 'Waiting on data'}
                 </span>
                 <button
@@ -532,6 +594,25 @@ const ReportCard = ({ report, selected, onSelect, onViewHistory }) => {
                     style={{ color: PALETTE.textSecondary }}
                 >
                     View history
+                </button>
+                {/* The mock's download affordance, now real. Only offered where
+                    there is a document to produce — a report with no data would
+                    save a blank page. */}
+                <button
+                    type="button"
+                    title={interactive ? `Download ${report.name} as PDF` : 'Nothing to download yet'}
+                    aria-label={`Download ${report.name} as PDF`}
+                    disabled={!interactive}
+                    onClick={(event) => { event.stopPropagation(); onDownload(report); }}
+                    className="flex-none w-[26px] h-[26px] rounded-md flex items-center justify-center text-xs"
+                    style={{
+                        border: `1px solid ${PALETTE.border}`,
+                        color: interactive ? PALETTE.textTertiary : PALETTE.textDim,
+                        cursor: interactive ? 'pointer' : 'default',
+                        opacity: interactive ? 1 : 0.4,
+                    }}
+                >
+                    ↓
                 </button>
             </div>
         </div>
@@ -575,6 +656,26 @@ const Reports = () => {
         // Backend's pick: the most recently generated report that has data.
         return reports.find((report) => report.key === data?.featuredKey) || reports.find((report) => report.available) || null;
     }, [reports, selectedKey, data]);
+
+    // The report being turned into a PDF. Held in state so its document can be
+    // rendered off-screen and handed to the printer — that way Download works on
+    // ANY card, not only the one currently in the panel, and the saved file is
+    // produced by the same component the preview uses.
+    const [pendingDownload, setPendingDownload] = useState(null);
+    const printRef = useRef(null);
+
+    useEffect(() => {
+        if (!pendingDownload || !printRef.current) return undefined;
+        // One frame so the off-screen copy is laid out before it is read.
+        const frameId = requestAnimationFrame(() => {
+            const node = printRef.current;
+            if (node) {
+                printReportDocument(node.innerHTML, downloadName(pendingDownload, data?.marketplace));
+            }
+            setPendingDownload(null);
+        });
+        return () => cancelAnimationFrame(frameId);
+    }, [pendingDownload, data]);
 
     const availableCount = data?.counts?.available ?? 0;
     const totalCount = data?.counts?.total ?? 0;
@@ -649,11 +750,29 @@ const Reports = () => {
                                     selected={selected?.key === report.key}
                                     onSelect={setSelectedKey}
                                     onViewHistory={() => navigate('/seller-central-checker/estore-factory/report-history')}
+                                    onDownload={setPendingDownload}
                                 />
                             ))}
                         </div>
                     )}
                 </section>
+
+                {/* The document being printed, laid out off-screen at its natural
+                    width. Off-screen rather than display:none, because a hidden
+                    element has no layout and would print blank. */}
+                {pendingDownload && (
+                    <div
+                        ref={printRef}
+                        aria-hidden="true"
+                        style={{ position: 'fixed', left: -99999, top: 0, width: DOC_NATURAL_WIDTH, pointerEvents: 'none' }}
+                    >
+                        <ReportDocumentPreview
+                            report={pendingDownload}
+                            marketplace={data?.marketplace}
+                            currency={currency}
+                        />
+                    </div>
+                )}
 
             </div>
         </div>

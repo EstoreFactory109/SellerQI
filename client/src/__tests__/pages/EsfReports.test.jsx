@@ -12,7 +12,7 @@
  */
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Provider } from 'react-redux';
 import { MemoryRouter } from 'react-router-dom';
 import { configureStore } from '@reduxjs/toolkit';
@@ -32,6 +32,13 @@ beforeEach(() => {
         unobserve() {}
         disconnect() {}
     };
+});
+
+// Restore spies even when a test fails partway, so one broken test cannot take
+// the rest of the file down with it.
+afterEach(() => {
+    vi.restoreAllMocks();
+    document.querySelectorAll('iframe').forEach((frame) => frame.remove());
 });
 
 const makeRows = (count, prefix = 'SKU') =>
@@ -207,6 +214,64 @@ describe('ESF Reports page', () => {
         await waitFor(() => {
             expect(screen.getAllByText(/Every tracked ASIN currently holds the Buy Box/).length).toBeGreaterThan(0);
         });
+    });
+
+    it('opts its scroll regions back into a visible scrollbar', async () => {
+        // index.css hides scrollbars on EVERY element via `*`, so a panel that
+        // scrolls inside a fixed height shows no affordance unless it opts back
+        // in with `esf-scroll`. Without this the content just looks cut off.
+        axiosInstance.get.mockResolvedValue(payload());
+        const { container } = renderPage();
+
+        await waitFor(() => expect(screen.getByText('1–10 of 40 rows')).toBeInTheDocument());
+
+        // The table body on the right, and the document tile on the left — the
+        // tile takes the light variant because it sits on a white page.
+        expect(container.querySelectorAll('.esf-scroll').length).toBeGreaterThanOrEqual(2);
+        expect(container.querySelector('.esf-scroll--light')).not.toBeNull();
+    });
+
+    it('offers download on a report with data and disables it on one without', async () => {
+        axiosInstance.get.mockResolvedValue(payload());
+        renderPage();
+
+        await waitFor(() => expect(screen.getByText('1–10 of 40 rows')).toBeInTheDocument());
+
+        expect(screen.getByLabelText('Download Inventory Restock as PDF')).toBeEnabled();
+        // Nothing to produce for a report with no data — it would save a blank page.
+        expect(screen.getByLabelText('Download FBA Aged Inventory as PDF')).toBeDisabled();
+    });
+
+    it('renders the document off-screen and sends it to the printer', async () => {
+        const print = vi.fn();
+        // The real iframe is appended so jsdom gives it a real contentWindow and
+        // document.write works; only print() is stubbed, since jsdom has none.
+        // Narrow on purpose: intercepting every appendChild also intercepts the
+        // one testing-library uses to mount, which breaks the render entirely.
+        const realAppend = document.body.appendChild.bind(document.body);
+        vi.spyOn(document.body, 'appendChild').mockImplementation((node) => {
+            const appended = realAppend(node);
+            if (node.tagName === 'IFRAME' && node.contentWindow) {
+                node.contentWindow.print = print;
+            }
+            return appended;
+        });
+
+        axiosInstance.get.mockResolvedValue(payload());
+        renderPage();
+        await waitFor(() => expect(screen.getByText('1–10 of 40 rows')).toBeInTheDocument());
+
+        await userEvent.click(screen.getByLabelText('Download Inventory Restock as PDF'));
+
+        await waitFor(() => expect(print).toHaveBeenCalled());
+
+        const frame = document.querySelector('iframe');
+        const printed = frame.contentWindow.document;
+        // What gets printed is the report itself, with its colours preserved and
+        // the dialog's default filename naming the report and marketplace.
+        expect(printed.body.textContent).toContain('Inventory Restock');
+        expect(printed.title).toBe('Inventory Restock - US - Fetched 25 Apr 2026');
+        expect(printed.head.innerHTML).toContain('print-color-adjust:exact');
     });
 
     it('says so when no report has data at all', async () => {
