@@ -62,6 +62,30 @@ const canManageTeam = (user) => {
  */
 const canManageClients = () => true;
 
+/**
+ * Whether this staff member may see WHO a client is — their name, email and phone.
+ *
+ * Managing a client and knowing who they are became two different permissions when the
+ * Messages page shipped. That page labels every conversation by Zoho project or brand
+ * and redacts contact details out of the message bodies, on the stated basis that staff
+ * are not shown who they are writing to.
+ *
+ * That claim is only true if it holds everywhere. A member who reads "Morgan's
+ * Repellent" in the inbox and then opens the Clients list to find the name and phone
+ * number beside it has not been stopped by anything — the redaction was theatre, and
+ * expensive theatre at that. So the same owner/admin line that governs team management
+ * governs identity, rather than inventing a fourth role for it.
+ *
+ * Owners and admins keep full visibility deliberately: someone has to be able to call a
+ * client back.
+ */
+const canSeeClientIdentity = (user) => {
+    // Platform superAdmins are admitted by esfAuth precisely so they can service the
+    // portal, and resolveEsfRole would otherwise demote them to 'member'.
+    if (user?.accessType === 'superAdmin') return true;
+    return canManageTeam(user);
+};
+
 module.exports = {
     ESF_ROLES,
     ASSIGNABLE_ESF_ROLES,
@@ -70,4 +94,5 @@ module.exports = {
     resolveEsfRole,
     canManageTeam,
     canManageClients,
+    canSeeClientIdentity,
 };

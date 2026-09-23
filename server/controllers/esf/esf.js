@@ -31,6 +31,7 @@ const {
     isEsfOwner,
     resolveEsfRole,
     canManageTeam,
+    canSeeClientIdentity,
 } = require('../../Services/User/esfRoles.js');
 const {
     ESF_CLIENT_PAGES,
@@ -209,7 +210,17 @@ const updateEsfPassword = asyncHandler(async (req, res) => {
 
 /** GET /app/esf/clients — every client added through this portal. */
 const getEsfClients = asyncHandler(async (req, res) => {
-    const clients = await listManagedClients(ESF_CLIENT_QUERY);
+    /**
+     * Members get the label, not the person.
+     *
+     * The Messages page states that staff are not shown who they are writing to. That
+     * claim only holds if it holds here too — a member who reads "Morgan's Repellent"
+     * in the inbox and then finds the name, email and phone on this page has not been
+     * stopped by anything, and the redaction was theatre.
+     */
+    const clients = await listManagedClients(ESF_CLIENT_QUERY, {
+        redactIdentity: !canSeeClientIdentity(req.esfUser),
+    });
 
     // Resolve "added by" names in one query rather than per client.
     const staffIds = [...new Set(clients.map((c) => c.esfAddedBy).filter(Boolean).map(String))];
@@ -317,6 +328,23 @@ const removeEsfClient = asyncHandler(async (req, res) => {
  * the staff member stays signed in to the portal underneath.
  */
 const switchToEsfClient = asyncHandler(async (req, res) => {
+    /**
+     * Owner/admin only, and this is the check that makes the redaction above mean
+     * anything.
+     *
+     * Impersonation mints a real client session. Inside it, the client's OWN Settings
+     * page shows their name, email and phone — so a member who can switch can read
+     * every field this portal just went to some trouble to hide, and can do it for any
+     * client, in two clicks. Redacting the list while leaving this open would be a
+     * lock on a door standing next to an open window.
+     */
+    if (!canSeeClientIdentity(req.esfUser)) {
+        logger.warn(`ESF user ${req.esfUserId} (${req.esfRole}) attempted to impersonate a client`);
+        return res.status(403).json(
+            new ApiResponse(403, '', 'Only the portal owner and admins can open a client account')
+        );
+    }
+
     const { clientId } = req.body;
 
     if (!clientId || !mongoose.Types.ObjectId.isValid(clientId)) {

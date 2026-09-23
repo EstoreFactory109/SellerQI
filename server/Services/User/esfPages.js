@@ -69,6 +69,11 @@ const API_PATH_TO_PAGE = [
     // Covers the invoice PDF route too — matching is by longest prefix, so
     // /esf/billing/invoices/:number/pdf resolves to this same entry.
     ['/api/pagewise/esf/billing', 'billing'],
+    // Without this the endpoint is unguarded BY CONSTRUCTION: 'messages' is in
+    // ESF_CLIENT_PAGES, so a staff member can be blocked from the page while still
+    // reading every conversation through the API. That exact gap existed for
+    // 'billing' until it was found.
+    ['/api/pagewise/esf/messages', 'messages'],
 
     ['/api/pagewise/dashboard', 'dashboard'],
     ['/api/pagewise/product-checker', 'dashboard'],
