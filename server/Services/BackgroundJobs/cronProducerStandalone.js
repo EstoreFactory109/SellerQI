@@ -202,6 +202,22 @@ async function start() {
         logger.error('[CronProducerStandalone] Zoho task sync init failed', { error: error?.message });
     }
 
+    // Estore Factory report emails: four cadences, ESF clients only. Hosted here
+    // for the same reason as the Zoho sync above — the ecosystem memory budget
+    // has no room for another PM2 app (12.75 GB committed against a 13 GB
+    // assertion on a 16 GB host), and this process already owns cron scheduling.
+    //
+    // NOT left in api-server's JobScheduler: the weekly report email that lives
+    // there fired 3 times in 3 months, because an api-server restart crossing
+    // the slot skips that week with no catch-up.
+    try {
+        const { setupEsfReportsCrons } = require('./esfReportsMailerStandalone.js');
+        setupEsfReportsCrons();
+        logger.info('[CronProducerStandalone] ESF reports mailer crons initialized');
+    } catch (error) {
+        logger.error('[CronProducerStandalone] ESF reports mailer init failed', { error: error?.message });
+    }
+
     logger.info('[CronProducerStandalone] Started successfully — running all cron schedules');
 
     // Graceful shutdown: stop accepting new cron ticks, let in-flight work finish.
