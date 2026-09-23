@@ -35,6 +35,7 @@
  * if a mail client strips unknown headers on a round trip. Neither is redundant.
  */
 
+const fs = require('fs/promises');
 const logger = require('../../utils/Logger.js');
 const { ApiError } = require('../../utils/ApiError.js');
 const { EmailThread, EmailMessage } = require('../../models/system/EmailThreadModels.js');
@@ -43,6 +44,7 @@ const { buildMimeMessage, generateMessageId } = require('./mimeBuilder.js');
 const { buildIdentityBundle, redactAll } = require('../Email/identityRedaction.js');
 const { toPlainLabel } = require('../Email/emailRichText.js');
 const { getCredentials, isMessagingEnabled, ORIGIN_HEADER } = require('./config.js');
+const { MAX_TOTAL_BYTES } = require('../../middlewares/multer/gmailUpload.js');
 
 /** The name the client sees on every reply. Never an individual. */
 const AGENCY_DISPLAY_NAME = process.env.GMAIL_SENDER_NAME || 'eStore Factory';
@@ -94,6 +96,7 @@ const assertSendable = (body) => {
  */
 const recordSentMessage = async ({
     thread, userId, direction, origin, bodyRedacted, messageId, gmailMessageId, sentByUserId = null,
+    attachments = [],
 }) => {
     const sentAt = new Date();
 
@@ -116,6 +119,7 @@ const recordSentMessage = async ({
                 // as distinct from 'deterministic', which means detail was removed.
                 redactedBy: 'portal',
                 sentByUserId,
+                attachments,
                 syncedAt: sentAt,
             },
         },
@@ -148,6 +152,71 @@ const recordSentMessage = async ({
 };
 
 /**
+ * Read uploaded files off disk into MIME-ready parts, and always clean up after.
+ *
+ * ── THE UNLINK HAS TO HAPPEN ON EVERY PATH, INCLUDING THE FAILING ONES ──
+ * These land in public/temp. A send that throws — Gmail down, quota hit, oversize
+ * rejection — must not leave the file behind, or a disk fills up over months from
+ * nothing but failed replies, and the symptom when it does is the whole server dying
+ * for reasons that point nowhere near Messages.
+ *
+ * Cleanup failures are swallowed deliberately: a file we could not delete is a tidiness
+ * problem, and throwing here would turn it into a failed reply the client has to send
+ * again — after it had already reached Gmail.
+ */
+const readAttachments = async (files = []) => Promise.all(
+    files.map(async (file) => ({
+        filename: file.originalname,
+        mimeType: file.mimetype,
+        content: await fs.readFile(file.path),
+    }))
+);
+
+const discardAttachments = async (files = []) => {
+    await Promise.all(files.map((file) => fs.unlink(file.path).catch((error) => {
+        logger.warn(`[GmailSend] could not remove temp upload ${file.path}: ${error.message}`);
+    })));
+};
+
+/**
+ * Gmail refuses a message over 25MB, counted AFTER base64 inflates it by about a third.
+ *
+ * multer caps each file individually but cannot see the total, so five files each
+ * inside the per-file limit can still add up to a message Gmail rejects — and it would
+ * reject it at the very end, after the client had waited through the whole upload.
+ */
+const assertAttachmentsFit = (files = []) => {
+    const total = files.reduce((sum, file) => sum + (file.size || 0), 0);
+    if (total > MAX_TOTAL_BYTES) {
+        throw new ApiError(
+            400,
+            `Those files total ${Math.round(total / 1048576)}MB. The limit is `
+            + `${Math.round(MAX_TOTAL_BYTES / 1048576)}MB across all attachments on one message.`
+        );
+    }
+};
+
+/** Attachment metadata as it is stored — filenames redacted, bytes never kept. */
+const attachmentRecords = (files = [], bundle = null) => files.map((file) => ({
+    // No Gmail attachmentId yet: Gmail assigns those, and we would have to re-fetch the
+    // message to learn them. The download route resolves them from the message on
+    // demand instead, so nothing here goes stale.
+    attachmentId: null,
+    filenameRedacted: bundle
+        ? (toPlainLabel(redactFilename(file.originalname, bundle)) || 'Attachment')
+        : (toPlainLabel(file.originalname) || 'Attachment'),
+    mimeType: file.mimetype,
+    size: file.size,
+}));
+
+/** "Nitesh Kumar CV.pdf" names the client in a label, exactly as a body would. */
+const redactFilename = (filename, bundle) => {
+    let out = String(filename || '');
+    (bundle?.names || []).forEach((name) => { out = out.split(name).join('[name]'); });
+    return out;
+};
+
+/**
  * The footer on a portal message, so the admin reading it in Gmail knows where it came
  * from and who they are actually replying to.
  *
@@ -171,7 +240,7 @@ const portalFooter = (fromAddress) => [
  */
 const deliverClientMessage = async ({
     text, rawSubject, fromAddress, gmailThreadId = null, inReplyTo = null, references = [],
-    isNewThread = false,
+    isNewThread = false, files = [],
 }) => {
     const { inboxAddress } = getCredentials();
     const messageId = generateMessageId(String(inboxAddress).split('@')[1]);
@@ -190,9 +259,11 @@ const deliverClientMessage = async ({
         references,
         origin: 'portal-client',
         messageId,
+        attachments: await readAttachments(files),
     });
 
-    const sent = await GmailClient.sendMessage({ raw, ...(gmailThreadId ? { threadId: gmailThreadId } : {}) });
+    const sent = await GmailClient.sendMessage({ raw, ...(gmailThreadId ? { threadId: gmailThreadId } : {}) })
+        .finally(() => discardAttachments(files));
     return { sent, messageId };
 };
 
@@ -275,8 +346,9 @@ const acknowledgeTicket = async ({ thread, rawSubject, text, fromAddress, gmailT
  * @param {string} args.body
  * @param {string} [args.staffUserId]  recorded, never shown to the client
  */
-const sendStaffReply = async ({ threadId, body, staffUserId = null }) => {
+const sendStaffReply = async ({ threadId, body, staffUserId = null, files = [] }) => {
     const text = assertSendable(body);
+    assertAttachmentsFit(files);
     const { inboxAddress } = getCredentials();
     const thread = await loadThreadForSend(threadId);
 
@@ -297,9 +369,12 @@ const sendStaffReply = async ({ threadId, body, staffUserId = null }) => {
         references: thread.referencesTail || [],
         messageId,
         origin: 'portal-staff',
+        attachments: await readAttachments(files),
     });
 
-    const sent = await GmailClient.sendMessage({ raw, threadId: thread.gmailThreadId });
+    // Sent or not, the temp files go. See discardAttachments.
+    const sent = await GmailClient.sendMessage({ raw, threadId: thread.gmailThreadId })
+        .finally(() => discardAttachments(files));
 
     await recordSentMessage({
         thread,
@@ -312,6 +387,8 @@ const sendStaffReply = async ({ threadId, body, staffUserId = null }) => {
         messageId,
         gmailMessageId: sent.id,
         sentByUserId: staffUserId,
+        // Staff wrote the filenames, so there is nothing of the client's to redact.
+        attachments: attachmentRecords(files),
     });
 
     logger.info(`[GmailSend] staff reply sent on thread ${thread._id}`);
@@ -326,8 +403,9 @@ const sendStaffReply = async ({ threadId, body, staffUserId = null }) => {
  * @param {string} args.body
  * @param {object} args.user  the authenticated client
  */
-const insertClientReply = async ({ threadId, body, user }) => {
+const insertClientReply = async ({ threadId, body, user, files = [] }) => {
     const text = assertSendable(body);
+    assertAttachmentsFit(files);
     const { inboxAddress } = getCredentials();
 
     // Scoped to this client. The thread id comes from a URL, so it narrows within the
@@ -343,6 +421,7 @@ const insertClientReply = async ({ threadId, body, user }) => {
         gmailThreadId: thread.gmailThreadId,
         inReplyTo: thread.rfc822MessageIdOfLast,
         references: thread.referencesTail || [],
+        files,
     });
 
     /**
@@ -364,6 +443,8 @@ const insertClientReply = async ({ threadId, body, user }) => {
         bodyRedacted,
         messageId,
         gmailMessageId: sent.id,
+        // The client named these, so a filename can carry their identity.
+        attachments: attachmentRecords(files, bundle),
     });
 
     logger.info(`[GmailSend] client reply delivered on thread ${thread._id}`);
@@ -388,8 +469,9 @@ const insertClientReply = async ({ threadId, body, user }) => {
  * The raw subject is still stored, because Gmail rejects a threaded reply whose subject
  * does not match the thread's — but it is `select: false` and staff never receive it.
  */
-const startClientTicket = async ({ subject, body, user }) => {
+const startClientTicket = async ({ subject, body, user, files = [] }) => {
     const text = assertSendable(body);
+    assertAttachmentsFit(files);
 
     const rawSubject = String(subject || '').trim().replace(/\s+/g, ' ');
     if (!rawSubject) throw new ApiError(400, 'A ticket needs a subject');
@@ -423,6 +505,7 @@ const startClientTicket = async ({ subject, body, user }) => {
         fromAddress,
         // No "Re:" — this opens the conversation rather than continuing one.
         isNewThread: true,
+        files,
     });
 
     const bundle = buildIdentityBundle(user);
@@ -474,6 +557,7 @@ const startClientTicket = async ({ subject, body, user }) => {
                 bodyTruncated: false,
                 quotedTrimmed: false,
                 redactedBy: 'portal',
+                attachments: attachmentRecords(files, bundle),
                 syncedAt: sentAt,
             },
         },

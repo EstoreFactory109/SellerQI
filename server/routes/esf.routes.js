@@ -39,8 +39,10 @@ const {
     getStaffThread,
     setThreadResolved,
     postStaffReply,
+    downloadStaffAttachment,
 } = require('../controllers/esf/esfMessages.js');
 const esfAuth = require('../middlewares/Auth/esfAuth.js');
+const gmailUpload = require('../middlewares/multer/gmailUpload.js');
 const { authRateLimiter, registerRateLimiter } = require('../middlewares/rateLimiting.js');
 const {
     validateEsfLogin,
@@ -112,6 +114,7 @@ router.delete('/users/:userId', esfAuth, removeEsfUser);
 router.get('/messages', esfAuth, listStaffThreads);
 router.get('/messages/:threadId', esfAuth, getStaffThread);
 router.patch('/messages/:threadId/resolve', esfAuth, setThreadResolved);
-router.post('/messages/:threadId/reply', esfAuth, postStaffReply);
+router.post('/messages/:threadId/reply', esfAuth, gmailUpload.array('files', 5), postStaffReply);
+router.get('/messages/:threadId/attachments/:messageId/:index', esfAuth, downloadStaffAttachment);
 
 module.exports = router;
