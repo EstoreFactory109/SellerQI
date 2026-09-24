@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PALETTE, dividerStyle } from '../../../Components/ESF/estoreFactoryTheme.js';
 import axiosInstance from '../../../config/axios.config.js';
+import AttachmentPicker from '../../../Components/ESF/AttachmentPicker.jsx';
 
 /**
  * Estore Factory > Status — recreates deploy/status.html exactly.
@@ -677,39 +678,13 @@ const Status = () => {
 
                             <div className="flex flex-col gap-1.5">
                                 <span className="text-[11.5px] tracking-[.04em]" style={{ color: PALETTE.textMuted }}>DOCUMENTS (OPTIONAL)</span>
-                                <input
-                                    type="file"
-                                    multiple
+                                <AttachmentPicker
+                                    files={reqFiles}
+                                    onChange={setReqFiles}
                                     disabled={sendingRequest}
-                                    onChange={(e) => {
-                                        // Capped here as well as server-side, so picking ten
-                                        // says so now rather than after the upload finishes.
-                                        setReqFiles((c) => [...c, ...Array.from(e.target.files || [])].slice(0, 5));
-                                        e.target.value = '';
-                                    }}
-                                    className="text-[12px]"
-                                    style={{ color: PALETTE.textMuted }}
+                                    tone="client"
+                                    label="Choose documents"
                                 />
-                                {reqFiles.length > 0 && (
-                                    <div className="flex flex-wrap gap-1.5 mt-1">
-                                        {reqFiles.map((file, i) => (
-                                            <span
-                                                key={`${file.name}-${i}`}
-                                                className="flex items-center gap-1.5 rounded px-2 py-1 text-[11.5px]"
-                                                style={{ background: PALETTE.surfaceRaised, color: PALETTE.textSecondary }}
-                                            >
-                                                <span className="max-w-[180px] truncate">{file.name}</span>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setReqFiles((c) => c.filter((_, j) => j !== i))}
-                                                    style={{ color: PALETTE.textMuted }}
-                                                >
-                                                    ×
-                                                </button>
-                                            </span>
-                                        ))}
-                                    </div>
-                                )}
                             </div>
 
                             {requestError && (
