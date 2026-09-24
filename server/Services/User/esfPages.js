@@ -130,7 +130,21 @@ const isPageDeniedFor = (staffUser, pageKey, { isOwner = false } = {}) => {
     return denied.includes(pageKey);
 };
 
+/**
+ * The same pages, for members of a seller account ("Add member"). Same keys and
+ * the same API mapping, so one blocklist format and one guard shape serve both.
+ *
+ * The Estore Factory group only exists inside an ESF client's account, so it is
+ * offered only there; User Logging is a super-admin page and never offered.
+ */
+const memberPageCatalogue = ({ includeEsfPages = false } = {}) =>
+    ESF_CLIENT_PAGES
+        .filter((page) => page.key !== 'user-logging')
+        .filter((page) => includeEsfPages || page.group !== 'Estore Factory')
+        .map((page) => (page.key === 'settings' ? { ...page, label: 'Settings' } : page));
+
 module.exports = {
+    memberPageCatalogue,
     ESF_CLIENT_PAGES,
     ESF_PAGE_KEYS,
     sanitizeDeniedPages,

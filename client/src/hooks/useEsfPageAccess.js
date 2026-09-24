@@ -13,7 +13,7 @@ import axiosInstance from '../config/axios.config.js';
  * independently, so nothing is actually exposed by that choice.
  */
 
-const EMPTY = { isEsfSession: false, esfRole: null, isOwner: false, deniedPages: [] };
+const EMPTY = { isEsfSession: false, isMemberSession: false, esfRole: null, isOwner: false, deniedPages: [] };
 
 let cache = null;
 let inflight = null;
@@ -80,9 +80,15 @@ export const useEsfPageAccess = () => {
   return {
     ...state,
     ready,
-    /** Owner is never restricted; a non-ESF session is never restricted. */
+    /**
+     * Restricted: ESF staff other than the owner, and members of a seller account
+     * (the owner set their page access on the Add member page). The account owner
+     * and everyone else are never restricted.
+     */
+    isRestricted: (state.isEsfSession && !state.isOwner) || state.isMemberSession === true,
     isPageAllowed: (pageKey) => {
-      if (!state.isEsfSession || state.isOwner) return true;
+      const restricted = (state.isEsfSession && !state.isOwner) || state.isMemberSession === true;
+      if (!restricted) return true;
       return !denied.includes(pageKey);
     },
   };
