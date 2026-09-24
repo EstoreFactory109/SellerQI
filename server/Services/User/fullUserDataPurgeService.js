@@ -37,6 +37,7 @@ const TopOpportunities = require('../../models/system/TopOpportunitiesModel.js')
 const EsfSuggestedWork = require('../../models/system/EsfSuggestedWorkModel.js');
 const { EsfBillingProfile, EsfBillingInvoice } = require('../../models/system/EsfBillingModels.js');
 const { EmailThread, EmailMessage } = require('../../models/system/EmailThreadModels.js');
+const TaskRequest = require('../../models/system/TaskRequestModel.js');
 const TopProducts = require('../../models/system/TopProductsModel.js');
 const Cogs = require('../../models/finance/CogsModel.js');
 const ProductWiseStorageFees = require('../../models/finance/ProductWiseStorageFees.js');
@@ -229,6 +230,7 @@ const collectionsWithUserId = [
     // so it cannot survive a deletion request.
     { model: EmailThread, key: 'userId' },
     { model: EmailMessage, key: 'userId' },
+    { model: TaskRequest, key: 'userId' },
     { model: Cogs, key: 'userId' },
     { model: ProductWiseStorageFees, key: 'userId' },
     { model: FBAFees, key: 'userId' },

@@ -386,6 +386,65 @@ const getProjectTaskUpdates = async (projectId, { includeComments = true, maxTas
  * account, so the CALLER is responsible for putting attribution in the text. Nothing
  * in Zoho will otherwise say a client wrote it.
  */
+/**
+ * Create a task in a Zoho project.
+ *
+ * ── THE FIELD NAMES HERE ARE THE RISKY PART ──
+ * `postTaskComment` below carries a scar worth heeding: its body field must be `comment`,
+ * and `content` — the obvious guess, and what the docs imply — returns
+ * FIELDS_VALIDATION_ERROR. Task creation is the same class of guess, so the payload is
+ * kept minimal (name plus optional description and end date) and every optional field is
+ * omitted when absent rather than sent empty. A rejected create is loud; a create that
+ * silently ignores a field is not.
+ *
+ * Dates go as `end_date` in Zoho's YYYY-MM-DD form. Setting one matters beyond
+ * presentation: ZohoTaskSync.classifyTask puts a task with no dates into "In progress",
+ * so a request with a needed-by date that failed to carry would land in the wrong column
+ * on the client's Status page.
+ *
+ * Like every write here, this is authored in Zoho by the single org-wide connected
+ * account — so the CALLER is responsible for putting attribution in the description.
+ */
+const createTask = async ({ projectId, name, description, endDate, portalId }) => {
+    if (!projectId) {
+        throw new ApiError(400, 'A project is required to create a task');
+    }
+
+    const title = typeof name === 'string' ? name.trim() : '';
+    if (!title) {
+        throw new ApiError(400, 'Task name is required');
+    }
+
+    const resolvedPortal = await resolvePortalId(portalId);
+    const spec = PATHS.tasks;
+
+    const body = { name: title };
+    if (description) body.description = String(description);
+    if (endDate) body.end_date = endDate;
+
+    const response = await zohoRequest({
+        method: 'POST',
+        path: spec.path(resolvedPortal, projectId),
+        version: spec.version,
+        data: body,
+        // v2 requires form-encoded writes; v3 takes JSON. Mirrors createProject.
+        form: spec.version === 'v2',
+        context: `Creating a Zoho task in project ${projectId}`
+    });
+
+    const created = unwrap(response, spec.envelope)[0] || response;
+    const task = normaliseTask(created);
+
+    if (!task.id) {
+        // Zoho answered 2xx without an id, which means the write did not land the way we
+        // think it did. Surfaced rather than returning a task nothing can refer to.
+        throw new ApiError(502, 'Zoho accepted the task but returned no task id');
+    }
+
+    logger.info(`[ZohoProjects] Created task ${task.id} in project ${projectId}`);
+    return task;
+};
+
 const postTaskComment = async ({ projectId, taskId, comment, portalId }) => {
     if (!projectId || !taskId) {
         throw new ApiError(400, 'A project and task are required to post a comment');
@@ -475,6 +534,7 @@ module.exports = {
     listProjects,
     createProject,
     getProjectTaskUpdates,
+    createTask,
     postTaskComment,
     uploadTaskAttachment,
     mapWithConcurrency

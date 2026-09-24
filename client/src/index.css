@@ -112,6 +112,49 @@ body::-webkit-scrollbar {
   background: transparent;
 }
 
+/* ---- Opt-in visible scrollbar ----
+ * The `*` rules above hide scrollbars on EVERY element. That is fine for the
+ * page itself, but a panel that scrolls inside a fixed height then gives no
+ * hint that there is more to see - the content just looks cut off. Add
+ * `esf-scroll` to such an element to put a themed scrollbar back on that one
+ * element only. A class beats the universal selector on specificity, so these
+ * rules win without !important.
+ *
+ * Use the --light variant on a pale surface (e.g. the report document preview);
+ * the default thumb is tuned for the dark ESF panels and would vanish on white.
+ */
+.esf-scroll {
+  scrollbar-width: thin;                                   /* Firefox */
+  scrollbar-color: rgba(255, 255, 255, 0.24) transparent;
+  -ms-overflow-style: auto;
+}
+.esf-scroll::-webkit-scrollbar {
+  display: block;
+  width: 8px;
+  height: 8px;
+  background: transparent;
+}
+.esf-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.esf-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+.esf-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.34);
+}
+
+.esf-scroll--light {
+  scrollbar-color: rgba(31, 56, 100, 0.35) transparent;
+}
+.esf-scroll--light::-webkit-scrollbar-thumb {
+  background: rgba(31, 56, 100, 0.3);
+}
+.esf-scroll--light::-webkit-scrollbar-thumb:hover {
+  background: rgba(31, 56, 100, 0.5);
+}
+
 /* Line clamp utilities */
 .line-clamp-1 {
   overflow: hidden;

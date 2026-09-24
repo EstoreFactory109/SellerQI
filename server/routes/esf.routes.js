@@ -41,6 +41,13 @@ const {
     postStaffReply,
     downloadStaffAttachment,
 } = require('../controllers/esf/esfMessages.js');
+const {
+    listTaskRequests,
+    acceptTaskRequest,
+    rejectTaskRequest,
+    deleteTaskRequest,
+    downloadTaskRequestAttachment,
+} = require('../controllers/esf/esfTaskRequests.js');
 const esfAuth = require('../middlewares/Auth/esfAuth.js');
 const gmailUpload = require('../middlewares/multer/gmailUpload.js');
 const { authRateLimiter, registerRateLimiter } = require('../middlewares/rateLimiting.js');
@@ -116,5 +123,18 @@ router.get('/messages/:threadId', esfAuth, getStaffThread);
 router.patch('/messages/:threadId/resolve', esfAuth, setThreadResolved);
 router.post('/messages/:threadId/reply', esfAuth, gmailUpload.array('files', 5), postStaffReply);
 router.get('/messages/:threadId/attachments/:messageId/:index', esfAuth, downloadStaffAttachment);
+
+/**
+ * Task requests — clients asking for work, and the decision on it.
+ *
+ * esfAuth admits any staff member; the owner/admin check is made explicitly inside the
+ * controller, because esfPageGuard does not cover /app/esf routes. Accepting a request
+ * creates a real task in the shared Zoho portal on the client's behalf.
+ */
+router.get('/task-requests', esfAuth, listTaskRequests);
+router.patch('/task-requests/:requestId/accept', esfAuth, acceptTaskRequest);
+router.patch('/task-requests/:requestId/reject', esfAuth, rejectTaskRequest);
+router.delete('/task-requests/:requestId', esfAuth, deleteTaskRequest);
+router.get('/task-requests/:requestId/attachments/:index', esfAuth, downloadTaskRequestAttachment);
 
 module.exports = router;

@@ -602,10 +602,76 @@ const startClientTicket = async ({ subject, body, user, files = [] }) => {
     return { threadId: String(thread._id), subject: thread.displaySubject, sentAt };
 };
 
+/**
+ * Email a task request to the shared inbox.
+ *
+ * ── THIS IS NOT A COURTESY COPY, IT IS THE ONLY COPY ──
+ * Zoho cannot accept attachments on this portal — every documented upload shape fails
+ * for a configuration reason outside this repo (see ZOHO_TASK_ATTACHMENTS_ENABLED). So
+ * when a client attaches documents to a task request, this email is the only place those
+ * files will ever exist. We store no bytes ourselves.
+ *
+ * That is why the caller treats a failure here as fatal rather than best-effort: a
+ * TaskRequest row written after a failed send would show an admin a request with
+ * evidence attached that nobody can open.
+ *
+ * Deliberately creates NO EmailThread or EmailMessage. A task request is a notification,
+ * not a conversation, and filing it into Messages would put every request into the
+ * client's inbox as though someone had written to them. `inboundRouting` skips this
+ * origin outright for the same reason — without that it would defer forever looking for
+ * a local copy that is never coming.
+ */
+const sendTaskRequestEmail = async ({ user, title, description, neededBy, files = [] }) => {
+    if (!isMessagingEnabled()) {
+        // Said plainly, because the client can do nothing about it and the admin needs
+        // to know why requests stopped rather than seeing a generic failure.
+        throw new ApiError(503, 'Task requests are unavailable while the mail connection is down. Please try again shortly.');
+    }
+    assertAttachmentsFit(files);
+
+    const { inboxAddress } = getCredentials();
+    const fromAddress = user.email;
+    const messageId = generateMessageId(String(inboxAddress).split('@')[1]);
+
+    const body = [
+        'A client has requested a task through the SellerQI portal.',
+        '',
+        `Requested by : ${fromAddress}`,
+        ...(neededBy ? [`Needed by    : ${new Date(neededBy).toISOString().slice(0, 10)}`] : []),
+        '',
+        `Task: ${title}`,
+        '',
+        description,
+        '',
+        '--',
+        'Accept or reject this in the portal under Task Requests. Accepting creates the',
+        'task in the linked Zoho project. Replying to this email reaches the client.',
+    ].join('\n');
+
+    const { raw } = buildMimeMessage({
+        from: { name: PORTAL_SENDER_NAME, email: inboxAddress },
+        to: { email: inboxAddress },
+        // So the admin can just hit Reply and reach the person who asked.
+        replyTo: { email: fromAddress },
+        rawSubject: `Task request: ${title}`,
+        isNewThread: true,
+        bodyText: body,
+        messageId,
+        origin: 'portal-task-request',
+        attachments: await readAttachments(files),
+    });
+
+    const sent = await GmailClient.sendMessage({ raw }).finally(() => discardAttachments(files));
+
+    logger.info(`[GmailSend] task request emailed for ${user._id}`);
+    return { gmailMessageId: sent.id };
+};
+
 module.exports = {
     sendStaffReply,
     insertClientReply,
     startClientTicket,
+    sendTaskRequestEmail,
     MAX_REPLY_CHARS,
     MAX_SUBJECT_CHARS,
     MAX_OPEN_TICKETS,

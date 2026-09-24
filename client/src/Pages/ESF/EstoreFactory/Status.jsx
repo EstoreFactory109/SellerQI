@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PALETTE, dividerStyle } from '../../../Components/ESF/estoreFactoryTheme.js';
 import axiosInstance from '../../../config/axios.config.js';
 
@@ -13,6 +13,39 @@ import axiosInstance from '../../../config/axios.config.js';
  * ClientDashboard.jsx), so nothing here persists past a page refresh, same as
  * the source design.
  */
+/**
+ * How a request reads while it waits, and after a decision.
+ *
+ * Accepted requests keep showing here until the Zoho sync picks the real task up, at
+ * which point it appears in the table below as ordinary work. Dropping the row the
+ * instant it was accepted would leave a gap where the client's request used to be.
+ */
+const REQUEST_BADGE = {
+    pending: {
+        rail: 'Pending', label: 'Requested by you', note: 'Awaiting confirm',
+        bg: 'rgba(59,130,246,.12)', color: '#7EA8F8',
+    },
+    accepted: {
+        rail: 'Accepted', label: 'Accepted', note: 'Being added to your plan',
+        bg: 'rgba(34,197,94,.12)', color: '#5FD48A',
+    },
+    rejected: {
+        rail: 'Declined', label: 'Not taken on', note: 'See the note',
+        bg: 'rgba(255,255,255,.06)', color: '#9AA3AF',
+    },
+};
+
+const relativeRequestTime = (value) => {
+    if (!value) return 'Just now';
+    const then = new Date(value);
+    if (Number.isNaN(then.getTime())) return 'Just now';
+    const minutes = Math.floor((Date.now() - then.getTime()) / 60000);
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (minutes < 1440) return `${Math.floor(minutes / 60)}h ago`;
+    return then.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+
 const inputStyle = { background: PALETTE.input, border: `1px solid ${PALETTE.borderHover}`, color: PALETTE.textBody };
 
 /**
@@ -443,8 +476,12 @@ const Status = () => {
 
     const [formOpen, setFormOpen] = useState(false);
     const [name, setName] = useState('');
+    const [description, setDescription] = useState('');
     const [due, setDue] = useState('');
-    const [requests, setRequests] = useState([]);
+    const [reqFiles, setReqFiles] = useState([]);
+    const [sendingRequest, setSendingRequest] = useState(false);
+    const [requestError, setRequestError] = useState('');
+    const [extraRequests, setExtraRequests] = useState([]);
     const [doneOpen, setDoneOpen] = useState(false);
 
     /**
@@ -475,17 +512,55 @@ const Status = () => {
     const comingUp = board?.comingUp || [];
     const completed = board?.completed || [];
 
-    const addTask = () => {
+    /**
+     * Send a task request.
+     *
+     * multipart because it may carry documents. Content-Type is left to the browser:
+     * setting it by hand drops the boundary and the server sees no files at all.
+     */
+    const addTask = async () => {
         const trimmed = name.trim();
-        if (!trimmed) return;
-        const dueLabel = due
-            ? `Needed ${new Date(`${due}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
-            : 'No date';
-        setRequests((r) => [{ name: trimmed, due: dueLabel }, ...r]);
-        setName('');
-        setDue('');
-        setFormOpen(false);
+        const detail = description.trim();
+        if (!trimmed || !detail || sendingRequest) return;
+
+        setSendingRequest(true);
+        setRequestError('');
+        try {
+            const form = new FormData();
+            form.append('title', trimmed);
+            form.append('description', detail);
+            if (due) form.append('neededBy', due);
+            reqFiles.forEach((file) => form.append('files', file));
+
+            const res = await axiosInstance.post('/api/pagewise/esf/task-requests', form);
+
+            /**
+             * Folded in locally rather than refetched, for the same reason recordReply
+             * does it: this GET is cached 300s server-side, so re-reading it would very
+             * often return a board captured before this request existed and it would
+             * appear to have vanished.
+             */
+            setExtraRequests((r) => [res.data?.data, ...r].filter(Boolean));
+            setName('');
+            setDescription('');
+            setDue('');
+            setReqFiles([]);
+            setFormOpen(false);
+        } catch (err) {
+            // The server's 4xx messages describe our own rules ("you already have 10
+            // awaiting a decision") and are worth showing verbatim.
+            setRequestError(err.response?.data?.message || 'Could not send that request');
+        } finally {
+            setSendingRequest(false);
+        }
     };
+
+    /** Just-submitted requests first, then whatever the cached board already knew about. */
+    const requests = useMemo(() => {
+        const fromBoard = board?.taskRequests || [];
+        const seen = new Set(extraRequests.map((r) => r.id));
+        return [...extraRequests, ...fromBoard.filter((r) => !seen.has(r.id))];
+    }, [board, extraRequests]);
 
     return (
         <div className="min-h-full w-full" style={{ background: PALETTE.bg, color: PALETTE.textPrimary, fontFamily: "system-ui, -apple-system, 'Helvetica Neue', Helvetica, sans-serif" }}>
@@ -560,14 +635,16 @@ const Status = () => {
                                 <span className="text-sm font-semibold">Request a task</span>
                                 <span className="text-[12.5px]" style={{ color: PALETTE.textSecondary }}>Your account manager reviews requests and confirms the timeline.</span>
                             </div>
-                            <div className="flex flex-col md:flex-row gap-3 md:items-end">
+                            <div className="flex flex-col md:flex-row gap-3">
                                 <label className="flex-1 flex flex-col gap-1.5">
                                     <span className="text-[11.5px] tracking-[.04em]" style={{ color: PALETTE.textMuted }}>WHAT DO YOU NEED</span>
                                     <input
                                         value={name}
+                                        disabled={sendingRequest}
+                                        maxLength={150}
                                         onChange={(e) => setName(e.target.value)}
                                         placeholder="e.g. Add a size chart to the mixing bowl listing"
-                                        className="rounded-lg px-3 py-2.5 text-[13px] outline-none"
+                                        className="rounded-lg px-3 py-2.5 text-[13px] outline-none disabled:opacity-50"
                                         style={inputStyle}
                                     />
                                 </label>
@@ -576,33 +653,118 @@ const Status = () => {
                                     <input
                                         type="date"
                                         value={due}
+                                        disabled={sendingRequest}
                                         onChange={(e) => setDue(e.target.value)}
-                                        className="rounded-lg px-3 py-2.5 text-[13px] outline-none"
+                                        className="rounded-lg px-3 py-2.5 text-[13px] outline-none disabled:opacity-50"
                                         style={{ ...inputStyle, colorScheme: 'dark' }}
                                     />
                                 </label>
-                                <button type="button" onClick={addTask} className="flex-none text-[12.5px] font-bold px-[18px] py-2.5 rounded-lg" style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}>Send request</button>
-                                <button type="button" onClick={() => setFormOpen(false)} className="flex-none text-[12.5px] px-4 py-2.5 rounded-lg" style={{ color: PALETTE.textSecondary, border: `1px solid ${PALETTE.border}` }}>Cancel</button>
+                            </div>
+
+                            <label className="flex flex-col gap-1.5">
+                                <span className="text-[11.5px] tracking-[.04em]" style={{ color: PALETTE.textMuted }}>DETAILS</span>
+                                <textarea
+                                    rows={4}
+                                    value={description}
+                                    disabled={sendingRequest}
+                                    maxLength={5000}
+                                    onChange={(e) => setDescription(e.target.value)}
+                                    placeholder="What needs doing, which products or ASINs it affects, and anything your team should know before starting."
+                                    className="rounded-lg px-3 py-2.5 text-[13px] leading-relaxed outline-none resize-none disabled:opacity-50"
+                                    style={inputStyle}
+                                />
+                            </label>
+
+                            <div className="flex flex-col gap-1.5">
+                                <span className="text-[11.5px] tracking-[.04em]" style={{ color: PALETTE.textMuted }}>DOCUMENTS (OPTIONAL)</span>
+                                <input
+                                    type="file"
+                                    multiple
+                                    disabled={sendingRequest}
+                                    onChange={(e) => {
+                                        // Capped here as well as server-side, so picking ten
+                                        // says so now rather than after the upload finishes.
+                                        setReqFiles((c) => [...c, ...Array.from(e.target.files || [])].slice(0, 5));
+                                        e.target.value = '';
+                                    }}
+                                    className="text-[12px]"
+                                    style={{ color: PALETTE.textMuted }}
+                                />
+                                {reqFiles.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5 mt-1">
+                                        {reqFiles.map((file, i) => (
+                                            <span
+                                                key={`${file.name}-${i}`}
+                                                className="flex items-center gap-1.5 rounded px-2 py-1 text-[11.5px]"
+                                                style={{ background: PALETTE.surfaceRaised, color: PALETTE.textSecondary }}
+                                            >
+                                                <span className="max-w-[180px] truncate">{file.name}</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setReqFiles((c) => c.filter((_, j) => j !== i))}
+                                                    style={{ color: PALETTE.textMuted }}
+                                                >
+                                                    ×
+                                                </button>
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            {requestError && (
+                                <p className="m-0 text-[12.5px]" style={{ color: PALETTE.amberValue }}>{requestError}</p>
+                            )}
+
+                            <div className="flex gap-3 items-center">
+                                <button
+                                    type="button"
+                                    onClick={addTask}
+                                    disabled={sendingRequest || !name.trim() || !description.trim()}
+                                    className="flex-none text-[12.5px] font-bold px-[18px] py-2.5 rounded-lg disabled:opacity-40"
+                                    style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}
+                                >
+                                    {sendingRequest ? 'Sending…' : 'Send request'}
+                                </button>
+                                <button type="button" disabled={sendingRequest} onClick={() => setFormOpen(false)} className="flex-none text-[12.5px] px-4 py-2.5 rounded-lg disabled:opacity-40" style={{ color: PALETTE.textSecondary, border: `1px solid ${PALETTE.border}` }}>Cancel</button>
                             </div>
                         </div>
                     )}
 
                     {requests.length > 0 && (
                         <div className="rounded-lg" style={{ background: PALETTE.surface, border: `1px solid ${PALETTE.border}`, padding: '4px 24px 6px' }}>
-                            {requests.map((r, i) => (
-                                <div key={i} className="grid items-center gap-[18px] py-[15px]" style={{ gridTemplateColumns: GRID_COLS, ...(i > 0 ? dividerStyle() : undefined) }}>
-                                    <span className="text-xs" style={{ color: PALETTE.textDim, fontFamily: 'ui-monospace, Menlo, monospace' }}>Pending</span>
-                                    <span className="flex flex-col gap-[3px] min-w-0">
-                                        <span className="text-[13.5px]" style={{ color: PALETTE.textBody }}>{r.name}</span>
-                                        <span className="text-xs" style={{ color: PALETTE.textMuted }}>{r.due}</span>
-                                    </span>
-                                    <span />
-                                    <span className="justify-self-start text-[11.5px] font-semibold rounded-md px-[10px] py-1" style={{ background: 'rgba(59,130,246,.12)', color: '#7EA8F8' }}>Requested by you</span>
-                                    <span className="text-[12.5px]" style={{ color: PALETTE.textMuted }}>Awaiting confirm</span>
-                                    <span className="text-xs text-right" style={{ color: PALETTE.textMuted }}>Just now</span>
-                                    <span />
-                                </div>
-                            ))}
+                            {requests.map((r, i) => {
+                                const badge = REQUEST_BADGE[r.status] || REQUEST_BADGE.pending;
+                                return (
+                                    <div key={r.id || i} className="grid items-center gap-[18px] py-[15px]" style={{ gridTemplateColumns: GRID_COLS, ...(i > 0 ? dividerStyle() : undefined) }}>
+                                        <span className="text-xs" style={{ color: PALETTE.textDim, fontFamily: 'ui-monospace, Menlo, monospace' }}>{badge.rail}</span>
+                                        <span className="flex flex-col gap-[3px] min-w-0">
+                                            <span className="text-[13.5px]" style={{ color: PALETTE.textBody }}>{r.title}</span>
+                                            <span className="text-xs" style={{ color: PALETTE.textMuted }}>
+                                                {r.neededBy
+                                                    ? `Needed ${new Date(r.neededBy).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+                                                    : 'No date'}
+                                                {r.attachmentCount > 0 ? ` · ${r.attachmentCount} file${r.attachmentCount === 1 ? '' : 's'}` : ''}
+                                            </span>
+                                            {/*
+                                                Shown in full rather than truncated. A client told
+                                                "no" with no explanation re-submits the same
+                                                request or sends a message asking why.
+                                            */}
+                                            {r.status === 'rejected' && r.rejectionReason && (
+                                                <span className="text-xs mt-0.5" style={{ color: PALETTE.amberValue }}>
+                                                    {r.rejectionReason}
+                                                </span>
+                                            )}
+                                        </span>
+                                        <span />
+                                        <span className="justify-self-start text-[11.5px] font-semibold rounded-md px-[10px] py-1" style={{ background: badge.bg, color: badge.color }}>{badge.label}</span>
+                                        <span className="text-[12.5px]" style={{ color: PALETTE.textMuted }}>{badge.note}</span>
+                                        <span className="text-xs text-right" style={{ color: PALETTE.textMuted }}>{relativeRequestTime(r.requestedAt)}</span>
+                                        <span />
+                                    </div>
+                                );
+                            })}
                         </div>
                     )}
 

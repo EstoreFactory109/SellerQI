@@ -20,9 +20,10 @@ const EmailLogsSchema = new mongoose.Schema(
           "USER_REGISTERED", 
           "ALERTS",
           "ESF_INVITE",
+          "ESF_REPORTS",
           "OTHER"
         ],
-        message: "Email type must be one of: OTP, WELCOME_LITE, PASSWORD_RESET, ANALYSIS_READY, WEEKLY_REPORT, UPGRADE_REMINDER, CONNECTION_REMINDER, SUPPORT_MESSAGE, USER_REGISTERED, ALERTS, ESF_INVITE, OTHER"
+        message: "Email type must be one of: OTP, WELCOME_LITE, PASSWORD_RESET, ANALYSIS_READY, WEEKLY_REPORT, UPGRADE_REMINDER, CONNECTION_REMINDER, SUPPORT_MESSAGE, USER_REGISTERED, ALERTS, ESF_INVITE, ESF_REPORTS, OTHER"
       },
       trim: true,
       uppercase: true
@@ -32,9 +33,21 @@ const EmailLogsSchema = new mongoose.Schema(
       required: [true, "Receiver email is required"],
       trim: true,
       lowercase: true,
+      // ONE OR MORE addresses, comma-separated.
+      //
+      // Not a single address, because that is not what senders store here.
+      // Services/Email/resolveRecipientEmail.js deliberately returns a
+      // comma-separated list — that is how a user with several verified
+      // addresses, or an agency client whose mail goes to the agency owner,
+      // gets their mail — and nodemailer accepts that form wherever a single
+      // address was accepted before.
+      //
+      // While this matched one address only, such a user could not have an
+      // email logged at all: every sender saves the log BEFORE calling
+      // sendMail, so the validation error meant the message was never sent.
       match: [
-        /^([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/,
-        "Please enter a valid email address",
+        /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(\s*,\s*[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})*$/,
+        "Please enter a valid email address, or a comma-separated list of them",
       ],
       index: true // Add index for faster queries
     },

@@ -36,7 +36,48 @@ const { parseMessage } = require('./gmailMessageParser.js');
 const INLINE_SAFE = [/^image\//, /^application\/pdf$/, /^text\/plain$/];
 
 /**
- * Resolve one attachment to its bytes.
+ * Fetch by Gmail's own message id, with the stored metadata supplied by the caller.
+ *
+ * Split out because not everything with attachments is a conversation: a task-request
+ * email deliberately has no EmailMessage row, and forcing one into existence purely to
+ * satisfy a download path would put notifications into the Messages inbox.
+ *
+ * @param {object} args
+ * @param {string} args.gmailMessageId
+ * @param {number} args.index                position in that message's attachment list
+ * @param {object} args.record               the stored metadata `{ filenameRedacted, mimeType }`
+ */
+const fetchAttachmentBytes = async ({ gmailMessageId, index, record }) => {
+    const position = Number(index);
+    if (!Number.isInteger(position) || position < 0) {
+        throw new ApiError(400, 'Invalid attachment reference');
+    }
+    if (!gmailMessageId || !record) throw new ApiError(404, 'Attachment not found');
+
+    // Read the message back to learn Gmail's own id for this file. Also the check that
+    // it still exists — a message deleted in Gmail 404s here rather than serving stale.
+    const raw = await GmailClient.getMessage(gmailMessageId);
+    const live = parseMessage(raw).attachments[position];
+
+    if (!live?.attachmentId) {
+        throw new ApiError(410, 'That file is no longer available in the mailbox');
+    }
+
+    const payload = await GmailClient.getAttachment(gmailMessageId, live.attachmentId);
+    if (!payload?.data) throw new ApiError(502, 'Gmail returned no data for that attachment');
+
+    return {
+        buffer: Buffer.from(String(payload.data).replace(/-/g, '+').replace(/_/g, '/'), 'base64'),
+        // The REDACTED name, never the one Gmail holds — the original can carry the
+        // client's own name, which is the whole reason it was redacted on the way in.
+        filename: record.filenameRedacted || 'attachment',
+        mimeType: record.mimeType || 'application/octet-stream',
+        inline: INLINE_SAFE.some((pattern) => pattern.test(record.mimeType || '')),
+    };
+};
+
+/**
+ * Resolve one attachment belonging to a CONVERSATION message.
  *
  * @param {object} args
  * @param {string} args.messageId  our EmailMessage _id
@@ -69,26 +110,11 @@ const fetchAttachment = async ({ messageId, threadId, index, userId = null }) =>
     const record = (message.attachments || [])[position];
     if (!record) throw new ApiError(404, 'Attachment not found');
 
-    // Read the message back to learn Gmail's own id for this file. Also the check that
-    // it still exists — a message deleted in Gmail 404s here rather than serving stale.
-    const raw = await GmailClient.getMessage(message.gmailMessageId);
-    const live = parseMessage(raw).attachments[position];
-
-    if (!live?.attachmentId) {
-        throw new ApiError(410, 'That file is no longer available in the mailbox');
-    }
-
-    const payload = await GmailClient.getAttachment(message.gmailMessageId, live.attachmentId);
-    if (!payload?.data) throw new ApiError(502, 'Gmail returned no data for that attachment');
-
-    return {
-        buffer: Buffer.from(String(payload.data).replace(/-/g, '+').replace(/_/g, '/'), 'base64'),
-        // The REDACTED name, never the one Gmail holds — the original can carry the
-        // client's own name, which is the whole reason it was redacted at ingest.
-        filename: record.filenameRedacted || 'attachment',
-        mimeType: record.mimeType || 'application/octet-stream',
-        inline: INLINE_SAFE.some((pattern) => pattern.test(record.mimeType || '')),
-    };
+    return fetchAttachmentBytes({
+        gmailMessageId: message.gmailMessageId,
+        index: position,
+        record,
+    });
 };
 
 /**
@@ -110,4 +136,4 @@ const sendAttachment = (res, { buffer, filename, mimeType, inline }) => {
     return res.send(buffer);
 };
 
-module.exports = { fetchAttachment, sendAttachment, INLINE_SAFE };
+module.exports = { fetchAttachment, fetchAttachmentBytes, sendAttachment, INLINE_SAFE };

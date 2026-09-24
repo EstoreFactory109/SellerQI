@@ -79,6 +79,23 @@ const canManageClients = () => true;
  * Owners and admins keep full visibility deliberately: someone has to be able to call a
  * client back.
  */
+/**
+ * Whether this staff member may accept, reject or delete a client's task request.
+ *
+ * Accepting one writes a real task into the shared Zoho portal on the client's behalf,
+ * which is the same bar as changing the Zoho connection itself — not something a member
+ * should be able to do unreviewed. Owner and admin only.
+ *
+ * A named function rather than an inline role check, for the reason the rest of this
+ * file gives: tightening or loosening it later is then a one-line change in one place.
+ */
+const canManageTaskRequests = (user) => {
+    // Platform superAdmins are admitted by esfAuth precisely so they can service the
+    // portal, and resolveEsfRole would otherwise demote them to 'member'.
+    if (user?.accessType === 'superAdmin') return true;
+    return canManageTeam(user);
+};
+
 const canSeeClientIdentity = (user) => {
     // Platform superAdmins are admitted by esfAuth precisely so they can service the
     // portal, and resolveEsfRole would otherwise demote them to 'member'.
@@ -95,4 +112,5 @@ module.exports = {
     canManageTeam,
     canManageClients,
     canSeeClientIdentity,
+    canManageTaskRequests,
 };

@@ -77,6 +77,38 @@ const toClientTask = (task) => {
  * project gets an explicit `linked: false` rather than empty arrays, so the
  * page can say why it is empty instead of implying there is no work.
  */
+/**
+ * The client's own task requests, newest first.
+ *
+ * Served on this payload rather than its own endpoint because the Status page is where
+ * they are raised and where their outcome belongs — one fetch, one place. Only the
+ * redacted copy is read; the raw text behind `select: false` exists for the Zoho write
+ * and nothing here opts into it.
+ *
+ * The rejection reason is included deliberately. A client who is told "no" with no
+ * explanation re-submits the same request, or sends a message asking why.
+ */
+const loadTaskRequests = async (userId) => {
+    const TaskRequest = require('../../models/system/TaskRequestModel.js');
+
+    const requests = await TaskRequest.find({ userId })
+        .select('title neededBy status requestedAt decidedAt rejectionReason attachments')
+        .sort({ requestedAt: -1 })
+        .limit(25)
+        .lean();
+
+    return requests.map((request) => ({
+        id: String(request._id),
+        title: request.title,
+        neededBy: request.neededBy,
+        status: request.status,
+        requestedAt: request.requestedAt,
+        decidedAt: request.decidedAt,
+        rejectionReason: request.rejectionReason,
+        attachmentCount: (request.attachments || []).length,
+    }));
+};
+
 const getEsfProjectStatus = asyncHandler(async (req, res) => {
     const userId = req.userId;
 
@@ -94,6 +126,10 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
                 completed: [],
                 syncedAt: null,
                 canAttachFiles: ATTACHMENTS_ENABLED,
+                // Included even here: not being linked to a project does not mean the
+                // client never asked for anything, and hiding their own requests would
+                // make the page look like the submission had failed.
+                taskRequests: await loadTaskRequests(userId),
             }, 'No Zoho project is linked to this account'));
         }
 
@@ -171,6 +207,7 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
             // ATTACHMENTS_ENABLED. Sent rather than hardcoded so turning uploads on is
             // an env change, not a release.
             canAttachFiles: ATTACHMENTS_ENABLED,
+            taskRequests: await loadTaskRequests(userId),
         }, 'Project status fetched successfully'));
     } catch (error) {
         logger.error(new ApiError(500, `[EsfProjectStatus] ${error.message}`));
