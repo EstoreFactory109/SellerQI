@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { ClipboardList, Check, X, Trash2, Paperclip, AlertTriangle, Sparkles, MessageSquare } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ClipboardList, Check, X, Trash2, Paperclip, AlertTriangle, Sparkles, MessageSquare, Search } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 
 /**
@@ -37,6 +37,7 @@ const EsfTaskRequests = () => {
     const [busyId, setBusyId] = useState(null);
     const [rejectingId, setRejectingId] = useState(null);
     const [reason, setReason] = useState('');
+    const [search, setSearch] = useState('');
 
     const load = useCallback(async () => {
         try {
@@ -80,6 +81,19 @@ const EsfTaskRequests = () => {
 
     const remove = (id) => act(id, () => axiosInstance.delete(`/app/esf/task-requests/${id}`));
 
+    /**
+     * Filtered here rather than server-side, over data already redacted.
+     *
+     * A search that ran over the stored text would be a de-anonymisation oracle — type a
+     * name, see which client comes back — and the whole page exists to keep that shut.
+     * The list is capped at 100 anyway, so there is nothing to gain by moving it.
+     */
+    const visible = useMemo(() => {
+        const needle = search.trim().toLowerCase();
+        if (!needle) return requests;
+        return requests.filter((r) => `${r.client} ${r.title} ${r.description}`.toLowerCase().includes(needle));
+    }, [requests, search]);
+
     const dismiss = (id) => act(id, () => axiosInstance.patch(`/app/esf/task-requests/${id}/dismiss-suggestion`));
 
     return (
@@ -92,8 +106,31 @@ const EsfTaskRequests = () => {
             <div className="mx-auto flex w-full max-w-[1100px] flex-1 flex-col">
 
                 <div className="mb-4 flex flex-wrap items-center gap-3">
-                    <p className="min-w-0 flex-1 text-sm text-gray-400">
-                        {loading ? 'Loading…' : `${requests.length} request${requests.length === 1 ? '' : 's'}`}
+                    <div className="flex min-w-[220px] flex-1 items-center gap-2 rounded-lg bg-white/[0.06] px-3 py-2">
+                        <Search className="h-4 w-4 shrink-0 text-gray-500" />
+                        <input
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            placeholder="Search by brand, project or what was asked for"
+                            className="w-full bg-transparent text-[13px] text-gray-200 placeholder:text-gray-600 focus:outline-none"
+                        />
+                        {search && (
+                            <button
+                                type="button"
+                                onClick={() => setSearch('')}
+                                className="shrink-0 text-gray-500 hover:text-gray-300"
+                                aria-label="Clear search"
+                            >
+                                <X className="h-3.5 w-3.5" />
+                            </button>
+                        )}
+                    </div>
+                    <p className="shrink-0 text-sm text-gray-400">
+                        {loading
+                            ? 'Loading…'
+                            : search
+                                ? `${visible.length} of ${requests.length}`
+                                : `${requests.length} request${requests.length === 1 ? '' : 's'}`}
                     </p>
                     <button
                         type="button"
@@ -108,6 +145,14 @@ const EsfTaskRequests = () => {
                     <p className="mb-4 rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-2.5 text-sm text-amber-300">
                         {error}
                     </p>
+                )}
+
+                {!loading && visible.length === 0 && search && (
+                    <div className="flex min-h-[40vh] flex-1 items-center justify-center rounded-xl border border-white/10 bg-white/[0.02] px-6 text-center">
+                        <p className="text-sm text-gray-500">
+                            Nothing matches “{search}”.
+                        </p>
+                    </div>
                 )}
 
                 {!loading && requests.length === 0 && (
@@ -134,7 +179,7 @@ const EsfTaskRequests = () => {
                 )}
 
                 <div className="space-y-3">
-                    {requests.map((request) => (
+                    {visible.map((request) => (
                         <div
                             key={request.id}
                             className="rounded-xl border border-white/10 bg-white/[0.03] p-4"
