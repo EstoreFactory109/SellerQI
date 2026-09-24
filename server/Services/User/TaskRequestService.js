@@ -180,8 +180,15 @@ const acceptTaskRequest = async ({ requestId, staffUserId }) => {
         projectId,
         name: brief.title,
         description,
-        // Carried through so ZohoTaskSync.classifyTask files it under "Coming up" rather
-        // than defaulting a dateless task to "In progress".
+        /**
+         * The client's "NEEDED BY", carried through as the task's due date.
+         *
+         * This used to claim it filed the task under "Coming up" instead of leaving a
+         * dateless task in "In progress". It never did: ZohoTaskSync.classifyTask reads
+         * startDate alone, so end_date has no bearing on the column at all. The date is
+         * still worth sending — it is the deadline the client asked for — but createTask
+         * is what pairs it with a start date, because Zoho refuses an end on its own.
+         */
         endDate: request.neededBy ? new Date(request.neededBy).toISOString().slice(0, 10) : null,
     });
 

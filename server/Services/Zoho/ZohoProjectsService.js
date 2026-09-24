@@ -397,15 +397,24 @@ const getProjectTaskUpdates = async (projectId, { includeComments = true, maxTas
  * omitted when absent rather than sent empty. A rejected create is loud; a create that
  * silently ignores a field is not.
  *
- * Dates go as `end_date` in Zoho's YYYY-MM-DD form. Setting one matters beyond
- * presentation: ZohoTaskSync.classifyTask puts a task with no dates into "In progress",
- * so a request with a needed-by date that failed to carry would land in the wrong column
- * on the client's Status page.
+ * ── end_date IS NOT ACCEPTED ON ITS OWN ──
+ * Zoho's task API documents end_date as requiring start_date to be set, and rejects the
+ * pair when only the end is given. This is why a request carrying a needed-by date could
+ * not be accepted at all while a dateless one could: the write was refused before a task
+ * ever existed. Both dates are therefore sent together or neither is.
+ *
+ * Dates go in Zoho's YYYY-MM-DD form, matching createProject above — this is v3, where
+ * ISO is what the API takes. (The v2 generation wants MM-DD-YYYY; do not copy a v2
+ * example into a v3 call.)
+ *
+ * Note that a date here does NOT decide which column the client sees.
+ * ZohoTaskSync.classifyTask reads startDate alone: a start date in the future is
+ * "Coming up", anything else is "In progress". end_date is the due date and nothing more.
  *
  * Like every write here, this is authored in Zoho by the single org-wide connected
  * account — so the CALLER is responsible for putting attribution in the description.
  */
-const createTask = async ({ projectId, name, description, endDate, portalId }) => {
+const createTask = async ({ projectId, name, description, startDate, endDate, portalId }) => {
     if (!projectId) {
         throw new ApiError(400, 'A project is required to create a task');
     }
@@ -420,7 +429,21 @@ const createTask = async ({ projectId, name, description, endDate, portalId }) =
 
     const body = { name: title };
     if (description) body.description = String(description);
-    if (endDate) body.end_date = endDate;
+    /**
+     * Sent as a pair, never end alone — see the header. A caller that supplies only an
+     * end date gets both, starting today, because "due by X" with no start is exactly
+     * the shape Zoho refuses. A start on its own is fine and passes straight through.
+     */
+    if (endDate) {
+        // Clamped so the start can never sit after the end, which Zoho also refuses —
+        // a client asking for something by a date that has already passed is a support
+        // question, not a reason for the accept to fail.
+        const todayIso = new Date().toISOString().slice(0, 10);
+        body.start_date = startDate || (endDate < todayIso ? endDate : todayIso);
+        body.end_date = endDate;
+    } else if (startDate) {
+        body.start_date = startDate;
+    }
 
     const response = await zohoRequest({
         method: 'POST',
