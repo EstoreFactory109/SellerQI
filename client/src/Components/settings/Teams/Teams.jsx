@@ -15,6 +15,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import axiosInstance from '../../../config/axios.config.js';
+import RenameDialog from '../../Shared/RenameDialog.jsx';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -42,6 +43,7 @@ const Teams = () => {
 
   const [busyId, setBusyId] = useState(null);
   const [confirmRemove, setConfirmRemove] = useState(null);
+  const [renameTarget, setRenameTarget] = useState(null);
 
   const flash = (setter, message) => {
     setter(message);
@@ -103,22 +105,15 @@ const Teams = () => {
     }
   };
 
-  const handleRename = async (member) => {
-    const next = window.prompt(`Name to show for ${member.email} (leave empty for none):`, member.name || '');
-    if (next === null) return;
-    if (next.trim() && next.trim().length < 2) {
-      setError('Name must be at least 2 characters');
-      return;
-    }
-    setBusyId(member._id);
-    setError('');
+  // Called by RenameDialog; throwing keeps the dialog open with the message.
+  const saveName = async (name) => {
+    const member = renameTarget;
     try {
-      const res = await axiosInstance.patch(`/app/members/${member._id}`, { name: next.trim() });
+      const res = await axiosInstance.patch(`/app/members/${member._id}`, { name });
       if (res.data?.data) setMembers((prev) => prev.map((m) => (m._id === member._id ? res.data.data : m)));
+      setRenameTarget(null);
     } catch (err) {
-      setError(err.response?.data?.message || 'Could not update the name');
-    } finally {
-      setBusyId(null);
+      throw new Error(err.response?.data?.message || 'Could not update the name');
     }
   };
 
@@ -312,7 +307,7 @@ const Teams = () => {
                       )}
                       <button
                         type="button"
-                        onClick={() => handleRename(member)}
+                        onClick={() => setRenameTarget(member)}
                         disabled={busy}
                         className="inline-flex items-center gap-1 text-xs font-medium text-gray-300 hover:text-gray-100 disabled:opacity-50"
                       >
@@ -336,6 +331,17 @@ const Teams = () => {
           )}
         </div>
       </div>
+
+      <RenameDialog
+        open={!!renameTarget}
+        title="Edit name"
+        description={renameTarget?.email}
+        initialValue={renameTarget?.name || ''}
+        placeholder="e.g. Priya"
+        tone="seller"
+        onCancel={() => setRenameTarget(null)}
+        onSave={saveName}
+      />
 
       {/* Remove confirmation */}
       {confirmRemove && (

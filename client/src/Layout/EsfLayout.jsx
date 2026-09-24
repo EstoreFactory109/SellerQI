@@ -112,10 +112,13 @@ const EsfLayout = () => {
               <User className="w-5 h-5 shrink-0" />
               <span className="text-sm font-medium">My profile</span>
             </NavLink>
+            {/* Only the owner has a password; admins and members sign in by emailed link. */}
+            {esfUser?.isOwner && (
             <NavLink to="/esf/settings?tab=password" className={({ isActive }) => navItemClass(isActive)}>
               <Key className="w-5 h-5 shrink-0" />
               <span className="text-sm font-medium">Update password</span>
             </NavLink>
+            )}
             <NavLink to="/esf/settings?tab=support" className={({ isActive }) => navItemClass(isActive)}>
               <HelpCircle className="w-5 h-5 shrink-0" />
               <span className="text-sm font-medium">Support</span>

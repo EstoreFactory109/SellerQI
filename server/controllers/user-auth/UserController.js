@@ -334,7 +334,9 @@ const profileUser = asyncHandler(async (req, res) => {
     // This tells the frontend that a super admin is viewing this account
     const responseData = {
         ...userProfile,
-        isSuperAdminSession: isSuperAdminSession
+        isSuperAdminSession: isSuperAdminSession,
+        // A member (not the owner) is signed in: the owner's own details are read-only.
+        isMemberSession: Boolean(req.memberId)
     };
 
     return res.status(200).json(new ApiResponse(200, responseData, "User profile fetched successfully"));

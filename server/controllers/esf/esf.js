@@ -209,6 +209,12 @@ const updateEsfProfile = asyncHandler(async (req, res) => {
 
 /** PUT /app/esf/update-password */
 const updateEsfPassword = asyncHandler(async (req, res) => {
+    // Admins and members join by invitation and sign in with an emailed link, so
+    // only the owner (and a super admin servicing the portal) has a password here.
+    if (req.esfUser?.accessType === 'esfUser' && !isEsfOwner(req.esfUser)) {
+        return res.status(403).json(new ApiResponse(403, '', 'Team members sign in with an emailed link and have no password to change'));
+    }
+
     const { currentPassword, newPassword } = req.body;
 
     if (!newPassword) {
@@ -584,28 +590,6 @@ const removeEsfUser = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, '', 'Team member removed successfully'));
 });
 
-/** POST /app/esf/users/:userId/reset-password */
-const resetEsfUserPassword = asyncHandler(async (req, res) => {
-    if (!requireTeamManager(req, res)) return;
-
-    const { userId } = req.params;
-    const { newPassword } = req.body;
-
-    if (!isStrongPassword(newPassword)) {
-        return res.status(400).json(new ApiResponse(400, '', passwordPolicyMessage(newPassword)));
-    }
-
-    // The owner's password is theirs alone - changed via Settings, not here.
-    const user = await loadModifiableStaff(userId, res);
-    if (!user) return;
-
-    user.password = await hashPassword(newPassword);
-    await user.save();
-
-    logger.info(`ESF user ${req.esfUserId} reset the password for staff member ${userId}`);
-    return res.status(200).json(new ApiResponse(200, '', 'Password reset successfully'));
-});
-
 /**
  * PATCH /app/esf/users/:userId/role
  * Change a team member's role. Cannot target the owner, and cannot grant
@@ -719,7 +703,6 @@ module.exports = {
     linkExistingUsers,
     getEsfUsers,
     removeEsfUser,
-    resetEsfUserPassword,
     updateEsfUserRole,
     getEsfPageCatalogue,
     updateEsfUserPermissions,

@@ -29,6 +29,13 @@ const SESSION_LABELS = {
     [SESSION_KINDS.USER]: 'SellerQI account',
 };
 
+/** Is this access token held by a member (not the owner) of the account? */
+const isMemberToken = async (token) => {
+    if (!token) return false;
+    const decoded = await verifyAccessToken(token);
+    return Boolean(decoded && decoded.isvalid && decoded.memberId);
+};
+
 /** Resolve a cookie's access token to its user's accessType, or null. */
 const accessTypeFor = async (token) => {
     if (!token) return null;
@@ -83,7 +90,11 @@ const resolveActiveSession = async (cookies = {}) => {
     }
 
     if (inAccount) {
-        return make(SESSION_KINDS.USER, '/analyse-account');
+        // A member joins an account that is already set up, so they go to its
+        // dashboard. /analyse-account is the owner's first-scan page and never
+        // moves on by itself.
+        const home = (await isMemberToken(cookies.IBEXAccessToken)) ? '/seller-central-checker/dashboard' : '/analyse-account';
+        return make(SESSION_KINDS.USER, home);
     }
 
     return null;
