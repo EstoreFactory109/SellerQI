@@ -143,18 +143,22 @@ TaskRequestSchema.index({ userId: 1, requestedAt: -1 });
 // The staff queue: everything awaiting a decision, oldest first.
 TaskRequestSchema.index({ status: 1, requestedAt: 1 });
 /**
- * At most one PENDING request per conversation.
+ * Threads are indexed but NOT unique, and that is a correction.
  *
- * A client answering our follow-up question is still talking about the same piece of
- * work, and without this the answer would be read as a fresh request and queued again —
- * so the more detail they gave, the more duplicates they would get.
+ * This was a unique partial index — at most one pending request per conversation —
+ * meant to stop a client's answer to our follow-up being read as a fresh request. It did
+ * that, and it also made it impossible for a client to raise a genuinely SEPARATE ask in
+ * an existing thread. They do that constantly, and the second request vanished with no
+ * reply and no trace.
  *
- * Partial, so decided requests do not block a genuinely new ask on the same thread later.
+ * Telling those two apart is a judgement, not a constraint, so it moved to
+ * MessageIntentService.classifyFollowUp, with a per-client pending cap as the guard
+ * against a runaway.
+ *
+ * NOTE: dropping this from the schema does not drop it from a database that already has
+ * it — Mongoose never removes indexes. It has to be dropped by hand once.
  */
-TaskRequestSchema.index(
-    { sourceThreadId: 1 },
-    { unique: true, partialFilterExpression: { status: 'pending', sourceThreadId: { $type: 'objectId' } } }
-);
+TaskRequestSchema.index({ sourceThreadId: 1 });
 
 const TaskRequest = mongoose.models.TaskRequest
     || mongoose.model('TaskRequest', TaskRequestSchema);

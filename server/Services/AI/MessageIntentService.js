@@ -152,6 +152,29 @@ const DECISION_PROMPT = [
     'return an empty string rather than inventing one. Empty for accept.',
 ].join('\n');
 
+const FOLLOW_UP_PROMPT = [
+    'A client of an Amazon agency already has ONE request waiting for a decision. You are',
+    'shown that request, then a newer message from the same conversation.',
+    '',
+    'Decide what the newer message is doing.',
+    '',
+    'Answer with JSON only: {"relation": "answers"|"new"|"other", "confidence": 0-1}',
+    '',
+    'answers: it is supplying detail about the SAME piece of work — naming the products,',
+    '  giving a deadline, clarifying scope, or replying to a question we asked about it.',
+    '',
+    'new: it is asking for a DIFFERENT piece of work. A client raising a second thing in',
+    '  an existing conversation is completely normal — "also, separate thing, can you..."',
+    '  or a message about different products or a different deliverable entirely.',
+    '',
+    'other: neither. Thanks, chit chat, a status chase, a complaint, an approval.',
+    '',
+    'The test for "new" is whether someone could work on it WITHOUT the first request.',
+    'A message about the same products, clarifying the same job, is answers even if it is',
+    'long. A message about different products or a different kind of work is new even if',
+    'it arrives in the same breath as an answer.',
+].join('\n');
+
 /** A model answer is only useful if it is the shape we asked for. */
 const parseJson = (content) => {
     try {
@@ -286,6 +309,45 @@ const detectDecision = async (text) => {
     };
 };
 
+/**
+ * Is this message answering the request already waiting, or raising a different one?
+ *
+ * Without this, every later message on a conversation was treated as an answer, and a
+ * client who raised a genuinely separate ask in an existing thread had it silently
+ * swallowed — no request, no reply, nothing. Clients do this constantly; a thread is a
+ * relationship, not a ticket.
+ *
+ * Defaults to 'answers' on any failure, because filling a gap wrongly is recoverable and
+ * a duplicate request is noise in the queue.
+ */
+const classifyFollowUp = async ({ text, existingTitle, existingDescription }) => {
+    const none = { relation: 'answers', confidence: 0, actionable: false, version: INTENT_VERSION };
+
+    const context = [
+        'REQUEST ALREADY WAITING:',
+        existingTitle || '(untitled)',
+        existingDescription || '',
+        '',
+        'NEWER MESSAGE:',
+        text,
+    ].join('\n');
+
+    const answer = await ask(FOLLOW_UP_PROMPT, context);
+    if (!answer) return none;
+
+    const relation = ['answers', 'new', 'other'].includes(answer.relation) ? answer.relation : 'answers';
+    const confidence = clamp(answer.confidence);
+
+    return {
+        relation,
+        confidence,
+        // Only a confident "new" is acted on. Anything else falls through to filling
+        // gaps, which is the behaviour that cannot create noise.
+        actionable: relation === 'new' && confidence >= MIN_CONFIDENCE,
+        version: INTENT_VERSION,
+    };
+};
+
 /** The question to put back to a client, naming only the gaps that exist. */
 const missingDetailsQuestion = (missing = []) => {
     const parts = missing.map((key) => REQUIRED_DETAILS[key]).filter(Boolean);
@@ -296,6 +358,7 @@ const missingDetailsQuestion = (missing = []) => {
 module.exports = {
     detectTaskRequest,
     detectDecision,
+    classifyFollowUp,
     missingDetailsQuestion,
     REQUIRED_DETAILS,
     MIN_CONFIDENCE,
