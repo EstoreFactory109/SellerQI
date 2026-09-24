@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Search,
-  Download,
   CheckCircle,
   XCircle,
   Info,
@@ -34,6 +33,8 @@ import { SkeletonTableBody } from '../../Components/Skeleton/PageSkeletons.jsx';
 import AmazonFbaInventoryCell from '../../Components/Products/AmazonFbaInventoryCell.jsx';
 import { COLORS, KPICard, STATUS, ProductsToFixList } from '../../Components/Shared/index.js';
 import { useTopProducts } from '../../hooks/useTopProducts.js';
+import axiosInstance from '../../config/axios.config.js';
+import DownloadReport from '../../Components/DownloadReport/DownloadReport.jsx';
 
 // Exactly 6 columns: 4 fixed (ASIN/SKU, Name, Issues or Recommendation, View) + 2 chosen from dropdown.
 // Product tabs: pick 2 from this list to fill columns 5 and 6.
@@ -61,6 +62,71 @@ const COLUMN_STORAGE_KEY_PRODUCT = 'yourProducts_selectedProductColumns';
 const COLUMN_STORAGE_KEY_OPTIMIZATION = 'yourProducts_selectedOptimizationColumns';
 
 const DEFAULT_PRODUCT_SELECTED = ['price', 'quantity'];
+
+// V3 endpoint per product tab — the export pulls every page from the same
+// endpoint the table uses, so it contains all rows, not just the loaded ones.
+const V3_TAB_ENDPOINTS = {
+  active: '/api/pagewise/your-products-v3/active',
+  nonSellable: '/api/pagewise/your-products-v3/non-sellable',
+  withoutAPlus: '/api/pagewise/your-products-v3/without-aplus',
+  notTargetedInAds: '/api/pagewise/your-products-v3/not-targeted-in-ads',
+  optimization: '/api/pagewise/your-products-v3/optimization'
+};
+
+// Sorting shared by the tables and the export so both list rows in the same order.
+function sortProductList(products, sortConfig) {
+  const list = [...products];
+  if (sortConfig.key) {
+    list.sort((a, b) => {
+      let aValue = a[sortConfig.key];
+      let bValue = b[sortConfig.key];
+      if (sortConfig.key === 'price' || sortConfig.key === 'numRatings' || sortConfig.key === 'starRatings' || sortConfig.key === 'quantity' || sortConfig.key === 'sales') {
+        aValue = parseFloat(aValue) || 0;
+        bValue = parseFloat(bValue) || 0;
+      } else {
+        aValue = (aValue || '').toString().toLowerCase();
+        bValue = (bValue || '').toString().toLowerCase();
+      }
+      if (sortConfig.direction === 'asc') {
+        return aValue > bValue ? 1 : -1;
+      } else {
+        return aValue < bValue ? 1 : -1;
+      }
+    });
+  }
+  return list;
+}
+
+function sortOptimizationList(products, sortConfig) {
+  const list = [...products];
+  if (sortConfig.key) {
+    list.sort((a, b) => {
+      const perfA = a.performance || {};
+      const perfB = b.performance || {};
+      let aVal, bVal;
+      switch (sortConfig.key) {
+        case 'sessions': aVal = perfA.sessions ?? 0; bVal = perfB.sessions ?? 0; break;
+        case 'pageViews': aVal = perfA.pageViews ?? 0; bVal = perfB.pageViews ?? 0; break;
+        case 'conversionRate': aVal = perfA.conversionRate ?? 0; bVal = perfB.conversionRate ?? 0; break;
+        case 'sales': aVal = perfA.sales ?? 0; bVal = perfB.sales ?? 0; break;
+        case 'ppcSpend': aVal = perfA.ppcSpend ?? 0; bVal = perfB.ppcSpend ?? 0; break;
+        case 'acos': aVal = perfA.acos ?? 0; bVal = perfB.acos ?? 0; break;
+        case 'asin': aVal = (a.asin || '').toLowerCase(); bVal = (b.asin || '').toLowerCase(); break;
+        case 'title': aVal = (a.name || a.title || '').toLowerCase(); bVal = (b.name || b.title || '').toLowerCase(); break;
+        default: aVal = (a[sortConfig.key] ?? '').toString(); bVal = (b[sortConfig.key] ?? '').toString();
+      }
+      if (typeof aVal === 'number' && typeof bVal === 'number') {
+        return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+      const cmp = String(aVal).localeCompare(String(bVal));
+      return sortConfig.direction === 'asc' ? cmp : -cmp;
+    });
+  }
+  return list;
+}
+
+// Issue text can carry HTML links — the export wants plain text.
+const stripHtml = (text) => (text || '').toString().replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
 const DEFAULT_OPTIMIZATION_SELECTED = ['sessions', 'conversionRate'];
 
 function loadSelectedProductColumns() {
@@ -508,57 +574,12 @@ const YourProducts = () => {
   }, [currentRegion]);
 
   // Sort products (search is handled server-side for large catalogs)
-  const sortedProducts = useMemo(() => {
-    const list = [...products];
-    if (sortConfig.key) {
-      list.sort((a, b) => {
-        let aValue = a[sortConfig.key];
-        let bValue = b[sortConfig.key];
-        if (sortConfig.key === 'price' || sortConfig.key === 'numRatings' || sortConfig.key === 'starRatings' || sortConfig.key === 'quantity' || sortConfig.key === 'sales') {
-          aValue = parseFloat(aValue) || 0;
-          bValue = parseFloat(bValue) || 0;
-        } else {
-          aValue = (aValue || '').toString().toLowerCase();
-          bValue = (bValue || '').toString().toLowerCase();
-        }
-        if (sortConfig.direction === 'asc') {
-          return aValue > bValue ? 1 : -1;
-        } else {
-          return aValue < bValue ? 1 : -1;
-        }
-      });
-    }
-    return list;
-  }, [products, sortConfig]);
+  const sortedProducts = useMemo(() => sortProductList(products, sortConfig), [products, sortConfig]);
 
   // Optimization tab sorting (search handled server-side)
   const sortedOptimizationProducts = useMemo(() => {
     if (activeTab !== 'optimization' || !optimizationProducts.length) return [];
-    const list = [...optimizationProducts];
-    if (sortConfig.key) {
-      list.sort((a, b) => {
-        const perfA = a.performance || {};
-        const perfB = b.performance || {};
-        let aVal, bVal;
-        switch (sortConfig.key) {
-          case 'sessions': aVal = perfA.sessions ?? 0; bVal = perfB.sessions ?? 0; break;
-          case 'pageViews': aVal = perfA.pageViews ?? 0; bVal = perfB.pageViews ?? 0; break;
-          case 'conversionRate': aVal = perfA.conversionRate ?? 0; bVal = perfB.conversionRate ?? 0; break;
-          case 'sales': aVal = perfA.sales ?? 0; bVal = perfB.sales ?? 0; break;
-          case 'ppcSpend': aVal = perfA.ppcSpend ?? 0; bVal = perfB.ppcSpend ?? 0; break;
-          case 'acos': aVal = perfA.acos ?? 0; bVal = perfB.acos ?? 0; break;
-          case 'asin': aVal = (a.asin || '').toLowerCase(); bVal = (b.asin || '').toLowerCase(); break;
-          case 'title': aVal = (a.name || a.title || '').toLowerCase(); bVal = (b.name || b.title || '').toLowerCase(); break;
-          default: aVal = (a[sortConfig.key] ?? '').toString(); bVal = (b[sortConfig.key] ?? '').toString();
-        }
-        if (typeof aVal === 'number' && typeof bVal === 'number') {
-          return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
-        }
-        const cmp = String(aVal).localeCompare(String(bVal));
-        return sortConfig.direction === 'asc' ? cmp : -cmp;
-      });
-    }
-    return list;
+    return sortOptimizationList(optimizationProducts, sortConfig);
   }, [activeTab, optimizationProducts, sortConfig]);
 
   const displayedOptimizationProducts = useMemo(() => {
@@ -637,37 +658,223 @@ const YourProducts = () => {
     return { bg: '#dbeafe', color: '#1e40af', text: totalIssues.toString() };
   };
 
-  // Export to CSV
-  const exportToCSV = () => {
-    const headers = [
-      'ASIN', 'SKU', 'Title', 'Status', 'Price', 'Reviews', 'Ratings', 'Quantity', 'Issue Count'
-    ];
-    const csvRows = [
-      headers.join(','),
-      ...sortedProducts.map(product => {
+  // Every page of a V3 tab (the table only holds what "Load More" has fetched so far).
+  const fetchAllTabProducts = async (url) => {
+    const all = [];
+    const seen = new Set();
+    for (let page = 1; page <= 500; page++) {
+      const response = await axiosInstance.get(url, {
+        params: { page, limit: 100 }
+      });
+      const payload = response.data?.data || {};
+      const pageProducts = payload.products || [];
+      pageProducts.forEach((p) => {
+        const key = `${p.asin}-${p.sku}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          all.push(p);
+        }
+      });
+      const totalItems = payload.pagination?.totalItems;
+      const hasMore = typeof payload.pagination?.hasMore === 'boolean'
+        ? payload.pagination.hasMore
+        : (totalItems != null && all.length < totalItems);
+      if (pageProducts.length === 0 || !hasMore) break;
+    }
+    return all;
+  };
+
+  const money = (value) => formatCurrencyWithLocale(Number(value) || 0, currency, 2);
+  const priceCell = (product) => (product.price ? money(parseFloat(product.price)) : '—');
+  // Same text AmazonFbaInventoryCell shows: FBA "Available", else the listing quantity
+  const fbaStockCell = (product) => {
+    if (product.fbaInventory) return (Number(product.fbaInventory.available) || 0).toLocaleString();
+    if (product.quantity === undefined || product.quantity === null) return '—';
+    return (Number(product.quantity) || 0).toLocaleString();
+  };
+  const productColumnCell = (product, colId) => {
+    switch (colId) {
+      case 'price': return priceCell(product);
+      case 'quantity': return fbaStockCell(product);
+      case 'video': return product.hasVideo ? 'Yes' : 'No';
+      case 'b2b': return product.has_b2b_pricing ? 'Yes' : 'No';
+      case 'reviews': return product.numRatings ? parseInt(product.numRatings).toLocaleString() : '0';
+      case 'starRating':
+        return product.starRatings != null && product.starRatings !== ''
+          ? `${typeof product.starRatings === 'number' ? product.starRatings.toFixed(1) : String(product.starRatings)} ⭐`
+          : '—';
+      default: return '—';
+    }
+  };
+  const optimizationColumnCell = (perf, colId) => {
+    switch (colId) {
+      case 'sessions': return (perf.sessions ?? 0).toLocaleString();
+      case 'pageViews': return (perf.pageViews ?? 0).toLocaleString();
+      case 'conversionRate': return `${(perf.conversionRate ?? 0).toFixed(1)}%`;
+      case 'ppcSpend': return perf.ppcSpend != null ? money(perf.ppcSpend) : '—';
+      case 'acos': return perf.acos != null ? `${Number(perf.acos).toFixed(1)}%` : '—';
+      default: return '—';
+    }
+  };
+  const productColumnLabel = (colId) => PRODUCT_SELECTABLE_COLUMNS.find(c => c.id === colId)?.label ?? colId;
+  const optimizationColumnLabel = (colId) => OPTIMIZATION_SELECTABLE_COLUMNS.find(c => c.id === colId)?.label ?? colId;
+  const issueDetails = (product) => (Array.isArray(product.issues) ? product.issues.map(stripHtml).filter(Boolean).join(' | ') : '');
+
+  // Per-tab export sections — same columns, formatting and sort order as each
+  // tab's on-screen table. Each returns [headerRow, ...dataRows].
+  const topProductsSection = () => {
+    // Same fields ProductsToFixList renders for each card
+    const listMoney = (value) => formatCurrencyWithLocale(value, currency);
+    return [
+      ['Rank', 'Product', 'ASIN', 'Not Listed', 'Why', 'Do This', 'Issues', 'Categories', 'Wasted Ad Spend (included)', 'Profit Impact', 'Capital Tied Up'],
+      ...topProducts.map((p, index) => {
+        const hasMoney = (p.profitImpact || 0) > 0;
+        const issues = (p.taskCount || 0) + (p.adsTaskCount || 0);
         return [
-          product.asin,
-          `"${(product.sku || '').replace(/"/g, '""')}"`,
-          `"${(product.title || '').replace(/"/g, '""')}"`,
-          product.status,
-          product.price,
-          product.numRatings || 0,
-          product.starRatings || 0,
-          product.quantity || 0,
-          product.issueCount || 0
-        ].join(',');
+          p.rank || index + 1,
+          p.productName || p.asin,
+          p.asin,
+          p.notInCatalogue ? 'not listed' : '',
+          p.why || '',
+          p.action || '',
+          `${issues} issue${issues === 1 ? '' : 's'}`,
+          (p.categories || []).join(', '),
+          (p.adWasteComponent || 0) > 0 && hasMoney ? `~${listMoney(p.adWasteComponent)}` : '',
+          hasMoney ? `${listMoney(p.profitImpact)}${p.amountIsEstimated ? '*' : ''}` : 'to review',
+          (p.capitalTiedUp || 0) > 0 ? listMoney(p.capitalTiedUp) : ''
+        ];
       })
     ];
-    const csvContent = csvRows.join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `your-products-${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  };
+
+  const activeSection = (list) => {
+    const [col1, col2] = selectedProductColumns;
+    return [
+      ['Product', 'SKU', 'ASIN', 'Sales', 'Issues', productColumnLabel(col1), productColumnLabel(col2), 'Issue Details'],
+      ...sortProductList(list, sortConfig).map((product) => [
+        product.title || '—',
+        product.sku || '—',
+        product.asin || '—',
+        product.sales != null ? money(product.sales) : '—',
+        getIssuesBadge(product.issueCount || 0).text,
+        productColumnCell(product, col1),
+        productColumnCell(product, col2),
+        issueDetails(product)
+      ])
+    ];
+  };
+
+  const optimizationSection = (list) => {
+    const [col1, col2] = selectedOptimizationColumns;
+    return [
+      ['Product', 'SKU', 'ASIN', 'Sales', optimizationColumnLabel(col1), optimizationColumnLabel(col2), 'Recommendation', 'Recommendation Details'],
+      ...sortOptimizationList(list, sortConfig).map((product) => {
+        const perf = product.performance || {};
+        return [
+          product.name || product.title || '—',
+          product.sku || '—',
+          product.asin || '—',
+          perf.sales != null ? money(perf.sales) : '—',
+          optimizationColumnCell(perf, col1),
+          optimizationColumnCell(perf, col2),
+          product.primaryRecommendation?.shortLabel || '—',
+          (product.recommendations || []).map(r => `${r.shortLabel}: ${r.message}`).join(' | ')
+        ];
+      })
+    ];
+  };
+
+  // Without A+ / Not Targeted to Ads share one table layout
+  const flagSection = (list, tabKey) => [
+    ['Product', 'SKU', 'ASIN', 'Status', 'Sales', 'Issues', 'Price', 'FBA Stock', tabKey === 'withoutAPlus' ? 'A+' : 'Ads', 'Issue Details'],
+    ...sortProductList(list, sortConfig).map((product) => [
+      product.title || '—',
+      product.sku || '—',
+      product.asin || '—',
+      product.status || '—',
+      product.sales != null ? money(product.sales) : '—',
+      getIssuesBadge(product.issueCount || 0).text,
+      priceCell(product),
+      fbaStockCell(product),
+      (tabKey === 'withoutAPlus' ? product.hasAPlus : product.isTargetedInAds) ? 'Yes' : 'No',
+      issueDetails(product)
+    ])
+  ];
+
+  const nonSellableSection = (list) => [
+    ['Product', 'SKU', 'ASIN', 'Status', 'Issues', 'Price', 'FBA Stock', 'Issue Details'],
+    ...sortProductList(list, sortConfig).map((product) => {
+      const issueCount = product.issues?.length || 0;
+      return [
+        product.title || '—',
+        product.sku || '—',
+        product.asin || '—',
+        product.status || '—',
+        issueCount === 0 ? 'None' : issueCount,
+        priceCell(product),
+        fbaStockCell(product),
+        issueDetails(product)
+      ];
+    })
+  ];
+
+  // Export — every tab, all of its data, in one file (same approach as the
+  // Campaign Audit export). Each product tab is fetched in full from the same
+  // endpoint its table uses, so the file isn't limited to what "Load More" loaded.
+  const prepareYourProductsExport = async () => {
+    if (v3Summary?.loading || topProductsLoading) {
+      alert('Your Products is still loading. Please export again once all figures are shown.');
+      return null;
+    }
+
+    const [activeRows, optimizationRows, withoutAPlusRows, notTargetedRows, nonSellableRows] = await Promise.all([
+      fetchAllTabProducts(V3_TAB_ENDPOINTS.active),
+      fetchAllTabProducts(V3_TAB_ENDPOINTS.optimization),
+      fetchAllTabProducts(V3_TAB_ENDPOINTS.withoutAPlus),
+      fetchAllTabProducts(V3_TAB_ENDPOINTS.notTargetedInAds),
+      fetchAllTabProducts(V3_TAB_ENDPOINTS.nonSellable),
+    ]);
+
+    const nonSellableCount = (summary.inactiveProducts || 0) + (summary.incompleteProducts || 0) + (summary.zeroAvailabilityProducts || 0);
+    const rows = [
+      ['Your Products Report'],
+      ['Marketplace', currentCountry ? currentCountry.toUpperCase() : '—'],
+      ['Generated on', new Date().toLocaleDateString()],
+      [],
+      // Summary tiles at the top of the page
+      ['Summary'],
+      ['Total Products', summary.totalProducts || 0],
+      ['Sellable', summary.activeProducts || 0],
+      ['Non-Sellable', nonSellableCount],
+      ['Without A+ Content', summary.productsWithoutAPlus || 0],
+      ['Has Brand Story', summary.hasBrandStory ? 'Yes' : 'No'],
+      [],
+    ];
+
+    // Same order as the tabs on the page
+    const sections = [
+      { label: 'Top Products to Fix', table: topProductsSection(), count: topProducts.length },
+      { label: 'Sellable Products', table: activeSection(activeRows), count: activeRows.length },
+      { label: 'Optimization', table: optimizationSection(optimizationRows), count: optimizationRows.length },
+      { label: 'Without A+', table: flagSection(withoutAPlusRows, 'withoutAPlus'), count: withoutAPlusRows.length },
+      { label: 'Not Targeted to Ads', table: flagSection(notTargetedRows, 'notTargetedInAds'), count: notTargetedRows.length },
+      { label: 'Non-Sellable Products', table: nonSellableSection(nonSellableRows), count: nonSellableRows.length },
+    ];
+
+    sections.forEach(({ label, table, count }) => {
+      rows.push([`${label} - Total: ${count}`]);
+      if (count > 0) {
+        rows.push(...table);
+      } else {
+        rows.push(['No products in this tab.']);
+      }
+      if (label === 'Top Products to Fix' && count > 0 && topProductsCapital > 0) {
+        rows.push([`A further ${formatCurrencyWithLocale(topProductsCapital, currency)} is capital locked in unsellable stock — shown per product, but not counted as profit. Amounts marked * include advertising spend attributed by campaign rather than measured per product.`]);
+      }
+      rows.push([]);
+    });
+
+    return rows;
   };
 
   if (error) {
@@ -703,14 +910,13 @@ const YourProducts = () => {
               {currentCountry ? ` (${currentCountry.toUpperCase()})` : ''}.
             </p>
           </div>
-          <button
-            onClick={exportToCSV}
-            className="flex items-center gap-2 px-[14px] py-[9px] rounded-lg text-[13px] font-medium border transition-colors"
-            style={{ background: COLORS.surface, borderColor: COLORS.border, color: COLORS.textPrimary }}
-          >
-            <Download size={15} />
-            Export CSV
-          </button>
+          <DownloadReport
+            prepareDataFunc={prepareYourProductsExport}
+            filename="Your_Products_Report"
+            buttonText="Export"
+            showIcon={true}
+            buttonClass="flex items-center gap-2 px-[14px] py-[9px] rounded-lg text-[13px] font-medium border border-[#252C3A] hover:border-[#3B4658] bg-[#151A23] text-[#F5F7FA] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          />
         </div>
 
         {/* Summary tiles — real data, restyled with the shared KPICard/StatusPill components */}

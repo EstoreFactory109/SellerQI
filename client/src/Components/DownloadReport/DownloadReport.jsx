@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import * as ExcelJS from 'exceljs';
 import Papa from 'papaparse';
 import { saveAs } from 'file-saver';
-import { Download, ChevronDown, FileText, FileSpreadsheet } from 'lucide-react';
+import { Download, ChevronDown, FileText, FileSpreadsheet, Loader2 } from 'lucide-react';
 
 const DownloadReport = ({ 
     data, 
@@ -14,6 +14,7 @@ const DownloadReport = ({
     prepareDataFunc = null
 }) => {
     const [showDownloadOptions, setShowDownloadOptions] = useState(false);
+    const [isExporting, setIsExporting] = useState(false);
     const downloadRef = useRef(null);
 
     useEffect(() => {
@@ -28,19 +29,24 @@ const DownloadReport = ({
         }
     }, []);
 
-    // Prepare data for export
-    const prepareExportData = () => {
+    // Prepare data for export (prepareDataFunc may be async, e.g. to fetch all pages)
+    const prepareExportData = async () => {
         if (prepareDataFunc) {
-            return prepareDataFunc();
+            return await prepareDataFunc();
         }
         return data || [];
     };
 
     // Download as Excel
     const downloadExcel = async () => {
+        if (isExporting) return;
+        setShowDownloadOptions(false);
+        setIsExporting(true);
         try {
-            const exportData = prepareExportData();
+            const exportData = await prepareExportData();
             
+            // null means the page already told the user why (e.g. still loading)
+            if (exportData === null) return;
             if (!exportData || exportData.length === 0) {
                 alert('No data available for export');
                 return;
@@ -66,7 +72,7 @@ const DownloadReport = ({
                 });
                 
                 // Set column widths for 2D array
-                const columnCount = exportData[0] ? exportData[0].length : 0;
+                const columnCount = exportData.reduce((max, row) => Math.max(max, Array.isArray(row) ? row.length : 0), 0);
                 worksheet.columns = Array(columnCount).fill().map(() => ({ width: 30 }));
             } else {
                 // Handle JSON object format
@@ -100,15 +106,21 @@ const DownloadReport = ({
         } catch (error) {
             console.error('Error downloading Excel:', error);
             alert('Error downloading Excel file. Please check console for details.');
+        } finally {
+            setIsExporting(false);
         }
-        setShowDownloadOptions(false);
     };
 
     // Download as CSV
-    const downloadCSV = () => {
+    const downloadCSV = async () => {
+        if (isExporting) return;
+        setShowDownloadOptions(false);
+        setIsExporting(true);
         try {
-            const exportData = prepareExportData();
+            const exportData = await prepareExportData();
             
+            // null means the page already told the user why (e.g. still loading)
+            if (exportData === null) return;
             if (!exportData || exportData.length === 0) {
                 alert('No data available for export');
                 return;
@@ -131,13 +143,15 @@ const DownloadReport = ({
             }
             
             const fileName = `${filename}_${new Date().toISOString().split('T')[0]}.csv`;
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            // BOM so Excel reads currency symbols (€, £, ₹) correctly
+            const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
             saveAs(blob, fileName);
         } catch (error) {
             console.error('Error downloading CSV:', error);
             alert('Error downloading CSV file. Please check console for details.');
+        } finally {
+            setIsExporting(false);
         }
-        setShowDownloadOptions(false);
     };
 
     // Use dashboard styling if no custom buttonClass provided
@@ -150,9 +164,10 @@ const DownloadReport = ({
                 <button 
                     className={finalButtonClass}
                     onClick={() => setShowDownloadOptions(!showDownloadOptions)}
+                    disabled={isExporting}
                 >
-                    {showIcon && <Download className='w-4 h-4' />}
-                    {buttonText}
+                    {showIcon && (isExporting ? <Loader2 className='w-4 h-4 animate-spin' /> : <Download className='w-4 h-4' />)}
+                    {isExporting ? 'Exporting...' : buttonText}
                     <ChevronDown className="w-4 h-4" />
                 </button>
                 <AnimatePresence>
