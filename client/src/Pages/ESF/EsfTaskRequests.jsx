@@ -83,11 +83,16 @@ const EsfTaskRequests = () => {
     const dismiss = (id) => act(id, () => axiosInstance.patch(`/app/esf/task-requests/${id}/dismiss-suggestion`));
 
     return (
-        <div className="w-full p-4 md:p-6">
-            <div className="mx-auto max-w-[1100px]">
+        /*
+            min-h-full plus a viewport floor: the parent <main> is a flex child, so a
+            percentage height does not always resolve, and without the floor an empty
+            queue drew a short card against a tall expanse of background.
+        */
+        <div className="flex min-h-full w-full flex-col p-4 md:p-6">
+            <div className="mx-auto flex w-full max-w-[1100px] flex-1 flex-col">
 
-                <div className="mb-4 flex items-center gap-3">
-                    <p className="flex-1 text-sm text-gray-400">
+                <div className="mb-4 flex flex-wrap items-center gap-3">
+                    <p className="min-w-0 flex-1 text-sm text-gray-400">
                         {loading ? 'Loading…' : `${requests.length} request${requests.length === 1 ? '' : 's'}`}
                     </p>
                     <button
@@ -106,11 +111,25 @@ const EsfTaskRequests = () => {
                 )}
 
                 {!loading && requests.length === 0 && (
-                    <div className="rounded-xl border border-white/10 bg-white/[0.02] px-6 py-14 text-center">
-                        <ClipboardList className="mx-auto mb-3 h-7 w-7 text-gray-700" />
-                        <p className="text-sm text-gray-400">
-                            {showDecided ? 'No task requests yet.' : 'Nothing waiting on a decision.'}
-                        </p>
+                    <div className="flex min-h-[55vh] flex-1 items-center justify-center rounded-xl border border-white/10 bg-white/[0.02] px-6 py-10 text-center">
+                        <div>
+                            <ClipboardList className="mx-auto mb-3 h-8 w-8 text-gray-700" />
+                            <p className="text-sm text-gray-400">
+                                {showDecided ? 'No task requests yet.' : 'Nothing waiting on a decision.'}
+                            </p>
+                            {/* Says where they come from, so an empty queue reads as
+                                "nothing to do" rather than "this page is broken". */}
+                            <p className="mx-auto mt-1.5 max-w-xs text-xs leading-relaxed text-gray-600">
+                                Requests appear here when a client submits one from their Status
+                                page, or when one is recognised in a message they send.
+                            </p>
+                        </div>
+                    </div>
+                )}
+
+                {loading && (
+                    <div className="flex min-h-[55vh] flex-1 items-center justify-center rounded-xl border border-white/10 bg-white/[0.02]">
+                        <p className="text-sm text-gray-500">Loading…</p>
                     </div>
                 )}
 

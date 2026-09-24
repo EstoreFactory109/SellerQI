@@ -708,10 +708,13 @@ const Status = () => {
 
                     {requests.length > 0 && (
                         <div className="rounded-lg" style={{ background: PALETTE.surface, border: `1px solid ${PALETTE.border}`, padding: '4px 24px 6px' }}>
+                            {/* GRID_COLS needs ~700px; without this it overflows a phone
+                                silently, the same reason the task table below scrolls. */}
+                            <div className="overflow-x-auto">
                             {requests.map((r, i) => {
                                 const badge = REQUEST_BADGE[r.status] || REQUEST_BADGE.pending;
                                 return (
-                                    <div key={r.id || i} className="grid items-center gap-[18px] py-[15px]" style={{ gridTemplateColumns: GRID_COLS, ...(i > 0 ? dividerStyle() : undefined) }}>
+                                    <div key={r.id || i} className="grid min-w-[700px] items-center gap-[18px] py-[15px]" style={{ gridTemplateColumns: GRID_COLS, ...(i > 0 ? dividerStyle() : undefined) }}>
                                         <span className="text-xs" style={{ color: PALETTE.textDim, fontFamily: 'ui-monospace, Menlo, monospace' }}>{badge.rail}</span>
                                         <span className="flex flex-col gap-[3px] min-w-0">
                                             <span className="text-[13.5px]" style={{ color: PALETTE.textBody }}>{r.title}</span>
@@ -740,6 +743,7 @@ const Status = () => {
                                     </div>
                                 );
                             })}
+                            </div>
                         </div>
                     )}
 
