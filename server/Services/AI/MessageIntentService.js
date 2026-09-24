@@ -37,7 +37,7 @@ const logger = require('../../utils/Logger.js');
 const MODEL = process.env.MESSAGE_INTENT_MODEL || 'gpt-4o-mini';
 
 /** Bumped when the prompt changes, so a re-analysis can be told from a cached verdict. */
-const INTENT_VERSION = 1;
+const INTENT_VERSION = 2;
 
 const MAX_INPUT_CHARS = 6000;
 const MAX_OUTPUT_TOKENS = 500;
@@ -79,22 +79,54 @@ const REQUEST_PROMPT = [
     'ASKING THE AGENCY TO DO A NEW PIECE OF WORK.',
     '',
     'Answer with JSON only: {"isRequest": bool, "confidence": 0-1, "title": str,',
-    '"description": str, "neededBy": "YYYY-MM-DD"|null, "missing": [str]}',
+    '"description": str, "neededBy": "YYYY-MM-DD"|null, "hasDeliverable": bool,',
+    '"hasTiming": bool}',
     '',
-    'isRequest is TRUE only for a genuine new ask — "can you add a size chart",',
-    '"we need the A+ content updated before Prime Day".',
+    'isRequest is TRUE when they are asking the agency to DO something new. How vague it',
+    'is has no bearing on this — a vague ask is still an ask, and the two flags below are',
+    'where vagueness is recorded.',
+    '  "can you add a size chart"                                    -> true',
+    '  "we need the A+ content updated before Prime Day"             -> true',
+    '  "I want your team to create product images for my products"   -> true',
+    '  "our images could do with a refresh at some point"            -> true',
     '',
     'isRequest is FALSE for: questions about existing work, status chasing, complaints,',
-    'approvals or answers to something we asked, thanks, and anything already being done.',
-    'A question is not a request. When it is genuinely ambiguous, say false.',
+    'approvals or answers to something we asked, thanks, and anything already under way.',
+    '  "how is the listing optimisation going?"                      -> false',
+    '  "any update on the size chart?"                               -> false',
+    '  "yes that version looks good, go ahead"                       -> false',
+    '  "thanks, that looks great"                                    -> false',
+    '',
+    'Ambiguous means you cannot tell whether they want anything done at all. It does NOT',
+    'mean the request lacks detail.',
     '',
     'title: a short imperative summary, under 80 characters, in the agency\'s words.',
     'description: what they actually want, in their own words. Keep product identifiers,',
     'ASINs, URLs and dates exactly as written — those are the useful part. Do not invent',
     'detail that is not there.',
     'neededBy: only if they state or clearly imply a date. Never guess one.',
-    'missing: which of these are absent — "deliverable" if it is unclear what to do or to',
-    'which product, "timing" if no date or urgency is given. Empty array if both present.',
+    '',
+    'The last two decide whether we have to go back and ask. Judge them strictly — the',
+    'question is whether someone could START this work today without asking anything,',
+    'not whether the message is reasonable.',
+    '',
+    'hasDeliverable: true ONLY if it is clear what to do AND which specific product,',
+    'listing or ASIN it applies to.',
+    '  "add a size chart to ASIN B08XYZ"      -> true',
+    '  "create product images for my listed products" -> FALSE (which products?)',
+    '  "refresh our images"                   -> FALSE (which ones?)',
+    '',
+    'hasTiming: true ONLY if the message states a date, a deadline, or a clear urgency.',
+    '  "before Prime Day on 10 July"          -> true',
+    '  "by Friday"                            -> true',
+    '  "as soon as you can"                   -> true',
+    '  no mention of when at all              -> FALSE',
+    '',
+    'Most short requests have neither, and that is normal — it does NOT make them any',
+    'less of a request. isRequest and these two are independent judgements: a vague ask',
+    'with no date is still a request, it is simply one we must go back and ask about.',
+    'Doubt about these two means false; doubt about isRequest is decided by the rules',
+    'above, not by these.',
 ].join('\n');
 
 const DECISION_PROMPT = [
@@ -107,13 +139,17 @@ const DECISION_PROMPT = [
     '"reason": str}',
     '',
     'accept: they agree to do it — "yes we can", "I\'ll get that scheduled", "consider it done".',
-    'reject: they decline it — "that is not something we can do", "not worth it", "no".',
+    'reject: they decline it, refuse it, or say it is not worth doing. Deliberately given',
+    'without example wording, because any phrase offered here comes back as the reason',
+    'below instead of the sender\'s own.',
     'none: anything else, including asking a question back, discussing it without deciding,',
     'giving a partial or conditional answer, or talking about something unrelated.',
     '',
     'A conditional is NOT a decision. "We could, if you send the images" is none.',
-    'reason: for a reject, the explanation in their own words, to show the client. Empty',
-    'string otherwise.',
+    'reason: for a reject only, quote the explanation FROM THE MESSAGE ITSELF, close to',
+    'verbatim. This is shown to the client, so wording they never used misrepresents',
+    'them. Never reuse the example phrasings above. If the message gives no reason,',
+    'return an empty string rather than inventing one. Empty for accept.',
 ].join('\n');
 
 /** A model answer is only useful if it is the shape we asked for. */
@@ -191,10 +227,21 @@ const detectTaskRequest = async (text) => {
      */
     if (!isRequest || !title) return { ...none, confidence };
 
-    // Only ever what we asked for, so an invented key cannot reach a page.
-    const missing = Array.isArray(answer.missing)
-        ? answer.missing.filter((key) => Object.keys(REQUIRED_DETAILS).includes(key))
-        : [];
+    /**
+     * Derived from two booleans rather than read from an array the model composes.
+     *
+     * Asked for as `missing: [str]` it came back empty every single time, including for
+     * "create product images for my listed products" — no product named, no date given.
+     * A model asked to emit enum strings as a side note at the end of a list simply does
+     * not, and the follow-up question this drives would never have fired.
+     *
+     * Two direct yes/no questions it must answer, turned into the list here, where an
+     * invented value cannot appear at all.
+     */
+    const missing = [
+        answer.hasDeliverable === true ? null : 'deliverable',
+        answer.hasTiming === true ? null : 'timing',
+    ].filter(Boolean);
 
     return {
         isRequest: true,
