@@ -85,6 +85,23 @@ const toClientThread = (thread) => {
         lastMessageAt: thread.lastMessageAt,
         messageCount: thread.messageCount,
         unread: thread.clientUnreadCount > 0,
+        /**
+         * How many are unread, not how many exist — the same rule as the staff side.
+         * Badging messageCount would claim five new messages on a thread with one.
+         */
+        unreadCount: thread.clientUnreadCount || 0,
+        /**
+         * The receipt for the LAST message, so the list can tick a row the way the
+         * conversation ticks a bubble. Null when the team spoke last — there is nothing
+         * of the CLIENT'S awaiting our eyes, and a tick on our own message would be
+         * telling them whether they themselves had read it.
+         *
+         * Mirrors lastSeenByClient on toStaffThread with the directions swapped:
+         * inbound is the client's own message on this side of the boundary.
+         */
+        lastSeenByTeam: thread.lastMessageDirection === 'inbound'
+            ? seenBy({ sentAt: thread.lastMessageAt }, thread.lastStaffReadAt)
+            : null,
         resolved: Boolean(thread.resolvedAt),
     };
 };
