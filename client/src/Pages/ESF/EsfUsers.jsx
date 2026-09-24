@@ -8,7 +8,6 @@ import {
   X as XIcon,
   Mail,
   UserPlus,
-  Key,
   Send,
   Clock,
   RefreshCw,
@@ -22,9 +21,9 @@ import {
 import { useNavigate } from 'react-router-dom';
 import axiosInstance from '../../config/axios.config.js';
 import EsfInviteUserForm from '../../Components/ESF/EsfInviteUserForm.jsx';
-import { isPasswordValid, passwordErrorMessage } from '../../utils/passwordCriteria.js';
 import EsfPagePermissionsModal from '../../Components/ESF/EsfPagePermissionsModal.jsx';
 import { useEsfUser } from '../../contexts/EsfUserContext.js';
+import RenameDialog from '../../Components/Shared/RenameDialog.jsx';
 
 /** Badge styling per role. Owner is visually distinct — it is not assignable. */
 const ROLE_BADGE = {
@@ -35,7 +34,7 @@ const ROLE_BADGE = {
 
 const ITEMS_PER_PAGE = 10;
 const DROPDOWN_MENU_WIDTH = 160;
-const DROPDOWN_MENU_HEIGHT = 200;
+const DROPDOWN_MENU_HEIGHT = 165;
 
 /** Staff who joined by invitation may have only a nickname, or nothing but an email. */
 const nameOf = (user) => user.displayName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
@@ -62,6 +61,7 @@ const EsfUsers = () => {
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [invites, setInvites] = useState([]);
   const [permissionsMember, setPermissionsMember] = useState(null);
+  const [renameTarget, setRenameTarget] = useState(null);
   const dropdownRef = useRef(null);
   const openDropdownButtonRef = useRef(null);
 
@@ -183,28 +183,23 @@ const EsfUsers = () => {
     }
   };
 
-  const handleRename = async (user) => {
-    const current = `${user.firstName || ''} ${user.lastName || ''}`.trim();
-    const next = window.prompt(`Name to show for ${user.email} (leave empty to show their email):`, current);
-    if (next === null) return;
-    const name = next.trim();
-    if (name && name.length < 2) {
-      setError('Name must be at least 2 characters');
-      return;
-    }
+  // Called by RenameDialog; throwing keeps the dialog open with the message.
+  const saveName = async (name) => {
+    const user = renameTarget;
+    let res;
     try {
-      const res = await axiosInstance.patch(`/app/esf/users/${user._id}/name`, { name });
-      if (res.data?.statusCode === 200 && res.data.data) {
-        const updated = res.data.data;
-        setUsers((prev) => prev.map((u) => (u._id === user._id
-          ? { ...u, firstName: updated.firstName, lastName: updated.lastName, displayName: updated.displayName }
-          : u)));
-      } else {
-        setError(res.data?.message || 'Failed to update the name');
-      }
+      res = await axiosInstance.patch(`/app/esf/users/${user._id}/name`, { name });
     } catch (err) {
-      setError(err.response?.data?.errors?.[0]?.msg || err.response?.data?.message || 'Failed to update the name');
+      throw new Error(err.response?.data?.errors?.[0]?.msg || err.response?.data?.message || 'Failed to update the name');
     }
+    if (res.data?.statusCode !== 200 || !res.data.data) {
+      throw new Error(res.data?.message || 'Failed to update the name');
+    }
+    const updated = res.data.data;
+    setUsers((prev) => prev.map((u) => (u._id === user._id
+      ? { ...u, firstName: updated.firstName, lastName: updated.lastName, displayName: updated.displayName }
+      : u)));
+    setRenameTarget(null);
   };
 
   const handleResendInvite = async (invite) => {
@@ -232,28 +227,6 @@ const EsfUsers = () => {
       setError(err.response?.data?.message || 'Failed to revoke the invitation');
     } finally {
       setDeletingId(null);
-    }
-  };
-
-  const handleResetPassword = async (user) => {
-    const newPassword = window.prompt(
-      `Enter a new password for ${nameOf(user)}
-
-` +
-        'Min 8 characters with 1 uppercase, 1 lowercase, a number and a symbol:'
-    );
-    if (!newPassword) return;
-    if (!isPasswordValid(newPassword)) {
-      setError(passwordErrorMessage(newPassword));
-      return;
-    }
-    try {
-      const res = await axiosInstance.post(`/app/esf/users/${user._id}/reset-password`, { newPassword });
-      if (res.data?.statusCode !== 200) {
-        setError(res.data?.message || 'Failed to reset password');
-      }
-    } catch (err) {
-      setError(err.response?.data?.message || 'Failed to reset password');
     }
   };
 
@@ -625,7 +598,7 @@ const EsfUsers = () => {
                     onClick={() => {
                       setOpenDropdownId(null);
                       setDropdownPosition(null);
-                      handleRename(user);
+                      setRenameTarget(user);
                     }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-gray-300 hover:bg-[#252525] hover:text-gray-100"
                   >
@@ -649,18 +622,6 @@ const EsfUsers = () => {
                     onClick={() => {
                       setOpenDropdownId(null);
                       setDropdownPosition(null);
-                      handleResetPassword(user);
-                    }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-blue-400 hover:bg-[#252525] hover:text-blue-300"
-                  >
-                    <Key className="w-3.5 h-3.5" />
-                    Reset password
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpenDropdownId(null);
-                      setDropdownPosition(null);
                       setDeleteConfirmUser(user);
                     }}
                     disabled={deletingId === user._id}
@@ -673,6 +634,17 @@ const EsfUsers = () => {
                 document.body
               );
             })()}
+
+            <RenameDialog
+              open={!!renameTarget}
+              title="Set name"
+              description={renameTarget?.email}
+              initialValue={renameTarget ? `${renameTarget.firstName || ''} ${renameTarget.lastName || ''}`.trim() : ''}
+              placeholder="e.g. Priya Sharma"
+              tone="esf"
+              onCancel={() => setRenameTarget(null)}
+              onSave={saveName}
+            />
 
             {permissionsMember && (
               <EsfPagePermissionsModal

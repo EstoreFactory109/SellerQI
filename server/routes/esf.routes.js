@@ -15,7 +15,6 @@ const {
     linkExistingUsers,
     getEsfUsers,
     removeEsfUser,
-    resetEsfUserPassword,
     updateEsfUserRole,
     getEsfPageCatalogue,
     updateEsfUserPermissions,
@@ -117,7 +116,6 @@ router.get('/pages', esfAuth, getEsfPageCatalogue);
 router.patch('/users/:userId/role', esfAuth, validateEsfRole, updateEsfUserRole);
 router.patch('/users/:userId/name', esfAuth, validateEsfNickname, updateEsfUserName);
 router.put('/users/:userId/permissions', esfAuth, updateEsfUserPermissions);
-router.post('/users/:userId/reset-password', esfAuth, resetEsfUserPassword);
 router.delete('/users/:userId', esfAuth, removeEsfUser);
 
 /**

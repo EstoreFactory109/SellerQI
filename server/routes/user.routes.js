@@ -12,6 +12,8 @@ const { validateAgencyClientRegistration } = require('../middlewares/validator/a
 const { validateAgencyAdminProfile } = require('../middlewares/validator/agencyAdminProfileValidate.js');
 const { validateUpdateSubscriptionPlan } = require('../middlewares/validator/subscriptionValidate.js');
 const auth=require('../middlewares/Auth/auth.js')
+// The owner's own details (name, phone, photo, emails, password) - members can't change them.
+const ownerOnly=require('../middlewares/Auth/ownerOnly.js')
 const { refuseIfOtherSession } = require('../middlewares/Auth/singleSession.js');
 const { getActiveSession } = require('../controllers/user-auth/SessionController.js');
 const upload=require('../middlewares/multer/multer.js')
@@ -43,9 +45,9 @@ router.get('/logout', auth, logoutUser);
 // POST; the nav sections and onboarding pages GET). The POSTs were silently
 // 404ing, so those logouts never reached the server to revoke the session.
 router.post('/logout', auth, logoutUser);
-router.put('/updateProfilePic', auth, upload.single('avatar'), updateProfilePic);
-router.put('/updateDetails', auth, validateUpdateDetails, updateDetails);
-router.put('/update-phone', auth, validateUpdatePhone, updateUserPhone); // phone-collection modal
+router.put('/updateProfilePic', auth, ownerOnly, upload.single('avatar'), updateProfilePic);
+router.put('/updateDetails', auth, ownerOnly, validateUpdateDetails, updateDetails);
+router.put('/update-phone', auth, ownerOnly, validateUpdatePhone, updateUserPhone); // phone-collection modal
 router.post('/switch-account', auth, switchAccount);
 router.post('/verify-email-for-password-reset', passwordResetRateLimiter, validatePasswordResetEmail, verifyEmailForPasswordReset);
 router.post('/verify-reset-password-code', passwordResetRateLimiter, validateResetPasswordCode, verifyResetPasswordCode);
@@ -67,17 +69,17 @@ router.post('/register-agency-client', auth, validateAgencyClientRegistration, r
 // Added addresses are verified by code, then receive mail and can be used to
 // sign in. Any address (including the primary) can be muted, but not the last one.
 router.get('/emails', auth, listEmails);
-router.post('/emails', auth, otpRateLimiter, addEmail);
-router.post('/emails/verify', auth, verifyEmail);
-router.post('/emails/resend', auth, otpRateLimiter, resendVerification);
-router.patch('/emails/preferences', auth, updateEmailPreference);
-router.delete('/emails', auth, removeEmail);
+router.post('/emails', auth, ownerOnly, otpRateLimiter, addEmail);
+router.post('/emails/verify', auth, ownerOnly, verifyEmail);
+router.post('/emails/resend', auth, ownerOnly, otpRateLimiter, resendVerification);
+router.patch('/emails/preferences', auth, ownerOnly, updateEmailPreference);
+router.delete('/emails', auth, ownerOnly, removeEmail);
 
 // Admin routes
 router.get('/admin/profile', auth, getAdminProfile);
-router.put('/admin/profile', auth, validateAgencyAdminProfile, updateAdminProfile);
-router.put('/admin/profile-pic', auth, upload.single('avatar'), updateAdminProfilePic);
-router.put('/admin/update-password', auth, updateAdminPassword);
+router.put('/admin/profile', auth, ownerOnly, validateAgencyAdminProfile, updateAdminProfile);
+router.put('/admin/profile-pic', auth, ownerOnly, upload.single('avatar'), updateAdminProfilePic);
+router.put('/admin/update-password', auth, ownerOnly, updateAdminPassword);
 router.get('/admin/clients', auth, getAdminClients);
 router.delete('/admin/clients/:clientId', auth, removeAdminClient);
 router.post('/admin/switch-to-client', auth, switchToClient);

@@ -90,6 +90,8 @@ const PhoneRequiredModal = ({ forceShow = false, onDone }) => {
     : !!user &&
       user.needsPhoneUpdate === true &&
       !isSuperAdminViewing &&
+      // A member can't change the owner's phone (the server refuses), so asking would trap them.
+      user.isMemberSession !== true &&
       !dismissed &&
       !isExcludedPath(location.pathname);
 

@@ -10,8 +10,11 @@ import { clearAuthCache } from '../../utils/authCoordinator.js';
  *   kind="invite" — /member-invite/:token        opening it accepts the invitation
  *   kind="login"  — /member-login/verify/:token  one-time link from "Log in as a member"
  *
- * Either way the server signs them in to the account they belong to, and the
- * usual post-login route (/analyse-account) takes it from there.
+ * Either way the server signs them in to the account they belong to and they go
+ * straight to its dashboard. Not /analyse-account: that is the owner's "we are
+ * scanning your Amazon account" page, which never moves on by itself (it waits
+ * for a click, or polls every 15 minutes while the owner's first scan runs), so a
+ * member joining an existing account was left sitting on it.
  */
 const COPY = {
   invite: {
@@ -51,7 +54,7 @@ const MemberLinkLanding = ({ kind }) => {
         clearAuthCache();
         localStorage.setItem('isAuth', 'true');
         setAccountName(res.data?.data?.accountName || '');
-        setTimeout(() => navigate('/analyse-account', { replace: true }), 1000);
+        setTimeout(() => navigate('/seller-central-checker/dashboard', { replace: true }), 1000);
       })
       .catch((err) => setError(err.response?.data?.message || copy.fallback));
   }, [kind, token, navigate, copy.fallback]);

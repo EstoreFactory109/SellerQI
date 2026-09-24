@@ -11,6 +11,7 @@ let refuseIfOtherSession;
 let verifyAccessToken;
 let getActiveRefreshTokenUser;
 let findById;
+let memberExists;
 
 // token -> user id; user id -> accessType
 const TOKENS = {
@@ -35,13 +36,18 @@ beforeEach(() => {
     getActiveRefreshTokenUser: jest.fn(),
   }));
   jest.doMock('../../../models/user-auth/userModel.js', () => ({ findById: jest.fn() }));
+  jest.doMock('../../../models/user-auth/AccountMemberModel.js', () => ({ exists: jest.fn() }));
 
   ({ verifyAccessToken, getActiveRefreshTokenUser } = require('../../../utils/Tokens.js'));
   ({ findById } = require('../../../models/user-auth/userModel.js'));
+  ({ exists: memberExists } = require('../../../models/user-auth/AccountMemberModel.js'));
 
-  verifyAccessToken.mockImplementation(async (token) =>
-    TOKENS[token] ? { isvalid: true, tokenData: TOKENS[token] } : { isvalid: false, tokenData: null }
-  );
+  verifyAccessToken.mockImplementation(async (token) => {
+    // A member's token: the owner's id plus the member's (see createAccessToken).
+    if (token === 'member-token') return { isvalid: true, tokenData: 'seller-id', memberId: 'member-1' };
+    return TOKENS[token] ? { isvalid: true, tokenData: TOKENS[token], memberId: null } : { isvalid: false, tokenData: null };
+  });
+  memberExists.mockResolvedValue({ _id: 'member-1' });
   getActiveRefreshTokenUser.mockResolvedValue(null);
   findById.mockImplementation((id) => ({
     select: () => ({ lean: async () => (ACCESS_TYPES[id] ? { accessType: ACCESS_TYPES[id] } : null) }),
@@ -72,6 +78,17 @@ describe('resolveActiveSession', () => {
     const session = await resolveActiveSession({ IBEXAccessToken: 'expired', IBEXRefreshToken: 'refresh' });
     expect(session.kind).toBe('user');
     expect(session.home).toBe('/analyse-account');
+  });
+
+  it("sends a member to the account's dashboard, not the owner's first-scan page", async () => {
+    const session = await resolveActiveSession({ IBEXAccessToken: 'member-token' });
+    expect(session.kind).toBe('user');
+    expect(session.home).toBe('/seller-central-checker/dashboard');
+  });
+
+  it('does not count a removed member as signed in, so the login page is reachable', async () => {
+    memberExists.mockResolvedValue(null);
+    expect(await resolveActiveSession({ IBEXAccessToken: 'member-token' })).toBeNull();
   });
 
   it('treats an admin impersonating a seller as an admin session, not a seller one', async () => {
