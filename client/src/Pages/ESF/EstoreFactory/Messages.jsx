@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Search, Send, Check, CheckCheck, Clock, MessageSquare } from 'lucide-react';
 import axiosInstance from '../../../config/axios.config.js';
 import { PALETTE } from '../../../Components/ESF/estoreFactoryTheme.js';
 import AttachmentPicker from '../../../Components/ESF/AttachmentPicker.jsx';
@@ -25,7 +26,16 @@ import useConversationPolling from '../../../Components/ESF/useConversationPolli
  * wonder whether something went wrong.
  *
  * Laid out like the staff inbox (client/src/Pages/ESF/EsfMessages.jsx) so the two
- * surfaces behave the same way, in this section's own palette.
+ * surfaces behave the same way, in this section's own palette. The borrowing is
+ * structural, not visual.
+ *
+ * ── ONE DELIBERATE DIVERGENCE FROM THE STAFF LIST ──
+ * A staff row is avatar + CLIENT NAME over subject, because each row is a different
+ * client and the name is what tells them apart. Here every conversation is with the
+ * same counterparty, so a name line would read "eStore Factory" on every row and carry
+ * no information. The subject takes the name slot instead, and the avatar is keyed on
+ * the subject for the same reason — the conversation, not the correspondent, is what
+ * distinguishes one row from another on this side.
  *
  * The Overview card's open-conversation count used to be exported from here and
  * computed over the mock array. It now comes from the dashboard API as
@@ -77,11 +87,64 @@ const dayLabel = (value) => {
  * had read it.
  */
 const ClientReceipt = ({ seen, pending = false }) => {
-    if (pending) return <span title="Sending">🕐</span>;
+    /**
+     * Real icons rather than the "✓✓" / "🕐" text this used to render. Emoji tick marks
+     * pick up the platform's own font, so they sat on a different baseline from the
+     * timestamp beside them and rendered at a different weight on Windows — the staff
+     * inbox has used lucide icons since it was laid out as a chat client, and the two
+     * surfaces showing the same state in two different alphabets is the tell that only
+     * one of them was ever finished.
+     */
+    if (pending) {
+        return <Clock className="h-3.5 w-3.5 shrink-0" style={{ color: PALETTE.textMuted }} aria-label="Sending" />;
+    }
     if (seen === null || seen === undefined) return null;
     // Two ticks once the team has opened the conversation. A single tick is not proof
     // they have not — it is the absence of evidence either way.
-    return <span title={seen ? 'Seen by your team' : 'Sent'}>{seen ? '✓✓' : '✓'}</span>;
+    return seen ? (
+        <CheckCheck className="h-3.5 w-3.5 shrink-0" style={{ color: PALETTE.accentLight }} aria-label="Seen by your team" />
+    ) : (
+        <Check className="h-3.5 w-3.5 shrink-0" style={{ color: PALETTE.textMuted }} aria-label="Sent" />
+    );
+};
+
+/**
+ * Initials and a stable tint for the conversation avatar.
+ *
+ * Keyed on the SUBJECT, not on a correspondent — see the divergence note in the header.
+ * The tint is a hash so a conversation keeps the same colour between loads; it means
+ * nothing on its own, it just makes the list scannable at a glance.
+ */
+const initialsOf = (subject = '') => {
+    const words = String(subject).replace(/[^\w\s-]/g, ' ').trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) return '—';
+    return (words[0][0] + (words[1]?.[0] || '')).toUpperCase();
+};
+
+const AVATAR_TINTS = [
+    { bg: 'rgba(59,130,246,.20)', color: '#93B4FB' },
+    { bg: 'rgba(34,197,94,.20)', color: '#86E0AC' },
+    { bg: 'rgba(139,92,246,.20)', color: '#C0ABFA' },
+    { bg: 'rgba(245,166,35,.20)', color: '#F5C87A' },
+    { bg: 'rgba(244,63,94,.20)', color: '#F9A3B2' },
+    { bg: 'rgba(6,182,212,.20)', color: '#8BDDEB' },
+];
+const tintFor = (key = '') => {
+    let hash = 0;
+    for (let i = 0; i < key.length; i += 1) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+    return AVATAR_TINTS[hash % AVATAR_TINTS.length];
+};
+
+const Avatar = ({ subject }) => {
+    const tint = tintFor(subject || '');
+    return (
+        <span
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold"
+            style={{ background: tint.bg, color: tint.color }}
+        >
+            {initialsOf(subject)}
+        </span>
+    );
 };
 
 const groupByDay = (messages) => {
@@ -97,6 +160,7 @@ const groupByDay = (messages) => {
 
 const Messages = () => {
     const [threads, setThreads] = useState([]);
+    const [search, setSearch] = useState('');
     const [inboxAddress, setInboxAddress] = useState(null);
     const [openId, setOpenId] = useState(null);
     const [conversation, setConversation] = useState(null);
@@ -135,7 +199,12 @@ const Messages = () => {
         try {
             const res = await axiosInstance.get(`/api/pagewise/esf/messages/${id}`);
             setConversation(res.data?.data || null);
-            setThreads((current) => current.map((t) => (t.id === id ? { ...t, unread: false } : t)));
+            // The count goes with the flag — the badge reads unreadCount, so clearing
+            // only `unread` would leave a stale "3" behind on the next render that
+            // happens to check the count instead.
+            setThreads((current) => current.map((t) => (
+                t.id === id ? { ...t, unread: false, unreadCount: 0 } : t
+            )));
         } catch (err) {
             setError(err.response?.data?.message || 'Could not open that conversation');
         }
@@ -242,6 +311,16 @@ const Messages = () => {
     const open = conversation?.thread;
     const dayGroups = useMemo(() => groupByDay(conversation?.messages || []), [conversation]);
 
+    /**
+     * Subject only — there is no correspondent name to search on this side, and the
+     * bodies are not in the list payload at all.
+     */
+    const visible = useMemo(() => {
+        const needle = search.trim().toLowerCase();
+        if (!needle) return threads;
+        return threads.filter((t) => (t.subject || '').toLowerCase().includes(needle));
+    }, [threads, search]);
+
     const panel = { background: PALETTE.panel || 'rgba(255,255,255,.02)', borderColor: PALETTE.border };
 
     return (
@@ -295,50 +374,88 @@ const Messages = () => {
                         )}
                     </div>
 
+                    <div className="px-3 pb-3">
+                        <div
+                            className="flex items-center gap-2 rounded-lg px-3 py-2"
+                            style={{ background: 'rgba(255,255,255,.06)' }}
+                        >
+                            <Search className="h-4 w-4 shrink-0" style={{ color: PALETTE.textMuted }} />
+                            <input
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                                placeholder="Search conversations"
+                                className="w-full bg-transparent text-[13px] focus:outline-none"
+                                style={{ color: PALETTE.textPrimary }}
+                            />
+                        </div>
+                    </div>
+
                     <div className="flex flex-1 flex-col overflow-y-auto">
                         {loading && (
                             <p className="flex flex-1 items-center justify-center py-6 text-sm" style={{ color: PALETTE.textTertiary }}>Loading…</p>
                         )}
 
-                        {!loading && threads.length === 0 && (
+                        {!loading && visible.length === 0 && (
                             <div className="flex flex-1 items-center justify-center px-4 py-10 text-center">
-                                <p className="text-sm" style={{ color: PALETTE.textTertiary }}>
-                                    No conversations yet.
-                                </p>
+                                <div>
+                                    <MessageSquare className="mx-auto mb-2 h-6 w-6" style={{ color: PALETTE.textMuted }} />
+                                    <p className="text-sm" style={{ color: PALETTE.textTertiary }}>
+                                        {search ? 'No conversations match.' : 'No conversations yet.'}
+                                    </p>
+                                </div>
                             </div>
                         )}
 
-                        {threads.map((thread) => {
+                        {visible.map((thread) => {
                             const pill = STATUS_PILL[thread.status] || STATUS_PILL.Open;
                             return (
                                 <button
                                     key={thread.id}
                                     type="button"
                                     onClick={() => openThread(thread.id)}
-                                    className="flex w-full flex-col gap-1 px-4 py-3 text-left transition-colors hover:bg-white/[0.035]"
+                                    className="flex w-full items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-white/[0.035]"
                                     style={openId === thread.id ? { background: 'rgba(255,255,255,.06)' } : undefined}
                                 >
-                                    <span className="flex items-baseline gap-2">
-                                        <span
-                                            className="min-w-0 flex-1 truncate text-[13.5px] font-medium"
-                                            style={{ color: PALETTE.textPrimary }}
-                                        >
-                                            {thread.subject || '(no subject)'}
+                                    <Avatar subject={thread.subject} />
+
+                                    <span className="min-w-0 flex-1">
+                                        <span className="flex items-baseline gap-2">
+                                            <span
+                                                className="min-w-0 flex-1 truncate text-[13.5px] font-medium"
+                                                style={{ color: PALETTE.textPrimary }}
+                                                title={thread.subject}
+                                            >
+                                                {thread.subject || '(no subject)'}
+                                            </span>
+                                            <span
+                                                className="shrink-0 text-[11px]"
+                                                style={{ color: thread.unread ? PALETTE.good : PALETTE.textTertiary }}
+                                            >
+                                                {listTime(thread.lastMessageAt)}
+                                            </span>
                                         </span>
-                                        <span className="shrink-0 text-[11px]" style={{ color: PALETTE.textTertiary }}>
-                                            {listTime(thread.lastMessageAt)}
+
+                                        <span className="mt-0.5 flex items-center gap-1.5">
+                                            {/* Only when THEY spoke last — the row tick describes
+                                                their own message, exactly as the bubble tick does. */}
+                                            <ClientReceipt seen={thread.lastSeenByTeam} />
+                                            <span
+                                                className="shrink-0 truncate rounded px-1.5 py-0.5 text-[10.5px] font-medium"
+                                                style={{ background: pill.bg, color: pill.color }}
+                                            >
+                                                {thread.status}
+                                            </span>
+                                            {thread.unread && (
+                                                /* The count is UNREAD, not total — a "5" here on a
+                                                   thread with one new message would be a lie. */
+                                                <span
+                                                    className="ml-auto flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full px-1 text-[10px] font-bold"
+                                                    style={{ background: PALETTE.good, color: PALETTE.bg }}
+                                                >
+                                                    {thread.unreadCount > 99 ? '99+' : thread.unreadCount || 1}
+                                                </span>
+                                            )}
                                         </span>
-                                    </span>
-                                    <span className="flex items-center gap-2">
-                                        <span
-                                            className="rounded px-1.5 py-0.5 text-[10.5px] font-medium"
-                                            style={{ background: pill.bg, color: pill.color }}
-                                        >
-                                            {thread.status}
-                                        </span>
-                                        {thread.unread && (
-                                            <span className="h-2 w-2 rounded-full" style={{ background: PALETTE.good }} />
-                                        )}
                                     </span>
                                 </button>
                             );
@@ -495,10 +612,12 @@ const Messages = () => {
                                         type="button"
                                         onClick={sendReply}
                                         disabled={sending || !draft.trim()}
-                                        className="mb-0.5 shrink-0 rounded-full px-3 py-1.5 text-[12px] font-semibold transition-opacity disabled:opacity-30"
+                                        title="Send"
+                                        aria-label="Send"
+                                        className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-opacity hover:opacity-90 disabled:opacity-30"
                                         style={{ background: PALETTE.good, color: PALETTE.bg }}
                                     >
-                                        Send
+                                        <Send className="h-4 w-4" />
                                     </button>
                                 </div>
                                 {/*

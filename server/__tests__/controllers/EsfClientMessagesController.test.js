@@ -222,3 +222,64 @@ describe('errors the client can act on', () => {
         expect(body.message).not.toMatch(/ECONNREFUSED/);
     });
 });
+
+describe('what the conversation list carries for the row', () => {
+    test('the row ticks only when the CLIENT spoke last', async () => {
+        /**
+         * The mirror image of the staff rule, and the easy bug is inverting it: a tick
+         * on a row where the team spoke last would be telling the client whether they
+         * themselves had read it. Null, so the UI renders nothing.
+         */
+        mockThreadFind.mockReturnValue(chain([
+            { ...THREAD, _id: 't-theirs', lastMessageDirection: 'inbound', lastStaffReadAt: null },
+            { ...THREAD, _id: 't-ours', lastMessageDirection: 'outbound' },
+        ]));
+
+        const { body } = await run(getEsfMessages, clientReq());
+        const byId = Object.fromEntries(body.data.threads.map((t) => [t.id, t]));
+
+        expect(byId['t-theirs'].lastSeenByTeam).toBe(false);
+        expect(byId['t-ours'].lastSeenByTeam).toBeNull();
+    });
+
+    test('a read by the team turns that row into two ticks', async () => {
+        mockThreadFind.mockReturnValue(chain([{
+            ...THREAD,
+            lastMessageDirection: 'inbound',
+            lastStaffReadAt: new Date('2026-09-22T11:00:00Z'),
+        }]));
+
+        const { body } = await run(getEsfMessages, clientReq());
+
+        expect(body.data.threads[0].lastSeenByTeam).toBe(true);
+    });
+
+    test('the badge counts UNREAD messages, not the messages in the thread', async () => {
+        // messageCount is 2 and clientUnreadCount is 1 — badging the former would
+        // claim two new messages on a thread with one.
+        const { body } = await run(getEsfMessages, clientReq());
+
+        expect(body.data.threads[0].unreadCount).toBe(1);
+        expect(body.data.threads[0].messageCount).toBe(2);
+    });
+
+    test('a row with nothing unread carries a zero, never undefined', async () => {
+        // The badge renders on `unread`, but reads `unreadCount`. undefined here would
+        // print an empty bubble rather than no bubble.
+        mockThreadFind.mockReturnValue(chain([{ ...THREAD, clientUnreadCount: undefined }]));
+
+        const { body } = await run(getEsfMessages, clientReq());
+
+        expect(body.data.threads[0].unread).toBe(false);
+        expect(body.data.threads[0].unreadCount).toBe(0);
+    });
+
+    test('the row still names no individual', async () => {
+        // The additions are a count and a boolean. Neither is identity, and nothing
+        // else may ride along with them.
+        const { body } = await run(getEsfMessages, clientReq());
+        const row = body.data.threads[0];
+
+        expect(JSON.stringify(row)).not.toMatch(/Nitesh|Kumar|913-269-8400|morgansrepellent/i);
+    });
+});
