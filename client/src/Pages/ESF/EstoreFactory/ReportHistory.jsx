@@ -121,10 +121,10 @@ const ReportHistory = () => {
 
     return (
         <div
-            className="min-h-full w-full"
+            className="flex w-full flex-1 flex-col"
             style={{ background: PALETTE.bg, color: PALETTE.textPrimary, fontFamily: "system-ui, -apple-system, 'Helvetica Neue', Helvetica, sans-serif" }}
         >
-            <div className="max-w-[1170px] mx-auto flex flex-col gap-[26px] px-8 md:px-10 py-8 md:py-10">
+            <div className="w-full max-w-[1170px] mx-auto flex flex-col gap-[26px] px-8 md:px-10 py-8 md:py-10">
 
                 <div className="flex items-center gap-[9px] text-[12.5px]" style={{ color: PALETTE.textMuted }}>
                     <button type="button" onClick={() => navigate(REPORTS_PAGE)} style={{ color: PALETTE.textTertiary }}>Reports</button>
