@@ -36,6 +36,10 @@ const INTENTIONALLY_EXCLUDED = {
     // which admin ran the connect flow; purging on that user's deletion would tear down
     // the whole company's Zoho integration for everyone else.
     'ZohoConnectionModel.js': 'org-wide singleton - connectedBy is an audit stamp, not ownership',
+    // Same shape as ZohoConnectionModel above: one row for the whole company. Purging it
+    // because the admin who happened to run the connect flow was deleted would
+    // disconnect the shared ESF inbox for everyone and stop all client mail.
+    'GmailConnectionModel.js': 'org-wide singleton - connectedBy is an audit stamp, not ownership',
 };
 
 /** Purged only when the caller passes includeBillingHistory (admin manual delete). */

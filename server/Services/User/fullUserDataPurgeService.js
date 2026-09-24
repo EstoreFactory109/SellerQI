@@ -36,6 +36,7 @@ const IssueSummary = require('../../models/system/IssueSummaryModel.js');
 const TopOpportunities = require('../../models/system/TopOpportunitiesModel.js');
 const EsfSuggestedWork = require('../../models/system/EsfSuggestedWorkModel.js');
 const { EsfBillingProfile, EsfBillingInvoice } = require('../../models/system/EsfBillingModels.js');
+const { EmailThread, EmailMessage } = require('../../models/system/EmailThreadModels.js');
 const TopProducts = require('../../models/system/TopProductsModel.js');
 const Cogs = require('../../models/finance/CogsModel.js');
 const ProductWiseStorageFees = require('../../models/finance/ProductWiseStorageFees.js');
@@ -223,6 +224,11 @@ const collectionsWithUserId = [
     // behind after a deletion request.
     { model: EsfBillingProfile, key: 'userId' },
     { model: EsfBillingInvoice, key: 'userId' },
+    // The client's email conversation with ESF. Redacted here and re-derivable from
+    // Gmail, but it still holds their own words and the address replies were sent to,
+    // so it cannot survive a deletion request.
+    { model: EmailThread, key: 'userId' },
+    { model: EmailMessage, key: 'userId' },
     { model: Cogs, key: 'userId' },
     { model: ProductWiseStorageFees, key: 'userId' },
     { model: FBAFees, key: 'userId' },

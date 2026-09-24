@@ -10,6 +10,7 @@
 const mongoose = require('mongoose');
 const UserModel = require('../../models/user-auth/userModel.js');
 const SellerCentralModel = require('../../models/user-auth/sellerCentralModel.js');
+const { esfClientLabel } = require('./esfClientLabel.js');
 const { getUserByEmail } = require('./userServices.js');
 const { createAccessToken, createRefreshToken, createLocationToken } = require('../../utils/Tokens.js');
 const { hashPassword } = require('../../utils/HashPassword.js');
@@ -108,9 +109,28 @@ const createManagedClient = async ({
  * @param {string} [options.select] Field projection for the User query.
  * @returns {Promise<Array<object>>}
  */
+/**
+ * Replace a client's identity with the label the Messages page already uses.
+ *
+ * The keys are kept and nulled rather than deleted: a consumer doing
+ * `${firstName} ${lastName}` should render nothing, not the string "undefined
+ * undefined", and one checking `client.email` should see a falsy value rather than
+ * throw. `identityRedacted` is what the UI switches on.
+ */
+const redactClientIdentity = (client, label) => ({
+    ...client,
+    firstName: null,
+    lastName: null,
+    email: null,
+    phone: null,
+    whatsapp: null,
+    identityRedacted: true,
+    label,
+});
+
 const listManagedClients = async (matchQuery, options = {}) => {
     const select = options.select
-        || 'firstName lastName email phone createdAt subscriptionStatus packageType agencyId isAgencyClient isEsfClient esfAddedBy zohoProject';
+        || 'firstName lastName email phone createdAt subscriptionStatus packageType agencyId isAgencyClient isEsfClient esfAddedBy zohoProject esfClientRef';
 
     const clients = await UserModel.find(matchQuery).select(select).sort({ createdAt: -1 }).lean();
     if (!clients.length) return [];
@@ -135,7 +155,7 @@ const listManagedClients = async (matchQuery, options = {}) => {
         else if (hasSpApi) amazonStatus = 'Seller Central';
         else if (hasAdsApi) amazonStatus = 'Amazon Ads';
 
-        return {
+        const row = {
             ...client,
             amazonStatus,
             amazonConnected,
@@ -146,6 +166,15 @@ const listManagedClients = async (matchQuery, options = {}) => {
             region: amazonConnected ? (sellerAccount?.region || null) : null,
             connectedDate: amazonConnected ? sellerDocument?.createdAt || null : null,
         };
+
+        /**
+         * Opt-in, so the agency flow (UserController) is untouched — this is an ESF
+         * portal rule about ESF staff, not a property of managed clients generally.
+         */
+        if (!options.redactIdentity) return row;
+
+        const { label } = esfClientLabel(client, { brand: sellerDocument?.brand });
+        return redactClientIdentity(row, label);
     });
 };
 
@@ -197,6 +226,7 @@ const agencyClientQuery = (ownerId) => ({
 
 module.exports = {
     createManagedClient,
+    redactClientIdentity,
     listManagedClients,
     issueClientSession,
     ESF_CLIENT_QUERY,

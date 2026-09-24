@@ -107,4 +107,42 @@ describe('esfPages', () => {
       expect(isPageDeniedFor(restricted, null)).toBe(false);
     });
   });
+
+  /**
+   * A page in the catalogue with no API mapping is a page that LOOKS restricted and
+   * is not: pageKeyForApiPath returns null for an unmapped path, and null means
+   * "never blocked". The Billing page shipped in exactly that state — a staff member
+   * denied the page could still call /api/pagewise/esf/billing and read the client's
+   * invoices, card last-four and billing address.
+   */
+  describe('every client page that has an API is actually guarded', () => {
+    const denied = { esfDeniedPages: ESF_CLIENT_PAGES.map((p) => p.key) };
+
+    // Real request paths, one per page that has a backend today.
+    const LIVE_ENDPOINTS = {
+      'client-dashboard': '/api/pagewise/esf/client-dashboard',
+      status: '/api/pagewise/esf/project-status',
+      billing: '/api/pagewise/esf/billing',
+    };
+
+    Object.entries(LIVE_ENDPOINTS).forEach(([key, path]) => {
+      it(`blocks ${key} at its API, not just in the nav`, () => {
+        expect(pageKeyForApiPath(path)).toBe(key);
+        expect(isPageDeniedFor(denied, pageKeyForApiPath(path))).toBe(true);
+      });
+    });
+
+    it('guards the invoice PDF through the same entry, by longest-prefix match', () => {
+      // A second mapping for the PDF route would be redundant; this asserts the
+      // prefix match genuinely covers it rather than leaving a hole beside it.
+      expect(pageKeyForApiPath('/api/pagewise/esf/billing/invoices/ESFI3635/pdf')).toBe('billing');
+    });
+
+    it('leaves shared infrastructure unrestricted', () => {
+      // Blocking these would break the whole app for a member rather than one page.
+      ['/api/pagewise/navbar', '/app/profile'].forEach((path) => {
+        expect(pageKeyForApiPath(path)).toBeNull();
+      });
+    });
+  });
 });
