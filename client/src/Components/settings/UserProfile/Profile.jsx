@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from "react";
-import EmailAddresses from './EmailAddresses.jsx';
 import ProfilePic from "./ProfilePic";
 import Upload from "./Upload";
 import Preview from "./Preview";
@@ -291,9 +290,6 @@ export default function ProfileForm() {
             )}
           </button>
         </div>
-
-        {/* Additional email addresses */}
-        <EmailAddresses />
 
         {/* Super Admin: Password Update Section */}
         {isSuperAdminSession && (

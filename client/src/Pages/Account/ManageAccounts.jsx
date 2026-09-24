@@ -26,6 +26,28 @@ import {
 } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 
+// Left padding of the User cell per nesting level: top-level, an agency client or
+// a member, and a member of an agency client.
+const INDENT = { 1: 'pl-8', 2: 'pl-14' };
+
+/** Chevron that expands a row's nested rows (agency clients, members). */
+const ExpandButton = ({ expanded, loading, onClick, label }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className="p-1 rounded-md text-gray-400 hover:bg-white/[0.06] hover:text-gray-200 shrink-0"
+    aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label}`}
+    aria-expanded={expanded}
+    title={label}
+  >
+    {loading ? (
+      <div className="w-3.5 h-3.5 border-2 border-gray-500 border-t-transparent rounded-full animate-spin" />
+    ) : (
+      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+    )}
+  </button>
+);
+
 const ITEMS_PER_PAGE = 10;
 
 // Mock data based on the user model schema
@@ -143,6 +165,10 @@ const ManageAccounts = () => {
   const [expandedAgencyIds, setExpandedAgencyIds] = useState(new Set());
   const [agencyClientsCache, setAgencyClientsCache] = useState({}); // { [agencyUserId]: clientRow[] }
   const [agencyClientsLoading, setAgencyClientsLoading] = useState(new Set());
+  // Members an account owner added with "Add member", shown nested under that owner.
+  const [expandedMemberIds, setExpandedMemberIds] = useState(new Set());
+  const [membersCache, setMembersCache] = useState({}); // { [ownerUserId]: memberRow[] }
+  const [membersLoading, setMembersLoading] = useState(new Set());
   const [loginLoadingUsers, setLoginLoadingUsers] = useState(new Set());
   const [loginError, setLoginError] = useState('');
   const [deletingUsers, setDeletingUsers] = useState(new Set());
@@ -397,6 +423,33 @@ const ManageAccounts = () => {
   const refreshExpandedAgencyClients = () => {
     expandedAgencyIds.forEach(id => fetchAgencyClients(id));
   };
+
+  const setHas = (setter, key, on) => setter(prev => {
+    const next = new Set(prev);
+    if (on) next.add(key); else next.delete(key);
+    return next;
+  });
+
+  const fetchMembers = async (ownerId) => {
+    setHas(setMembersLoading, ownerId, true);
+    try {
+      const response = await axiosInstance.get(`/app/auth/admin/accounts/${ownerId}/members`);
+      if (response.data.statusCode === 200) {
+        setMembersCache(prev => ({ ...prev, [ownerId]: response.data.data.members || [] }));
+      }
+    } catch (error) {
+      console.error('Failed to fetch members:', error);
+    } finally {
+      setHas(setMembersLoading, ownerId, false);
+    }
+  };
+
+  const toggleMembers = (owner) => {
+    const opening = !expandedMemberIds.has(owner._id);
+    setHas(setExpandedMemberIds, owner._id, opening);
+    if (opening && !membersCache[owner._id]) fetchMembers(owner._id);
+  };
+
 
   // Close dropdown when clicking outside (portal menu or trigger button)
   useEffect(() => {
@@ -817,7 +870,7 @@ const ManageAccounts = () => {
 
   // Renders one account row - shared by top-level rows and an agency's nested client rows,
   // so both look and behave identically (same columns, same actions menu).
-  const renderAccountRow = (user, { isChild = false } = {}) => {
+  const renderAccountRow = (user, { isChild = false, depth = isChild ? 1 : 0 } = {}) => {
     const packageInfo = getPackageTypeInfo(user);
     const statusInfo = getSubscriptionStatus(user);
     const PackageIcon = packageInfo.icon;
@@ -826,25 +879,27 @@ const ManageAccounts = () => {
     const isAgencyOwner = !isChild && user.packageType === 'AGENCY' && !hasActiveFilters;
     const isExpanded = isAgencyOwner && expandedAgencyIds.has(user._id);
     const isExpandLoading = isAgencyOwner && agencyClientsLoading.has(user._id);
+    // An agency connects no Amazon account of its own (its clients do), so a red
+    // cross there would read as a problem. Show a dash instead.
+    const hasNoAmazonConnection = user.packageType === 'AGENCY';
+    // Anyone else with members ("Add member") expands to show them instead.
+    const hasMembers = !isAgencyOwner && user.memberCount > 0;
+    const membersExpanded = hasMembers && expandedMemberIds.has(user._id);
 
     return (
-      <tr key={user._id} className={`group transition-colors hover:bg-white/[0.035] ${isChild ? 'bg-blue-500/[0.035]' : 'bg-transparent'}`}>
-        <td className={`px-3 py-2.5 ${isChild ? 'pl-8' : ''}`}>
+      <tr key={user._id} className={`group transition-colors hover:bg-white/[0.035] ${depth > 0 ? 'bg-blue-500/[0.035]' : 'bg-transparent'}`}>
+        <td className={`px-3 py-2.5 ${INDENT[depth] || ''}`}>
           <div className="flex items-center gap-2">
+            {hasMembers && (
+              <ExpandButton
+                expanded={membersExpanded}
+                loading={membersLoading.has(user._id)}
+                onClick={() => toggleMembers(user)}
+                label={`${user.memberCount} member${user.memberCount === 1 ? '' : 's'}`}
+              />
+            )}
             {isAgencyOwner && (
-              <button
-                type="button"
-                onClick={() => toggleAgencyExpand(user)}
-                className="p-1 rounded-md text-gray-400 hover:bg-white/[0.06] hover:text-gray-200 shrink-0"
-                aria-label={isExpanded ? 'Collapse agency clients' : 'Expand agency clients'}
-                aria-expanded={isExpanded}
-              >
-                {isExpandLoading ? (
-                  <div className="w-3.5 h-3.5 border-2 border-gray-500 border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                )}
-              </button>
+              <ExpandButton expanded={isExpanded} loading={isExpandLoading} onClick={() => toggleAgencyExpand(user)} label="agency clients" />
             )}
             <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-sm border ${
               user.packageType === 'AGENCY'
@@ -897,7 +952,9 @@ const ManageAccounts = () => {
           </span>
         </td>
         <td className="px-2 py-2.5 text-center text-xs">
-          {getSpApiConnectionStatus(user).connected ? (
+          {hasNoAmazonConnection ? (
+            <span className="text-gray-500">—</span>
+          ) : getSpApiConnectionStatus(user).connected ? (
             <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-green-500/10 border border-green-500/20">
               <Check className="w-4 h-4 text-green-400" aria-label="Connected" />
             </span>
@@ -908,7 +965,9 @@ const ManageAccounts = () => {
           )}
         </td>
         <td className="px-2 py-2.5 text-center text-xs">
-          {getAdsApiConnectionStatus(user).connected ? (
+          {hasNoAmazonConnection ? (
+            <span className="text-gray-500">—</span>
+          ) : getAdsApiConnectionStatus(user).connected ? (
             <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-green-500/10 border border-green-500/20">
               <Check className="w-4 h-4 text-green-400" aria-label="Connected" />
             </span>
@@ -969,6 +1028,75 @@ const ManageAccounts = () => {
       </tr>
     );
   };
+
+  const DASH = <span className="text-gray-500">—</span>;
+  const initials = (text = '') =>
+    text.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+
+  /**
+   * A row that is not an account: a member someone added with "Add member". Same 10 columns as renderAccountRow; everything past the User
+   * cell is a dash unless given, and there is never an actions menu.
+   */
+  const renderPlainRow = ({ key, depth, lead, avatar, title, subtitle, type, joined, tone = 'bg-blue-500/[0.035]' }) => (
+    <tr key={key} className={`transition-colors hover:bg-white/[0.035] ${tone}`}>
+      <td className={`px-3 py-2.5 ${INDENT[depth] || ''}`}>
+        <div className="flex items-center gap-2">
+          {lead}
+          {avatar}
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-gray-100 break-words">{title}</p>
+            {subtitle && (
+              <p className="text-xs text-gray-500 break-all flex items-center gap-1 mt-0.5">{subtitle}</p>
+            )}
+          </div>
+        </div>
+      </td>
+      <td className="px-2 py-2.5 text-center">{type || DASH}</td>
+      <td className="px-2 py-2.5 text-xs">{DASH}</td>
+      <td className="px-2 py-2.5 text-center text-xs">{DASH}</td>
+      <td className="px-2 py-2.5 text-center text-xs">{DASH}</td>
+      <td className="px-2 py-2.5 text-center text-xs">{DASH}</td>
+      <td className="px-2 py-2.5 text-center text-xs">{DASH}</td>
+      <td className="px-2 py-2.5 text-center text-xs text-gray-500 whitespace-nowrap">{joined ? formatDate(joined) : DASH}</td>
+      <td className="px-2 py-2.5 text-center text-xs">{DASH}</td>
+      <td className="px-2 py-2.5 text-center text-xs">{DASH}</td>
+    </tr>
+  );
+
+  const emptyRow = (key, text) => (
+    <tr key={key}>
+      <td colSpan={10} className="px-3 py-3 text-center text-xs text-gray-500 bg-blue-500/[0.035]">{text}</td>
+    </tr>
+  );
+
+  const smallAvatar = (text, className = 'bg-sky-500/10 border-sky-400/20') => (
+    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${className}`}>
+      <span className="text-gray-100 text-[11px] font-semibold">{initials(text)}</span>
+    </div>
+  );
+
+  // Members are not accounts: no plan, brand or billing, so only who they are.
+  const renderMemberRows = (owner, depth, emptyText = 'No members') => {
+    if (!expandedMemberIds.has(owner._id) || membersLoading.has(owner._id)) return null;
+    const members = membersCache[owner._id] || [];
+    if (members.length === 0) return emptyRow(`${owner._id}-no-members`, emptyText);
+    return members.map((member) => renderPlainRow({
+      key: `member-${member._id}`,
+      depth,
+      avatar: smallAvatar(member.name || member.email),
+      title: member.name || member.email,
+      subtitle: member.name ? <><Mail className="w-3 h-3 shrink-0" />{member.email}</> : null,
+    }));
+  };
+
+  /** An account row plus, when expanded, the members its owner added. */
+  const renderAccountBlock = (user, { depth = 0 } = {}) => (
+    <React.Fragment key={user._id}>
+      {renderAccountRow(user, { depth })}
+      {renderMemberRows(user, depth + 1)}
+    </React.Fragment>
+  );
+
 
   return (
     <div className="relative min-h-full w-full overflow-hidden bg-[#0b0f17] p-4 md:p-6">
@@ -1392,6 +1520,9 @@ const ManageAccounts = () => {
               || Object.values(agencyClientsCache).flat().find((u) => u._id === openDropdownId);
             if (!user) return null;
             const canCancel = canCancelSubscription(user);
+            // An agency has no seller data of its own - its clients are opened one by one
+            // from the expanded row. The server refuses this login too.
+            const canLoginAs = user.packageType !== 'AGENCY' && user.accessType !== 'enterpriseAdmin';
             return createPortal(
               <div
                 ref={dropdownRef}
@@ -1401,6 +1532,7 @@ const ManageAccounts = () => {
                   top: Math.max(8, Math.min(dropdownPosition.top, window.innerHeight - DROPDOWN_MENU_HEIGHT - 8)),
                 }}
               >
+                {canLoginAs && (
                 <button
                   type="button"
                   onClick={() => {
@@ -1418,6 +1550,7 @@ const ManageAccounts = () => {
                   )}
                   Login
                 </button>
+                )}
                 {canCancel && (
                   <button
                     type="button"
@@ -1763,21 +1896,15 @@ const ManageAccounts = () => {
                     <tbody className="divide-y divide-white/10">
                       {users.map((user) => {
                         const isAgencyOwner = user.packageType === 'AGENCY';
-                        const isExpanded = isAgencyOwner && expandedAgencyIds.has(user._id);
+                        const isExpanded = isAgencyOwner && !hasActiveFilters && expandedAgencyIds.has(user._id);
                         const clients = agencyClientsCache[user._id] || [];
                         return (
                           <React.Fragment key={user._id}>
-                            {renderAccountRow(user)}
+                            {renderAccountBlock(user)}
                             {isExpanded && !agencyClientsLoading.has(user._id) && (
-                              clients.length === 0 ? (
-                                <tr>
-                                  <td colSpan={10} className="px-3 py-3 text-center text-xs text-gray-500 bg-blue-500/[0.035]">
-                                    No clients under this agency
-                                  </td>
-                                </tr>
-                              ) : (
-                                clients.map((client) => renderAccountRow(client, { isChild: true }))
-                              )
+                              clients.length === 0
+                                ? emptyRow(`${user._id}-no-clients`, 'No clients under this agency')
+                                : clients.map((client) => renderAccountBlock(client, { depth: 1 }))
                             )}
                           </React.Fragment>
                         );

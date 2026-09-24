@@ -12,6 +12,8 @@ const { validateAgencyClientRegistration } = require('../middlewares/validator/a
 const { validateAgencyAdminProfile } = require('../middlewares/validator/agencyAdminProfileValidate.js');
 const { validateUpdateSubscriptionPlan } = require('../middlewares/validator/subscriptionValidate.js');
 const auth=require('../middlewares/Auth/auth.js')
+const { refuseIfOtherSession } = require('../middlewares/Auth/singleSession.js');
+const { getActiveSession } = require('../controllers/user-auth/SessionController.js');
 const upload=require('../middlewares/multer/multer.js')
 const {verifyResetPasswordCode}=require('../controllers/user-auth/UserController.js')
 const { authRateLimiter, registerRateLimiter, passwordResetRateLimiter, otpRateLimiter } = require('../middlewares/rateLimiting.js');
@@ -28,8 +30,12 @@ const {
 
 // Rate limiting applied to authentication endpoints
 router.post('/register', registerRateLimiter, registerValidate, registerUser);
-router.post('/login', authRateLimiter, validateLogin, loginUser);
-router.post('/verify-user', authRateLimiter, verifyUser);
+// One session per browser: a seller login may replace a seller/agency session,
+// but not stack on top of an admin or ESF one (see middlewares/Auth/singleSession.js).
+const sellerLoginOnly = refuseIfOtherSession('user', 'agency');
+router.get('/session', getActiveSession);
+router.post('/login', authRateLimiter, validateLogin, sellerLoginOnly, loginUser);
+router.post('/verify-user', authRateLimiter, sellerLoginOnly, verifyUser);
 router.get('/profile', auth, profileUser);
 router.post('/refresh-token', refreshAccessToken); // No auth middleware - uses refresh token from cookie
 router.get('/logout', auth, logoutUser);
@@ -52,8 +58,8 @@ router.get('/check-trial-status', auth, checkTrialStatus); // New route for chec
 router.get('/check-first-analysis-status', auth, checkFirstAnalysisStatus); // Route to check if first analysis is complete
 
 
-router.post('/google-login', authRateLimiter, validateGoogleIdToken, googleLoginUser);
-router.post('/google-register', registerRateLimiter, validateGoogleIdToken, googleRegisterUser);
+router.post('/google-login', authRateLimiter, validateGoogleIdToken, sellerLoginOnly, googleLoginUser);
+router.post('/google-register', registerRateLimiter, validateGoogleIdToken, sellerLoginOnly, googleRegisterUser);
 router.post('/register-agency-client', auth, validateAgencyClientRegistration, registerAgencyClient);
 
 // ===== EMAIL ADDRESSES =====

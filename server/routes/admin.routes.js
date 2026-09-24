@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { adminLogin, adminLogout, getAllAccounts, getAgencyClients, getCountryStats, loginSelectedUser, deleteUser, getPaymentLogs, getAllPaymentLogs, cancelUserSubscription, exportAllAccountsCsv, refundUserPayment, updateUserTrialPeriod } = require('../controllers/admin/admin.js');
+const { adminLogin, adminLogout, getAllAccounts, getAgencyClients, getAccountMembers, getCountryStats, loginSelectedUser, deleteUser, getPaymentLogs, getAllPaymentLogs, cancelUserSubscription, exportAllAccountsCsv, refundUserPayment, updateUserTrialPeriod } = require('../controllers/admin/admin.js');
 const { getSubscriptionData } = require('../controllers/admin/AdminSubscriptionController.js');
 const { getAdminEmailLogs } = require('../controllers/admin/AdminEmailLogsController.js');
 const { getAdminTicketMessages } = require('../controllers/admin/AdminTicketMessagesController.js');
@@ -8,9 +8,10 @@ const { getAdminUserSessions, getAdminUserErrorLogs, getAdminUserSessionDetails 
 const superAdminAuth = require('../middlewares/Auth/superAdminAuth.js');
 const { authRateLimiter } = require('../middlewares/rateLimiting.js');
 const { validateAdminLogin } = require('../middlewares/validator/adminValidate.js');
+const { refuseIfOtherSession } = require('../middlewares/Auth/singleSession.js');
 
 // Public admin routes (no authentication required)
-router.post('/admin-login', authRateLimiter, validateAdminLogin, adminLogin);
+router.post('/admin-login', authRateLimiter, validateAdminLogin, refuseIfOtherSession('admin'), adminLogin);
 
 // Protected admin routes (require superAdmin authentication)
 router.post('/admin-logout', superAdminAuth, adminLogout);
@@ -18,6 +19,7 @@ router.get('/admin/accounts', superAdminAuth, getAllAccounts);
 router.get('/admin/accounts/export', superAdminAuth, exportAllAccountsCsv);
 router.get('/admin/accounts/country-stats', superAdminAuth, getCountryStats);
 router.get('/admin/accounts/:agencyId/clients', superAdminAuth, getAgencyClients);
+router.get('/admin/accounts/:userId/members', superAdminAuth, getAccountMembers);
 router.post('/admin/login-as-user', superAdminAuth, loginSelectedUser);
 router.delete('/admin/users/:userId', superAdminAuth, deleteUser);
 router.post('/admin/users/:userId/cancel-subscription', superAdminAuth, cancelUserSubscription);

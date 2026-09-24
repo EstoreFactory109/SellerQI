@@ -17,6 +17,7 @@ import {
   Crown,
   ChevronLeft,
   ChevronRight,
+  Pencil,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import axiosInstance from '../../config/axios.config.js';
@@ -34,7 +35,14 @@ const ROLE_BADGE = {
 
 const ITEMS_PER_PAGE = 10;
 const DROPDOWN_MENU_WIDTH = 160;
-const DROPDOWN_MENU_HEIGHT = 165;
+const DROPDOWN_MENU_HEIGHT = 200;
+
+/** Staff who joined by invitation may have only a nickname, or nothing but an email. */
+const nameOf = (user) => user.displayName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+const initialsOf = (user) => {
+  const name = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || '';
+  return name.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+};
 
 const EsfUsers = () => {
   const navigate = useNavigate();
@@ -112,7 +120,7 @@ const EsfUsers = () => {
   }, []);
 
   const filteredUsers = users.filter((u) => {
-    const name = `${u.firstName || ''} ${u.lastName || ''}`.toLowerCase();
+    const name = nameOf(u).toLowerCase();
     const email = (u.email || '').toLowerCase();
     const q = searchQuery.toLowerCase().trim();
     return !q || name.includes(q) || email.includes(q);
@@ -161,9 +169,7 @@ const EsfUsers = () => {
 
   const handleChangeRole = async (user) => {
     const nextRole = user.esfRole === 'admin' ? 'member' : 'admin';
-    const ok = window.confirm(
-      `Change ${user.firstName} ${user.lastName} from ${user.esfRole} to ${nextRole}?`
-    );
+    const ok = window.confirm(`Change ${nameOf(user)} from ${user.esfRole} to ${nextRole}?`);
     if (!ok) return;
     try {
       const res = await axiosInstance.patch(`/app/esf/users/${user._id}/role`, { role: nextRole });
@@ -174,6 +180,30 @@ const EsfUsers = () => {
       }
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to change role');
+    }
+  };
+
+  const handleRename = async (user) => {
+    const current = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+    const next = window.prompt(`Name to show for ${user.email} (leave empty to show their email):`, current);
+    if (next === null) return;
+    const name = next.trim();
+    if (name && name.length < 2) {
+      setError('Name must be at least 2 characters');
+      return;
+    }
+    try {
+      const res = await axiosInstance.patch(`/app/esf/users/${user._id}/name`, { name });
+      if (res.data?.statusCode === 200 && res.data.data) {
+        const updated = res.data.data;
+        setUsers((prev) => prev.map((u) => (u._id === user._id
+          ? { ...u, firstName: updated.firstName, lastName: updated.lastName, displayName: updated.displayName }
+          : u)));
+      } else {
+        setError(res.data?.message || 'Failed to update the name');
+      }
+    } catch (err) {
+      setError(err.response?.data?.errors?.[0]?.msg || err.response?.data?.message || 'Failed to update the name');
     }
   };
 
@@ -207,7 +237,7 @@ const EsfUsers = () => {
 
   const handleResetPassword = async (user) => {
     const newPassword = window.prompt(
-      `Enter a new password for ${user.firstName} ${user.lastName}
+      `Enter a new password for ${nameOf(user)}
 
 ` +
         'Min 8 characters with 1 uppercase, 1 lowercase, a number and a symbol:'
@@ -305,7 +335,10 @@ const EsfUsers = () => {
                   {invites.map((invite) => (
                     <div key={invite._id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                       <Mail className="w-4 h-4 text-gray-500 shrink-0" />
-                      <span className="text-sm text-gray-100 break-all min-w-0 flex-1">{invite.email}</span>
+                      <span className="text-sm text-gray-100 break-all min-w-0 flex-1">
+                        {invite.name && <span className="font-medium">{invite.name} · </span>}
+                        {invite.email}
+                      </span>
 
                       <span className={`inline-flex items-center justify-center gap-1 rounded-full border px-2 py-1 text-xs font-medium ${
                         (ROLE_BADGE[invite.role] || ROLE_BADGE.member).className
@@ -365,12 +398,12 @@ const EsfUsers = () => {
                             <div className="flex items-center gap-2">
                               <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-sm border bg-violet-500/15 border-violet-400/20">
                                 <span className="text-gray-100 text-xs font-semibold">
-                                  {(user.firstName?.[0] || '') + (user.lastName?.[0] || '')}
+                                  {initialsOf(user)}
                                 </span>
                               </div>
                               <div className="min-w-0">
                                 <p className="text-sm font-medium text-gray-100 break-words">
-                                  {user.firstName} {user.lastName}
+                                  {nameOf(user)}
                                 </p>
                                 <p className="text-xs text-gray-500 break-all flex items-center gap-1 mt-0.5">
                                   <Mail className="w-3 h-3 shrink-0" />
@@ -535,7 +568,7 @@ const EsfUsers = () => {
                           <h2 id="esf-add-user-modal-title" className="text-lg font-semibold text-gray-100">
                             Invite a team member
                           </h2>
-                          <p className="text-xs text-gray-500">They set their own name and password</p>
+                          <p className="text-xs text-gray-500">They join straight from the emailed link</p>
                         </div>
                       </div>
                       <button
@@ -586,6 +619,18 @@ const EsfUsers = () => {
                   >
                     <ShieldCheck className="w-3.5 h-3.5" />
                     Page access
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenDropdownId(null);
+                      setDropdownPosition(null);
+                      handleRename(user);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-gray-300 hover:bg-[#252525] hover:text-gray-100"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    Set name
                   </button>
                   <button
                     type="button"
@@ -652,8 +697,8 @@ const EsfUsers = () => {
                 >
                   <h3 className="text-base font-semibold text-gray-100 mb-2">Remove access</h3>
                   <p className="text-sm text-gray-400 mb-4">
-                    Permanently delete the account for {deleteConfirmUser.firstName} {deleteConfirmUser.lastName}
-                    {deleteConfirmUser.email ? ` (${deleteConfirmUser.email})` : ''}? Their account and data are
+                    Permanently delete the account for {nameOf(deleteConfirmUser)}
+                    {deleteConfirmUser.email && nameOf(deleteConfirmUser) !== deleteConfirmUser.email ? ` (${deleteConfirmUser.email})` : ''}? Their account and data are
                     removed from the database and they can no longer sign in. This cannot be undone — you would
                     need to invite them again.
                   </p>

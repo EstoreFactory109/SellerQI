@@ -1,9 +1,18 @@
 import React, { useState } from 'react';
 import { Key, Lock, Loader2, CheckCircle, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
+import { useEsfUser } from '../../contexts/EsfUserContext.js';
 
-/** Update-password card for the ESF portal. */
+/**
+ * Update-password card for the ESF portal.
+ *
+ * Staff who joined by invitation have no password (they sign in with an emailed
+ * link), so for them this sets a first one and there is no current password to ask for.
+ */
 export default function EsfPassword() {
+  const esfUser = useEsfUser();
+  // Missing on older /me responses — assume a password exists, the old behaviour.
+  const [hasPassword, setHasPassword] = useState(esfUser?.hasPassword !== false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -18,7 +27,7 @@ export default function EsfPassword() {
     e.preventDefault();
     setError('');
     setSuccess('');
-    if (!currentPassword || !newPassword || !confirmPassword) {
+    if ((hasPassword && !currentPassword) || !newPassword || !confirmPassword) {
       setError('Please fill in all fields.');
       return;
     }
@@ -32,8 +41,9 @@ export default function EsfPassword() {
     }
     setLoading(true);
     try {
-      await axiosInstance.put('/app/esf/update-password', { currentPassword, newPassword });
-      setSuccess('Password updated successfully.');
+      await axiosInstance.put('/app/esf/update-password', hasPassword ? { currentPassword, newPassword } : { newPassword });
+      setSuccess(hasPassword ? 'Password updated successfully.' : 'Password set. You can now also sign in with it.');
+      setHasPassword(true);
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
@@ -79,10 +89,14 @@ export default function EsfPassword() {
           <div className="w-2 h-6 bg-blue-400 rounded-full" />
           <div className="flex items-center gap-3">
             <Key className="w-5 h-5 text-white" />
-            <h2 className="text-xl font-bold text-white">Update password</h2>
+            <h2 className="text-xl font-bold text-white">{hasPassword ? 'Update password' : 'Set a password'}</h2>
           </div>
         </div>
-        <p className="text-gray-200 text-xs mt-1">Change your portal account password</p>
+        <p className="text-gray-200 text-xs mt-1">
+          {hasPassword
+            ? 'Change your portal account password'
+            : 'You sign in with an emailed link. Optionally set a password to sign in with it too.'}
+        </p>
       </div>
       <div className="p-4">
         {success && (
@@ -98,7 +112,7 @@ export default function EsfPassword() {
           </div>
         )}
         <form onSubmit={handleSubmit} className="space-y-4 max-w-md">
-          {passwordField('Current password', currentPassword, setCurrentPassword, showCurrent, setShowCurrent, 'Enter current password', 'current-password')}
+          {hasPassword && passwordField('Current password', currentPassword, setCurrentPassword, showCurrent, setShowCurrent, 'Enter current password', 'current-password')}
           {passwordField('New password', newPassword, setNewPassword, showNew, setShowNew, 'At least 8 characters', 'new-password')}
           {passwordField('Confirm new password', confirmPassword, setConfirmPassword, showConfirm, setShowConfirm, 'Confirm new password', 'new-password')}
           <button
@@ -107,7 +121,7 @@ export default function EsfPassword() {
             className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-500 shadow-lg shadow-blue-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-            Update password
+            {hasPassword ? 'Update password' : 'Set password'}
           </button>
         </form>
       </div>

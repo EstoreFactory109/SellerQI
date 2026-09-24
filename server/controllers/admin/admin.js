@@ -9,6 +9,7 @@ const { createAccessToken, createRefreshToken, createLocationToken, revokeRefres
 const { verifyPassword } = require('../../utils/HashPassword.js');
 const logger = require('../../utils/Logger.js');
 const UserModel = require('../../models/user-auth/userModel.js');
+const AccountMember = require('../../models/user-auth/AccountMemberModel.js');
 const PaymentLogs = require('../../models/system/PaymentLogsModel.js');
 const Subscription = require('../../models/user-auth/SubscriptionModel.js');
 const { getHttpsCookieOptions } = require('../../utils/cookieConfig.js');
@@ -350,7 +351,7 @@ const attachCardConnectedStatus = async (accounts) => {
  * the exact order it needs to run in the aggregation.
  */
 const buildAccountsPipeline = (filters) => {
-    const { packageType, statusFilter, startDate, endDate, brand, search, spApiFilter, adsFilter, hideAgencyClients } = filters;
+    const { packageType, statusFilter, startDate, endDate, brand, search, spApiFilter, adsFilter, hideAgencyClients, hideAgencyOwners, hideEsfStaff } = filters;
     const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const pipeline = [];
 
@@ -390,6 +391,15 @@ const buildAccountsPipeline = (filters) => {
     // top-level rows - only applied in the paginated (ManageAccounts) path, see getAllAccounts.
     if (hideAgencyClients) {
         preMatchClauses.push({ isAgencyClient: { $ne: true } });
+    }
+    // ESF staff are not customers: no brand, no plan, no data of their own. They are
+    // not listed on this page at all - not even by search.
+    if (hideEsfStaff) {
+        preMatchClauses.push({ accessType: { $ne: 'esfUser' } });
+    }
+    // Agencies are browsed from the Agency filter only, not in the default list.
+    if (hideAgencyOwners) {
+        preMatchClauses.push({ packageType: { $ne: 'AGENCY' } });
     }
     if (packageType && packageType !== 'all') {
         preMatchClauses.push({ packageType });
@@ -536,6 +546,8 @@ const getAccountsStats = async (proCardMapPromise) => {
 
     const [result, proCardMap, refundedUsers] = await Promise.all([
         UserModel.aggregate([
+            // ESF staff are not customers and are not listed, so they are left out of every count.
+            { $match: { accessType: { $ne: 'esfUser' } } },
             {
                 $group: {
                     _id: null,
@@ -638,7 +650,14 @@ const getAllAccounts = asyncHandler(async (req, res) => {
         // instead of as their own top-level rows - but only while browsing with no search/filter active.
         // The moment any filter is on, behave like a normal flat table so search/filter can find clients too.
         // This exclusion also never applies to the legacy unpaginated callers (e.g. AdminUserLogs).
-        const pipeline = buildAccountsPipeline({ packageType, statusFilter, startDate, endDate, brand, search, spApiFilter, adsFilter, hideAgencyClients: isPaginated && !hasActiveFilters });
+        const pipeline = buildAccountsPipeline({
+            packageType, statusFilter, startDate, endDate, brand, search, spApiFilter, adsFilter,
+            hideAgencyClients: isPaginated && !hasActiveFilters,
+            // The default (Total) list shows sellers only; agency rows appear once the
+            // Agency filter is chosen. Search and the other filters still find them.
+            hideAgencyOwners: isPaginated && !hasActiveFilters && packageType !== 'AGENCY',
+            hideEsfStaff: isPaginated,
+        });
 
         const pageNum = isPaginated ? Math.max(1, parseInt(page) || 1) : null;
         const limitNum = isPaginated ? Math.min(100, Math.max(1, parseInt(limit) || 10)) : null;
@@ -732,6 +751,7 @@ const getAllAccounts = asyncHandler(async (req, res) => {
         // "Signed Up" there would be worse than sending nothing (the client falls back on its own).
         if (isPaginated || alreadyProcessed) {
             accountsWithStats.forEach(account => { account.accountStatus = resolveAccountStatus(account); });
+            await attachMemberCounts(accountsWithStats);
         }
 
         const responseData = {
@@ -758,6 +778,77 @@ const getAllAccounts = asyncHandler(async (req, res) => {
  * reference, same as AgencyAdminService.getAdminProfile.
  * Protected route - requires superAdmin access
  */
+/** Returns true when the caller is a super admin; otherwise it has already responded. */
+const requireSuperAdmin = async (req, res) => {
+    if (!req.SuperAdminId) {
+        res.status(401).json(new ApiResponse(401, "", "Admin token required"));
+        return false;
+    }
+    const admin = await UserModel.findById(req.SuperAdminId).select('accessType').lean();
+    if (!admin || admin.accessType !== 'superAdmin') {
+        res.status(403).json(new ApiResponse(403, "", "SuperAdmin access required"));
+        return false;
+    }
+    return true;
+};
+
+/**
+ * How many members ("Add member") each account has, so the row can offer to
+ * expand them. One grouped query for the whole list, mutating in place.
+ */
+const attachMemberCounts = async (accounts) => {
+    if (!accounts.length) return;
+    const counts = await AccountMember.aggregate([
+        { $match: { owner: { $in: accounts.map((account) => account._id) } } },
+        { $group: { _id: '$owner', count: { $sum: 1 } } },
+    ]);
+    const byOwner = new Map(counts.map((c) => [String(c._id), c.count]));
+    accounts.forEach((account) => { account.memberCount = byOwner.get(String(account._id)) || 0; });
+};
+
+/**
+ * An agency's client rows: same row shape, card status and Status label as the
+ * top-level rows, plus how many members each has.
+ */
+const listClientRows = async (match) => {
+    const CLIENTS_CAP = 500; // defensive cap - no group is expected to have more clients than this today
+    const clients = await UserModel.aggregate([
+        { $match: match },
+        {
+            $project: {
+                firstName: 1,
+                lastName: 1,
+                email: 1,
+                phone: 1,
+                whatsapp: 1,
+                accessType: 1,
+                packageType: 1,
+                isAgencyClient: 1,
+                agencyName: 1,
+                subscriptionStatus: 1,
+                isInTrialPeriod: 1,
+                trialEndsDate: 1,
+                isVerified: 1,
+                profilePic: 1,
+                createdAt: 1,
+                updatedAt: 1,
+                adminId: 1,
+                sellerCentral: 1
+            }
+        },
+        { $sort: { createdAt: -1 } },
+        { $limit: CLIENTS_CAP },
+        ...buildAccountLookupStages()
+    ]);
+
+    const rows = clients.map(mapAccountFields);
+    await attachCardConnectedStatus(rows);
+    // Same authoritative Status as the top-level rows - this list is bounded, so cardConnected is real.
+    rows.forEach(client => { client.accountStatus = resolveAccountStatus(client); });
+    await attachMemberCounts(rows);
+    return rows;
+};
+
 const getAgencyClients = asyncHandler(async (req, res) => {
     const adminId = req.SuperAdminId;
 
@@ -784,51 +875,37 @@ const getAgencyClients = asyncHandler(async (req, res) => {
 
     try {
         const agencyObjectId = new mongoose.Types.ObjectId(agencyId);
-        const CLIENTS_CAP = 500; // defensive cap - no agency is expected to have more clients than this today
+        const clients = await listClientRows({ $or: [{ agencyId: agencyObjectId }, { adminId: agencyObjectId }] });
 
-        const pipeline = [
-            { $match: { $or: [{ agencyId: agencyObjectId }, { adminId: agencyObjectId }] } },
-            {
-                $project: {
-                    firstName: 1,
-                    lastName: 1,
-                    email: 1,
-                    phone: 1,
-                    whatsapp: 1,
-                    accessType: 1,
-                    packageType: 1,
-                    isAgencyClient: 1,
-                    agencyName: 1,
-                    subscriptionStatus: 1,
-                    isInTrialPeriod: 1,
-                    trialEndsDate: 1,
-                    isVerified: 1,
-                    profilePic: 1,
-                    createdAt: 1,
-                    updatedAt: 1,
-                    adminId: 1,
-                    sellerCentral: 1
-                }
-            },
-            { $sort: { createdAt: -1 } },
-            { $limit: CLIENTS_CAP },
-            ...buildAccountLookupStages()
-        ];
+        logger.info(`SuperAdmin ${adminId} retrieved ${clients.length} clients for agency ${agencyId}`);
 
-        const clients = await UserModel.aggregate(pipeline);
-        const clientsWithFields = clients.map(mapAccountFields);
-        await attachCardConnectedStatus(clientsWithFields);
-        // Same authoritative Status as the top-level rows - this list is bounded, so cardConnected is real.
-        clientsWithFields.forEach(client => { client.accountStatus = resolveAccountStatus(client); });
-
-        logger.info(`SuperAdmin ${adminId} retrieved ${clientsWithFields.length} clients for agency ${agencyId}`);
-
-        res.status(200).json(new ApiResponse(200, { clients: clientsWithFields }, "Agency clients retrieved successfully"));
+        res.status(200).json(new ApiResponse(200, { clients }, "Agency clients retrieved successfully"));
 
     } catch (error) {
         logger.error(new ApiError(500, `Error retrieving agency clients: ${error.message}`));
         return res.status(500).json(new ApiResponse(500, "", "Failed to retrieve agency clients"));
     }
+});
+
+/**
+ * GET /app/auth/admin/accounts/:userId/members
+ * People the account owner added with "Add member". Members are not user
+ * accounts, so there is nothing to show beyond who they are.
+ */
+const getAccountMembers = asyncHandler(async (req, res) => {
+    if (!(await requireSuperAdmin(req, res))) return;
+
+    const { userId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+        return res.status(400).json(new ApiResponse(400, "", "Valid userId is required"));
+    }
+
+    const members = await AccountMember.find({ owner: userId })
+        .select('email name status createdAt lastLoginAt')
+        .sort({ createdAt: -1 })
+        .lean();
+
+    return res.status(200).json(new ApiResponse(200, { members }, "Members retrieved successfully"));
 });
 
 /**
@@ -985,6 +1062,16 @@ const loginSelectedUser = asyncHandler(async (req, res) => {
         if (!user) {
             logger.error(new ApiError(404, "User not found"));
             return res.status(404).json(new ApiResponse(404, "", "User not found"));
+        }
+
+        // Accounts with no seller data of their own. ESF staff work inside the ESF
+        // portal; an agency owner's data lives in their clients, who can be opened
+        // individually from the expanded agency row.
+        if (user.accessType === 'esfUser') {
+            return res.status(403).json(new ApiResponse(403, "", "eStore Factory staff accounts have no seller data to open"));
+        }
+        if (user.accessType === 'enterpriseAdmin' || user.packageType === 'AGENCY') {
+            return res.status(403).json(new ApiResponse(403, "", "An agency has no seller data of its own. Open one of its clients instead."));
         }
 
         // Create IBEX tokens
@@ -1646,6 +1733,7 @@ module.exports = {
     adminLogout,
     getAllAccounts,
     getAgencyClients,
+    getAccountMembers,
     getCountryStats,
     loginSelectedUser,
     deleteUser,
