@@ -23,6 +23,7 @@
 
 const logger = require('../../utils/Logger.js');
 const TaskRequest = require('../../models/system/TaskRequestModel.js');
+const { MAX_PENDING_REQUESTS } = require('../../models/system/TaskRequestModel.js');
 const { buildIdentityBundle, redactAll } = require('../Email/identityRedaction.js');
 const { toPlainLabel } = require('../Email/emailRichText.js');
 const MessageIntent = require('../AI/MessageIntentService.js');
@@ -44,9 +45,44 @@ const handleClientMessage = async ({ rawText, user, thread, message }) => {
      * piece of work. Without this, the more detail they supplied the more duplicate
      * requests they would generate — the exact opposite of the intended behaviour.
      */
-    const existing = await TaskRequest.findOne({ sourceThreadId: thread._id, status: 'pending' });
+    const existing = await TaskRequest.findOne({ sourceThreadId: thread._id, status: 'pending' })
+        .select('+titleRaw +descriptionRaw');
+
     if (existing) {
-        return fillGaps({ existing, rawText, user, thread });
+        /**
+         * A thread is a relationship, not a ticket.
+         *
+         * This used to assume every later message was answering the request already
+         * waiting, which silently swallowed a client raising a genuinely different ask
+         * in an existing conversation — no request, no reply, nothing. They do this
+         * constantly: "also, separate thing, can you…".
+         *
+         * Only a confident "new" creates a second request. Everything else falls through
+         * to filling gaps, which is the branch that cannot generate noise.
+         */
+        const relation = await MessageIntent.classifyFollowUp({
+            text: rawText,
+            existingTitle: existing.titleRaw || existing.title,
+            existingDescription: existing.descriptionRaw || existing.description,
+        });
+
+        if (!relation.actionable) {
+            return fillGaps({ existing, rawText, user, thread });
+        }
+        logger.info(`[MessageIntent] thread ${thread._id} raised a second, separate request`);
+    }
+
+    /**
+     * A cap per CLIENT, now that the per-thread one is gone.
+     *
+     * The old unique index made a runaway impossible by making a second request on a
+     * thread impossible at all — which is exactly the behaviour that had to go. This is
+     * the guard that replaces it, and it matches the portal form's own limit.
+     */
+    const openForClient = await TaskRequest.countDocuments({ userId: user._id, status: 'pending' });
+    if (openForClient >= MAX_PENDING_REQUESTS) {
+        logger.warn(`[MessageIntent] ${user._id} is at the pending-request cap; not queuing another`);
+        return null;
     }
 
     const intent = await MessageIntent.detectTaskRequest(rawText);

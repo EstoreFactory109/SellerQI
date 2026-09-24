@@ -16,9 +16,11 @@ jest.mock('../../../utils/Logger.js', () => ({ info: jest.fn(), warn: jest.fn(),
 
 const mockDetectTaskRequest = jest.fn();
 const mockDetectDecision = jest.fn();
+const mockClassifyFollowUp = jest.fn();
 jest.mock('../../../Services/AI/MessageIntentService.js', () => ({
     detectTaskRequest: (...a) => mockDetectTaskRequest(...a),
     detectDecision: (...a) => mockDetectDecision(...a),
+    classifyFollowUp: (...a) => mockClassifyFollowUp(...a),
     missingDetailsQuestion: (missing) => (missing.length ? `Please tell us ${missing.join(' and ')}` : null),
 }));
 
@@ -29,10 +31,16 @@ jest.mock('../../../Services/Gmail/GmailSendService.js', () => ({
 
 const mockFindOne = jest.fn();
 const mockCreate = jest.fn();
-jest.mock('../../../models/system/TaskRequestModel.js', () => ({
-    findOne: (...a) => mockFindOne(...a),
-    create: (...a) => mockCreate(...a),
-}));
+const mockCount = jest.fn();
+jest.mock('../../../models/system/TaskRequestModel.js', () => {
+    const model = {
+        findOne: (...a) => mockFindOne(...a),
+        create: (...a) => mockCreate(...a),
+        countDocuments: (...a) => mockCount(...a),
+    };
+    model.MAX_PENDING_REQUESTS = 10;
+    return model;
+});
 
 const { analyseMessage } = require('../../../Services/User/MessageIntentHandler.js');
 
@@ -61,9 +69,17 @@ const detected = (over = {}) => ({
     neededBy: null, missing: [], ...over,
 });
 
+/** findOne(...).select(...) — thenable so it works awaited either way. */
+const foundRequest = (doc) => ({
+    select: () => Promise.resolve(doc),
+    then: (resolve) => resolve(doc),
+});
+
 beforeEach(() => {
     jest.clearAllMocks();
-    mockFindOne.mockResolvedValue(null);
+    mockFindOne.mockReturnValue(foundRequest(null));
+    mockCount.mockResolvedValue(0);
+    mockClassifyFollowUp.mockResolvedValue({ relation: 'answers', confidence: 0.9, actionable: false });
     mockCreate.mockImplementation(async (doc) => ({ ...doc, _id: 'tr-1', save: jest.fn() }));
     mockDetectTaskRequest.mockResolvedValue(detected());
     mockDetectDecision.mockResolvedValue({ intent: null, confidence: 0, actionable: false, reason: '' });
@@ -82,7 +98,7 @@ describe('a client request is created; an admin decision is only staged', () => 
         // The whole safety argument. Applying it would create a real Zoho task with no
         // human confirming, on a model reading of a sentence.
         const pending = { _id: 'tr-1', status: 'pending', save: jest.fn() };
-        mockFindOne.mockResolvedValue(pending);
+        mockFindOne.mockReturnValue(foundRequest(pending));
         mockDetectDecision.mockResolvedValue({ intent: 'accept', confidence: 0.95, actionable: true, reason: '' });
 
         await outbound();
@@ -95,7 +111,7 @@ describe('a client request is created; an admin decision is only staged', () => 
     test('a decision is not even looked for without a request waiting', async () => {
         // "Yes, go ahead" refers to nothing in particular otherwise, and asking the
         // model to interpret it invites an answer about something else entirely.
-        mockFindOne.mockResolvedValue(null);
+        mockFindOne.mockReturnValue(foundRequest(null));
 
         await outbound();
 
@@ -114,7 +130,7 @@ describe('confidence', () => {
 
     test('a low-confidence decision is not staged', async () => {
         const pending = { _id: 'tr-1', status: 'pending', save: jest.fn() };
-        mockFindOne.mockResolvedValue(pending);
+        mockFindOne.mockReturnValue(foundRequest(pending));
         mockDetectDecision.mockResolvedValue({ intent: 'accept', confidence: 0.3, actionable: false, reason: '' });
 
         await outbound();
@@ -149,7 +165,7 @@ describe('the loops this could create', () => {
 
     test('analyses a staff reply written in the portal too', async () => {
         const pending = { _id: 'tr-1', status: 'pending', save: jest.fn() };
-        mockFindOne.mockResolvedValue(pending);
+        mockFindOne.mockReturnValue(foundRequest(pending));
         mockDetectDecision.mockResolvedValue({ intent: 'accept', confidence: 0.95, actionable: true, reason: '' });
 
         await outbound({ origin: 'portal-staff' });
@@ -157,10 +173,46 @@ describe('the loops this could create', () => {
         expect(pending.stagedDecision.intent).toBe('accept');
     });
 
-    test('a second message on a thread does not create a second request', async () => {
-        // A client answering our follow-up is still talking about the same work. Without
-        // this, the more detail they gave the more duplicates they would get.
-        mockFindOne.mockResolvedValue({ _id: 'tr-1', missingDetails: [], save: jest.fn() });
+    test('an ANSWER to a waiting request does not create a second one', async () => {
+        // A client supplying the detail we asked for is still talking about the same
+        // work. Without this, the more detail they gave the more duplicates they got.
+        mockFindOne.mockReturnValue(foundRequest({ _id: 'tr-1', missingDetails: [], save: jest.fn() }));
+        mockClassifyFollowUp.mockResolvedValue({ relation: 'answers', confidence: 0.95, actionable: false });
+
+        await inbound();
+
+        expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    test('a genuinely SEPARATE ask on the same thread DOES create one', async () => {
+        /**
+         * The case this originally got wrong. Every later message was treated as an
+         * answer, so a client raising a different request in an existing conversation
+         * had it silently swallowed — no request, no reply, nothing. A thread is a
+         * relationship, not a ticket, and clients raise second things in them constantly.
+         */
+        mockFindOne.mockReturnValue(foundRequest({ _id: 'tr-1', missingDetails: [], save: jest.fn() }));
+        mockClassifyFollowUp.mockResolvedValue({ relation: 'new', confidence: 0.95, actionable: true });
+
+        await inbound();
+
+        expect(mockCreate).toHaveBeenCalled();
+    });
+
+    test('an UNSURE classification falls back to filling gaps', async () => {
+        // The branch that cannot create noise is the safe default.
+        mockFindOne.mockReturnValue(foundRequest({ _id: 'tr-1', missingDetails: [], save: jest.fn() }));
+        mockClassifyFollowUp.mockResolvedValue({ relation: 'new', confidence: 0.4, actionable: false });
+
+        await inbound();
+
+        expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    test('stops at the per-client cap, now that the per-thread one is gone', async () => {
+        // The old unique index made a runaway impossible by making a second request on a
+        // thread impossible at all. This is the guard that replaces it.
+        mockCount.mockResolvedValue(10);
 
         await inbound();
 
@@ -169,7 +221,7 @@ describe('the loops this could create', () => {
 
     test('asks for missing details exactly once', async () => {
         const existing = { _id: 'tr-1', missingDetails: ['timing'], detailsRequestedAt: new Date(), save: jest.fn() };
-        mockFindOne.mockResolvedValue(existing);
+        mockFindOne.mockReturnValue(foundRequest(existing));
         mockDetectTaskRequest.mockResolvedValue(detected({ missing: ['timing'] }));
 
         await inbound();
