@@ -17,6 +17,7 @@
  * of recovering the account through it.
  */
 const UserModel = require('../../models/user-auth/userModel.js');
+const AccountMember = require('../../models/user-auth/AccountMemberModel.js');
 const logger = require('../../utils/Logger.js');
 
 /** Guard-rail so one account cannot fan a mailing out to dozens of addresses. */
@@ -104,6 +105,12 @@ const assertEmailAvailable = async (email, userId) => {
                     : 'You have already added this email',
             };
         }
+        return { ok: false, status: 409, message: 'This email is already in use on another account' };
+    }
+
+    // A member of a seller account signs in with this address by emailed link;
+    // it cannot also be someone's sign-in address.
+    if (await AccountMember.exists({ email: normalized })) {
         return { ok: false, status: 409, message: 'This email is already in use on another account' };
     }
 

@@ -17,7 +17,7 @@ const {
     ESF_CLIENT_QUERY,
 } = require('../../Services/User/ManagedClientService.js');
 const { getLinkableUsers, linkUsersToEsf } = require('../../Services/User/esfLinkableUsers.js');
-const { createAccessToken, verifyAccessToken } = require('../../utils/Tokens.js');
+const { createAccessToken, verifyAccessToken, revokeRefreshToken } = require('../../utils/Tokens.js');
 const { hashPassword, verifyPassword } = require('../../utils/HashPassword.js');
 const { getHttpsCookieOptions } = require('../../utils/cookieConfig.js');
 const { ApiError } = require('../../utils/ApiError.js');
@@ -33,16 +33,25 @@ const {
     canManageTeam,
     canSeeClientIdentity,
 } = require('../../Services/User/esfRoles.js');
+const { splitStaffName } = require('../../Services/User/staffName.js');
 const {
     ESF_CLIENT_PAGES,
     sanitizeDeniedPages,
 } = require('../../Services/User/esfPages.js');
+
+/**
+ * What to call a staff member. Staff who joined by invitation may have no name at
+ * all (only an optional nickname), so fall back to their address.
+ */
+const staffDisplayName = (user) =>
+    `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
 
 /** Shape a staff user for the client, never leaking the password hash. */
 const toStaffResponse = (user, extra = {}) => ({
     _id: user._id,
     firstName: user.firstName,
     lastName: user.lastName,
+    displayName: staffDisplayName(user),
     email: user.email,
     phone: user.phone,
     accessType: user.accessType,
@@ -114,8 +123,9 @@ const esfLogin = asyncHandler(async (req, res) => {
         return res.status(403).json(new ApiResponse(403, '', 'This account does not have access to the eStore Factory portal'));
     }
 
+    // Staff who joined by invitation never set a password; point them at the link.
     if (!user.password) {
-        return res.status(401).json(new ApiResponse(401, '', 'Invalid credentials'));
+        return res.status(401).json(new ApiResponse(401, { useLoginLink: true }, 'This account signs in with an emailed link. Choose "Log in as a member" below.'));
     }
 
     const isPasswordValid = await verifyPassword(password, user.password);
@@ -140,21 +150,38 @@ const esfLogin = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, toStaffResponse(user), 'Login successful'));
 });
 
-/** POST /app/esf/logout */
+/**
+ * POST /app/esf/logout
+ *
+ * Also ends the client session a staff member opened from the portal. The IBEX*
+ * cookies then belong to the CLIENT, and leaving them behind would keep the
+ * browser signed in to that client's account after the staff member left.
+ */
 const esfLogout = asyncHandler(async (req, res) => {
+    const options = getHttpsCookieOptions();
+    const clientRefreshToken = req.cookies?.IBEXRefreshToken;
+    if (clientRefreshToken) {
+        await revokeRefreshToken(clientRefreshToken);
+    }
+
     return res
         .status(200)
-        .clearCookie('ESFToken', getHttpsCookieOptions())
+        .clearCookie('ESFToken', options)
+        .clearCookie('IBEXAccessToken', options)
+        .clearCookie('IBEXRefreshToken', options)
+        .clearCookie('IBEXLocationToken', options)
         .json(new ApiResponse(200, '', 'Logged out successfully'));
 });
 
 /** GET /app/esf/me — session check used by the route guard. */
 const getEsfProfile = asyncHandler(async (req, res) => {
-    const user = await UserModel.findById(req.esfUserId).select('-password');
+    // The hash is loaded only to answer hasPassword; toStaffResponse never copies it.
+    const user = await UserModel.findById(req.esfUserId).select('+password');
     if (!user) {
         return res.status(404).json(new ApiResponse(404, '', 'User not found'));
     }
-    return res.status(200).json(new ApiResponse(200, toStaffResponse(user), 'Profile fetched'));
+    // Staff who joined by invitation have none, so Settings asks only for a new one.
+    return res.status(200).json(new ApiResponse(200, toStaffResponse(user, { hasPassword: Boolean(user.password) }), 'Profile fetched'));
 });
 
 /** PUT /app/esf/profile — name and phone only; email is immutable. */
@@ -167,7 +194,10 @@ const updateEsfProfile = asyncHandler(async (req, res) => {
     }
 
     if (firstName) user.firstName = firstName;
+    // Staff who joined by invitation may have only one name; an empty last name clears it.
     if (lastName) user.lastName = lastName;
+    // (Only staff: a super admin servicing the portal still needs a last name.)
+    else if (lastName === '' && user.accessType === 'esfUser') user.lastName = undefined;
     if (phone) {
         user.phone = phone;
         user.whatsapp = phone;
@@ -181,8 +211,8 @@ const updateEsfProfile = asyncHandler(async (req, res) => {
 const updateEsfPassword = asyncHandler(async (req, res) => {
     const { currentPassword, newPassword } = req.body;
 
-    if (!currentPassword || !newPassword) {
-        return res.status(400).json(new ApiResponse(400, '', 'Current and new password are required'));
+    if (!newPassword) {
+        return res.status(400).json(new ApiResponse(400, '', 'A new password is required'));
     }
     // Same strength as the signup page - otherwise this is a way straight past it.
     if (!isStrongPassword(newPassword)) {
@@ -190,13 +220,20 @@ const updateEsfPassword = asyncHandler(async (req, res) => {
     }
 
     const user = await UserModel.findById(req.esfUserId).select('+password');
-    if (!user || !user.password) {
+    if (!user) {
         return res.status(404).json(new ApiResponse(404, '', 'User not found'));
     }
 
-    const isPasswordValid = await verifyPassword(currentPassword, user.password);
-    if (!isPasswordValid) {
-        return res.status(401).json(new ApiResponse(401, '', 'Current password is incorrect'));
+    // Staff who joined by invitation have no password yet. Their session (from the
+    // emailed link) is the proof here; everyone else must confirm the current one.
+    if (user.password) {
+        if (!currentPassword) {
+            return res.status(400).json(new ApiResponse(400, '', 'Current and new password are required'));
+        }
+        const isPasswordValid = await verifyPassword(currentPassword, user.password);
+        if (!isPasswordValid) {
+            return res.status(401).json(new ApiResponse(401, '', 'Current password is incorrect'));
+        }
     }
 
     user.password = await hashPassword(newPassword);
@@ -225,9 +262,9 @@ const getEsfClients = asyncHandler(async (req, res) => {
     // Resolve "added by" names in one query rather than per client.
     const staffIds = [...new Set(clients.map((c) => c.esfAddedBy).filter(Boolean).map(String))];
     const staff = staffIds.length
-        ? await UserModel.find({ _id: { $in: staffIds } }).select('firstName lastName').lean()
+        ? await UserModel.find({ _id: { $in: staffIds } }).select('firstName lastName email').lean()
         : [];
-    const staffById = new Map(staff.map((s) => [String(s._id), `${s.firstName} ${s.lastName}`.trim()]));
+    const staffById = new Map(staff.map((s) => [String(s._id), staffDisplayName(s)]));
 
     const withAddedBy = clients.map((client) => ({
         ...client,
@@ -471,6 +508,7 @@ const getEsfUsers = asyncHandler(async (req, res) => {
 
     const withCounts = users.map((user) => ({
         ...user,
+        displayName: staffDisplayName(user),
         esfRole: resolveEsfRole(user),
         isOwner: isEsfOwner(user),
         esfDeniedPages: isEsfOwner(user) ? [] : sanitizeDeniedPages(user.esfDeniedPages),
@@ -482,6 +520,31 @@ const getEsfUsers = asyncHandler(async (req, res) => {
     withCounts.sort((a, b) => rank[a.esfRole] - rank[b.esfRole]);
 
     return res.status(200).json(new ApiResponse(200, withCounts, 'ESF users fetched successfully'));
+});
+
+/**
+ * PATCH /app/esf/users/:userId/name — body: { name }
+ * Set (or clear, with an empty name) the nickname shown for a staff member.
+ * Staff who joined by invitation start with no name of their own.
+ */
+const updateEsfUserName = asyncHandler(async (req, res) => {
+    if (!requireTeamManager(req, res)) return;
+
+    const user = await loadModifiableStaff(req.params.userId, res);
+    if (!user) return;
+
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    // "Priya Sharma" becomes first + last name, so it survives the My profile form.
+    const { firstName, lastName } = splitStaffName(name);
+    const $set = {};
+    const $unset = {};
+    if (firstName) $set.firstName = firstName; else $unset.firstName = 1;
+    if (lastName) $set.lastName = lastName; else $unset.lastName = 1;
+    await UserModel.updateOne({ _id: user._id }, { ...(Object.keys($set).length ? { $set } : {}), ...(Object.keys($unset).length ? { $unset } : {}) });
+
+    const updated = await UserModel.findById(user._id).select('-password');
+    logger.info(`ESF user ${req.esfUserId} renamed staff member ${user._id} to "${name}"`);
+    return res.status(200).json(new ApiResponse(200, toStaffResponse(updated), 'Name updated'));
 });
 
 /** DELETE /app/esf/users/:userId — revoke a staff member's portal access. */
@@ -661,4 +724,5 @@ module.exports = {
     getEsfPageCatalogue,
     updateEsfUserPermissions,
     getEsfSessionPermissions,
+    updateEsfUserName,
 };

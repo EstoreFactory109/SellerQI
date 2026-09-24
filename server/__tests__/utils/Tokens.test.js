@@ -11,6 +11,12 @@ jest.mock('../../models/user-auth/userModel.js', () => ({
   updateOne: jest.fn(),
 }));
 
+// Revoking pulls the token from a member's sessions too (see memberTokens.test.js).
+jest.mock('../../models/user-auth/AccountMemberModel.js', () => ({
+  updateOne: jest.fn().mockResolvedValue({}),
+  exists: jest.fn(),
+}));
+
 const {
   createAccessToken,
   createRefreshToken,

@@ -526,6 +526,16 @@ export default function Login() {
                     Sign up
                   </button>
                 </p>
+                {/* Members of someone else's account have no password — they get an emailed link. */}
+                <p className="text-gray-500 text-sm">
+                  Invited to someone&apos;s account?{' '}
+                  <Link
+                    to="/member-login"
+                    className="text-blue-400 hover:text-blue-300 font-semibold hover:underline transition-colors"
+                  >
+                    Log in as a member
+                  </Link>
+                </p>
               </div>
 
               {/* Error Message */}

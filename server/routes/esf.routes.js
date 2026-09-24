@@ -20,6 +20,7 @@ const {
     getEsfPageCatalogue,
     updateEsfUserPermissions,
     getEsfSessionPermissions,
+    updateEsfUserName,
 } = require('../controllers/esf/esf.js');
 const {
     listInvites,
@@ -28,6 +29,8 @@ const {
     revokeInvite,
     getInviteByToken,
     acceptInvite,
+    requestEsfLoginLink,
+    verifyEsfLoginLink,
 } = require('../controllers/esf/esfInvites.js');
 const {
     getClientProjectOptions,
@@ -49,20 +52,27 @@ const {
     downloadTaskRequestAttachment,
 } = require('../controllers/esf/esfTaskRequests.js');
 const esfAuth = require('../middlewares/Auth/esfAuth.js');
+const { refuseIfOtherSession } = require('../middlewares/Auth/singleSession.js');
 const gmailUpload = require('../middlewares/multer/gmailUpload.js');
 const { authRateLimiter, registerRateLimiter } = require('../middlewares/rateLimiting.js');
 const {
     validateEsfLogin,
     validateEsfClient,
     validateEsfInvite,
-    validateEsfInviteAccept,
+    validateEsfNickname,
+    validateEsfLoginLink,
     validateEsfRole,
     validateEsfProfile,
     validateLinkProject,
 } = require('../middlewares/validator/esfValidate.js');
 
-// Public
-router.post('/login', authRateLimiter, validateEsfLogin, esfLogin);
+// Public. Anything that signs someone in refuses while this browser is signed in
+// to a different portal (middlewares/Auth/singleSession.js).
+const esfLoginOnly = refuseIfOtherSession('esf');
+router.post('/login', authRateLimiter, validateEsfLogin, esfLoginOnly, esfLogin);
+// "Log in as a member": emailed one-time link for staff without a password.
+router.post('/login-link', authRateLimiter, validateEsfLoginLink, requestEsfLoginLink);
+router.post('/login-link/verify', authRateLimiter, esfLoginOnly, verifyEsfLoginLink);
 
 // Read from inside a client's account to decide what the sidebar shows.
 // Answers 200 with isEsfSession:false when no staff session is present, so the
@@ -70,9 +80,9 @@ router.post('/login', authRateLimiter, validateEsfLogin, esfLogin);
 router.get('/session-permissions', getEsfSessionPermissions);
 
 // Invitation acceptance is public by necessity — the recipient has no account
-// yet. The invite token is the credential.
+// yet. The invite token is the credential, and the body is not read at all.
 router.get('/invites/token/:token', getInviteByToken);
-router.post('/invites/token/:token/accept', registerRateLimiter, validateEsfInviteAccept, acceptInvite);
+router.post('/invites/token/:token/accept', registerRateLimiter, refuseIfOtherSession(), acceptInvite);
 
 // Everything below requires a valid ESFToken cookie belonging to an esfUser.
 router.post('/logout', esfAuth, esfLogout);
@@ -105,6 +115,7 @@ router.post('/invites/:inviteId/resend', esfAuth, resendInvite);
 router.delete('/invites/:inviteId', esfAuth, revokeInvite);
 router.get('/pages', esfAuth, getEsfPageCatalogue);
 router.patch('/users/:userId/role', esfAuth, validateEsfRole, updateEsfUserRole);
+router.patch('/users/:userId/name', esfAuth, validateEsfNickname, updateEsfUserName);
 router.put('/users/:userId/permissions', esfAuth, updateEsfUserPermissions);
 router.post('/users/:userId/reset-password', esfAuth, resetEsfUserPassword);
 router.delete('/users/:userId', esfAuth, removeEsfUser);

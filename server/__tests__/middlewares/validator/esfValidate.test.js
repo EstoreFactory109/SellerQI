@@ -1,10 +1,9 @@
 /**
  * Tests for the ESF staff portal validators.
  *
- * Both ESF clients and ESF staff must have a password: clients sign in at the
- * main login page, staff sign in at /esf-login. Both are held to the SAME
- * strength rules as the normal signup page - uppercase, lowercase, number and
- * special character - so neither form is a way past that requirement.
+ * ESF clients must have a password (they sign in at the main login page) held to
+ * the SAME strength rules as the normal signup page. Staff join by invitation
+ * with nothing but their address, and sign in with an emailed link afterwards.
  */
 
 const { validationResult } = require('express-validator');
@@ -12,7 +11,8 @@ const {
   validateEsfLogin,
   validateEsfClient,
   validateEsfInvite,
-  validateEsfInviteAccept,
+  validateEsfNickname,
+  validateEsfLoginLink,
 } = require('../../../middlewares/validator/esfValidate.js');
 
 const run = async (chain, body) => {
@@ -33,9 +33,6 @@ const clientBody = {
   email: 'client@test.com',
   password: 'Cl1entPass!',
 };
-// Accepting an invite carries the person's own details only — the email and
-// role come from the invitation, never the request body.
-const acceptBody = { firstname: 'Priya', lastname: 'Shah', phone: '+19876543210', password: 'S3cretPass!' };
 
 describe('esfValidate', () => {
   describe('validateEsfClient', () => {
@@ -125,26 +122,39 @@ describe('esfValidate', () => {
     });
   });
 
-  describe('validateEsfInviteAccept', () => {
-    it('passes with the details the invitee supplies', async () => {
-      const { errors } = await run(validateEsfInviteAccept, acceptBody);
+  describe('validateEsfInvite nickname', () => {
+    it('accepts an optional nickname', async () => {
+      const { errors } = await run(validateEsfInvite, { email: 'new@estorefactory.net', name: "Priya O'Neil" });
       expect(errors.isEmpty()).toBe(true);
     });
 
-    it('requires a password meeting the signup rules', async () => {
-      const { errors } = await run(validateEsfInviteAccept, { ...acceptBody, password: 'weakpass' });
-      expect(errorFor(errors, 'password')).toBeDefined();
-    });
-
-    it('requires a name', async () => {
-      const { errors } = await run(validateEsfInviteAccept, { ...acceptBody, firstname: '' });
-      expect(errorFor(errors, 'firstname')).toBeDefined();
-    });
-
-    it('ignores any email sent in the body — it comes from the invitation', async () => {
-      const { errors } = await run(validateEsfInviteAccept, { ...acceptBody, email: 'attacker@evil.com' });
-      expect(errorFor(errors, 'email')).toBeUndefined();
+    it('treats an empty nickname as none', async () => {
+      const { errors } = await run(validateEsfInvite, { email: 'new@estorefactory.net', name: '' });
       expect(errors.isEmpty()).toBe(true);
+    });
+
+    it('rejects a nickname with symbols', async () => {
+      const { errors } = await run(validateEsfInvite, { email: 'new@estorefactory.net', name: '<script>' });
+      expect(errorFor(errors, 'name')).toBeDefined();
+    });
+  });
+
+  describe('validateEsfNickname', () => {
+    it('rejects a one-character name', async () => {
+      const { errors } = await run(validateEsfNickname, { name: 'P' });
+      expect(errorFor(errors, 'name')).toBeDefined();
+    });
+
+    it('allows clearing the name', async () => {
+      const { errors } = await run(validateEsfNickname, { name: '' });
+      expect(errors.isEmpty()).toBe(true);
+    });
+  });
+
+  describe('validateEsfLoginLink', () => {
+    it('needs a valid email', async () => {
+      const { errors } = await run(validateEsfLoginLink, { email: 'nope' });
+      expect(errorFor(errors, 'email')).toBeDefined();
     });
   });
 

@@ -42,11 +42,17 @@ const MainPagesLayout = () => {
       // Also reset window scroll
       window.scrollTo({ top: 0, behavior: 'instant' })
       
-      // Also try to reset any nested scrollable containers that might have scrolled
+      // Also try to reset any nested scrollable containers that might have scrolled.
+      // Skips the sidebars (data-preserve-scroll): they are the thing that was just
+      // clicked, and snapping them back to the top made the menu jump on every click.
       const nestedScrollContainers = document.querySelectorAll('[class*="overflow-y-auto"], [class*="overflow-auto"]')
       nestedScrollContainers.forEach(container => {
         // Only reset containers that are actually scrolled and not the main container
-        if (container !== scrollContainerRef.current && container.scrollTop > 0) {
+        if (
+          container !== scrollContainerRef.current &&
+          container.scrollTop > 0 &&
+          !container.closest('[data-preserve-scroll]')
+        ) {
           container.scrollTop = 0
         }
       })

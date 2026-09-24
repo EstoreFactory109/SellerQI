@@ -29,6 +29,13 @@ const { getHttpsCookieOptions } = require('../../utils/cookieConfig.js');
 const sendVerificationCode = require('../../Services/SMS/sendSMS.js');
 const subscriptionVerificationService = require('../../Services/User/SubscriptionVerificationService.js');
 const { sendRegisteredEmail } = require('../../Services/Email/SendEmailOnRegistered.js');
+const AccountMember = require('../../models/user-auth/AccountMemberModel.js');
+
+// A member of someone else's account signs in by emailed link with this address;
+// it cannot also be the login of an account of its own.
+const MEMBER_EMAIL_MESSAGE = "This email is a member of another SellerQI account. Use \"Log in as a member\" on the sign-in page instead.";
+const isMemberEmail = async (email) =>
+    typeof email === 'string' && email.trim() !== '' && Boolean(await AccountMember.exists({ email: email.trim().toLowerCase() }));
 
 const registerUser = asyncHandler(async (req, res) => {
     const { firstname, lastname, phone, email, password, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate, intendedPackage, agencyName } = req.body;
@@ -62,6 +69,9 @@ const registerUser = asyncHandler(async (req, res) => {
      if (checkUserIfExists) {
          logger.error(new ApiError(409, "User already exists"));
          return res.status(409).json(new ApiResponse(409, "", "User already exists"));
+    }
+    if (await isMemberEmail(email)) {
+        return res.status(409).json(new ApiResponse(409, "", MEMBER_EMAIL_MESSAGE));
     }
 
     let otp = generateOTP();
@@ -1316,6 +1326,9 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
             // User already exists - return 409 Conflict
             logger.error(new ApiError(409, "User already exists. Please login instead."));
             return res.status(409).json(new ApiResponse(409, { email: email }, "User already exists. Please login instead."));
+        }
+        if (await isMemberEmail(email)) {
+            return res.status(409).json(new ApiResponse(409, { email: email }, MEMBER_EMAIL_MESSAGE));
         }
 
         // Create new user

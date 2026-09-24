@@ -1,20 +1,21 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Mail, Shield, Send, Loader2 } from 'lucide-react';
+import { Mail, Shield, Send, Loader2, User, ChevronDown } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 import { extractServerError } from '../../utils/passwordCriteria.js';
 
 /**
  * Invite someone to the ESF staff portal.
  *
- * Only two fields: the address and the starting role. The invitee fills in
- * their own name, phone and password when they accept, so nobody sets another
- * person's password. The role can be changed afterwards from the members page;
- * the email cannot.
+ * The address, the starting role and an optional nickname. The invitee fills in
+ * nothing: opening the emailed link signs them straight in, so the nickname is
+ * what the team sees until they add a name themselves. Role and nickname can be
+ * changed afterwards from the members page; the email cannot.
  */
 const EsfInviteUserForm = ({ onCancel, onSent, showCancelButton = false }) => {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('member');
+  const [name, setName] = useState('');
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -24,6 +25,7 @@ const EsfInviteUserForm = ({ onCancel, onSent, showCancelButton = false }) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!email.trim()) next.email = 'Email is required';
     else if (!emailRegex.test(email.trim())) next.email = 'Enter a valid email address';
+    if (name.trim() && name.trim().length < 2) next.name = 'Name must be at least 2 characters';
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -35,7 +37,7 @@ const EsfInviteUserForm = ({ onCancel, onSent, showCancelButton = false }) => {
     setErrorMessage('');
 
     try {
-      const res = await axiosInstance.post('/app/esf/invites', { email: email.trim(), role });
+      const res = await axiosInstance.post('/app/esf/invites', { email: email.trim(), role, name: name.trim() });
       if (res.data?.statusCode === 201 && res.data?.data) {
         onSent?.(res.data.data);
       } else {
@@ -88,18 +90,47 @@ const EsfInviteUserForm = ({ onCancel, onSent, showCancelButton = false }) => {
         </div>
 
         <div>
+          <label className={labelClass}>
+            Name <span className="text-gray-600 font-normal">(optional)</span>
+          </label>
+          <div className="relative">
+            <User className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 w-4 h-4" />
+            <input
+              type="text"
+              name="name"
+              value={name}
+              maxLength={50}
+              onChange={(e) => {
+                setName(e.target.value);
+                setErrors({});
+              }}
+              className={inputClass(!!errors.name)}
+              placeholder="A nickname, e.g. Priya"
+              autoComplete="off"
+            />
+          </div>
+          {errors.name && <p className="text-red-400 text-xs mt-1">{errors.name}</p>}
+          <p className="mt-1 text-xs text-gray-500">Shown to the team instead of their email address.</p>
+        </div>
+
+        <div>
           <label className={labelClass}>Role</label>
           <div className="relative">
             <Shield className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 w-4 h-4 pointer-events-none" />
+            {/* Native option lists ignore the translucent input background and draw on
+                white, so the select gets a solid dark fill, dark options and a dark
+                color-scheme (which also darkens the list on Chrome/Edge). */}
             <select
               name="role"
               value={role}
               onChange={(e) => setRole(e.target.value)}
-              className={`${inputClass(false)} appearance-none cursor-pointer`}
+              className="w-full pl-10 pr-10 py-2.5 rounded-lg border border-white/10 hover:border-white/20 bg-[#0b0f17] text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500/70 transition appearance-none cursor-pointer"
+              style={{ colorScheme: 'dark' }}
             >
-              <option value="member">Member — manage clients only</option>
-              <option value="admin">Admin — manage clients and team members</option>
+              <option value="member" className="bg-[#101722] text-gray-100">Member — manage clients only</option>
+              <option value="admin" className="bg-[#101722] text-gray-100">Admin — manage clients and team members</option>
             </select>
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 w-4 h-4 pointer-events-none" />
           </div>
           <p className="mt-1 text-xs text-gray-500">
             You can change their role later. Their email address is fixed by the invitation.
@@ -128,8 +159,9 @@ const EsfInviteUserForm = ({ onCancel, onSent, showCancelButton = false }) => {
       </form>
 
       <p className="mt-4 text-xs text-gray-500 border-t border-white/10 pt-4">
-        We will email them a link to join. They set their own name, phone and password —
-        you never see or choose it. The invitation expires in 7 days.
+        We will email them a link to join. Opening it signs them straight in — no form and no
+        password. Next time they choose &quot;Log in as a member&quot; to get a sign-in link. The
+        invitation expires in 7 days.
       </p>
     </>
   );

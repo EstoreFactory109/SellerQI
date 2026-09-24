@@ -38,8 +38,9 @@ export default function EsfProfile() {
     e.preventDefault();
     setError('');
     setSuccess('');
-    if (!form.firstName.trim() || !form.lastName.trim()) {
-      setError('First and last name are required.');
+    // Staff who joined by invitation may have a single name, so only the first is required.
+    if (!form.firstName.trim()) {
+      setError('First name is required.');
       return;
     }
     setLoading(true);

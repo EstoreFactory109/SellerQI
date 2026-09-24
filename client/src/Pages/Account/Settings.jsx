@@ -30,6 +30,7 @@ const Settings = () => {
         return <AccountIntegration />;
       case 'plans-billing':
         return <PlansAndBilling />;
+      case 'members':
       case 'teams':
         return <Teams />;
       case 'support':
