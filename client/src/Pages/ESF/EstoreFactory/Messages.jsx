@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import axiosInstance from '../../../config/axios.config.js';
 import { PALETTE } from '../../../Components/ESF/estoreFactoryTheme.js';
 import AttachmentPicker from '../../../Components/ESF/AttachmentPicker.jsx';
+import useAutoGrow from '../../../Components/ESF/useAutoGrow.js';
+import useConversationPolling from '../../../Components/ESF/useConversationPolling.js';
 
 /**
  * Estore Factory > Messages — the client's own conversations.
@@ -66,6 +68,22 @@ const dayLabel = (value) => {
     return then.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
 };
 
+/**
+ * The status of a message the CLIENT sent.
+ *
+ * They had none before: their own messages showed a time and nothing else, so there was
+ * no difference on screen between sent, delivered and read. Only their own side gets
+ * one — a tick on the agency's message would be telling them whether they themselves
+ * had read it.
+ */
+const ClientReceipt = ({ seen, pending = false }) => {
+    if (pending) return <span title="Sending">🕐</span>;
+    if (seen === null || seen === undefined) return null;
+    // Two ticks once the team has opened the conversation. A single tick is not proof
+    // they have not — it is the absence of evidence either way.
+    return <span title={seen ? 'Seen by your team' : 'Sent'}>{seen ? '✓✓' : '✓'}</span>;
+};
+
 const groupByDay = (messages) => {
     const groups = [];
     messages.forEach((message) => {
@@ -87,6 +105,7 @@ const Messages = () => {
     const [draft, setDraft] = useState('');
     const [sending, setSending] = useState(false);
     const [files, setFiles] = useState([]);
+    const composerRef = useAutoGrow(draft);
     const [ticketFiles, setTicketFiles] = useState([]);
     const [ticketOpen, setTicketOpen] = useState(false);
     const [ticketSubject, setTicketSubject] = useState('');
@@ -127,6 +146,24 @@ const Messages = () => {
         if (!text || sending || !openId) return;
 
         setSending(true);
+
+        // Shown immediately, marked pending. Waiting for the round trip left the
+        // composer empty and the conversation unchanged, which reads as a failed send.
+        const pendingId = `pending-${Date.now()}`;
+        setConversation((current) => (current ? {
+            ...current,
+            messages: [...current.messages, {
+                id: pendingId,
+                direction: 'inbound',
+                author: 'You',
+                body: text,
+                sentAt: new Date().toISOString(),
+                seenByTeam: false,
+                pending: true,
+                attachments: files.map((f) => ({ name: f.name })),
+            }],
+        } : current));
+
         try {
             // multipart, because the body may carry files. Content-Type is left to the
             // browser: setting it by hand drops the boundary and multer sees nothing.
@@ -142,6 +179,12 @@ const Messages = () => {
             setConversation(res.data?.data || null);
             loadThreads();
         } catch (err) {
+            // Dropped rather than left on screen: a message that never sent, shown as
+            // though it had, is worse than no message.
+            setConversation((current) => (current ? {
+                ...current,
+                messages: current.messages.filter((m) => m.id !== pendingId),
+            } : current));
             setError(err.response?.data?.message || 'Could not send that reply');
         } finally {
             setSending(false);
@@ -179,6 +222,22 @@ const Messages = () => {
             setRaising(false);
         }
     }, [ticketSubject, ticketBody, ticketFiles, raising, loadThreads, openThread]);
+
+    // Same reasoning as the staff inbox: a reply from the team arrives by email and
+    // lands in the database with nothing telling this page about it.
+    useConversationPolling(async () => {
+        if (sending || raising) return;
+        try {
+            if (openId) {
+                const res = await axiosInstance.get(`/api/pagewise/esf/messages/${openId}`);
+                setConversation(res.data?.data || null);
+            }
+            const list = await axiosInstance.get('/api/pagewise/esf/messages');
+            setThreads(list.data?.data?.threads || []);
+        } catch {
+            // Transient failures are not worth a banner over a working page.
+        }
+    }, { enabled: true });
 
     const open = conversation?.thread;
     const dayGroups = useMemo(() => groupByDay(conversation?.messages || []), [conversation]);
@@ -387,10 +446,13 @@ const Messages = () => {
                                                         )}
 
                                                         <span
-                                                            className="mt-1 block text-right text-[10.5px]"
+                                                            className="mt-1 flex items-center justify-end gap-1.5 text-[10.5px]"
                                                             style={{ color: PALETTE.textTertiary }}
                                                         >
                                                             {bubbleTime(message.sentAt)}
+                                                            {mine && (
+                                                                <ClientReceipt seen={message.seenByTeam} pending={message.pending} />
+                                                            )}
                                                         </span>
                                                     </div>
                                                 </div>
@@ -414,6 +476,7 @@ const Messages = () => {
                                     style={{ background: 'rgba(255,255,255,.05)' }}
                                 >
                                     <textarea
+                                        ref={composerRef}
                                         rows={1}
                                         value={draft}
                                         disabled={sending}
@@ -425,7 +488,7 @@ const Messages = () => {
                                             }
                                         }}
                                         placeholder="Write a reply…"
-                                        className="max-h-32 w-full resize-none bg-transparent py-1 text-[13.5px] leading-relaxed focus:outline-none disabled:opacity-50"
+                                        className="w-full resize-none bg-transparent py-1 text-[13.5px] leading-relaxed focus:outline-none disabled:opacity-50"
                                         style={{ color: PALETTE.textPrimary }}
                                     />
                                     <button

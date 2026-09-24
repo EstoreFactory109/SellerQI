@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { MessageSquare, CheckCircle2, RotateCcw, Search, Send, Paperclip, Lock, Check, CheckCheck, ArrowLeft } from 'lucide-react';
+import { MessageSquare, CheckCircle2, RotateCcw, Search, Send, Paperclip, Lock, Check, CheckCheck, ArrowLeft, Clock } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 import AttachmentPicker from '../../Components/ESF/AttachmentPicker.jsx';
+import useAutoGrow from '../../Components/ESF/useAutoGrow.js';
+import useConversationPolling from '../../Components/ESF/useConversationPolling.js';
 
 /**
  * "Estore Factory" > Messages — the staff inbox.
@@ -76,7 +78,17 @@ const Avatar = ({ label, size = 'md' }) => (
  * and why the conversation carries a standing note saying so — a staff member who
  * reads one tick as "they are ignoring me" is being misled by the UI.
  */
-const Receipt = ({ seen }) => {
+const Receipt = ({ seen, pending = false }) => {
+    /**
+     * Three states, and the clock is the one that earns its place.
+     *
+     * Sending is a real email leaving a real mailbox and can take a second or two. With
+     * nothing on screen until it lands, the message either appeared late or appeared to
+     * have failed — so people retyped it. The clock says "gone, not yet confirmed".
+     */
+    if (pending) {
+        return <Clock className="h-3.5 w-3.5 shrink-0 text-gray-500" aria-label="Sending" />;
+    }
     if (seen === null || seen === undefined) return null;
     return seen ? (
         <CheckCheck className="h-3.5 w-3.5 shrink-0 text-sky-400" aria-label="Seen by the client" />
@@ -140,6 +152,7 @@ const EsfMessages = () => {
     const [draft, setDraft] = useState('');
     const [sending, setSending] = useState(false);
     const [files, setFiles] = useState([]);
+    const composerRef = useAutoGrow(draft);
 
     const loadThreads = useCallback(async () => {
         try {
@@ -197,6 +210,30 @@ const EsfMessages = () => {
         if (!text || sending || !openId) return;
 
         setSending(true);
+
+        /**
+         * Shown before it has been sent, marked pending.
+         *
+         * The alternative — wait for the round trip, then refetch — left the composer
+         * empty and the conversation unchanged for a second or two, which reads as
+         * nothing having happened. Reconciled by the refetch below, so the temporary id
+         * never outlives the request.
+         */
+        const pendingId = `pending-${Date.now()}`;
+        setConversation((current) => (current ? {
+            ...current,
+            messages: [...current.messages, {
+                id: pendingId,
+                direction: 'outbound',
+                author: 'Your team',
+                body: text,
+                sentAt: new Date().toISOString(),
+                seenByClient: false,
+                pending: true,
+                attachments: files.map((f) => ({ name: f.name })),
+            }],
+        } : current));
+
         try {
             // multipart, because the body may carry files. Content-Type is left to the
             // browser: setting it by hand drops the boundary and multer sees nothing.
@@ -214,6 +251,12 @@ const EsfMessages = () => {
             setConversation(res.data?.data || null);
             loadThreads();
         } catch (err) {
+            // Remove it rather than leaving a message on screen that was never sent —
+            // a permanent clock is worse than no message, because it looks delivered.
+            setConversation((current) => (current ? {
+                ...current,
+                messages: current.messages.filter((m) => m.id !== pendingId),
+            } : current));
             setError(err.response?.data?.message || 'Could not send that reply');
         } finally {
             setSending(false);
@@ -231,6 +274,30 @@ const EsfMessages = () => {
         if (!needle) return threads;
         return threads.filter((t) => `${t.client} ${t.subject || ''}`.toLowerCase().includes(needle));
     }, [threads, search]);
+
+    /**
+     * Refresh the open conversation and the list behind it.
+     *
+     * Skipped entirely while a send is in flight: replacing the messages mid-send would
+     * wipe the optimistic bubble and make the message flicker out and back.
+     */
+    useConversationPolling(async () => {
+        if (sending) return;
+        try {
+            if (openId) {
+                const res = await axiosInstance.get(`/app/esf/messages/${openId}`);
+                setConversation(res.data?.data || null);
+            }
+            const list = await axiosInstance.get('/app/esf/messages', {
+                params: showResolved ? { resolved: 'true' } : {},
+            });
+            setThreads(list.data?.data?.threads || []);
+        } catch {
+            // A failed poll is not worth an error banner — the next one is 15s away, and
+            // a red message over a working page for a transient blip is worse than
+            // briefly stale data.
+        }
+    }, { enabled: true });
 
     const open = conversation?.thread;
     const dayGroups = useMemo(() => groupByDay(conversation?.messages || []), [conversation]);
@@ -466,7 +533,7 @@ const EsfMessages = () => {
                                                                 <span title="Some detail was removed automatically">limited detail</span>
                                                             )}
                                                             {bubbleTime(message.sentAt)}
-                                                            <Receipt seen={message.seenByClient} />
+                                                            <Receipt seen={message.seenByClient} pending={message.pending} />
                                                         </span>
                                                     </div>
                                                 </div>
@@ -490,6 +557,7 @@ const EsfMessages = () => {
 
                                 <div className="flex items-end gap-2 rounded-lg bg-white/[0.05] px-3 py-2">
                                     <textarea
+                                        ref={composerRef}
                                         rows={1}
                                         value={draft}
                                         disabled={sending}
@@ -504,7 +572,7 @@ const EsfMessages = () => {
                                             }
                                         }}
                                         placeholder="Write a reply…"
-                                        className="max-h-32 w-full resize-none bg-transparent py-1 text-[13.5px] leading-relaxed text-gray-100 placeholder:text-gray-500 focus:outline-none disabled:opacity-50"
+                                        className="w-full resize-none bg-transparent py-1 text-[13.5px] leading-relaxed text-gray-100 placeholder:text-gray-500 focus:outline-none disabled:opacity-50"
                                     />
                                     <button
                                         type="button"
