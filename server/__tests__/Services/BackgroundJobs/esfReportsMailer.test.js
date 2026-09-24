@@ -74,8 +74,18 @@ const reportPayload = (available = []) => ({
  * test after it.
  */
 const freezeClock = (iso) => {
+    /**
+     * Resolve the timestamp BEFORE installing fake timers.
+     *
+     * useFakeTimers swaps the global Date for sinon's ClockDate, so a Date built after
+     * that line is a ClockDate — and sinon's own setSystemTime guards with
+     * `epoch instanceof Date` against the NATIVE constructor it captured at module load.
+     * The two never match, and it throws "now should be milliseconds since UNIX epoch"
+     * pointing at a line that looks entirely correct.
+     */
+    const at = new Date(iso).getTime();
     jest.useFakeTimers({ doNotFake: ['setTimeout', 'setInterval', 'setImmediate', 'nextTick'] });
-    jest.setSystemTime(new Date(iso));
+    jest.setSystemTime(at);
 };
 
 // The jest config sets resetMocks, which strips the implementations given in the
