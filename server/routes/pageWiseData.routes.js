@@ -102,7 +102,7 @@ const { getEsfClientDashboard } = require('../controllers/analytics/EsfClientDas
 const { getEsfProjectStatus } = require('../controllers/analytics/EsfProjectStatusController.js');
 const { postEsfTaskReply } = require('../controllers/analytics/EsfProjectReplyController.js');
 const { getEsfBilling, downloadEsfInvoice } = require('../controllers/analytics/EsfBillingController.js');
-const { getEsfMessages, getEsfMessageThread, postEsfMessageReply, postEsfNewTicket, downloadEsfAttachment } = require('../controllers/analytics/EsfClientMessagesController.js');
+const { getEsfMessages, getEsfMessageThread, postEsfMessageReply, postEsfNewTicket, downloadEsfAttachment, postEsfTaskRequest } = require('../controllers/analytics/EsfClientMessagesController.js');
 const gmailUpload = require('../middlewares/multer/gmailUpload.js');
 const { zohoUpload, MAX_FILES, MAX_FILE_BYTES } = require('../middlewares/multer/zohoUpload.js');
 const { ApiResponse } = require('../utils/ApiResponse.js');
@@ -324,6 +324,10 @@ router.post('/esf/messages', auth, esfClientOnly, gmailUpload.array('files', 5),
 router.get('/esf/messages/:threadId', auth, esfClientOnly, getEsfMessageThread);
 router.post('/esf/messages/:threadId/reply', auth, esfClientOnly, gmailUpload.array('files', 5), postEsfMessageReply);
 router.get('/esf/messages/:threadId/attachments/:messageId/:index', auth, esfClientOnly, downloadEsfAttachment);
+
+// Request a task. Files go to Gmail (Zoho cannot accept them on this portal), so this
+// uses the same upload middleware and limits as Messages.
+router.post('/esf/task-requests', auth, esfClientOnly, gmailUpload.array('files', 5), postEsfTaskRequest);
 
 /**
  * Reply to a task from the Status page — text, files, or both, sent on to Zoho.

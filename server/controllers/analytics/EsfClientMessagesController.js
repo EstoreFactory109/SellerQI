@@ -205,6 +205,44 @@ const downloadEsfAttachment = asyncHandler(async (req, res) => {
     }
 });
 
+/**
+ * POST /api/pagewise/esf/task-requests
+ *
+ * The client asks for a piece of work. Nothing is created in Zoho here — an ESF admin
+ * decides first, and only an accept creates the task.
+ */
+const postEsfTaskRequest = asyncHandler(async (req, res) => {
+    try {
+        const { submitTaskRequest } = require('../../Services/User/TaskRequestService.js');
+
+        const request = await submitTaskRequest({
+            user: await loadClient(req.userId),
+            title: req.body?.title,
+            description: req.body?.description,
+            neededBy: req.body?.neededBy || null,
+            files: req.files || [],
+        });
+
+        return res.status(201).json(new ApiResponse(201, {
+            id: String(request._id),
+            title: request.title,
+            neededBy: request.neededBy,
+            status: request.status,
+            requestedAt: request.requestedAt,
+            attachmentCount: request.attachments.length,
+        }, 'Request sent'));
+    } catch (error) {
+        // 4xx describe our own rules ("you already have 10 awaiting a decision", "mail
+        // connection is down") and are worth showing verbatim.
+        if (error.statusCode && error.statusCode < 500) {
+            return res.status(error.statusCode).json(new ApiResponse(error.statusCode, '', error.message));
+        }
+        logger.error(new ApiError(500, `[EsfClientMessages] task request failed: ${error.message}`));
+        return res.status(500).json(new ApiResponse(500, '', 'Could not send that request'));
+    }
+});
+
 module.exports = {
-    getEsfMessages, getEsfMessageThread, postEsfMessageReply, postEsfNewTicket, downloadEsfAttachment,
+    getEsfMessages, getEsfMessageThread, postEsfMessageReply, postEsfNewTicket,
+    downloadEsfAttachment, postEsfTaskRequest,
 };

@@ -103,7 +103,20 @@ const routeMessage = (message = {}, { inboxAddress } = {}) => {
      * reconciliation in the ingest service, which covers the race where the
      * notification arrives before our own write has landed.
      */
-    if (message.originHeader) return skip('portal-echo');
+    if (message.originHeader) {
+        /**
+         * A task-request email is a NOTIFICATION, not part of a conversation — it has no
+         * EmailMessage row and never will.
+         *
+         * That distinction matters because the caller defers 'portal-echo' when it finds
+         * no local copy, on the assumption that our own write is merely late. Here there
+         * is nothing to be late: deferring one would re-queue it on every sync forever
+         * and grow the retry backlog until it raised an alarm about a message that was
+         * never meant to be stored.
+         */
+        if (message.originHeader === 'portal-task-request') return skip('task-request-notification');
+        return skip('portal-echo');
+    }
 
     const from = normalizeAddress(message.fromEmail);
     const recipients = normalizeList(message.toEmails || []);
