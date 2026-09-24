@@ -216,8 +216,9 @@ const PPCDashboard = () => {
   const [showLeftArrow, setShowLeftArrow] = useState(false);
   const [showRightArrow, setShowRightArrow] = useState(false);
   
-  // Flag to skip legacy calculations unless CSV export is needed
-  const [computeLegacyData, setComputeLegacyData] = useState(false);
+  // Legacy calculations are no longer used — the export now reads the same
+  // paginated endpoints the tables use (see preparePPCData).
+  const computeLegacyData = false;
   
   // Pagination states for each table (used to track current loaded page)
   const [highAcosPage, setHighAcosPage] = useState(1);
@@ -1946,205 +1947,195 @@ const PPCDashboard = () => {
     return formatYAxisCurrency(value, currency);
   };
 
-  // Prepare data for CSV/Excel export
-  // This function is called by DownloadReport component - enables legacy computation on first call
-  const preparePPCData = () => {
-    // Trigger legacy data computation if not already enabled
-    if (!computeLegacyData) {
-      setComputeLegacyData(true);
-      // Return minimal data initially - the component will re-render with full data
-      return [['Preparing export data...', 'Please click Export again']];
+  // Fetch every page of a campaign-analysis tab so the export holds all rows,
+  // not just the ones infinite-scroll has loaded so far. Same endpoint and
+  // date params as the on-screen table, so the numbers match exactly.
+  const fetchAllTabRows = async (url, params = {}) => {
+    const rows = [];
+    for (let page = 1; page <= 500; page++) {
+      const response = await axiosInstance.get(url, { params: { ...params, page, limit: 100 } });
+      const payload = response.data?.data || {};
+      const pageRows = payload.data || [];
+      rows.push(...pageRows);
+      if (pageRows.length === 0 || !getHasMoreFromPagination(payload.pagination)) break;
     }
+    return rows;
+  };
+
+  // Prepare data for CSV/Excel export — mirrors what the page shows:
+  // the KPI cards, the performance chart, and every campaign-analysis tab.
+  const preparePPCData = async () => {
+    if (ppcKPISummaryLoading || ppcTabCountsLoading) {
+      alert('Campaign Audit is still loading. Please export again once all figures are shown.');
+      return null;
+    }
+    const dateParams = { startDate: info?.startDate || undefined, endDate: info?.endDate || undefined };
+    const [highAcosRows, wastedRows, noNegativesRows, topKeywordRows, zeroSalesRows, autoInsightRows] = await Promise.all([
+      fetchAllTabRows('/api/pagewise/ppc/high-acos', dateParams),
+      fetchAllTabRows('/api/pagewise/ppc/wasted-spend', dateParams),
+      fetchAllTabRows('/api/pagewise/ppc/no-negatives'),
+      fetchAllTabRows('/api/pagewise/ppc/top-keywords', dateParams),
+      fetchAllTabRows('/api/pagewise/ppc/zero-sales', dateParams),
+      fetchAllTabRows('/api/pagewise/ppc/auto-insights', dateParams),
+    ]);
+
+    const money = (value) => formatCurrencyWithLocale(Number(value || 0), currency);
     const csvData = [];
-    
-    // Add KPI data
-    csvData.push(['PPC Dashboard Report']);
+
+    csvData.push(['Campaign Audit Report']);
     csvData.push(['Generated on:', new Date().toLocaleDateString()]);
-    // Show actual date range
-    let dateRangeText = 'Last 30 Days';
-    if (info?.startDate && info?.endDate) {
-      dateRangeText = `${info.startDate} to ${info.endDate}`;
-    } else {
-      const actualEndDate = getActualEndDate();
-      const formatDate = (date) => date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-      if (info?.calendarMode === 'last7') {
-        const startDate = new Date(actualEndDate);
-        startDate.setDate(actualEndDate.getDate() - 6);
-        dateRangeText = `${formatDate(startDate)} to ${formatDate(actualEndDate)}`;
-      } else {
-        // Last 30 Days: 30 days before yesterday (to match MCP data fetch range)
-        const startDate = new Date(actualEndDate);
-        startDate.setDate(actualEndDate.getDate() - 30);
-        dateRangeText = `${formatDate(startDate)} to ${formatDate(actualEndDate)}`;
-      }
-    }
+    // Same label as the calendar button in the page header
+    const dateRangeText = info?.startDate && info?.endDate
+      ? `${parseLocalDate(info.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - ${parseLocalDate(info.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+      : 'Default range (no dates selected)';
     csvData.push(['Date Range:', dateRangeText]);
     csvData.push([]);
-    
-    // Add KPI metrics
+
+    // Ads performance banner (shown on the page only when there is real ad spend)
+    if (kpiData.spend > 0) {
+      const adsVerdict = getAdsPerformanceVerdict(kpiData.roas);
+      let summary = adsVerdict.coversSpend
+        ? `Every $1 of ad spend returns $${kpiData.roas.toFixed(2)} in sales (before product costs).`
+        : `Your ads are running at a loss — every $1 spent returns only $${kpiData.roas.toFixed(2)} in sales.`;
+      if (kpiData.wastedSpend > 0) {
+        summary += ` But ${money(kpiData.wastedSpend)} went to keywords that never sold anything.`;
+      }
+      csvData.push(['Summary', summary]);
+      csvData.push([]);
+    }
+
+    // KPI cards (same formatted values and captions as on the page)
     csvData.push(['Key Performance Indicators']);
+    csvData.push(['Metric', 'Value', 'Note']);
     [...kpiData.primary, ...kpiData.mini].forEach(kpi => {
-      csvData.push([kpi.label, kpi.value]);
+      csvData.push([kpi.label, kpi.value, kpi.caption || '']);
     });
     csvData.push([]);
-    
-    // Add High ACOS Campaigns - ALL DATA (not paginated)
-    if (highAcosCampaigns.length > 0) {
-      csvData.push([`High ACOS Campaigns (>40%) - Total: ${highAcosCampaigns.length} campaigns`]);
-      csvData.push(['Campaign Name', 'Campaign ID', 'Total Spend', 'Total Sales', 'ACOS %', 'Keywords']);
-      highAcosCampaigns.forEach(campaign => {
+
+    // Performance chart (same two series the chart plots)
+    if (chartData.length > 0) {
+      csvData.push(['Daily Performance']);
+      csvData.push(['Date', 'PPC Sales', 'PPC Spend']);
+      chartData.forEach(day => {
+        const dayDate = localDayFromMetricDate(day.rawDate);
+        const label = dayDate ? dayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : day.date;
+        csvData.push([label, money(day.ppcSales), money(day.spend)]);
+      });
+      csvData.push([]);
+    }
+
+    // High ACoS Campaigns tab
+    if (highAcosRows.length > 0) {
+      csvData.push([`High ACOS Campaigns - Total: ${highAcosRows.length}`]);
+      csvData.push(['Campaign', 'Spend', 'Sales', 'ACoS %', 'CTR %', 'CPC', 'ROAS']);
+      highAcosRows.forEach(campaign => {
+        const spend = Number(campaign.spend ?? campaign.totalSpend ?? 0);
+        const sales = Number(campaign.sales ?? campaign.totalSales ?? 0);
+        const impressions = Number(campaign.impressions ?? campaign.totalImpressions ?? 0);
+        const clicks = Number(campaign.clicks ?? campaign.totalClicks ?? 0);
+        const ctr = campaign.ctr != null ? Number(campaign.ctr) : (impressions > 0 ? (clicks / impressions) * 100 : 0);
+        const cpc = campaign.cpc != null ? Number(campaign.cpc) : (clicks > 0 ? spend / clicks : 0);
+        const roas = campaign.roas != null ? Number(campaign.roas) : (spend > 0 ? sales / spend : 0);
         csvData.push([
           campaign.campaignName,
-          campaign.campaignId,
-          `${currency}${campaign.totalSpend.toFixed(2)}`,
-          `${currency}${campaign.totalSales.toFixed(2)}`,
-          `${campaign.acos.toFixed(2)}%`,
-          campaign.keywordCount
+          money(spend),
+          money(sales),
+          `${(campaign.acos || 0).toFixed(2)}%`,
+          `${ctr.toFixed(2)}%`,
+          money(cpc),
+          `${roas.toFixed(2)}x`
         ]);
       });
       csvData.push([]);
     }
-    
-    // Add Wasted Spend Keywords - ALL DATA (not paginated)
-    if (wastedSpendKeywords.length > 0) {
-      csvData.push([`Wasted Spend Keywords (>$0 spend, $0 sales) - Total: ${wastedSpendKeywords.length} keywords`]);
-      csvData.push(['Keyword', 'Campaign Name', 'Ad Group', 'Sales', 'Spend']);
-      wastedSpendKeywords.forEach(keyword => {
+
+    // Wasted Spend tab
+    if (wastedRows.length > 0) {
+      csvData.push([`Wasted Spend Keywords - Total: ${wastedRows.length}`, '', '', 'Total Wasted Spend:', money(totalWastedSpend)]);
+      csvData.push(['Keyword', 'Campaign', 'Ad Group', 'Sales', 'Spend']);
+      wastedRows.forEach(keyword => {
         csvData.push([
           keyword.keyword,
           keyword.campaignName,
           keyword.adGroupName || 'N/A',
-          `${currency}${keyword.sales.toFixed(2)}`,
-          `${currency}${keyword.spend.toFixed(2)}`
+          money(keyword.sales),
+          money(keyword.spend)
         ]);
       });
       csvData.push([]);
     }
-    
-    // Add Top Performing Keywords - ALL DATA (not paginated)
-    if (topPerformingKeywords.length > 0) {
-      csvData.push([`Top Performing Keywords (<20% ACOS, >$100 sales, >1000 impressions) - Total: ${topPerformingKeywords.length} keywords`]);
-      csvData.push(['Keyword', 'Campaign Name', 'Sales', 'Spend', 'ACOS %', 'Impressions', 'Match Type', 'Clicks']);
-      topPerformingKeywords.forEach(keyword => {
+
+    // Campaigns Without Negatives tab
+    if (noNegativesRows.length > 0) {
+      csvData.push([`Campaigns Without Negative Keywords - Total: ${noNegativesRows.length}`]);
+      csvData.push(['Campaign', 'Ad Group', 'Negatives']);
+      noNegativesRows.forEach(row => {
+        csvData.push([row.campaignName, row.adGroupName, row.negatives]);
+      });
+      csvData.push([]);
+    }
+
+    // Top Performing Keywords tab
+    if (topKeywordRows.length > 0) {
+      csvData.push([`Top Performing Keywords - Total: ${topKeywordRows.length}`]);
+      csvData.push(['Keyword', 'Campaign', 'Ad Group', 'Sales', 'Spend', 'ACoS %', 'Impressions']);
+      topKeywordRows.forEach(keyword => {
         csvData.push([
           keyword.keyword,
           keyword.campaignName,
-          `${currency}${keyword.sales.toFixed(2)}`,
-          `${currency}${keyword.spend.toFixed(2)}`,
-          `${keyword.acos.toFixed(2)}%`,
-          keyword.impressions.toLocaleString(),
-          keyword.matchType || 'N/A',
-          keyword.clicks.toString()
+          keyword.adGroupName || 'N/A',
+          money(keyword.sales),
+          money(keyword.spend),
+          `${(keyword.acos || 0).toFixed(2)}%`,
+          (keyword.impressions || 0).toLocaleString()
         ]);
       });
       csvData.push([]);
     }
-    
-    // Add Auto Campaign Insights - ALL DATA (not paginated)
-    if (autoCampaignInsights.length > 0) {
-      csvData.push([`Auto Campaign Insights (>$30 sales) - Total: ${autoCampaignInsights.length} search terms`]);
-      csvData.push(['Search Term', 'Campaign Name', 'Sales', 'Spend', 'Clicks', 'ACOS %', 'Recommended Action']);
-      autoCampaignInsights.forEach(insight => {
+
+    // Search Terms with Zero Sales tab
+    if (zeroSalesRows.length > 0) {
+      csvData.push([`Search Terms with Zero Sales - Total: ${zeroSalesRows.length}`]);
+      csvData.push(['Search Term', 'Matched Keyword', 'Ad Group', 'Clicks', 'Sales', 'Spend']);
+      zeroSalesRows.forEach(term => {
+        csvData.push([
+          term.searchTerm,
+          term.keyword || 'N/A',
+          term.adGroupName || 'N/A',
+          term.clicks ?? '',
+          money(term.sales),
+          money(term.spend)
+        ]);
+      });
+      csvData.push([]);
+    }
+
+    // Auto Campaign Insights tab
+    if (autoInsightRows.length > 0) {
+      csvData.push([`Auto Campaign Insights - Total: ${autoInsightRows.length}`]);
+      csvData.push(['Search Term', 'Campaign Name', 'Ad Group', 'Sales', 'ACoS %', 'CTR %', 'CPC', 'ROAS']);
+      autoInsightRows.forEach(insight => {
+        const spend = Number(insight.spend || 0);
+        const sales = Number(insight.sales || 0);
+        const impressions = Number(insight.impressions || 0);
+        const clicks = Number(insight.clicks || 0);
+        const ctr = insight.ctr != null ? Number(insight.ctr) : (impressions > 0 ? (clicks / impressions) * 100 : 0);
+        const cpc = insight.cpc != null ? Number(insight.cpc) : (clicks > 0 ? spend / clicks : 0);
+        const roas = insight.roas != null ? Number(insight.roas) : (spend > 0 ? sales / spend : 0);
         csvData.push([
           insight.searchTerm,
           insight.campaignName,
-          `${currency}${insight.sales.toFixed(2)}`,
-          `${currency}${insight.spend.toFixed(2)}`,
-          insight.clicks,
-          `${insight.acos.toFixed(2)}%`,
-          insight.action || 'Monitor Performance'
+          insight.adGroupName || 'N/A',
+          money(sales),
+          `${(insight.acos || 0).toFixed(2)}%`,
+          `${ctr.toFixed(2)}%`,
+          money(cpc),
+          `${roas.toFixed(2)}x`
         ]);
       });
       csvData.push([]);
     }
-    
-    // Add Negative Keywords Metrics - ALL DATA (not paginated)
-    if (negativeKeywordsMetrics.length > 0) {
-      csvData.push([`Negative Keywords Analysis (using adsKeywordsPerformanceData) - Total: ${negativeKeywordsMetrics.length} keywords`]);
-      csvData.push(['Keyword', 'Campaign Name', 'Sales', 'Spend', 'ACOS %']);
-      negativeKeywordsMetrics.forEach(keyword => {
-        csvData.push([
-          keyword.keyword,
-          keyword.campaignName,
-          `${currency}${keyword.sales.toFixed(2)}`,
-          `${currency}${keyword.spend.toFixed(2)}`,
-          keyword.acos === 0 ? '-' : `${keyword.acos.toFixed(2)}%`
-        ]);
-      });
-      csvData.push([]);
-    }
-    
-    // Add Search Terms Data - Uses date-filtered data
-    if (filteredSearchTermsData.length > 0) {
-      const dateRangeLabel = (info?.startDate && info?.endDate) 
-        ? ` (${parseLocalDate(info.startDate).toLocaleDateString()} - ${parseLocalDate(info.endDate).toLocaleDateString()})` 
-        : ' (Last 30 Days)';
-      csvData.push([`All Search Terms${dateRangeLabel} - Total: ${filteredSearchTermsData.length} terms`]);
-      csvData.push(['Date', 'Search Term', 'Campaign Name', 'Ad Group', 'Sales', 'Spend', 'Clicks', 'Impressions', 'ACOS %']);
-      filteredSearchTermsData.forEach(term => {
-        const acos = term.sales > 0 ? (term.spend / term.sales) * 100 : 0;
-        csvData.push([
-          term.date || 'N/A',
-          term.searchTerm,
-          term.campaignName,
-          term.adGroupName || 'N/A',
-          `${currency}${term.sales.toFixed(2)}`,
-          `${currency}${term.spend.toFixed(2)}`,
-          term.clicks || 0,
-          term.impressions || 0,
-          `${acos.toFixed(2)}%`
-        ]);
-      });
-      csvData.push([]);
-    }
-    
-    // Add All Keywords Data - ALL DATA (not paginated)
-    if (keywords.length > 0) {
-      csvData.push([`All Keywords - Total: ${keywords.length} keywords`]);
-      csvData.push(['Keyword', 'Campaign ID', 'Bid', 'Match Type', 'State']);
-      keywords.forEach(keyword => {
-        csvData.push([
-          keyword.keywordText,
-          keyword.campaignId,
-          `${currency}${(keyword.bid || 0).toFixed(2)}`,
-          keyword.matchType || 'N/A',
-          keyword.state || 'N/A'
-        ]);
-      });
-      csvData.push([]);
-    }
-    
-    // Add Chart Data (using dateWiseTotalCosts for both spend and sales)
-    if (chartData.length > 0) {
-      csvData.push([`Daily Performance Chart Data (from dateWiseTotalCosts)`]);
-      csvData.push(['Date', 'PPC Sales', 'Spend']);
-      chartData.forEach(day => {
-        csvData.push([
-          day.date,
-          `${currency}${day.ppcSales.toFixed(2)}`,
-          `${currency}${day.spend.toFixed(2)}`
-        ]);
-      });
-      csvData.push([]);
-    }
-    
-    // Add Raw DateWise Total Costs if available (filtered by selected date range)
-    const costsForExport = filteredDateWiseTotalCosts.length > 0 ? filteredDateWiseTotalCosts : dateWiseTotalCosts;
-    if (costsForExport.length > 0) {
-      const dateRangeInfo = filteredDateWiseTotalCosts.length > 0 ? 
-        ` (Filtered: ${info?.startDate || 'N/A'} to ${info?.endDate || 'N/A'})` : 
-        ' (All Data)';
-      csvData.push([`Raw DateWise Total Costs (Source Data)${dateRangeInfo}`]);
-      csvData.push(['Date', 'Total Cost']);
-      costsForExport.forEach(item => {
-        csvData.push([
-          item.date,
-          `${currency}${item.totalCost.toFixed(2)}`
-        ]);
-      });
-      csvData.push([]);
-    }
-    
+
     return csvData;
   };
 
