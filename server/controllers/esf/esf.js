@@ -8,6 +8,7 @@
 const mongoose = require('mongoose');
 const UserModel = require('../../models/user-auth/userModel.js');
 const EsfInvite = require('../../models/user-auth/EsfInviteModel.js');
+const AccountMember = require('../../models/user-auth/AccountMemberModel.js');
 const { getUserByEmail } = require('../../Services/User/userServices.js');
 const { deleteUserById } = require('../../Services/User/deleteUserService.js');
 const {
@@ -667,21 +668,43 @@ const updateEsfUserPermissions = asyncHandler(async (req, res) => {
  */
 const getEsfSessionPermissions = asyncHandler(async (req, res) => {
     const esfToken = req.cookies?.ESFToken;
-    const empty = { isEsfSession: false, esfRole: null, isOwner: false, deniedPages: [] };
+    const empty = { isEsfSession: false, isMemberSession: false, esfRole: null, isOwner: false, deniedPages: [] };
 
-    if (!esfToken) return res.status(200).json(new ApiResponse(200, empty, 'No ESF session'));
+    // No staff session: the seller app is being driven by its owner or by one of
+    // their members ("Add member"). A member gets the page access the owner set,
+    // enforced server-side by memberPageGuard - this is only what the sidebar hides.
+    const noStaffSession = async () => {
+        const accessToken = req.cookies?.IBEXAccessToken;
+        const decodedAccess = accessToken ? await verifyAccessToken(accessToken) : null;
+        if (decodedAccess && decodedAccess.isvalid && decodedAccess.memberId) {
+            const member = await AccountMember.findOne({ _id: decodedAccess.memberId, owner: decodedAccess.tokenData })
+                .select('deniedPages')
+                .lean();
+            if (member) {
+                return res.status(200).json(new ApiResponse(200, {
+                    ...empty,
+                    isMemberSession: true,
+                    deniedPages: sanitizeDeniedPages(member.deniedPages),
+                }, 'Member session permissions fetched'));
+            }
+        }
+        return res.status(200).json(new ApiResponse(200, empty, 'No ESF session'));
+    };
+
+    if (!esfToken) return noStaffSession();
 
     const decoded = await verifyAccessToken(esfToken);
-    if (!decoded || !decoded.isvalid) return res.status(200).json(new ApiResponse(200, empty, 'No ESF session'));
+    if (!decoded || !decoded.isvalid) return noStaffSession();
 
     const staff = await UserModel.findById(decoded.tokenData).select('accessType esfRole esfDeniedPages email');
     if (!staff || staff.accessType !== 'esfUser') {
-        return res.status(200).json(new ApiResponse(200, empty, 'No ESF session'));
+        return noStaffSession();
     }
 
     const owner = isEsfOwner(staff);
     return res.status(200).json(new ApiResponse(200, {
         isEsfSession: true,
+        isMemberSession: false,
         esfRole: resolveEsfRole(staff),
         isOwner: owner,
         deniedPages: owner ? [] : sanitizeDeniedPages(staff.esfDeniedPages),

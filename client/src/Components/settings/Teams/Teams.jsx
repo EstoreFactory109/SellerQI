@@ -14,8 +14,10 @@ import {
   Pencil,
   ShieldCheck,
 } from 'lucide-react';
+import { useSelector } from 'react-redux';
 import axiosInstance from '../../../config/axios.config.js';
 import RenameDialog from '../../Shared/RenameDialog.jsx';
+import { PageAccessPicker, MemberPageAccessModal, accessLabel, deniedFrom } from './MemberPageAccess.jsx';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -26,9 +28,12 @@ const formatDate = (value) =>
  * "Add member" — invite people to help run this seller account.
  *
  * Mirrors the ESF portal's team page, for a seller: invite by email (with an
- * optional name). Opening the emailed link signs the member straight in to this
- * account with full access; there is no form and no password. Next time they use
- * "Log in as a member" on the sign-in page, which emails them a one-time link.
+ * optional name and page access). Opening the emailed link signs the member
+ * straight in to this account; there is no form and no password. Next time they
+ * use "Log in as a member" on the sign-in page, which emails them a one-time link.
+ *
+ * Page access is the owner's to set. A member inviting someone passes on their
+ * own limits (the server enforces both).
  */
 const Teams = () => {
   const [members, setMembers] = useState([]);
@@ -45,6 +50,14 @@ const Teams = () => {
   const [confirmRemove, setConfirmRemove] = useState(null);
   const [renameTarget, setRenameTarget] = useState(null);
 
+  // Page access: the pages that can be switched on/off, what the invite grants,
+  // and the member whose access is being edited.
+  const isMemberSession = useSelector((state) => state.Auth?.user?.isMemberSession === true);
+  const [pages, setPages] = useState([]);
+  const [inviteAllowed, setInviteAllowed] = useState(new Set());
+  const [customiseAccess, setCustomiseAccess] = useState(false);
+  const [accessTarget, setAccessTarget] = useState(null);
+
   const flash = (setter, message) => {
     setter(message);
     setTimeout(() => setter(''), 5000);
@@ -54,8 +67,14 @@ const Teams = () => {
     try {
       setLoading(true);
       setError('');
-      const res = await axiosInstance.get('/app/members');
+      const [res, pagesRes] = await Promise.all([
+        axiosInstance.get('/app/members'),
+        axiosInstance.get('/app/members/pages'),
+      ]);
       if (res.data?.statusCode === 200 && Array.isArray(res.data.data)) setMembers(res.data.data);
+      const catalogue = Array.isArray(pagesRes.data?.data) ? pagesRes.data.data : [];
+      setPages(catalogue);
+      setInviteAllowed(new Set(catalogue.map((page) => page.key)));
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to load members');
     } finally {
@@ -77,11 +96,17 @@ const Teams = () => {
     setInviting(true);
     setError('');
     try {
-      const res = await axiosInstance.post('/app/members/invite', { email: trimmed, name: name.trim() });
+      const res = await axiosInstance.post('/app/members/invite', {
+        email: trimmed,
+        name: name.trim(),
+        deniedPages: deniedFrom(pages, inviteAllowed),
+      });
       if (res.data?.statusCode === 201 && res.data.data) {
         setMembers((prev) => [res.data.data, ...prev]);
         setEmail('');
         setName('');
+        setInviteAllowed(new Set(pages.map((page) => page.key)));
+        setCustomiseAccess(false);
         flash(setSuccess, `Invitation sent to ${trimmed}`);
       }
     } catch (err) {
@@ -161,7 +186,7 @@ const Teams = () => {
           {[
             { Icon: Mail, title: 'Invite by email', text: 'Enter their email address. We send them an invitation.' },
             { Icon: ShieldCheck, title: 'One click to join', text: 'Opening the link signs them straight in — no form, no password.' },
-            { Icon: Users, title: 'Full access', text: 'Members can do everything you can. Remove them any time.' },
+            { Icon: Users, title: 'You choose the pages', text: 'Give access to every page or only some. Change it or remove them any time.' },
           ].map(({ Icon, title, text }) => (
             <div key={title} className="rounded-xl border border-[#30363d] bg-[#1a1a1a] p-3">
               <div className="flex items-center gap-2 mb-1">
@@ -220,6 +245,40 @@ const Teams = () => {
             </button>
           </div>
           {fieldError && <p className="text-red-400 text-xs mt-2">{fieldError}</p>}
+
+          {/* Page access for the invitee */}
+          {pages.length > 0 && (
+            <div className="mt-3 rounded-lg border border-[#30363d] bg-[#161b22] px-3 py-2.5">
+              {isMemberSession ? (
+                <p className="text-xs text-gray-400 flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-blue-400 shrink-0" />
+                  They will get the same page access as you. Only the account owner can change it.
+                </p>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs text-gray-300 flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-blue-400 shrink-0" />
+                      Page access: <span className="font-semibold">{accessLabel(pages, deniedFrom(pages, inviteAllowed))}</span>
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setCustomiseAccess((open) => !open)}
+                      className="text-xs font-medium text-blue-400 hover:text-blue-300"
+                    >
+                      {customiseAccess ? 'Done' : 'Customise'}
+                    </button>
+                  </div>
+                  {customiseAccess && (
+                    <div className="mt-3">
+                      <PageAccessPicker pages={pages} allowed={inviteAllowed} onChange={setInviteAllowed} />
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
           <p className="text-xs text-gray-500 mt-3">
             The address must not already have its own SellerQI account. The invitation expires in 7 days. Next time,
             members choose &quot;Log in as a member&quot; on the sign-in page to get a sign-in link.
@@ -300,7 +359,25 @@ const Teams = () => {
                       </span>
                     )}
 
+                    {pages.length > 0 && (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border border-[#30363d] bg-white/[0.03] text-gray-300">
+                        <ShieldCheck className="w-3 h-3" />
+                        {accessLabel(pages, member.deniedPages || [])}
+                      </span>
+                    )}
+
                     <div className="flex items-center gap-3">
+                      {!isMemberSession && pages.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setAccessTarget(member)}
+                          disabled={busy}
+                          className="inline-flex items-center gap-1 text-xs font-medium text-blue-400 hover:text-blue-300 disabled:opacity-50"
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          Page access
+                        </button>
+                      )}
                       {pending && (
                         <button
                           type="button"
@@ -341,6 +418,19 @@ const Teams = () => {
           )}
         </div>
       </div>
+
+      {accessTarget && (
+        <MemberPageAccessModal
+          member={accessTarget}
+          pages={pages}
+          onClose={() => setAccessTarget(null)}
+          onSaved={(updated) => {
+            if (updated) setMembers((prev) => prev.map((m) => (m._id === updated._id ? updated : m)));
+            setAccessTarget(null);
+            flash(setSuccess, 'Page access updated');
+          }}
+        />
+      )}
 
       <RenameDialog
         open={!!renameTarget}

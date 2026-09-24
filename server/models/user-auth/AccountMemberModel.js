@@ -62,6 +62,15 @@ const accountMemberSchema = new mongoose.Schema(
             default: null,
         },
         /**
+         * Pages this member may NOT open (keys from Services/User/esfPages.js).
+         * A blocklist like ESF staff's esfDeniedPages: empty means every page, and a
+         * page added later is visible by default. Enforced by memberPageGuard.
+         */
+        deniedPages: {
+            type: [String],
+            default: [],
+        },
+        /**
          * This member's signed-in sessions. Kept here rather than on the owner so
          * member sign-ins never push the owner's own devices out of their session
          * limit, and so deleting the row ends them all.

@@ -34,6 +34,8 @@ const supportTicketRoute=require('../routes/supportTicket.routes.js')
 const adminRoute=require('../routes/admin.routes.js')
 const esfRoute=require('../routes/esf.routes.js')
 const esfPageGuard=require('../middlewares/Auth/esfPageGuard.js')
+// Same idea for members of a seller account ("Add member" page access).
+const memberPageGuard=require('../middlewares/Auth/memberPageGuard.js')
 const userDetailsRoute=require('../routes/userDetails.routes.js')
 const userLocationRoute=require('../routes/userLocation.routes.js')
 const reimbursementRoute=require('../routes/reimbursement.routes.js')
@@ -193,7 +195,7 @@ app.use('/app/reimbursements',reimbursementRoute)
 app.use('/app/mcp',mcpRoute)
 // Enforces ESF per-member page access before any client data is served.
 // No-ops unless an ESF staff session is viewing an ESF client.
-app.use('/api/pagewise',esfPageGuard,pageWiseDataRoute)
+app.use('/api/pagewise',esfPageGuard,memberPageGuard,pageWiseDataRoute)
 app.use('/api/total-sales',totalSalesFilterRoute)
 if (testRoutesEnabled) {
     app.use('/api/test', testRoute);
@@ -224,7 +226,7 @@ app.use('/api/integration',integrationRoute)
 app.use('/api/zoho',zohoRoute)
 app.use('/api/gmail',gmailRoute)
 app.use('/api/alerts',alertsRoute)
-app.use('/api/qmate',esfPageGuard,qmateRoute)
+app.use('/api/qmate',esfPageGuard,memberPageGuard,qmateRoute)
 app.use('/api/whatsapp',whatsappRoute)
 app.use('/api/ai',rankingContentAIRoute)
 app.use('/api/review',reviewRoute)

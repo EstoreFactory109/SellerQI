@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const {
+    listMemberPages,
+    updateMemberPermissions,
     listMembers,
     inviteMember,
     resendMemberInvite,
@@ -25,9 +27,11 @@ router.post('/login-link/verify', authRateLimiter, refuseIfOtherSession(), verif
 
 // The account being viewed manages its own members.
 router.get('/', auth, listMembers);
+router.get('/pages', auth, listMemberPages);
 router.post('/invite', auth, registerRateLimiter, inviteMember);
 router.post('/:memberId/resend', auth, resendMemberInvite);
 router.patch('/:memberId', auth, renameMember);
+router.put('/:memberId/permissions', auth, updateMemberPermissions);
 router.delete('/:memberId', auth, removeMember);
 
 module.exports = router;

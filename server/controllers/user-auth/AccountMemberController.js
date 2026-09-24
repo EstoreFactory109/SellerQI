@@ -12,6 +12,8 @@ const mongoose = require('mongoose');
 const AccountMember = require('../../models/user-auth/AccountMemberModel.js');
 const LoginLink = require('../../models/user-auth/LoginLinkModel.js');
 const EsfInvite = require('../../models/user-auth/EsfInviteModel.js');
+const UserModel = require('../../models/user-auth/userModel.js');
+const { memberPageCatalogue, sanitizeDeniedPages } = require('../../Services/User/esfPages.js');
 const { getUserByEmail } = require('../../Services/User/userServices.js');
 const { sendAuthLinkEmail } = require('../../Services/Email/SendAuthLinkEmail.js');
 const { accountNameFor, issueMemberSession } = require('../../Services/User/memberSession.js');
@@ -43,7 +45,20 @@ const toMemberResponse = (member, viewerMemberId = null) => ({
     acceptedAt: member.acceptedAt,
     lastLoginAt: member.lastLoginAt,
     createdAt: member.createdAt,
+    deniedPages: sanitizeDeniedPages(member.deniedPages),
 });
+
+/** Pages a member of this account can be given or denied. */
+const pagesForAccount = async (ownerId) => {
+    const owner = await UserModel.findById(ownerId).select('isEsfClient').lean();
+    return memberPageCatalogue({ includeEsfPages: owner?.isEsfClient === true });
+};
+
+/** Keep only keys offered for this account. */
+const cleanDeniedPages = async (ownerId, keys) => {
+    const offered = new Set((await pagesForAccount(ownerId)).map((page) => page.key));
+    return sanitizeDeniedPages(keys).filter((key) => offered.has(key));
+};
 
 /** Who is doing the inviting, for the email. */
 const inviterNameFor = async (req) => (await accountNameFor(req.userId)) || 'A SellerQI user';
@@ -80,13 +95,18 @@ const loadOwnMember = async (req, res) => {
 
 /* ------------------------------------------------------- account side --- */
 
+/** GET /app/members/pages — the pages page access can switch on and off. */
+const listMemberPages = asyncHandler(async (req, res) => {
+    return res.status(200).json(new ApiResponse(200, await pagesForAccount(req.userId), 'Pages fetched'));
+});
+
 /** GET /app/members */
 const listMembers = asyncHandler(async (req, res) => {
     const members = await AccountMember.find({ owner: req.userId }).sort({ createdAt: -1 }).lean();
     return res.status(200).json(new ApiResponse(200, members.map((m) => toMemberResponse(m, req.memberId)), 'Members fetched successfully'));
 });
 
-/** POST /app/members/invite — body: { email, name? } */
+/** POST /app/members/invite — body: { email, name?, deniedPages? } */
 const inviteMember = asyncHandler(async (req, res) => {
     const email = normalize(req.body?.email);
     if (!isValidEmail(email)) {
@@ -108,11 +128,20 @@ const inviteMember = asyncHandler(async (req, res) => {
         return res.status(409).json(new ApiResponse(409, '', 'That email has a pending invitation to another SellerQI portal'));
     }
 
+    // A member inviting someone cannot grant more than they have: the invitee is
+    // denied at least what the inviter is. Only the owner hands out full access.
+    let deniedPages = await cleanDeniedPages(req.userId, req.body?.deniedPages);
+    if (req.memberId) {
+        const inviter = await AccountMember.findById(req.memberId).select('deniedPages').lean();
+        deniedPages = [...new Set([...deniedPages, ...sanitizeDeniedPages(inviter?.deniedPages)])];
+    }
+
     const token = newInviteToken();
     const member = await AccountMember.create({
         owner: req.userId,
         email,
         name: cleanName(req.body?.name),
+        deniedPages,
         status: 'pending',
         inviteTokenHash: hashToken(token),
         inviteExpiresAt: inviteExpiry(),
@@ -157,6 +186,28 @@ const renameMember = asyncHandler(async (req, res) => {
     member.name = cleanName(req.body?.name);
     await member.save();
     return res.status(200).json(new ApiResponse(200, toMemberResponse(member, req.memberId), 'Name updated'));
+});
+
+/**
+ * PUT /app/members/:memberId/permissions — body: { deniedPages: string[] }
+ * Owner only: a member changing page access could simply lift their own limits.
+ */
+const updateMemberPermissions = asyncHandler(async (req, res) => {
+    if (req.memberId) {
+        return res.status(403).json(new ApiResponse(403, '', 'Only the account owner can change page access'));
+    }
+    if (!Array.isArray(req.body?.deniedPages)) {
+        return res.status(400).json(new ApiResponse(400, '', 'deniedPages must be an array of page keys'));
+    }
+
+    const member = await loadOwnMember(req, res);
+    if (!member) return;
+
+    member.deniedPages = await cleanDeniedPages(req.userId, req.body.deniedPages);
+    await member.save();
+
+    logger.info(`Account ${req.userId} set page access for member ${member.email} (denied: ${member.deniedPages.join(', ') || 'none'})`);
+    return res.status(200).json(new ApiResponse(200, toMemberResponse(member, req.memberId), 'Page access updated'));
 });
 
 /**
@@ -282,6 +333,8 @@ const verifyMemberLoginLink = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+    listMemberPages,
+    updateMemberPermissions,
     listMembers,
     inviteMember,
     resendMemberInvite,
