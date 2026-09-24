@@ -224,6 +224,16 @@ const ingestMessage = async (gmailMessageId) => {
     const bundle = buildIdentityBundle(user);
     const redacted = await redactMessage(parsed, user);
 
+    /**
+     * The flattened body before redaction, held only for the duration of this call.
+     *
+     * Never written anywhere: the models keep the redacted copy alone, and that is the
+     * property the whole staff/client boundary rests on.
+     */
+    const rawBodyForIntent = prepareBody(parsed.bodyHtml || parsed.bodyText || '', {
+        isHtml: Boolean(parsed.bodyHtml),
+    }).text;
+
     const thread = await upsertThread(parsed, user, decision);
     await EmailMessage.updateOne(
         { gmailMessageId },
@@ -246,7 +256,36 @@ const ingestMessage = async (gmailMessageId) => {
         { upsert: true }
     );
 
+    // Re-read rather than trusting the upsert's return: on a redelivery the row already
+    // existed, and the intent handler needs its real _id to link a request back to it.
+    const stored = await EmailMessage.findOne({ gmailMessageId }).select('_id gmailMessageId').lean();
+
     await refreshThreadCounters(thread._id, parsed, decision);
+
+    /**
+     * Read the message for intent — a client asking for new work, or a staff reply
+     * deciding on a request already waiting.
+     *
+     * Deliberately LAST, and after the message is already stored. Everything above is
+     * the conversation record, which must survive regardless; losing a client's email
+     * because an analysis failed would be exactly backwards. analyseMessage swallows its
+     * own failures for the same reason, and this awaits it only so a sync's summary
+     * reflects work that actually finished.
+     *
+     * Given the RAW text, not the redacted copy stored above. Redaction strips every
+     * URL, and "please update amazon.com/dp/B08…" is precisely what makes a request
+     * worth raising. Nothing read here is stored unredacted — the handler runs its own
+     * redaction before writing anything.
+     */
+    const { analyseMessage } = require('../User/MessageIntentHandler.js');
+    await analyseMessage({
+        direction: decision.direction,
+        origin: decision.origin,
+        rawText: rawBodyForIntent,
+        user,
+        thread,
+        message: stored,
+    });
 
     return { status: 'ingested', direction: decision.direction, threadId: String(thread._id) };
 };

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import axiosInstance from '../../../config/axios.config.js';
 import { PALETTE } from '../../../Components/ESF/estoreFactoryTheme.js';
+import AttachmentPicker from '../../../Components/ESF/AttachmentPicker.jsx';
 
 /**
  * Estore Factory > Messages — the client's own conversations.
@@ -185,12 +186,29 @@ const Messages = () => {
     const panel = { background: PALETTE.panel || 'rgba(255,255,255,.02)', borderColor: PALETTE.border };
 
     return (
-        <div className="h-[calc(100vh-150px)] w-full p-4 md:p-6" style={{ background: PALETTE.bg }}>
-            <div className="mx-auto flex h-full max-w-[1600px] overflow-hidden rounded-xl border" style={panel}>
+        /*
+            flex-1 within the layout's own column rather than a viewport calculation.
+            The calc had to guess the height of the nav and banner above it, and any
+            guess is wrong on some screen — too small leaves a gap under the page, too
+            large pushes the composer out of reach. MainPagesLayout marks this route as
+            owning its scrolling, so the parent is a definite-height flex column and
+            this simply fills it.
+
+            flex-col rather than the default row: as a row item the card below sized to
+            its own content and stopped filling the width.
+        */
+        <div className="flex min-h-0 w-full flex-1 flex-col p-3 md:p-6" style={{ background: PALETTE.bg }}>
+            {/* w-full so the max-width is a cap rather than the width — an auto-margined
+                flex item sizes to its content otherwise. */}
+            <div className="mx-auto flex w-full max-w-[1600px] flex-1 overflow-hidden rounded-xl border" style={panel}>
 
                 {/* Conversation list */}
+                {/*
+                    One pane at a time on a phone — two fixed panes on a narrow screen
+                    leave a conversation too thin to read.
+                */}
                 <aside
-                    className="flex w-full max-w-[360px] shrink-0 flex-col border-r"
+                    className={`${openId ? 'hidden md:flex' : 'flex'} w-full shrink-0 flex-col md:w-[300px] md:max-w-[360px] md:border-r lg:w-[360px]`}
                     style={{ borderColor: PALETTE.border }}
                 >
                     <div className="px-4 py-3">
@@ -218,15 +236,17 @@ const Messages = () => {
                         )}
                     </div>
 
-                    <div className="flex-1 overflow-y-auto">
+                    <div className="flex flex-1 flex-col overflow-y-auto">
                         {loading && (
-                            <p className="px-4 py-6 text-sm" style={{ color: PALETTE.textTertiary }}>Loading…</p>
+                            <p className="flex flex-1 items-center justify-center py-6 text-sm" style={{ color: PALETTE.textTertiary }}>Loading…</p>
                         )}
 
                         {!loading && threads.length === 0 && (
-                            <p className="px-4 py-10 text-center text-sm" style={{ color: PALETTE.textTertiary }}>
-                                No conversations yet.
-                            </p>
+                            <div className="flex flex-1 items-center justify-center px-4 py-10 text-center">
+                                <p className="text-sm" style={{ color: PALETTE.textTertiary }}>
+                                    No conversations yet.
+                                </p>
+                            </div>
                         )}
 
                         {threads.map((thread) => {
@@ -268,7 +288,7 @@ const Messages = () => {
                 </aside>
 
                 {/* Conversation */}
-                <section className="flex min-w-0 flex-1 flex-col">
+                <section className={`${openId ? 'flex' : 'hidden md:flex'} min-w-0 flex-1 flex-col`}>
                     {error && (
                         <p className="border-b px-5 py-2.5 text-sm" style={{ borderColor: PALETTE.border, color: PALETTE.amberValue }}>
                             {error}
@@ -286,9 +306,18 @@ const Messages = () => {
                     {open && (
                         <>
                             <div
-                                className="flex items-center gap-3 border-b px-4 py-2.5"
+                                className="flex items-center gap-3 border-b px-3 py-2.5 md:px-4"
                                 style={{ borderColor: PALETTE.border }}
                             >
+                                <button
+                                    type="button"
+                                    onClick={() => { setOpenId(null); setConversation(null); }}
+                                    className="-ml-1 shrink-0 rounded-lg px-1.5 py-1 text-[16px] leading-none md:hidden"
+                                    style={{ color: PALETTE.textTertiary }}
+                                    aria-label="Back to conversations"
+                                >
+                                    ←
+                                </button>
                                 <div className="min-w-0 flex-1">
                                     <p className="truncate text-[14px] font-semibold" style={{ color: PALETTE.textPrimary }}>
                                         {open.subject || '(no subject)'}
@@ -307,7 +336,7 @@ const Messages = () => {
                                 </span>
                             </div>
 
-                            <div className="flex-1 space-y-1 overflow-y-auto px-4 py-4 md:px-8">
+                            <div className="flex-1 space-y-1 overflow-y-auto px-3 py-4 sm:px-4 md:px-8">
                                 {dayGroups.map((group) => (
                                     <div key={group.key} className="space-y-1">
                                         <div className="flex justify-center py-3">
@@ -324,7 +353,7 @@ const Messages = () => {
                                             return (
                                                 <div key={message.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                                                     <div
-                                                        className={`max-w-[68%] rounded-lg px-3 py-2 text-[13.5px] leading-[1.5] ${
+                                                        className={`max-w-[85%] rounded-lg px-3 py-2 text-[13.5px] leading-[1.5] sm:max-w-[68%] ${
                                                             mine ? 'rounded-tr-sm' : 'rounded-tl-sm'
                                                         }`}
                                                         style={{
@@ -372,49 +401,18 @@ const Messages = () => {
                             </div>
 
                             <div className="border-t px-4 py-3" style={{ borderColor: PALETTE.border }}>
-                                {files.length > 0 && (
-                                    <div className="mb-2 flex flex-wrap gap-1.5">
-                                        {files.map((file, i) => (
-                                            <span
-                                                key={`${file.name}-${i}`}
-                                                className="flex items-center gap-1.5 rounded px-2 py-1 text-[11px]"
-                                                style={{ background: 'rgba(255,255,255,.07)', color: PALETTE.textSecondary }}
-                                            >
-                                                <span className="max-w-[160px] truncate">{file.name}</span>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setFiles((c) => c.filter((_, j) => j !== i))}
-                                                    style={{ color: PALETTE.textTertiary }}
-                                                >
-                                                    ×
-                                                </button>
-                                            </span>
-                                        ))}
-                                    </div>
-                                )}
+                                <div className="mb-2">
+                                    <AttachmentPicker
+                                        files={files}
+                                        onChange={setFiles}
+                                        disabled={sending}
+                                        tone="client"
+                                    />
+                                </div>
                                 <div
                                     className="flex items-end gap-2 rounded-lg px-3 py-2"
                                     style={{ background: 'rgba(255,255,255,.05)' }}
                                 >
-                                    <label
-                                        className="mb-0.5 shrink-0 cursor-pointer text-[16px] leading-none"
-                                        style={{ color: PALETTE.textTertiary }}
-                                        title="Attach files"
-                                    >
-                                        📎
-                                        <input
-                                            type="file"
-                                            multiple
-                                            hidden
-                                            disabled={sending}
-                                            onChange={(e) => {
-                                                // Capped here too, so picking ten says so now
-                                                // rather than after the upload finishes.
-                                                setFiles((c) => [...c, ...Array.from(e.target.files || [])].slice(0, 5));
-                                                e.target.value = '';
-                                            }}
-                                        />
-                                    </label>
                                     <textarea
                                         rows={1}
                                         value={draft}
@@ -508,37 +506,14 @@ const Messages = () => {
                         <label className="mt-3 block text-[11.5px] font-medium" style={{ color: PALETTE.textSecondary }}>
                             Attachments (optional)
                         </label>
-                        <input
-                            type="file"
-                            multiple
-                            disabled={raising}
-                            onChange={(e) => {
-                                setTicketFiles((c) => [...c, ...Array.from(e.target.files || [])].slice(0, 5));
-                                e.target.value = '';
-                            }}
-                            className="mt-1 w-full text-[11.5px]"
-                            style={{ color: PALETTE.textTertiary }}
-                        />
-                        {ticketFiles.length > 0 && (
-                            <div className="mt-1.5 flex flex-wrap gap-1.5">
-                                {ticketFiles.map((file, i) => (
-                                    <span
-                                        key={`${file.name}-${i}`}
-                                        className="flex items-center gap-1.5 rounded px-2 py-1 text-[11px]"
-                                        style={{ background: 'rgba(255,255,255,.07)', color: PALETTE.textSecondary }}
-                                    >
-                                        <span className="max-w-[160px] truncate">{file.name}</span>
-                                        <button
-                                            type="button"
-                                            onClick={() => setTicketFiles((c) => c.filter((_, j) => j !== i))}
-                                            style={{ color: PALETTE.textTertiary }}
-                                        >
-                                            ×
-                                        </button>
-                                    </span>
-                                ))}
-                            </div>
-                        )}
+                        <div className="mt-1">
+                            <AttachmentPicker
+                                files={ticketFiles}
+                                onChange={setTicketFiles}
+                                disabled={raising}
+                                tone="client"
+                            />
+                        </div>
 
                         {/*
                             Said before they type it rather than after: contact details get

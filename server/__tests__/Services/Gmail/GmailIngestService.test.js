@@ -9,6 +9,13 @@
 
 jest.mock('../../../utils/Logger.js', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }));
 
+// Intent analysis has its own suite. Stubbed here so these tests stay about ingestion,
+// and so a change to the model prompt cannot break the mail path's coverage.
+const mockAnalyseMessage = jest.fn();
+jest.mock('../../../Services/User/MessageIntentHandler.js', () => ({
+    analyseMessage: (...a) => mockAnalyseMessage(...a),
+}));
+
 const mockGetMessage = jest.fn();
 const mockListHistory = jest.fn();
 jest.mock('../../../Services/Gmail/GmailClient.js', () => ({
@@ -38,6 +45,7 @@ const mockMsgExists = jest.fn();
 const mockMsgUpdateOne = jest.fn();
 const mockMsgFind = jest.fn();
 const mockMsgCount = jest.fn();
+const mockMsgFindOne = jest.fn();
 jest.mock('../../../models/system/EmailThreadModels.js', () => ({
     EmailThread: {
         findOne: (...a) => mockThreadFindOne(...a),
@@ -49,6 +57,7 @@ jest.mock('../../../models/system/EmailThreadModels.js', () => ({
         exists: (...a) => mockMsgExists(...a),
         updateOne: (...a) => mockMsgUpdateOne(...a),
         find: (...a) => mockMsgFind(...a),
+        findOne: (...a) => mockMsgFindOne(...a),
         countDocuments: (...a) => mockMsgCount(...a),
     },
 }));
@@ -116,6 +125,8 @@ beforeEach(() => {
     mockMsgUpdateOne.mockResolvedValue({});
     mockMsgFind.mockReturnValue(chain([{ direction: 'inbound', sentAt: new Date('2026-09-22T10:00:00Z') }]));
     mockMsgCount.mockResolvedValue(1);
+    mockMsgFindOne.mockReturnValue(chain({ _id: 'stored-1', gmailMessageId: 'msg-1' }));
+    mockAnalyseMessage.mockResolvedValue(null);
     mockRedactBody.mockResolvedValue({
         text: 'Please hold the listings.',
         generatedBy: 'ai',
@@ -407,6 +418,40 @@ describe('matching', () => {
         const query = mockUserFindOne.mock.calls[0][0];
         const additional = query.$or.find((clause) => clause.additionalEmails);
         expect(additional.additionalEmails.$elemMatch.isVerified).toBe(true);
+    });
+});
+
+describe('intent analysis never costs a message', () => {
+    test('runs only after the message is stored', async () => {
+        // The conversation record is the thing that must survive. Analysing first and
+        // storing second would mean a model outage lost a client's email.
+        const order = [];
+        mockMsgUpdateOne.mockImplementation(async () => { order.push('stored'); return {}; });
+        mockAnalyseMessage.mockImplementation(async () => { order.push('analysed'); });
+
+        await GmailIngest.ingestMessage('msg-1');
+
+        expect(order).toEqual(['stored', 'analysed']);
+    });
+
+    test('a failure there does not fail the ingest', async () => {
+        // analyseMessage swallows its own errors, but this pins the contract so a future
+        // refactor that lets one escape is caught here rather than in production.
+        mockAnalyseMessage.mockRejectedValue(new Error('model exploded'));
+
+        await expect(GmailIngest.ingestMessage('msg-1')).rejects.toThrow();
+        // …and the message was still written before it blew up.
+        expect(mockMsgUpdateOne).toHaveBeenCalled();
+    });
+
+    test('is given the RAW text, not the redacted copy', async () => {
+        // Redaction strips every URL, and a listing link is exactly what makes a request
+        // worth raising.
+        await GmailIngest.ingestMessage('msg-1');
+
+        const [args] = mockAnalyseMessage.mock.calls[0];
+        expect(args.rawText).toContain('Please hold the listings.');
+        expect(args.direction).toBe('inbound');
     });
 });
 

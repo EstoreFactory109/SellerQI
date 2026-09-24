@@ -126,6 +126,28 @@ const acceptTaskRequest = async ({ requestId, staffUserId }) => {
     }
 
     const ZohoProjectsService = require('../Zoho/ZohoProjectsService.js');
+    const { buildTaskBrief } = require('../AI/TaskBriefService.js');
+
+    /**
+     * Rewrite the client's words into something the team can work from — and strip their
+     * contact details on the way.
+     *
+     * This is the only place the raw description is transformed. Everywhere else it is
+     * passed through verbatim precisely because a rewrite risks changing meaning; here
+     * clarity is the point, so TaskBriefService guards it structurally instead (every
+     * identifier preserved, negations counted, contacts checked) and falls back to the
+     * cleaned original whenever the result fails those checks.
+     */
+    const clientUser = await UserModel.findById(request.userId)
+        .select('firstName lastName email additionalEmails phone whatsapp')
+        .lean();
+    const bundle = buildIdentityBundle(clientUser || {});
+
+    const brief = await buildTaskBrief({
+        title: request.titleRaw,
+        description: request.descriptionRaw || '',
+        bundle,
+    });
 
     /**
      * Attribution in the description, because everything written to Zoho is authored by
@@ -135,17 +157,28 @@ const acceptTaskRequest = async ({ requestId, staffUserId }) => {
     const description = [
         'Requested by the client through the SellerQI portal.',
         '',
-        request.descriptionRaw || '',
+        brief.description,
         ...(request.attachments.length
             // Said explicitly because the files CANNOT be attached here: Zoho uploads are
             // not provisioned on this portal, so the email is where they are.
             ? ['', `${request.attachments.length} file(s) were attached to the request email.`]
             : []),
+        /**
+         * The client's own words, kept below the brief whenever the brief is a rewrite.
+         *
+         * This is what makes a bad rewrite recoverable rather than silent. The
+         * validation above catches a brief that drops an ASIN or a negation, but not one
+         * that is subtly off — and whoever does the work can settle it here in two
+         * seconds instead of asking the client to repeat themselves.
+         */
+        ...(brief.generatedBy === 'ai'
+            ? ['', '--- as the client wrote it ---', brief.original]
+            : []),
     ].join('\n');
 
     const task = await ZohoProjectsService.createTask({
         projectId,
-        name: request.titleRaw,
+        name: brief.title,
         description,
         // Carried through so ZohoTaskSync.classifyTask files it under "Coming up" rather
         // than defaulting a dateless task to "In progress".

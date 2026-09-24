@@ -48,6 +48,7 @@ const {
     acceptTaskRequest,
     rejectTaskRequest,
     deleteTaskRequest,
+    dismissStagedDecision,
     downloadTaskRequestAttachment,
 } = require('../controllers/esf/esfTaskRequests.js');
 const esfAuth = require('../middlewares/Auth/esfAuth.js');
@@ -143,6 +144,7 @@ router.get('/messages/:threadId/attachments/:messageId/:index', esfAuth, downloa
 router.get('/task-requests', esfAuth, listTaskRequests);
 router.patch('/task-requests/:requestId/accept', esfAuth, acceptTaskRequest);
 router.patch('/task-requests/:requestId/reject', esfAuth, rejectTaskRequest);
+router.patch('/task-requests/:requestId/dismiss-suggestion', esfAuth, dismissStagedDecision);
 router.delete('/task-requests/:requestId', esfAuth, deleteTaskRequest);
 router.get('/task-requests/:requestId/attachments/:index', esfAuth, downloadTaskRequestAttachment);
 

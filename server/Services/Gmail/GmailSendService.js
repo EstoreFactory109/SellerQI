@@ -347,6 +347,37 @@ const acknowledgeTicket = async ({ thread, rawSubject, text, fromAddress, gmailT
 };
 
 /**
+ * Read a portal-written message for intent, the way ingestion does for an emailed one.
+ *
+ * Needed because these never pass through ingestMessage: the portal writes its own row
+ * directly, and the Gmail echo that comes back is skipped as our own. So without this
+ * call, every request or decision written in the portal went unread — which is most of
+ * them, now that the composer works.
+ *
+ * Non-fatal and not awaited for its result: a reply must never fail because an analysis
+ * did. analyseMessage swallows its own errors for the same reason.
+ */
+const analysePortalMessage = async ({ thread, gmailMessageId, direction, origin, text, user }) => {
+    try {
+        const stored = await EmailMessage.findOne({ gmailMessageId }).select('_id').lean();
+        if (!stored) return;
+
+        const { analyseMessage } = require('../User/MessageIntentHandler.js');
+        await analyseMessage({
+            direction,
+            origin,
+            // What they typed, before redaction — same input ingestion gives it.
+            rawText: text,
+            user,
+            thread,
+            message: stored,
+        });
+    } catch (error) {
+        logger.warn(`[GmailSend] intent analysis skipped for ${gmailMessageId}: ${error.message}`);
+    }
+};
+
+/**
  * A staff member replies. The email is genuinely sent to the client.
  *
  * @param {object} args
@@ -399,8 +430,68 @@ const sendStaffReply = async ({ threadId, body, staffUserId = null, files = [] }
         attachments: attachmentRecords(files),
     });
 
+    await analysePortalMessage({
+        thread,
+        gmailMessageId: sent.id,
+        direction: 'outbound',
+        origin: 'portal-staff',
+        text,
+    });
+
     logger.info(`[GmailSend] staff reply sent on thread ${thread._id}`);
     return { id: sent.id, sentAt: new Date() };
+};
+
+/**
+ * A reply this system wrote by itself, into an existing conversation.
+ *
+ * Currently one thing: asking a client for the details a request of theirs was missing.
+ * It is a real email to the client and a real message in their portal thread, because
+ * anything else would be a question they could not answer.
+ *
+ * Attributed to the agency like every other outbound message — the client is told which
+ * agency they are dealing with, never which person, and "an automated system" would be
+ * both unhelpful and a worse experience than a plain question.
+ *
+ * Stamped `portal-ai` rather than `portal-staff` so the intent analyser skips it. Read
+ * back as an inbound message it would be a request describing our own question.
+ */
+const sendAutomatedReply = async ({ threadId, body }) => {
+    const text = assertSendable(body);
+    const { inboxAddress } = getCredentials();
+    const thread = await loadThreadForSend(threadId);
+
+    if (!thread.clientEmail) throw new ApiError(409, 'That conversation has no reply address');
+
+    const messageId = generateMessageId(String(inboxAddress).split('@')[1]);
+
+    const { raw } = buildMimeMessage({
+        from: { name: AGENCY_DISPLAY_NAME, email: inboxAddress },
+        to: { email: thread.clientEmail },
+        rawSubject: thread.rawSubject,
+        bodyText: text,
+        inReplyTo: thread.rfc822MessageIdOfLast,
+        references: thread.referencesTail || [],
+        messageId,
+        origin: 'portal-ai',
+    });
+
+    const sent = await GmailClient.sendMessage({ raw, threadId: thread.gmailThreadId });
+
+    await recordSentMessage({
+        thread,
+        userId: thread.userId,
+        direction: 'outbound',
+        origin: 'portal-ai',
+        // Written by us from our own template, so there was never anything of the
+        // client's in it to remove.
+        bodyRedacted: text,
+        messageId,
+        gmailMessageId: sent.id,
+    });
+
+    logger.info(`[GmailSend] automated reply sent on thread ${thread._id}`);
+    return { id: sent.id };
 };
 
 /**
@@ -453,6 +544,15 @@ const insertClientReply = async ({ threadId, body, user, files = [] }) => {
         gmailMessageId: sent.id,
         // The client named these, so a filename can carry their identity.
         attachments: attachmentRecords(files, bundle),
+    });
+
+    await analysePortalMessage({
+        thread,
+        gmailMessageId: sent.id,
+        direction: 'inbound',
+        origin: 'portal-client',
+        text,
+        user,
     });
 
     logger.info(`[GmailSend] client reply delivered on thread ${thread._id}`);
@@ -598,6 +698,20 @@ const startClientTicket = async ({ subject, body, user, files = [] }) => {
         logger.error(`[GmailSend] ticket ${thread._id} raised but acknowledgement failed: ${error.message}`);
     }
 
+    /**
+     * A ticket is a conversation, not a work item — "my listing is down" is not a task
+     * request. But clients routinely state one inside a ticket, and this is the same
+     * class of message as any other thing they write, so it is read like one.
+     */
+    await analysePortalMessage({
+        thread,
+        gmailMessageId: sent.id,
+        direction: 'inbound',
+        origin: 'portal-client',
+        text: `${rawSubject}\n\n${text}`,
+        user,
+    });
+
     logger.info(`[GmailSend] client opened ticket ${thread._id}`);
     return { threadId: String(thread._id), subject: thread.displaySubject, sentAt };
 };
@@ -672,6 +786,7 @@ module.exports = {
     insertClientReply,
     startClientTicket,
     sendTaskRequestEmail,
+    sendAutomatedReply,
     MAX_REPLY_CHARS,
     MAX_SUBJECT_CHARS,
     MAX_OPEN_TICKETS,
