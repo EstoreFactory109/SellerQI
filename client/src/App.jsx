@@ -254,7 +254,10 @@ const App = () => {
             <Route path='estore-factory/status' element={<EstoreFactoryStatus />} />
             <Route path='estore-factory/untapped' element={<EstoreFactoryUntapped />} />
             <Route path='estore-factory/reports' element={<EstoreFactoryReports />} />
+            {/* Keyless path kept so older links still resolve; the page falls back
+                to the Buy Box report, which is the one the original mock showed. */}
             <Route path='estore-factory/report-history' element={<EstoreFactoryReportHistory />} />
+            <Route path='estore-factory/report-history/:reportKey' element={<EstoreFactoryReportHistory />} />
             <Route path='estore-factory/messages' element={<EstoreFactoryMessages />} />
             <Route path='estore-factory/billing' element={<EstoreFactoryBilling />} />
             <Route path='review-request' element={<RecentOrders />} />

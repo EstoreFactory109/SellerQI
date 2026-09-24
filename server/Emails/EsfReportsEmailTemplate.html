@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your Estore Factory reports</title>
+</head>
+<!--
+  Estore Factory reports email.
+
+  Table-based with inline styles throughout, because that is what mail clients
+  reliably render - Outlook in particular ignores <style> blocks and modern CSS.
+  The palette matches report-template.html so the message and the PDFs attached
+  to it read as one family.
+
+  Placeholders: firstName, cadenceLabel, reportCount, reportWord, reportRows,
+  portalUrl, year.
+-->
+<body style="margin:0;padding:0;background:#F4F5F7;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F4F5F7;padding:24px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#FFFFFF;border-radius:6px;overflow:hidden;">
+
+          <!-- Banner, same navy as the report documents -->
+          <tr>
+            <td style="background:#1F3864;padding:22px 24px;">
+              <div style="font:bold 19px Arial,Helvetica,sans-serif;color:#FFFFFF;letter-spacing:.3px;">
+                ESTORE FACTORY
+              </div>
+              <div style="font:italic 13px Arial,Helvetica,sans-serif;color:#D9E2F3;margin-top:4px;">
+                Your {{cadenceLabel}} reports
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:24px 24px 8px;">
+              <p style="margin:0 0 12px;font:15px Arial,Helvetica,sans-serif;color:#111;">
+                Hello {{firstName}},
+              </p>
+              <p style="margin:0 0 18px;font:14px/1.6 Arial,Helvetica,sans-serif;color:#374151;">
+                Your {{cadenceLabel}} {{reportWord}} {{reportCount}} attached to this email as PDF.
+                Here is what each one found.
+              </p>
+            </td>
+          </tr>
+
+          <!-- One row per report: name, period, headline finding -->
+          <tr>
+            <td style="padding:0 24px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E6E9EE;border-radius:4px;">
+                {{reportRows}}
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:20px 24px 4px;">
+              <a href="{{portalUrl}}"
+                 style="display:inline-block;background:#1F3864;color:#FFFFFF;text-decoration:none;font:bold 14px Arial,Helvetica,sans-serif;padding:12px 22px;border-radius:6px;">
+                Open your reports
+              </a>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:16px 24px 24px;">
+              <p style="margin:0;font:12px/1.6 Arial,Helvetica,sans-serif;color:#6B7280;">
+                Each PDF shows a summary and the first rows of its table. The complete data,
+                and every earlier edition, is on your Reports page.
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="background:#F9FAFB;border-top:1px solid #E6E9EE;padding:16px 24px;">
+              <p style="margin:0;font:11px/1.6 Arial,Helvetica,sans-serif;color:#9CA3AF;">
+                Sent by Estore Factory because your account is managed by our team.<br>
+                &copy; {{year}} Estore Factory
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

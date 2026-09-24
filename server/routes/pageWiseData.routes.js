@@ -104,6 +104,7 @@ const { postEsfTaskReply } = require('../controllers/analytics/EsfProjectReplyCo
 const { getEsfBilling, downloadEsfInvoice } = require('../controllers/analytics/EsfBillingController.js');
 const { getEsfMessages, getEsfMessageThread, postEsfMessageReply, postEsfNewTicket, downloadEsfAttachment, postEsfTaskRequest } = require('../controllers/analytics/EsfClientMessagesController.js');
 const gmailUpload = require('../middlewares/multer/gmailUpload.js');
+const { getEsfReportsData, getEsfReportRowsData, getEsfReportHistoryData } = require('../controllers/analytics/EsfReportsController.js');
 const { zohoUpload, MAX_FILES, MAX_FILE_BYTES } = require('../middlewares/multer/zohoUpload.js');
 const { ApiResponse } = require('../utils/ApiResponse.js');
 const esfClientOnly = require('../middlewares/Auth/esfClientOnly.js');
@@ -314,6 +315,26 @@ router.get('/esf/billing', auth, esfClientOnly, analyseDataCache(300, 'esf-billi
 // The invoice PDF. Deliberately NOT behind analyseDataCache — that cache serves JSON
 // and would corrupt a binary body. Scoped to the caller inside the controller.
 router.get('/esf/billing/invoices/:invoiceNumber/pdf', auth, esfClientOnly, downloadEsfInvoice);
+
+// Every recurring report type, each computed live from the collection that backs it.
+// getLocation because every report is scoped to one marketplace. Cached for 10 minutes:
+// the underlying snapshots are refreshed hourly at most, and the fan-out here touches
+// eight collections, so re-running it per page view would be wasteful.
+router.get('/esf/reports', auth, esfClientOnly, getLocation, analyseDataCache(600, 'esf-reports'), getEsfReportsData);
+
+// One page of a single report's table, for the preview panel's pagination.
+// Deliberately NOT behind analyseDataCache: that middleware builds its key from
+// pageType + user + marketplace only, adding page/limit for a hardcoded list of
+// pageTypes (see redisCache.js). This route would therefore serve page 1 of the
+// first report for every page of every report. Rebuilding one report costs a
+// couple of Mongo reads against snapshots, which is cheaper than the bug.
+router.get('/esf/reports/:reportKey/rows', auth, esfClientOnly, getLocation, getEsfReportRowsData);
+
+// Every captured edition of one report, for the Report History page. Cached for
+// 10 minutes and keyed per report by the path, which analyseDataCache does not
+// see — so, like the rows route above, it is left uncached rather than served
+// the wrong report's history.
+router.get('/esf/reports/:reportKey/history', auth, esfClientOnly, getLocation, getEsfReportHistoryData);
 
 // Deliberately NOT behind analyseDataCache. Every sibling ESF route uses a 300s TTL;
 // on a chat surface that makes a reply appear to vanish for five minutes.
