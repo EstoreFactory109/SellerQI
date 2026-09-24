@@ -30,8 +30,10 @@ const newInviteToken = () => crypto.randomBytes(32).toString('hex');
 const inviteExpiry = () => new Date(Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000);
 const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
-const toMemberResponse = (member) => ({
+/** `viewerMemberId`: the member making the request, if any, so their own row is marked. */
+const toMemberResponse = (member, viewerMemberId = null) => ({
     _id: member._id,
+    isYou: Boolean(viewerMemberId) && String(member._id) === String(viewerMemberId),
     email: member.email,
     name: member.name || null,
     status: member.status,
@@ -81,7 +83,7 @@ const loadOwnMember = async (req, res) => {
 /** GET /app/members */
 const listMembers = asyncHandler(async (req, res) => {
     const members = await AccountMember.find({ owner: req.userId }).sort({ createdAt: -1 }).lean();
-    return res.status(200).json(new ApiResponse(200, members.map(toMemberResponse), 'Members fetched successfully'));
+    return res.status(200).json(new ApiResponse(200, members.map((m) => toMemberResponse(m, req.memberId)), 'Members fetched successfully'));
 });
 
 /** POST /app/members/invite — body: { email, name? } */
@@ -154,7 +156,7 @@ const renameMember = asyncHandler(async (req, res) => {
     if (!member) return;
     member.name = cleanName(req.body?.name);
     await member.save();
-    return res.status(200).json(new ApiResponse(200, toMemberResponse(member), 'Name updated'));
+    return res.status(200).json(new ApiResponse(200, toMemberResponse(member, req.memberId), 'Name updated'));
 });
 
 /**
@@ -164,6 +166,12 @@ const renameMember = asyncHandler(async (req, res) => {
 const removeMember = asyncHandler(async (req, res) => {
     const member = await loadOwnMember(req, res);
     if (!member) return;
+
+    // A member can edit their own name but not remove themselves - leaving an
+    // account is the owner's call (or another member's).
+    if (req.memberId && String(req.memberId) === String(member._id)) {
+        return res.status(403).json(new ApiResponse(403, '', 'You cannot remove yourself from this account'));
+    }
 
     // Their sessions live on this row (see createRefreshToken), and every token they
     // hold names them, so deleting the row ends their access on the next request.

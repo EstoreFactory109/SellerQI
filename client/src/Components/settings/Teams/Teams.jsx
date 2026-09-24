@@ -271,7 +271,14 @@ const Teams = () => {
                       </span>
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-gray-100 break-all">{member.name || member.email}</p>
+                      <p className="text-sm font-medium text-gray-100 break-all">
+                        {member.name || member.email}
+                        {member.isYou && (
+                          <span className="ml-2 align-middle text-[10px] font-semibold px-1.5 py-0.5 rounded border border-blue-400/30 bg-blue-500/10 text-blue-300">
+                            You
+                          </span>
+                        )}
+                      </p>
                       {member.name && <p className="text-xs text-gray-500 break-all">{member.email}</p>}
                     </div>
 
@@ -314,15 +321,18 @@ const Teams = () => {
                         <Pencil className="w-3.5 h-3.5" />
                         Name
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => setConfirmRemove(member)}
-                        disabled={busy}
-                        className="inline-flex items-center gap-1 text-xs font-medium text-red-400 hover:text-red-300 disabled:opacity-50"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        {pending ? 'Revoke' : 'Remove'}
-                      </button>
+                      {/* A member can rename themselves but not remove themselves (the server refuses too). */}
+                      {!member.isYou && (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmRemove(member)}
+                          disabled={busy}
+                          className="inline-flex items-center gap-1 text-xs font-medium text-red-400 hover:text-red-300 disabled:opacity-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          {pending ? 'Revoke' : 'Remove'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
