@@ -125,18 +125,36 @@ describe('confidence', () => {
 
 describe('the loops this could create', () => {
     test('never analyses a message this system wrote', async () => {
-        // Our own follow-up question, read back as a client message, would queue a
-        // request describing our own question.
+        // The ONLY origin that must be skipped. Our own follow-up question, read back as
+        // a client message, would queue a request describing our own question.
         await inbound({ origin: 'portal-ai' });
 
         expect(mockDetectTaskRequest).not.toHaveBeenCalled();
         expect(mockCreate).not.toHaveBeenCalled();
     });
 
-    test('never analyses a portal submission either', async () => {
+    test("DOES analyse a client's own portal message", async () => {
+        /**
+         * This test previously asserted the opposite, and in doing so pinned a real bug.
+         * The guard skipped everything that was not `email`, which silently excluded the
+         * portal — so a client typing "I want your team to create product images" into
+         * the composer had no request raised at all, while the identical sentence sent
+         * by email did. Most client messages arrive this way.
+         */
         await inbound({ origin: 'portal-client' });
 
-        expect(mockDetectTaskRequest).not.toHaveBeenCalled();
+        expect(mockDetectTaskRequest).toHaveBeenCalled();
+        expect(mockCreate).toHaveBeenCalled();
+    });
+
+    test('analyses a staff reply written in the portal too', async () => {
+        const pending = { _id: 'tr-1', status: 'pending', save: jest.fn() };
+        mockFindOne.mockResolvedValue(pending);
+        mockDetectDecision.mockResolvedValue({ intent: 'accept', confidence: 0.95, actionable: true, reason: '' });
+
+        await outbound({ origin: 'portal-staff' });
+
+        expect(pending.stagedDecision.intent).toBe('accept');
     });
 
     test('a second message on a thread does not create a second request', async () => {

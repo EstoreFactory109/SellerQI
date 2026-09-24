@@ -197,9 +197,20 @@ const handleStaffMessage = async ({ rawText, thread, message }) => {
  */
 const analyseMessage = async ({ direction, origin, rawText, user, thread, message }) => {
     try {
-        // Never analyse our own writing. An automated follow-up read back as a client
-        // request would queue a request describing our own question.
-        if (origin && origin !== 'email') return null;
+        /**
+         * Skip ONLY our own automated writing.
+         *
+         * This used to skip everything that was not `email`, which quietly excluded the
+         * client's own portal messages — and those are exactly as likely to contain a
+         * request as an emailed one. A client typing "I want your team to create product
+         * images" into the portal got no request raised at all, because the message was
+         * stored as `portal-client` and never looked at.
+         *
+         * `portal-ai` is the only origin that must never be read: it is the follow-up
+         * question this system wrote, and reading it back as a client message would
+         * queue a request describing our own question.
+         */
+        if (origin === 'portal-ai') return null;
         if (!rawText || !thread || !message) return null;
 
         return direction === 'inbound'

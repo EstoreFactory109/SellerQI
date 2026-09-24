@@ -347,6 +347,37 @@ const acknowledgeTicket = async ({ thread, rawSubject, text, fromAddress, gmailT
 };
 
 /**
+ * Read a portal-written message for intent, the way ingestion does for an emailed one.
+ *
+ * Needed because these never pass through ingestMessage: the portal writes its own row
+ * directly, and the Gmail echo that comes back is skipped as our own. So without this
+ * call, every request or decision written in the portal went unread — which is most of
+ * them, now that the composer works.
+ *
+ * Non-fatal and not awaited for its result: a reply must never fail because an analysis
+ * did. analyseMessage swallows its own errors for the same reason.
+ */
+const analysePortalMessage = async ({ thread, gmailMessageId, direction, origin, text, user }) => {
+    try {
+        const stored = await EmailMessage.findOne({ gmailMessageId }).select('_id').lean();
+        if (!stored) return;
+
+        const { analyseMessage } = require('../User/MessageIntentHandler.js');
+        await analyseMessage({
+            direction,
+            origin,
+            // What they typed, before redaction — same input ingestion gives it.
+            rawText: text,
+            user,
+            thread,
+            message: stored,
+        });
+    } catch (error) {
+        logger.warn(`[GmailSend] intent analysis skipped for ${gmailMessageId}: ${error.message}`);
+    }
+};
+
+/**
  * A staff member replies. The email is genuinely sent to the client.
  *
  * @param {object} args
@@ -397,6 +428,14 @@ const sendStaffReply = async ({ threadId, body, staffUserId = null, files = [] }
         sentByUserId: staffUserId,
         // Staff wrote the filenames, so there is nothing of the client's to redact.
         attachments: attachmentRecords(files),
+    });
+
+    await analysePortalMessage({
+        thread,
+        gmailMessageId: sent.id,
+        direction: 'outbound',
+        origin: 'portal-staff',
+        text,
     });
 
     logger.info(`[GmailSend] staff reply sent on thread ${thread._id}`);
@@ -505,6 +544,15 @@ const insertClientReply = async ({ threadId, body, user, files = [] }) => {
         gmailMessageId: sent.id,
         // The client named these, so a filename can carry their identity.
         attachments: attachmentRecords(files, bundle),
+    });
+
+    await analysePortalMessage({
+        thread,
+        gmailMessageId: sent.id,
+        direction: 'inbound',
+        origin: 'portal-client',
+        text,
+        user,
     });
 
     logger.info(`[GmailSend] client reply delivered on thread ${thread._id}`);
@@ -649,6 +697,20 @@ const startClientTicket = async ({ subject, body, user, files = [] }) => {
     } catch (error) {
         logger.error(`[GmailSend] ticket ${thread._id} raised but acknowledgement failed: ${error.message}`);
     }
+
+    /**
+     * A ticket is a conversation, not a work item — "my listing is down" is not a task
+     * request. But clients routinely state one inside a ticket, and this is the same
+     * class of message as any other thing they write, so it is read like one.
+     */
+    await analysePortalMessage({
+        thread,
+        gmailMessageId: sent.id,
+        direction: 'inbound',
+        origin: 'portal-client',
+        text: `${rawSubject}\n\n${text}`,
+        user,
+    });
 
     logger.info(`[GmailSend] client opened ticket ${thread._id}`);
     return { threadId: String(thread._id), subject: thread.displaySubject, sentAt };
