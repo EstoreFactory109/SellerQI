@@ -193,9 +193,14 @@ const Messages = () => {
             large pushes the composer out of reach. MainPagesLayout marks this route as
             owning its scrolling, so the parent is a definite-height flex column and
             this simply fills it.
+
+            flex-col rather than the default row: as a row item the card below sized to
+            its own content and stopped filling the width.
         */
-        <div className="flex min-h-0 w-full flex-1 p-3 md:p-6" style={{ background: PALETTE.bg }}>
-            <div className="mx-auto flex h-full max-w-[1600px] overflow-hidden rounded-xl border" style={panel}>
+        <div className="flex min-h-0 w-full flex-1 flex-col p-3 md:p-6" style={{ background: PALETTE.bg }}>
+            {/* w-full so the max-width is a cap rather than the width — an auto-margined
+                flex item sizes to its content otherwise. */}
+            <div className="mx-auto flex w-full max-w-[1600px] flex-1 overflow-hidden rounded-xl border" style={panel}>
 
                 {/* Conversation list */}
                 {/*

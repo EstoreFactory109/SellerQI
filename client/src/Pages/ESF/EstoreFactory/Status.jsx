@@ -569,7 +569,9 @@ const Status = () => {
            down an empty page. The layout marks this route as filling the viewport, so
            the parent is a flex column and this grows into it. */
         <div className="flex w-full flex-1 flex-col" style={{ background: PALETTE.bg, color: PALETTE.textPrimary, fontFamily: "system-ui, -apple-system, 'Helvetica Neue', Helvetica, sans-serif" }}>
-            <div className="max-w-[1170px] mx-auto flex flex-col gap-[26px] px-8 md:px-10 py-9 md:py-11">
+            {/* w-full because mx-auto on a flex item cancels the default stretch, which
+                left this sized to its content once the parent became a flex column. */}
+            <div className="w-full max-w-[1170px] mx-auto flex flex-col gap-[26px] px-4 sm:px-8 md:px-10 py-9 md:py-11">
 
                 <header className="flex flex-col gap-[7px]">
                     <h1 className="m-0 text-[29px] font-semibold tracking-[-0.02em]">Status</h1>
