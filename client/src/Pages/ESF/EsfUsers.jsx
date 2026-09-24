@@ -62,6 +62,10 @@ const EsfUsers = () => {
   const [invites, setInvites] = useState([]);
   const [permissionsMember, setPermissionsMember] = useState(null);
   const [renameTarget, setRenameTarget] = useState(null);
+  // In-page confirmation for "Make admin" / "Make member" (was window.confirm).
+  const [roleTarget, setRoleTarget] = useState(null);
+  const [roleSaving, setRoleSaving] = useState(false);
+  const [roleError, setRoleError] = useState('');
   const dropdownRef = useRef(null);
   const openDropdownButtonRef = useRef(null);
 
@@ -167,19 +171,30 @@ const EsfUsers = () => {
     }
   };
 
-  const handleChangeRole = async (user) => {
-    const nextRole = user.esfRole === 'admin' ? 'member' : 'admin';
-    const ok = window.confirm(`Change ${nameOf(user)} from ${user.esfRole} to ${nextRole}?`);
-    if (!ok) return;
+  const nextRoleOf = (user) => (user.esfRole === 'admin' ? 'member' : 'admin');
+
+  const openRoleConfirm = (user) => {
+    setRoleError('');
+    setRoleTarget(user);
+  };
+
+  const handleChangeRole = async () => {
+    const user = roleTarget;
+    const nextRole = nextRoleOf(user);
+    setRoleSaving(true);
+    setRoleError('');
     try {
       const res = await axiosInstance.patch(`/app/esf/users/${user._id}/role`, { role: nextRole });
       if (res.data?.statusCode === 200) {
         setUsers((prev) => prev.map((u) => (u._id === user._id ? { ...u, esfRole: nextRole } : u)));
+        setRoleTarget(null);
       } else {
-        setError(res.data?.message || 'Failed to change role');
+        setRoleError(res.data?.message || 'Failed to change role');
       }
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to change role');
+      setRoleError(err.response?.data?.message || 'Failed to change role');
+    } finally {
+      setRoleSaving(false);
     }
   };
 
@@ -610,7 +625,7 @@ const EsfUsers = () => {
                     onClick={() => {
                       setOpenDropdownId(null);
                       setDropdownPosition(null);
-                      handleChangeRole(user);
+                      openRoleConfirm(user);
                     }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-gray-300 hover:bg-[#252525] hover:text-gray-100"
                   >
@@ -634,6 +649,61 @@ const EsfUsers = () => {
                 document.body
               );
             })()}
+
+            {/* Role change confirmation */}
+            {roleTarget && createPortal(
+              <div
+                className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[210] p-4"
+                onClick={() => !roleSaving && setRoleTarget(null)}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="esf-role-dialog-title"
+              >
+                <div
+                  className="bg-[#101722] rounded-2xl max-w-md w-full p-6 border border-white/10 shadow-2xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-9 h-9 rounded-xl bg-blue-500/15 border border-blue-400/20 flex items-center justify-center">
+                      <Shield className="w-4 h-4 text-blue-400" />
+                    </div>
+                    <h3 id="esf-role-dialog-title" className="text-base font-semibold text-gray-100">
+                      {nextRoleOf(roleTarget) === 'admin' ? 'Make admin' : 'Make member'}
+                    </h3>
+                  </div>
+                  <p className="text-sm text-gray-400 mb-1">
+                    Change <span className="text-gray-200 font-medium">{nameOf(roleTarget)}</span> from{' '}
+                    <span className="text-gray-200">{(ROLE_BADGE[roleTarget.esfRole] || ROLE_BADGE.member).label}</span> to{' '}
+                    <span className="text-gray-200">{(ROLE_BADGE[nextRoleOf(roleTarget)] || ROLE_BADGE.member).label}</span>?
+                  </p>
+                  <p className="text-xs text-gray-500 mb-4">
+                    {nextRoleOf(roleTarget) === 'admin'
+                      ? 'Admins can see client details, open client accounts, and manage team members.'
+                      : 'Members work on clients but cannot see client identities, open client accounts, or manage the team.'}
+                  </p>
+                  {roleError && <p className="text-xs text-red-400 mb-4">{roleError}</p>}
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRoleTarget(null)}
+                      disabled={roleSaving}
+                      className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-white/10 text-gray-300 hover:bg-white/[0.05] hover:text-gray-200 transition-colors disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleChangeRole}
+                      disabled={roleSaving}
+                      className="flex-1 px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50 transition-colors"
+                    >
+                      {roleSaving ? 'Saving…' : 'Change role'}
+                    </button>
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )}
 
             <RenameDialog
               open={!!renameTarget}
