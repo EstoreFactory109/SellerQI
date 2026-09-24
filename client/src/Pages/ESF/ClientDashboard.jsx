@@ -227,8 +227,8 @@ const ClientDashboard = () => {
         || comingUp.find((t) => t.source === 'suggested');
 
     return (
-        <div className="min-h-full w-full" style={{ background: PALETTE.bg, color: PALETTE.textPrimary, fontFamily: "system-ui, -apple-system, 'Helvetica Neue', Helvetica, sans-serif" }}>
-            <div className="max-w-[1170px] mx-auto flex flex-col gap-7 px-8 md:px-10 py-9 md:py-11">
+        <div className="flex w-full flex-1 flex-col" style={{ background: PALETTE.bg, color: PALETTE.textPrimary, fontFamily: "system-ui, -apple-system, 'Helvetica Neue', Helvetica, sans-serif" }}>
+            <div className="w-full max-w-[1170px] mx-auto flex flex-col gap-7 px-8 md:px-10 py-9 md:py-11">
 
                 {/* Header */}
                 <header className="flex flex-col gap-[7px]">

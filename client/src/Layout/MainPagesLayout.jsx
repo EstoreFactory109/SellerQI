@@ -34,9 +34,18 @@ const MainPagesLayout = () => {
    * Both are route-scoped rather than applied to every page, because turning the shared
    * wrapper into a flex column would change the box model for every page under this
    * layout to fix two.
+   *
+   * fillsViewport matches the ESF client group by PREFIX rather than naming each route.
+   * Every page in that group is built to the same shape — a full-bleed tinted background
+   * with a centred 1170px column — so every one of them showed the same halfway-down
+   * background when it had little or no data, and listing them one at a time just meant
+   * coming back for the next one. `/esf/estore-factory/zoho-projects` is not caught by
+   * this: it renders under EsfLayout, where this component never mounts.
    */
   const ownsItsScrolling = onQMatePage || location.pathname.includes('estore-factory/messages')
-  const fillsViewport = ownsItsScrolling || location.pathname.includes('estore-factory/status')
+  const fillsViewport = ownsItsScrolling
+    || location.pathname.includes('estore-factory/')
+    || location.pathname.includes('client-dashboard')
 
   // Given to every page below via context so a single row can ask about itself.
   const qmateValue = useMemo(() => ({
