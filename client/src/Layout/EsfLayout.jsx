@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, useLocation, useNavigate, NavLink } from 'react-router-dom';
-import { Users, UserCog, LogOut, Menu, User, Key, HelpCircle, Building2, MessageSquare } from 'lucide-react';
+import { Users, UserCog, LogOut, Menu, User, Key, HelpCircle, Building2, MessageSquare, ClipboardList } from 'lucide-react';
 import axiosInstance from '../config/axios.config.js';
 import { useEsfUser } from '../contexts/EsfUserContext.js';
 import sellerQILogo from '../assets/Logo/sellerQILogo.png';
@@ -10,6 +10,7 @@ const PAGE_TITLES = {
   '/esf/users': { title: 'Team members', subtitle: 'Manage who can access this portal' },
   '/esf/estore-factory/zoho-projects': { title: 'Zoho Projects', subtitle: 'Connect and manage the shared Zoho Projects account' },
   '/esf/messages': { title: 'Messages', subtitle: 'Client conversations — shown by project, never by name' },
+  '/esf/task-requests': { title: 'Task requests', subtitle: 'Work clients have asked for — accepting creates the task in Zoho' },
   '/esf/settings': { title: 'Settings', subtitle: 'Your profile and preferences' },
 };
 
@@ -87,6 +88,10 @@ const EsfLayout = () => {
             <NavLink to="/esf/messages" className={({ isActive }) => navItemClass(isActive)}>
               <MessageSquare className="w-5 h-5 shrink-0" />
               <span className="text-sm font-medium">Messages</span>
+            </NavLink>
+            <NavLink to="/esf/task-requests" className={({ isActive }) => navItemClass(isActive)}>
+              <ClipboardList className="w-5 h-5 shrink-0" />
+              <span className="text-sm font-medium">Task requests</span>
             </NavLink>
           </nav>
 

@@ -79,6 +79,7 @@ import EstoreFactoryMessages from './Pages/ESF/EstoreFactory/Messages.jsx';
 import EstoreFactoryBilling from './Pages/ESF/EstoreFactory/Billing.jsx';
 import EsfEstoreFactoryZoho from './Pages/ESF/EsfEstoreFactoryZoho.jsx';
 import EsfMessages from './Pages/ESF/EsfMessages.jsx';
+import EsfTaskRequests from './Pages/ESF/EsfTaskRequests.jsx'
 import EsfPageAccessGuard from './Layout/EsfPageAccessGuard.jsx';
 import AdminSubscription from './Pages/Admin/Subscription.jsx';
 import AdminEmailLogs from './Pages/Admin/EmailLogs.jsx';
@@ -182,6 +183,7 @@ const App = () => {
             <Route path='clients' element={<EsfClients />} />
             <Route path='users' element={<EsfUsers />} />
             <Route path='messages' element={<EsfMessages />} />
+            <Route path='task-requests' element={<EsfTaskRequests />} />
             <Route path='estore-factory/zoho-projects' element={<EsfEstoreFactoryZoho />} />
             <Route path='settings' element={<EsfSettings />} />
           </Route>
