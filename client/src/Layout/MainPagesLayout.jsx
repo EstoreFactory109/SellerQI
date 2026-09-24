@@ -19,6 +19,25 @@ const MainPagesLayout = () => {
   const [qmateQuestion, setQmateQuestion] = useState(null)
   const onQMatePage = location.pathname.includes('qmate')
 
+  /**
+   * Height opt-ins, because the wrapper around <Outlet/> is auto-height by default and
+   * nothing inside it can resolve a percentage height against that.
+   *
+   * ownsItsScrolling — the page manages its own scroll panes and must be exactly the
+   * viewport, never taller. QMate already needed this; the Messages inbox is the same
+   * shape, with a list and a conversation that scroll independently and a composer
+   * pinned to the bottom.
+   *
+   * fillsViewport — the page scrolls normally but must COVER the viewport, so an empty
+   * or short state does not leave its background stopping halfway down the screen.
+   *
+   * Both are route-scoped rather than applied to every page, because turning the shared
+   * wrapper into a flex column would change the box model for every page under this
+   * layout to fix two.
+   */
+  const ownsItsScrolling = onQMatePage || location.pathname.includes('estore-factory/messages')
+  const fillsViewport = ownsItsScrolling || location.pathname.includes('estore-factory/status')
+
   // Given to every page below via context so a single row can ask about itself.
   const qmateValue = useMemo(() => ({
     askQMate: (question) => {
@@ -93,13 +112,21 @@ const MainPagesLayout = () => {
             <TrialBanner/>
             <div
               ref={scrollContainerRef}
-              className={`relative flex-1 min-h-0 overflow-x-hidden scrollbar-hide ${onQMatePage ? 'overflow-hidden flex flex-col' : 'overflow-y-auto'}`}
+              className={`relative flex-1 min-h-0 overflow-x-hidden scrollbar-hide ${ownsItsScrolling ? 'overflow-hidden flex flex-col' : 'overflow-y-auto'}`}
               style={{ overscrollBehaviorY: 'auto', overscrollBehaviorX: 'contain', scrollBehavior: 'smooth' }}
             >
                 {showArrivalFlash && (
                     <div className="pointer-events-none absolute inset-x-0 top-0 h-28 z-20 bg-gradient-to-b from-blue-500/25 via-blue-500/10 to-transparent animate-pulse" />
                 )}
-                <div className={onQMatePage ? 'flex-1 min-h-0 flex flex-col lg:pt-0 pt-[8vh] pb-0' : 'lg:pt-0 pt-[8vh] pb-0'}>
+                <div
+                  className={
+                    ownsItsScrolling
+                      ? 'flex-1 min-h-0 flex flex-col lg:pt-0 pt-[8vh] pb-0'
+                      : fillsViewport
+                        ? 'min-h-full flex flex-col lg:pt-0 pt-[8vh] pb-0'
+                        : 'lg:pt-0 pt-[8vh] pb-0'
+                  }
+                >
                     <ErrorBoundary resetKey={location.pathname} title="Page Error" message="Something went wrong loading this page. Try navigating again or refreshing.">
                         <QMateContext.Provider value={qmateValue}>
                             <Outlet/>

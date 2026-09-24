@@ -187,11 +187,14 @@ const Messages = () => {
 
     return (
         /*
-            dvh rather than vh: on mobile browsers vh includes the space behind the
-            collapsing address bar, which pushed the composer off-screen with no way to
-            reach it. The floor keeps the pane usable on short windows.
+            flex-1 within the layout's own column rather than a viewport calculation.
+            The calc had to guess the height of the nav and banner above it, and any
+            guess is wrong on some screen — too small leaves a gap under the page, too
+            large pushes the composer out of reach. MainPagesLayout marks this route as
+            owning its scrolling, so the parent is a definite-height flex column and
+            this simply fills it.
         */
-        <div className="h-[calc(100dvh-150px)] min-h-[520px] w-full p-3 md:p-6" style={{ background: PALETTE.bg }}>
+        <div className="flex min-h-0 w-full flex-1 p-3 md:p-6" style={{ background: PALETTE.bg }}>
             <div className="mx-auto flex h-full max-w-[1600px] overflow-hidden rounded-xl border" style={panel}>
 
                 {/* Conversation list */}
