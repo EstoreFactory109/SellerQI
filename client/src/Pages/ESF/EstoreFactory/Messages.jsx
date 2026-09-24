@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import axiosInstance from '../../../config/axios.config.js';
 import { PALETTE } from '../../../Components/ESF/estoreFactoryTheme.js';
+import AttachmentPicker from '../../../Components/ESF/AttachmentPicker.jsx';
 
 /**
  * Estore Factory > Messages — the client's own conversations.
@@ -372,49 +373,18 @@ const Messages = () => {
                             </div>
 
                             <div className="border-t px-4 py-3" style={{ borderColor: PALETTE.border }}>
-                                {files.length > 0 && (
-                                    <div className="mb-2 flex flex-wrap gap-1.5">
-                                        {files.map((file, i) => (
-                                            <span
-                                                key={`${file.name}-${i}`}
-                                                className="flex items-center gap-1.5 rounded px-2 py-1 text-[11px]"
-                                                style={{ background: 'rgba(255,255,255,.07)', color: PALETTE.textSecondary }}
-                                            >
-                                                <span className="max-w-[160px] truncate">{file.name}</span>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setFiles((c) => c.filter((_, j) => j !== i))}
-                                                    style={{ color: PALETTE.textTertiary }}
-                                                >
-                                                    ×
-                                                </button>
-                                            </span>
-                                        ))}
-                                    </div>
-                                )}
+                                <div className="mb-2">
+                                    <AttachmentPicker
+                                        files={files}
+                                        onChange={setFiles}
+                                        disabled={sending}
+                                        tone="client"
+                                    />
+                                </div>
                                 <div
                                     className="flex items-end gap-2 rounded-lg px-3 py-2"
                                     style={{ background: 'rgba(255,255,255,.05)' }}
                                 >
-                                    <label
-                                        className="mb-0.5 shrink-0 cursor-pointer text-[16px] leading-none"
-                                        style={{ color: PALETTE.textTertiary }}
-                                        title="Attach files"
-                                    >
-                                        📎
-                                        <input
-                                            type="file"
-                                            multiple
-                                            hidden
-                                            disabled={sending}
-                                            onChange={(e) => {
-                                                // Capped here too, so picking ten says so now
-                                                // rather than after the upload finishes.
-                                                setFiles((c) => [...c, ...Array.from(e.target.files || [])].slice(0, 5));
-                                                e.target.value = '';
-                                            }}
-                                        />
-                                    </label>
                                     <textarea
                                         rows={1}
                                         value={draft}
@@ -508,37 +478,14 @@ const Messages = () => {
                         <label className="mt-3 block text-[11.5px] font-medium" style={{ color: PALETTE.textSecondary }}>
                             Attachments (optional)
                         </label>
-                        <input
-                            type="file"
-                            multiple
-                            disabled={raising}
-                            onChange={(e) => {
-                                setTicketFiles((c) => [...c, ...Array.from(e.target.files || [])].slice(0, 5));
-                                e.target.value = '';
-                            }}
-                            className="mt-1 w-full text-[11.5px]"
-                            style={{ color: PALETTE.textTertiary }}
-                        />
-                        {ticketFiles.length > 0 && (
-                            <div className="mt-1.5 flex flex-wrap gap-1.5">
-                                {ticketFiles.map((file, i) => (
-                                    <span
-                                        key={`${file.name}-${i}`}
-                                        className="flex items-center gap-1.5 rounded px-2 py-1 text-[11px]"
-                                        style={{ background: 'rgba(255,255,255,.07)', color: PALETTE.textSecondary }}
-                                    >
-                                        <span className="max-w-[160px] truncate">{file.name}</span>
-                                        <button
-                                            type="button"
-                                            onClick={() => setTicketFiles((c) => c.filter((_, j) => j !== i))}
-                                            style={{ color: PALETTE.textTertiary }}
-                                        >
-                                            ×
-                                        </button>
-                                    </span>
-                                ))}
-                            </div>
-                        )}
+                        <div className="mt-1">
+                            <AttachmentPicker
+                                files={ticketFiles}
+                                onChange={setTicketFiles}
+                                disabled={raising}
+                                tone="client"
+                            />
+                        </div>
 
                         {/*
                             Said before they type it rather than after: contact details get
