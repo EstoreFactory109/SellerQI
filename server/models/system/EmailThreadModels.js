@@ -116,7 +116,11 @@ const EmailMessageSchema = new mongoose.Schema({
      */
     origin: {
         type: String,
-        enum: ['email', 'portal-client', 'portal-staff'],
+        // 'portal-ai' is a message this system wrote by itself — currently the
+        // follow-up asking a client for details their request was missing. Distinct
+        // from 'portal-staff' because nobody typed it, and because the intent analyser
+        // must never read its own words back as a new client request.
+        enum: ['email', 'portal-client', 'portal-staff', 'portal-ai'],
         default: 'email',
     },
 

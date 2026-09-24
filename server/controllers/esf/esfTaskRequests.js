@@ -86,6 +86,25 @@ const present = (request, meta) => ({
         size: file.size,
     })),
     status: request.status,
+    // Surfaced so an admin deciding whether to create real work knows whether a human
+    // typed this or a model inferred it from a conversation.
+    source: request.source || 'portal',
+    aiConfidence: request.aiConfidence,
+    threadId: request.sourceThreadId ? String(request.sourceThreadId) : null,
+    missingDetails: request.missingDetails || [],
+    detailsRequestedAt: request.detailsRequestedAt,
+    /**
+     * A decision read out of the conversation but NOT applied. The admin confirms it
+     * with one click; nothing reached Zoho on the model's say-so.
+     */
+    stagedDecision: request.stagedDecision?.intent
+        ? {
+            intent: request.stagedDecision.intent,
+            reason: request.stagedDecision.reason,
+            confidence: request.stagedDecision.confidence,
+            detectedAt: request.stagedDecision.detectedAt,
+        }
+        : null,
     requestedAt: request.requestedAt,
     decidedAt: request.decidedAt,
     rejectionReason: request.rejectionReason,
@@ -161,6 +180,38 @@ const rejectTaskRequest = decide('rejected', (req) => {
 });
 
 /**
+ * PATCH /app/esf/task-requests/:requestId/dismiss-suggestion
+ *
+ * Throw away a staged decision without acting on it — the AI read the reply wrong, and
+ * the request goes back to waiting.
+ *
+ * Exists so the only way past a wrong suggestion is not to accept or reject something
+ * the admin did not mean. Without it the staged banner would be a nag with two wrong
+ * answers.
+ */
+const dismissStagedDecision = asyncHandler(async (req, res) => {
+    try {
+        if (!requireManager(req, res)) return undefined;
+
+        const updated = await TaskRequest.findByIdAndUpdate(
+            req.params.requestId,
+            { $set: { 'stagedDecision.intent': null, 'stagedDecision.reason': null } },
+            { new: true }
+        ).lean();
+
+        if (!updated) return res.status(404).json(new ApiResponse(404, '', 'Request not found'));
+
+        const labels = await labelsFor([updated]);
+        return res.status(200).json(new ApiResponse(
+            200, present(updated, labels.get(String(updated.userId))), 'Suggestion dismissed'
+        ));
+    } catch (error) {
+        logger.error(new ApiError(500, `[EsfTaskRequests] dismiss failed: ${error.message}`));
+        return res.status(500).json(new ApiResponse(500, '', 'Could not dismiss that suggestion'));
+    }
+});
+
+/**
  * DELETE /app/esf/task-requests/:requestId
  *
  * A hard delete. Nothing of record is lost: the request email, with its attachments, is
@@ -223,5 +274,6 @@ module.exports = {
     acceptTaskRequest,
     rejectTaskRequest,
     deleteTaskRequest,
+    dismissStagedDecision,
     downloadTaskRequestAttachment,
 };

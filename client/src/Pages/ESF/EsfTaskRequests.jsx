@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ClipboardList, Check, X, Trash2, Paperclip, AlertTriangle } from 'lucide-react';
+import { ClipboardList, Check, X, Trash2, Paperclip, AlertTriangle, Sparkles, MessageSquare } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 
 /**
@@ -80,6 +80,8 @@ const EsfTaskRequests = () => {
 
     const remove = (id) => act(id, () => axiosInstance.delete(`/app/esf/task-requests/${id}`));
 
+    const dismiss = (id) => act(id, () => axiosInstance.patch(`/app/esf/task-requests/${id}/dismiss-suggestion`));
+
     return (
         <div className="w-full p-4 md:p-6">
             <div className="mx-auto max-w-[1100px]">
@@ -120,7 +122,26 @@ const EsfTaskRequests = () => {
                         >
                             <div className="flex flex-wrap items-start gap-3">
                                 <div className="min-w-0 flex-1">
-                                    <p className="text-[14.5px] font-semibold text-gray-100">{request.title}</p>
+                                    <p className="flex flex-wrap items-center gap-2 text-[14.5px] font-semibold text-gray-100">
+                                        {request.title}
+                                        {/*
+                                            Said plainly, because it changes how carefully
+                                            this should be read: a model wrote this summary
+                                            from an email, and the link goes to the message
+                                            so that can be checked rather than trusted.
+                                        */}
+                                        {request.source === 'ai' && (
+                                            <span
+                                                className="inline-flex items-center gap-1 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10.5px] font-medium text-violet-300"
+                                                title={request.aiConfidence
+                                                    ? `Read from a message, ${Math.round(request.aiConfidence * 100)}% confidence`
+                                                    : 'Read from a message'}
+                                            >
+                                                <Sparkles className="h-3 w-3" />
+                                                From a message
+                                            </span>
+                                        )}
+                                    </p>
                                     <p className="mt-0.5 text-[12px] text-gray-500">
                                         {request.client}
                                         {request.neededBy ? ` · needed by ${dateLabel(request.neededBy)}` : ''}
@@ -181,6 +202,66 @@ const EsfTaskRequests = () => {
                                 <p className="mt-3 text-[11.5px] text-emerald-300/70">
                                     Created in Zoho as task {request.zohoTaskId}. It appears on the client&apos;s
                                     Status page once the project finishes re-syncing.
+                                </p>
+                            )}
+
+                            {/*
+                                A decision the AI read in the conversation, deliberately NOT
+                                applied. Accepting creates a real task in the live Zoho
+                                portal, so the model stages and a human authorises — which is
+                                the approval gate this would otherwise walk straight past.
+                            */}
+                            {request.status === 'pending' && request.stagedDecision && (
+                                <div className="mt-3 rounded-lg border border-violet-500/25 bg-violet-500/[0.07] p-3">
+                                    <p className="flex items-start gap-1.5 text-[12px] text-violet-200">
+                                        <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                        <span>
+                                            Your reply in this conversation reads as{' '}
+                                            <strong>
+                                                {request.stagedDecision.intent === 'accept' ? 'accepting' : 'declining'}
+                                            </strong>{' '}
+                                            this request. Nothing has been done yet.
+                                            {request.stagedDecision.reason
+                                                ? ` Reason read: "${request.stagedDecision.reason}"`
+                                                : ''}
+                                        </span>
+                                    </p>
+                                    <div className="mt-2.5 flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            disabled={busyId === request.id}
+                                            onClick={() => (request.stagedDecision.intent === 'accept'
+                                                ? accept(request.id)
+                                                : (setRejectingId(request.id), setReason(request.stagedDecision.reason || '')))}
+                                            className="rounded-lg bg-violet-500/80 px-3 py-1.5 text-xs font-semibold text-[#0b0f17] transition-opacity hover:bg-violet-500 disabled:opacity-40"
+                                        >
+                                            {request.stagedDecision.intent === 'accept'
+                                                ? 'Confirm — create the task'
+                                                : 'Confirm — decline it'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={busyId === request.id}
+                                            onClick={() => dismiss(request.id)}
+                                            className="rounded-lg px-2.5 py-1.5 text-xs text-gray-400 transition-colors hover:bg-white/5 hover:text-gray-200 disabled:opacity-40"
+                                        >
+                                            That&apos;s not what I meant
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/*
+                                Only worth showing while it still matters — once a client has
+                                answered, missingDetails is cleared by the handler.
+                            */}
+                            {request.status === 'pending' && request.missingDetails?.length > 0 && (
+                                <p className="mt-3 flex items-start gap-1.5 text-[11.5px] text-gray-500">
+                                    <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                    Missing {request.missingDetails.join(' and ')}.
+                                    {request.detailsRequestedAt
+                                        ? ' The client has been asked.'
+                                        : ' Not yet asked.'}
                                 </p>
                             )}
 

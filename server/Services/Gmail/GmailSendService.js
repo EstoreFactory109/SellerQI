@@ -404,6 +404,58 @@ const sendStaffReply = async ({ threadId, body, staffUserId = null, files = [] }
 };
 
 /**
+ * A reply this system wrote by itself, into an existing conversation.
+ *
+ * Currently one thing: asking a client for the details a request of theirs was missing.
+ * It is a real email to the client and a real message in their portal thread, because
+ * anything else would be a question they could not answer.
+ *
+ * Attributed to the agency like every other outbound message — the client is told which
+ * agency they are dealing with, never which person, and "an automated system" would be
+ * both unhelpful and a worse experience than a plain question.
+ *
+ * Stamped `portal-ai` rather than `portal-staff` so the intent analyser skips it. Read
+ * back as an inbound message it would be a request describing our own question.
+ */
+const sendAutomatedReply = async ({ threadId, body }) => {
+    const text = assertSendable(body);
+    const { inboxAddress } = getCredentials();
+    const thread = await loadThreadForSend(threadId);
+
+    if (!thread.clientEmail) throw new ApiError(409, 'That conversation has no reply address');
+
+    const messageId = generateMessageId(String(inboxAddress).split('@')[1]);
+
+    const { raw } = buildMimeMessage({
+        from: { name: AGENCY_DISPLAY_NAME, email: inboxAddress },
+        to: { email: thread.clientEmail },
+        rawSubject: thread.rawSubject,
+        bodyText: text,
+        inReplyTo: thread.rfc822MessageIdOfLast,
+        references: thread.referencesTail || [],
+        messageId,
+        origin: 'portal-ai',
+    });
+
+    const sent = await GmailClient.sendMessage({ raw, threadId: thread.gmailThreadId });
+
+    await recordSentMessage({
+        thread,
+        userId: thread.userId,
+        direction: 'outbound',
+        origin: 'portal-ai',
+        // Written by us from our own template, so there was never anything of the
+        // client's in it to remove.
+        bodyRedacted: text,
+        messageId,
+        gmailMessageId: sent.id,
+    });
+
+    logger.info(`[GmailSend] automated reply sent on thread ${thread._id}`);
+    return { id: sent.id };
+};
+
+/**
  * A client replies from the portal. Inserted into the Gmail thread; nothing is mailed.
  *
  * @param {object} args
@@ -672,6 +724,7 @@ module.exports = {
     insertClientReply,
     startClientTicket,
     sendTaskRequestEmail,
+    sendAutomatedReply,
     MAX_REPLY_CHARS,
     MAX_SUBJECT_CHARS,
     MAX_OPEN_TICKETS,

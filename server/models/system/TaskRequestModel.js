@@ -73,6 +73,52 @@ const TaskRequestSchema = new mongoose.Schema({
     /** The request email. Without it the attachments cannot be fetched at all. */
     gmailMessageId: { type: String, default: null },
 
+    /**
+     * Where this came from. 'portal' is the client filling in the form; 'ai' is this
+     * system reading a request out of an email they wrote.
+     *
+     * Surfaced on the queue rather than kept internal, because an admin deciding whether
+     * to create real work should know whether a human typed this or a model inferred it.
+     */
+    source: { type: String, enum: ['portal', 'ai'], default: 'portal' },
+    aiConfidence: { type: Number, default: null },
+
+    /**
+     * The conversation it was read out of, so the admin can check the model got it right
+     * rather than taking its word.
+     */
+    sourceThreadId: { type: mongoose.Schema.Types.ObjectId, ref: 'EmailThread', default: null },
+    sourceMessageId: { type: mongoose.Schema.Types.ObjectId, ref: 'EmailMessage', default: null, index: true },
+
+    /** Which of the details needed for scheduling the message did not contain. */
+    missingDetails: { type: [String], default: [] },
+
+    /**
+     * When we asked the client to fill those gaps.
+     *
+     * Its presence is the guard against asking twice. Without it a thread where the
+     * client keeps replying without answering would be met with the same question every
+     * time, which reads as a system that is not listening.
+     */
+    detailsRequestedAt: { type: Date, default: null },
+
+    /**
+     * A decision the AI read in the conversation but has NOT applied.
+     *
+     * Staged rather than acted on deliberately: accepting creates a real task in the live
+     * Zoho portal on a client's account, and a model reading "I don't think we should do
+     * this" as approval is a plausible failure with an expensive result. Confirming is a
+     * human click, which is the whole point of the approval gate this would otherwise
+     * bypass.
+     */
+    stagedDecision: {
+        intent: { type: String, enum: ['accept', 'reject', null], default: null },
+        reason: { type: String, default: null },
+        confidence: { type: Number, default: null },
+        detectedAt: { type: Date, default: null },
+        sourceMessageId: { type: mongoose.Schema.Types.ObjectId, ref: 'EmailMessage', default: null },
+    },
+
     status: { type: String, enum: STATUSES, default: 'pending', index: true },
 
     requestedAt: { type: Date, default: Date.now },
@@ -96,6 +142,19 @@ const TaskRequestSchema = new mongoose.Schema({
 TaskRequestSchema.index({ userId: 1, requestedAt: -1 });
 // The staff queue: everything awaiting a decision, oldest first.
 TaskRequestSchema.index({ status: 1, requestedAt: 1 });
+/**
+ * At most one PENDING request per conversation.
+ *
+ * A client answering our follow-up question is still talking about the same piece of
+ * work, and without this the answer would be read as a fresh request and queued again —
+ * so the more detail they gave, the more duplicates they would get.
+ *
+ * Partial, so decided requests do not block a genuinely new ask on the same thread later.
+ */
+TaskRequestSchema.index(
+    { sourceThreadId: 1 },
+    { unique: true, partialFilterExpression: { status: 'pending', sourceThreadId: { $type: 'objectId' } } }
+);
 
 const TaskRequest = mongoose.models.TaskRequest
     || mongoose.model('TaskRequest', TaskRequestSchema);
