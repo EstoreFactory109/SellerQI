@@ -186,12 +186,29 @@ const Messages = () => {
     const panel = { background: PALETTE.panel || 'rgba(255,255,255,.02)', borderColor: PALETTE.border };
 
     return (
-        <div className="h-[calc(100vh-150px)] w-full p-4 md:p-6" style={{ background: PALETTE.bg }}>
-            <div className="mx-auto flex h-full max-w-[1600px] overflow-hidden rounded-xl border" style={panel}>
+        /*
+            flex-1 within the layout's own column rather than a viewport calculation.
+            The calc had to guess the height of the nav and banner above it, and any
+            guess is wrong on some screen — too small leaves a gap under the page, too
+            large pushes the composer out of reach. MainPagesLayout marks this route as
+            owning its scrolling, so the parent is a definite-height flex column and
+            this simply fills it.
+
+            flex-col rather than the default row: as a row item the card below sized to
+            its own content and stopped filling the width.
+        */
+        <div className="flex min-h-0 w-full flex-1 flex-col p-3 md:p-6" style={{ background: PALETTE.bg }}>
+            {/* w-full so the max-width is a cap rather than the width — an auto-margined
+                flex item sizes to its content otherwise. */}
+            <div className="mx-auto flex w-full max-w-[1600px] flex-1 overflow-hidden rounded-xl border" style={panel}>
 
                 {/* Conversation list */}
+                {/*
+                    One pane at a time on a phone — two fixed panes on a narrow screen
+                    leave a conversation too thin to read.
+                */}
                 <aside
-                    className="flex w-full max-w-[360px] shrink-0 flex-col border-r"
+                    className={`${openId ? 'hidden md:flex' : 'flex'} w-full shrink-0 flex-col md:w-[300px] md:max-w-[360px] md:border-r lg:w-[360px]`}
                     style={{ borderColor: PALETTE.border }}
                 >
                     <div className="px-4 py-3">
@@ -219,15 +236,17 @@ const Messages = () => {
                         )}
                     </div>
 
-                    <div className="flex-1 overflow-y-auto">
+                    <div className="flex flex-1 flex-col overflow-y-auto">
                         {loading && (
-                            <p className="px-4 py-6 text-sm" style={{ color: PALETTE.textTertiary }}>Loading…</p>
+                            <p className="flex flex-1 items-center justify-center py-6 text-sm" style={{ color: PALETTE.textTertiary }}>Loading…</p>
                         )}
 
                         {!loading && threads.length === 0 && (
-                            <p className="px-4 py-10 text-center text-sm" style={{ color: PALETTE.textTertiary }}>
-                                No conversations yet.
-                            </p>
+                            <div className="flex flex-1 items-center justify-center px-4 py-10 text-center">
+                                <p className="text-sm" style={{ color: PALETTE.textTertiary }}>
+                                    No conversations yet.
+                                </p>
+                            </div>
                         )}
 
                         {threads.map((thread) => {
@@ -269,7 +288,7 @@ const Messages = () => {
                 </aside>
 
                 {/* Conversation */}
-                <section className="flex min-w-0 flex-1 flex-col">
+                <section className={`${openId ? 'flex' : 'hidden md:flex'} min-w-0 flex-1 flex-col`}>
                     {error && (
                         <p className="border-b px-5 py-2.5 text-sm" style={{ borderColor: PALETTE.border, color: PALETTE.amberValue }}>
                             {error}
@@ -287,9 +306,18 @@ const Messages = () => {
                     {open && (
                         <>
                             <div
-                                className="flex items-center gap-3 border-b px-4 py-2.5"
+                                className="flex items-center gap-3 border-b px-3 py-2.5 md:px-4"
                                 style={{ borderColor: PALETTE.border }}
                             >
+                                <button
+                                    type="button"
+                                    onClick={() => { setOpenId(null); setConversation(null); }}
+                                    className="-ml-1 shrink-0 rounded-lg px-1.5 py-1 text-[16px] leading-none md:hidden"
+                                    style={{ color: PALETTE.textTertiary }}
+                                    aria-label="Back to conversations"
+                                >
+                                    ←
+                                </button>
                                 <div className="min-w-0 flex-1">
                                     <p className="truncate text-[14px] font-semibold" style={{ color: PALETTE.textPrimary }}>
                                         {open.subject || '(no subject)'}
@@ -308,7 +336,7 @@ const Messages = () => {
                                 </span>
                             </div>
 
-                            <div className="flex-1 space-y-1 overflow-y-auto px-4 py-4 md:px-8">
+                            <div className="flex-1 space-y-1 overflow-y-auto px-3 py-4 sm:px-4 md:px-8">
                                 {dayGroups.map((group) => (
                                     <div key={group.key} className="space-y-1">
                                         <div className="flex justify-center py-3">
@@ -325,7 +353,7 @@ const Messages = () => {
                                             return (
                                                 <div key={message.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                                                     <div
-                                                        className={`max-w-[68%] rounded-lg px-3 py-2 text-[13.5px] leading-[1.5] ${
+                                                        className={`max-w-[85%] rounded-lg px-3 py-2 text-[13.5px] leading-[1.5] sm:max-w-[68%] ${
                                                             mine ? 'rounded-tr-sm' : 'rounded-tl-sm'
                                                         }`}
                                                         style={{

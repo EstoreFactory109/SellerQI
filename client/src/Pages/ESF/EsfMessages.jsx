@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { MessageSquare, CheckCircle2, RotateCcw, Search, Send, Paperclip, Lock, Check, CheckCheck } from 'lucide-react';
+import { MessageSquare, CheckCircle2, RotateCcw, Search, Send, Paperclip, Lock, Check, CheckCheck, ArrowLeft } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 import AttachmentPicker from '../../Components/ESF/AttachmentPicker.jsx';
 
@@ -236,11 +236,24 @@ const EsfMessages = () => {
     const dayGroups = useMemo(() => groupByDay(conversation?.messages || []), [conversation]);
 
     return (
-        <div className="h-[calc(100vh-132px)] w-full bg-[#0b0f17] p-4 md:p-6">
+        /*
+            dvh rather than vh: on mobile browsers vh counts the space behind the
+            collapsing address bar, which pushed the composer below the fold with no way
+            to scroll to it.
+        */
+        <div className="h-[calc(100dvh-132px)] min-h-[520px] w-full bg-[#0b0f17] p-3 md:p-6">
             <div className="mx-auto flex h-full max-w-[1600px] overflow-hidden rounded-xl border border-white/10">
 
                 {/* ── Conversation list ── */}
-                <aside className="flex w-full max-w-[380px] shrink-0 flex-col border-r border-white/10 bg-white/[0.02]">
+                {/*
+                    One pane at a time on a phone. Both panes at 380px + remainder on a
+                    narrow screen left a conversation about 100px wide, which is not a
+                    usable reading column — so the list gives way once a thread is open,
+                    exactly as every mail client does.
+                */}
+                <aside
+                    className={`${openId ? 'hidden md:flex' : 'flex'} w-full shrink-0 flex-col border-white/10 bg-white/[0.02] md:w-[320px] md:max-w-[380px] md:border-r lg:w-[380px]`}
+                >
                     <div className="flex items-center gap-2 px-4 py-3">
                         <h2 className="flex-1 text-sm font-semibold text-gray-200">Chats</h2>
                         <button
@@ -264,15 +277,21 @@ const EsfMessages = () => {
                         </div>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto">
-                        {loading && <p className="px-4 py-6 text-sm text-gray-500">Loading…</p>}
+                    <div className="flex flex-1 flex-col overflow-y-auto">
+                        {loading && (
+                            <p className="flex flex-1 items-center justify-center py-6 text-sm text-gray-500">Loading…</p>
+                        )}
 
                         {!loading && visible.length === 0 && (
-                            <div className="px-4 py-10 text-center">
-                                <MessageSquare className="mx-auto mb-2 h-6 w-6 text-gray-600" />
-                                <p className="text-sm text-gray-500">
-                                    {search ? 'No conversations match.' : showResolved ? 'No conversations yet.' : 'Nothing needs a reply.'}
-                                </p>
+                            /* Centred in the column rather than pinned to the top, where a
+                               short message under a tall empty panel reads as a failed load. */
+                            <div className="flex flex-1 items-center justify-center px-4 py-10 text-center">
+                                <div>
+                                    <MessageSquare className="mx-auto mb-2 h-6 w-6 text-gray-600" />
+                                    <p className="text-sm text-gray-500">
+                                        {search ? 'No conversations match.' : showResolved ? 'No conversations yet.' : 'Nothing needs a reply.'}
+                                    </p>
+                                </div>
                             </div>
                         )}
 
@@ -321,7 +340,7 @@ const EsfMessages = () => {
                 </aside>
 
                 {/* ── Conversation ── */}
-                <section className="flex min-w-0 flex-1 flex-col bg-white/[0.01]">
+                <section className={`${openId ? 'flex' : 'hidden md:flex'} min-w-0 flex-1 flex-col bg-white/[0.01]`}>
                     {error && (
                         <p className="border-b border-white/10 bg-amber-500/5 px-5 py-2.5 text-sm text-amber-300">{error}</p>
                     )}
@@ -342,7 +361,15 @@ const EsfMessages = () => {
                     {open && (
                         <>
                             {/* Header */}
-                            <div className="flex items-center gap-3 border-b border-white/10 bg-white/[0.03] px-4 py-2.5">
+                            <div className="flex items-center gap-3 border-b border-white/10 bg-white/[0.03] px-3 py-2.5 md:px-4">
+                                <button
+                                    type="button"
+                                    onClick={() => { setOpenId(null); setConversation(null); }}
+                                    className="-ml-1 shrink-0 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-white/5 hover:text-gray-200 md:hidden"
+                                    aria-label="Back to conversations"
+                                >
+                                    <ArrowLeft className="h-4 w-4" />
+                                </button>
                                 <Avatar label={open.client} size="sm" />
                                 <div className="min-w-0 flex-1">
                                     <p className="truncate text-[14px] font-semibold text-gray-100">{open.client}</p>
@@ -359,13 +386,13 @@ const EsfMessages = () => {
                                     className="flex shrink-0 items-center gap-1.5 rounded-lg border border-white/15 px-2.5 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:bg-white/5 disabled:opacity-50"
                                 >
                                     {open.resolved
-                                        ? <><RotateCcw className="h-3.5 w-3.5" /> Reopen</>
-                                        : <><CheckCircle2 className="h-3.5 w-3.5" /> Resolve</>}
+                                        ? <><RotateCcw className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Reopen</span></>
+                                        : <><CheckCircle2 className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Resolve</span></>}
                                 </button>
                             </div>
 
                             {/* Messages */}
-                            <div className="flex-1 space-y-1 overflow-y-auto px-4 py-4 md:px-8">
+                            <div className="flex-1 space-y-1 overflow-y-auto px-3 py-4 sm:px-4 md:px-8">
                                 {/* The slot WhatsApp gives its encryption notice, used for the
                                     same kind of statement: what the ticks can actually tell you. */}
                                 <div className="flex justify-center pb-1">
@@ -392,7 +419,7 @@ const EsfMessages = () => {
                                                     {/* Bubbles hug their content and cap at ~68%, which is
                                                         what stops a chat reading like a document. */}
                                                     <div
-                                                        className={`relative max-w-[68%] rounded-lg px-3 py-2 text-[13.5px] leading-[1.5] ${
+                                                        className={`relative max-w-[85%] rounded-lg px-3 py-2 text-[13.5px] leading-[1.5] sm:max-w-[68%] ${
                                                             mine
                                                                 ? 'rounded-tr-sm bg-blue-500/15 text-gray-100'
                                                                 : 'rounded-tl-sm bg-white/[0.07] text-gray-100'

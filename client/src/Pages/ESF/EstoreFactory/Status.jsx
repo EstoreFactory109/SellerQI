@@ -564,8 +564,14 @@ const Status = () => {
     }, [board, extraRequests]);
 
     return (
-        <div className="min-h-full w-full" style={{ background: PALETTE.bg, color: PALETTE.textPrimary, fontFamily: "system-ui, -apple-system, 'Helvetica Neue', Helvetica, sans-serif" }}>
-            <div className="max-w-[1170px] mx-auto flex flex-col gap-[26px] px-8 md:px-10 py-9 md:py-11">
+        /* flex-1 rather than min-h-full: a percentage min-height against an auto-height
+           parent resolves to nothing, which is why the background used to stop partway
+           down an empty page. The layout marks this route as filling the viewport, so
+           the parent is a flex column and this grows into it. */
+        <div className="flex w-full flex-1 flex-col" style={{ background: PALETTE.bg, color: PALETTE.textPrimary, fontFamily: "system-ui, -apple-system, 'Helvetica Neue', Helvetica, sans-serif" }}>
+            {/* w-full because mx-auto on a flex item cancels the default stretch, which
+                left this sized to its content once the parent became a flex column. */}
+            <div className="w-full max-w-[1170px] mx-auto flex flex-col gap-[26px] px-4 sm:px-8 md:px-10 py-9 md:py-11">
 
                 <header className="flex flex-col gap-[7px]">
                     <h1 className="m-0 text-[29px] font-semibold tracking-[-0.02em]">Status</h1>
@@ -708,10 +714,13 @@ const Status = () => {
 
                     {requests.length > 0 && (
                         <div className="rounded-lg" style={{ background: PALETTE.surface, border: `1px solid ${PALETTE.border}`, padding: '4px 24px 6px' }}>
+                            {/* GRID_COLS needs ~700px; without this it overflows a phone
+                                silently, the same reason the task table below scrolls. */}
+                            <div className="overflow-x-auto">
                             {requests.map((r, i) => {
                                 const badge = REQUEST_BADGE[r.status] || REQUEST_BADGE.pending;
                                 return (
-                                    <div key={r.id || i} className="grid items-center gap-[18px] py-[15px]" style={{ gridTemplateColumns: GRID_COLS, ...(i > 0 ? dividerStyle() : undefined) }}>
+                                    <div key={r.id || i} className="grid min-w-[700px] items-center gap-[18px] py-[15px]" style={{ gridTemplateColumns: GRID_COLS, ...(i > 0 ? dividerStyle() : undefined) }}>
                                         <span className="text-xs" style={{ color: PALETTE.textDim, fontFamily: 'ui-monospace, Menlo, monospace' }}>{badge.rail}</span>
                                         <span className="flex flex-col gap-[3px] min-w-0">
                                             <span className="text-[13.5px]" style={{ color: PALETTE.textBody }}>{r.title}</span>
@@ -740,6 +749,7 @@ const Status = () => {
                                     </div>
                                 );
                             })}
+                            </div>
                         </div>
                     )}
 
