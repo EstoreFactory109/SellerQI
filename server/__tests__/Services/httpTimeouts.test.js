@@ -222,3 +222,53 @@ describe('GET_APLUS_CONTENT.js — the same raw https, in the same kind of pipel
         expect(elapsed).toBeLessThan(5000);
     }, 15000);
 });
+
+describe('GET_COMPETITIVE_OFFERS.js — raw https, and the only POST of the three', () => {
+    // Third service in this class, and the one with the slowest endpoint behind
+    // it: getItemOffersBatch allows one call per ten seconds, so a socket that
+    // accepts and never answers is not a far-fetched failure here. Same
+    // loopback approach as the two blocks above — a mocked https would paper
+    // over the setTimeout -> destroy -> 'error' wiring that is under test.
+    //
+    // It also carries a request BODY, which the other two do not, so this pins
+    // that the timeout still fires on a request that has written bytes.
+    const http = require('http');
+
+    let server, port, httpsRequestSpy;
+    beforeAll(async () => {
+        process.env.PRICING_REQUEST_TIMEOUT_MS = '300';
+        server = http.createServer((req) => { req.resume(); }); // drains the body, never replies
+        await new Promise((resolve) => server.listen(0, resolve));
+        port = server.address().port;
+    });
+    afterAll(() => new Promise((resolve) => server.close(resolve)));
+
+    beforeEach(() => {
+        httpsRequestSpy = jest.spyOn(require('https'), 'request').mockImplementation((options, cb) =>
+            http.request({ ...options, hostname: 'localhost', host: 'localhost', port }, cb)
+        );
+    });
+    afterEach(() => httpsRequestSpy.mockRestore());
+
+    test('a pricing endpoint that never responds gives up instead of hanging the phase', async () => {
+        jest.isolateModules(() => {
+            jest.doMock('../../models/products/CompetitiveOffersModel.js', () => ({ create: jest.fn() }));
+            jest.doMock('../../models/MCP/BuyBoxDataModel.js', () => ({ findOne: jest.fn() }));
+            jest.doMock('../../models/user-auth/sellerCentralModel.js', () => ({ findOne: jest.fn() }));
+        });
+        const getCompetitiveOffers = require('../../Services/Sp_API/GET_COMPETITIVE_OFFERS.js');
+
+        const start = Date.now();
+        const result = await getCompetitiveOffers('token', ['mp-1'], 'user-1', 'localhost', 'US', 'NA', {
+            asins: ['B01'],
+        });
+        const elapsed = Date.now() - start;
+
+        // False rather than a throw: the service owns its failure so a dead
+        // pricing endpoint costs the report a column, not the rest of the sync.
+        expect(result).toBe(false);
+        // 300ms timeout, three retries are only for 429s, so this is one
+        // attempt. Pre-timeout it would never have returned at all.
+        expect(elapsed).toBeLessThan(5000);
+    }, 15000);
+});

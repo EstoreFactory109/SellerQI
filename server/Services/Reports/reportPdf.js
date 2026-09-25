@@ -45,6 +45,33 @@ const DOC = {
 const MAX_PDF_ROWS = 40;
 
 /**
+ * Past this many columns the table is turned sideways.
+ *
+ * pdfmake does not shrink text to fit and does not warn: a table wider than
+ * the page is drawn past the right margin, off the paper, with the content
+ * still present and simply unreadable. Wrapping cannot save it either, because
+ * a column's floor is its widest unbreakable word — and the two widest columns
+ * in the Buy Box report hold an Amazon merchant token and a seller's own SKU,
+ * neither of which contains a space to break at.
+ *
+ * Measured rather than guessed: twelve columns with a realistic SKU need 561pt
+ * even at 7pt type, and A4 portrait leaves 515pt. Landscape leaves 762pt.
+ * Shrinking the type instead would have meant 6pt — unreadable, and still one
+ * long SKU from overflowing again. reportPdfTableWidth.test.js pins both
+ * numbers.
+ *
+ * Nine columns still fit portrait comfortably, so every report that fitted
+ * before is laid out exactly as it was.
+ */
+const LANDSCAPE_COLUMN_THRESHOLD = 9;
+
+/** The widest table in a report — the primary one or its secondary. */
+const widestTableColumnCount = (report) => Math.max(
+    report?.summary?.columns?.length || 0,
+    report?.summary?.secondaryTable?.columns?.length || 0
+);
+
+/**
  * The 14 fonts every PDF reader has built in. pdfmake resolves these through
  * the same local-access hook it uses for real files, so they have to be named
  * explicitly in the allow-list below or font loading is denied.
@@ -86,6 +113,14 @@ const ensureConfigured = () => {
 const formatCell = (value, format, currency) => {
     if (value === null || value === undefined || value === '') return '—';
     if (typeof value !== 'number') return String(value);
+    // Per-unit money, to the cent. Distinct from 'currency', which rounds to
+    // whole units — right for "Total sales $124,530", wrong for a price gap,
+    // where the cents ARE the finding: a $4.99 gap rendered as "$5" against a
+    // $17.50 Buy Box price rendered as "$18" does not even add up on the page.
+    if (format === 'money') {
+        const sign = value < 0 ? '-' : '';
+        return `${sign}${currency}${Math.abs(value).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
     if (format === 'currency') return `${currency}${value.toLocaleString('en-GB', { maximumFractionDigits: 0 })}`;
     if (format === 'percent') return `${value}%`;
     return value.toLocaleString('en-GB');
@@ -318,6 +353,7 @@ const buildReportDocDefinition = (report, { marketplace, currency = '$', clientN
             subject: report.insight || report.name,
         },
         pageSize: 'A4',
+        pageOrientation: widestTableColumnCount(report) > LANDSCAPE_COLUMN_THRESHOLD ? 'landscape' : 'portrait',
         pageMargins: [40, 36, 40, 44],
         defaultStyle: { font: 'Helvetica', fontSize: 9, color: DOC.ink },
         content,
@@ -359,4 +395,6 @@ module.exports = {
     buildReportDocDefinition,
     reportPdfFilename,
     MAX_PDF_ROWS,
+    LANDSCAPE_COLUMN_THRESHOLD,
+    widestTableColumnCount,
 };

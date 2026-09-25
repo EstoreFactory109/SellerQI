@@ -51,6 +51,9 @@ const { addReviewDataTODatabase } = require('../Sp_API/NumberOfProductReviews.js
 // tier comes from, and it writes to its own collection so nothing that reads
 // the scraper's output changes.
 const getAPlusContent = require('../Sp_API/GET_APLUS_CONTENT.js');
+// Offer-level pricing for the ASINs the Buy Box snapshot says we are losing.
+// Must run after that snapshot exists, so it is not in a batch — see below.
+const { syncCompetitiveOffers } = require('../Sp_API/GET_COMPETITIVE_OFFERS.js');
 const { GetListingItem, GetListingItemIssuesForInactive } = require('../Sp_API/GetListingItemsIssues.js');
 const getshipment = require('../Sp_API/shipment.js');
 
@@ -1407,6 +1410,19 @@ class Integration {
             apiData.mcpBuyBoxData = { success: false, data: null, error: "Refresh token not available" };
             logger.info("MCP BuyBox skipped - no refresh token", { userId, region: Region, country: Country });
         }
+
+        // Competitor pricing for the contested ASINs. Deliberately here and not
+        // in a batch: it needs the Buy Box snapshot written just above to know
+        // which ASINs are contested, and pricing the whole catalogue instead is
+        // not an option at one API call per ten seconds.
+        //
+        // Awaited but never allowed to throw — the service returns false on any
+        // failure, so a dead pricing endpoint costs the report a column, not
+        // the rest of the sync.
+        if (AccessToken) {
+            await syncCompetitiveOffers(AccessToken, marketplaceIds, userId, Base_URI, Country, Region);
+        }
+
         
         // Unified Finance Sync (Sales Report + Finance API) — replaces the
         // legacy Expense Report and ASIN-wise Sales calls. One pass populates
@@ -3175,6 +3191,12 @@ class Integration {
                         }
                     }
                 }
+            }
+
+            // Competitor pricing, for the same reason as the sign-in path: it
+            // reads the Buy Box snapshot written just above.
+            if (AccessToken) {
+                await syncCompetitiveOffers(AccessToken, marketplaceIds, userId, Base_URI, Country, Region);
             }
 
             // Unified Finance Sync (Sales Report + Finance API) — replaces

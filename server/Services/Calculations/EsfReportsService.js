@@ -42,6 +42,9 @@ const APlusContent = require('../../models/seller-performance/APlusContentModel.
 // Separate collection, filled by Amazon's own A+ Content API. APlusContent
 // above still comes from the scraper and is untouched.
 const APlusPremium = require('../../models/seller-performance/APlusPremiumModel.js');
+// Offer-level pricing for the ASINs we are losing. BuyBoxData is an aggregate
+// with no offers in it, so this is the only source for "to whom, at what price".
+const CompetitiveOffers = require('../../models/products/CompetitiveOffersModel.js');
 const ReviewOrder = require('../../models/review/ReviewOrderModel.js');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
@@ -607,14 +610,24 @@ const buildAccountOverview = async (userId, country, region) => {
 const REPORT_BUYBOX = { key: 'buybox', name: 'Weekly Buybox Report', cadence: 'WEEKLY', format: 'xlsx' };
 
 /**
- * BuyBoxData holds a daily Data Kiosk snapshot per marketplace. Win/lose status
- * and the trend against last week come straight out of it; the competing
- * seller's identity and price do not exist anywhere in this system.
+ * BuyBoxData holds a daily Data Kiosk snapshot per marketplace: win/lose status
+ * and the trend against last week come straight out of it. It is an aggregate
+ * though — ownership percentages, sessions, units — with no offers in it, so
+ * the competing seller and their price come from CompetitiveOffers, which is
+ * fetched from Amazon's Product Pricing API for the contested ASINs only.
+ *
+ * THE GAP IS COMPUTED FROM LANDED PRICES, NOT LIST PRICES
+ * The catalogue's `price` is a list price with no delivery in it. Comparing it
+ * against a Buy Box landed price would report a gap wrong by the whole shipping
+ * charge, and would call us "cheaper" while the shopper pays more. So the gap
+ * uses our own landed price as Amazon reports it, and an ASIN whose offer we
+ * cannot see gets no gap at all rather than a misleading one.
  */
 const buildBuyBox = async (userId, country, region) => {
-    const [snapshots, seller] = await Promise.all([
+    const [snapshots, seller, pricing] = await Promise.all([
         BuyBoxData.find({ User: userId, country, region }).sort({ createdAt: -1 }).limit(8).lean(),
         Seller.findOne({ User: userId }).select('sellerAccount').lean(),
+        CompetitiveOffers.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
     ]);
 
     const latest = snapshots[0];
@@ -649,6 +662,13 @@ const buildBuyBox = async (userId, country, region) => {
             });
         }
     }
+
+    // Absent until the pricing fetch has run at least once. Absent is reported
+    // as an em dash, never as "no competitor" — the two look identical in a
+    // table and mean opposite things.
+    const offersByAsin = new Map((pricing?.items || []).map((item) => [item.asin, item]));
+    const pricingCaptured = Boolean(pricing);
+    const pricingFetchedAt = pricing?.createdAt || null;
 
     const losing = latest.asinBuyBoxData?.filter((row) => num(row.buyBoxPercentage) === 0) || [];
 
@@ -687,9 +707,60 @@ const buildBuyBox = async (userId, country, region) => {
         return streak;
     };
 
+    /**
+     * The four pricing fields for one contested ASIN.
+     *
+     * Every one of them can legitimately be unknown, and each unknown means
+     * something different: not fetched yet, fetched but Amazon withheld the
+     * seller id, fetched but nobody holds the Buy Box, fetched but our own
+     * offer was not in the returned list. None of those is "no gap", so none
+     * of them is reported as a number.
+     */
+    const pricingFor = (asin, catalogPrice) => {
+        if (!pricingCaptured) return { competingSeller: null, competingPrice: null, priceGap: null, pricingFlag: '\u2014' };
+
+        const item = offersByAsin.get(asin);
+        if (!item || item.error) return { competingSeller: null, competingPrice: null, priceGap: null, pricingFlag: '\u2014' };
+
+        const competingPrice = item.buyBoxPrice ?? null;
+        // Our landed price where Amazon showed us our own offer; the catalogue
+        // list price only as a last resort, and then flagged as such, because
+        // it has no delivery in it.
+        const ourLanded = item.ourLandedPrice ?? null;
+        const basis = ourLanded ?? (catalogPrice || null);
+
+        const gap = (competingPrice !== null && basis !== null) ? round(basis - competingPrice, 2) : null;
+
+        let flag = '\u2014';
+        if (gap !== null) {
+            // A penny either way is not a pricing decision worth a flag.
+            if (gap > 0.009) flag = 'Priced above';
+            else if (gap < -0.009) flag = 'Priced below';
+            else flag = 'Matched';
+        } else if (competingPrice === null) {
+            // Amazon answered, and nobody holds the Buy Box. Worth its own
+            // words: there is no competitor to undercut.
+            flag = 'No Buy Box holder';
+        }
+
+        return {
+            competingSeller: item.buyBoxSellerId || null,
+            competingPrice,
+            ourLandedPrice: ourLanded,
+            priceGap: gap,
+            pricingFlag: flag,
+            // Set when the gap leans on the catalogue price, so the caveat can
+            // name how many rows are affected instead of blanket-hedging.
+            gapFromListPrice: gap !== null && ourLanded === null,
+            competitorIsFba: Boolean(item.buyBoxIsFba),
+            offerCount: item.totalOfferCount || 0,
+        };
+    };
+
     const rows = losing
         .map((row) => {
             const match = byAsin.get(row.childAsin) || {};
+            const priced = pricingFor(row.childAsin, match.price || null);
             return {
                 asin: row.childAsin,
                 sku: match.sku || '\u2014',
@@ -703,12 +774,29 @@ const buildBuyBox = async (userId, country, region) => {
                 sessions: row.sessions || 0,
                 unitsOrdered: row.unitsOrdered || 0,
                 detailPage: detailPageUrl(row.childAsin, country),
-                // Named as the gap it is: we know we are losing, not to whom.
-                competingSeller: null,
-                competingPrice: null,
+                ...priced,
+                // Amazon returns a merchant token, not a storefront name, and
+                // there is no endpoint that turns one into the other. The token
+                // is what identifies the competitor, so it is what we show.
+                competingSeller: priced.competingSeller || '\u2014',
             };
         })
         .sort((a, b) => b.periodsLosing - a.periodsLosing || b.sessions - a.sessions);
+
+    // Counted from the rows themselves rather than the raw fetch: these are
+    // the contested ASINs the report actually shows, which is what the tiles
+    // are describing.
+    const pricedRows = rows.filter((row) => row.competingPrice !== null && row.competingPrice !== undefined);
+    const above = pricedRows.filter((row) => row.pricingFlag === 'Priced above');
+    const listPriceRows = rows.filter((row) => row.gapFromListPrice);
+    const unknownSeller = pricedRows.filter((row) => row.competingSeller === '\u2014');
+    // The biggest amount we are asking over the Buy Box holder — the single
+    // number a manager acts on first.
+    const widestGap = above.reduce((worst, row) => (worst && worst.priceGap >= row.priceGap ? worst : row), null);
+    // Stats carry their currency through `format: 'currency'`, but prose does
+    // not, so the highlight names the code Amazon returned with the offers.
+    const pricingCurrency = (pricing?.items || []).map((item) => item.currency).find(Boolean) || '';
+    const money = (value) => `${pricingCurrency} ${Math.abs(value).toFixed(2)}`.trim();
 
     return {
         ...REPORT_BUYBOX,
@@ -727,11 +815,27 @@ const buildBuyBox = async (userId, country, region) => {
                 { label: 'Buy Box ownership', value: weightedOwnership, format: 'percent', tone: weightedOwnership >= 90 ? 'good' : 'watch' },
                 { label: 'Snapshots on file', value: snapshots.length },
                 { label: 'Suppressed listings', value: suppressed.length, tone: suppressed.length > 0 ? 'watch' : 'good' },
+                // Only once pricing has actually run. A "0 priced above" tile
+                // on an account that was never fetched is a false all-clear.
+                ...(pricingCaptured && rows.length
+                    ? [{
+                        label: 'Priced above Buy Box',
+                        value: above.length,
+                        tone: above.length > 0 ? 'watch' : 'good',
+                    }]
+                    : []),
+                ...(widestGap
+                    ? [{ label: 'Widest price gap', value: widestGap.priceGap, format: 'money', tone: 'watch' }]
+                    : []),
             ],
             columns: [
                 { key: 'sku', label: 'SKU' },
                 { key: 'asin', label: 'ASIN' },
-                { key: 'ourPrice', label: 'Our price', format: 'currency' },
+                { key: 'ourPrice', label: 'Our price', format: 'money' },
+                { key: 'competingPrice', label: 'Buy Box price', format: 'money' },
+                { key: 'priceGap', label: 'Gap', format: 'money' },
+                { key: 'pricingFlag', label: 'Pricing' },
+                { key: 'competingSeller', label: 'Buy Box seller' },
                 { key: 'status', label: 'Status' },
                 { key: 'ownership', label: 'Buy Box %', format: 'percent' },
                 { key: 'periodsLosing', label: 'Snapshots losing', format: 'number' },
@@ -775,10 +879,37 @@ const buildBuyBox = async (userId, country, region) => {
                     'watch'
                 )]
                 : []),
+            ...(widestGap
+                ? [highlight(
+                    `${widestGap.sku !== '\u2014' ? widestGap.sku : widestGap.asin} is ${money(widestGap.priceGap)} above the Buy Box holder — the widest gap on the account.`,
+                    'watch'
+                )]
+                : []),
+            ...(pricingCaptured && rows.length && !above.length && pricedRows.length
+                ? [highlight(
+                    `None of the ${plural(pricedRows.length, 'contested ASIN')} is priced above the Buy Box holder, so price is not what is costing the Buy Box here.`,
+                    'good'
+                )]
+                : []),
             highlight('[Pricing or fulfilment action taken on the contested listings]', 'fill'),
         ],
         caveats: [
-            'The competing seller and their price are not tracked. Amazon\'s offer-level pricing feed is not connected, so "who is winning it and at what price" cannot be shown yet.',
+            ...(pricingCaptured
+                ? [
+                    `Buy Box prices were read from Amazon's offer feed on ${formatDate(pricingFetchedAt)} and move daily.`,
+                    // Amazon returns a merchant token and no endpoint converts
+                    // one to a storefront name, so say what the column is.
+                    ...(unknownSeller.length
+                        ? [`Amazon withheld the seller identity on ${plural(unknownSeller.length, 'contested ASIN')}; the price and gap for those are still exact.`]
+                        : ['The Buy Box seller is shown as Amazon\'s merchant token. Amazon does not publish a way to resolve one to a storefront name.']),
+                    ...(listPriceRows.length
+                        ? [`On ${plural(listPriceRows.length, 'ASIN')} our own offer was not in Amazon's returned list, so the gap uses our catalogue list price, which excludes delivery.`]
+                        : []),
+                    ...((pricing?.asinsRequested || 0) > (pricing?.items?.length || 0)
+                        ? [`Pricing covered ${pricing.items.length} of ${pricing.asinsRequested} contested ASINs; the rest were cut by the per-run batch cap.`]
+                        : []),
+                ]
+                : ['The competing seller and their price are fetched from Amazon\'s offer feed for contested ASINs only, from the next sync onwards. This edition shows them as not captured.']),
             ...(suppressed.length ? [] : ['Suppression is read from the listing issues Amazon returns with each SKU. A listing suppressed since the last catalogue sync will not appear until the next one.']),
         ],
     };

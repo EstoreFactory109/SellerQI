@@ -31,6 +31,7 @@ jest.mock('../../../models/inventory/ProductWiseFBADataItemModel.js', () => ({ c
 jest.mock('../../../models/seller-performance/NumberOfProductReviewsModel.js', () => ({ findOne: jest.fn() }));
 jest.mock('../../../models/seller-performance/APlusContentModel.js', () => ({ findOne: jest.fn() }));
 jest.mock('../../../models/seller-performance/APlusPremiumModel.js', () => ({ findOne: jest.fn() }));
+jest.mock('../../../models/products/CompetitiveOffersModel.js', () => ({ findOne: jest.fn() }));
 jest.mock('../../../models/review/ReviewOrderModel.js', () => ({ aggregate: jest.fn(), countDocuments: jest.fn(), findOne: jest.fn() }));
 jest.mock('../../../models/MCP/SalesOnlyMetricsModel.js', () => ({ aggregate: jest.fn(), findOne: jest.fn() }));
 jest.mock('../../../models/amazon-ads/PPCMetricsModel.js', () => ({ aggregate: jest.fn(), findOne: jest.fn() }));
@@ -50,6 +51,7 @@ const FbaFeeItem = require('../../../models/inventory/ProductWiseFBADataItemMode
 const Content = require('../../../models/seller-performance/NumberOfProductReviewsModel.js');
 const APlus = require('../../../models/seller-performance/APlusContentModel.js');
 const APlusPremium = require('../../../models/seller-performance/APlusPremiumModel.js');
+const Pricing = require('../../../models/products/CompetitiveOffersModel.js');
 const ReviewOrder = require('../../../models/review/ReviewOrderModel.js');
 const SalesOnlyMetrics = require('../../../models/MCP/SalesOnlyMetricsModel.js');
 const PPCMetrics = require('../../../models/amazon-ads/PPCMetricsModel.js');
@@ -87,6 +89,7 @@ const stubEmpty = () => {
     Content.findOne.mockReturnValue(mockFindOne(null));
     APlus.findOne.mockReturnValue(mockFindOne(null));
     APlusPremium.findOne.mockReturnValue(mockFindOne(null));
+    Pricing.findOne.mockReturnValue(mockFindOne(null));
     ReviewOrder.aggregate.mockResolvedValue([]);
     ReviewOrder.countDocuments.mockResolvedValue(0);
     ReviewOrder.findOne.mockReturnValue({ sort: () => ({ select: () => ({ lean: () => Promise.resolve(null) }) }) });
@@ -322,13 +325,150 @@ describe('getEsfReports', () => {
             expect(row.ourPrice).toBe(19.99);
         });
 
-        it('reports the competing seller as absent rather than guessing', async () => {
-            snapshots([0]);
-            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'buybox');
+        describe('competitor pricing', () => {
+            /** A catalogue whose one losing ASIN is listed at 19.99. */
+            const catalogue = () => Seller.findOne.mockReturnValue(mockFindOne({
+                sellerAccount: [{
+                    region: 'NA', country: 'US',
+                    products: [{ asin: 'B1', sku: 'SKU-1', price: '19.99', itemName: 'Thing' }],
+                }],
+            }));
 
-            expect(report.summary.rows[0].competingSeller).toBeNull();
-            expect(report.summary.rows[0].competingPrice).toBeNull();
-            expect(report.caveats.join(' ')).toMatch(/competing seller/i);
+            it('says nothing at all before the first pricing fetch', async () => {
+                snapshots([0]);
+                catalogue();
+
+                const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'buybox');
+                const row = report.summary.rows[0];
+
+                // Not null and not zero: an em dash, because "we have not
+                // looked" and "there is no competitor" are opposite facts that
+                // a blank cell would render identically.
+                expect(row.competingSeller).toBe('\u2014');
+                expect(row.competingPrice).toBeNull();
+                expect(row.priceGap).toBeNull();
+                expect(row.pricingFlag).toBe('\u2014');
+                // No tile either — "0 priced above" on an unfetched account is
+                // a false all-clear.
+                expect(report.summary.stats.some((stat) => stat.label === 'Priced above Buy Box')).toBe(false);
+                expect(report.caveats.join(' ')).toMatch(/from the next sync onwards/);
+            });
+
+            it('reports the Buy Box price, its seller and the gap against our landed price', async () => {
+                snapshots([0]);
+                catalogue();
+                Pricing.findOne.mockReturnValue(mockFindOne({
+                    createdAt: new Date('2026-09-20T00:00:00Z'),
+                    asinsRequested: 1,
+                    items: [{
+                        asin: 'B1',
+                        currency: 'USD',
+                        buyBoxPrice: 17.5,
+                        buyBoxSellerId: 'A1COMPETITOR',
+                        buyBoxIsFba: true,
+                        ourLandedPrice: 22.49,
+                        totalOfferCount: 4,
+                    }],
+                }));
+
+                const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'buybox');
+                const row = report.summary.rows[0];
+
+                expect(row.competingPrice).toBe(17.5);
+                expect(row.competingSeller).toBe('A1COMPETITOR');
+                // 22.49 - 17.50, from LANDED prices on both sides. The
+                // catalogue's 19.99 list price is deliberately not used here.
+                expect(row.priceGap).toBe(4.99);
+                expect(row.pricingFlag).toBe('Priced above');
+                expect(report.summary.stats.find((stat) => stat.label === 'Priced above Buy Box').value).toBe(1);
+                expect(report.summary.stats.find((stat) => stat.label === 'Widest price gap').value).toBe(4.99);
+                expect(report.summary.columns.map((column) => column.key))
+                    .toEqual(expect.arrayContaining(['competingPrice', 'priceGap', 'pricingFlag', 'competingSeller']));
+            });
+
+            it('falls back to the list price only when our own offer is missing, and says so', async () => {
+                snapshots([0]);
+                catalogue();
+                Pricing.findOne.mockReturnValue(mockFindOne({
+                    createdAt: new Date('2026-09-20T00:00:00Z'),
+                    asinsRequested: 1,
+                    // Amazon returned the Buy Box but not our offer.
+                    items: [{ asin: 'B1', currency: 'USD', buyBoxPrice: 17.5, ourLandedPrice: null }],
+                }));
+
+                const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'buybox');
+
+                expect(report.summary.rows[0].priceGap).toBe(2.49); // 19.99 list - 17.50
+                // The fallback is stated, not silently applied: that gap has no
+                // delivery in it and can be wrong by the shipping charge.
+                expect(report.caveats.join(' ')).toMatch(/catalogue list price, which excludes delivery/);
+            });
+
+            it('calls a cheaper listing Priced below, and a matching one Matched', async () => {
+                snapshots([0]);
+                catalogue();
+                Pricing.findOne.mockReturnValue(mockFindOne({
+                    createdAt: new Date('2026-09-20T00:00:00Z'),
+                    items: [{ asin: 'B1', currency: 'USD', buyBoxPrice: 25, ourLandedPrice: 20 }],
+                }));
+                let report = byKey(await getEsfReports(USER, 'US', 'NA'), 'buybox');
+                expect(report.summary.rows[0].pricingFlag).toBe('Priced below');
+                expect(report.summary.rows[0].priceGap).toBe(-5);
+                // Losing while cheaper is the finding that matters: price is
+                // not the reason, so no "priced above" count.
+                expect(report.summary.stats.find((stat) => stat.label === 'Priced above Buy Box').value).toBe(0);
+
+                Pricing.findOne.mockReturnValue(mockFindOne({
+                    createdAt: new Date('2026-09-20T00:00:00Z'),
+                    items: [{ asin: 'B1', currency: 'USD', buyBoxPrice: 20, ourLandedPrice: 20 }],
+                }));
+                report = byKey(await getEsfReports(USER, 'US', 'NA'), 'buybox');
+                expect(report.summary.rows[0].pricingFlag).toBe('Matched');
+            });
+
+            it('separates "nobody holds the Buy Box" from "we did not look"', async () => {
+                snapshots([0]);
+                catalogue();
+                Pricing.findOne.mockReturnValue(mockFindOne({
+                    createdAt: new Date('2026-09-20T00:00:00Z'),
+                    // Amazon answered; there is simply no Buy Box holder.
+                    items: [{ asin: 'B1', currency: 'USD', buyBoxPrice: null, ourLandedPrice: 20 }],
+                }));
+
+                const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'buybox');
+                expect(report.summary.rows[0].pricingFlag).toBe('No Buy Box holder');
+                expect(report.summary.rows[0].priceGap).toBeNull();
+            });
+
+            it('keeps the price when Amazon withholds the seller identity', async () => {
+                snapshots([0]);
+                catalogue();
+                Pricing.findOne.mockReturnValue(mockFindOne({
+                    createdAt: new Date('2026-09-20T00:00:00Z'),
+                    items: [{ asin: 'B1', currency: 'USD', buyBoxPrice: 17.5, buyBoxSellerId: '', ourLandedPrice: 22.49 }],
+                }));
+
+                const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'buybox');
+
+                // Half an answer beats none: the gap is what gets actioned.
+                expect(report.summary.rows[0].competingSeller).toBe('\u2014');
+                expect(report.summary.rows[0].priceGap).toBe(4.99);
+                expect(report.caveats.join(' ')).toMatch(/withheld the seller identity/);
+            });
+
+            it('reports an ASIN the fetch could not price, without inventing a gap', async () => {
+                snapshots([0]);
+                catalogue();
+                Pricing.findOne.mockReturnValue(mockFindOne({
+                    createdAt: new Date('2026-09-20T00:00:00Z'),
+                    asinsRequested: 1,
+                    items: [{ asin: 'B1', error: 'Amazon returned 404 for this ASIN' }],
+                }));
+
+                const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'buybox');
+                expect(report.summary.rows[0].pricingFlag).toBe('\u2014');
+                expect(report.summary.rows[0].priceGap).toBeNull();
+            });
         });
 
         it('stays good-toned when nothing is losing', async () => {

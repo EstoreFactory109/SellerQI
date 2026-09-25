@@ -40,6 +40,13 @@ const DOC_ROWS = 4;
 const formatCell = (value, format, currency) => {
     if (value === null || value === undefined || value === '') return '—';
     if (typeof value !== 'number') return value;
+    // Per-unit money, to the cent — see the note in reportPdf.js formatCell.
+    // 'currency' rounds to whole units, which is right for an aggregate and
+    // wrong for a price or a gap.
+    if (format === 'money') {
+        const sign = value < 0 ? '-' : '';
+        return `${sign}${currency}${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
     if (format === 'currency') return `${currency}${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
     if (format === 'percent') return `${value}%`;
     return value.toLocaleString();
