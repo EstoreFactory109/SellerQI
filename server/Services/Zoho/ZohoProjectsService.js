@@ -25,6 +25,9 @@ const {
     COMMENT_FETCH_CONCURRENCY
 } = require('./config.js');
 
+/** A project with more tasklists than this has a problem no page of ours can render. */
+const MAX_TASKLISTS_FETCHED = 200;
+
 /**
  * Run `fn` over `items` with at most `limit` in flight.
  *
@@ -178,6 +181,9 @@ const normaliseTask = (task = {}) => ({
             .filter((name) => name && name !== 'Unassigned User')
         : [],
     tasklist: toPlainLabel(task.tasklist && task.tasklist.name),
+    // The id as well as the name, so a created task can say WHICH list it landed in
+    // and a caller can file another task beside it. Dropped until 2026-09-25.
+    tasklistId: (task.tasklist && asId(task.tasklist.id, task.tasklist.id_string)) || null,
 
     /**
      * Where this task sits in the subtask tree: 0 is top level, 1 is a subtask of one.
@@ -477,7 +483,7 @@ const getProjectTaskUpdates = async (projectId, { includeComments = true, maxTas
  * Like every write here, this is authored in Zoho by the single org-wide connected
  * account — so the CALLER is responsible for putting attribution in the description.
  */
-const createTask = async ({ projectId, name, description, startDate, endDate, portalId }) => {
+const createTask = async ({ projectId, name, description, startDate, endDate, tasklistId, portalId }) => {
     if (!projectId) {
         throw new ApiError(400, 'A project is required to create a task');
     }
@@ -492,6 +498,13 @@ const createTask = async ({ projectId, name, description, startDate, endDate, po
 
     const body = { name: title };
     if (description) body.description = String(description);
+    /**
+     * Which list the task is filed under. Omitted when absent rather than sent
+     * empty, per the header — and `tasklist_id` is documented on create for v2
+     * while v3 is unverified, so the retry below drops it if Zoho objects. Where a
+     * task is filed must never be the reason approving work fails.
+     */
+    if (tasklistId) body.tasklist_id = String(tasklistId);
     /**
      * Sent as a pair, never end alone — see the header. A caller that supplies only an
      * end date gets both, starting today, because "due by X" with no start is exactly
@@ -533,11 +546,11 @@ const createTask = async ({ projectId, name, description, startDate, endDate, po
      * the admin's queue with no task created. A 400 creates nothing, so replaying it is
      * safe, and whichever dialect this portal wants, one of the two is it.
      */
-    const send = (dates) => zohoRequest({
+    const send = (payload) => zohoRequest({
         method: 'POST',
         path: spec.path(resolvedPortal, projectId),
         version: spec.version,
-        data: { ...body, ...dates },
+        data: payload,
         // v2 requires form-encoded writes; v3 takes JSON. Mirrors createProject.
         form: spec.version === 'v2',
         context: `Creating a Zoho task in project ${projectId}`
@@ -545,15 +558,34 @@ const createTask = async ({ projectId, name, description, startDate, endDate, po
 
     let response;
     try {
-        response = await send({});
+        response = await send(body);
     } catch (error) {
+        if (!isDateFormatRejection(error)) throw error;
+
+        /**
+         * Two things in this payload are unverified, and the rejection does not say which
+         * one it means: the date dialect, and `tasklist_id` on v3.
+         *
+         * So the replay drops the tasklist AND switches dialect in one go. Filing is a
+         * nicety; the task existing is not, and a second round trip to narrow down which
+         * field was at fault would be a third failed accept for the admin watching.
+         * Whichever it was, the task lands — unfiled if it has to be, and the log says so.
+         */
         const alternate = body.end_date || body.start_date ? legacyDates(body) : null;
-        if (!alternate || !isDateFormatRejection(error)) throw error;
+        const droppingTasklist = Boolean(body.tasklist_id);
+        if (!alternate && !droppingTasklist) throw error;
 
         logger.warn(
-            `[ZohoProjects] task create refused the ISO dates — retrying once as MM-DD-YYYY (project ${projectId})`
+            `[ZohoProjects] task create was refused (project ${projectId}) — retrying once`
+            + `${alternate ? ' with MM-DD-YYYY dates' : ''}`
+            + `${droppingTasklist ? ' and without tasklist_id' : ''}`
         );
-        response = await send(alternate);
+        // Built by deletion, not by spreading `undefined` over it: a v2 retry is
+        // form-encoded, and URLSearchParams turns an undefined value into the literal
+        // string "undefined" rather than omitting the field.
+        const replay = { ...body, ...(alternate || {}) };
+        if (droppingTasklist) delete replay.tasklist_id;
+        response = await send(replay);
     }
 
     const created = unwrap(response, spec.envelope)[0] || response;
@@ -590,6 +622,106 @@ const createTask = async ({ projectId, name, description, startDate, endDate, po
         `[ZohoProjects] Created task ${task.id} in project ${projectId} (status: ${task.status || 'unknown'})`
     );
     return task;
+};
+
+/**
+ * The tasklists in a project, as `{ id, name }`.
+ *
+ * ── WHY THIS RETRIES ON THE OTHER GENERATION ──
+ * Until the tasklists scope was added, BOTH v2 and v3 answered 401 INVALID_OAUTHSCOPE,
+ * so nothing could establish which one actually serves this resource — the 401 masked it.
+ * v3 is configured because the rest of this file is v3, but v3 answers
+ * URL_RULE_NOT_CONFIGURED for subtasks, so v2 is a real possibility. One retry on the
+ * other generation settles it at runtime and logs which won; once that is known, correct
+ * PATHS.tasklists and this retry can go.
+ *
+ * ── AND WHY IT RETURNS [] INSTEAD OF THROWING ──
+ * Its only caller is the accept path, where this decides which list a task is FILED
+ * under. An empty list means "we could not choose", and the task is created unfiled —
+ * which is exactly what happened before this existed. A throw here would turn a nicety
+ * into a failed approval.
+ */
+const listTasklists = async ({ projectId, portalId } = {}) => {
+    if (!projectId) return [];
+
+    const spec = PATHS.tasklists;
+    const resolvedPortal = await resolvePortalId(portalId);
+    const path = spec.path(resolvedPortal, projectId);
+
+    const fetch = async (version) => paginate({
+        // v2 wants the trailing slash; v3 refuses it.
+        path: version === 'v2' ? `${path}/` : path,
+        version,
+        envelope: spec.envelope,
+        pageSize: PAGE_SIZE.tasklists,
+        maxItems: MAX_TASKLISTS_FETCHED,
+        context: `Listing tasklists for Zoho project ${projectId}`
+    });
+
+    const versions = spec.version === 'v3' ? ['v3', 'v2'] : ['v2', 'v3'];
+    for (const [index, version] of versions.entries()) {
+        try {
+            const rows = await fetch(version);
+            if (index > 0) {
+                logger.warn(
+                    `[ZohoProjects] tasklists answered on ${version}, not ${versions[0]} — `
+                    + 'correct PATHS.tasklists.version and drop the retry'
+                );
+            }
+            return rows
+                .map((row) => ({ id: asId(row.id, row.id_string), name: toPlainLabel(row.name) }))
+                .filter((row) => row.id && row.name);
+        } catch (error) {
+            const last = index === versions.length - 1;
+            logger.warn(
+                `[ZohoProjects] listing tasklists on ${version} failed for project ${projectId}: `
+                + `${error.message}${last ? ' — continuing without a tasklist' : ', trying the other version'}`
+            );
+            if (last) return [];
+        }
+    }
+    return [];
+};
+
+/**
+ * Create a tasklist and return `{ id, name }`.
+ *
+ * Unlike listTasklists this DOES throw, and the difference is deliberate: failing to read
+ * the lists means we file the task nowhere, which is survivable, but failing to create one
+ * we decided to create means the caller must know not to reference it. The caller catches
+ * and falls back to unfiled.
+ *
+ * Nothing here ever deletes a tasklist. A name lives in the agency's shared workspace long
+ * after the request that prompted it, which is why the caller validates the name first.
+ */
+const createTasklist = async ({ projectId, name, portalId } = {}) => {
+    if (!projectId) throw new ApiError(400, 'A project is required to create a tasklist');
+
+    const title = typeof name === 'string' ? name.trim() : '';
+    if (!title) throw new ApiError(400, 'Tasklist name is required');
+
+    const spec = PATHS.tasklists;
+    const resolvedPortal = await resolvePortalId(portalId);
+    const path = spec.path(resolvedPortal, projectId);
+
+    const response = await zohoRequest({
+        method: 'POST',
+        path: spec.version === 'v2' ? `${path}/` : path,
+        version: spec.version,
+        data: { name: title },
+        form: spec.version === 'v2',
+        context: `Creating a Zoho tasklist in project ${projectId}`
+    });
+
+    const created = unwrap(response, spec.envelope)[0] || response;
+    const id = asId(created && (created.id || created.id_string));
+
+    if (!id) {
+        throw new ApiError(502, 'Zoho accepted the tasklist but returned no id');
+    }
+
+    logger.info(`[ZohoProjects] Created tasklist ${id} ("${title}") in project ${projectId}`);
+    return { id, name: toPlainLabel(created.name) || title };
 };
 
 const postTaskComment = async ({ projectId, taskId, comment, portalId }) => {
@@ -682,6 +814,8 @@ module.exports = {
     createProject,
     getProjectTaskUpdates,
     createTask,
+    listTasklists,
+    createTasklist,
     postTaskComment,
     uploadTaskAttachment,
     mapWithConcurrency

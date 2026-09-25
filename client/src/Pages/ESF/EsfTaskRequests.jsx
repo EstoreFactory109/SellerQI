@@ -264,8 +264,20 @@ const EsfTaskRequests = () => {
 
                             {request.status === 'accepted' && request.zohoTaskId && (
                                 <p className="mt-3 text-[11.5px] text-emerald-300/70">
-                                    Created in Zoho as task {request.zohoTaskId}. It appears on the client&apos;s
-                                    Status page once the project finishes re-syncing.
+                                    Created in Zoho as task {request.zohoTaskId}
+                                    {/*
+                                        Which list it went into, because the choice is made by a
+                                        model and a wrong one is only obvious to someone who
+                                        knows where it should have gone. Saying "new list" is the
+                                        part worth reading: creating lists is permanent, and a
+                                        run of them is this feature going wrong.
+                                    */}
+                                    {request.zohoTasklistName
+                                        ? <>, filed under <span className="font-medium">{request.zohoTasklistName}</span>
+                                            {request.tasklistChosenBy === 'created' && ' (a new list)'}</>
+                                        : ', not filed under any list'}
+                                    . It appears on the client&apos;s Status page once the project
+                                    finishes re-syncing.
                                 </p>
                             )}
 

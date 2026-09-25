@@ -45,6 +45,20 @@ const SCOPES = [
     // INVALID_OAUTHSCOPE, which is indistinguishable from a bad token until you read
     // the error body.
     'ZohoProjects.tasks.ALL',
+    /**
+     * ALL, not READ: accepting a client's task request files it under a tasklist, and
+     * creates one when nothing fits.
+     *
+     * Added 2026-09-25. Before this the tasklists endpoint answered 401
+     * INVALID_OAUTHSCOPE on BOTH v2 and v3 — the reason ZohoTaskSync reconstructs the
+     * Untapped tree out of ordinary tasks instead of asking for tasklists directly.
+     *
+     * Adding it cost a reconnect, per the warning above. If tasklist calls still 401
+     * after that reconnect, suspect THIS STRING rather than the code: Zoho's consent URL
+     * accepts any scope name without validating it, so a typo here consents cleanly and
+     * then fails exactly as if the scope were missing.
+     */
+    'ZohoProjects.tasklists.ALL',
     'ZohoProjects.activities.READ',
     'ZohoProjects.status.READ',
 
@@ -112,6 +126,23 @@ const PATHS = {
         version: 'v3',
         path: (portalId, projectId) => `/portal/${portalId}/projects/${projectId}/tasks`,
         envelope: 'tasks'
+    },
+
+    /**
+     * Tasklists — read to choose one, written to create one.
+     *
+     * The version here is a GUESS that could not be tested before the scope existed:
+     * both generations answered 401 INVALID_OAUTHSCOPE, which masks whichever of them
+     * actually serves this resource. v3 matches the rest of this block, but v3 answers
+     * URL_RULE_NOT_CONFIGURED for subtasks, so v2 is a real possibility — and
+     * listTasklists retries on the other generation for exactly that reason. If v2 turns
+     * out to be the one, correct it here (note v2 paths carry a trailing slash) and drop
+     * the retry.
+     */
+    tasklists: {
+        version: 'v3',
+        path: (portalId, projectId) => `/portal/${portalId}/projects/${projectId}/tasklists`,
+        envelope: 'tasklists'
     },
 
     taskComments: {
@@ -198,6 +229,7 @@ const BILLING_PATHS = {
 const PAGE_SIZE = {
     projects: 200,
     tasks: 200,
+    tasklists: 100,
     comments: 100,
     activities: 100,
     statuses: 100
