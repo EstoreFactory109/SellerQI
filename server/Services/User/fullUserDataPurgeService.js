@@ -35,6 +35,7 @@ const IssuesData = require('../../models/system/IssuesDataModel.js');
 const IssueSummary = require('../../models/system/IssueSummaryModel.js');
 const TopOpportunities = require('../../models/system/TopOpportunitiesModel.js');
 const EsfSuggestedWork = require('../../models/system/EsfSuggestedWorkModel.js');
+const EsfUntapped = require('../../models/system/EsfUntappedModel.js');
 const { EsfBillingProfile, EsfBillingInvoice } = require('../../models/system/EsfBillingModels.js');
 const { EmailThread, EmailMessage } = require('../../models/system/EmailThreadModels.js');
 const TaskRequest = require('../../models/system/TaskRequestModel.js');
@@ -223,6 +224,11 @@ const collectionsWithUserId = [
     // Derived and rebuildable, but it copies the opportunity titles and dollar
     // amounts, so it leaks exactly like the two rows above if left off this list.
     { model: EsfSuggestedWork, key: 'userId' },
+    // The Untapped page's opportunities. Rebuildable from Zoho in one sync, but each
+    // body is a paragraph written about THIS client's business — their search volumes,
+    // what their competitors do, what they are losing and to whom. More revealing per
+    // row than anything else in this list, and it must not outlive the account.
+    { model: EsfUntapped, key: 'userId' },
     // Synced Zoho Billing. Rebuildable from Zoho, but these hold a company's billing
     // ADDRESS, invoice amounts and the last four digits of a card — the most
     // sensitive rows this integration stores, and the least defensible to leave

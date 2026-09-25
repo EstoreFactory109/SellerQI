@@ -178,6 +178,22 @@ const normaliseTask = (task = {}) => ({
             .filter((name) => name && name !== 'Unassigned User')
         : [],
     tasklist: toPlainLabel(task.tasklist && task.tasklist.name),
+
+    /**
+     * Where this task sits in the subtask tree: 0 is top level, 1 is a subtask of one.
+     *
+     * Kept because subtasks arrive as ordinary rows in this same flat list — there is no
+     * working subtasks endpoint on this connection (v3 answers URL_RULE_NOT_CONFIGURED)
+     * and no scope for the tasklists one, so these two fields are the only way to
+     * reconstruct the tree. The Untapped page is built entirely out of them.
+     *
+     * `parental_info` is what the live v3 API returns today and is absent on top-level
+     * tasks. It is not in Zoho's published schema, so treat a sudden run of nulls here
+     * as the API changing under us rather than as a project with no subtasks.
+     */
+    depth: Number(task.depth) || 0,
+    parentTaskId: (task.parental_info && asId(task.parental_info.parent_task_id)) || null,
+
     // "None" is Zoho's placeholder milestone, not a real one.
     milestone: toPlainLabel((task.milestone && task.milestone.name !== 'None' && task.milestone.name) || null),
     createdByName: (task.created_by && (task.created_by.full_name || task.created_by.name)) || null,

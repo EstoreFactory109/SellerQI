@@ -100,6 +100,7 @@ const {
 const { getAsinDailyAggregation } = require('../controllers/analytics/ProductWiseAsinDailyController.js');
 const { getEsfClientDashboard } = require('../controllers/analytics/EsfClientDashboardController.js');
 const { getEsfProjectStatus } = require('../controllers/analytics/EsfProjectStatusController.js');
+const { getEsfUntapped } = require('../controllers/analytics/EsfUntappedController.js');
 const { postEsfTaskReply } = require('../controllers/analytics/EsfProjectReplyController.js');
 const { getEsfBilling, downloadEsfInvoice } = require('../controllers/analytics/EsfBillingController.js');
 const { getEsfMessages, getEsfMessageThread, postEsfMessageReply, postEsfNewTicket, downloadEsfAttachment, postEsfTaskRequest } = require('../controllers/analytics/EsfClientMessagesController.js');
@@ -306,6 +307,15 @@ router.get('/esf/client-dashboard', auth, esfClientOnly, getLocation, analyseDat
 // project data, not marketplace data, so it has no country/region dimension.
 // Cached briefly because the underlying rows only change once a day anyway.
 router.get('/esf/project-status', auth, esfClientOnly, analyseDataCache(300, 'esf-project-status'), getEsfProjectStatus);
+
+// The Untapped page, from the same nightly Zoho sync. No getLocation, for the same
+// reason as the Status route above.
+//
+// Deliberately NOT cached. analyseDataCache is a no-op on these ESF routes — it needs
+// req.country/req.region and bails without them (middlewares/redisCache.js), and none of
+// them run getLocation. Adding it here would read like caching while doing nothing, and
+// the rows only change once a day regardless.
+router.get('/esf/untapped', auth, esfClientOnly, getEsfUntapped);
 
 // Invoices + the card on file, from the nightly Zoho Billing sync. Same shape as the
 // Status route above: no getLocation (billing has no marketplace dimension) and a

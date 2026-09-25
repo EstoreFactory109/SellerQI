@@ -1,91 +1,88 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import axiosInstance from '../../../config/axios.config.js';
 import { PALETTE, dividerStyle } from '../../../Components/ESF/estoreFactoryTheme.js';
 
 /**
- * Estore Factory > Untapped — recreates deploy/untapped.html exactly.
+ * Estore Factory > Untapped — upside the agency has spotted but nobody has started.
  *
- * Every "Discuss this" / "Not interested" interaction here is local UI state
- * only, exactly matching the mock's own Component class (a plain in-memory
- * `cards` dictionary, no API calls) — there is no untapped-opportunity model
- * on the backend, so "Send to your account manager" only flips this card's own local state
- * to "sent"; nothing is actually delivered anywhere yet.
+ * Real data since this replaced the mock. The agency writes each opportunity as a
+ * subtask under "Within Amazon" or "Off Amazon" in the Zoho tasklist "Untapped", with
+ * the money and the explanation in its description; the nightly sync parses those and
+ * this page renders them. So the page is only ever as current as the last sync, which
+ * is why the header says when that was — on something refreshed once a day, "empty"
+ * and "broken" look identical without it.
+ *
+ * ── NOTHING ON THIS PAGE IS INVENTED ANY MORE ──
+ * It used to open with a hardcoded "$14,450/mo" over a hand-computed six-segment bar,
+ * none of which came from anywhere. The total is now summed server-side from the same
+ * rows the cards render, so the headline and the cards cannot disagree. The old "show 3
+ * more opportunities" table is gone entirely: Zoho has no notion of a lesser
+ * opportunity, so it could only ever have stayed empty or gone back to being fiction.
+ *
+ * "Discuss this" books time on the existing consultation link rather than posting
+ * anywhere — a conversation about scoping work is a conversation, and we already have
+ * a calendar for it. It is the only action on a card: the mock's "Not interested" is
+ * gone, because dismissing an opportunity that nothing records is a button that lies,
+ * and one the client would have to press again after every refresh.
  */
-const OPPORTUNITIES = [
-    {
-        id: 'a1', eyebrow: 'From your account data',
-        title: 'Nine of your listings have no A+ content',
-        amount: '$2,100', amountSuffix: '/mo', amountLabel: 'estimated upside',
-        body: 'These nine ASINs get 31,000 views a month between them and convert about 3 points below your listings that do have A+ modules. It is usually the last thing added when a catalogue grows quickly.',
-        meta: ['Medium effort', 'About 3 weeks', '9 listings'],
-        sendTo: 'your account manager', hiddenLabel: 'Nine of your listings have no A+ content — hidden',
-    },
-    {
-        id: 'a2', eyebrow: 'From your account data',
-        title: 'None of your top five products have video',
-        amount: '$1,450', amountSuffix: '/mo', amountLabel: 'estimated upside',
-        body: 'Kitchen products with a short demo video hold shoppers on the page noticeably longer. Your kettle and frother are the two where a 20-second clip would answer the questions your reviews keep raising.',
-        meta: ['Medium effort', 'About 4 weeks', 'Kettle + frother first'],
-        sendTo: 'your account manager', hiddenLabel: 'No video on your top five products — hidden',
-    },
-    {
-        id: 'a3', eyebrow: 'From your account data',
-        title: 'Reimbursements from 2024 are still unclaimed',
-        amount: '$4,380', amountLabel: 'recoverable, one-off',
-        body: 'Sixty-two units were damaged or lost in fulfilment centres before we started working together. Amazon’s claim window closes 18 months after the event, so the oldest of these expire in November.',
-        meta: ['Light effort', 'Filed within a week', 'Oldest expire in November'],
-        sendTo: 'your account manager', hiddenLabel: 'Unclaimed 2024 reimbursements — hidden',
-    },
-    {
-        id: 'a4', eyebrow: 'From your account data',
-        title: 'Your brand store has never been built',
-        amount: '$3,800', amountSuffix: '/mo', amountLabel: 'estimated upside',
-        body: 'Shoppers who land on a brand store browse more of the catalogue than they do from a single listing, and it is the only place your range reads as one brand. Brand Registry is already in place, so the store is available to build whenever you want it.',
-        meta: ['Larger project', '4 to 5 weeks', 'Brand Registry in place'],
-        sendTo: 'your account manager', hiddenLabel: 'Brand store not built — hidden',
-    },
-];
 
-const OFF_AMAZON = [
-    {
-        id: 't1', eyebrow: 'Noted by your team',
-        title: 'You have no website of your own',
-        amount: '$3,600', amountSuffix: '/mo', amountLabel: 'estimated upside',
-        body: 'People search "Kessler kitchen scale" about 2,900 times a month and land on retailers reselling you. A simple brand site that pushes those searches to your Amazon listings would keep that demand yours, and it makes Brand Referral Bonus credits available.',
-        meta: ['Larger project', '6 to 8 weeks', 'Unlocks referral credits'],
-        sendTo: 'your account manager', hiddenLabel: 'No brand website — hidden',
-    },
-    {
-        id: 't2', eyebrow: 'Noted by your team',
-        title: 'Nothing is driving outside traffic to your listings',
-        amount: '$2,400', amountSuffix: '/mo', amountLabel: 'estimated upside',
-        body: 'Every sale you make right now comes from inside Amazon. Your unboxing photos do well on Pinterest for competitors in this category, and off-Amazon traffic also improves how your listings rank organically.',
-        meta: ['Light to start', 'Ongoing', 'Pinterest and email first'],
-        sendTo: 'the Advertising team', hiddenLabel: 'No external traffic — hidden',
-    },
-    {
-        id: 't3', eyebrow: 'Noted by your team',
-        title: 'The brand has no social presence at all',
-        amount: '$1,100', amountSuffix: '/mo', amountLabel: 'estimated upside',
-        body: 'Kitchen gear does well in short-form video, and right now there is nowhere for a curious shopper to look you up. A modest, consistent account gives the external traffic work somewhere to send people back from.',
-        meta: ['Light to start', 'Ongoing', 'Instagram first'],
-        sendTo: 'your account manager', hiddenLabel: 'No social presence — hidden',
-    },
-];
+/** Longest first, so the bar reads big-to-small like the cards do. */
+const BAR_COLORS = [PALETTE.accent, '#2F5FCB', '#6B7684', '#4A525C', '#3B424B', '#31373F'];
 
-const SMALLER = [
-    { id: 'x2', text: 'Twelve listings are missing backend search terms entirely', tag: 'WITHIN AMAZON', amount: '$980', amountSuffix: '/mo' },
-    { id: 'x3', text: 'The frother range is not enrolled in Subscribe & Save', tag: 'WITHIN AMAZON', amount: '$1,240', amountSuffix: '/mo' },
-    { id: 'x4', text: 'No email list to launch new products into', tag: 'OFF AMAZON', amount: '$740', amountSuffix: '/mo' },
-];
+/** Where "Discuss this" goes — the same Calendly consultation the rest of the app uses. */
+const CONSULTATION_PATH = '/seller-central-checker/consultation';
 
-const LEGEND = [
-    { label: 'Brand store', amount: '$3,800', color: PALETTE.accent, width: 26.3 },
-    { label: 'Brand website', amount: '$3,600', color: '#2F5FCB', width: 24.9 },
-    { label: 'External traffic', amount: '$2,400', color: '#6B7684', width: 16.6 },
-    { label: 'A+ content', amount: '$2,100', color: '#4A525C', width: 14.5 },
-    { label: 'Listing video', amount: '$1,450', color: '#3B424B', width: 10 },
-    { label: 'Social', amount: '$1,100', color: '#31373F', width: 7.6 },
-];
+const SECTIONS = {
+    within: {
+        heading: 'Within Amazon',
+        blurb: 'Upside available on the marketplace itself, using tools your account already has.',
+        eyebrow: 'From your account data',
+    },
+    off: {
+        heading: 'Off Amazon',
+        blurb: 'Ways to bring demand in from outside the marketplace and point it at your listings.',
+        eyebrow: 'Noted by your team',
+    },
+};
+
+const money = (amount, currencyCode = 'USD') => {
+    try {
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: currencyCode || 'USD',
+            maximumFractionDigits: 0,
+        }).format(amount);
+    } catch {
+        // An unrecognised currency code must not blank the figure.
+        return `${Math.round(amount).toLocaleString('en-US')}`;
+    }
+};
+
+/** `month` -> `/mo`. Null for a one-off, which reads as a plain figure. */
+const periodSuffix = (period) => {
+    if (!period || period === 'once') return null;
+    return { month: '/mo', year: '/yr', week: '/wk' }[period] || `/${period}`;
+};
+
+const relativeTime = (value) => {
+    if (!value) return '—';
+    const then = new Date(value);
+    if (Number.isNaN(then.getTime())) return '—';
+    const mins = Math.round((Date.now() - then.getTime()) / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins} min ago`;
+    const hours = Math.round(mins / 60);
+    if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+    const days = Math.round(hours / 24);
+    if (days === 1) return 'Yesterday';
+    if (days < 7) return `${days} days ago`;
+    return then.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+};
+
+const SectionEmpty = ({ children }) => (
+    <div className="py-8 text-center text-[13px]" style={{ color: PALETTE.textMuted }}>{children}</div>
+);
 
 const CardShell = ({ children, background, borderColor }) => (
     <div
@@ -98,187 +95,205 @@ const CardShell = ({ children, background, borderColor }) => (
     </div>
 );
 
-/** One opportunity card, cycling live -> composing -> sent, or live -> hidden -> restore. */
-const OpportunityCard = ({ opp, raised }) => {
-    const [mode, setMode] = useState('live');
-    const [draft, setDraft] = useState('');
+const OpportunityCard = ({ opp, eyebrow, raised, onDiscuss }) => {
     const background = raised ? PALETTE.surfaceRaised : PALETTE.surface;
     const borderColor = raised ? PALETTE.borderRaised : PALETTE.border;
-
-    if (mode === 'hidden') {
-        return (
-            <CardShell background={background} borderColor={borderColor}>
-                <div className="flex items-center gap-3">
-                    <span className="flex-1 text-[13px]" style={{ color: PALETTE.textMuted }}>{opp.hiddenLabel}</span>
-                    <button type="button" onClick={() => setMode('live')} className="text-[12.5px]" style={{ color: PALETTE.textSecondary }}>Undo</button>
-                </div>
-            </CardShell>
-        );
-    }
+    const suffix = periodSuffix(opp.period);
 
     return (
         <CardShell background={background} borderColor={borderColor}>
             <div className="flex-1 min-h-0 flex flex-col gap-3.5">
-                <span className="self-start text-[10.5px]" style={{ color: PALETTE.textFaint }}>{opp.eyebrow}</span>
+                <span className="self-start text-[10.5px]" style={{ color: PALETTE.textFaint }}>{eyebrow}</span>
                 <span className="text-[16.5px] font-semibold leading-[1.35] tracking-[-0.01em]" style={{ color: PALETTE.textPrimary }}>{opp.title}</span>
-                <div className="flex flex-col gap-1">
-                    <span className="text-[31px] font-semibold tracking-[-0.025em] leading-none" style={{ color: '#FFFFFF' }}>
-                        {opp.amount}{opp.amountSuffix && <span className="text-[15px] font-medium" style={{ color: PALETTE.textSecondary }}>{opp.amountSuffix}</span>}
-                    </span>
-                    <span className="text-[11.5px]" style={{ color: PALETTE.textMuted }}>{opp.amountLabel}</span>
-                </div>
-                <p className="m-0 text-[13px] leading-[1.65]" style={{ color: PALETTE.textTertiary }}>{opp.body}</p>
-                <div className="flex items-center gap-2.5 flex-wrap text-[11.5px] mt-auto pt-3.5" style={{ color: PALETTE.textFaint, ...dividerStyle() }}>
-                    {opp.meta.map((m, i) => (
-                        <span key={m} className="flex items-center gap-2.5">
-                            {i > 0 && <span className="w-[3px] h-[3px] rounded-full" style={{ background: '#41474F' }} />}
-                            {m}
+
+                {/*
+                    A card with no figure still earns its place. The agency wrote the
+                    explanation; only the price line failed to parse, and showing the
+                    words without a number beats dropping the opportunity entirely.
+                */}
+                {opp.amount !== null && (
+                    <div className="flex flex-col gap-1">
+                        <span className="text-[31px] font-semibold tracking-[-0.025em] leading-none" style={{ color: '#FFFFFF' }}>
+                            {money(opp.amount, opp.currencyCode)}
+                            {suffix && <span className="text-[15px] font-medium" style={{ color: PALETTE.textSecondary }}>{suffix}</span>}
                         </span>
-                    ))}
-                </div>
+                        {opp.amountLabel && (
+                            <span className="text-[11.5px]" style={{ color: PALETTE.textMuted }}>{opp.amountLabel}</span>
+                        )}
+                    </div>
+                )}
+
+                <p className="m-0 text-[13px] leading-[1.65] whitespace-pre-wrap" style={{ color: PALETTE.textTertiary }}>{opp.body}</p>
             </div>
 
-            {mode === 'live' && (
-                <div className="flex items-center gap-4">
-                    <button type="button" onClick={() => setMode('composing')} className="text-[12.5px] font-medium px-4 py-[9px] rounded-lg" style={{ color: PALETTE.textBody, border: `1px solid ${PALETTE.borderHover}` }}>Discuss this</button>
-                    <button type="button" onClick={() => setMode('hidden')} className="text-[12.5px]" style={{ color: PALETTE.textMuted }}>Not interested</button>
-                </div>
-            )}
-
-            {mode === 'composing' && (
-                <div className="flex flex-col gap-2.5 pt-3.5" style={dividerStyle('rgba(255,255,255,.06)')}>
-                    <textarea
-                        value={draft}
-                        onChange={(e) => setDraft(e.target.value)}
-                        placeholder="Anything you want to ask before we scope this?"
-                        className="rounded-lg px-3 py-2.5 text-[12.5px] leading-[1.5] outline-none resize-y"
-                        style={{ background: PALETTE.input, border: `1px solid ${PALETTE.borderHover}`, color: PALETTE.textBody, minHeight: 64 }}
-                    />
-                    <div className="flex items-center gap-2.5">
-                        <button
-                            type="button"
-                            onClick={() => setMode('sent')}
-                            className="text-[12.5px] font-bold px-[15px] py-2 rounded-lg"
-                            style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}
-                        >
-                            Send to {opp.sendTo}
-                        </button>
-                        <button type="button" onClick={() => setMode('live')} className="text-[12.5px]" style={{ color: PALETTE.textMuted }}>Cancel</button>
-                    </div>
-                </div>
-            )}
-
-            {mode === 'sent' && (
-                <div className="flex items-center gap-2.5 pt-3.5" style={dividerStyle('rgba(255,255,255,.06)')}>
-                    <span className="w-[7px] h-[7px] rounded-full" style={{ background: PALETTE.good }} />
-                    <span className="text-[12.5px]" style={{ color: PALETTE.good }}>Sent — {opp.sendTo} will pick this up in your next check-in</span>
-                </div>
-            )}
+            <div className="flex items-center gap-4 pt-3.5" style={dividerStyle()}>
+                <button
+                    type="button"
+                    onClick={onDiscuss}
+                    className="text-[12.5px] font-medium px-4 py-[9px] rounded-lg"
+                    style={{ color: PALETTE.textBody, border: `1px solid ${PALETTE.borderHover}` }}
+                >
+                    Discuss this
+                </button>
+            </div>
         </CardShell>
     );
 };
 
-const SmallerOpportunityRow = ({ item, withDivider }) => {
-    const [sent, setSent] = useState(false);
+const OpportunitySection = ({ section, items, currencyCode, loading, error, linked, onDiscuss }) => {
+    const meta = SECTIONS[section];
     return (
-        <div className="flex items-center gap-[22px] py-[18px]" style={withDivider ? dividerStyle() : undefined}>
-            <span className="flex-1 text-[13.5px]" style={{ color: PALETTE.textBody }}>{item.text}</span>
-            <span className="flex-none text-[11px] tracking-[.04em]" style={{ color: PALETTE.textMuted }}>{item.tag}</span>
-            <span className="flex-none text-[15px] font-semibold" style={{ color: PALETTE.textPrimary }}>
-                {item.amount}<span className="text-xs font-medium" style={{ color: PALETTE.textSecondary }}>{item.amountSuffix}</span>
-            </span>
-            <button
-                type="button"
-                onClick={() => setSent(true)}
-                disabled={sent}
-                className="flex-none text-xs px-3.5 py-2 rounded-lg"
-                style={{ color: PALETTE.textBody, border: `1px solid ${PALETTE.border}` }}
-            >
-                {sent ? 'Sent to your account manager' : 'Discuss this'}
-            </button>
-        </div>
+        <section className="flex flex-col gap-4">
+            <div className="flex flex-col gap-[5px]">
+                <h2 className="m-0 text-base font-bold tracking-[-0.01em]">{meta.heading}</h2>
+                <span className="text-[12.5px]" style={{ color: PALETTE.textMuted }}>{meta.blurb}</span>
+            </div>
+
+            {loading ? (
+                <SectionEmpty>Loading your opportunities…</SectionEmpty>
+            ) : error ? (
+                <SectionEmpty>{error}</SectionEmpty>
+            ) : !linked ? (
+                <SectionEmpty>
+                    No Zoho project is connected to your account yet — your account manager connects one from the portal.
+                </SectionEmpty>
+            ) : items.length === 0 ? (
+                <SectionEmpty>Nothing here yet. Your team adds opportunities as they spot them.</SectionEmpty>
+            ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-[18px] items-stretch">
+                    {items.map((o) => (
+                        <OpportunityCard
+                            key={o.id}
+                            opp={{ ...o, currencyCode }}
+                            eyebrow={meta.eyebrow}
+                            raised={section === 'off'}
+                            onDiscuss={onDiscuss}
+                        />
+                    ))}
+                </div>
+            )}
+        </section>
     );
 };
 
 const Untapped = () => {
-    const [moreOpen, setMoreOpen] = useState(false);
+    const navigate = useNavigate();
+    const [data, setData] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState('');
+
+    const load = useCallback(async () => {
+        try {
+            setLoading(true);
+            setLoadError('');
+            const res = await axiosInstance.get('/api/pagewise/esf/untapped');
+            setData(res.data?.data || null);
+        } catch (err) {
+            setLoadError(err.response?.data?.message || 'Could not load your untapped opportunities');
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { load(); }, [load]);
+
+    const within = data?.within || [];
+    const off = data?.off || [];
+    const all = [...within, ...off];
+    const currencyCode = data?.currencyCode || 'USD';
+    const total = data?.totalAmount || 0;
+
+    /**
+     * The bar, built from the opportunities themselves.
+     *
+     * Only those with a figure can have a width, and a total of zero means no bar at
+     * all rather than a division by zero — which is what a page full of unparsed
+     * descriptions would otherwise produce.
+     */
+    const priced = all.filter((o) => o.amount > 0).sort((a, b) => b.amount - a.amount);
+    const segments = total > 0
+        ? priced.slice(0, BAR_COLORS.length).map((o, i) => ({
+            id: o.id,
+            label: o.title,
+            amount: o.amount,
+            color: BAR_COLORS[i],
+            width: (o.amount / total) * 100,
+        }))
+        : [];
+
+    // One period for the headline. They are in practice all monthly; if they ever are
+    // not, showing no suffix is better than asserting the wrong one.
+    const periods = new Set(priced.map((o) => o.period).filter(Boolean));
+    const heroSuffix = periods.size === 1 ? periodSuffix([...periods][0]) : null;
 
     return (
         <div className="flex w-full flex-1 flex-col" style={{ background: PALETTE.bg, color: PALETTE.textPrimary, fontFamily: "system-ui, -apple-system, 'Helvetica Neue', Helvetica, sans-serif" }}>
-            <div className="w-full max-w-[1170px] mx-auto flex flex-col gap-[34px] px-8 md:px-10 py-9 md:py-11">
+            <div className="w-full max-w-[1170px] mx-auto flex flex-col gap-[34px] px-4 sm:px-8 md:px-10 py-9 md:py-11">
 
                 <header className="flex flex-col gap-2">
                     <h1 className="m-0 text-[29px] font-semibold tracking-[-0.02em]">Untapped</h1>
                     <p className="m-0 text-[13.5px] leading-[1.6] max-w-[720px]" style={{ color: PALETTE.textSecondary }}>
                         Upside that is available on your account but not being worked on yet. Nothing here is urgent, and nothing here is behind.
+                        {data?.syncedAt && (
+                            <span style={{ color: PALETTE.textMuted }}> Updated {relativeTime(data.syncedAt)}.</span>
+                        )}
                     </p>
                 </header>
 
-                <section
-                    className="rounded-lg flex flex-col md:flex-row md:items-end gap-[52px]"
-                    style={{ background: `radial-gradient(120% 180% at 0% 0%, rgba(59,130,246,.08) 0%, rgba(20,22,26,0) 55%), ${PALETTE.surface}`, border: `1px solid ${PALETTE.borderHover}`, padding: '26px 28px 24px' }}
-                >
-                    <div className="flex-none flex flex-col gap-[7px]">
-                        <span className="text-[11.5px] tracking-[.06em]" style={{ color: PALETTE.textMuted }}>IDENTIFIED UPSIDE</span>
-                        <span className="text-[46px] font-semibold tracking-[-0.03em] leading-none tabular-nums" style={{ color: '#FFFFFF' }}>
-                            $14,450<span className="text-[17px] font-medium" style={{ color: PALETTE.textSecondary }}>/mo</span>
-                        </span>
-                        <span className="text-[12.5px]" style={{ color: PALETTE.textSecondary }}>
-                            Across 6 opportunities, plus <span style={{ color: PALETTE.textInputBody }}>$4,380</span> recoverable one-off
-                        </span>
-                    </div>
-                    <div className="flex-1 flex flex-col gap-3 pb-1">
-                        <div className="flex gap-[3px] h-2 rounded-full overflow-hidden">
-                            {LEGEND.map((l) => (
-                                <span key={l.label} style={{ width: `${l.width}%`, background: l.color, borderRadius: 99 }} />
-                            ))}
+                {/* Hidden until there is something true to put in it. */}
+                {!loading && !loadError && total > 0 && (
+                    <section
+                        className="rounded-lg flex flex-col md:flex-row md:items-end gap-[52px]"
+                        style={{ background: `radial-gradient(120% 180% at 0% 0%, rgba(59,130,246,.08) 0%, rgba(20,22,26,0) 55%), ${PALETTE.surface}`, border: `1px solid ${PALETTE.borderHover}`, padding: '26px 28px 24px' }}
+                    >
+                        <div className="flex-none flex flex-col gap-[7px]">
+                            <span className="text-[11.5px] tracking-[.06em]" style={{ color: PALETTE.textMuted }}>IDENTIFIED UPSIDE</span>
+                            <span className="text-[46px] font-semibold tracking-[-0.03em] leading-none tabular-nums" style={{ color: '#FFFFFF' }}>
+                                {money(total, currencyCode)}
+                                {heroSuffix && <span className="text-[17px] font-medium" style={{ color: PALETTE.textSecondary }}>{heroSuffix}</span>}
+                            </span>
+                            <span className="text-[12.5px]" style={{ color: PALETTE.textSecondary }}>
+                                Across {all.length} opportunit{all.length === 1 ? 'y' : 'ies'}
+                            </span>
                         </div>
-                        <div className="flex flex-wrap gap-x-[22px] gap-y-2">
-                            {LEGEND.map((l) => (
-                                <span key={l.label} className="flex items-center gap-[7px] text-xs" style={{ color: PALETTE.textTertiary }}>
-                                    <span className="w-[7px] h-[7px] rounded-[2px]" style={{ background: l.color }} />
-                                    {l.label}<span style={{ color: PALETTE.textMuted }}>{l.amount}</span>
-                                </span>
-                            ))}
-                        </div>
-                    </div>
-                </section>
-
-                <section className="flex flex-col gap-4">
-                    <div className="flex flex-col gap-[5px]">
-                        <h2 className="m-0 text-base font-bold tracking-[-0.01em]">Within Amazon</h2>
-                        <span className="text-[12.5px]" style={{ color: PALETTE.textMuted }}>Upside available on the marketplace itself, using tools your account already has.</span>
-                    </div>
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-[18px] items-stretch">
-                        {OPPORTUNITIES.map((o) => <OpportunityCard key={o.id} opp={o} />)}
-                    </div>
-                </section>
-
-                <section className="flex flex-col gap-4">
-                    <div className="flex flex-col gap-[5px]">
-                        <h2 className="m-0 text-base font-bold tracking-[-0.01em]">Off Amazon</h2>
-                        <span className="text-[12.5px]" style={{ color: PALETTE.textMuted }}>Ways to bring demand in from outside the marketplace and point it at your listings.</span>
-                    </div>
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-[18px] items-stretch">
-                        {OFF_AMAZON.map((o) => <OpportunityCard key={o.id} opp={o} raised />)}
-                    </div>
-                </section>
-
-                {moreOpen && (
-                    <section>
-                        <div className="rounded-lg" style={{ background: PALETTE.surface, border: `1px solid ${PALETTE.border}`, padding: '4px 24px 6px' }}>
-                            {SMALLER.map((item, i) => (
-                                <SmallerOpportunityRow key={item.id} item={item} withDivider={i > 0} />
-                            ))}
+                        <div className="flex-1 flex flex-col gap-3 pb-1">
+                            <div className="flex gap-[3px] h-2 rounded-full overflow-hidden">
+                                {segments.map((s) => (
+                                    <span key={s.id} style={{ width: `${s.width}%`, background: s.color, borderRadius: 99 }} />
+                                ))}
+                            </div>
+                            <div className="flex flex-wrap gap-x-[22px] gap-y-2">
+                                {segments.map((s) => (
+                                    <span key={s.id} className="flex items-center gap-[7px] text-xs" style={{ color: PALETTE.textTertiary }}>
+                                        <span className="w-[7px] h-[7px] rounded-[2px] shrink-0" style={{ background: s.color }} />
+                                        <span className="truncate max-w-[220px]">{s.label}</span>
+                                        <span style={{ color: PALETTE.textMuted }}>{money(s.amount, currencyCode)}</span>
+                                    </span>
+                                ))}
+                            </div>
                         </div>
                     </section>
                 )}
 
-                <div>
-                    <button type="button" onClick={() => setMoreOpen((v) => !v)} className="text-[12.5px]" style={{ color: PALETTE.textSecondary }}>
-                        {moreOpen ? 'Hide the smaller opportunities' : 'Show 3 more opportunities'}
-                    </button>
-                </div>
+                <OpportunitySection
+                    section="within"
+                    items={within}
+                    currencyCode={currencyCode}
+                    loading={loading}
+                    error={loadError}
+                    linked={Boolean(data?.linked)}
+                    onDiscuss={() => navigate(CONSULTATION_PATH)}
+                />
+
+                <OpportunitySection
+                    section="off"
+                    items={off}
+                    currencyCode={currencyCode}
+                    loading={loading}
+                    error={loadError}
+                    linked={Boolean(data?.linked)}
+                    onDiscuss={() => navigate(CONSULTATION_PATH)}
+                />
 
             </div>
         </div>

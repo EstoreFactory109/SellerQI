@@ -27,11 +27,13 @@
 const UserModel = require('../../models/user-auth/userModel.js');
 const ZohoProjectTask = require('../../models/system/ZohoProjectTaskModel.js');
 const EsfSuggestedWork = require('../../models/system/EsfSuggestedWorkModel.js');
+const EsfUntapped = require('../../models/system/EsfUntappedModel.js');
 const TopOpportunities = require('../../models/system/TopOpportunitiesModel.js');
 const ZohoOpportunityMatchService = require('../AI/ZohoOpportunityMatchService.js');
 const ZohoProjectsService = require('./ZohoProjectsService.js');
 const { mapWithConcurrency } = ZohoProjectsService;
 const ZohoTaskSummaryService = require('../AI/ZohoTaskSummaryService.js');
+const { parseOpportunity, PARSER_VERSION } = require('../AI/UntappedParserService.js');
 const ZohoAuth = require('./ZohoAuth.js');
 const { ApiError } = require('../../utils/ApiError.js');
 const logger = require('../../utils/Logger.js');
@@ -44,6 +46,12 @@ const SECTIONS = {
 
 /** Safety net: one runaway project must not stall the whole nightly run. */
 const MAX_TASKS_PER_PROJECT = 200;
+
+/**
+ * The tasklist the Untapped page is built from. Compared lower-cased and trimmed,
+ * because this is typed by hand in Zoho and "untapped " is the same tasklist.
+ */
+const UNTAPPED_TASKLIST = 'untapped';
 
 /** How many comment threads are summarised at once. These are OpenAI calls. */
 const SUMMARY_CONCURRENCY = 4;
@@ -200,12 +208,14 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
     });
 
     const suggested = await refreshSuggestedWork(projectId, tasks);
+    const untapped = await refreshUntapped(projectId, tasks, { projectName });
 
     return {
         projectId,
         projectName,
         tasks: tasks.length,
         suggested,
+        untapped,
         comments: tasks.reduce((sum, t) => sum + (t.comments?.length || 0), 0),
         summarised: summaries.filter((s) => s.generatedBy === 'ai').length,
         waitingOnClient: summaries.filter((s) => s.waitingOnClient).length,
@@ -333,6 +343,134 @@ const refreshSuggestedWork = async (projectId, tasks, now = new Date()) => {
 };
 
 /**
+ * Rebuild the client's Untapped page from the tasks we already fetched.
+ *
+ * The shape in Zoho is a tasklist called "Untapped" holding two tasks — "Within Amazon"
+ * and "Off Amazon" — whose SUBTASKS are the opportunities. Nothing here makes an extra
+ * Zoho call: subtasks come back in the ordinary task list as rows with `depth: 1` and a
+ * `parentTaskId`, which is just as well, because the tasklists endpoint needs a scope
+ * this connection does not have and the v3 subtasks endpoint answers
+ * URL_RULE_NOT_CONFIGURED.
+ *
+ * Like refreshSuggestedWork, this never throws. A project whose Untapped tasklist is
+ * malformed must not take the whole nightly sync down with it.
+ */
+const refreshUntapped = async (projectId, tasks, { projectName = null } = {}) => {
+    try {
+        const inTasklist = (tasks || []).filter(
+            (t) => String(t.tasklist || '').trim().toLowerCase() === UNTAPPED_TASKLIST
+        );
+
+        // No tasklist yet is the ordinary state for a client nobody has written
+        // opportunities for. Clear any previous doc so a deleted tasklist empties the
+        // page rather than leaving yesterday's cards up forever.
+        if (!inTasklist.length) {
+            await EsfUntapped.deleteOne({ projectId });
+            return { opportunities: 0, cleared: true };
+        }
+
+        const sectionOf = (name) => {
+            const text = String(name || '').toLowerCase();
+            if (/within\s+amazon/.test(text)) return 'within';
+            if (/off\s+amazon/.test(text)) return 'off';
+            return null;
+        };
+
+        // The two section headings. Matched on NAME, so a rename in Zoho silently
+        // empties a section — hence the warning below rather than a quiet skip.
+        const sectionByTaskId = new Map();
+        for (const task of inTasklist) {
+            const section = sectionOf(task.name);
+            if (section && !task.parentTaskId) sectionByTaskId.set(String(task.id), section);
+        }
+
+        if (!sectionByTaskId.size) {
+            logger.warn(
+                `[ZohoTaskSync] project ${projectId} has an "Untapped" tasklist but no `
+                + '"Within Amazon" / "Off Amazon" task in it — nothing to show'
+            );
+        }
+
+        const candidates = inTasklist.filter((task) => {
+            if (!task.parentTaskId) return false;
+            if (!sectionByTaskId.has(String(task.parentTaskId))) return false;
+            // A closed opportunity is no longer untapped.
+            return !task.isCompleted && !task.statusIsClosed;
+        });
+
+        const orphans = inTasklist.filter(
+            (t) => t.parentTaskId && !sectionByTaskId.has(String(t.parentTaskId))
+        );
+        if (orphans.length) {
+            logger.warn(
+                `[ZohoTaskSync] project ${projectId}: ${orphans.length} Untapped subtask(s) `
+                + 'sit under a task that is neither "Within Amazon" nor "Off Amazon"'
+            );
+        }
+
+        const capped = candidates.slice(0, EsfUntapped.MAX_OPPORTUNITIES);
+
+        const opportunities = [];
+        let currencyCode = null;
+        for (const [index, task] of capped.entries()) {
+            // Sequential on purpose: the parser only reaches the network in the rare
+            // case the pattern fails, so there is nothing here worth parallelising.
+            const parsed = await parseOpportunity(task.description);
+            // One currency for the page — the first real one wins. Mixed currencies in
+            // a single project would be a data problem in Zoho, not a thing to render.
+            if (!currencyCode && parsed.currencyCode) currencyCode = parsed.currencyCode;
+            opportunities.push({
+                taskId: String(task.id),
+                parentTaskId: String(task.parentTaskId),
+                section: sectionByTaskId.get(String(task.parentTaskId)),
+                title: task.name || null,
+                body: parsed.body || '',
+                amount: parsed.amount,
+                period: parsed.period,
+                amountLabel: parsed.amountLabel,
+                rank: index,
+                parsedBy: parsed.parsedBy,
+            });
+        }
+
+        await EsfUntapped.updateOne(
+            { projectId },
+            {
+                $set: {
+                    projectId,
+                    projectName: projectName || null,
+                    userId: (await UserModel.findOne({ 'zohoProject.projectId': projectId })
+                        .select('_id').lean())?._id || null,
+                    currencyCode: currencyCode || 'USD',
+                    opportunities,
+                    parserVersion: PARSER_VERSION,
+                    syncedAt: new Date(),
+                },
+            },
+            { upsert: true }
+        );
+
+        const unparsed = opportunities.filter((o) => o.parsedBy === 'none').length;
+        if (unparsed) {
+            logger.warn(
+                `[ZohoTaskSync] project ${projectId}: ${unparsed} of ${opportunities.length} `
+                + 'Untapped descriptions had no readable price — check the format in Zoho'
+            );
+        }
+
+        return {
+            opportunities: opportunities.length,
+            within: opportunities.filter((o) => o.section === 'within').length,
+            off: opportunities.filter((o) => o.section === 'off').length,
+            unparsed,
+        };
+    } catch (error) {
+        logger.warn(`[ZohoTaskSync] Untapped for project ${projectId} failed: ${error.message}`);
+        return { error: error.message };
+    }
+};
+
+/**
  * Drop rows for projects no client is linked to any more.
  *
  * Without this, unlinking a client (or re-pointing them at a different project)
@@ -340,11 +478,19 @@ const refreshSuggestedWork = async (projectId, tasks, now = new Date()) => {
  * growing, and re-appearing if the project is ever linked again with stale data.
  */
 const pruneUnlinkedProjects = async (liveProjectIds) => {
-    const result = await ZohoProjectTask.deleteMany(
-        liveProjectIds.length ? { projectId: { $nin: liveProjectIds } } : {}
-    );
+    const scope = liveProjectIds.length ? { projectId: { $nin: liveProjectIds } } : {};
+
+    const result = await ZohoProjectTask.deleteMany(scope);
+    // The Untapped page is per-project too, and describes the client's business in
+    // detail — leaving it behind on an unlinked project is the same leak this function
+    // exists to prevent, one collection over.
+    const untapped = await EsfUntapped.deleteMany(scope);
+
     const removed = result.deletedCount || 0;
     if (removed) logger.info(`[ZohoTaskSync] pruned ${removed} rows from unlinked projects`);
+    if (untapped.deletedCount) {
+        logger.info(`[ZohoTaskSync] pruned untapped for ${untapped.deletedCount} unlinked project(s)`);
+    }
     return removed;
 };
 
@@ -420,6 +566,17 @@ const getTaskBoard = async (projectId, { now = new Date(), completedSinceDays = 
     const completedCutoff = new Date(now.getTime() - completedSinceDays * 86400000);
 
     for (const row of rows) {
+        /**
+         * The Untapped tasklist is not work, and must not appear here.
+         *
+         * Its tasks are synced like any other — they come from the same task list — so
+         * without this the client's Status page shows "Within Amazon", "Off Amazon" and
+         * every opportunity subtask as work in progress. That overstates what the team
+         * is actually doing, which is close to the worst thing this page can get wrong.
+         * They belong on the Untapped page, and only there.
+         */
+        if (String(row.tasklist || '').trim().toLowerCase() === UNTAPPED_TASKLIST) continue;
+
         const section = classifyTask(row, now);
         if (section === SECTIONS.COMPLETED) {
             // "Completed, last 30 days" — older finished work stays out of the
@@ -464,6 +621,8 @@ module.exports = {
     linkedProjects,
     pruneUnlinkedProjects,
     refreshSuggestedWork,
+    refreshUntapped,
+    UNTAPPED_TASKLIST,
     syncProject,
     syncAllProjects,
     getTaskBoard,
