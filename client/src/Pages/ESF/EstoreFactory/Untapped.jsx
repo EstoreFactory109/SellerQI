@@ -22,8 +22,9 @@ import { PALETTE, dividerStyle } from '../../../Components/ESF/estoreFactoryThem
  *
  * "Discuss this" books time on the existing consultation link rather than posting
  * anywhere — a conversation about scoping work is a conversation, and we already have
- * a calendar for it. "Not interested" stays local to the card, as it always was: it is
- * a way to quieten the page while reading it, not a preference worth storing.
+ * a calendar for it. It is the only action on a card: the mock's "Not interested" is
+ * gone, because dismissing an opportunity that nothing records is a button that lies,
+ * and one the client would have to press again after every refresh.
  */
 
 /** Longest first, so the bar reads big-to-small like the cards do. */
@@ -95,23 +96,9 @@ const CardShell = ({ children, background, borderColor }) => (
 );
 
 const OpportunityCard = ({ opp, eyebrow, raised, onDiscuss }) => {
-    const [hidden, setHidden] = useState(false);
     const background = raised ? PALETTE.surfaceRaised : PALETTE.surface;
     const borderColor = raised ? PALETTE.borderRaised : PALETTE.border;
     const suffix = periodSuffix(opp.period);
-
-    if (hidden) {
-        return (
-            <CardShell background={background} borderColor={borderColor}>
-                <div className="flex items-center gap-3">
-                    <span className="flex-1 text-[13px]" style={{ color: PALETTE.textMuted }}>
-                        {opp.title} — hidden
-                    </span>
-                    <button type="button" onClick={() => setHidden(false)} className="text-[12.5px]" style={{ color: PALETTE.textSecondary }}>Undo</button>
-                </div>
-            </CardShell>
-        );
-    }
 
     return (
         <CardShell background={background} borderColor={borderColor}>
@@ -148,7 +135,6 @@ const OpportunityCard = ({ opp, eyebrow, raised, onDiscuss }) => {
                 >
                     Discuss this
                 </button>
-                <button type="button" onClick={() => setHidden(true)} className="text-[12.5px]" style={{ color: PALETTE.textMuted }}>Not interested</button>
             </div>
         </CardShell>
     );
