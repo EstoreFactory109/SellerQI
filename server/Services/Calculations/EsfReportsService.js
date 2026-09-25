@@ -31,6 +31,9 @@ const FbaInventoryPlanningData = require('../../models/inventory/GET_FBA_INVENTO
 const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
 const AccountHistory = require('../../models/user-auth/AccountHistory.js');
 const V2SellerPerformance = require('../../models/seller-performance/V2_Seller_Performance_ReportModel.js');
+const V1SellerPerformance = require('../../models/seller-performance/V1_Seller_Performance_Report_Model.js');
+const StrandedInventoryItem = require('../../models/inventory/StrandedInventoryUIDataItemModel.js');
+const TopOpportunities = require('../../models/system/TopOpportunitiesModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const FbaInventoryApiDetail = require('../../models/inventory/FbaInventoryApiDetailModel.js');
 const ProductWiseFBADataItem = require('../../models/inventory/ProductWiseFBADataItemModel.js');
@@ -124,6 +127,24 @@ const plural = (count, singular, pluralForm = `${singular}s`) =>
 const HEALTH_TONE = { GOOD: 'good', EXCELLENT: 'good', FAIR: 'watch', 'AT RISK': 'watch', POOR: 'watch', BAD: 'watch' };
 
 const healthTone = (status) => HEALTH_TONE[String(status || '').toUpperCase()] || 'neutral';
+
+/**
+ * V1 performance counts arrive as { startDate, endDate, count } — the window is
+ * part of the fact, because "0 claims" over a week and over a quarter are not
+ * the same statement. Returns null when the metric is absent so the caller can
+ * leave the row out entirely rather than print a zero it cannot stand behind.
+ */
+const v1Count = (node) => {
+    if (node === null || node === undefined) return null;
+    if (typeof node === 'string' || typeof node === 'number') {
+        return { count: num(node), window: null };
+    }
+    if (node.count === undefined || node.count === null || node.count === '') return null;
+    const window = node.startDate && node.endDate
+        ? `${formatDate(node.startDate)} to ${formatDate(node.endDate)}`
+        : null;
+    return { count: num(node.count), window };
+};
 
 /** Reads as a sentence: "Good", "At risk". */
 const healthLabel = (status) => {
@@ -360,11 +381,16 @@ const REPORT_ACCOUNT = { key: 'account-overview', name: 'Weekly Account Overview
  * product counts and issue counts, hence the caveat.
  */
 const buildAccountOverview = async (userId, country, region) => {
-    const [seller, history, performance] = await Promise.all([
+    const [seller, history, performance, v1Performance, strandedCount, opportunities] = await Promise.all([
         Seller.findOne({ User: userId }).select('sellerAccount').lean(),
         AccountHistory.findOne({ User: userId, country, region }).lean(),
         // 17k of these have been collected and never shown to anyone.
         V2SellerPerformance.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+        // Counts Amazon reports separately from the policy statuses above.
+        V1SellerPerformance.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+        StrandedInventoryItem.countDocuments({ User: userId, country, region }),
+        // Written by the existing opportunity engine; keyed by userId as a string.
+        TopOpportunities.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
     ]);
 
     const account = (seller?.sellerAccount || []).find((acc) => acc.region === region && acc.country === country);
@@ -434,6 +460,38 @@ const buildAccountOverview = async (userId, country, region) => {
                 action: healthTone(status) === 'watch' ? 'Review in Seller Central' : 'None',
             });
         }
+    }
+
+    // Counted metrics from the V1 report. A count is its own verdict: zero is
+    // good, anything above zero wants looking at, so no status mapping applies.
+    if (v1Performance) {
+        const counted = [
+            ['A-to-z Guarantee claims', v1Count(v1Performance.a_z_claims), '0'],
+            ['Negative seller feedback', v1Count(v1Performance.negativeFeedbacks), '0'],
+            ['Refunds', v1Count(v1Performance.refundsCount), 'Minimise'],
+            ['Buyer messages answered in 24h', v1Count(v1Performance.responseUnder24HoursCount), '100%'],
+        ];
+        for (const [metric, value, target] of counted) {
+            if (!value) continue;
+            // More replies within 24h is good; for everything else more is bad.
+            const isGoodWhenHigher = metric.startsWith('Buyer messages');
+            const concerning = isGoodWhenHigher ? false : value.count > 0;
+            healthRows.push({
+                metric: value.window ? `${metric} (${value.window})` : metric,
+                status: String(value.count),
+                target,
+                action: concerning ? 'Review in Seller Central' : 'None',
+            });
+        }
+    }
+
+    if (strandedCount > 0) {
+        healthRows.push({
+            metric: 'Stranded inventory',
+            status: String(strandedCount),
+            target: '0',
+            action: 'Fix the listings so this stock can sell',
+        });
     }
 
     if (current) {
@@ -523,6 +581,18 @@ const buildAccountOverview = async (userId, country, region) => {
                     ? [highlight('Every Amazon policy metric is within target.', 'good')]
                     : []),
             ...(incomplete ? [highlight(`${plural(incomplete, 'listing')} are incomplete and will not sell until finished.`, 'watch')] : []),
+            // Spec 2F. The opportunity engine already ranks these and puts a
+            // figure against each; the report just carries its top few rather
+            // than inventing a second, competing ranking.
+            ...(opportunities?.opportunities?.length
+                ? opportunities.opportunities.slice(0, 3).map((item) => highlight(
+                    `${item.title}${item.amount ? ` — about ${round(item.amount)} at stake` : ''}${item.count ? ` across ${plural(item.count, 'product')}` : ''}.`,
+                    'watch'
+                ))
+                : []),
+            ...(opportunities?.totalEstimatedRecovery
+                ? [highlight(`${round(opportunities.totalEstimatedRecovery)} is recoverable in total across every opportunity we have ranked.`)]
+                : []),
             highlight('[Observation / remarks for this week]', 'fill'),
         ],
         caveats,
@@ -1075,15 +1145,33 @@ const sumTraffic = async (userId, country, region, startDate, endDate) => {
     let unitsSold = 0;
     let sessions = 0;
     let pageViews = 0;
+    // Per-ASIN totals for the breakdown the spec asks for (3.1). Built here
+    // rather than in a second query because this loop already holds the rows.
+    const byAsin = new Map();
+
     for (const snapshot of byDate.values()) {
         for (const row of snapshot.asinBuyBoxData || []) {
             unitsSold += row.unitsOrdered || 0;
             sessions += row.sessions || 0;
             pageViews += row.pageViews || 0;
+
+            const asin = row.childAsin || row.parentAsin;
+            if (!asin) continue;
+            const entry = byAsin.get(asin) || { asin, pageViews: 0, sessions: 0, unitsOrdered: 0, sales: 0 };
+            entry.pageViews += row.pageViews || 0;
+            entry.sessions += row.sessions || 0;
+            entry.unitsOrdered += row.unitsOrdered || 0;
+            entry.sales += row.sales?.amount || 0;
+            byAsin.set(asin, entry);
         }
     }
 
-    return { unitsSold, sessions, pageViews, days: byDate.size };
+    const asinRows = [...byAsin.values()]
+        .map((row) => ({ ...row, sales: round(row.sales) }))
+        // Biggest sellers first: the order someone reads a performance report in.
+        .sort((a, b) => b.sales - a.sales || b.unitsOrdered - a.unitsOrdered);
+
+    return { unitsSold, sessions, pageViews, days: byDate.size, asinRows };
 };
 
 /** Sum ad spend and ad sales over a window; ACOS is derived, never averaged. */
@@ -1096,12 +1184,30 @@ const sumPpc = async (userId, country, region, startDate, endDate) => {
                 _id: null,
                 adSales: { $sum: { $ifNull: ['$summary.totalSales', 0] } },
                 adSpend: { $sum: { $ifNull: ['$summary.totalSpend', 0] } },
+                // Already stored per day and never reported. CTR, CPC and ROAS
+                // are recomputed from these totals rather than averaged out of
+                // the daily rates, which would weight a quiet day the same as a
+                // busy one.
+                impressions: { $sum: { $ifNull: ['$summary.totalImpressions', 0] } },
+                clicks: { $sum: { $ifNull: ['$summary.totalClicks', 0] } },
             },
         },
     ]);
     const adSales = round(result?.adSales || 0);
     const adSpend = round(result?.adSpend || 0);
-    return { adSales, adSpend, acos: adSales ? round((adSpend / adSales) * 100) : null };
+    const impressions = result?.impressions || 0;
+    const clicks = result?.clicks || 0;
+    return {
+        adSales,
+        adSpend,
+        impressions,
+        clicks,
+        acos: adSales ? round((adSpend / adSales) * 100) : null,
+        // Return on ad spend, the inverse view of ACOS.
+        roas: adSpend ? round(adSales / adSpend, 2) : null,
+        ctr: impressions ? round((clicks / impressions) * 100, 2) : null,
+        cpc: clicks ? round(adSpend / clicks, 2) : null,
+    };
 };
 
 const buildMonthlyPerformance = async (userId, country, region) => {
@@ -1133,6 +1239,10 @@ const buildMonthlyPerformance = async (userId, country, region) => {
     const spanDays = Math.round((currentEnd - currentStart) / 86400000);
     const previousStart = new Date(Date.UTC(currentStart.getUTCFullYear(), currentStart.getUTCMonth() - 1, 1));
     const previousEnd = addDays(previousStart, spanDays);
+
+    const seller = await Seller.findOne({ User: userId }).select('sellerAccount').lean();
+    const account = (seller?.sellerAccount || []).find((a) => a.region === region && a.country === country);
+    const titleByAsin = new Map((account?.products || []).map((p) => [p.asin, p.itemName || '']));
 
     const [current, previous, ppcCurrent, ppcPrevious, trafficCurrent, trafficPrevious] = await Promise.all([
         sumSales(userId, country, region, toYmd(currentStart), toYmd(currentEnd)),
@@ -1218,6 +1328,11 @@ const buildMonthlyPerformance = async (userId, country, region) => {
                 { label: 'Ad spend', value: ppcCurrent.adSpend, format: 'currency', delta: pctChange(ppcCurrent.adSpend, ppcPrevious.adSpend), deltaFormat: 'percent', deltaGoodWhen: 'down' },
                 { label: 'ACOS', value: ppcCurrent.acos, format: 'percent', delta: acosDelta, deltaFormat: 'points', deltaGoodWhen: 'down' },
                 { label: 'TACOS', value: tacos, format: 'percent', delta: tacos !== null && tacosPrev !== null ? round(tacos - tacosPrev, 2) : null, deltaFormat: 'points', deltaGoodWhen: 'down' },
+                { label: 'ROAS', value: ppcCurrent.roas, delta: pctChange(ppcCurrent.roas, ppcPrevious.roas), deltaFormat: 'percent' },
+                { label: 'Impressions', value: ppcCurrent.impressions, delta: pctChange(ppcCurrent.impressions, ppcPrevious.impressions), deltaFormat: 'percent' },
+                { label: 'Clicks', value: ppcCurrent.clicks, delta: pctChange(ppcCurrent.clicks, ppcPrevious.clicks), deltaFormat: 'percent' },
+                { label: 'CTR', value: ppcCurrent.ctr, format: 'percent', delta: ppcCurrent.ctr !== null && ppcPrevious.ctr !== null ? round(ppcCurrent.ctr - ppcPrevious.ctr, 2) : null, deltaFormat: 'points' },
+                { label: 'CPC', value: ppcCurrent.cpc, format: 'currency', delta: pctChange(ppcCurrent.cpc, ppcPrevious.cpc), deltaFormat: 'percent', deltaGoodWhen: 'down' },
                 { label: 'Avg selling price', value: asp, format: 'currency', delta: pctChange(asp, aspPrev), deltaFormat: 'percent' },
             ],
             columns: [
@@ -1257,7 +1372,43 @@ const buildMonthlyPerformance = async (userId, country, region) => {
                     change: ptsCell(tacos, tacosPrev),
                 },
                 { metric: 'Avg selling price', current: asp, previous: aspPrev, change: pctCell(asp, aspPrev) },
+                { metric: 'Impressions', current: ppcCurrent.impressions, previous: ppcPrevious.impressions, change: pctCell(ppcCurrent.impressions, ppcPrevious.impressions) },
+                { metric: 'Clicks', current: ppcCurrent.clicks, previous: ppcPrevious.clicks, change: pctCell(ppcCurrent.clicks, ppcPrevious.clicks) },
+                {
+                    metric: 'CTR',
+                    current: ppcCurrent.ctr === null ? '\u2014' : `${ppcCurrent.ctr}%`,
+                    previous: ppcPrevious.ctr === null ? '\u2014' : `${ppcPrevious.ctr}%`,
+                    change: ptsCell(ppcCurrent.ctr, ppcPrevious.ctr),
+                },
+                { metric: 'CPC', current: ppcCurrent.cpc, previous: ppcPrevious.cpc, change: pctCell(ppcCurrent.cpc, ppcPrevious.cpc) },
+                {
+                    metric: 'ROAS',
+                    current: ppcCurrent.roas === null ? '\u2014' : `${ppcCurrent.roas}x`,
+                    previous: ppcPrevious.roas === null ? '\u2014' : `${ppcPrevious.roas}x`,
+                    change: pctCell(ppcCurrent.roas, ppcPrevious.roas),
+                },
             ],
+    // Spec 3.1 — the same period broken down by ASIN. Its own table because
+            // it answers "which products earned this" rather than "what did the
+            // account earn", and the two belong side by side.
+            secondaryTable: trafficCurrent.asinRows?.length
+                ? {
+                    title: 'Sales by ASIN',
+                    columns: [
+                        { key: 'asin', label: 'ASIN' },
+                        { key: 'productName', label: 'Product' },
+                        { key: 'pageViews', label: 'Page views', format: 'number' },
+                        { key: 'sessions', label: 'Sessions', format: 'number' },
+                        { key: 'unitsOrdered', label: 'Units', format: 'number' },
+                        { key: 'sales', label: 'Sales', format: 'currency' },
+                    ],
+                    rows: trafficCurrent.asinRows.slice(0, 25).map((row) => ({
+                        ...row,
+                        productName: titleByAsin.get(row.asin) || '',
+                    })),
+                    totalRows: trafficCurrent.asinRows.length,
+                }
+                : null,
         },
         highlights: [
             ...(salesChange !== null
@@ -1283,6 +1434,12 @@ const buildMonthlyPerformance = async (userId, country, region) => {
                 : []),
             ...(conversion !== null
                 ? [highlight(`${plural(trafficCurrent.sessions, 'session')} converted at ${conversion}%${asp === null ? '' : `, at an average selling price of ${asp}`}.`)]
+                : []),
+            ...(ppcCurrent.roas !== null
+                ? [highlight(
+                    `Advertising returned ${ppcCurrent.roas}x on spend${ppcCurrent.ctr === null ? '' : `, from ${ppcCurrent.impressions.toLocaleString()} impressions at a ${ppcCurrent.ctr}% click-through rate`}.`,
+                    ppcPrevious.roas !== null && ppcCurrent.roas < ppcPrevious.roas ? 'watch' : 'good'
+                )]
                 : []),
             highlight('[Actions taken this month and focus areas planned for next]', 'fill'),
         ],
