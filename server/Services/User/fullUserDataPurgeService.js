@@ -88,6 +88,8 @@ const AccountHistory = require('../../models/user-auth/AccountHistory.js');
 const LedgerDetailView = require('../../models/finance/LedgerDetailViewModel.js');
 const V2_Seller_Performance_Report = require('../../models/seller-performance/V2_Seller_Performance_ReportModel.js');
 const APlusContent = require('../../models/seller-performance/APlusContentModel.js');
+const APlusPremium = require('../../models/seller-performance/APlusPremiumModel.js');
+const CompetitiveOffers = require('../../models/products/CompetitiveOffersModel.js');
 const NumberOfProductReviews = require('../../models/seller-performance/NumberOfProductReviewsModel.js');
 // Alert.js exports a map of discriminators, not a model. Importing the module
 // object made `Alert.deleteMany` undefined, so every alert purge threw and was
@@ -169,6 +171,8 @@ const collectionsWithUser = [
     { model: LedgerDetailViewItem, key: 'User' },
     { model: V2_Seller_Performance_Report, key: 'User' },
     { model: APlusContent, key: 'User' },
+    { model: APlusPremium, key: 'User' },
+    { model: CompetitiveOffers, key: 'User' },
     { model: NumberOfProductReviews, key: 'User' },
     { model: Alert, key: 'User' },
     { model: GET_FBA_INVENTORY_PLANNING_DATA, key: 'User' },

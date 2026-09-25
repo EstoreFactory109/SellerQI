@@ -2049,10 +2049,16 @@ class ScheduledIntegration {
             // report B2B pricing without reporting issues and vice versa, and a SKU absent
             // from the response must not be forced to false.
             const b2bPricingMap = new Map();
+            const listingIssuesMap = new Map();
             issuesDataArray.forEach(item => {
                 if (!item || !item.sku) return;
                 if (Array.isArray(item.issues)) {
                     issuesMap.set(item.sku, item.issues);
+                }
+                // Structured issues travel separately: a SKU can report one
+                // without the other, so neither may gate the other.
+                if (Array.isArray(item.listingIssues)) {
+                    listingIssuesMap.set(item.sku, item.listingIssues);
                 }
                 if (item.has_b2b_pricing !== undefined) {
                     b2bPricingMap.set(item.sku, item.has_b2b_pricing);
@@ -2069,6 +2075,11 @@ class ScheduledIntegration {
                 if ((product.status === 'Inactive' || product.status === 'Incomplete') && issuesMap.has(product.sku)) {
                     product.issues = issuesMap.get(product.sku);
                     updatedCount++;
+                }
+                // Not gated on status: an ACTIVE listing can be suppressed, and
+                // that is exactly the case worth reporting.
+                if (listingIssuesMap.has(product.sku)) {
+                    product.listingIssues = listingIssuesMap.get(product.sku);
                 }
                 // B2B pricing is not status-dependent — match Integration's semantics and
                 // key purely on SKU.

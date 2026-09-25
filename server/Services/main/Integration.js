@@ -46,6 +46,14 @@ const GET_V2_SELLER_PERFORMANCE_REPORT = require('../Sp_API/V2_Seller_Performanc
 const GET_V1_SELLER_PERFORMANCE_REPORT = require('../Sp_API/GET_V1_SELLER_PERFORMANCE_REPORT.js');
 const GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT = require('../Sp_API/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT.js');
 const { addReviewDataTODatabase } = require('../Sp_API/NumberOfProductReviews.js');
+// A+ content from Amazon's own API. The scraper inside NumberOfProductReviews
+// above only knows whether a listing has A+ at all; this is where the Premium
+// tier comes from, and it writes to its own collection so nothing that reads
+// the scraper's output changes.
+const getAPlusContent = require('../Sp_API/GET_APLUS_CONTENT.js');
+// Offer-level pricing for the ASINs the Buy Box snapshot says we are losing.
+// Must run after that snapshot exists, so it is not in a batch — see below.
+const { syncCompetitiveOffers } = require('../Sp_API/GET_COMPETITIVE_OFFERS.js');
 const { GetListingItem, GetListingItemIssuesForInactive } = require('../Sp_API/GetListingItemsIssues.js');
 const getshipment = require('../Sp_API/shipment.js');
 
@@ -1195,6 +1203,17 @@ class Integration {
             secondBatchServiceNames.push("Ads Keywords", "Campaign Data");
         }
 
+        // Appended last on purpose: the results below are read by a running
+        // index, so anything inserted earlier shifts every reader after it.
+        // Nothing reads this one — the service stores its own result.
+        if (AccessToken) {
+            secondBatchPromises.push(
+                tokenManager.wrapSpApiFunction(getAPlusContent, userId, RefreshToken, AdsRefreshToken)
+                    (AccessToken, marketplaceIds, userId, Base_URI, Country, Region)
+            );
+            secondBatchServiceNames.push("A+ Content");
+        }
+
         const secondBatchResults = await Promise.allSettled(secondBatchPromises);
         let secondResultIndex = 0;
 
@@ -1391,6 +1410,19 @@ class Integration {
             apiData.mcpBuyBoxData = { success: false, data: null, error: "Refresh token not available" };
             logger.info("MCP BuyBox skipped - no refresh token", { userId, region: Region, country: Country });
         }
+
+        // Competitor pricing for the contested ASINs. Deliberately here and not
+        // in a batch: it needs the Buy Box snapshot written just above to know
+        // which ASINs are contested, and pricing the whole catalogue instead is
+        // not an option at one API call per ten seconds.
+        //
+        // Awaited but never allowed to throw — the service returns false on any
+        // failure, so a dead pricing endpoint costs the report a column, not
+        // the rest of the sync.
+        if (AccessToken) {
+            await syncCompetitiveOffers(AccessToken, marketplaceIds, userId, Base_URI, Country, Region);
+        }
+
         
         // Unified Finance Sync (Sales Report + Finance API) — replaces the
         // legacy Expense Report and ASIN-wise Sales calls. One pass populates
@@ -1911,11 +1943,17 @@ class Integration {
 
             // Create a map of SKU to issues for quick lookup (chunked for large datasets)
             const issuesMap = new Map();
+            const listingIssuesMap = new Map();
             const MAP_BUILD_CHUNK_SIZE = 500;
             for (let i = 0; i < issuesDataArray.length; i++) {
                 const item = issuesDataArray[i];
                 if (item && item.sku && Array.isArray(item.issues)) {
                     issuesMap.set(item.sku, item.issues);
+                }
+                // Structured issues travel separately: a SKU can report one
+                // without the other, so neither may gate the other.
+                if (Array.isArray(item.listingIssues)) {
+                    listingIssuesMap.set(item.sku, item.listingIssues);
                 }
                 // Yield periodically for large arrays
                 if ((i + 1) % MAP_BUILD_CHUNK_SIZE === 0) {
@@ -1935,6 +1973,11 @@ class Integration {
                     if ((product.status === 'Inactive' || product.status === 'Incomplete') && issuesMap.has(product.sku)) {
                         product.issues = issuesMap.get(product.sku);
                         updatedCount++;
+                    }
+                    // Not gated on status: an ACTIVE listing can be suppressed,
+                    // and that is exactly the case worth reporting.
+                    if (listingIssuesMap.has(product.sku)) {
+                        product.listingIssues = listingIssuesMap.get(product.sku);
                     }
                 }
                 // Yield to event loop to allow lock extension
@@ -2915,6 +2958,15 @@ class Integration {
                 secondBatchServiceNames.push("Ads Keywords", "Campaign Data");
             }
 
+            // Appended last for the same reason as the sign-in path above.
+            if (AccessToken) {
+                secondBatchPromises.push(
+                    tokenManager.wrapSpApiFunction(getAPlusContent, userId, RefreshToken, AdsRefreshToken)
+                        (AccessToken, marketplaceIds, userId, Base_URI, Country, Region)
+                );
+                secondBatchServiceNames.push("A+ Content");
+            }
+
             const secondBatchResults = await Promise.allSettled(secondBatchPromises);
             
             // Process and log individual service results for second batch
@@ -3139,6 +3191,12 @@ class Integration {
                         }
                     }
                 }
+            }
+
+            // Competitor pricing, for the same reason as the sign-in path: it
+            // reads the Buy Box snapshot written just above.
+            if (AccessToken) {
+                await syncCompetitiveOffers(AccessToken, marketplaceIds, userId, Base_URI, Country, Region);
             }
 
             // Unified Finance Sync (Sales Report + Finance API) — replaces

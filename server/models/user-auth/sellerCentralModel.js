@@ -39,6 +39,30 @@ const Products=new mongoose.Schema({
     required: false,
     default: undefined
   },
+  // The same issues with everything Amazon sent, not just the message.
+  //
+  // `issues` above stays a plain string array because a lot of code reads it
+  // that way. This sits beside it and carries what that flattening lost —
+  // above all `enforcementActions`, which is the only signal that separates a
+  // listing that is merely imperfect from one shoppers cannot buy.
+  listingIssues:{
+    type: [{
+      _id: false,
+      code: { type: String, default: '' },
+      message: { type: String, default: '' },
+      severity: { type: String, default: '' },
+      attributeNames: { type: [String], default: [] },
+      categories: { type: [String], default: [] },
+      // e.g. LISTING_SUPPRESSED, SEARCH_SUPPRESSED, CATALOG_ITEM_REMOVED
+      enforcementActions: { type: [String], default: [] },
+      // A suppressed-but-exempt listing is still selling; the two must not be
+      // read as the same state.
+      exemptionStatus: { type: String, default: '' },
+      isSuppression: { type: Boolean, default: false }
+    }],
+    required: false,
+    default: undefined
+  },
   // Total issue count for this product (sum of ranking, conversion, inventory errors)
   // Calculated by ProductIssuesService and updated during integration/scheduled jobs
   issueCount:{

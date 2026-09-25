@@ -45,6 +45,33 @@ const DOC = {
 const MAX_PDF_ROWS = 40;
 
 /**
+ * Past this many columns the table is turned sideways.
+ *
+ * pdfmake does not shrink text to fit and does not warn: a table wider than
+ * the page is drawn past the right margin, off the paper, with the content
+ * still present and simply unreadable. Wrapping cannot save it either, because
+ * a column's floor is its widest unbreakable word — and the two widest columns
+ * in the Buy Box report hold an Amazon merchant token and a seller's own SKU,
+ * neither of which contains a space to break at.
+ *
+ * Measured rather than guessed: twelve columns with a realistic SKU need 561pt
+ * even at 7pt type, and A4 portrait leaves 515pt. Landscape leaves 762pt.
+ * Shrinking the type instead would have meant 6pt — unreadable, and still one
+ * long SKU from overflowing again. reportPdfTableWidth.test.js pins both
+ * numbers.
+ *
+ * Nine columns still fit portrait comfortably, so every report that fitted
+ * before is laid out exactly as it was.
+ */
+const LANDSCAPE_COLUMN_THRESHOLD = 9;
+
+/** The widest table in a report — the primary one or its secondary. */
+const widestTableColumnCount = (report) => Math.max(
+    report?.summary?.columns?.length || 0,
+    report?.summary?.secondaryTable?.columns?.length || 0
+);
+
+/**
  * The 14 fonts every PDF reader has built in. pdfmake resolves these through
  * the same local-access hook it uses for real files, so they have to be named
  * explicitly in the allow-list below or font loading is denied.
@@ -86,6 +113,14 @@ const ensureConfigured = () => {
 const formatCell = (value, format, currency) => {
     if (value === null || value === undefined || value === '') return '—';
     if (typeof value !== 'number') return String(value);
+    // Per-unit money, to the cent. Distinct from 'currency', which rounds to
+    // whole units — right for "Total sales $124,530", wrong for a price gap,
+    // where the cents ARE the finding: a $4.99 gap rendered as "$5" against a
+    // $17.50 Buy Box price rendered as "$18" does not even add up on the page.
+    if (format === 'money') {
+        const sign = value < 0 ? '-' : '';
+        return `${sign}${currency}${Math.abs(value).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
     if (format === 'currency') return `${currency}${value.toLocaleString('en-GB', { maximumFractionDigits: 0 })}`;
     if (format === 'percent') return `${value}%`;
     return value.toLocaleString('en-GB');
@@ -190,9 +225,9 @@ const sectionHeading = (text) => ({
  * the identifier a manager checks each cycle; the rest are centred like the
  * template's numeric cells.
  */
-const dataTable = (summary, currency) => {
-    const columns = summary?.columns || [];
-    const rows = (summary?.rows || []).slice(0, MAX_PDF_ROWS);
+const dataTable = (summary, currency, override) => {
+    const columns = override?.columns || summary?.columns || [];
+    const rows = (override?.rows || summary?.rows || []).slice(0, MAX_PDF_ROWS);
     if (!columns.length || !rows.length) return null;
 
     const header = columns.map((column) => ({
@@ -257,6 +292,29 @@ const highlightList = (highlights) => {
  * @param {string} opts.currency     symbol for currency-formatted cells
  * @param {string} [opts.clientName] shown in the banner subtitle
  */
+/**
+ * "Showing the first N of M rows", when rows were left out.
+ *
+ * Two things can cut a table and neither used to announce itself on the second
+ * one: MAX_PDF_ROWS here, and a builder's own slice — the suppressed-listings
+ * table is cut to 25 before it ever reaches this file. A reader who cannot see
+ * that rows are missing will read the table as the whole answer.
+ *
+ * @param {number} total  rows the builder found, before any slicing
+ * @param {Array} shown   rows actually handed to the table
+ */
+const truncationNote = (total, shown) => {
+    const rendered = Math.min((shown || []).length, MAX_PDF_ROWS);
+    if (!total || total <= rendered) return null;
+    return {
+        text: `Showing the first ${rendered} of ${Number(total).toLocaleString('en-GB')} rows. The full set is on your Reports page.`,
+        fontSize: 8,
+        italics: true,
+        color: DOC.muted,
+        margin: [0, 0, 0, 12],
+    };
+};
+
 const buildReportDocDefinition = (report, { marketplace, currency = '$', clientName = '' } = {}) => {
     const place = marketplace?.country ? `Amazon ${marketplace.country}` : 'All marketplaces';
     const subtitle = [clientName, place, report.date].filter(Boolean).join('  ·  ');
@@ -274,18 +332,23 @@ const buildReportDocDefinition = (report, { marketplace, currency = '$', clientN
     const table = dataTable(report.summary, currency);
     if (table) {
         content.push(table);
-        const total = report.summary?.totalRows || 0;
-        if (total > MAX_PDF_ROWS) {
-            content.push({
-                text: `Showing the first ${MAX_PDF_ROWS} of ${total.toLocaleString('en-GB')} rows. The full set is on your Reports page.`,
-                fontSize: 8,
-                italics: true,
-                color: DOC.muted,
-                margin: [0, 0, 0, 12],
-            });
-        }
+        const note = truncationNote(report.summary?.totalRows, report.summary?.rows);
+        if (note) content.push(note);
     } else if (report.summary?.emptyMessage) {
         content.push({ text: report.summary.emptyMessage, fontSize: 9, bold: true, color: DOC.green, margin: [0, 0, 0, 12] });
+    }
+
+    // Amazon's policy metrics, where the report carries them. Its own section,
+    // because it answers a different question from the table above it.
+    const secondary = report.summary?.secondaryTable;
+    if (secondary?.rows?.length) {
+        content.push(sectionHeading(secondary.title || 'Detail'));
+        const secondaryTable = dataTable(null, currency, secondary);
+        if (secondaryTable) {
+            content.push(secondaryTable);
+            const note = truncationNote(secondary.totalRows, secondary.rows);
+            if (note) content.push(note);
+        }
     }
 
     const bullets = highlightList(report.highlights);
@@ -309,6 +372,7 @@ const buildReportDocDefinition = (report, { marketplace, currency = '$', clientN
             subject: report.insight || report.name,
         },
         pageSize: 'A4',
+        pageOrientation: widestTableColumnCount(report) > LANDSCAPE_COLUMN_THRESHOLD ? 'landscape' : 'portrait',
         pageMargins: [40, 36, 40, 44],
         defaultStyle: { font: 'Helvetica', fontSize: 9, color: DOC.ink },
         content,
@@ -350,4 +414,6 @@ module.exports = {
     buildReportDocDefinition,
     reportPdfFilename,
     MAX_PDF_ROWS,
+    LANDSCAPE_COLUMN_THRESHOLD,
+    widestTableColumnCount,
 };
