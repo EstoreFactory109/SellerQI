@@ -468,3 +468,82 @@ describe('uploadTaskAttachment', () => {
         expect(axios).not.toHaveBeenCalled();
     });
 });
+
+describe('createTask — the body Zoho actually receives', () => {
+    /**
+     * These assert the REQUEST, not the response. TaskRequestService's own suite mocks
+     * ZohoProjectsService wholesale, so nothing anywhere exercised the payload — which
+     * is how a task create that Zoho refuses outright reached production.
+     */
+    const okTask = { tasks: [{ id: 'task-9', id_string: 'task-9', name: 'Redo search terms' }] };
+    const bodyOf = () => axios.mock.calls[0][0].data;
+
+    beforeEach(() => {
+        axios.mockReset();
+        axios.mockResolvedValue({ data: okTask });
+        ZohoAuth.getAccessToken.mockResolvedValue('access-token-1');
+        ZohoAuth.getConnection.mockResolvedValue({
+            apiDomain: 'https://projectsapi.zoho.com', portalId: 'portal-1',
+        });
+    });
+
+    test('an end date is never sent on its own — Zoho refuses the pair', async () => {
+        // The whole bug: a request carrying a needed-by date could not be accepted,
+        // while a dateless one could.
+        await ZohoProjectsService.createTask({
+            projectId: 'p1', name: 'Redo search terms', endDate: '2099-12-31',
+        });
+
+        const body = bodyOf();
+        expect(body.end_date).toBe('2099-12-31');
+        expect(body.start_date).toBeTruthy();
+    });
+
+    test('the start it invents is today, in the ISO form v3 takes', async () => {
+        await ZohoProjectsService.createTask({
+            projectId: 'p1', name: 'Redo search terms', endDate: '2099-12-31',
+        });
+
+        expect(bodyOf().start_date).toBe(new Date().toISOString().slice(0, 10));
+        // Not MM-DD-YYYY: that is the v2 dialect, and this path is v3.
+        expect(bodyOf().start_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+
+    test('a needed-by date already in the past does not fail the accept', async () => {
+        // start must not sit after end, which Zoho also refuses. A client asking for
+        // something by a date that has passed is a support question, not a 400.
+        await ZohoProjectsService.createTask({
+            projectId: 'p1', name: 'Overdue thing', endDate: '2020-01-01',
+        });
+
+        const body = bodyOf();
+        expect(body.start_date).toBe('2020-01-01');
+        expect(new Date(body.start_date) <= new Date(body.end_date)).toBe(true);
+    });
+
+    test('an explicit start date is passed through untouched', async () => {
+        await ZohoProjectsService.createTask({
+            projectId: 'p1', name: 'Scheduled', startDate: '2099-01-01', endDate: '2099-12-31',
+        });
+
+        expect(bodyOf().start_date).toBe('2099-01-01');
+    });
+
+    test('no dates at all means no date fields, not empty ones', async () => {
+        // Every optional field is omitted when absent rather than sent empty — a create
+        // that silently ignores a field is harder to spot than one that is rejected.
+        await ZohoProjectsService.createTask({ projectId: 'p1', name: 'Dateless' });
+
+        const body = bodyOf();
+        expect(body).not.toHaveProperty('start_date');
+        expect(body).not.toHaveProperty('end_date');
+        expect(body.name).toBe('Dateless');
+    });
+
+    test('the title goes as `name`, and v3 takes it as JSON', async () => {
+        await ZohoProjectsService.createTask({ projectId: 'p1', name: '  Trim me  ' });
+
+        expect(bodyOf().name).toBe('Trim me');
+        expect(axios.mock.calls[0][0].headers['Content-Type']).toBe('application/json');
+    });
+});
