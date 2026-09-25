@@ -17,6 +17,15 @@ const MAX_TITLE_CHARS = 150;
 const MAX_DESCRIPTION_CHARS = 5000;
 const MAX_REASON_CHARS = 500;
 
+/**
+ * Above this many tasklists, never create another one.
+ *
+ * Not a Zoho limit — a judgement. A project already carrying this many lists has a
+ * navigation problem, and the router adding one more per unusual request is how that
+ * becomes unusable. The live project runs on five.
+ */
+const MAX_TASKLISTS_PER_PROJECT = 25;
+
 /** "Nitesh Kumar brief.pdf" names the client in a label, exactly as a body would. */
 const redactFilename = (filename, bundle) => {
     let out = String(filename || '');
@@ -127,6 +136,7 @@ const acceptTaskRequest = async ({ requestId, staffUserId }) => {
 
     const ZohoProjectsService = require('../Zoho/ZohoProjectsService.js');
     const { buildTaskBrief } = require('../AI/TaskBriefService.js');
+    const TasklistRouter = require('../AI/TasklistRouterService.js');
 
     /**
      * Rewrite the client's words into something the team can work from — and strip their
@@ -176,10 +186,80 @@ const acceptTaskRequest = async ({ requestId, staffUserId }) => {
             : []),
     ].join('\n');
 
+    /**
+     * Which tasklist to file it under.
+     *
+     * Wrapped whole, because every step of it is optional. Reading the lists can fail,
+     * the model can be unavailable, a proposed name can be unusable, creating a list can
+     * be refused — and none of those are reasons to refuse a client's approved work. Any
+     * of them lands on `filing`'s initial value and the task is created unfiled, which is
+     * exactly where every accepted request went before this existed.
+     */
+    let filing = { tasklistId: null, tasklistName: null, chosenBy: 'none' };
+    try {
+        const tasklists = await ZohoProjectsService.listTasklists({
+            projectId,
+            portalId: client?.zohoProject?.portalId || null,
+        });
+
+        if (tasklists.length) {
+            const routed = await TasklistRouter.route({
+                title: brief.title,
+                description: brief.description,
+                tasklists,
+                bundle,
+            });
+
+            if (routed.tasklistId) {
+                filing = {
+                    tasklistId: routed.tasklistId,
+                    tasklistName: routed.tasklistName,
+                    chosenBy: routed.chosenBy,
+                };
+            } else if (routed.newTasklistName) {
+                /**
+                 * Before creating anything, check the name against the real ones.
+                 *
+                 * The model proposing "Graphics" when a "graphics" list already exists is
+                 * the single likeliest way this clutters a project, and it would look
+                 * like two lists that differ only in case. Cheaper to catch here than to
+                 * merge by hand later.
+                 */
+                const existing = tasklists.find(
+                    (l) => l.name.trim().toLowerCase() === routed.newTasklistName.trim().toLowerCase()
+                );
+
+                if (existing) {
+                    filing = { tasklistId: existing.id, tasklistName: existing.name, chosenBy: 'ai' };
+                } else if (tasklists.length >= MAX_TASKLISTS_PER_PROJECT) {
+                    // A project this cluttered does not need another list; the router's
+                    // second choice is better than growing the mess.
+                    logger.warn(
+                        `[TaskRequest] project ${projectId} already has ${tasklists.length} tasklists — `
+                        + `not creating "${routed.newTasklistName}"`
+                    );
+                } else {
+                    const created = await ZohoProjectsService.createTasklist({
+                        projectId,
+                        name: routed.newTasklistName,
+                        portalId: client?.zohoProject?.portalId || null,
+                    });
+                    filing = { tasklistId: created.id, tasklistName: created.name, chosenBy: 'created' };
+                }
+            }
+        }
+    } catch (error) {
+        logger.warn(
+            `[TaskRequest] could not choose a tasklist for request ${requestId} `
+            + `(creating it unfiled): ${error.message}`
+        );
+    }
+
     const task = await ZohoProjectsService.createTask({
         projectId,
         name: brief.title,
         description,
+        tasklistId: filing.tasklistId,
         /**
          * The client's "NEEDED BY", carried through as the task's due date.
          *
@@ -197,6 +277,15 @@ const acceptTaskRequest = async ({ requestId, staffUserId }) => {
     request.decidedAt = new Date();
     request.zohoTaskId = task.id;
     request.zohoProjectId = projectId;
+    /**
+     * Read back off the created task where possible, not from what we asked for. If the
+     * create retried without the tasklist — which it does when Zoho refuses the field —
+     * then what we requested and where it landed are different things, and the record
+     * should say the second one.
+     */
+    request.zohoTasklistId = task.tasklistId || (task.tasklistId === null ? null : filing.tasklistId);
+    request.zohoTasklistName = task.tasklist || filing.tasklistName;
+    request.tasklistChosenBy = request.zohoTasklistId ? filing.chosenBy : 'none';
     await request.save();
 
     /**
@@ -256,4 +345,5 @@ module.exports = {
     MAX_TITLE_CHARS,
     MAX_DESCRIPTION_CHARS,
     MAX_REASON_CHARS,
+    MAX_TASKLISTS_PER_PROJECT,
 };
