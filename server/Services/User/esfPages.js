@@ -74,6 +74,7 @@ const API_PATH_TO_PAGE = [
     // reading every conversation through the API. That exact gap existed for
     // 'billing' until it was found.
     ['/api/pagewise/esf/messages', 'messages'],
+    ['/api/pagewise/esf/untapped', 'untapped'],
 
     ['/api/pagewise/dashboard', 'dashboard'],
     ['/api/pagewise/product-checker', 'dashboard'],
