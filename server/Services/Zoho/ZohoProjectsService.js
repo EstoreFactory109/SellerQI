@@ -64,6 +64,44 @@ const asId = (...candidates) => {
 };
 
 /** Zoho date fields vary: ISO string, epoch millis, or a `_long` sibling. Return an ISO string. */
+/**
+ * A calendar date in the form the v3 write API accepts.
+ *
+ * Reads from the live portal come back as `"2026-05-05T13:30:00.000Z"`, and a bare
+ * `YYYY-MM-DD` is refused with INVALID_PARAMETER_VALUE. Midday UTC because a due date
+ * has no time of day and midnight would land on the previous date in any portal west
+ * of UTC. Anything already carrying a time is passed through untouched.
+ */
+const zohoDate = (value) => {
+    if (!value) return value;
+    const text = String(value);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+    return `${text}T12:00:00.000Z`;
+};
+
+/** The same dates in the v2 dialect, for the single retry in createTask. */
+const legacyDates = (body) => {
+    const toLegacy = (value) => {
+        if (!value) return undefined;
+        const [y, m, d] = String(value).slice(0, 10).split('-');
+        return y && m && d ? `${m}-${d}-${y}` : undefined;
+    };
+    const out = {};
+    if (body.start_date) out.start_date = toLegacy(body.start_date);
+    if (body.end_date) out.end_date = toLegacy(body.end_date);
+    return Object.keys(out).length ? out : null;
+};
+
+/**
+ * Whether Zoho refused this specifically because a date was the wrong SHAPE.
+ *
+ * Deliberately narrow. Retrying a rejection that was about anything else — a missing
+ * field, a permission, an unknown project — would just make the same wrong call twice
+ * and bury the real reason under the second failure.
+ */
+const isDateFormatRejection = (error) => error?.statusCode === 400
+    && /input format mismatch|INVALID_PARAMETER_VALUE/i.test(String(error.message || ''));
+
 const asDate = (...candidates) => {
     for (const value of candidates) {
         if (value === undefined || value === null || value === '') {
@@ -403,9 +441,16 @@ const getProjectTaskUpdates = async (projectId, { includeComments = true, maxTas
  * not be accepted at all while a dateless one could: the write was refused before a task
  * ever existed. Both dates are therefore sent together or neither is.
  *
- * Dates go in Zoho's YYYY-MM-DD form, matching createProject above — this is v3, where
- * ISO is what the API takes. (The v2 generation wants MM-DD-YYYY; do not copy a v2
- * example into a v3 call.)
+ * ── A DATE-ONLY STRING IS NOT A DATE TO THIS API ──
+ * `YYYY-MM-DD` is rejected with INVALID_PARAMETER_VALUE / "input format mismatch" naming
+ * end_date. v3 wants a full ISO 8601 datetime: reading tasks back from the live portal
+ * returns `"2026-05-05T13:30:00.000Z"`, and what it emits is what it takes. (The v2
+ * generation wants MM-DD-YYYY — do not copy a v2 example into a v3 call. If this ever
+ * flips, DATE_FORMATS below is the one place to change.)
+ *
+ * Midday UTC, not midnight: a due date carries no time, and midnight lands on the
+ * previous calendar day in any portal west of UTC. Noon is the same day everywhere
+ * anyone runs this.
  *
  * Note that a date here does NOT decide which column the client sees.
  * ZohoTaskSync.classifyTask reads startDate alone: a start date in the future is
@@ -439,21 +484,44 @@ const createTask = async ({ projectId, name, description, startDate, endDate, po
         // a client asking for something by a date that has already passed is a support
         // question, not a reason for the accept to fail.
         const todayIso = new Date().toISOString().slice(0, 10);
-        body.start_date = startDate || (endDate < todayIso ? endDate : todayIso);
-        body.end_date = endDate;
+        body.start_date = zohoDate(startDate || (endDate < todayIso ? endDate : todayIso));
+        body.end_date = zohoDate(endDate);
     } else if (startDate) {
-        body.start_date = startDate;
+        body.start_date = zohoDate(startDate);
     }
 
-    const response = await zohoRequest({
+    /**
+     * One retry in the other dialect, and only on the error that says the format is
+     * wrong.
+     *
+     * Not defensive habit — this exact call has now been refused twice on the shape of a
+     * date, and the cost of being wrong a third time is not a log line: createTask
+     * throws before TaskRequestService sets the status, so the request silently stays in
+     * the admin's queue with no task created. A 400 creates nothing, so replaying it is
+     * safe, and whichever dialect this portal wants, one of the two is it.
+     */
+    const send = (dates) => zohoRequest({
         method: 'POST',
         path: spec.path(resolvedPortal, projectId),
         version: spec.version,
-        data: body,
+        data: { ...body, ...dates },
         // v2 requires form-encoded writes; v3 takes JSON. Mirrors createProject.
         form: spec.version === 'v2',
         context: `Creating a Zoho task in project ${projectId}`
     });
+
+    let response;
+    try {
+        response = await send({});
+    } catch (error) {
+        const alternate = body.end_date || body.start_date ? legacyDates(body) : null;
+        if (!alternate || !isDateFormatRejection(error)) throw error;
+
+        logger.warn(
+            `[ZohoProjects] task create refused the ISO dates — retrying once as MM-DD-YYYY (project ${projectId})`
+        );
+        response = await send(alternate);
+    }
 
     const created = unwrap(response, spec.envelope)[0] || response;
     const task = normaliseTask(created);
