@@ -627,15 +627,7 @@ const createTask = async ({ projectId, name, description, startDate, endDate, ta
 /**
  * The tasklists in a project, as `{ id, name }`.
  *
- * ── WHY THIS RETRIES ON THE OTHER GENERATION ──
- * Until the tasklists scope was added, BOTH v2 and v3 answered 401 INVALID_OAUTHSCOPE,
- * so nothing could establish which one actually serves this resource — the 401 masked it.
- * v3 is configured because the rest of this file is v3, but v3 answers
- * URL_RULE_NOT_CONFIGURED for subtasks, so v2 is a real possibility. One retry on the
- * other generation settles it at runtime and logs which won; once that is known, correct
- * PATHS.tasklists and this retry can go.
- *
- * ── AND WHY IT RETURNS [] INSTEAD OF THROWING ──
+ * ── WHY IT RETURNS [] INSTEAD OF THROWING ──
  * Its only caller is the accept path, where this decides which list a task is FILED
  * under. An empty list means "we could not choose", and the task is created unfiled —
  * which is exactly what happened before this existed. A throw here would turn a nicety
@@ -648,39 +640,27 @@ const listTasklists = async ({ projectId, portalId } = {}) => {
     const resolvedPortal = await resolvePortalId(portalId);
     const path = spec.path(resolvedPortal, projectId);
 
-    const fetch = async (version) => paginate({
-        // v2 wants the trailing slash; v3 refuses it.
-        path: version === 'v2' ? `${path}/` : path,
-        version,
-        envelope: spec.envelope,
-        pageSize: PAGE_SIZE.tasklists,
-        maxItems: MAX_TASKLISTS_FETCHED,
-        context: `Listing tasklists for Zoho project ${projectId}`
-    });
+    try {
+        const rows = await paginate({
+            // v2 would want a trailing slash here; v3 refuses one.
+            path,
+            version: spec.version,
+            envelope: spec.envelope,
+            pageSize: PAGE_SIZE.tasklists,
+            maxItems: MAX_TASKLISTS_FETCHED,
+            context: `Listing tasklists for Zoho project ${projectId}`
+        });
 
-    const versions = spec.version === 'v3' ? ['v3', 'v2'] : ['v2', 'v3'];
-    for (const [index, version] of versions.entries()) {
-        try {
-            const rows = await fetch(version);
-            if (index > 0) {
-                logger.warn(
-                    `[ZohoProjects] tasklists answered on ${version}, not ${versions[0]} — `
-                    + 'correct PATHS.tasklists.version and drop the retry'
-                );
-            }
-            return rows
-                .map((row) => ({ id: asId(row.id, row.id_string), name: toPlainLabel(row.name) }))
-                .filter((row) => row.id && row.name);
-        } catch (error) {
-            const last = index === versions.length - 1;
-            logger.warn(
-                `[ZohoProjects] listing tasklists on ${version} failed for project ${projectId}: `
-                + `${error.message}${last ? ' — continuing without a tasklist' : ', trying the other version'}`
-            );
-            if (last) return [];
-        }
+        return rows
+            .map((row) => ({ id: asId(row.id, row.id_string), name: toPlainLabel(row.name) }))
+            .filter((row) => row.id && row.name);
+    } catch (error) {
+        logger.warn(
+            `[ZohoProjects] listing tasklists failed for project ${projectId} `
+            + `(continuing without one): ${error.message}`
+        );
+        return [];
     }
-    return [];
 };
 
 /**
