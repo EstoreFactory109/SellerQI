@@ -99,6 +99,7 @@ const OrderAndRevenue = require('../models/products/OrderAndRevenueModel.js');
 const V2_Seller_Performance_Report = require('../models/seller-performance/V2_Seller_Performance_ReportModel.js');
 const V1_Seller_Performance_Report = require('../models/seller-performance/V1_Seller_Performance_Report_Model.js');
 const APlusContent = require('../models/seller-performance/APlusContentModel.js');
+const APlusPremium = require('../models/seller-performance/APlusPremiumModel.js');
 const NumberOfProductReviews = require('../models/seller-performance/NumberOfProductReviewsModel.js');
 
 // ── MCP ──
@@ -249,6 +250,7 @@ const USER_TARGETS = [
   { label: 'V2_Seller_Performance_Report', model: V2_Seller_Performance_Report },
   { label: 'V1_Seller_Performance_Report', model: V1_Seller_Performance_Report },
   { label: 'APlusContent', model: APlusContent },
+  { label: 'APlusPremium', model: APlusPremium },
   { label: 'NumberOfProductReviews', model: NumberOfProductReviews },
   { label: 'BuyBoxData', model: BuyBoxData },
   { label: 'EconomicsMetrics', model: EconomicsMetrics },

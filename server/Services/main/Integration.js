@@ -46,6 +46,11 @@ const GET_V2_SELLER_PERFORMANCE_REPORT = require('../Sp_API/V2_Seller_Performanc
 const GET_V1_SELLER_PERFORMANCE_REPORT = require('../Sp_API/GET_V1_SELLER_PERFORMANCE_REPORT.js');
 const GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT = require('../Sp_API/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT.js');
 const { addReviewDataTODatabase } = require('../Sp_API/NumberOfProductReviews.js');
+// A+ content from Amazon's own API. The scraper inside NumberOfProductReviews
+// above only knows whether a listing has A+ at all; this is where the Premium
+// tier comes from, and it writes to its own collection so nothing that reads
+// the scraper's output changes.
+const getAPlusContent = require('../Sp_API/GET_APLUS_CONTENT.js');
 const { GetListingItem, GetListingItemIssuesForInactive } = require('../Sp_API/GetListingItemsIssues.js');
 const getshipment = require('../Sp_API/shipment.js');
 
@@ -1193,6 +1198,17 @@ class Integration {
                     (AdsAccessToken, ProfileId, Region, userId, Country)
             );
             secondBatchServiceNames.push("Ads Keywords", "Campaign Data");
+        }
+
+        // Appended last on purpose: the results below are read by a running
+        // index, so anything inserted earlier shifts every reader after it.
+        // Nothing reads this one — the service stores its own result.
+        if (AccessToken) {
+            secondBatchPromises.push(
+                tokenManager.wrapSpApiFunction(getAPlusContent, userId, RefreshToken, AdsRefreshToken)
+                    (AccessToken, marketplaceIds, userId, Base_URI, Country, Region)
+            );
+            secondBatchServiceNames.push("A+ Content");
         }
 
         const secondBatchResults = await Promise.allSettled(secondBatchPromises);
@@ -2924,6 +2940,15 @@ class Integration {
                         (AdsAccessToken, ProfileId, Region, userId, Country)
                 );
                 secondBatchServiceNames.push("Ads Keywords", "Campaign Data");
+            }
+
+            // Appended last for the same reason as the sign-in path above.
+            if (AccessToken) {
+                secondBatchPromises.push(
+                    tokenManager.wrapSpApiFunction(getAPlusContent, userId, RefreshToken, AdsRefreshToken)
+                        (AccessToken, marketplaceIds, userId, Base_URI, Country, Region)
+                );
+                secondBatchServiceNames.push("A+ Content");
             }
 
             const secondBatchResults = await Promise.allSettled(secondBatchPromises);

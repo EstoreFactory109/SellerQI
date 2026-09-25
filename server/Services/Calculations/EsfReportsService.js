@@ -39,6 +39,9 @@ const FbaInventoryApiDetail = require('../../models/inventory/FbaInventoryApiDet
 const ProductWiseFBADataItem = require('../../models/inventory/ProductWiseFBADataItemModel.js');
 const NumberOfProductReviews = require('../../models/seller-performance/NumberOfProductReviewsModel.js');
 const APlusContent = require('../../models/seller-performance/APlusContentModel.js');
+// Separate collection, filled by Amazon's own A+ Content API. APlusContent
+// above still comes from the scraper and is untouched.
+const APlusPremium = require('../../models/seller-performance/APlusPremiumModel.js');
 const ReviewOrder = require('../../models/review/ReviewOrderModel.js');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
@@ -897,15 +900,24 @@ const AUDIT_CHECKS = [
 ];
 
 /**
- * Joins the catalogue with the three content collections. Premium A+,
- * Storefront and content language have no source anywhere and are declared as
- * out of scope rather than scored as failures, which would understate the audit.
+ * Joins the catalogue with the content collections.
+ *
+ * Premium A+ now has a source — Amazon's own A+ Content API, stored separately
+ * from the scraper's output — but only from the first sync onwards, so a
+ * listing has three possible answers and not two: Yes, No, and not yet asked.
+ * The third is an em dash with no tile and its own caveat, because reporting it
+ * as No would read as a finding about the listing rather than a gap in ours.
+ *
+ * Storefront presence and content language still have no source anywhere and
+ * are declared out of scope rather than scored as failures, which would
+ * understate the audit.
  */
 const buildListingsAudit = async (userId, country, region) => {
-    const [seller, content, aplus] = await Promise.all([
+    const [seller, content, aplus, premium] = await Promise.all([
         Seller.findOne({ User: userId }).select('sellerAccount').lean(),
         NumberOfProductReviews.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
         APlusContent.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+        APlusPremium.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
     ]);
 
     const account = (seller?.sellerAccount || []).find((acc) => acc.region === region && acc.country === country);
@@ -918,6 +930,11 @@ const buildListingsAudit = async (userId, country, region) => {
     const aplusByAsin = new Map(
         (aplus?.ApiContentDetails || []).map((item) => [item.Asins, String(item.status || '').toUpperCase()])
     );
+    // Premium is a separate tier, not a stronger A+ — a listing can have
+    // standard A+ and no Premium. Absent until the A+ Content API has run, and
+    // absent is reported as "not captured" rather than as "No".
+    const premiumByAsin = new Map((premium?.documents || []).map((doc) => [doc.asin, doc.isPremium]));
+    const premiumCaptured = Boolean(premium);
 
     const marketplaces = (seller?.sellerAccount || []).filter((acc) => acc.country).length;
     const passCount = Object.fromEntries(AUDIT_CHECKS.map((check) => [check.key, 0]));
@@ -960,6 +977,9 @@ const buildListingsAudit = async (userId, country, region) => {
             brandStory: checks.brandStory ? 'Yes' : 'No',
             aPlus: checks.aPlus ? 'Yes' : 'No',
             bullets: detail?.about_product?.length || 0,
+            // Em dash, not "No", until the A+ Content API has run at least once:
+            // "not captured" and "not Premium" are different statements.
+            aPlusPremium: premiumCaptured ? (premiumByAsin.get(product.asin) ? 'Yes' : 'No') : '\u2014',
             price: num(product.price),
             detailPage: detailPageUrl(product.asin, country),
             // Listing Quality Score: the share of checks passed, on a 1-10 scale.
@@ -990,6 +1010,12 @@ const buildListingsAudit = async (userId, country, region) => {
                     value: passCount[check.key],
                     tone: passCount[check.key] === products.length ? 'good' : 'watch',
                 })),
+                ...(premiumCaptured
+                    ? [{
+                        label: 'A+ Premium',
+                        value: products.filter((p) => premiumByAsin.get(p.asin)).length,
+                    }]
+                    : []),
             ],
             columns: [
                 { key: 'sku', label: 'SKU' },
@@ -999,6 +1025,7 @@ const buildListingsAudit = async (userId, country, region) => {
                 { key: 'video', label: 'Video' },
                 { key: 'brandStory', label: 'Brand Story' },
                 { key: 'aPlus', label: 'A+' },
+                { key: 'aPlusPremium', label: 'A+ Premium' },
                 { key: 'lqs', label: 'LQS /10', format: 'number' },
                 { key: 'missing', label: 'Missing' },
             ],
@@ -1024,7 +1051,9 @@ const buildListingsAudit = async (userId, country, region) => {
             highlight('[Listings scheduled for content work this quarter]', 'fill'),
         ],
         caveats: [
-            'Premium A+ is not distinguished from standard A+, and Storefront presence and content language are not audited — none of the three is available from the data we hold.',
+            ...(premiumCaptured
+                ? ['Storefront presence and content language are not audited — neither is available from the data we hold.']
+                : ['Premium A+ is captured from the next A+ Content sync onwards; this edition shows it as not captured. Storefront presence and content language are not audited — neither is available from the data we hold.']),
         ],
     };
 };

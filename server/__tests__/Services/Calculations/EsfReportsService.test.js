@@ -30,6 +30,7 @@ jest.mock('../../../models/inventory/FbaInventoryApiDetailModel.js', () => ({ co
 jest.mock('../../../models/inventory/ProductWiseFBADataItemModel.js', () => ({ countDocuments: jest.fn() }));
 jest.mock('../../../models/seller-performance/NumberOfProductReviewsModel.js', () => ({ findOne: jest.fn() }));
 jest.mock('../../../models/seller-performance/APlusContentModel.js', () => ({ findOne: jest.fn() }));
+jest.mock('../../../models/seller-performance/APlusPremiumModel.js', () => ({ findOne: jest.fn() }));
 jest.mock('../../../models/review/ReviewOrderModel.js', () => ({ aggregate: jest.fn(), countDocuments: jest.fn(), findOne: jest.fn() }));
 jest.mock('../../../models/MCP/SalesOnlyMetricsModel.js', () => ({ aggregate: jest.fn(), findOne: jest.fn() }));
 jest.mock('../../../models/amazon-ads/PPCMetricsModel.js', () => ({ aggregate: jest.fn(), findOne: jest.fn() }));
@@ -48,6 +49,7 @@ const FbaDetail = require('../../../models/inventory/FbaInventoryApiDetailModel.
 const FbaFeeItem = require('../../../models/inventory/ProductWiseFBADataItemModel.js');
 const Content = require('../../../models/seller-performance/NumberOfProductReviewsModel.js');
 const APlus = require('../../../models/seller-performance/APlusContentModel.js');
+const APlusPremium = require('../../../models/seller-performance/APlusPremiumModel.js');
 const ReviewOrder = require('../../../models/review/ReviewOrderModel.js');
 const SalesOnlyMetrics = require('../../../models/MCP/SalesOnlyMetricsModel.js');
 const PPCMetrics = require('../../../models/amazon-ads/PPCMetricsModel.js');
@@ -84,6 +86,7 @@ const stubEmpty = () => {
     FbaFeeItem.countDocuments.mockResolvedValue(0);
     Content.findOne.mockReturnValue(mockFindOne(null));
     APlus.findOne.mockReturnValue(mockFindOne(null));
+    APlusPremium.findOne.mockReturnValue(mockFindOne(null));
     ReviewOrder.aggregate.mockResolvedValue([]);
     ReviewOrder.countDocuments.mockResolvedValue(0);
     ReviewOrder.findOne.mockReturnValue({ sort: () => ({ select: () => ({ lean: () => Promise.resolve(null) }) }) });
@@ -383,13 +386,73 @@ describe('getEsfReports', () => {
             expect(report.summary.stats.find((item) => item.label === 'Completion').value).toBe(50);
         });
 
-        it('declares the three fields it cannot audit', async () => {
+        it('declares the fields it cannot audit', async () => {
             Seller.findOne.mockReturnValue(mockFindOne({
                 sellerAccount: [{ region: 'NA', country: 'US', products: [{ asin: 'B1', sku: 'S', status: 'Active' }] }],
             }));
 
             const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'listings-audit');
             expect(report.caveats.join(' ')).toMatch(/Premium A\+.*Storefront.*language/);
+        });
+    });
+
+    describe('A+ Premium in the listings audit', () => {
+        const oneListing = () => {
+            Seller.findOne.mockReturnValue(mockFindOne({
+                sellerAccount: [{
+                    region: 'NA', country: 'US',
+                    products: [{ asin: 'B1', sku: 'S', itemName: 'One', status: 'Active' }],
+                }],
+            }));
+        };
+
+        /** Premium is a separate eligibility tier, so it gets its own column. */
+        it('reports Yes for a listing Amazon badges as Premium', async () => {
+            oneListing();
+            APlusPremium.findOne.mockReturnValue(mockFindOne({
+                documents: [{ asin: 'B1', isPremium: true }],
+            }));
+
+            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'listings-audit');
+            expect(report.summary.rows[0].aPlusPremium).toBe('Yes');
+            expect(report.summary.columns.some((column) => column.key === 'aPlusPremium')).toBe(true);
+            expect(report.summary.stats.find((stat) => stat.label === 'A+ Premium').value).toBe(1);
+        });
+
+        /** Fetched, and genuinely not Premium — a real No. */
+        it('reports No for a listing the fetch did not cover', async () => {
+            oneListing();
+            APlusPremium.findOne.mockReturnValue(mockFindOne({ documents: [] }));
+
+            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'listings-audit');
+            expect(report.summary.rows[0].aPlusPremium).toBe('No');
+            expect(report.summary.stats.find((stat) => stat.label === 'A+ Premium').value).toBe(0);
+        });
+
+        /**
+         * The distinction that matters. Before the A+ Content API has ever run
+         * there is no answer, and "No" would read as a finding about the
+         * listing. An em dash says nothing, which is the honest thing to say.
+         */
+        it('says nothing at all before the first fetch, rather than No', async () => {
+            oneListing();
+            APlusPremium.findOne.mockReturnValue(mockFindOne(null));
+
+            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'listings-audit');
+            expect(report.summary.rows[0].aPlusPremium).toBe('\u2014');
+            // No count either: reporting zero Premium is the same false claim
+            // in another shape.
+            expect(report.summary.stats.some((stat) => stat.label === 'A+ Premium')).toBe(false);
+            expect(report.caveats.join(' ')).toMatch(/captured from the next/);
+        });
+
+        it('drops the not-captured caveat once the fetch has run', async () => {
+            oneListing();
+            APlusPremium.findOne.mockReturnValue(mockFindOne({ documents: [] }));
+
+            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'listings-audit');
+            expect(report.caveats.join(' ')).not.toMatch(/captured from the next/);
+            expect(report.caveats.join(' ')).toMatch(/Storefront.*language/);
         });
     });
 

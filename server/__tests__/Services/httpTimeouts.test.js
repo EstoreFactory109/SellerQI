@@ -177,3 +177,48 @@ describe('AsinRelationshipService.js — raw https.request, not axios', () => {
             .rejects.toMatchObject({ message: expect.any(String) });
     }, 10000);
 });
+
+describe('GET_APLUS_CONTENT.js — the same raw https, in the same kind of pipeline phase', () => {
+    // A new service in this class earns a test in this file on day one rather than
+    // after an incident: raw https.request, one call per content document in a
+    // sequential loop, awaited from a scheduled phase — the exact shape that hung
+    // AsinRelationshipService above for 100+ minutes at 0% CPU.
+    //
+    // Same reasoning as that block: driven against a REAL loopback server, because
+    // a mocked https is precisely what would paper over the setTimeout -> destroy ->
+    // 'error' wiring that is the thing under test.
+    const http = require('http');
+
+    let server, port, httpsRequestSpy;
+    beforeAll(async () => {
+        process.env.APLUS_REQUEST_TIMEOUT_MS = '300';
+        server = http.createServer(() => {}); // accepts, never responds
+        await new Promise((resolve) => server.listen(0, resolve));
+        port = server.address().port;
+    });
+    afterAll(() => new Promise((resolve) => server.close(resolve)));
+
+    beforeEach(() => {
+        httpsRequestSpy = jest.spyOn(require('https'), 'request').mockImplementation((options, cb) =>
+            http.request({ ...options, hostname: 'localhost', host: 'localhost', port }, cb)
+        );
+    });
+    afterEach(() => httpsRequestSpy.mockRestore());
+
+    test('a marketplace that never responds gives up in bounded time instead of hanging the phase', async () => {
+        jest.isolateModules(() => {
+            jest.doMock('../../models/seller-performance/APlusPremiumModel.js', () => ({ create: jest.fn() }));
+        });
+        const getAPlusContent = require('../../Services/Sp_API/GET_APLUS_CONTENT.js');
+
+        const start = Date.now();
+        const result = await getAPlusContent('token', ['mp-1'], 'user-1', 'localhost', 'US', 'NA');
+        const elapsed = Date.now() - start;
+
+        // Returns false rather than throwing: the service owns its own failure so a
+        // dead A+ endpoint cannot take the surrounding batch down with it. What
+        // matters here is that it returns AT ALL — pre-timeout this never would.
+        expect(result).toBe(false);
+        expect(elapsed).toBeLessThan(5000);
+    }, 15000);
+});
