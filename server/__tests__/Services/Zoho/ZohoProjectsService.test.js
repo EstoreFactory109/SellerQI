@@ -495,7 +495,7 @@ describe('createTask — the body Zoho actually receives', () => {
         });
 
         const body = bodyOf();
-        expect(body.end_date).toBe('2099-12-31');
+        expect(body.end_date).toBe('2099-12-31T12:00:00.000Z');
         expect(body.start_date).toBeTruthy();
     });
 
@@ -504,9 +504,10 @@ describe('createTask — the body Zoho actually receives', () => {
             projectId: 'p1', name: 'Redo search terms', endDate: '2099-12-31',
         });
 
-        expect(bodyOf().start_date).toBe(new Date().toISOString().slice(0, 10));
-        // Not MM-DD-YYYY: that is the v2 dialect, and this path is v3.
-        expect(bodyOf().start_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        // A full ISO datetime, NOT a bare YYYY-MM-DD — v3 refuses the date-only form
+        // with INVALID_PARAMETER_VALUE. Midday so it cannot slip to the previous date.
+        expect(bodyOf().start_date).toBe(`${new Date().toISOString().slice(0, 10)}T12:00:00.000Z`);
+        expect(bodyOf().start_date).toMatch(/^\d{4}-\d{2}-\d{2}T12:00:00\.000Z$/);
     });
 
     test('a needed-by date already in the past does not fail the accept', async () => {
@@ -517,7 +518,7 @@ describe('createTask — the body Zoho actually receives', () => {
         });
 
         const body = bodyOf();
-        expect(body.start_date).toBe('2020-01-01');
+        expect(body.start_date).toBe('2020-01-01T12:00:00.000Z');
         expect(new Date(body.start_date) <= new Date(body.end_date)).toBe(true);
     });
 
@@ -526,7 +527,7 @@ describe('createTask — the body Zoho actually receives', () => {
             projectId: 'p1', name: 'Scheduled', startDate: '2099-01-01', endDate: '2099-12-31',
         });
 
-        expect(bodyOf().start_date).toBe('2099-01-01');
+        expect(bodyOf().start_date).toBe('2099-01-01T12:00:00.000Z');
     });
 
     test('no dates at all means no date fields, not empty ones', async () => {
@@ -545,5 +546,72 @@ describe('createTask — the body Zoho actually receives', () => {
 
         expect(bodyOf().name).toBe('Trim me');
         expect(axios.mock.calls[0][0].headers['Content-Type']).toBe('application/json');
+    });
+});
+
+describe('createTask — the one retry in the other date dialect', () => {
+    const okTask = { tasks: [{ id: 'task-9', id_string: 'task-9', name: 'Redo search terms' }] };
+    const formatRejection = () => httpError(400, {
+        error: {
+            status_code: '400',
+            title: 'INVALID_PARAMETER_VALUE',
+            error_type: 'FIELDS_VALIDATION_ERROR',
+            details: [{ message: 'input format mismatch. Kindly pass correct format.', field_name: 'end_date' }],
+        },
+    });
+
+    beforeEach(() => {
+        axios.mockReset();
+        ZohoAuth.getAccessToken.mockResolvedValue('access-token-1');
+        ZohoAuth.getConnection.mockResolvedValue({
+            apiDomain: 'https://projectsapi.zoho.com', portalId: 'portal-1',
+        });
+    });
+
+    test('a format rejection is retried once as MM-DD-YYYY and succeeds', async () => {
+        axios.mockRejectedValueOnce(formatRejection()).mockResolvedValueOnce({ data: okTask });
+
+        const task = await ZohoProjectsService.createTask({
+            projectId: 'p1', name: 'Redo search terms', endDate: '2099-12-31',
+        });
+
+        expect(axios).toHaveBeenCalledTimes(2);
+        expect(axios.mock.calls[0][0].data.end_date).toBe('2099-12-31T12:00:00.000Z');
+        expect(axios.mock.calls[1][0].data.end_date).toBe('12-31-2099');
+        expect(task.id).toBe('task-9');
+    });
+
+    test('the retry happens once, not in a loop', async () => {
+        axios.mockRejectedValue(formatRejection());
+
+        await expect(ZohoProjectsService.createTask({
+            projectId: 'p1', name: 'Redo search terms', endDate: '2099-12-31',
+        })).rejects.toThrow();
+
+        expect(axios).toHaveBeenCalledTimes(2);
+    });
+
+    test('a rejection about anything else is NOT retried', async () => {
+        // Replaying a permission or missing-field error would make the same wrong call
+        // twice and bury the real reason under the second failure.
+        axios.mockRejectedValue(httpError(400, {
+            error: { title: 'FIELD_REQUIRED', details: [{ message: 'name is required' }] },
+        }));
+
+        await expect(ZohoProjectsService.createTask({
+            projectId: 'p1', name: 'Redo search terms', endDate: '2099-12-31',
+        })).rejects.toThrow();
+
+        expect(axios).toHaveBeenCalledTimes(1);
+    });
+
+    test('a dateless task is never retried — there is no date to blame', async () => {
+        axios.mockRejectedValue(formatRejection());
+
+        await expect(ZohoProjectsService.createTask({
+            projectId: 'p1', name: 'Dateless',
+        })).rejects.toThrow();
+
+        expect(axios).toHaveBeenCalledTimes(1);
     });
 });
