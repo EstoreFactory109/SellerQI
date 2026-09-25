@@ -131,13 +131,10 @@ const PATHS = {
     /**
      * Tasklists — read to choose one, written to create one.
      *
-     * The version here is a GUESS that could not be tested before the scope existed:
-     * both generations answered 401 INVALID_OAUTHSCOPE, which masks whichever of them
-     * actually serves this resource. v3 matches the rest of this block, but v3 answers
-     * URL_RULE_NOT_CONFIGURED for subtasks, so v2 is a real possibility — and
-     * listTasklists retries on the other generation for exactly that reason. If v2 turns
-     * out to be the one, correct it here (note v2 paths carry a trailing slash) and drop
-     * the retry.
+     * v3, confirmed against the live portal on 2026-09-25 once the tasklists scope was
+     * granted. Worth recording because it could not be established before then: both
+     * generations answered 401 INVALID_OAUTHSCOPE, and that 401 masks which one actually
+     * serves the resource.
      */
     tasklists: {
         version: 'v3',

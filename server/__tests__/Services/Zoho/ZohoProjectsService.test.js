@@ -694,3 +694,94 @@ describe('createTask — the status a new task lands in', () => {
         expect(logger.warn).not.toHaveBeenCalledWith(expect.stringMatching(/CLOSED status/));
     });
 });
+
+describe('listTasklists', () => {
+    beforeEach(() => {
+        axios.mockReset();
+        ZohoAuth.getAccessToken.mockResolvedValue('access-token-1');
+        ZohoAuth.getConnection.mockResolvedValue({
+            apiDomain: 'https://projectsapi.zoho.com', portalId: 'portal-1',
+        });
+    });
+
+    test('returns id and name, dropping rows missing either', async () => {
+        axios.mockResolvedValue({ data: { tasklists: [
+            { id: '1', name: 'Walmart' },
+            { id: '2', name: null },
+            { name: 'No id' },
+        ] } });
+
+        const lists = await ZohoProjectsService.listTasklists({ projectId: 'p1' });
+
+        expect(lists).toEqual([{ id: '1', name: 'Walmart' }]);
+    });
+
+    test('a failure returns [] rather than throwing', async () => {
+        /**
+         * Load-bearing. The only caller is the accept path, where this decides where a
+         * task is FILED — a throw would turn a nicety into a failed approval. This is
+         * the exact shape seen live while the tasklists scope was still missing.
+         */
+        axios.mockRejectedValue(httpError(401, {
+            error: { title: 'INVALID_OAUTHSCOPE', details: [{ message: 'Invalid OAuth scope.' }] },
+        }));
+
+        await expect(ZohoProjectsService.listTasklists({ projectId: 'p1' })).resolves.toEqual([]);
+    });
+
+    test('no project means no call at all', async () => {
+        await expect(ZohoProjectsService.listTasklists({})).resolves.toEqual([]);
+        expect(axios).not.toHaveBeenCalled();
+    });
+
+    test('it reads v3, the generation confirmed against the live portal', async () => {
+        axios.mockResolvedValue({ data: { tasklists: [] } });
+
+        await ZohoProjectsService.listTasklists({ projectId: 'p1' });
+
+        const { url } = axios.mock.calls[0][0];
+        expect(url).toContain('/api/v3/');
+        // v2 would need a trailing slash; v3 refuses one.
+        expect(url).toMatch(/\/tasklists$/);
+    });
+});
+
+describe('createTasklist', () => {
+    beforeEach(() => {
+        axios.mockReset();
+        ZohoAuth.getAccessToken.mockResolvedValue('access-token-1');
+        ZohoAuth.getConnection.mockResolvedValue({
+            apiDomain: 'https://projectsapi.zoho.com', portalId: 'portal-1',
+        });
+    });
+
+    test('creates and returns the new list', async () => {
+        axios.mockResolvedValue({ data: { tasklists: [{ id: 'tl-9', name: 'Video Production' }] } });
+
+        const created = await ZohoProjectsService.createTasklist({ projectId: 'p1', name: '  Video Production  ' });
+
+        expect(axios.mock.calls[0][0].data).toEqual({ name: 'Video Production' });
+        expect(created).toEqual({ id: 'tl-9', name: 'Video Production' });
+    });
+
+    test('it DOES throw, unlike listTasklists', async () => {
+        // The asymmetry is deliberate: failing to read the lists means filing nowhere,
+        // which is survivable. Failing to create one we decided to create means the
+        // caller must not go on to reference it.
+        axios.mockRejectedValue(httpError(400, { error: { title: 'FIELDS_VALIDATION_ERROR' } }));
+
+        await expect(ZohoProjectsService.createTasklist({ projectId: 'p1', name: 'X' })).rejects.toThrow();
+    });
+
+    test('a 2xx with no id is refused rather than returned', async () => {
+        axios.mockResolvedValue({ data: { tasklists: [{ name: 'No id' }] } });
+
+        await expect(ZohoProjectsService.createTasklist({ projectId: 'p1', name: 'X' }))
+            .rejects.toThrow(/returned no id/);
+    });
+
+    test('an empty name never reaches Zoho', async () => {
+        await expect(ZohoProjectsService.createTasklist({ projectId: 'p1', name: '   ' })).rejects.toThrow();
+        expect(axios).not.toHaveBeenCalled();
+    });
+});
