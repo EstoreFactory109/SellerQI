@@ -292,6 +292,29 @@ const highlightList = (highlights) => {
  * @param {string} opts.currency     symbol for currency-formatted cells
  * @param {string} [opts.clientName] shown in the banner subtitle
  */
+/**
+ * "Showing the first N of M rows", when rows were left out.
+ *
+ * Two things can cut a table and neither used to announce itself on the second
+ * one: MAX_PDF_ROWS here, and a builder's own slice — the suppressed-listings
+ * table is cut to 25 before it ever reaches this file. A reader who cannot see
+ * that rows are missing will read the table as the whole answer.
+ *
+ * @param {number} total  rows the builder found, before any slicing
+ * @param {Array} shown   rows actually handed to the table
+ */
+const truncationNote = (total, shown) => {
+    const rendered = Math.min((shown || []).length, MAX_PDF_ROWS);
+    if (!total || total <= rendered) return null;
+    return {
+        text: `Showing the first ${rendered} of ${Number(total).toLocaleString('en-GB')} rows. The full set is on your Reports page.`,
+        fontSize: 8,
+        italics: true,
+        color: DOC.muted,
+        margin: [0, 0, 0, 12],
+    };
+};
+
 const buildReportDocDefinition = (report, { marketplace, currency = '$', clientName = '' } = {}) => {
     const place = marketplace?.country ? `Amazon ${marketplace.country}` : 'All marketplaces';
     const subtitle = [clientName, place, report.date].filter(Boolean).join('  ·  ');
@@ -309,16 +332,8 @@ const buildReportDocDefinition = (report, { marketplace, currency = '$', clientN
     const table = dataTable(report.summary, currency);
     if (table) {
         content.push(table);
-        const total = report.summary?.totalRows || 0;
-        if (total > MAX_PDF_ROWS) {
-            content.push({
-                text: `Showing the first ${MAX_PDF_ROWS} of ${total.toLocaleString('en-GB')} rows. The full set is on your Reports page.`,
-                fontSize: 8,
-                italics: true,
-                color: DOC.muted,
-                margin: [0, 0, 0, 12],
-            });
-        }
+        const note = truncationNote(report.summary?.totalRows, report.summary?.rows);
+        if (note) content.push(note);
     } else if (report.summary?.emptyMessage) {
         content.push({ text: report.summary.emptyMessage, fontSize: 9, bold: true, color: DOC.green, margin: [0, 0, 0, 12] });
     }
@@ -329,7 +344,11 @@ const buildReportDocDefinition = (report, { marketplace, currency = '$', clientN
     if (secondary?.rows?.length) {
         content.push(sectionHeading(secondary.title || 'Detail'));
         const secondaryTable = dataTable(null, currency, secondary);
-        if (secondaryTable) content.push(secondaryTable);
+        if (secondaryTable) {
+            content.push(secondaryTable);
+            const note = truncationNote(secondary.totalRows, secondary.rows);
+            if (note) content.push(note);
+        }
     }
 
     const bullets = highlightList(report.highlights);

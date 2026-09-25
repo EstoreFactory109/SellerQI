@@ -545,6 +545,7 @@ const buildAccountOverview = async (userId, country, region) => {
                         { key: 'action', label: 'Action' },
                     ],
                     rows: healthRows,
+                    totalRows: healthRows.length,
                 }
                 : null,
             // History is the point of this report, so it is the table.

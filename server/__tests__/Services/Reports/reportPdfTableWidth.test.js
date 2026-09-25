@@ -175,3 +175,73 @@ describe('report table width', () => {
         expect(MAX_PDF_ROWS).toBe(40);
     });
 });
+
+/**
+ * Rows that were cut must be declared.
+ *
+ * The primary table has always said "Showing the first N of M rows". The
+ * SECOND table on the same page said nothing, and it can be cut twice over —
+ * once by the builder (the suppressed-listings table is sliced to 25 before it
+ * reaches the renderer) and again by MAX_PDF_ROWS here. A reader who cannot
+ * see that rows are missing reads the table as the whole answer, which on a
+ * suppressed-listings table means believing the account has 25 blocked
+ * listings when it has 60.
+ */
+describe('truncation notices', () => {
+    const cols = [{ key: 'a', label: 'A' }];
+    const rows = (n) => Array.from({ length: n }, (_, i) => ({ a: `r${i}` }));
+
+    const textOf = (summary) => {
+        const out = [];
+        const walk = (node) => {
+            if (node === null || node === undefined) return;
+            if (Array.isArray(node)) return node.forEach(walk);
+            if (typeof node === 'object') {
+                if (typeof node.text === 'string') out.push(node.text);
+                Object.values(node).forEach(walk);
+            }
+        };
+        walk(buildReportDocDefinition({ key: 'x', name: 'X', available: true, summary }, {}));
+        return out;
+    };
+
+    const notices = (summary) => textOf(summary).filter((t) => t.startsWith('Showing the first'));
+
+    it('says so when the SECONDARY table was cut by the builder', () => {
+        const found = notices({
+            columns: cols, rows: rows(1), totalRows: 1,
+            secondaryTable: { title: 'Suppressed listings', columns: cols, rows: rows(25), totalRows: 60 },
+        });
+        expect(found).toHaveLength(1);
+        expect(found[0]).toContain('first 25 of 60');
+    });
+
+    it('still says so for the primary table', () => {
+        const found = notices({ columns: cols, rows: rows(60), totalRows: 60 });
+        expect(found).toHaveLength(1);
+        expect(found[0]).toContain(`first ${MAX_PDF_ROWS} of 60`);
+    });
+
+    it('stays quiet when nothing was cut', () => {
+        expect(notices({
+            columns: cols, rows: rows(3), totalRows: 3,
+            secondaryTable: { title: 'Account Health', columns: cols, rows: rows(4), totalRows: 4 },
+        })).toHaveLength(0);
+    });
+
+    it('counts what was RENDERED, not what it was handed', () => {
+        // A builder that slices to 50 still only gets MAX_PDF_ROWS onto the
+        // page, so the notice must name 40 rather than repeating the 50.
+        const found = notices({
+            columns: cols, rows: rows(1), totalRows: 1,
+            secondaryTable: { columns: cols, rows: rows(50), totalRows: 200 },
+        });
+        expect(found[0]).toContain(`first ${MAX_PDF_ROWS} of 200`);
+    });
+
+    it('does not claim a cut when the builder forgot to report a total', () => {
+        // totalRows absent is "unknown", and inventing a number from the rows
+        // in hand would assert something the renderer cannot know.
+        expect(notices({ secondaryTable: { columns: cols, rows: rows(25) } })).toHaveLength(0);
+    });
+});
