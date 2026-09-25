@@ -159,6 +159,49 @@ const ReportDocumentPreview = ({ report, marketplace, currency }) => {
                 )}
             </div>
 
+            {report.summary?.secondaryTable?.rows?.length > 0 && (
+                <div style={{ padding: '8px 24px 4px' }}>
+                    <h2 style={{ fontSize: 14, color: DOC.teal, borderBottom: `2px solid ${DOC.teal}`, paddingBottom: 6, margin: '0 0 12px', textTransform: 'uppercase', letterSpacing: '.3px' }}>
+                        {report.summary.secondaryTable.title || 'Detail'}
+                    </h2>
+                    <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 8 }}>
+                            <thead>
+                                <tr>
+                                    {report.summary.secondaryTable.columns.map((column) => (
+                                        <th
+                                            key={column.key}
+                                            style={{ background: DOC.navy, color: '#fff', fontSize: 11, textAlign: 'center', padding: '8px 6px', border: `1px solid ${DOC.border}`, whiteSpace: 'nowrap' }}
+                                        >
+                                            {column.label}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {report.summary.secondaryTable.rows.map((row, index) => (
+                                    <tr key={index} style={{ background: index % 2 === 1 ? DOC.zebra : '#fff' }}>
+                                        {report.summary.secondaryTable.columns.map((column, cellIndex) => (
+                                            <td
+                                                key={column.key}
+                                                style={{
+                                                    padding: '8px 6px',
+                                                    border: `1px solid ${DOC.border}`,
+                                                    textAlign: cellIndex === 0 ? 'left' : 'center',
+                                                    color: cellIndex === 0 ? DOC.blueInput : DOC.ink,
+                                                }}
+                                            >
+                                                {formatCell(row[column.key], column.format, currency)}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
             {report.highlights?.length > 0 && (
                 <div style={{ padding: '8px 24px 4px' }}>
                     <h2 style={{ fontSize: 14, color: DOC.teal, borderBottom: `2px solid ${DOC.teal}`, paddingBottom: 6, margin: '0 0 12px', textTransform: 'uppercase', letterSpacing: '.3px' }}>

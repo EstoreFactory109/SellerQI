@@ -30,6 +30,7 @@ const RestockInventoryRecommendations = require('../../models/inventory/GET_REST
 const FbaInventoryPlanningData = require('../../models/inventory/GET_FBA_INVENTORY_PLANNING_DATA_Model.js');
 const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
 const AccountHistory = require('../../models/user-auth/AccountHistory.js');
+const V2SellerPerformance = require('../../models/seller-performance/V2_Seller_Performance_ReportModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const FbaInventoryApiDetail = require('../../models/inventory/FbaInventoryApiDetailModel.js');
 const ProductWiseFBADataItem = require('../../models/inventory/ProductWiseFBADataItemModel.js');
@@ -85,9 +86,51 @@ const formatMonth = (value) => {
     return date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 };
 
+/**
+ * Country code -> Amazon storefront domain, for the detail-page links. Matches
+ * the codes used at connect time (UK, not GB); an unlisted code simply gets no
+ * link rather than a guessed one that 404s.
+ */
+const MARKETPLACE_DOMAIN = {
+    US: 'amazon.com', CA: 'amazon.ca', MX: 'amazon.com.mx', BR: 'amazon.com.br',
+    UK: 'amazon.co.uk', DE: 'amazon.de', FR: 'amazon.fr', IT: 'amazon.it',
+    ES: 'amazon.es', NL: 'amazon.nl', SE: 'amazon.se', PL: 'amazon.pl',
+    BE: 'amazon.com.be', IE: 'amazon.ie', TR: 'amazon.com.tr',
+    IN: 'amazon.in', JP: 'amazon.co.jp', AU: 'amazon.com.au',
+    SG: 'amazon.sg', AE: 'amazon.ae', SA: 'amazon.sa', EG: 'amazon.eg',
+};
+
+/** The listing's own page, so a flagged ASIN can be opened straight from the report. */
+const detailPageUrl = (asin, country) => {
+    const domain = MARKETPLACE_DOMAIN[String(country || '').toUpperCase()];
+    return asin && domain ? `https://www.${domain}/dp/${asin}` : null;
+};
+
 /** "1 SKU" / "2 SKUs" — every insight line is a sentence a client reads. */
 const plural = (count, singular, pluralForm = `${singular}s`) =>
     `${count.toLocaleString()} ${count === 1 ? singular : pluralForm}`;
+
+/**
+ * Amazon's Account Health statuses, as stored.
+ *
+ * WHAT THIS IS AND IS NOT
+ * The V2 Seller Performance report gives each policy metric a STATUS — "GOOD",
+ * "AT RISK", "POOR" — not the percentage behind it. So this report can say
+ * whether the Order Defect Rate is within Amazon's threshold, but not that it
+ * is 0.24%. Reporting a made-up percentage would be worse than reporting the
+ * status we actually have, so the status is what travels, and the caveat says
+ * the number itself is not available.
+ */
+const HEALTH_TONE = { GOOD: 'good', EXCELLENT: 'good', FAIR: 'watch', 'AT RISK': 'watch', POOR: 'watch', BAD: 'watch' };
+
+const healthTone = (status) => HEALTH_TONE[String(status || '').toUpperCase()] || 'neutral';
+
+/** Reads as a sentence: "Good", "At risk". */
+const healthLabel = (status) => {
+    const text = String(status || '').trim();
+    if (!text) return 'Not reported';
+    return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+};
 
 /**
  * Does this marketplace hold any FBA stock at all?
@@ -181,6 +224,8 @@ const buildRestock = async (userId, country, region) => {
     let needsRestock = 0;
     let reorderValue = 0;
     let outOfStock = 0;
+    let inboundTotal = 0;
+    let unfulfillableTotal = 0;
 
     const rows = [];
     for (const product of products) {
@@ -200,6 +245,20 @@ const buildRestock = async (userId, country, region) => {
             reorderValue += replenishQty * num(product.price);
         }
 
+        // Every one of these already arrives in Amazon's report and has been
+        // stored since day one. Without them a reader cannot tell stock that is
+        // merely in transit from stock that genuinely needs reordering, which is
+        // how the same SKU gets ordered twice.
+        const fcTransfer = num(product.fcTransfer);
+        const fcProcessing = num(product.fcProcessing);
+        const reserved = num(product.customerOrder);
+        const unfulfillable = num(product.unfulfillable);
+        const working = num(product.working);
+        const shipped = num(product.shipped);
+        const receiving = num(product.receiving);
+        // Amazon's own inbound total when it sends one, else the three stages.
+        const inbound = num(product.inbound) || working + shipped + receiving;
+
         rows.push({
             asin: product.asin || '',
             sku: product.merchantSku || '',
@@ -207,7 +266,16 @@ const buildRestock = async (userId, country, region) => {
             price: num(product.price),
             unitsSoldLast30Days: num(product.unitsSoldLast30Days),
             available,
-            inbound: num(product.inbound),
+            fcTransfer,
+            fcProcessing,
+            reserved,
+            unfulfillable,
+            inbound,
+            // Kept alongside the total so "50 shipped" and "50 still working"
+            // are not read as the same thing.
+            inboundWorking: working,
+            inboundShipped: shipped,
+            inboundReceiving: receiving,
             // Amazon reports cover in days; the report is read in weeks.
             weeksOfCover: product.totalDaysOfSupply ? round(num(product.totalDaysOfSupply) / 7, 1) : null,
             recommendedQty: replenishQty,
@@ -215,6 +283,9 @@ const buildRestock = async (userId, country, region) => {
             alert,
             isUrgent,
         });
+
+        inboundTotal += inbound;
+        unfulfillableTotal += unfulfillable;
     }
 
     // Most urgent first, then by the size of the reorder — the order someone
@@ -238,11 +309,20 @@ const buildRestock = async (userId, country, region) => {
                 { label: 'Need restock', value: needsRestock },
                 { label: 'Out of stock', value: outOfStock, tone: outOfStock > 0 ? 'watch' : 'good' },
                 { label: 'Est. reorder value', value: round(reorderValue), format: 'currency' },
+                { label: 'Inbound units', value: inboundTotal },
+                { label: 'Unfulfillable', value: unfulfillableTotal, tone: unfulfillableTotal > 0 ? 'watch' : 'good' },
             ],
             columns: [
                 { key: 'sku', label: 'SKU' },
                 { key: 'productName', label: 'Product' },
+                { key: 'price', label: 'Price', format: 'currency' },
+                { key: 'unitsSoldLast30Days', label: '30D sales', format: 'number' },
                 { key: 'available', label: 'Available', format: 'number' },
+                { key: 'fcTransfer', label: 'FC transfer', format: 'number' },
+                { key: 'fcProcessing', label: 'FC processing', format: 'number' },
+                { key: 'reserved', label: 'Reserved', format: 'number' },
+                { key: 'unfulfillable', label: 'Unfulfillable', format: 'number' },
+                { key: 'inbound', label: 'Inbound', format: 'number' },
                 { key: 'weeksOfCover', label: 'Weeks left', format: 'number' },
                 { key: 'recommendedQty', label: 'Reorder qty', format: 'number' },
                 { key: 'reorderValue', label: 'Reorder value', format: 'currency' },
@@ -255,6 +335,12 @@ const buildRestock = async (userId, country, region) => {
                 ? highlight(`${plural(urgent, 'SKU')} flagged urgent by Amazon and ${outOfStock} already out of stock.`, 'watch')
                 : highlight(`No SKU is flagged urgent; ${needsRestock} are due a routine replenishment.`, 'good'),
             highlight(`Replenishing everything Amazon recommends is about ${Math.round(reorderValue).toLocaleString()} at current prices.`),
+            ...(inboundTotal
+                ? [highlight(`${plural(inboundTotal, 'unit')} are already inbound to Amazon — check these before raising new orders.`)]
+                : []),
+            ...(unfulfillableTotal
+                ? [highlight(`${plural(unfulfillableTotal, 'unit')} are unfulfillable and should be removed or disposed of.`, 'watch')]
+                : []),
             ...(rows[0]?.isUrgent
                 ? [highlight(`${rows[0].sku || rows[0].asin} carries the largest urgent reorder at ${Math.round(rows[0].reorderValue).toLocaleString()}.`, 'watch')]
                 : []),
@@ -274,9 +360,11 @@ const REPORT_ACCOUNT = { key: 'account-overview', name: 'Weekly Account Overview
  * product counts and issue counts, hence the caveat.
  */
 const buildAccountOverview = async (userId, country, region) => {
-    const [seller, history] = await Promise.all([
+    const [seller, history, performance] = await Promise.all([
         Seller.findOne({ User: userId }).select('sellerAccount').lean(),
         AccountHistory.findOne({ User: userId, country, region }).lean(),
+        // 17k of these have been collected and never shown to anyone.
+        V2SellerPerformance.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
     ]);
 
     const account = (seller?.sellerAccount || []).find((acc) => acc.region === region && acc.country === country);
@@ -289,9 +377,15 @@ const buildAccountOverview = async (userId, country, region) => {
     let active = 0;
     let activeWithStock = 0;
     let outOfStock = 0;
+    let inactive = 0;
+    let incomplete = 0;
     for (const product of products) {
-        const isActive = String(product.status || '').toLowerCase() === 'active';
-        if (!isActive) continue;
+        const status = String(product.status || '').toLowerCase();
+        if (status === 'inactive') inactive += 1;
+        // Amazon has no "suppressed" state in what we store; "Incomplete" is the
+        // nearest thing and is reported under its own name rather than relabelled.
+        if (status === 'incomplete') incomplete += 1;
+        if (status !== 'active') continue;
         active += 1;
         if (num(product.quantity) > 0) activeWithStock += 1;
         else outOfStock += 1;
@@ -310,11 +404,41 @@ const buildAccountOverview = async (userId, country, region) => {
         { label: 'Active', value: active },
         { label: 'Active with stock', value: activeWithStock },
         { label: 'Out of stock', value: outOfStock, tone: outOfStock > 0 ? 'watch' : 'good' },
+        { label: 'Inactive', value: inactive, tone: inactive > 0 ? 'watch' : 'good' },
+        { label: 'Incomplete', value: incomplete, tone: incomplete > 0 ? 'watch' : 'good' },
     ];
+
+    // Amazon's own Account Health, which the report has never carried.
+    const healthRows = [];
+    if (performance) {
+        if (performance.ahrScore !== undefined && performance.ahrScore !== null) {
+            stats.push({
+                label: 'Amazon AHR',
+                value: num(performance.ahrScore),
+                tone: num(performance.ahrScore) >= 200 ? 'good' : 'watch',
+            });
+        }
+        const metrics = [
+            ['Order Defect Rate', performance.orderWithDefectsStatus, 'Under 1%'],
+            ['Pre-fulfilment cancellations', performance.CancellationRate, 'Under 2.5%'],
+            ['Valid Tracking Rate', performance.validTrackingRateStatus, 'Over 95%'],
+            ['Late Shipment Rate', performance.lateShipmentRateStatus, 'Under 4%'],
+            ['Listing policy violations', performance.listingPolicyViolations, 'None'],
+        ];
+        for (const [metric, status, target] of metrics) {
+            if (status === undefined || status === null || status === '') continue;
+            healthRows.push({
+                metric,
+                status: healthLabel(status),
+                target,
+                action: healthTone(status) === 'watch' ? 'Review in Seller Central' : 'None',
+            });
+        }
+    }
 
     if (current) {
         stats.push({
-            label: 'Health score',
+            label: 'SellerQI health',
             value: num(current.HealthScore),
             delta: previous ? round(num(current.HealthScore) - num(previous.HealthScore), 1) : null,
         });
@@ -332,6 +456,9 @@ const buildAccountOverview = async (userId, country, region) => {
     }
     caveats.push('History covers health score, listing counts and issue counts. Other account parameters are measured live and have no weekly history yet.');
     caveats.push('The "Checks" and "Observation / Remarks" columns are written by your account manager and are not part of this live view.');
+    if (healthRows.length) {
+        caveats.push('Amazon reports each policy metric as a status rather than a figure, so Order Defect Rate and the rest show as Good or At risk. The underlying percentages are in Seller Central.');
+    }
 
     return {
         ...REPORT_ACCOUNT,
@@ -343,6 +470,19 @@ const buildAccountOverview = async (userId, country, region) => {
         summary: {
             headline: `${active} active listings, ${activeWithStock} with stock on hand`,
             stats,
+            // Amazon's policy metrics, where the performance report supplied them.
+            secondaryTable: healthRows.length
+                ? {
+                    title: 'Account Health',
+                    columns: [
+                        { key: 'metric', label: 'Metric' },
+                        { key: 'status', label: 'Status' },
+                        { key: 'target', label: 'Amazon target' },
+                        { key: 'action', label: 'Action' },
+                    ],
+                    rows: healthRows,
+                }
+                : null,
             // History is the point of this report, so it is the table.
             columns: [
                 { key: 'date', label: 'Week' },
@@ -374,6 +514,15 @@ const buildAccountOverview = async (userId, country, region) => {
                     );
                 })()]
                 : []),
+            ...(healthRows.some((r) => r.action !== 'None')
+                ? [highlight(
+                    `Amazon flags ${healthRows.filter((r) => r.action !== 'None').map((r) => r.metric).join(', ')} as needing attention.`,
+                    'watch'
+                )]
+                : healthRows.length
+                    ? [highlight('Every Amazon policy metric is within target.', 'good')]
+                    : []),
+            ...(incomplete ? [highlight(`${plural(incomplete, 'listing')} are incomplete and will not sell until finished.`, 'watch')] : []),
             highlight('[Observation / remarks for this week]', 'fill'),
         ],
         caveats,
@@ -411,6 +560,16 @@ const buildBuyBox = async (userId, country, region) => {
     }
 
     const losing = latest.asinBuyBoxData?.filter((row) => num(row.buyBoxPercentage) === 0) || [];
+
+    // Session-weighted, not a flat mean: an ASIN nobody visits should not move
+    // the account's headline ownership as much as one carrying the traffic.
+    const ownershipRows = latest.asinBuyBoxData || [];
+    const sessionTotal = ownershipRows.reduce((sum, row) => sum + (row.sessions || 0), 0);
+    const weightedOwnership = sessionTotal
+        ? round(ownershipRows.reduce((sum, row) => sum + num(row.buyBoxPercentage) * (row.sessions || 0), 0) / sessionTotal, 1)
+        : (ownershipRows.length
+            ? round(ownershipRows.reduce((sum, row) => sum + num(row.buyBoxPercentage), 0) / ownershipRows.length, 1)
+            : 0);
     const total = latest.totalProducts || latest.asinBuyBoxData?.length || 0;
 
     // ASIN -> buy box % for each snapshot, indexed once. Scanning the snapshot
@@ -442,12 +601,17 @@ const buildBuyBox = async (userId, country, region) => {
             const match = byAsin.get(row.childAsin) || {};
             return {
                 asin: row.childAsin,
-                sku: match.sku || '—',
+                sku: match.sku || '\u2014',
                 productName: match.title || '',
                 ourPrice: match.price || null,
                 status: 'Losing',
+                // Amazon's own ownership figure for the period, which is the
+                // difference between "lost it once" and "never holds it".
+                ownership: round(num(row.buyBoxPercentage), 1),
                 periodsLosing: consecutiveLosing(row.childAsin),
                 sessions: row.sessions || 0,
+                unitsOrdered: row.unitsOrdered || 0,
+                detailPage: detailPageUrl(row.childAsin, country),
                 // Named as the gap it is: we know we are losing, not to whom.
                 competingSeller: null,
                 competingPrice: null,
@@ -469,6 +633,7 @@ const buildBuyBox = async (userId, country, region) => {
                 { label: 'Winning', value: latest.productsWithBuyBox || 0, tone: 'good' },
                 { label: 'Losing', value: losing.length, tone: losing.length > 0 ? 'watch' : 'good' },
                 { label: 'Below 50%', value: latest.productsWithLowBuyBox || 0, tone: (latest.productsWithLowBuyBox || 0) > 0 ? 'watch' : 'good' },
+                { label: 'Buy Box ownership', value: weightedOwnership, format: 'percent', tone: weightedOwnership >= 90 ? 'good' : 'watch' },
                 { label: 'Snapshots on file', value: snapshots.length },
             ],
             columns: [
@@ -476,8 +641,10 @@ const buildBuyBox = async (userId, country, region) => {
                 { key: 'asin', label: 'ASIN' },
                 { key: 'ourPrice', label: 'Our price', format: 'currency' },
                 { key: 'status', label: 'Status' },
+                { key: 'ownership', label: 'Buy Box %', format: 'percent' },
                 { key: 'periodsLosing', label: 'Snapshots losing', format: 'number' },
                 { key: 'sessions', label: 'Sessions', format: 'number' },
+                { key: 'unitsOrdered', label: 'Units', format: 'number' },
             ],
             rows,
             // An empty table here is the GOOD outcome, not missing data. Say so,
@@ -674,8 +841,19 @@ const buildListingsAudit = async (userId, country, region) => {
             sku: product.sku || '',
             productName: product.itemName || '',
             status: product.status || '',
+            // The actual counts and flags, rather than a pass/fail that hides
+            // whether a listing has three images or nine.
+            images: detail?.product_photos?.length || 0,
+            video: checks.video ? 'Yes' : 'No',
+            brandStory: checks.brandStory ? 'Yes' : 'No',
+            aPlus: checks.aPlus ? 'Yes' : 'No',
+            bullets: detail?.about_product?.length || 0,
+            price: num(product.price),
+            detailPage: detailPageUrl(product.asin, country),
+            // Listing Quality Score: the share of checks passed, on a 1-10 scale.
+            lqs: round((listingPassed / AUDIT_CHECKS.length) * 10, 1),
             score: `${listingPassed}/${AUDIT_CHECKS.length}`,
-            missing: AUDIT_CHECKS.filter((check) => !checks[check.key]).map((check) => check.label).join(', ') || '—',
+            missing: AUDIT_CHECKS.filter((check) => !checks[check.key]).map((check) => check.label).join(', ') || '\u2014',
             gaps: AUDIT_CHECKS.length - listingPassed,
         });
     }
@@ -705,7 +883,11 @@ const buildListingsAudit = async (userId, country, region) => {
                 { key: 'sku', label: 'SKU' },
                 { key: 'productName', label: 'Product' },
                 { key: 'status', label: 'Status' },
-                { key: 'score', label: 'Checks passed' },
+                { key: 'images', label: 'Images', format: 'number' },
+                { key: 'video', label: 'Video' },
+                { key: 'brandStory', label: 'Brand Story' },
+                { key: 'aPlus', label: 'A+' },
+                { key: 'lqs', label: 'LQS /10', format: 'number' },
                 { key: 'missing', label: 'Missing' },
             ],
             rows,
@@ -859,6 +1041,51 @@ const sumSales = async (userId, country, region, startDate, endDate) => {
     return { totalSales: round(result?.totalSales || 0), unitsSold: result?.unitsSold || 0 };
 };
 
+/**
+ * Units, sessions and page views over a window, from the Data Kiosk sales &
+ * traffic snapshots.
+ *
+ * WHY NOT SalesOnlyMetrics.unitsSold
+ * That field is 0 for every account checked, which is why the monthly report
+ * showed revenue against "0 units sold". The same day's BuyBoxData carries real
+ * unitsOrdered and sessions per ASIN, so this reads them from there.
+ *
+ * ONE SNAPSHOT PER DAY
+ * BuyBoxData can hold several captures of the same day. Summing the documents
+ * would count those days twice, so the latest capture of each date wins and the
+ * rest are discarded before anything is added up.
+ */
+const sumTraffic = async (userId, country, region, startDate, endDate) => {
+    const snapshots = await BuyBoxData.find({
+        User: userId,
+        country,
+        region,
+        date: { $gte: startDate, $lte: endDate },
+    })
+        .sort({ date: 1, createdAt: 1 })
+        .select('date asinBuyBoxData')
+        .lean();
+
+    // Later captures of the same date overwrite earlier ones.
+    const byDate = new Map();
+    for (const snapshot of snapshots) {
+        if (snapshot.date) byDate.set(snapshot.date, snapshot);
+    }
+
+    let unitsSold = 0;
+    let sessions = 0;
+    let pageViews = 0;
+    for (const snapshot of byDate.values()) {
+        for (const row of snapshot.asinBuyBoxData || []) {
+            unitsSold += row.unitsOrdered || 0;
+            sessions += row.sessions || 0;
+            pageViews += row.pageViews || 0;
+        }
+    }
+
+    return { unitsSold, sessions, pageViews, days: byDate.size };
+};
+
 /** Sum ad spend and ad sales over a window; ACOS is derived, never averaged. */
 const sumPpc = async (userId, country, region, startDate, endDate) => {
     const [result] = await PPCMetrics.aggregate([
@@ -907,12 +1134,32 @@ const buildMonthlyPerformance = async (userId, country, region) => {
     const previousStart = new Date(Date.UTC(currentStart.getUTCFullYear(), currentStart.getUTCMonth() - 1, 1));
     const previousEnd = addDays(previousStart, spanDays);
 
-    const [current, previous, ppcCurrent, ppcPrevious] = await Promise.all([
+    const [current, previous, ppcCurrent, ppcPrevious, trafficCurrent, trafficPrevious] = await Promise.all([
         sumSales(userId, country, region, toYmd(currentStart), toYmd(currentEnd)),
         sumSales(userId, country, region, toYmd(previousStart), toYmd(previousEnd)),
         sumPpc(userId, country, region, toYmd(currentStart), toYmd(currentEnd)),
         sumPpc(userId, country, region, toYmd(previousStart), toYmd(previousEnd)),
+        sumTraffic(userId, country, region, toYmd(currentStart), toYmd(currentEnd)),
+        sumTraffic(userId, country, region, toYmd(previousStart), toYmd(previousEnd)),
     ]);
+
+    // Data Kiosk is the unit source; the sales collection's own unitsSold is 0
+    // across every account and is only used if Data Kiosk has nothing to say.
+    const units = trafficCurrent.unitsSold || current.unitsSold;
+    const unitsPrev = trafficPrevious.unitsSold || previous.unitsSold;
+
+    // Everything below is derived, and each one is defined once here so the
+    // tiles, the table and the bullets cannot disagree about it.
+    const organic = round(current.totalSales - ppcCurrent.adSales);
+    const organicPrev = round(previous.totalSales - ppcPrevious.adSales);
+    // TACOS is ad spend against TOTAL sales, unlike ACOS which is against ad sales.
+    const tacos = current.totalSales ? round((ppcCurrent.adSpend / current.totalSales) * 100) : null;
+    const tacosPrev = previous.totalSales ? round((ppcPrevious.adSpend / previous.totalSales) * 100) : null;
+    const conversion = trafficCurrent.sessions ? round((units / trafficCurrent.sessions) * 100) : null;
+    const conversionPrev = trafficPrevious.sessions ? round((unitsPrev / trafficPrevious.sessions) * 100) : null;
+    // Average selling price.
+    const asp = units ? round(current.totalSales / units) : null;
+    const aspPrev = unitsPrev ? round(previous.totalSales / unitsPrev) : null;
 
     if (!current.totalSales && !ppcCurrent.adSales) {
         // We got past the guard above, so metric days DO exist — they just sum
@@ -923,6 +1170,16 @@ const buildMonthlyPerformance = async (userId, country, region) => {
             `No sales or ad spend recorded in ${formatMonth(currentStart)} — this marketplace was dormant.`
         );
     }
+
+    /** "+4.32%" / "-12%" / "—" — the change column's one format. */
+    const pctCell = (now, before) => {
+        const change = pctChange(now, before);
+        return change === null ? '\u2014' : `${change >= 0 ? '+' : ''}${change}%`;
+    };
+    /** "+1.59 pts" — for the metrics that move in points, not percent. */
+    const ptsCell = (now, before) => (now === null || before === null
+        ? '\u2014'
+        : `${now - before >= 0 ? '+' : ''}${round(now - before, 2)} pts`);
 
     // Both windows are the same length, so the label must say so — otherwise
     // "September" next to "August" implies whole months against each other.
@@ -953,10 +1210,15 @@ const buildMonthlyPerformance = async (userId, country, region) => {
             headline: `${periodLabel} against ${comparisonLabel}`,
             stats: [
                 { label: 'Total sales', value: current.totalSales, format: 'currency', delta: salesChange, deltaFormat: 'percent' },
-                { label: 'Units sold', value: current.unitsSold, delta: pctChange(current.unitsSold, previous.unitsSold), deltaFormat: 'percent' },
                 { label: 'Ad sales', value: ppcCurrent.adSales, format: 'currency', delta: pctChange(ppcCurrent.adSales, ppcPrevious.adSales), deltaFormat: 'percent' },
+                { label: 'Organic sales', value: organic, format: 'currency', delta: pctChange(organic, organicPrev), deltaFormat: 'percent' },
+                { label: 'Units sold', value: units, delta: pctChange(units, unitsPrev), deltaFormat: 'percent' },
+                { label: 'Sessions', value: trafficCurrent.sessions, delta: pctChange(trafficCurrent.sessions, trafficPrevious.sessions), deltaFormat: 'percent' },
+                { label: 'Conversion rate', value: conversion, format: 'percent', delta: conversion !== null && conversionPrev !== null ? round(conversion - conversionPrev, 2) : null, deltaFormat: 'points' },
                 { label: 'Ad spend', value: ppcCurrent.adSpend, format: 'currency', delta: pctChange(ppcCurrent.adSpend, ppcPrevious.adSpend), deltaFormat: 'percent', deltaGoodWhen: 'down' },
                 { label: 'ACOS', value: ppcCurrent.acos, format: 'percent', delta: acosDelta, deltaFormat: 'points', deltaGoodWhen: 'down' },
+                { label: 'TACOS', value: tacos, format: 'percent', delta: tacos !== null && tacosPrev !== null ? round(tacos - tacosPrev, 2) : null, deltaFormat: 'points', deltaGoodWhen: 'down' },
+                { label: 'Avg selling price', value: asp, format: 'currency', delta: pctChange(asp, aspPrev), deltaFormat: 'percent' },
             ],
             columns: [
                 { key: 'metric', label: 'Metric' },
@@ -971,22 +1233,30 @@ const buildMonthlyPerformance = async (userId, country, region) => {
                     previous: previous.totalSales,
                     change: salesChange === null ? '—' : `${salesChange >= 0 ? '+' : ''}${salesChange}%`,
                 },
+                { metric: 'Ad revenue', current: ppcCurrent.adSales, previous: ppcPrevious.adSales, change: pctCell(ppcCurrent.adSales, ppcPrevious.adSales) },
+                { metric: 'Organic revenue', current: organic, previous: organicPrev, change: pctCell(organic, organicPrev) },
+                { metric: 'Units sold', current: units, previous: unitsPrev, change: pctCell(units, unitsPrev) },
+                { metric: 'Sessions', current: trafficCurrent.sessions, previous: trafficPrevious.sessions, change: pctCell(trafficCurrent.sessions, trafficPrevious.sessions) },
                 {
-                    metric: 'Units sold',
-                    current: current.unitsSold,
-                    previous: previous.unitsSold,
-                    change: pctChange(current.unitsSold, previous.unitsSold) === null
-                        ? '—'
-                        : `${pctChange(current.unitsSold, previous.unitsSold) >= 0 ? '+' : ''}${pctChange(current.unitsSold, previous.unitsSold)}%`,
+                    metric: 'Conversion rate',
+                    current: conversion === null ? '\u2014' : `${conversion}%`,
+                    previous: conversionPrev === null ? '\u2014' : `${conversionPrev}%`,
+                    change: ptsCell(conversion, conversionPrev),
                 },
-                { metric: 'Ad sales', current: ppcCurrent.adSales, previous: ppcPrevious.adSales, change: '' },
-                { metric: 'Ad spend', current: ppcCurrent.adSpend, previous: ppcPrevious.adSpend, change: '' },
+                { metric: 'Ad spend', current: ppcCurrent.adSpend, previous: ppcPrevious.adSpend, change: pctCell(ppcCurrent.adSpend, ppcPrevious.adSpend) },
                 {
                     metric: 'ACOS',
-                    current: ppcCurrent.acos === null ? '—' : `${ppcCurrent.acos}%`,
-                    previous: ppcPrevious.acos === null ? '—' : `${ppcPrevious.acos}%`,
-                    change: acosDelta === null ? '—' : `${acosDelta >= 0 ? '+' : ''}${acosDelta} pts`,
+                    current: ppcCurrent.acos === null ? '\u2014' : `${ppcCurrent.acos}%`,
+                    previous: ppcPrevious.acos === null ? '\u2014' : `${ppcPrevious.acos}%`,
+                    change: acosDelta === null ? '\u2014' : `${acosDelta >= 0 ? '+' : ''}${acosDelta} pts`,
                 },
+                {
+                    metric: 'TACOS',
+                    current: tacos === null ? '\u2014' : `${tacos}%`,
+                    previous: tacosPrev === null ? '\u2014' : `${tacosPrev}%`,
+                    change: ptsCell(tacos, tacosPrev),
+                },
+                { metric: 'Avg selling price', current: asp, previous: aspPrev, change: pctCell(asp, aspPrev) },
             ],
         },
         highlights: [
@@ -1003,7 +1273,16 @@ const buildMonthlyPerformance = async (userId, country, region) => {
                 )]
                 : []),
             ...(ppcCurrent.adSales && current.totalSales
-                ? [highlight(`Advertising drove ${round((ppcCurrent.adSales / current.totalSales) * 100, 1)}% of total sales this period.`)]
+                ? [highlight(`Advertising drove ${round((ppcCurrent.adSales / current.totalSales) * 100, 1)}% of total sales this period, leaving ${organic} organic.`)]
+                : []),
+            ...(tacos !== null
+                ? [highlight(
+                    `TACOS is ${tacos}% — ad spend against total sales, the figure that shows whether advertising is carrying the account.`,
+                    tacosPrev !== null && tacos > tacosPrev ? 'watch' : 'neutral'
+                )]
+                : []),
+            ...(conversion !== null
+                ? [highlight(`${plural(trafficCurrent.sessions, 'session')} converted at ${conversion}%${asp === null ? '' : `, at an average selling price of ${asp}`}.`)]
                 : []),
             highlight('[Actions taken this month and focus areas planned for next]', 'fill'),
         ],
@@ -1011,7 +1290,7 @@ const buildMonthlyPerformance = async (userId, country, region) => {
             ...(partial
                 ? [`${formatMonth(currentStart)} is still incomplete — this covers the ${spanDays + 1} days to ${formatDate(currentEnd)}, compared against the same ${spanDays + 1} days of ${formatMonth(previousStart)} so the two are like for like.`]
                 : []),
-            'Sessions and the per-marketplace narrative are not included yet. Actions taken and planned focus areas come from your account manager and are not part of this live view.',
+            'The per-marketplace narrative, actions taken and planned focus areas come from your account manager and are not part of this live view.',
         ],
     };
 };

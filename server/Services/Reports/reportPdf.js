@@ -190,9 +190,9 @@ const sectionHeading = (text) => ({
  * the identifier a manager checks each cycle; the rest are centred like the
  * template's numeric cells.
  */
-const dataTable = (summary, currency) => {
-    const columns = summary?.columns || [];
-    const rows = (summary?.rows || []).slice(0, MAX_PDF_ROWS);
+const dataTable = (summary, currency, override) => {
+    const columns = override?.columns || summary?.columns || [];
+    const rows = (override?.rows || summary?.rows || []).slice(0, MAX_PDF_ROWS);
     if (!columns.length || !rows.length) return null;
 
     const header = columns.map((column) => ({
@@ -286,6 +286,15 @@ const buildReportDocDefinition = (report, { marketplace, currency = '$', clientN
         }
     } else if (report.summary?.emptyMessage) {
         content.push({ text: report.summary.emptyMessage, fontSize: 9, bold: true, color: DOC.green, margin: [0, 0, 0, 12] });
+    }
+
+    // Amazon's policy metrics, where the report carries them. Its own section,
+    // because it answers a different question from the table above it.
+    const secondary = report.summary?.secondaryTable;
+    if (secondary?.rows?.length) {
+        content.push(sectionHeading(secondary.title || 'Detail'));
+        const secondaryTable = dataTable(null, currency, secondary);
+        if (secondaryTable) content.push(secondaryTable);
     }
 
     const bullets = highlightList(report.highlights);

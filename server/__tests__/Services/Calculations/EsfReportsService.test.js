@@ -21,6 +21,7 @@ jest.mock('../../../models/inventory/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPOR
 jest.mock('../../../models/inventory/GET_FBA_INVENTORY_PLANNING_DATA_Model.js', () => ({ findOne: jest.fn() }));
 jest.mock('../../../models/MCP/BuyBoxDataModel.js', () => ({ find: jest.fn() }));
 jest.mock('../../../models/user-auth/AccountHistory.js', () => ({ findOne: jest.fn() }));
+jest.mock('../../../models/seller-performance/V2_Seller_Performance_ReportModel.js', () => ({ findOne: jest.fn() }));
 jest.mock('../../../models/user-auth/sellerCentralModel.js', () => ({ findOne: jest.fn() }));
 jest.mock('../../../models/inventory/FbaInventoryApiDetailModel.js', () => ({ countDocuments: jest.fn() }));
 jest.mock('../../../models/inventory/ProductWiseFBADataItemModel.js', () => ({ countDocuments: jest.fn() }));
@@ -35,6 +36,7 @@ const Restock = require('../../../models/inventory/GET_RESTOCK_INVENTORY_RECOMME
 const Planning = require('../../../models/inventory/GET_FBA_INVENTORY_PLANNING_DATA_Model.js');
 const BuyBoxData = require('../../../models/MCP/BuyBoxDataModel.js');
 const AccountHistory = require('../../../models/user-auth/AccountHistory.js');
+const V2Perf = require('../../../models/seller-performance/V2_Seller_Performance_ReportModel.js');
 const Seller = require('../../../models/user-auth/sellerCentralModel.js');
 const FbaDetail = require('../../../models/inventory/FbaInventoryApiDetailModel.js');
 const FbaFeeItem = require('../../../models/inventory/ProductWiseFBADataItemModel.js');
@@ -60,8 +62,14 @@ const USER = '507f1f77bcf86cd799439011';
 const stubEmpty = () => {
     Restock.findOne.mockReturnValue(mockFindOne(null));
     Planning.findOne.mockReturnValue(mockFindOne(null));
-    BuyBoxData.find.mockReturnValue({ sort: () => ({ limit: () => ({ lean: () => Promise.resolve([]) }) }) });
+    BuyBoxData.find.mockReturnValue({
+        sort: () => ({
+            limit: () => ({ lean: () => Promise.resolve([]) }),
+            select: () => ({ lean: () => Promise.resolve([]) }),
+        }),
+    });
     AccountHistory.findOne.mockReturnValue(mockFindOne(null));
+    V2Perf.findOne.mockReturnValue(mockFindOne(null));
     Seller.findOne.mockReturnValue(mockFindOne(null));
     FbaDetail.countDocuments.mockResolvedValue(0);
     FbaFeeItem.countDocuments.mockResolvedValue(0);
