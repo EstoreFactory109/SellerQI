@@ -499,15 +499,45 @@ describe('createTask — the body Zoho actually receives', () => {
         expect(body.start_date).toBeTruthy();
     });
 
-    test('the start it invents is today, in the ISO form v3 takes', async () => {
+    test('the invented start is a full ISO datetime, not a bare date', async () => {
         await ZohoProjectsService.createTask({
             projectId: 'p1', name: 'Redo search terms', endDate: '2099-12-31',
         });
 
-        // A full ISO datetime, NOT a bare YYYY-MM-DD — v3 refuses the date-only form
-        // with INVALID_PARAMETER_VALUE. Midday so it cannot slip to the previous date.
-        expect(bodyOf().start_date).toBe(`${new Date().toISOString().slice(0, 10)}T12:00:00.000Z`);
-        expect(bodyOf().start_date).toMatch(/^\d{4}-\d{2}-\d{2}T12:00:00\.000Z$/);
+        // v3 refuses the date-only form with INVALID_PARAMETER_VALUE.
+        expect(bodyOf().start_date).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    });
+
+    test('the invented start is never in the future, so the task is In progress', async () => {
+        /**
+         * The property that decides the client's column. classifyTask calls a task
+         * "Coming up" while its start is still ahead, so a start of today-at-noon put
+         * an approved task in the wrong list for the whole UTC morning and then moved
+         * it at midday with nobody touching it.
+         *
+         * The clock is pinned to 06:00 UTC deliberately. Without that this test passes
+         * against the old midday behaviour whenever the suite happens to run after
+         * noon — it would have caught the bug in the morning and waved it through in
+         * the afternoon, which is worse than not testing it.
+         *
+         * Resolved to a number BEFORE the timers are faked: building a Date afterwards
+         * hands sinon an object its own patched Date does not recognise.
+         */
+        const morning = new Date('2026-09-25T06:00:00.000Z').getTime();
+        jest.useFakeTimers({ now: morning, doNotFake: ['nextTick', 'setImmediate'] });
+
+        try {
+            await ZohoProjectsService.createTask({
+                projectId: 'p1', name: 'Redo search terms', endDate: '2099-12-31',
+            });
+
+            const start = new Date(bodyOf().start_date).getTime();
+            expect(start).toBeLessThanOrEqual(morning);
+            // Explicitly not noon, which is what it used to be and is 6 hours ahead here.
+            expect(bodyOf().start_date).not.toMatch(/T12:00:00\.000Z$/);
+        } finally {
+            jest.useRealTimers();
+        }
     });
 
     test('a needed-by date already in the past does not fail the accept', async () => {
@@ -613,5 +643,54 @@ describe('createTask — the one retry in the other date dialect', () => {
         })).rejects.toThrow();
 
         expect(axios).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('createTask — the status a new task lands in', () => {
+    const logger = require('../../../utils/Logger.js');
+
+    beforeEach(() => {
+        axios.mockReset();
+        ZohoAuth.getAccessToken.mockResolvedValue('access-token-1');
+        ZohoAuth.getConnection.mockResolvedValue({
+            apiDomain: 'https://projectsapi.zoho.com', portalId: 'portal-1',
+        });
+    });
+
+    test('no status is sent, because creation does not accept one', async () => {
+        /**
+         * Zoho's create endpoint has no status field at all — `custom_status` exists
+         * only on update. Sending one would be a FIELDS_VALIDATION_ERROR, which is how
+         * this call has already failed twice over a guessed field.
+         */
+        axios.mockResolvedValue({ data: { tasks: [{ id: 't1', status: { name: 'Open' } }] } });
+
+        await ZohoProjectsService.createTask({ projectId: 'p1', name: 'Thing' });
+
+        const body = axios.mock.calls[0][0].data;
+        expect(body).not.toHaveProperty('status');
+        expect(body).not.toHaveProperty('custom_status');
+    });
+
+    test('a task created in a CLOSED status is called out', async () => {
+        // Silent and wrong otherwise: approved work that the team never sees, while the
+        // client is told it is underway.
+        axios.mockResolvedValue({
+            data: { tasks: [{ id: 't1', status: { name: 'Closed', is_closed_type: true } }] },
+        });
+
+        await ZohoProjectsService.createTask({ projectId: 'p1', name: 'Thing' });
+
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/created in a CLOSED status/));
+    });
+
+    test('an open status passes without a warning', async () => {
+        axios.mockResolvedValue({
+            data: { tasks: [{ id: 't1', status: { name: 'Open', is_closed_type: false } }] },
+        });
+
+        await ZohoProjectsService.createTask({ projectId: 'p1', name: 'Thing' });
+
+        expect(logger.warn).not.toHaveBeenCalledWith(expect.stringMatching(/CLOSED status/));
     });
 });

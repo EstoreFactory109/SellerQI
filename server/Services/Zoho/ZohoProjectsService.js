@@ -464,13 +464,15 @@ const getProjectTaskUpdates = async (projectId, { includeComments = true, maxTas
  * generation wants MM-DD-YYYY — do not copy a v2 example into a v3 call. If this ever
  * flips, DATE_FORMATS below is the one place to change.)
  *
- * Midday UTC, not midnight: a due date carries no time, and midnight lands on the
- * previous calendar day in any portal west of UTC. Noon is the same day everywhere
- * anyone runs this.
+ * A supplied date is pinned to midday UTC, not midnight: a due date carries no time,
+ * and midnight lands on the previous calendar day in any portal west of UTC. Noon is
+ * the same day everywhere anyone runs this.
  *
- * Note that a date here does NOT decide which column the client sees.
- * ZohoTaskSync.classifyTask reads startDate alone: a start date in the future is
- * "Coming up", anything else is "In progress". end_date is the due date and nothing more.
+ * ── THE START DATE DECIDES THE CLIENT'S COLUMN ──
+ * ZohoTaskSync.classifyTask reads startDate alone: still in the future is "Coming up",
+ * anything else is "In progress". So an INVENTED start is the current timestamp rather
+ * than a date, which puts an approved task straight into "In progress" where it belongs.
+ * end_date is the due date and has no bearing on the column.
  *
  * Like every write here, this is authored in Zoho by the single org-wide connected
  * account — so the CALLER is responsible for putting attribution in the description.
@@ -496,11 +498,26 @@ const createTask = async ({ projectId, name, description, startDate, endDate, po
      * the shape Zoho refuses. A start on its own is fine and passes straight through.
      */
     if (endDate) {
-        // Clamped so the start can never sit after the end, which Zoho also refuses —
-        // a client asking for something by a date that has already passed is a support
-        // question, not a reason for the accept to fail.
-        const todayIso = new Date().toISOString().slice(0, 10);
-        body.start_date = zohoDate(startDate || (endDate < todayIso ? endDate : todayIso));
+        const now = new Date();
+        const todayIso = now.toISOString().slice(0, 10);
+        /**
+         * The invented start is THIS MOMENT, not today at noon — and that detail is
+         * what decides which column the client sees.
+         *
+         * ZohoTaskSync.classifyTask files a task as "Coming up" while its start date is
+         * still in the future and "In progress" otherwise. A start of today-at-noon is
+         * in the future for the whole UTC morning, so a task approved at 09:00 sat under
+         * "Coming up" and then moved itself at 12:00 with nobody touching it. Approving
+         * the work IS the start of it, so the timestamp is now and the task is in
+         * progress from the moment it is created.
+         *
+         * Clamped to the end date when that has already passed, because Zoho refuses a
+         * start after an end — a client asking for something by a date already gone is a
+         * support question, not a reason for the accept to fail.
+         */
+        body.start_date = startDate
+            ? zohoDate(startDate)
+            : (endDate < todayIso ? zohoDate(endDate) : now.toISOString());
         body.end_date = zohoDate(endDate);
     } else if (startDate) {
         body.start_date = zohoDate(startDate);
@@ -548,7 +565,30 @@ const createTask = async ({ projectId, name, description, startDate, endDate, po
         throw new ApiError(502, 'Zoho accepted the task but returned no task id');
     }
 
-    logger.info(`[ZohoProjects] Created task ${task.id} in project ${projectId}`);
+    /**
+     * ── THE STATUS IS CHECKED, NOT SET ──
+     * A new task must be open, or the team never picks it up and the client is told
+     * work is underway that nobody can see. But status CANNOT be set at creation:
+     * Zoho's create endpoint takes no status field at all, and `custom_status` exists
+     * only on update. A task is created in the portal's default status, which is its
+     * built-in open one.
+     *
+     * So this asserts rather than assigns. Issuing a second write to set a task to the
+     * status it already has would add a failure mode to the accept path and buy
+     * nothing — but silently creating a CLOSED task would be invisible and wrong, so
+     * that is worth saying out loud.
+     */
+    if (task.statusIsClosed) {
+        logger.warn(
+            `[ZohoProjects] task ${task.id} was created in a CLOSED status ("${task.status}") `
+            + `in project ${projectId} — the project's default status is not an open one, `
+            + 'so approved work will not reach the team'
+        );
+    }
+
+    logger.info(
+        `[ZohoProjects] Created task ${task.id} in project ${projectId} (status: ${task.status || 'unknown'})`
+    );
     return task;
 };
 
