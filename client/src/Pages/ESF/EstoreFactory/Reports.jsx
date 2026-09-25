@@ -3,7 +3,7 @@ import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { PALETTE } from '../../../Components/ESF/estoreFactoryTheme.js';
 import axiosInstance from '../../../config/axios.config.js';
-import ReportDocumentPreview from '../../../Components/ESF/ReportDocumentPreview.jsx';
+import ReportDocumentPreview, { reportNeedsLandscape } from '../../../Components/ESF/ReportDocumentPreview.jsx';
 
 /**
  * Estore Factory > Reports.
@@ -59,8 +59,9 @@ const TONE_COLOR = {
  *
  * @param {string} html   outerHTML of the rendered document
  * @param {string} title  becomes the print dialog's default filename
+ * @param {boolean} landscape  turn the page, for a table too wide for portrait
  */
-const printReportDocument = (html, title) => {
+const printReportDocument = (html, title, landscape = false) => {
     const frame = document.createElement('iframe');
     // Off-screen rather than display:none — a hidden frame does not lay out, and
     // an unlaid-out document prints blank.
@@ -78,7 +79,9 @@ const printReportDocument = (html, title) => {
         + '<style>'
         // Browsers drop background colours when printing unless told otherwise,
         // which would strip the navy banner and every flagged cell.
-        + '@page{margin:14mm}'
+        // The emailed PDF turns the page for a wide table; so must this one,
+        // or the saved copy loses its right-hand columns off the paper.
+        + `@page{margin:14mm${landscape ? ';size:A4 landscape' : ''}}`
         + 'html,body{margin:0;padding:0;background:#fff;'
         + '-webkit-print-color-adjust:exact;print-color-adjust:exact}'
         + 'table{page-break-inside:auto}tr{page-break-inside:avoid}'
@@ -348,6 +351,8 @@ const DOC_TILE_WIDTH = 236;
 const DOC_TILE_HEIGHT = 300;
 /** Width the document is laid out at before being scaled down into the tile. */
 const DOC_NATURAL_WIDTH = 640;
+/** The same document laid out for a landscape page, in the same proportion. */
+const DOC_LANDSCAPE_WIDTH = 960;
 const DOC_SCALE = DOC_TILE_WIDTH / DOC_NATURAL_WIDTH;
 
 /**
@@ -678,7 +683,11 @@ const Reports = () => {
         const frameId = requestAnimationFrame(() => {
             const node = printRef.current;
             if (node) {
-                printReportDocument(node.innerHTML, downloadName(pendingDownload, data?.marketplace));
+                printReportDocument(
+                    node.innerHTML,
+                    downloadName(pendingDownload, data?.marketplace),
+                    reportNeedsLandscape(pendingDownload)
+                );
             }
             setPendingDownload(null);
         });
@@ -772,12 +781,18 @@ const Reports = () => {
                     <div
                         ref={printRef}
                         aria-hidden="true"
-                        style={{ position: 'fixed', left: -99999, top: 0, width: DOC_NATURAL_WIDTH, pointerEvents: 'none' }}
+                        style={{
+                            position: 'fixed', left: -99999, top: 0, pointerEvents: 'none',
+                            width: reportNeedsLandscape(pendingDownload) ? DOC_LANDSCAPE_WIDTH : DOC_NATURAL_WIDTH,
+                        }}
                     >
+                        {/* full: a saved file must match the emailed PDF, not
+                            the thumbnail in the panel. */}
                         <ReportDocumentPreview
                             report={pendingDownload}
                             marketplace={data?.marketplace}
                             currency={currency}
+                            full
                         />
                     </div>
                 )}

@@ -37,6 +37,25 @@ const FONT = 'Arial, Helvetica, sans-serif';
 /** Rows shown inside the document preview — it is a sample, not the full table. */
 const DOC_ROWS = 4;
 
+/**
+ * Rows in a downloaded copy. Matches MAX_PDF_ROWS in reportPdf.js so the file a
+ * client saves and the file they are emailed hold the same data.
+ */
+const FULL_ROWS = 40;
+
+/**
+ * Past this many columns a printed copy needs a landscape page. Mirrors
+ * LANDSCAPE_COLUMN_THRESHOLD in server/Services/Reports/reportPdf.js, so the
+ * file a client saves and the file they are emailed break the same way.
+ */
+export const WIDE_TABLE_COLUMNS = 9;
+
+/** Whether this report's widest table needs the page turned. */
+export const reportNeedsLandscape = (report) => Math.max(
+    report?.summary?.columns?.length || 0,
+    report?.summary?.secondaryTable?.columns?.length || 0
+) > WIDE_TABLE_COLUMNS;
+
 const formatCell = (value, format, currency) => {
     if (value === null || value === undefined || value === '') return '—';
     if (typeof value !== 'number') return value;
@@ -85,12 +104,27 @@ const StatTile = ({ stat, currency }) => {
     );
 };
 
-const ReportDocumentPreview = ({ report, marketplace, currency }) => {
+/**
+ * @param {boolean} full  render everything, for the off-screen copy that gets
+ *   printed to PDF. The on-screen panel is a thumbnail and stays truncated.
+ *
+ * WHY THIS PROP EXISTS
+ * One component serves two jobs. In the panel the truncation is the point — it
+ * is a small preview beside the data table. In a download it is a bug: the
+ * saved file silently lost every stat past the fourth and every column past the
+ * fifth, which on the Buy Box report meant four of nine tiles and seven of
+ * twelve columns, including the whole of the competitor pricing. The emailed
+ * PDF has always carried the full set, so the two disagreed about what the
+ * report even said.
+ */
+const ReportDocumentPreview = ({ report, marketplace, currency, full = false }) => {
     if (!report?.available) return null;
 
-    const stats = (report.summary?.stats || []).slice(0, 4);
-    const columns = (report.summary?.columns || []).slice(0, 5);
-    const rows = (report.summary?.rows || []).slice(0, DOC_ROWS);
+    const allStats = report.summary?.stats || [];
+    const allColumns = report.summary?.columns || [];
+    const stats = full ? allStats : allStats.slice(0, 4);
+    const columns = full ? allColumns : allColumns.slice(0, 5);
+    const rows = (report.summary?.rows || []).slice(0, full ? FULL_ROWS : DOC_ROWS);
     const place = marketplace?.country ? `Amazon ${marketplace.country}` : 'All marketplaces';
 
     return (
@@ -118,14 +152,21 @@ const ReportDocumentPreview = ({ report, marketplace, currency }) => {
                 </h2>
 
                 {rows.length > 0 ? (
-                    <div style={{ overflowX: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 8 }}>
+                    <div style={full ? undefined : { overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: full ? 10 : 12, marginBottom: 8, tableLayout: full ? 'fixed' : 'auto' }}>
                             <thead>
                                 <tr>
                                     {columns.map((column) => (
                                         <th
                                             key={column.key}
-                                            style={{ background: DOC.navy, color: '#fff', fontSize: 11, textAlign: 'center', padding: '8px 6px', border: `1px solid ${DOC.border}`, whiteSpace: 'nowrap' }}
+                                            style={{
+                                                background: DOC.navy, color: '#fff', fontSize: full ? 10 : 11,
+                                                textAlign: 'center', padding: full ? '6px 4px' : '8px 6px',
+                                                border: `1px solid ${DOC.border}`,
+                                                // Wrapping a header costs a line; not wrapping it costs the
+                                                // columns that fall off the right-hand edge of the page.
+                                                whiteSpace: full ? 'normal' : 'nowrap',
+                                            }}
                                         >
                                             {column.label}
                                         </th>
@@ -141,7 +182,8 @@ const ReportDocumentPreview = ({ report, marketplace, currency }) => {
                                                 <td
                                                     key={column.key}
                                                     style={{
-                                                        padding: '8px 6px',
+                                                        padding: full ? '6px 4px' : '8px 6px',
+                                                        wordBreak: full ? 'break-word' : undefined,
                                                         border: `1px solid ${DOC.border}`,
                                                         textAlign: cellIndex === 0 ? 'left' : 'center',
                                                         // First column is the identifier the manager checks each
@@ -171,14 +213,21 @@ const ReportDocumentPreview = ({ report, marketplace, currency }) => {
                     <h2 style={{ fontSize: 14, color: DOC.teal, borderBottom: `2px solid ${DOC.teal}`, paddingBottom: 6, margin: '0 0 12px', textTransform: 'uppercase', letterSpacing: '.3px' }}>
                         {report.summary.secondaryTable.title || 'Detail'}
                     </h2>
-                    <div style={{ overflowX: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 8 }}>
+                    <div style={full ? undefined : { overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: full ? 10 : 12, marginBottom: 8, tableLayout: full ? 'fixed' : 'auto' }}>
                             <thead>
                                 <tr>
                                     {report.summary.secondaryTable.columns.map((column) => (
                                         <th
                                             key={column.key}
-                                            style={{ background: DOC.navy, color: '#fff', fontSize: 11, textAlign: 'center', padding: '8px 6px', border: `1px solid ${DOC.border}`, whiteSpace: 'nowrap' }}
+                                            style={{
+                                                background: DOC.navy, color: '#fff', fontSize: full ? 10 : 11,
+                                                textAlign: 'center', padding: full ? '6px 4px' : '8px 6px',
+                                                border: `1px solid ${DOC.border}`,
+                                                // Wrapping a header costs a line; not wrapping it costs the
+                                                // columns that fall off the right-hand edge of the page.
+                                                whiteSpace: full ? 'normal' : 'nowrap',
+                                            }}
                                         >
                                             {column.label}
                                         </th>
