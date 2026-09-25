@@ -21,6 +21,65 @@ axiosRetry(axios, {
   }
 });
 
+/**
+ * Amazon's enforcement actions that mean a listing is not being shown to
+ * shoppers. The report calls these suppressions; Amazon spells them several
+ * ways depending on how the listing was penalised.
+ */
+const SUPPRESSION_ACTIONS = new Set([
+    'LISTING_SUPPRESSED',
+    'ATTRIBUTE_SUPPRESSED',
+    'CATALOG_ITEM_REMOVED',
+    'SEARCH_SUPPRESSED',
+]);
+
+/**
+ * Keep the whole of each listing issue, not just its message.
+ *
+ * Both call sites below already ask Amazon for `includedData=issues`, and both
+ * threw away everything except `message` — the active-SKU path discarded the
+ * issues array entirely. That lost the only signal that says a listing is
+ * SUPPRESSED rather than merely imperfect, which is the difference between "fix
+ * when you get a chance" and "this product cannot be bought right now".
+ *
+ * Shapes are read defensively. The exact nesting of `enforcements` could not be
+ * confirmed against a live response (no working SP-API credentials on the
+ * machine this was written on), so several spellings are accepted and anything
+ * unrecognised is preserved in `raw` rather than dropped.
+ *
+ * @param {Array} issuesArray  response.data.issues
+ * @returns {Array} structured issues, safe to store
+ */
+const extractListingIssues = (issuesArray) => {
+    if (!Array.isArray(issuesArray)) return [];
+
+    return issuesArray.map((issue) => {
+        // enforcements.actions[].action is the documented shape; the flatter
+        // spellings are accepted in case the field arrives differently.
+        const actionNodes = issue?.enforcements?.actions
+            || issue?.enforcements
+            || issue?.enforcementActions
+            || [];
+        const actions = (Array.isArray(actionNodes) ? actionNodes : [])
+            .map((entry) => (typeof entry === 'string' ? entry : entry?.action || entry?.name || ''))
+            .filter(Boolean)
+            .map((action) => String(action).toUpperCase());
+
+        return {
+            code: String(issue?.code || ''),
+            message: String(issue?.message || ''),
+            severity: String(issue?.severity || '').toUpperCase(),
+            attributeNames: Array.isArray(issue?.attributeNames) ? issue.attributeNames.map(String) : [],
+            categories: Array.isArray(issue?.categories) ? issue.categories.map(String) : [],
+            enforcementActions: actions,
+            // Amazon can grant a temporary exemption; a suppressed-but-exempt
+            // listing is still selling, so the two must not be conflated.
+            exemptionStatus: String(issue?.enforcements?.exemption?.status || ''),
+            isSuppression: actions.some((action) => SUPPRESSION_ACTIONS.has(action)),
+        };
+    });
+};
+
 const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country, Region) => {
   logger.debug("GetListingItemsIssues starting", { sku, asin, Country, Region });
   
@@ -104,6 +163,11 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
 
     const keywordData = response.data?.attributes?.generic_keyword?.[0];
 
+    // This path already asked for includedData=issues and then ignored the
+    // answer entirely. An ACTIVE listing can still be suppressed, so the issues
+    // matter as much here as on the inactive path below.
+    const listingIssues = extractListingIssues(response.data?.issues);
+
     // Check for B2B pricing in multiple locations:
     // 1. response.data.offers array (offerType === "B2B")
     // 2. response.data.attributes.purchasable_offer array (audience === "B2B")
@@ -141,6 +205,7 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
         value: null,
         marketplace_id: null,
         has_b2b_pricing: hasB2BPricing,
+        listingIssues,
         sku: sku
       };
     }
@@ -150,6 +215,7 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
       value: keywordData.value,
       marketplace_id: keywordData.marketplace_id,
       has_b2b_pricing: hasB2BPricing,
+      listingIssues,
       sku: sku
     };
 
@@ -294,7 +360,12 @@ const GetListingItemIssuesForInactive = async (dataToReceive, sku, asin, userId,
 
     // Extract issues from the response
     const issuesArray = response.data?.issues || [];
-    
+
+    // The full issue objects, kept beside the plain messages. The messages stay
+    // exactly as they were: a lot of downstream code reads products[].issues as
+    // an array of strings and must not break.
+    const listingIssues = extractListingIssues(issuesArray);
+
     // If issues array is empty, use the default message for inactive SKUs
     let issuesMessages = [];
     if (issuesArray.length === 0) {
@@ -337,6 +408,7 @@ const GetListingItemIssuesForInactive = async (dataToReceive, sku, asin, userId,
       sku: sku,
       asin: asin,
       issues: issuesMessages,
+      listingIssues,
       has_b2b_pricing: hasB2BPricing
     };
 
@@ -387,3 +459,7 @@ const GetListingItemIssuesForInactive = async (dataToReceive, sku, asin, userId,
 };
 
 module.exports = { GetListingItem, GetListingItemIssuesForInactive };
+// Exported for tests: the enforcement parsing is the part that can be checked
+// without a live Amazon response, and the part most likely to be quietly wrong.
+module.exports.extractListingIssues = extractListingIssues;
+module.exports.SUPPRESSION_ACTIONS = SUPPRESSION_ACTIONS;

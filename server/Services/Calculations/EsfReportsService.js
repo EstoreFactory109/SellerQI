@@ -623,9 +623,27 @@ const buildBuyBox = async (userId, country, region) => {
     // alert service already joins these two collections.
     const account = (seller?.sellerAccount || []).find((acc) => acc.region === region && acc.country === country);
     const byAsin = new Map();
+    // Listings Amazon is actively suppressing. Reported here because a
+    // suppressed listing cannot be bought at all, which outranks losing the
+    // Buy Box on the same page.
+    const suppressed = [];
     for (const product of account?.products || []) {
         if (product.asin && !byAsin.has(product.asin)) {
             byAsin.set(product.asin, { sku: product.sku || '', price: num(product.price), title: product.itemName || '' });
+        }
+        const hits = (product.listingIssues || []).filter((issue) => issue.isSuppression);
+        if (hits.length) {
+            suppressed.push({
+                sku: product.sku || '',
+                asin: product.asin || '',
+                productName: product.itemName || '',
+                // One listing can carry several enforcements; show them all.
+                enforcement: [...new Set(hits.flatMap((issue) => issue.enforcementActions))].join(', '),
+                reason: hits[0].message || '',
+                // An exemption means Amazon is still showing it despite the issue.
+                exempt: hits.some((issue) => String(issue.exemptionStatus).toUpperCase() === 'EXEMPT') ? 'Yes' : 'No',
+                detailPage: detailPageUrl(product.asin, country),
+            });
         }
     }
 
@@ -705,6 +723,7 @@ const buildBuyBox = async (userId, country, region) => {
                 { label: 'Below 50%', value: latest.productsWithLowBuyBox || 0, tone: (latest.productsWithLowBuyBox || 0) > 0 ? 'watch' : 'good' },
                 { label: 'Buy Box ownership', value: weightedOwnership, format: 'percent', tone: weightedOwnership >= 90 ? 'good' : 'watch' },
                 { label: 'Snapshots on file', value: snapshots.length },
+                { label: 'Suppressed listings', value: suppressed.length, tone: suppressed.length > 0 ? 'watch' : 'good' },
             ],
             columns: [
                 { key: 'sku', label: 'SKU' },
@@ -720,6 +739,22 @@ const buildBuyBox = async (userId, country, region) => {
             // An empty table here is the GOOD outcome, not missing data. Say so,
             // otherwise the panel renders stats above blank space.
             emptyMessage: 'Every tracked ASIN currently holds the Buy Box. Nothing to action.',
+            // Its own table: suppression is a different failure from losing the
+            // Buy Box, and mixing them would imply a competitor is involved.
+            secondaryTable: suppressed.length
+                ? {
+                    title: 'Suppressed listings',
+                    columns: [
+                        { key: 'sku', label: 'SKU' },
+                        { key: 'productName', label: 'Product' },
+                        { key: 'enforcement', label: 'Enforcement' },
+                        { key: 'exempt', label: 'Exempt' },
+                        { key: 'reason', label: 'Reason' },
+                    ],
+                    rows: suppressed.slice(0, 25),
+                    totalRows: suppressed.length,
+                }
+                : null,
         },
         highlights: [
             losing.length
@@ -731,10 +766,17 @@ const buildBuyBox = async (userId, country, region) => {
             ...((latest.productsWithLowBuyBox || 0) > 0
                 ? [highlight(`${plural(latest.productsWithLowBuyBox, 'ASIN')} held the Buy Box less than half the time.`, 'watch')]
                 : []),
+            ...(suppressed.length
+                ? [highlight(
+                    `${plural(suppressed.length, 'listing')} suppressed by Amazon and not visible to shoppers — a harder block on sales than losing the Buy Box.`,
+                    'watch'
+                )]
+                : []),
             highlight('[Pricing or fulfilment action taken on the contested listings]', 'fill'),
         ],
         caveats: [
             'The competing seller and their price are not tracked. Amazon\'s offer-level pricing feed is not connected, so "who is winning it and at what price" cannot be shown yet.',
+            ...(suppressed.length ? [] : ['Suppression is read from the listing issues Amazon returns with each SKU. A listing suppressed since the last catalogue sync will not appear until the next one.']),
         ],
     };
 };

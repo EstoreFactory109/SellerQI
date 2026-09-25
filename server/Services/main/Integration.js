@@ -1911,11 +1911,17 @@ class Integration {
 
             // Create a map of SKU to issues for quick lookup (chunked for large datasets)
             const issuesMap = new Map();
+            const listingIssuesMap = new Map();
             const MAP_BUILD_CHUNK_SIZE = 500;
             for (let i = 0; i < issuesDataArray.length; i++) {
                 const item = issuesDataArray[i];
                 if (item && item.sku && Array.isArray(item.issues)) {
                     issuesMap.set(item.sku, item.issues);
+                }
+                // Structured issues travel separately: a SKU can report one
+                // without the other, so neither may gate the other.
+                if (Array.isArray(item.listingIssues)) {
+                    listingIssuesMap.set(item.sku, item.listingIssues);
                 }
                 // Yield periodically for large arrays
                 if ((i + 1) % MAP_BUILD_CHUNK_SIZE === 0) {
@@ -1935,6 +1941,11 @@ class Integration {
                     if ((product.status === 'Inactive' || product.status === 'Incomplete') && issuesMap.has(product.sku)) {
                         product.issues = issuesMap.get(product.sku);
                         updatedCount++;
+                    }
+                    // Not gated on status: an ACTIVE listing can be suppressed,
+                    // and that is exactly the case worth reporting.
+                    if (listingIssuesMap.has(product.sku)) {
+                        product.listingIssues = listingIssuesMap.get(product.sku);
                     }
                 }
                 // Yield to event loop to allow lock extension
