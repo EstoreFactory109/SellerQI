@@ -439,7 +439,7 @@ describe('CreateTasksService.createTasksFromErrors — tasksRebuilt signal', () 
 
         expect(result.tasksRebuilt).toBe(true);
         // Corroborate that it really was a rebuild, not just the flag being set.
-        expect(TaskItem.deleteByUserId).toHaveBeenCalledWith('user1');
+        expect(TaskItem.deleteByUserId).toHaveBeenCalledWith('user1', null, null);
     });
 
     it('reports false inside the renewal period (insert-only run)', async () => {
@@ -528,5 +528,117 @@ describe('generateConversionTasks (Brand Story)', () => {
         expect(GROUP_COPY['conversion:missing_brand_story']).toEqual(
             expect.objectContaining({ title: expect.any(String), action: expect.any(String) })
         );
+    });
+});
+
+/**
+ * Marketplace scoping.
+ *
+ * Tasks used to be keyed by user alone, so a seller with more than one
+ * marketplace had a single shared pool. Three things went wrong:
+ *
+ *   - the per-marketplace AI views were built from the combined pool, so one
+ *     marketplace was described using another's products (on a live account,
+ *     10,090 of 10,091 task ASINs were UK-EU while a US-NA view used them);
+ *   - the dedup index had no marketplace in it, so the same ASIN failing the
+ *     same way in two marketplaces collided and one was silently dropped;
+ *   - renewal deleted every marketplace's tasks, not just the one rebuilding.
+ */
+describe('CreateTasksService — marketplace scoping', () => {
+    const payload = (extra = {}) => ({
+        userId: 'user1',
+        country: 'US',
+        region: 'NA',
+        profitabilityErrorDetails: [
+            { asin: 'B01', errorType: 'negative_profit', amount: 10, netProfit: -10, sales: 100 }
+        ],
+        ...extra
+    });
+
+    beforeEach(() => {
+        Task.mockImplementation(function (doc) {
+            Object.assign(this, doc);
+            this.save = jest.fn().mockResolvedValue(this);
+        });
+        TaskItem.deleteByUserId.mockResolvedValue({ deletedCount: 0 });
+        TaskItem.bulkInsertTasks.mockResolvedValue({ insertedCount: 1 });
+        TaskItem.countByStatus.mockResolvedValue({ total: 1, pending: 1, completed: 0, in_progress: 0 });
+    });
+
+    const daysFromNow = (d) => new Date(Date.now() + d * 24 * 3600 * 1000);
+
+    it('looks up the renewal marker for THIS marketplace, not the whole user', async () => {
+        Task.findOne.mockResolvedValue(null);
+
+        await CreateTaskService.createTasksFromErrors(payload());
+
+        expect(Task.findOne).toHaveBeenCalledWith({ userId: 'user1', country: 'US', region: 'NA' });
+    });
+
+    it('writes the marketplace onto every task it inserts', async () => {
+        Task.findOne.mockResolvedValue(null);
+
+        await CreateTaskService.createTasksFromErrors(payload());
+
+        expect(TaskItem.bulkInsertTasks).toHaveBeenCalledWith('user1', expect.any(Array), expect.any(Number), 'US', 'NA');
+    });
+
+    it('deletes only this marketplace on renewal, leaving the others intact', async () => {
+        Task.findOne.mockResolvedValue({ taskRenewalDate: daysFromNow(-1), tasks: [], save: jest.fn() });
+
+        await CreateTaskService.createTasksFromErrors(payload());
+
+        // Unscoped, a US rebuild wiped the seller's UK tasks as a side effect.
+        expect(TaskItem.deleteByUserId).toHaveBeenCalledWith('user1', 'US', 'NA');
+    });
+
+    it('stamps the marketplace on a brand-new metadata document', async () => {
+        Task.findOne.mockResolvedValue(null);
+
+        await CreateTaskService.createTasksFromErrors(payload());
+
+        expect(Task).toHaveBeenCalledWith(expect.objectContaining({ country: 'US', region: 'NA' }));
+    });
+
+    it('counts only this marketplace', async () => {
+        Task.findOne.mockResolvedValue(null);
+
+        await CreateTaskService.createTasksFromErrors(payload());
+
+        expect(TaskItem.countByStatus).toHaveBeenCalledWith('user1', 'US', 'NA');
+    });
+
+    it('passes the marketplace through createTasksFromCalculateServiceData', async () => {
+        Task.findOne.mockResolvedValue(null);
+
+        await CreateTaskService.createTasksFromCalculateServiceData('user1', {
+            profitabilityErrorDetails: []
+        }, 'UK', 'EU');
+
+        expect(Task.findOne).toHaveBeenCalledWith({ userId: 'user1', country: 'UK', region: 'EU' });
+    });
+
+    // A caller that has not been updated must keep working rather than silently
+    // reading nothing — an empty task list is a worse failure than the mixing.
+    it('falls back to user-wide behaviour when no marketplace is supplied', async () => {
+        Task.findOne.mockResolvedValue(null);
+
+        await CreateTaskService.createTasksFromErrors({
+            userId: 'user1',
+            profitabilityErrorDetails: []
+        });
+
+        expect(Task.findOne).toHaveBeenCalledWith({ userId: 'user1' });
+        expect(TaskItem.countByStatus).toHaveBeenCalledWith('user1', null, null);
+    });
+
+    it('reads only the requested marketplace in getUserTasks', async () => {
+        Task.findOne.mockReturnValue({ lean: jest.fn().mockResolvedValue({ taskRenewalDate: new Date() }) });
+        TaskItem.findByUserId.mockResolvedValue([]);
+
+        await CreateTaskService.getUserTasks('user1', { country: 'US', region: 'NA' });
+
+        expect(TaskItem.findByUserId).toHaveBeenCalledWith('user1', expect.objectContaining({ country: 'US', region: 'NA' }));
+        expect(TaskItem.countByStatus).toHaveBeenCalledWith('user1', 'US', 'NA');
     });
 });

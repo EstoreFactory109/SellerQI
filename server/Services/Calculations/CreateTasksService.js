@@ -213,7 +213,11 @@ class CreateTaskService {
      */
     async createTasksFromErrors(data) {
         try {
-            const { userId } = data;
+            // country/region scope everything below. Without them a seller's
+            // marketplaces shared one task pool, so each marketplace's view was
+            // built from the others' products.
+            const { userId, country = null, region = null } = data;
+            const scope = country && region ? ` [${country}-${region}]` : '';
             
             // Create a product name map from TotalProducts for quick lookup
             const productNameMap = new Map();
@@ -256,7 +260,10 @@ class CreateTaskService {
             }
             
             // Check if user metadata document exists
-            let userTaskDocument = await Task.findOne({ userId });
+            const metaFilter = { userId };
+            if (country) metaFilter.country = country;
+            if (region) metaFilter.region = region;
+            let userTaskDocument = await Task.findOne(metaFilter);
 
             // Whether this run replaced the whole task set, as opposed to only
             // inserting newly-appeared tasks. Callers use it to decide when the
@@ -273,11 +280,13 @@ class CreateTaskService {
                     logger.info(`Renewal period reached for user ${userId}. Clearing all tasks and creating fresh set.`);
                     
                     // Delete ALL tasks from TaskItem collection (not just completed)
-                    const deleteResult = await TaskItem.deleteByUserId(userId);
-                    logger.info(`Deleted ${deleteResult.deletedCount} tasks for user ${userId}`);
-                    
+                    // Scoped: an unscoped delete here wiped the seller's OTHER
+                    // marketplaces every time one of them renewed.
+                    const deleteResult = await TaskItem.deleteByUserId(userId, country, region);
+                    logger.info(`Deleted ${deleteResult.deletedCount} tasks for user ${userId}${scope}`);
+
                     // Insert new tasks in chunks (duplicates handled by unique index)
-                    const insertResult = await TaskItem.bulkInsertTasks(userId, tasks, TASK_INSERT_CHUNK_SIZE);
+                    const insertResult = await TaskItem.bulkInsertTasks(userId, tasks, TASK_INSERT_CHUNK_SIZE, country, region);
                     
                     // Update renewal date
                     const newRenewalDate = new Date();
@@ -289,10 +298,10 @@ class CreateTaskService {
                     tasksRebuilt = true;
                     logger.info(`Renewed tasks for user ${userId}. Inserted ${insertResult.insertedCount} fresh tasks.`);
                 } else {
-                    logger.info(`Within renewal period for user ${userId}. Adding new unique tasks.`);
-                    
+                    logger.info(`Within renewal period for user ${userId}${scope}. Adding new unique tasks.`);
+
                     // Insert new tasks in chunks (duplicates handled by unique index)
-                    const insertResult = await TaskItem.bulkInsertTasks(userId, tasks, TASK_INSERT_CHUNK_SIZE);
+                    const insertResult = await TaskItem.bulkInsertTasks(userId, tasks, TASK_INSERT_CHUNK_SIZE, country, region);
                     
                     // Clear legacy embedded tasks if present
                     if (userTaskDocument.tasks && userTaskDocument.tasks.length > 0) {
@@ -309,20 +318,22 @@ class CreateTaskService {
                 
                 userTaskDocument = new Task({
                     userId,
+                    country,
+                    region,
                     tasks: [], // No longer store tasks here
                     taskRenewalDate: renewalDate
                 });
                 await userTaskDocument.save();
-                
+
                 // Insert tasks into TaskItem collection
-                const insertResult = await TaskItem.bulkInsertTasks(userId, tasks, TASK_INSERT_CHUNK_SIZE);
+                const insertResult = await TaskItem.bulkInsertTasks(userId, tasks, TASK_INSERT_CHUNK_SIZE, country, region);
                 // A brand-new account's first task set is a full build, not an increment.
                 tasksRebuilt = true;
                 logger.info(`Created new task metadata for user ${userId}, inserted ${insertResult.insertedCount} tasks`);
             }
 
-            // Return task counts for compatibility
-            const taskCounts = await TaskItem.countByStatus(userId);
+            // Return task counts for compatibility (this marketplace only)
+            const taskCounts = await TaskItem.countByStatus(userId, country, region);
 
             return {
                 userId,
@@ -891,10 +902,14 @@ class CreateTaskService {
      * @param {Object} dashboardData - Dashboard data containing error arrays
      * @returns {Object} Result containing task counts and metadata
      */
-    async createTasksFromCalculateServiceData(userId, dashboardData) {
+    async createTasksFromCalculateServiceData(userId, dashboardData, country = null, region = null) {
         return this.createTasksFromErrors({
             userId,
-            ...dashboardData
+            // Explicit arguments win over anything of the same name that happens
+            // to be on dashboardData.
+            ...dashboardData,
+            country: country || dashboardData.country || null,
+            region: region || dashboardData.region || null
         });
     }
     
@@ -941,8 +956,15 @@ class CreateTaskService {
      */
     async getUserTasks(userId, options = {}) {
         try {
+            // Marketplace scope. Omitted => every marketplace, which is the old
+            // behaviour and what a caller without a marketplace still gets.
+            const { country = null, region = null } = options;
+            const metaFilter = { userId };
+            if (country) metaFilter.country = country;
+            if (region) metaFilter.region = region;
+
             // Get metadata from Task document
-            const userTaskDocument = await Task.findOne({ userId }).lean();
+            const userTaskDocument = await Task.findOne(metaFilter).lean();
 
             // Get tasks from TaskItem collection. Each task is rendered (for the
             // lean renderData-backed types) and annotated with effort/impact so
@@ -952,7 +974,7 @@ class CreateTaskService {
                 ...this.renderTaskIfNeeded(task),
                 ...getTaskPriorityMeta(task)
             }));
-            const taskCounts = await TaskItem.countByStatus(userId);
+            const taskCounts = await TaskItem.countByStatus(userId, country, region);
 
             // The same issue-type groups the Dashboard's "Top things to fix" shows,
             // sent once rather than per task. Lets a task row state its standing
@@ -1049,9 +1071,9 @@ class CreateTaskService {
      * @param {string} userId - User ID
      * @returns {Object} Deletion result
      */
-    async deleteAllUserTasks(userId) {
+    async deleteAllUserTasks(userId, country = null, region = null) {
         try {
-            const result = await TaskItem.deleteByUserId(userId);
+            const result = await TaskItem.deleteByUserId(userId, country, region);
             logger.info(`Deleted ${result.deletedCount} tasks for user ${userId}`);
             return result;
         } catch (error) {

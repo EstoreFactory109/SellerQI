@@ -564,7 +564,7 @@ router.get('/account-history', auth, getLocation, analyseDataCache(3600, 'accoun
 
 // ===== TASKS PAGE =====
 // Returns tasks data
-router.get('/tasks', auth, getTasksData);
+router.get('/tasks', auth, getLocation, getTasksData);
 
 // Update task status
 router.put('/tasks/status', auth, validateTaskStatusBody, updateTaskStatus);
