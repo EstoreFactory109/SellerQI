@@ -8,6 +8,10 @@ import ConnectToAmazon from './Pages/Onboarding/ConnectToAmazon.jsx';
 import FetchingTokens from './Pages/Auth/FetchingTokens.jsx';
 import AnalysingAccount from './Pages/Onboarding/AnalysingAccount.jsx';
 import ProtectedAuthRouteWrapper from './Layout/ProtectedAuthRouteWrapper.jsx';
+import LoginPageGuard, { PortalGate } from './Layout/LoginPageGuard.jsx';
+import { rememberPortalPage } from './utils/portalPages.js';
+import MemberLogin from './Pages/Auth/MemberLogin.jsx';
+import MemberLinkLanding from './Pages/Auth/MemberLinkLanding.jsx';
 import MainLayout from './Layout/MainPagesLayout.jsx';
 import DashBoard from './Pages/Dashboard/Dashboard.jsx';
 import Issues from './Pages/Issues/Issues.jsx';
@@ -64,6 +68,7 @@ import EsfClientLayout from './Layout/EsfClientLayout.jsx';
 import ProtectedEsfRouteWrapper from './Layout/ProtectedEsfRouteWrapper.jsx';
 import EsfLogin from './Pages/ESF/EsfLogin.jsx';
 import EsfAcceptInvite from './Pages/ESF/EsfAcceptInvite.jsx';
+import EsfLoginLinkVerify from './Pages/ESF/EsfLoginLinkVerify.jsx';
 import EsfClients from './Pages/ESF/EsfClients.jsx';
 import EsfUsers from './Pages/ESF/EsfUsers.jsx';
 import EsfSettings from './Pages/ESF/EsfSettings.jsx';
@@ -124,7 +129,13 @@ import PhoneRequiredModal from './Components/PhoneUpdate/PhoneRequiredModal.jsx'
 
 const App = () => {
   const location = useLocation();
-  const { pathname } = location;
+  const { pathname, search } = location;
+
+  // Remember the last page in each portal, so typing another portal's URL can
+  // leave the visitor exactly where they were (see Layout/LoginPageGuard.jsx).
+  useEffect(() => {
+    rememberPortalPage(pathname, search);
+  }, [pathname, search]);
 
   // Keep demo-mode flag in sync: set it while browsing demo pages,
   // clear it when leaving demo pages so main routes stay unaffected.
@@ -151,31 +162,49 @@ const App = () => {
           
           <Route path='/verify-email-for-password-reset' element={<EmailVerificationForNewPassword />} />
         </Route>
-        <Route path='/admin-login' element={<AdminLogin />} />
-        <Route path='/agency-sign-up' element={<AgencySignUp />} />
-        <Route path='/agency-login' element={<AgencyLogin />} />
-        <Route path='/manage-agency-users' element={<ManageAgencyUsersLayout />}>
+        {/* Every other page that signs someone in. One browser holds one session, so
+            while it is signed in anywhere these redirect to that portal instead of
+            rendering (see LoginPageGuard; the login endpoints refuse the same way). */}
+        <Route element={
+          <LoginPageGuard>
+            <Outlet />
+          </LoginPageGuard>
+        }>
+          <Route path='/admin-login' element={<AdminLogin />} />
+          <Route path='/agency-sign-up' element={<AgencySignUp />} />
+          <Route path='/agency-login' element={<AgencyLogin />} />
+          {/* Members of a seller account: no password, an emailed link instead. */}
+          <Route path='/member-login' element={<MemberLogin />} />
+          <Route path='/member-login/verify/:token' element={<MemberLinkLanding kind="login" />} />
+          <Route path='/member-invite/:token' element={<MemberLinkLanding kind="invite" />} />
+          {/* eStore Factory internal staff portal. Guarded server-side by
+              GET /app/esf/me, so a stale localStorage flag cannot render it. */}
+          <Route path='/esf-login' element={<EsfLogin />} />
+          <Route path='/esf-login/verify/:token' element={<EsfLoginLinkVerify />} />
+          {/* Public — the invitee has no account yet; the token is the credential. */}
+          <Route path='/esf-invite/:token' element={<EsfAcceptInvite />} />
+        </Route>
+        {/* Each portal opens only for its own session; anyone signed in elsewhere
+            stays on the page they were on (PortalGate). */}
+        <Route path='/manage-agency-users' element={<PortalGate allow={['agency']}><ManageAgencyUsersLayout /></PortalGate>}>
           <Route index element={<ManageAgencyUsers />} />
           <Route path='settings' element={<AgencySettings />} />
           <Route path='consultation' element={<CalendlyWidget />} />
         </Route>
-        <Route path='/agency/:agencyName/client/:clientId' element={<AgencyClientLayout />}>
+        <Route path='/agency/:agencyName/client/:clientId' element={<PortalGate allow={['agency']}><AgencyClientLayout /></PortalGate>}>
           <Route index element={<Navigate to="connect-to-amazon" replace />} />
           <Route path='connect-to-amazon' element={<AgencyClientConnectToAmazon />} />
           <Route path='connect-accounts' element={<AgencyClientConnectAccounts />} />
           <Route path='profile-selection' element={<AgencyClientProfileSelection />} />
         </Route>
         <Route path='/agency-analysing-account' element={<AgencyAnalysingAccount />} />
-        {/* eStore Factory internal staff portal. Guarded server-side by
-            GET /app/esf/me, so a stale localStorage flag cannot render it. */}
-        <Route path='/esf-login' element={<EsfLogin />} />
-        {/* Public — the invitee has no account yet; the token is the credential. */}
-        <Route path='/esf-invite/:token' element={<EsfAcceptInvite />} />
         <Route
           element={
-            <ProtectedEsfRouteWrapper>
-              <Outlet />
-            </ProtectedEsfRouteWrapper>
+            <PortalGate allow={['esf']}>
+              <ProtectedEsfRouteWrapper>
+                <Outlet />
+              </ProtectedEsfRouteWrapper>
+            </PortalGate>
           }
         >
           <Route path='/esf' element={<EsfLayout />}>
@@ -194,7 +223,7 @@ const App = () => {
             <Route path='profile-selection' element={<EsfClientProfileSelection />} />
           </Route>
         </Route>
-        <Route path='/manage-accounts' element={<ManageAccountsLayout />}>
+        <Route path='/manage-accounts' element={<PortalGate allow={['admin']}><ManageAccountsLayout /></PortalGate>}>
           <Route index element={<ManageAccounts />} />
           <Route path='subscription' element={<AdminSubscription />} />
           <Route path='logs/email' element={<AdminEmailLogs />} />

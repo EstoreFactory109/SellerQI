@@ -12,6 +12,7 @@ import axiosInstance from '../../config/axios.config.js'
 import { amazonMarketplaceCurrencies } from '../../utils/amazonAllowedCountries.js'
 import Calender, { isClickInsideGaCalDropdown } from '../Calender/Calender.jsx'
 import { useDashboardData } from '../../hooks/usePageData.js'
+import useEsfPageAccess, { clearEsfPageAccessCache } from '../../hooks/useEsfPageAccess.js'
 
 const DASHBOARD_ROUTES = ['/seller-central-checker/dashboard', '/seller-central-checker-demo/dashboard']
 
@@ -97,6 +98,9 @@ const TopNav = () => {
     // Agency admin viewing a client's dashboard (not on manage-agency-users page)
     // loggedInAsClient is now a JSON string (same pattern as loggedInAsUser)
     const isAgencyAdminViewingClient = isAgencyAdmin && loggedInAsClient;
+    // ESF staff who opened this client from the portal. Asked of the server (the
+    // ESFToken cookie), not localStorage, so it cannot show for the client themselves.
+    const { isEsfSession } = useEsfPageAccess();
     const profilepic = useSelector(state => state.profileImage?.imageLink)
     const dropdownRef = useRef(null)
     const notificationRef = useRef(null)
@@ -186,6 +190,23 @@ const TopNav = () => {
             window.location.href = '/manage-accounts';
         } finally {
             setIsLoading(false);
+        }
+    }
+
+    // Same handshake as handleSwitchToAdmin: end the client session (the ESFToken
+    // cookie is untouched, so the staff member stays signed in to the portal) and
+    // go back to the client list.
+    const handleSwitchToEsfClients = async () => {
+        setIsLoading(true);
+        try {
+            await axios.post(`${import.meta.env.VITE_BASE_URI}/app/logout`, {}, { withCredentials: true });
+        } catch (error) {
+            console.error('Error leaving the client account:', error);
+        } finally {
+            localStorage.removeItem('loggedInAsClient');
+            localStorage.removeItem('isAuth');
+            clearEsfPageAccessCache();
+            window.location.href = '/esf/clients';
         }
     }
 
@@ -551,6 +572,20 @@ const TopNav = () => {
                     >
                         <RefreshCw className={`w-3.5 h-3.5 text-[#6B7486] ${isRefreshingDashboard ? 'animate-spin' : ''}`} />
                     </button>
+                )}
+
+                {/* Switch Account Button - ESF staff viewing a client, back to the portal */}
+                {isEsfSession && !(isSuperAdmin && loggedInAsUser) && (
+                    <div className="relative">
+                        <button
+                            onClick={handleSwitchToEsfClients}
+                            className="w-8 h-8 rounded-lg flex items-center justify-center border border-[#F5A623]/50 text-[#F5A623] hover:border-[#F5A623] hover:bg-[#F5A623]/10 transition-colors duration-200"
+                            title="Switch account - back to eStore Factory clients"
+                            aria-label="Switch account - back to eStore Factory clients"
+                        >
+                            <ArrowLeftRight className="w-4 h-4" />
+                        </button>
+                    </div>
                 )}
 
                 {/* Switch Account Button - Only visible for Super Admin */}

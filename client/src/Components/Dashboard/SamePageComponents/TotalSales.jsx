@@ -368,16 +368,6 @@ const TotalSales = ({ onGrossProfitChange } = {}) => {
 
   const { totalSales, grossProfitRaw, visibleSlices, hasFinanceData } = pieMetrics;
 
-  // Reports the same Gross Profit figure computed above to the parent (Dashboard's
-  // KPI card), so it doesn't need to duplicate this calculation independently.
-  // Gated on effectiveFinanceDates.ready — before that, `loading` is still its
-  // initial `false` (the fetch effect hasn't fired yet), which would otherwise
-  // report a premature "no data" the instant this component mounts.
-  useEffect(() => {
-    if (typeof onGrossProfitChange !== 'function' || !effectiveFinanceDates.ready) return;
-    onGrossProfitChange({ grossProfitRaw, totalSales, hasFinanceData, loading });
-  }, [effectiveFinanceDates.ready, grossProfitRaw, totalSales, hasFinanceData, loading, onGrossProfitChange]);
-
   const handleNavigateToProfitability = () => {
     navigate('/seller-central-checker/profitibility-dashboard');
   };
@@ -410,6 +400,20 @@ const TotalSales = ({ onGrossProfitChange } = {}) => {
   const periodLabel = displayDates.startDate && displayDates.endDate
     ? `${formatDateWithOrdinal(displayDates.startDate)} – ${formatDateWithOrdinal(displayDates.endDate)}`
     : 'this period';
+
+  // Reports the same Gross Profit figure computed above to the parent (Dashboard's
+  // KPI card), so it doesn't need to duplicate this calculation independently.
+  // Gated on effectiveFinanceDates.ready — before that, `loading` is still its
+  // initial `false` (the fetch effect hasn't fired yet), which would otherwise
+  // report a premature "no data" the instant this component mounts.
+  // visibleSlices / periodLabel / cogsNote let the Dashboard export this section as shown.
+  const cogsNote = cogsIncomplete
+    ? `Product cost is estimated for ${costedProductCount} of ${pricedProductCount} products. Add real costs to make this exact.`
+    : null;
+  useEffect(() => {
+    if (typeof onGrossProfitChange !== 'function' || !effectiveFinanceDates.ready) return;
+    onGrossProfitChange({ grossProfitRaw, totalSales, hasFinanceData, loading, visibleSlices, periodLabel, cogsNote });
+  }, [effectiveFinanceDates.ready, grossProfitRaw, totalSales, hasFinanceData, loading, visibleSlices, periodLabel, cogsNote, onGrossProfitChange]);
 
   return (
     <div className="p-5 h-full flex flex-col">

@@ -29,25 +29,33 @@ const additionalEmailSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// ESF staff join from an emailed invitation with nothing but their address, so
+// name and phone are optional for them (the inviter may give a nickname, and they
+// can fill the rest in from My profile). Every other account still requires them.
+// A function, not an arrow: Mongoose calls it with the document as `this`.
+function requiredUnlessEsfStaff() {
+  return this.accessType !== "esfUser";
+}
+
 const userSchema = new mongoose.Schema(
     {
       firstName: {
         type: String,
-        required: [true, "First name is required"],
+        required: [requiredUnlessEsfStaff, "First name is required"],
         trim: true,
         minlength: [2, "First name must be at least 2 characters"],
         maxlength: [50, "First name must not exceed 50 characters"],
       },
       lastName: {
         type: String,
-        required: [true, "Last name is required"],
+        required: [requiredUnlessEsfStaff, "Last name is required"],
         trim: true,
         minlength: [2, "Last name must be at least 2 characters"],
         maxlength: [50, "Last name must not exceed 50 characters"],
       },
       phone: {
         type: String,
-        required: [true, "Phone number is required"],
+        required: [requiredUnlessEsfStaff, "Phone number is required"],
 
       },
       // True when the stored phone number cannot be trusted and the user should
@@ -68,7 +76,7 @@ const userSchema = new mongoose.Schema(
       },
       whatsapp: {
         type: String,
-        required: [true, "WhatsApp number is required"],
+        required: [requiredUnlessEsfStaff, "WhatsApp number is required"],
      
       },
       email: {

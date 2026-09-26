@@ -79,12 +79,22 @@ const validateEsfClient = [
     handleValidation,
 ];
 
+// Optional display name ("nickname") an owner/admin gives a staff member. Looser
+// than nameRule on purpose: one field, and spaces, dots and hyphens are fine.
+const nicknameRule = (field) =>
+    body(field)
+        .optional({ values: "falsy" })
+        .trim()
+        .isLength({ min: 2, max: 50 }).withMessage("Name must be between 2 and 50 characters")
+        .matches(/^[\p{L}][\p{L} .'-]*$/u).withMessage("Name may contain letters, spaces, dots, hyphens and apostrophes");
+
 /**
- * POST /app/esf/invites — the inviter supplies only an address and a role.
- * Everything else is filled in by the recipient when they accept.
+ * POST /app/esf/invites — the inviter supplies an address, a role and optionally
+ * a nickname. The recipient fills in nothing: accepting signs them straight in.
  */
 const validateEsfInvite = [
     emailRule,
+    nicknameRule("name"),
     // 'owner' is intentionally not accepted - there is exactly one, and it is seeded.
     body("role")
         .optional()
@@ -92,16 +102,15 @@ const validateEsfInvite = [
     handleValidation,
 ];
 
-/**
- * POST /app/esf/invites/token/:token/accept — the recipient's own details.
- * No email and no role: both come from the invitation, so accepting cannot be
- * used to claim a different address or a higher role.
- */
-const validateEsfInviteAccept = [
-    nameRule("firstname", "First name"),
-    nameRule("lastname", "Last name"),
-    phoneRule,
-    passwordRule(),
+/** PATCH /app/esf/users/:userId/name — set or clear a staff member's nickname. */
+const validateEsfNickname = [
+    nicknameRule("name"),
+    handleValidation,
+];
+
+/** POST /app/esf/login-link — "Log in as a member" on /esf-login. */
+const validateEsfLoginLink = [
+    emailRule,
     handleValidation,
 ];
 
@@ -113,10 +122,13 @@ const validateEsfRole = [
     handleValidation,
 ];
 
-/** PUT /app/esf/profile — email is intentionally not updatable. */
+/**
+ * PUT /app/esf/profile — email is intentionally not updatable. Same name rule as
+ * the nickname an admin sets, so a name given at invitation can be saved back.
+ */
 const validateEsfProfile = [
-    nameRule("firstName", "First name").optional(),
-    nameRule("lastName", "Last name").optional(),
+    nicknameRule("firstName"),
+    nicknameRule("lastName"),
     body("phone").optional().trim(),
     handleValidation,
 ];
@@ -140,7 +152,8 @@ module.exports = {
     validateEsfLogin,
     validateEsfClient,
     validateEsfInvite,
-    validateEsfInviteAccept,
+    validateEsfNickname,
+    validateEsfLoginLink,
     validateEsfRole,
     validateEsfProfile,
 };

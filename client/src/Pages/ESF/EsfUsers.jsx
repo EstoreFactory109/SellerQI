@@ -8,7 +8,6 @@ import {
   X as XIcon,
   Mail,
   UserPlus,
-  Key,
   Send,
   Clock,
   RefreshCw,
@@ -17,13 +16,14 @@ import {
   Crown,
   ChevronLeft,
   ChevronRight,
+  Pencil,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import axiosInstance from '../../config/axios.config.js';
 import EsfInviteUserForm from '../../Components/ESF/EsfInviteUserForm.jsx';
-import { isPasswordValid, passwordErrorMessage } from '../../utils/passwordCriteria.js';
 import EsfPagePermissionsModal from '../../Components/ESF/EsfPagePermissionsModal.jsx';
 import { useEsfUser } from '../../contexts/EsfUserContext.js';
+import RenameDialog from '../../Components/Shared/RenameDialog.jsx';
 
 /** Badge styling per role. Owner is visually distinct — it is not assignable. */
 const ROLE_BADGE = {
@@ -35,6 +35,13 @@ const ROLE_BADGE = {
 const ITEMS_PER_PAGE = 10;
 const DROPDOWN_MENU_WIDTH = 160;
 const DROPDOWN_MENU_HEIGHT = 165;
+
+/** Staff who joined by invitation may have only a nickname, or nothing but an email. */
+const nameOf = (user) => user.displayName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+const initialsOf = (user) => {
+  const name = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || '';
+  return name.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+};
 
 const EsfUsers = () => {
   const navigate = useNavigate();
@@ -54,6 +61,11 @@ const EsfUsers = () => {
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [invites, setInvites] = useState([]);
   const [permissionsMember, setPermissionsMember] = useState(null);
+  const [renameTarget, setRenameTarget] = useState(null);
+  // In-page confirmation for "Make admin" / "Make member" (was window.confirm).
+  const [roleTarget, setRoleTarget] = useState(null);
+  const [roleSaving, setRoleSaving] = useState(false);
+  const [roleError, setRoleError] = useState('');
   const dropdownRef = useRef(null);
   const openDropdownButtonRef = useRef(null);
 
@@ -112,7 +124,7 @@ const EsfUsers = () => {
   }, []);
 
   const filteredUsers = users.filter((u) => {
-    const name = `${u.firstName || ''} ${u.lastName || ''}`.toLowerCase();
+    const name = nameOf(u).toLowerCase();
     const email = (u.email || '').toLowerCase();
     const q = searchQuery.toLowerCase().trim();
     return !q || name.includes(q) || email.includes(q);
@@ -159,22 +171,50 @@ const EsfUsers = () => {
     }
   };
 
-  const handleChangeRole = async (user) => {
-    const nextRole = user.esfRole === 'admin' ? 'member' : 'admin';
-    const ok = window.confirm(
-      `Change ${user.firstName} ${user.lastName} from ${user.esfRole} to ${nextRole}?`
-    );
-    if (!ok) return;
+  const nextRoleOf = (user) => (user.esfRole === 'admin' ? 'member' : 'admin');
+
+  const openRoleConfirm = (user) => {
+    setRoleError('');
+    setRoleTarget(user);
+  };
+
+  const handleChangeRole = async () => {
+    const user = roleTarget;
+    const nextRole = nextRoleOf(user);
+    setRoleSaving(true);
+    setRoleError('');
     try {
       const res = await axiosInstance.patch(`/app/esf/users/${user._id}/role`, { role: nextRole });
       if (res.data?.statusCode === 200) {
         setUsers((prev) => prev.map((u) => (u._id === user._id ? { ...u, esfRole: nextRole } : u)));
+        setRoleTarget(null);
       } else {
-        setError(res.data?.message || 'Failed to change role');
+        setRoleError(res.data?.message || 'Failed to change role');
       }
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to change role');
+      setRoleError(err.response?.data?.message || 'Failed to change role');
+    } finally {
+      setRoleSaving(false);
     }
+  };
+
+  // Called by RenameDialog; throwing keeps the dialog open with the message.
+  const saveName = async (name) => {
+    const user = renameTarget;
+    let res;
+    try {
+      res = await axiosInstance.patch(`/app/esf/users/${user._id}/name`, { name });
+    } catch (err) {
+      throw new Error(err.response?.data?.errors?.[0]?.msg || err.response?.data?.message || 'Failed to update the name');
+    }
+    if (res.data?.statusCode !== 200 || !res.data.data) {
+      throw new Error(res.data?.message || 'Failed to update the name');
+    }
+    const updated = res.data.data;
+    setUsers((prev) => prev.map((u) => (u._id === user._id
+      ? { ...u, firstName: updated.firstName, lastName: updated.lastName, displayName: updated.displayName }
+      : u)));
+    setRenameTarget(null);
   };
 
   const handleResendInvite = async (invite) => {
@@ -202,28 +242,6 @@ const EsfUsers = () => {
       setError(err.response?.data?.message || 'Failed to revoke the invitation');
     } finally {
       setDeletingId(null);
-    }
-  };
-
-  const handleResetPassword = async (user) => {
-    const newPassword = window.prompt(
-      `Enter a new password for ${user.firstName} ${user.lastName}
-
-` +
-        'Min 8 characters with 1 uppercase, 1 lowercase, a number and a symbol:'
-    );
-    if (!newPassword) return;
-    if (!isPasswordValid(newPassword)) {
-      setError(passwordErrorMessage(newPassword));
-      return;
-    }
-    try {
-      const res = await axiosInstance.post(`/app/esf/users/${user._id}/reset-password`, { newPassword });
-      if (res.data?.statusCode !== 200) {
-        setError(res.data?.message || 'Failed to reset password');
-      }
-    } catch (err) {
-      setError(err.response?.data?.message || 'Failed to reset password');
     }
   };
 
@@ -305,7 +323,10 @@ const EsfUsers = () => {
                   {invites.map((invite) => (
                     <div key={invite._id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                       <Mail className="w-4 h-4 text-gray-500 shrink-0" />
-                      <span className="text-sm text-gray-100 break-all min-w-0 flex-1">{invite.email}</span>
+                      <span className="text-sm text-gray-100 break-all min-w-0 flex-1">
+                        {invite.name && <span className="font-medium">{invite.name} · </span>}
+                        {invite.email}
+                      </span>
 
                       <span className={`inline-flex items-center justify-center gap-1 rounded-full border px-2 py-1 text-xs font-medium ${
                         (ROLE_BADGE[invite.role] || ROLE_BADGE.member).className
@@ -365,12 +386,12 @@ const EsfUsers = () => {
                             <div className="flex items-center gap-2">
                               <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-sm border bg-violet-500/15 border-violet-400/20">
                                 <span className="text-gray-100 text-xs font-semibold">
-                                  {(user.firstName?.[0] || '') + (user.lastName?.[0] || '')}
+                                  {initialsOf(user)}
                                 </span>
                               </div>
                               <div className="min-w-0">
                                 <p className="text-sm font-medium text-gray-100 break-words">
-                                  {user.firstName} {user.lastName}
+                                  {nameOf(user)}
                                 </p>
                                 <p className="text-xs text-gray-500 break-all flex items-center gap-1 mt-0.5">
                                   <Mail className="w-3 h-3 shrink-0" />
@@ -535,7 +556,7 @@ const EsfUsers = () => {
                           <h2 id="esf-add-user-modal-title" className="text-lg font-semibold text-gray-100">
                             Invite a team member
                           </h2>
-                          <p className="text-xs text-gray-500">They set their own name and password</p>
+                          <p className="text-xs text-gray-500">They join straight from the emailed link</p>
                         </div>
                       </div>
                       <button
@@ -592,24 +613,24 @@ const EsfUsers = () => {
                     onClick={() => {
                       setOpenDropdownId(null);
                       setDropdownPosition(null);
-                      handleChangeRole(user);
+                      setRenameTarget(user);
                     }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-gray-300 hover:bg-[#252525] hover:text-gray-100"
                   >
-                    <Shield className="w-3.5 h-3.5" />
-                    {user.esfRole === 'admin' ? 'Make member' : 'Make admin'}
+                    <Pencil className="w-3.5 h-3.5" />
+                    Set name
                   </button>
                   <button
                     type="button"
                     onClick={() => {
                       setOpenDropdownId(null);
                       setDropdownPosition(null);
-                      handleResetPassword(user);
+                      openRoleConfirm(user);
                     }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-blue-400 hover:bg-[#252525] hover:text-blue-300"
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-gray-300 hover:bg-[#252525] hover:text-gray-100"
                   >
-                    <Key className="w-3.5 h-3.5" />
-                    Reset password
+                    <Shield className="w-3.5 h-3.5" />
+                    {user.esfRole === 'admin' ? 'Make member' : 'Make admin'}
                   </button>
                   <button
                     type="button"
@@ -628,6 +649,72 @@ const EsfUsers = () => {
                 document.body
               );
             })()}
+
+            {/* Role change confirmation */}
+            {roleTarget && createPortal(
+              <div
+                className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[210] p-4"
+                onClick={() => !roleSaving && setRoleTarget(null)}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="esf-role-dialog-title"
+              >
+                <div
+                  className="bg-[#101722] rounded-2xl max-w-md w-full p-6 border border-white/10 shadow-2xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-9 h-9 rounded-xl bg-blue-500/15 border border-blue-400/20 flex items-center justify-center">
+                      <Shield className="w-4 h-4 text-blue-400" />
+                    </div>
+                    <h3 id="esf-role-dialog-title" className="text-base font-semibold text-gray-100">
+                      {nextRoleOf(roleTarget) === 'admin' ? 'Make admin' : 'Make member'}
+                    </h3>
+                  </div>
+                  <p className="text-sm text-gray-400 mb-1">
+                    Change <span className="text-gray-200 font-medium">{nameOf(roleTarget)}</span> from{' '}
+                    <span className="text-gray-200">{(ROLE_BADGE[roleTarget.esfRole] || ROLE_BADGE.member).label}</span> to{' '}
+                    <span className="text-gray-200">{(ROLE_BADGE[nextRoleOf(roleTarget)] || ROLE_BADGE.member).label}</span>?
+                  </p>
+                  <p className="text-xs text-gray-500 mb-4">
+                    {nextRoleOf(roleTarget) === 'admin'
+                      ? 'Admins can see client details, open client accounts, and manage team members.'
+                      : 'Members work on clients but cannot see client identities, open client accounts, or manage the team.'}
+                  </p>
+                  {roleError && <p className="text-xs text-red-400 mb-4">{roleError}</p>}
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRoleTarget(null)}
+                      disabled={roleSaving}
+                      className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-white/10 text-gray-300 hover:bg-white/[0.05] hover:text-gray-200 transition-colors disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleChangeRole}
+                      disabled={roleSaving}
+                      className="flex-1 px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50 transition-colors"
+                    >
+                      {roleSaving ? 'Saving…' : 'Change role'}
+                    </button>
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )}
+
+            <RenameDialog
+              open={!!renameTarget}
+              title="Set name"
+              description={renameTarget?.email}
+              initialValue={renameTarget ? `${renameTarget.firstName || ''} ${renameTarget.lastName || ''}`.trim() : ''}
+              placeholder="e.g. Priya Sharma"
+              tone="esf"
+              onCancel={() => setRenameTarget(null)}
+              onSave={saveName}
+            />
 
             {permissionsMember && (
               <EsfPagePermissionsModal
@@ -652,8 +739,8 @@ const EsfUsers = () => {
                 >
                   <h3 className="text-base font-semibold text-gray-100 mb-2">Remove access</h3>
                   <p className="text-sm text-gray-400 mb-4">
-                    Permanently delete the account for {deleteConfirmUser.firstName} {deleteConfirmUser.lastName}
-                    {deleteConfirmUser.email ? ` (${deleteConfirmUser.email})` : ''}? Their account and data are
+                    Permanently delete the account for {nameOf(deleteConfirmUser)}
+                    {deleteConfirmUser.email && nameOf(deleteConfirmUser) !== deleteConfirmUser.email ? ` (${deleteConfirmUser.email})` : ''}? Their account and data are
                     removed from the database and they can no longer sign in. This cannot be undone — you would
                     need to invite them again.
                   </p>

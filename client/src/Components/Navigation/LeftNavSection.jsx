@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BadgeAlert, ClipboardPlus, Clock8, ChartLine, LaptopMinimalCheck, ChevronRight, Activity, Calendar, DollarSign, Lock, Package, BarChart3, LogOut, Bot, User, Link2, LifeBuoy, CreditCard, Building2, ListChecks, TrendingUp, FileText, MessageSquare, Receipt } from 'lucide-react';
+import { LayoutDashboard, BadgeAlert, ClipboardPlus, Clock8, ChartLine, LaptopMinimalCheck, ChevronRight, Activity, Calendar, DollarSign, Lock, Package, BarChart3, LogOut, Bot, User, UserPlus, Link2, LifeBuoy, CreditCard, Building2, ListChecks, TrendingUp, FileText, MessageSquare, Receipt } from 'lucide-react';
 import useEsfPageAccess from '../../hooks/useEsfPageAccess.js';
 import { useDispatch, useSelector } from 'react-redux';
 import { logout } from '../../redux/slices/authSlice.js'
@@ -273,7 +273,9 @@ const LeftNavSection = () => {
     });
 
     return (
-        <aside className="h-screen w-[252px] flex-shrink-0 hidden lg:flex lg:flex-col overflow-hidden" style={{ borderRight: `1px solid ${COLORS.border}`, background: COLORS.bgBase }}>
+        // data-preserve-scroll: the page's route-change scroll reset leaves this alone,
+        // so the menu stays where it was after an item is clicked (see MainPagesLayout).
+        <aside data-preserve-scroll className="h-screen w-[252px] flex-shrink-0 hidden lg:flex lg:flex-col overflow-hidden" style={{ borderRight: `1px solid ${COLORS.border}`, background: COLORS.bgBase }}>
             {/* Main Container - Top and Bottom Sections */}
             <div className="flex flex-col justify-between h-full min-h-0">
                 {/* Top Section - Logo and Navigation */}
@@ -464,6 +466,7 @@ const LeftNavSection = () => {
                             <NavGroupLabel>Account &amp; Settings</NavGroupLabel>
                             <div className="space-y-0.5">
                                 <NavItem to="/seller-central-checker/settings?tab=profile" icon={User} label="User Profile" isActive={isSettingsPage && currentSettingsTab === 'profile'} />
+                                <NavItem to="/seller-central-checker/settings?tab=members" icon={UserPlus} label="Add Member" isActive={isSettingsPage && currentSettingsTab === 'members'} />
 
                                 {/* Account Integration - Only for PRO users (not AGENCY) */}
                                 {!isLiteUser && !isAgencyUser && (

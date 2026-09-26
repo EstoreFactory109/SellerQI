@@ -1,6 +1,7 @@
 var jwt = require('jsonwebtoken');
 const logger = require('../utils/Logger.js');
 const User = require('../models/user-auth/userModel.js');
+const AccountMember = require('../models/user-auth/AccountMemberModel.js');
 const {ApiError}=require('./ApiError.js')
 
 
@@ -15,12 +16,19 @@ const MAX_REFRESH_TOKENS = 5;
 const ACCESS = 'access';
 const REFRESH = 'refresh';
 
-const createAccessToken=async(userId)=>{
+// A member of a seller account signs in to the OWNER's account, so their tokens
+// carry the owner's id plus `mid`, the member's id. Having it inside the token
+// (not in a separate cookie) is what lets removing a member end their session:
+// auth.js refuses any token whose member is gone, and the owner's own tokens,
+// which have no `mid`, are never affected.
+const createAccessToken=async(userId,{memberId=null}={})=>{
     if(!userId){
         logger.error(new ApiError(400,"User ID is missing"));
         return false;
     }
-    const accessToken=jwt.sign({id:userId,type:ACCESS},process.env.JWT_SECRET,{expiresIn:'15d'});
+    const payload={id:userId,type:ACCESS};
+    if(memberId) payload.mid=String(memberId);
+    const accessToken=jwt.sign(payload,process.env.JWT_SECRET,{expiresIn:'15d'});
 
     return accessToken;
 }
@@ -33,16 +41,22 @@ const createAccessToken=async(userId)=>{
 // A failed write is logged loudly but still returns the token: the access token
 // remains valid for 15 days, so a transient DB error degrades that one session
 // rather than blocking the login outright.
-const createRefreshToken=async(userId)=>{
+const createRefreshToken=async(userId,{memberId=null}={})=>{
     if(!userId){
         logger.error(new ApiError(400,"User ID is missing"));
         return false;
     }
-    const refreshToken=jwt.sign({id:userId,type:REFRESH},process.env.JWT_SECRET,{expiresIn:REFRESH_TOKEN_TTL});
+    const payload={id:userId,type:REFRESH};
+    if(memberId) payload.mid=String(memberId);
+    const refreshToken=jwt.sign(payload,process.env.JWT_SECRET,{expiresIn:REFRESH_TOKEN_TTL});
+    // A member's sessions are recorded on the member, not the owner, so they never
+    // push the owner's own devices out of the MAX_REFRESH_TOKENS window - and
+    // deleting the member deletes their sessions with it.
+    const holder = memberId
+        ? AccountMember.updateOne({_id:memberId},{$push:{refreshTokens:{$each:[refreshToken],$slice:-MAX_REFRESH_TOKENS}}})
+        : User.findByIdAndUpdate(userId,{$push:{refreshTokens:{$each:[refreshToken],$slice:-MAX_REFRESH_TOKENS}}});
     try {
-        await User.findByIdAndUpdate(userId,{
-            $push:{refreshTokens:{$each:[refreshToken],$slice:-MAX_REFRESH_TOKENS}}
-        });
+        await holder;
     } catch (error) {
         logger.error(`Error recording refresh token session for ${userId}: ${error}`);
     }
@@ -59,7 +73,11 @@ const revokeRefreshToken=async(token)=>{
         return false;
     }
     try {
-        await User.updateOne({refreshTokens:token},{$pull:{refreshTokens:token}});
+        // The token is either an owner's or a member's session; pull it from whichever holds it.
+        await Promise.all([
+            User.updateOne({refreshTokens:token},{$pull:{refreshTokens:token}}),
+            AccountMember.updateOne({refreshTokens:token},{$pull:{refreshTokens:token}}),
+        ]);
         return true;
     } catch (error) {
         logger.error(`Error revoking refresh token: ${error}`);
@@ -94,8 +112,10 @@ const verifyAccessToken=async(token)=>{
         }
         const tokenResponse={
             tokenData:decoded.id,
-            isvalid:true
-        }   
+            isvalid:true,
+            // Set when a member (not the owner) holds this session - see createAccessToken.
+            memberId:decoded.mid||null
+        }
         return tokenResponse;
     } catch (error) {
         if (error.name === "TokenExpiredError") {
@@ -110,6 +130,10 @@ const verifyAccessToken=async(token)=>{
     }
 }
 
+/** The member behind a decoded refresh token still exists, is active and holds this session. */
+const isLiveMemberSession=async(decoded,token)=>
+    Boolean(await AccountMember.exists({_id:decoded.mid,owner:decoded.id,status:'active',refreshTokens:token}));
+
 const refreshAccess=async(token)=>{
     if(!token){
         logger.error(new ApiError(400,"Token is missing"));
@@ -121,6 +145,16 @@ const refreshAccess=async(token)=>{
             logger.error(new ApiError(400,"Token is not a refresh token"));
             return false;
         }
+        if(decoded.mid){
+            // A member's session: live only while they are still an active member.
+            const live=await isLiveMemberSession(decoded,token);
+            if(!live){
+                logger.error(new ApiError(400,"Member refresh token is not an active session"));
+                return false;
+            }
+            return await createAccessToken(decoded.id,{memberId:decoded.mid});
+        }
+
         const CheckUserRefreshToken=await User.findById(decoded.id).select('refreshTokens');
         if(!CheckUserRefreshToken){
             logger.error(new ApiError(404,"User not found"));
@@ -136,6 +170,22 @@ const refreshAccess=async(token)=>{
     } catch (error) {
         logger.error(new ApiError(400,"Invalid token"));
         return false;
+    }
+}
+
+// Read-only twin of refreshAccess: answers "is this still a live session?"
+// without minting anything. Returns the user id, or null.
+const getActiveRefreshTokenUser=async(token)=>{
+    if(!token) return null;
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        if(decoded.type!==REFRESH) return null;
+        const live = decoded.mid
+            ? await isLiveMemberSession(decoded,token)
+            : await User.exists({_id:decoded.id,refreshTokens:token});
+        return live ? decoded.id : null;
+    } catch (error) {
+        return null;
     }
 }
 
@@ -194,4 +244,4 @@ const verifyLinkToken = async (token) => {
     }
 };
 
-module.exports={createAccessToken, createRefreshToken,revokeRefreshToken,verifyAccessToken,refreshAccess,createLocationToken,verifyLocationToken,createDemoAccessToken,createLinkToken,verifyLinkToken,MAX_REFRESH_TOKENS};
+module.exports={createAccessToken, createRefreshToken,revokeRefreshToken,verifyAccessToken,refreshAccess,getActiveRefreshTokenUser,createLocationToken,verifyLocationToken,createDemoAccessToken,createLinkToken,verifyLinkToken,MAX_REFRESH_TOKENS};

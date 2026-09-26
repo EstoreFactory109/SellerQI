@@ -33,7 +33,10 @@ const EsfLayout = () => {
     } catch (err) {
       console.error('Logout error:', err);
     } finally {
+      // Logging out also ends any client account opened from the portal.
       localStorage.removeItem('isEsfAuth');
+      localStorage.removeItem('loggedInAsClient');
+      localStorage.removeItem('isAuth');
       setIsLoggingOut(false);
       navigate('/esf-login');
     }
@@ -109,10 +112,13 @@ const EsfLayout = () => {
               <User className="w-5 h-5 shrink-0" />
               <span className="text-sm font-medium">My profile</span>
             </NavLink>
+            {/* Only the owner has a password; admins and members sign in by emailed link. */}
+            {esfUser?.isOwner && (
             <NavLink to="/esf/settings?tab=password" className={({ isActive }) => navItemClass(isActive)}>
               <Key className="w-5 h-5 shrink-0" />
               <span className="text-sm font-medium">Update password</span>
             </NavLink>
+            )}
             <NavLink to="/esf/settings?tab=support" className={({ isActive }) => navItemClass(isActive)}>
               <HelpCircle className="w-5 h-5 shrink-0" />
               <span className="text-sm font-medium">Support</span>
@@ -151,9 +157,9 @@ const EsfLayout = () => {
           <div className="flex items-center gap-2 shrink-0">
             <span
               className="text-sm font-medium text-gray-300 truncate max-w-[140px] md:max-w-[200px]"
-              title={esfUser ? `${esfUser.firstName} ${esfUser.lastName}` : 'eStore Factory'}
+              title={esfUser?.displayName || 'eStore Factory'}
             >
-              {esfUser ? `${esfUser.firstName} ${esfUser.lastName}` : 'eStore Factory'}
+              {esfUser?.displayName || 'eStore Factory'}
             </span>
           </div>
         </header>

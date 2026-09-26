@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,ChartLine,LaptopMinimalCheck, ChevronRight, X, Calendar, DollarSign, Lock, Package, LogOut, Bot, BarChart3, User, Link2, LifeBuoy, CreditCard, Building2, ListChecks, TrendingUp, FileText, MessageSquare, Receipt} from 'lucide-react'
+import {LayoutDashboard,BadgeAlert, ClipboardPlus,Clock8,ChartLine,LaptopMinimalCheck, ChevronRight, X, Calendar, DollarSign, Lock, Package, LogOut, Bot, BarChart3, User, UserPlus, Link2, LifeBuoy, CreditCard, Building2, ListChecks, TrendingUp, FileText, MessageSquare, Receipt} from 'lucide-react'
 import useEsfPageAccess from '../../hooks/useEsfPageAccess.js';
 import { logout } from '../../redux/slices/authSlice.js'
 import { clearCogsData } from '../../redux/slices/cogsSlice.js'
@@ -266,8 +266,10 @@ const LeftNavSection = () => {
                 />
             )}
 
-            {/* Mobile Menu */}
+            {/* Mobile Menu - data-preserve-scroll keeps the route-change scroll reset
+                (MainPagesLayout) from snapping the menu back to the top */}
             <aside
+                data-preserve-scroll
                 className="h-screen w-2/5 lg:w-1/5 shadow-xl block lg:hidden fixed z-[99] transition-all duration-300 ease-in-out flex flex-col"
                 style={{ left: position, background: COLORS.bgBase, borderRight: `1px solid ${COLORS.border}` }}
             >
@@ -451,6 +453,7 @@ const LeftNavSection = () => {
                     <NavGroupLabel>Account &amp; Settings</NavGroupLabel>
                     <div className="space-y-1">
                         <NavItem to="/seller-central-checker/settings?tab=profile" icon={User} label="User Profile" isActive={isSettingsPage && currentSettingsTab === 'profile'} onNavigate={closeMenu} />
+                        <NavItem to="/seller-central-checker/settings?tab=members" icon={UserPlus} label="Add Member" isActive={isSettingsPage && currentSettingsTab === 'members'} onNavigate={closeMenu} />
 
                         {/* Account Integration - Only for PRO users (not AGENCY) */}
                         {!isLiteUser && !isAgencyUser && (

@@ -8,7 +8,7 @@ import { SkeletonChart, SkeletonTableBody } from '../../Components/Skeleton/Page
 import { SkeletonBar } from '../../Components/Skeleton/Skeleton.jsx'
 import { useSelector, useDispatch } from 'react-redux'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { formatCurrency, formatCurrencyWithLocale } from '../../utils/currencyUtils.js'
+import { formatCurrencyWithLocale } from '../../utils/currencyUtils.js'
 import { fetchReimbursementSummary } from '../../redux/slices/ReimbursementSlice.js'
 import { fetchLatestPPCMetrics, selectPPCSummary, selectLatestPPCMetricsLoading, selectPPCDateWiseMetrics } from '../../redux/slices/PPCMetricsSlice.js'
 import { fetchPPCKPISummary, selectPPCKPISummary } from '../../redux/slices/PPCCampaignAnalysisSlice.js'
@@ -437,7 +437,6 @@ const Dashboard = () => {
   };
 
   // Calculate real data from backend
-  const totalSales = Number(dashboardInfo?.TotalWeeklySale || 0);
   const totalProducts = dashboardInfo?.TotalProduct?.length || 0;
   
   // Store filtered orders array where status is Shipped, Unshipped, or PartiallyShipped
@@ -460,18 +459,13 @@ const Dashboard = () => {
     (dashboardInfo?.totalErrorInAccount || 0)
   );
 
-  // Calculate PPC Sales and Spend for the quickStats
+  // Calculate PPC Sales and Spend for the ACoS KPI
   const ppcSales = calculatePPCSales();
   const ppcSpend = calculatePPCSpend();
   
   // ACoS must match the spend & sales shown above (same rule as PPC / profitability)
   const acos =
     ppcSales > 0 ? ((ppcSpend / ppcSales) * 100).toFixed(2) : '0.00';
-
-  // Format sales value
-  const formatCurrencyLocal = (value) => {
-    return formatCurrency(value, currency);
-  };
 
   // Full, comma-grouped, non-abbreviated dollar figure (e.g. "$6,841", never "$6.8K") —
   // used everywhere in the redesigned sections (KPI cards, Verdict Banner, Top Things to Fix).
@@ -488,24 +482,6 @@ const Dashboard = () => {
     customRangeMoneyWasted,
     dashboardInfo?.moneyWastedInAds,
     dashboardInfo?.ppcSummary?.moneyWastedInAds,
-  ]);
-
-  const moneyWastedDisplay = customRangeMoneyWastedLoading && isDateRangeSelected
-    ? 'Loading...'
-    : formatCurrencyWithLocale(moneyWastedInAds, currency);
-
-  const quickStats = [
-    { icon: Receipt, label: 'Amazon Owes You', value: reimbursementLoading ? 'Loading...' : formatCurrencyWithLocale(expectedReimbursement, currency), change: 'N/A', trend: 'neutral', color: 'emerald', link: '/seller-central-checker/reimbursement-dashboard' },
-    { icon: TrendingDown, label: 'Money Wasted in Ads', value: moneyWastedDisplay, change: 'N/A', trend: 'neutral', color: 'blue', link: '/seller-central-checker/ppc-dashboard' },
-    { icon: Gauge, label: 'ACoS %', value: `${acos}%`, change: 'N/A', trend: 'neutral', color: 'purple', link: '/seller-central-checker/ppc-dashboard' },
-    { icon: FileWarning, label: 'Total Issues', value: totalIssues.toLocaleString(), change: 'N/A', trend: 'neutral', color: 'orange', link: '/seller-central-checker/issues' }
-  ]
-
-  // Export report reuses the exact values already shown in the quick-stat tiles below.
-  const prepareDashboardExportData = () => ([
-    { Metric: 'Period', Value: selectedPeriod },
-    { Metric: 'Total Sales', Value: formatCurrencyLocal(totalSales) },
-    ...quickStats.map((stat) => ({ Metric: stat.label, Value: stat.value })),
   ]);
 
   // --- Real data for the redesigned Verdict Banner + KPI row (§3.1) ---
@@ -782,6 +758,163 @@ const Dashboard = () => {
       message: accountErrorsDetail?.orderWithDefectsStatus?.Message,
     },
   ];
+
+  // Issue mix — ProductChecker.jsx reads these counts straight from the Redux
+  // dashboard slice, so the export reads the same object.
+  const issueMixInfo = useSelector((state) => state.Dashboard.DashBoardInfo);
+  const issueMix = [
+    { label: 'Rankings', count: issueMixInfo?.TotalRankingerrors || 0 },
+    { label: 'Conversion', count: issueMixInfo?.totalErrorInConversion || 0 },
+    { label: 'Sponsored Ads', count: issueMixInfo?.totalSponsoredAdsErrors || 0 },
+    { label: 'Profitability', count: issueMixInfo?.totalProfitabilityErrors || 0 },
+    { label: 'Inventory', count: issueMixInfo?.totalInventoryErrors || 0 },
+    { label: 'Account & Policy', count: issueMixInfo?.totalErrorInAccount || 0 },
+  ];
+
+  // Export report — every value and sentence below is the one rendered on this
+  // page (verdict banner, KPI cards, Top things to fix, Where your money goes,
+  // account health, issue mix, QMate noticed), so the file matches the screen.
+  const prepareDashboardExportData = () => {
+    const stillLoading = !isPhase1Complete || !isPhase2Complete || !isPhase3Complete || !isPhase4Complete ||
+      !verdictDataReady || grossProfitData.loading || ppcMetricsLoading || topProductsLoading ||
+      (isDateRangeSelected && customRangeMoneyWastedLoading);
+    if (stillLoading) {
+      alert('The dashboard is still loading. Please export again once all figures are shown.');
+      return null;
+    }
+
+    const pillLabel = (status, label) => label || getStatusConfig(status).label;
+    const rows = [
+      ['SellerQI Dashboard Report'],
+      ['Period', selectedPeriod],
+      ['Generated on', new Date().toLocaleDateString()],
+      [],
+    ];
+
+    // Verdict banner — same sentence as the page
+    let verdict = `Your account is ${healthDescriptor} (${healthPercentage}%)`;
+    if (hasAiOpportunities) {
+      const n = topOpportunities.opportunities.length;
+      verdict += ` — but ${n} thing${n === 1 ? '' : 's'} need${n === 1 ? 's' : ''} attention`;
+      if (recoverableAmount > 0) verdict += ` and about ${formatFullCurrency(recoverableAmount)}/mo of profit is in play`;
+      verdict += '. ';
+      if (topOpportunityPhrase) verdict += `Start with ${topOpportunityPhrase}.`;
+    } else if (attentionItems.length > 0) {
+      verdict += ` — but ${attentionItems.map((i) => i.label).join(' and ')} need${attentionItems.length === 1 ? 's' : ''} attention`;
+      if (recoverableAmount > 0) verdict += ` and about ${formatFullCurrency(recoverableAmount)} of profit may be in play this period.`;
+    } else {
+      verdict += ' — nothing urgent needs attention right now.';
+    }
+    rows.push(['Summary', verdict.trim()]);
+    rows.push([]);
+
+    // KPI row
+    rows.push(['Key Metrics']);
+    rows.push(['Card', 'Item', 'Value']);
+    if (expectedReimbursement > 0) {
+      rows.push(['Money Amazon Owes You', 'Unclaimed FBA reimbursements', formatFullCurrency(expectedReimbursement)]);
+      rows.push(['Money Amazon Owes You', 'Status', 'Ready to claim']);
+    } else {
+      rows.push(['Money Amazon Owes You', 'Unclaimed FBA reimbursements', 'No unclaimed reimbursements found for this period.']);
+    }
+
+    rows.push(['Wasted Ad Spend', 'ACoS', `${acos}%`]);
+    if (moneyWastedInAds > 0) rows.push(['Wasted Ad Spend', 'Wasted', `${formatFullCurrency(moneyWastedInAds)} wasted`]);
+    rows.push(['Wasted Ad Spend', 'Status', pillLabel(acosStatus)]);
+    rows.push(['Wasted Ad Spend', 'Benchmark', `${acosBenchmark.healthyText} · ${acosBenchmark.valueText}`]);
+
+    if (grossProfitData.hasFinanceData) {
+      rows.push(['Sales & Profit', 'Total Sales', formatFullCurrency(grossProfitData.totalSales)]);
+      rows.push(['Sales & Profit', 'Gross Profit', formatFullCurrency(grossProfitData.grossProfitRaw)]);
+      if (grossProfitMarginLabel) rows.push(['Sales & Profit', 'Margin', grossProfitMarginLabel]);
+      if (grossProfitStatus) rows.push(['Sales & Profit', 'Status', pillLabel(grossProfitStatus, grossProfitStatusLabel)]);
+      if (cogsIncomplete) rows.push(['Sales & Profit', 'Note', `Only ${productsWithCogsCount} of ${totalProducts} products have costs added, so this is understated.`]);
+    } else {
+      rows.push(['Sales & Profit', 'Status', 'No finance data available for this period yet.']);
+    }
+
+    rows.push(['Account Health', 'Status', pillLabel(healthPillStatus)]);
+    rows.push(['Account Health', 'Score', `${healthPercentage}%`]);
+    rows.push(['Account Health', 'Summary', healthPillStatus === STATUS.GOOD
+      ? 'Healthy — a few things need attention.'
+      : healthPillStatus === STATUS.WATCH
+        ? 'Fair — several things need attention.'
+        : 'At risk — action needed soon.']);
+    rows.push(['Account Health', 'Total issues', `${totalIssues.toLocaleString()} total issues across your account`]);
+    rows.push([]);
+
+    // Top things to fix — the same cards in the same order (snoozed ones excluded, as on screen)
+    rows.push(['Top Things to Fix']);
+    rows.push(['Potential profit impact', formatFullCurrency(recoverableAmount)]);
+    if (capitalTiedUp > 0) rows.push(['Capital tied up', `+ ${formatFullCurrency(capitalTiedUp)} capital tied up`]);
+    if (visibleFixes.length > 0) {
+      rows.push(['Rank', 'Issue', 'Category', 'Value', 'Value Type', 'Why']);
+      visibleFixes.forEach((fix, index) => {
+        rows.push([String(index + 1).padStart(2, '0'), fix.title, fix.badge, fix.value, fix.valueLabel || '', fix.why || '']);
+      });
+      rows.push([`Dollar figures are estimates for ${selectedPeriod}.`]);
+    } else {
+      rows.push(['All clear for now — Nothing high-impact is outstanding right now.']);
+    }
+    rows.push([]);
+
+    // Where your money goes — legend rows (amount + % of sales) and the hover breakdowns
+    rows.push(['Where Your Money Goes']);
+    if (grossProfitData.hasFinanceData) {
+      const moneySlices = grossProfitData.visibleSlices || [];
+      const salesForPct = grossProfitData.totalSales;
+      const breakdownAmount = (amount) => `${amount < 0 ? '-' : ''}${currency}${Math.abs(amount).toFixed(2)}`;
+      rows.push([`Every dollar of the ${formatFullCurrency(salesForPct)} you sold ${grossProfitData.periodLabel || 'this period'}.`]);
+      rows.push(['You keep', formatFullCurrency(grossProfitData.grossProfitRaw)]);
+      rows.push(['Category', 'Item', 'Amount', '% of Sales']);
+      moneySlices.forEach((slice) => {
+        const pct = salesForPct > 0 ? Math.round((slice.value / salesForPct) * 100) : 0;
+        rows.push([slice.label, 'Total', formatFullCurrency(slice.displayAmount), `${pct}%`]);
+        (slice.breakdown || []).forEach((item) => {
+          rows.push([slice.label, item.label, breakdownAmount(item.amount), '']);
+        });
+      });
+      if (grossProfitData.cogsNote) rows.push([grossProfitData.cogsNote]);
+    } else {
+      rows.push(['No finance data available for this period. Run integration to sync finance data.']);
+    }
+    rows.push([]);
+
+    // Account health detail (2x2 grid)
+    rows.push(['Account Health Detail']);
+    rows.push(['Metric', 'Status', 'Details']);
+    accountHealthDetail.forEach((item) => {
+      rows.push([
+        item.label,
+        pillLabel(item.isError ? STATUS.FIX : STATUS.GOOD),
+        item.message || (item.isError ? 'Needs attention — see Account Issues for details.' : 'No issues detected.'),
+      ]);
+    });
+    rows.push([]);
+
+    // Issue mix
+    const issueMixTotal = issueMix.reduce((sum, c) => sum + c.count, 0);
+    rows.push(['Issue Mix']);
+    rows.push([`Where the ${issueMixTotal.toLocaleString()} open issues sit. Counts, not urgency.`]);
+    rows.push(['Category', 'Open Issues']);
+    issueMix.forEach((c) => rows.push([c.label, c.count.toLocaleString()]));
+    rows.push([]);
+
+    // QMate noticed card
+    rows.push(['QMate Noticed']);
+    if (topProduct) {
+      let noticed = topProduct.productName || topProduct.asin;
+      if ((topProduct.profitImpact || 0) > 0) {
+        noticed += ` has about ${formatFullCurrency(topProduct.profitImpact)}${topProduct.amountIsEstimated ? '*' : ''} of profit in play.`;
+      }
+      if (topProduct.why) noticed += ` ${topProduct.why}`;
+      rows.push([noticed]);
+    } else {
+      rows.push(['No single product stands out as needing attention right now.']);
+    }
+
+    return rows;
+  };
 
   return (
     <div

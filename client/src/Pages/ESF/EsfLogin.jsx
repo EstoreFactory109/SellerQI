@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Eye, EyeOff, Mail, Lock, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, ArrowRight, Loader2, AlertCircle, Send, CheckCircle, ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import axiosInstance from '../../config/axios.config.js';
 
@@ -10,24 +10,25 @@ export default function EsfLogin() {
   const [errors, setErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  // 'password' — the usual form. 'link' — "Log in as a member": staff who joined by
+  // invitation have no password, so they get a one-time sign-in link by email.
+  const [mode, setMode] = useState('password');
+  const [linkSentMessage, setLinkSentMessage] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
-  // Already signed in? Skip the form.
-  useEffect(() => {
-    const check = async () => {
-      try {
-        const res = await axiosInstance.get('/app/esf/me');
-        if (res.data?.statusCode === 200) navigate('/esf/clients', { replace: true });
-      } catch (_) {
-        // not signed in - stay on the login form
-      }
-    };
-    check();
-  }, [navigate]);
+  // Already signed in (here or in another portal)? LoginPageGuard in App.jsx has
+  // already sent the visitor on before this renders.
+
+  const switchMode = (next) => {
+    setMode(next);
+    setErrors({});
+    setErrorMessage('');
+    setLinkSentMessage('');
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -48,16 +49,38 @@ export default function EsfLogin() {
     } else if (!emailRegex.test(formData.email)) {
       newErrors.email = 'Please enter a valid email address';
     }
-    if (!formData.password) {
+    if (mode === 'password' && !formData.password) {
       newErrors.password = 'Password is required';
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
+  const handleSendLink = async () => {
+    setIsLoading(true);
+    setErrorMessage('');
+    try {
+      const res = await axiosInstance.post('/app/esf/login-link', { email: formData.email });
+      setLinkSentMessage(res.data?.message || 'Check your inbox for a sign-in link.');
+    } catch (err) {
+      const status = err.response?.status;
+      setErrorMessage(
+        status === 429
+          ? 'Too many attempts. Please wait a moment and try again.'
+          : err.response?.data?.message || 'Could not send the sign-in link. Please try again.'
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validateForm()) return;
+    if (mode === 'link') {
+      handleSendLink();
+      return;
+    }
     setIsLoading(true);
     setErrorMessage('');
     try {
@@ -78,6 +101,10 @@ export default function EsfLogin() {
         setErrorMessage(err.response?.data?.message || 'This account does not have access to the eStore Factory portal.');
       } else if (status === 404) {
         setErrorMessage('No portal account found with this email.');
+      } else if (status === 401 && err.response?.data?.data?.useLoginLink) {
+        // Joined by invitation, so there is no password to type — offer the link.
+        switchMode('link');
+        setErrorMessage(err.response.data.message);
       } else if (status === 401) {
         setErrorMessage('Invalid email or password.');
       } else if (status === 429) {
@@ -118,8 +145,14 @@ export default function EsfLogin() {
                   className="h-10 w-auto"
                 />
               </motion.div>
-              <h1 className="text-xl lg:text-2xl font-bold text-gray-100 mb-2">Welcome Back</h1>
-              <p className="text-gray-500 text-sm">Sign in to the eStore Factory portal</p>
+              <h1 className="text-xl lg:text-2xl font-bold text-gray-100 mb-2">
+                {mode === 'link' ? 'Log in as a member' : 'Welcome Back'}
+              </h1>
+              <p className="text-gray-500 text-sm">
+                {mode === 'link'
+                  ? 'Enter your email and we will send you a one-time sign-in link'
+                  : 'Sign in to the eStore Factory portal'}
+              </p>
             </div>
 
             {errorMessage && (
@@ -130,6 +163,17 @@ export default function EsfLogin() {
               >
                 <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
                 <p className="text-red-400 text-sm">{errorMessage}</p>
+              </motion.div>
+            )}
+
+            {linkSentMessage && (
+              <motion.div
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mb-4 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-start gap-2"
+              >
+                <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                <p className="text-emerald-300 text-sm">{linkSentMessage}</p>
               </motion.div>
             )}
 
@@ -159,6 +203,7 @@ export default function EsfLogin() {
                 )}
               </div>
 
+              {mode === 'password' && (
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">Password</label>
                 <div className="relative">
@@ -190,6 +235,7 @@ export default function EsfLogin() {
                   </motion.p>
                 )}
               </div>
+              )}
 
               <button
                 type="submit"
@@ -198,6 +244,11 @@ export default function EsfLogin() {
               >
                 {isLoading ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
+                ) : mode === 'link' ? (
+                  <>
+                    <Send className="w-4 h-4" />
+                    {linkSentMessage ? 'Send again' : 'Send link'}
+                  </>
                 ) : (
                   <>
                     Sign in
@@ -206,6 +257,27 @@ export default function EsfLogin() {
                 )}
               </button>
             </form>
+
+            <div className="mt-4 text-center">
+              {mode === 'password' ? (
+                <button
+                  type="button"
+                  onClick={() => switchMode('link')}
+                  className="text-sm font-medium text-blue-400 hover:text-blue-300 hover:underline transition-colors"
+                >
+                  Log in as a member
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => switchMode('password')}
+                  className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-400 hover:text-gray-200 transition-colors"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  Sign in with a password instead
+                </button>
+              )}
+            </div>
 
             <p className="mt-4 text-xs text-gray-500 border-t border-white/10 pt-4 text-center">
               Internal portal. Accounts are created by an existing team member.

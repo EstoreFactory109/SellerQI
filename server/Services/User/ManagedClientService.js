@@ -9,6 +9,7 @@
  */
 const mongoose = require('mongoose');
 const UserModel = require('../../models/user-auth/userModel.js');
+const AccountMember = require('../../models/user-auth/AccountMemberModel.js');
 const SellerCentralModel = require('../../models/user-auth/sellerCentralModel.js');
 const { esfClientLabel } = require('./esfClientLabel.js');
 const { getUserByEmail } = require('./userServices.js');
@@ -53,6 +54,10 @@ const createManagedClient = async ({
     const existing = await getUserByEmail(email);
     if (existing) {
         return { ok: false, status: 409, message: 'User already exists' };
+    }
+    // That address signs in as a member of another account; it cannot be a login too.
+    if (await AccountMember.exists({ email: String(email).trim().toLowerCase() })) {
+        return { ok: false, status: 409, message: 'That email is already a member of a SellerQI account' };
     }
 
     try {

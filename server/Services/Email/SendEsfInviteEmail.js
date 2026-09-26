@@ -95,7 +95,7 @@ const sendEsfInviteEmail = async ({ email, role, inviterName, inviteLink, expire
             `Email: ${email}\nRole: ${ROLE_LABELS[role] || ROLE_LABELS.member}\n` +
             `Invitation expires: ${expiresOn}\n\n` +
             `Accept the invitation: ${inviteLink}\n\n` +
-            `You will be asked to add your name, phone number and a password. Your email address is fixed by this invitation.\n\n` +
+            `Accepting signs you straight in - no form and no password. Next time, choose "Log in as a member" on the sign-in page to get an emailed sign-in link.\n\n` +
             `If you were not expecting this invitation, you can safely ignore this email.\n\n` +
             `Need help? Contact support@sellerqi.com`;
 

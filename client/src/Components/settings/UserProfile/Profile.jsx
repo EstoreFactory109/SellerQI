@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from "react";
-import EmailAddresses from './EmailAddresses.jsx';
 import ProfilePic from "./ProfilePic";
 import Upload from "./Upload";
 import Preview from "./Preview";
@@ -35,6 +34,9 @@ export default function ProfileForm() {
 
   // Check if current session is a super admin session
   const isSuperAdminSession = Details?.isSuperAdminSession === true;
+  // A member signed in to this account sees the owner's details but cannot change
+  // them (the server refuses too - middlewares/Auth/ownerOnly.js).
+  const isMemberSession = Details?.isMemberSession === true;
 
   const [firstNameStatus, setFirstNameStatus] = useState(true);
   const [firstNameColor, setFirstNameColor] = useState('#9ba3ad');
@@ -186,11 +188,20 @@ export default function ProfileForm() {
       {/* Content Section */}
       <div className="p-4">
         {/* Profile Image Section */}
+        {isMemberSession ? (
+          <div className="mb-4 flex items-start gap-2 rounded-xl border border-blue-400/30 bg-blue-500/10 px-3 py-2.5">
+            <Lock className="w-4 h-4 text-blue-300 shrink-0 mt-0.5" />
+            <p className="text-sm text-blue-200">
+              You are signed in as a member. These are the account owner&apos;s details — only the owner can change them.
+            </p>
+          </div>
+        ) : (
         <div className="mb-4">
           {(!pic || pic.length === 0) && <Upload handleFile={handleFile} />}
           {!close && <Preview image={image} setImage={setImage} setClose={setClose} />}
           {(pic !== null && pic.length !== 0) && <ProfilePic handleFile={handleFile} setClose={setClose} />}
         </div>
+        )}
 
         {/* Form Section */}
         <form className="space-y-4" onSubmit={handleSubmit}>
@@ -208,6 +219,7 @@ export default function ProfileForm() {
                 toggleEdit(setFirstNameStatus, setFirstNameColor, firstNameStatus);
               }}
               icon={User}
+              readOnly={isMemberSession}
             />
 
             {/* Last Name */}
@@ -223,6 +235,7 @@ export default function ProfileForm() {
                 toggleEdit(setLastNameStatus, setLastNameColor, lastNameStatus);
               }}
               icon={User}
+              readOnly={isMemberSession}
             />
 
             {/* Phone */}
@@ -238,6 +251,7 @@ export default function ProfileForm() {
                 toggleEdit(setPhoneStatus, setPhoneColor, phoneStatus);
               }}
               icon={Phone}
+              readOnly={isMemberSession}
             />
 
             {/* Whatsapp */}
@@ -253,6 +267,7 @@ export default function ProfileForm() {
                 toggleEdit(setWhatsappStatus, setWhatsappColor, whatsappStatus);
               }}
               icon={Phone}
+              readOnly={isMemberSession}
             />
 
             {/* Email */}
@@ -269,6 +284,7 @@ export default function ProfileForm() {
                   toggleEdit(setEmailStatus, setEmailColor, emailStatus);
                 }}
                 icon={Mail}
+                readOnly={isMemberSession}
               />
             </div>
           </div>
@@ -277,6 +293,7 @@ export default function ProfileForm() {
         </form>
 
         {/* Save Button */}
+        {!isMemberSession && (
         <div className="flex justify-end pt-4 border-t border-[#30363d] mt-4">
           <button
             type="submit"
@@ -291,9 +308,7 @@ export default function ProfileForm() {
             )}
           </button>
         </div>
-
-        {/* Additional email addresses */}
-        <EmailAddresses />
+        )}
 
         {/* Super Admin: Password Update Section */}
         {isSuperAdminSession && (
@@ -398,7 +413,7 @@ export default function ProfileForm() {
 }
 
 // Updated InputField component with modern styling
-const InputField = ({ label, value, editable, color, name, func, onEdit, icon: Icon }) => (
+const InputField = ({ label, value, editable, color, name, func, onEdit, icon: Icon, readOnly = false }) => (
   <div className="space-y-2">
     <label className="block text-sm font-semibold text-gray-100">{label}</label>
     <div className="relative">
@@ -420,6 +435,8 @@ const InputField = ({ label, value, editable, color, name, func, onEdit, icon: I
           borderColor: editable ? '#30363d' : (color === '#333651' ? '#3b82f6' : '#30363d')
         }}
       />
+      {/* No edit (pencil) button when read-only - a member viewing the owner's details. */}
+      {!readOnly && (
       <button
         type="button"
         className={`absolute inset-y-0 right-0 px-3 flex items-center transition-all duration-200 rounded-r-xl ${
@@ -431,6 +448,7 @@ const InputField = ({ label, value, editable, color, name, func, onEdit, icon: I
       >
         <Edit3 className="w-4 h-4" />
       </button>
+      )}
     </div>
   </div>
 );

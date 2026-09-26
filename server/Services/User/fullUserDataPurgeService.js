@@ -128,6 +128,7 @@ const ReviewOrder = require('../../models/review/ReviewOrderModel.js');
 const ListingFixStatus = require('../../models/system/ListingFixStatusModel.js');
 const WhatsAppLink = require('../../models/user-auth/WhatsAppLinkModel.js');
 const EsfInvite = require('../../models/user-auth/EsfInviteModel.js');
+const AccountMember = require('../../models/user-auth/AccountMemberModel.js');
 
 // Billing history — purged only for an admin's manual delete, see below.
 const Subscription = require('../../models/user-auth/SubscriptionModel.js');
@@ -141,6 +142,9 @@ const collectionsWithUser = [
     // invite links.
     { model: EsfInvite, key: 'invitedBy' },
     { model: EsfInvite, key: 'acceptedUserId' },
+    // Members of this seller account. They have no data of their own; without the
+    // account they belong to, their invitations and sign-ins are meaningless.
+    { model: AccountMember, key: 'owner' },
     { model: ListingItemsKeyword, key: 'User' },
     { model: ListingItems, key: 'User' },
     { model: BuyBoxData, key: 'User' },

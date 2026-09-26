@@ -19,6 +19,7 @@ const {
   marketplaceTodayStr,
   marketplaceYesterdayStr,
   getMarketplaceTimezone,
+  addDaysToDateStr,
 } = require('../../utils/marketplaceTimezone.js');
 const { itemSalesForRow, warnIfRateLooksWrong } = require('../../utils/marketplaceTax.js');
 
@@ -1290,7 +1291,7 @@ function parseSalesReportRows(reportRows, country) {
 /**
  * Which days this run may DELETE before reinserting.
  *
- * Two kinds of day qualify:
+ * Three kinds of day qualify:
  *   1. Days that produced fresh buckets — the normal case.
  *   2. Days the report positively COVERED but which produced no bucket at all. Seeing any row for
  *      a day (even a cancelled one) proves the report covers it, so "nothing survived the filters"
@@ -1298,9 +1299,20 @@ function parseSalesReportRows(reportRows, country) {
  *      value forever: a real US account read 20.73 for 2026-07-11 against Seller Central's 0.00,
  *      because the report returned just one `Cancelled` row, which is correctly dropped, so the
  *      day produced no bucket and was never cleared.
+ *   3. INTERIOR GAP days — days inside the window that produced no row at all, but which have report
+ *      rows both BEFORE and AFTER them. Case 2 keys off `daysSeen`, which is built from each row's
+ *      marketplace-local day. That works when a day keeps at least one row, but not when EVERY order
+ *      on a day moves to the adjacent day — which is exactly what the marketplace-local bucketing
+ *      fix did to non-Pacific marketplaces. Such a day vanishes from `daysSeen` entirely and looks
+ *      identical to a day the report never mentioned, so its stale pre-fix row survived forever and
+ *      was double-counted against the day the order moved to. Observed on an AU account: the same
+ *      $69.99 order sat on both 2026-08-25 (stale) and 2026-08-26 (correct).
  *
- * A day the report says NOTHING about is deliberately absent — that is the aged-out case that once
- * wiped a settled May 28 to $0, and it must keep its existing data.
+ * A day the report says NOTHING about, with nothing after it, is deliberately absent — that is the
+ * aged-out case that once wiped a settled May 28 to $0, and it must keep its existing data. Case 3
+ * is safe against precisely that case because an aged-out or partial report TRUNCATES: it drops a
+ * trailing range, it does not punch a hole in the middle. A missing day with rows on both sides
+ * cannot be produced by truncation, so it is positive evidence of coverage, not absence of evidence.
  *
  * Everything is clamped to [startDate, endDate] so `datesToClear ⊆ requested range` holds. That
  * invariant is what stops one chunk's clear from deleting a neighbouring chunk's fresh rows.
@@ -1320,6 +1332,24 @@ function resolveDatesToClear({ reportRows, daysSeen, country, startDate, endDate
     datesToClear.add(d);
     zeroedDays.add(d);
   }
+
+  // Case 3: interior gaps — a day with report rows on BOTH immediate neighbours.
+  //
+  // The bracket is deliberately the two adjacent days, not "anywhere before and anywhere after".
+  // A span-based test would clear an entire window from a single row at each end, so one hole in
+  // Amazon's data could zero everything between. Requiring d-1 and d+1 is the exact signature of the
+  // defect being corrected — the bucketing shift moves orders by exactly one day — and it cannot
+  // cascade: each day is judged only against rows immediately beside it.
+  for (const d of seen) {
+    if (!d) continue;
+    const gap = addDaysToDateStr(d, 1);
+    if (seen.has(gap) || datesToClear.has(gap)) continue;
+    if (!seen.has(addDaysToDateStr(gap, 1))) continue;   // no row after the gap: could be truncation
+    if (gap < startDate || gap > endDate) continue;      // keep datesToClear ⊆ requested range
+    datesToClear.add(gap);
+    zeroedDays.add(gap);
+  }
+
   return { datesToClear: [...datesToClear], zeroedDays: [...zeroedDays].sort() };
 }
 
@@ -2411,7 +2441,7 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
   if (zeroedDays.length > 0) {
     // Worth a log line: this is the path that takes a day DOWN to $0, so it should be visible if
     // it ever fires unexpectedly.
-    logger.info(`[Step1] ${zeroedDays.join(', ')}: report covered these day(s) but no order survived the filters (e.g. all cancelled) — clearing them to $0 rather than leaving a stale value.`);
+    logger.info(`[Step1] ${zeroedDays.join(', ')}: report covered these day(s) but they produced no bucket — every order was filtered out (e.g. all cancelled) or moved to an adjacent day under marketplace-local bucketing. Clearing them to $0 rather than leaving a stale value.`);
   }
 
   const saved = await persistDailyBuckets({ userId, country: country.toUpperCase(), regionModel, marketplaceId, skuBuckets, overheadBuckets, datesToClear: [...datesToClear] });

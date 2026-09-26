@@ -3,6 +3,7 @@ const {ApiError}=require('../../utils/ApiError');
 const asyncHandler = require('../../utils/AsyncHandler');
 const logger = require('../../utils/Logger');
 const { ApiResponse } = require('../../utils/ApiResponse');
+const AccountMember = require('../../models/user-auth/AccountMemberModel.js');
 
 const auth=asyncHandler(async(req,res,next)=>{
     const accesstoken=req.cookies.IBEXAccessToken;
@@ -50,6 +51,19 @@ const auth=asyncHandler(async(req,res,next)=>{
 
     if(decoded.isvalid){
         req.userId=decoded.tokenData;
+
+        // A member signed in to this account (their token names them - see
+        // createAccessToken). Once the owner removes them the row is gone, and this
+        // refuses every request their token makes, cookie or no cookie.
+        if(decoded.memberId){
+            const stillMember=await AccountMember.exists({_id:decoded.memberId,owner:decoded.tokenData,status:'active'});
+            if(!stillMember){
+                logger.warn(`Refused a request from removed member ${decoded.memberId} of account ${decoded.tokenData}`);
+                return res.status(401).json(new ApiResponse(401,"","Your access to this account has been removed"));
+            }
+            req.memberId=decoded.memberId;
+        }
+
         next();
     }else{
         return res.status(401).json(new ApiResponse(401,"","Access token expired"));

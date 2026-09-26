@@ -26,6 +26,16 @@ const esfInviteSchema = new mongoose.Schema(
             // Indexed by the partial-unique index below, not here — declaring
             // both makes Mongoose warn about a duplicate index.
         },
+        /**
+         * Optional display name chosen by the inviter. Accepting no longer asks the
+         * recipient for anything, so without this they would show up as a bare address.
+         */
+        name: {
+            type: String,
+            trim: true,
+            maxlength: 50,
+            default: null,
+        },
         /** Starting role. 'owner' is never invitable — there is exactly one, seeded. */
         role: {
             type: String,

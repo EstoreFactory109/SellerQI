@@ -3,17 +3,20 @@ import { useSearchParams } from 'react-router-dom';
 import EsfProfile from '../../Components/ESF/EsfProfile.jsx';
 import EsfPassword from '../../Components/ESF/EsfPassword.jsx';
 import Support from '../../Components/settings/Support/Support.jsx';
+import { useEsfUser } from '../../contexts/EsfUserContext.js';
 
 const EsfSettings = () => {
   const [searchParams] = useSearchParams();
   const currentTab = searchParams.get('tab') || 'profile';
+  // Only the owner has a password; admins and members sign in by emailed link.
+  const canChangePassword = useEsfUser()?.isOwner === true;
 
   const renderContent = () => {
     switch (currentTab) {
       case 'profile':
         return <EsfProfile />;
       case 'password':
-        return <EsfPassword />;
+        return canChangePassword ? <EsfPassword /> : <EsfProfile />;
       case 'support':
         return <Support />;
       default:
