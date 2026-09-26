@@ -380,10 +380,12 @@ function buildGroupsFromTasks(tasks, options = {}) {
 }
 
 /**
- * Load an account's tasks and build ranked groups from them.
+ * Load one marketplace's tasks and build ranked groups from them.
  *
- * Tasks are stored per user, not per marketplace (TaskItem has no country/region),
- * so country/region are accepted only for logging symmetry with the caller.
+ * country/region scope the read. They used to be accepted for logging only, which
+ * meant every marketplace of a multi-marketplace seller was ranked from the same
+ * combined pool — a UK-only issue could be presented as a US opportunity.
+ * Omitting them keeps the old user-wide behaviour rather than matching nothing.
  *
  * @param {string} userId
  * @param {string} [country]
@@ -393,7 +395,7 @@ async function getTaskOpportunityGroups(userId, country = null, region = null) {
     const startTime = Date.now();
 
     try {
-        const tasks = await TaskItem.find({ userId })
+        const tasks = await TaskItem.find(TaskItem.scopeFilter(userId, country, region))
             .select('taskId productName asin errorCategory errorType amount amountIsEstimated status')
             .lean();
 
@@ -635,8 +637,8 @@ async function loadProductNameMap(userId, country) {
 /**
  * Load an account's tasks, attribute its ad waste, and rank its products.
  *
- * country/region are required here (unlike the issue-level groups) because the
- * campaign→ASIN index is marketplace-scoped even though TaskItem is not.
+ * country/region scope BOTH the task read and the campaign→ASIN index, so the
+ * products ranked here belong to the marketplace being asked about.
  */
 async function getTopProductsToFix(userId, country, region, options = {}) {
     const startTime = Date.now();
@@ -645,7 +647,7 @@ async function getTopProductsToFix(userId, country, region, options = {}) {
         // Project only the two renderData fields ad attribution needs. Pulling the
         // whole blob would drag every keyword/search-term string and metric along
         // with it — needless weight on an account with tens of thousands of tasks.
-        const tasks = await TaskItem.find({ userId })
+        const tasks = await TaskItem.find(TaskItem.scopeFilter(userId, country, region))
             .select('taskId productName asin errorCategory errorType amount amountIsEstimated capitalAmount renderData.campaignId renderData.campaignName status')
             .lean();
 

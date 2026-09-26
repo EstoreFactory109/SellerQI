@@ -16,6 +16,19 @@ const TaskItemSchema = new mongoose.Schema({
         required: true,
         index: true
     },
+    // Marketplace this task belongs to. Tasks used to be keyed by user alone, so a
+    // seller with several marketplaces got one shared pool: the US view was built
+    // from UK products, and the same ASIN failing in two marketplaces collided on
+    // the dedup index so only one survived. Optional rather than required so the
+    // rows written before this change stay readable until they are backfilled.
+    country: {
+        type: String,
+        index: true
+    },
+    region: {
+        type: String,
+        index: true
+    },
     taskId: {
         type: String,
         required: true
@@ -88,19 +101,44 @@ const TaskItemSchema = new mongoose.Schema({
 // Index for efficient queries by user
 TaskItemSchema.index({ userId: 1, createdAt: -1 });
 
-// Compound index for deduplication: unique task per user based on asin + errorCategory + errorType
-TaskItemSchema.index({ userId: 1, asin: 1, errorCategory: 1, errorType: 1 }, { unique: true });
+// Deduplication key. country/region are part of it because the same ASIN can fail
+// the same way in two marketplaces and both are real, separate pieces of work —
+// without them the second insert is rejected as a duplicate and silently lost.
+// The previous index ({userId, asin, errorCategory, errorType}) has to be dropped
+// explicitly; see scripts/migrateScopeTasksToMarketplace.js.
+TaskItemSchema.index(
+    { userId: 1, country: 1, region: 1, asin: 1, errorCategory: 1, errorType: 1 },
+    { unique: true, name: 'task_dedup_marketplace' }
+);
+
+// Primary read path: one marketplace's tasks.
+TaskItemSchema.index({ userId: 1, country: 1, region: 1 });
 
 // Index for status queries
 TaskItemSchema.index({ userId: 1, status: 1 });
 
 /**
- * Find all tasks for a user
+ * Build a {userId, country?, region?} filter.
+ *
+ * The marketplace is applied only when supplied. A caller that has not been
+ * updated therefore keeps its old, user-wide behaviour rather than matching
+ * nothing — filtering on `country: undefined` would silently empty a seller's
+ * task list, which is a worse failure than the mixing this replaces.
+ */
+TaskItemSchema.statics.scopeFilter = function(userId, country = null, region = null) {
+    const filter = { userId };
+    if (country) filter.country = country;
+    if (region) filter.region = region;
+    return filter;
+};
+
+/**
+ * Find all tasks for a user, optionally limited to one marketplace.
  */
 TaskItemSchema.statics.findByUserId = function(userId, options = {}) {
-    const { limit, skip, status, sort = { createdAt: -1 } } = options;
-    
-    const query = this.find({ userId });
+    const { limit, skip, status, sort = { createdAt: -1 }, country = null, region = null } = options;
+
+    const query = this.find(this.scopeFilter(userId, country, region));
     
     if (status) {
         query.where('status', status);
@@ -125,8 +163,8 @@ TaskItemSchema.statics.findByUserId = function(userId, options = {}) {
  * Get task identifiers for deduplication
  * Returns a Set of "asin-errorCategory-errorType" strings
  */
-TaskItemSchema.statics.getTaskIdentifiers = async function(userId) {
-    const tasks = await this.find({ userId })
+TaskItemSchema.statics.getTaskIdentifiers = async function(userId, country = null, region = null) {
+    const tasks = await this.find(this.scopeFilter(userId, country, region))
         .select('asin errorCategory errorType')
         .lean();
     
@@ -136,23 +174,29 @@ TaskItemSchema.statics.getTaskIdentifiers = async function(userId) {
 /**
  * Delete completed tasks for a user (used during renewal)
  */
-TaskItemSchema.statics.deleteCompletedTasks = function(userId) {
-    return this.deleteMany({ userId, status: 'completed' });
+TaskItemSchema.statics.deleteCompletedTasks = function(userId, country = null, region = null) {
+    return this.deleteMany({ ...this.scopeFilter(userId, country, region), status: 'completed' });
 };
 
 /**
- * Delete all tasks for a user
+ * Delete a user's tasks, for ONE marketplace when it is given.
+ *
+ * Weekly renewal calls this before re-inserting. Unscoped, one marketplace's
+ * rebuild wiped every other marketplace's tasks as a side effect.
  */
-TaskItemSchema.statics.deleteByUserId = function(userId) {
-    return this.deleteMany({ userId });
+TaskItemSchema.statics.deleteByUserId = function(userId, country = null, region = null) {
+    return this.deleteMany(this.scopeFilter(userId, country, region));
 };
 
 /**
  * Count tasks by status for a user
  */
-TaskItemSchema.statics.countByStatus = async function(userId) {
+TaskItemSchema.statics.countByStatus = async function(userId, country = null, region = null) {
+    const match = { userId: typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId };
+    if (country) match.country = country;
+    if (region) match.region = region;
     const results = await this.aggregate([
-        { $match: { userId: new mongoose.Types.ObjectId(userId) } },
+        { $match: match },
         { $group: { _id: '$status', count: { $sum: 1 } } }
     ]);
     
@@ -168,7 +212,7 @@ TaskItemSchema.statics.countByStatus = async function(userId) {
 /**
  * Bulk insert tasks in chunks to avoid memory issues
  */
-TaskItemSchema.statics.bulkInsertTasks = async function(userId, tasks, chunkSize = 500) {
+TaskItemSchema.statics.bulkInsertTasks = async function(userId, tasks, chunkSize = 500, country = null, region = null) {
     if (!tasks || tasks.length === 0) return { insertedCount: 0 };
     
     let insertedCount = 0;
@@ -178,6 +222,10 @@ TaskItemSchema.statics.bulkInsertTasks = async function(userId, tasks, chunkSize
         const chunk = tasks.slice(i, i + chunkSize);
         const docsToInsert = chunk.map(task => ({
             userId: userObjectId,
+            // Per-task values win so a caller can mix marketplaces in one batch;
+            // the arguments are the default for the usual single-marketplace call.
+            country: task.country || country,
+            region: task.region || region,
             taskId: task.taskId,
             productName: task.productName,
             asin: task.asin,
