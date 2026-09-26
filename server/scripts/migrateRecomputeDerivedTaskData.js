@@ -241,10 +241,21 @@ async function taskStats(userId) {
 async function captureProgress(userId) {
     const rows = await TaskItem.find(
         { userId, status: { $ne: 'pending' } },
-        { asin: 1, errorCategory: 1, errorType: 1, status: 1 }
+        { asin: 1, errorCategory: 1, errorType: 1, status: 1, country: 1, region: 1 }
     ).lean();
+    // country/region are part of the key because they are part of the dedup
+    // identity. Without them the same ASIN failing the same way in two
+    // marketplaces matches both rows, and updateOne would reapply the seller's
+    // "completed" to whichever it happened to hit — losing it on the real one.
     return rows.map((r) => ({
-        key: { userId, asin: r.asin, errorCategory: r.errorCategory, errorType: r.errorType },
+        key: {
+            userId,
+            asin: r.asin,
+            errorCategory: r.errorCategory,
+            errorType: r.errorType,
+            ...(r.country ? { country: r.country } : {}),
+            ...(r.region ? { region: r.region } : {})
+        },
         status: r.status
     }));
 }
@@ -264,9 +275,12 @@ async function restoreProgress(progress) {
  * what the weekly boundary itself does, so no new code path is involved; an
  * account with no marker at all already builds a full set.
  */
-async function forceRebuildBranch(userId) {
+async function forceRebuildBranch(userId, country = null, region = null) {
     const past = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    await Task.updateOne({ userId }, { $set: { taskRenewalDate: past } });
+    const filter = { userId };
+    if (country) filter.country = country;
+    if (region) filter.region = region;
+    await Task.updateOne(filter, { $set: { taskRenewalDate: past } });
 }
 
 /**
@@ -390,10 +404,12 @@ async function processUser(account, index, total) {
     const progress = doTasks ? await captureProgress(userId) : [];
     if (progress.length > 0) log(`${label}   preserving ${progress.length} seller-set task status(es)`);
 
-    // Only the first marketplace rebuilds tasks; the rest add, mirroring production.
-    if (doTasks) await forceRebuildBranch(userId);
-
+    // Every marketplace rebuilds its OWN tasks. Tasks used to be one shared pool
+    // per user, so only the first could rebuild and the rest had to append or
+    // they would have wiped each other; now that each row carries its
+    // marketplace, a rebuild only ever touches its own.
     for (const m of marketplaces) {
+        if (doTasks) await forceRebuildBranch(userId, m.country, m.region);
         const result = await withTimeout(
             recomputeMarketplace(userId, m.country, m.region, doTasks),
             TIMEOUT_MS,
