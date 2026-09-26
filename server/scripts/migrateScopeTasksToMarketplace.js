@@ -54,6 +54,14 @@
  *   node server/scripts/migrateScopeTasksToMarketplace.js            # report only
  *   node server/scripts/migrateScopeTasksToMarketplace.js --apply    # do it
  *   node server/scripts/migrateScopeTasksToMarketplace.js --apply --skip-indexes
+ *
+ * PHASED (recommended, because a push to main deploys immediately):
+ *   1. before deploy:  --apply --skip-multi     # stamp + swap indexes; old code
+ *                                               # ignores the new fields, so this
+ *                                               # is a no-op for what is running
+ *   2. deploy
+ *   3. after deploy:   --apply                  # clear the multi-marketplace
+ *                                               # accounts, then recompute them
  */
 
 const path = require('path');
@@ -73,6 +81,10 @@ const Task = require('../models/MCP/TaskModel.js');
 const hasFlag = (n) => process.argv.slice(2).includes(`--${n}`);
 const APPLY = hasFlag('apply');
 const SKIP_INDEXES = hasFlag('skip-indexes');
+// Multi-marketplace accounts are cleared for a scoped rebuild. That rebuild has
+// to be done by the NEW code, so this phase is skipped on a pre-deploy run and
+// done straight after the deploy.
+const SKIP_MULTI = hasFlag('skip-multi');
 const log = (...a) => console.log(...a);
 
 const OLD_TASKITEM_INDEX = 'userId_1_asin_1_errorCategory_1_errorType_1';
@@ -132,7 +144,7 @@ async function main() {
 
     // ── 2. clear multi-marketplace accounts for a scoped rebuild ────────────
     let clearedTasks = 0, clearedMeta = 0;
-    for (const m of multi) {
+    for (const m of (SKIP_MULTI ? [] : multi)) {
         const n = await TaskItem.countDocuments({ userId: m.userId });
         const places = m.mk.map((x) => `${x.country}-${x.region}`).join(',');
         log(`  ${m.userId}  ${places}  ${n} mixed task(s) ${APPLY ? '-> removing' : '-> would remove'}`);
@@ -145,8 +157,13 @@ async function main() {
             clearedTasks += n;
         }
     }
+    if (SKIP_MULTI) {
+        const pending = multi.reduce((n, m) => n + (m.mk ? 1 : 0), 0);
+        log(`multi-marketplace: SKIPPED (${pending} account(s)) — re-run without --skip-multi once the`);
+        log('  scoped code is deployed, so their rebuild writes rows that carry a marketplace.');
+    }
     log(`multi-marketplace: ${APPLY ? 'removed' : 'would remove'} ${clearedTasks} tasks, ${clearedMeta} metadata docs`);
-    if (multi.length > 0) {
+    if (multi.length > 0 && !SKIP_MULTI) {
         log('  -> rebuild these per marketplace with:');
         log(`     node server/scripts/migrateRecomputeDerivedTaskData.js --apply --user-id="${multi.map((m) => m.userId).join(',')}"`);
     }
