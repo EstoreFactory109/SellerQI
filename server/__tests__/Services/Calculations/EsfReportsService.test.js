@@ -1350,3 +1350,54 @@ describe('account health against live V2 shapes', () => {
         expect(healthRow(report, 'Shipments without valid tracking')).toBeUndefined();
     });
 });
+
+describe('the reference report layout: data both renderers draw', () => {
+    it('gives Monthly its two charts, drawn once as SVG, and a "vs" label for every change line', async () => {
+        latestMetricDays({ sales: '2026-08-31', ppc: '2026-08-31' });
+        SalesOnlyMetrics.aggregate
+            .mockResolvedValueOnce([{ totalSales: 150 }])
+            .mockResolvedValueOnce([{ totalSales: 100 }]);
+        PPCMetrics.aggregate
+            .mockResolvedValueOnce([{ adSales: 100, adSpend: 40 }])
+            .mockResolvedValueOnce([{ adSales: 80, adSpend: 50 }]);
+
+        const report = byKey(await getEsfReports(USER, 'UK', 'EU'), 'monthly-performance');
+
+        expect(report.tableTitle).toBe('Month on month');
+        expect(report.summary.comparisonLabel).toBe('vs Jul 2026');
+        expect(report.summary.charts.map((chart) => chart.title)).toEqual(['UK Sales Breakdown', 'UK ACOS vs TACOS']);
+        expect(report.summary.charts[0].svg).toMatch(/^<svg /);
+        // The marketplace's own currency, inside the chart too.
+        expect(report.summary.charts[0].svg).toContain('£150');
+        expect(report.summary.charts[0].svg).toContain('July');
+    });
+
+    it('builds the Key Takeaway from the highlights, lead line first', async () => {
+        Restock.findOne.mockReturnValue(mockFindOne({
+            createdAt: new Date('2026-01-01T00:00:00Z'),
+            Products: [{ asin: 'B1', merchantSku: 'S', price: '10', recommendedReplenishmentQty: '3', available: '0', alert: 'Urgent - Out of Stock', unfulfillable: '1' }],
+        }));
+        const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'inventory-restock');
+        // The lead line, then the first OTHER line that needs attention.
+        const flagged = report.highlights.find((h, i) => i > 0 && h.tone === 'watch');
+        expect(report.summary.takeaway).toBe(`${report.highlights[0].text} ${flagged.text}`);
+        // Never the account manager's placeholder.
+        expect(report.summary.takeaway).not.toMatch(/\[/);
+    });
+
+    it('writes money in sentences in the marketplace currency, and agrees verbs with counts', async () => {
+        Restock.findOne.mockReturnValue(mockFindOne({
+            createdAt: new Date('2026-01-01T00:00:00Z'),
+            Products: [{ asin: 'B1', merchantSku: 'S', price: '10', recommendedReplenishmentQty: '3', available: '5', unfulfillable: '1' }],
+        }));
+        const report = byKey(await getEsfReports(USER, 'IN', 'EU'), 'inventory-restock');
+        const text = report.highlights.map((h) => h.text).join(' ');
+        expect(text).toContain('about ₹30 at current prices');
+        expect(text).toContain('1 unit is unfulfillable');
+    });
+
+    it('reports no change against a negative baseline rather than a meaningless percentage', () => {
+        // Organic sales of -17 (ad sales above total) once gave "-7733%".
+        expect(pctChange(1297, -17)).toBeNull();
+    });
+});

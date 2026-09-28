@@ -3,7 +3,7 @@ import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { PALETTE } from '../../../Components/ESF/estoreFactoryTheme.js';
 import axiosInstance from '../../../config/axios.config.js';
-import ReportDocumentPreview, { reportNeedsLandscape, FULL_ROWS } from '../../../Components/ESF/ReportDocumentPreview.jsx';
+import ReportDocumentPreview, { reportNeedsLandscape, FULL_ROWS, POPPINS_HREF } from '../../../Components/ESF/ReportDocumentPreview.jsx';
 
 /**
  * Estore Factory > Reports.
@@ -76,6 +76,9 @@ const printReportDocument = (html, title, landscape = false) => {
     doc.write(
         '<!doctype html><html><head><meta charset="utf-8">'
         + `<title>${title.replace(/[<>]/g, '')}</title>`
+        // The report's typeface. Printed before it loads, the saved file
+        // silently falls back to Arial — see the fonts.ready wait below.
+        + `<link rel="stylesheet" href="${POPPINS_HREF}">`
         + '<style>'
         // Browsers drop background colours when printing unless told otherwise,
         // which would strip the navy banner and every flagged cell.
@@ -91,12 +94,26 @@ const printReportDocument = (html, title, landscape = false) => {
     );
     doc.close();
 
-    const done = () => {
+    let printed = false;
+    const print = () => {
+        if (printed) return;
+        printed = true;
         frame.contentWindow.focus();
         frame.contentWindow.print();
         // Left long enough for the print dialog to take its snapshot; removing
         // the frame too early cancels the job in some browsers.
         setTimeout(() => frame.remove(), 1500);
+    };
+
+    // Wait for Poppins, but never indefinitely: offline, the file still prints,
+    // in the fallback face.
+    const done = () => {
+        const fonts = frame.contentWindow.document.fonts;
+        if (fonts?.ready) {
+            Promise.race([fonts.ready, new Promise((resolve) => setTimeout(resolve, 2500))]).then(print);
+        } else {
+            print();
+        }
     };
 
     // about:blank documents written this way are usually ready immediately, but

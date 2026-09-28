@@ -256,7 +256,8 @@ const caveats = (report) => (report?.caveats || []).join(' ');
         check(scope, 'Premium tile counts exactly one', stat(audit, 'A+ Premium').value, 1);
         check(scope, 'caveat drops "not captured"', /captured from the next/.test(caveats(audit)), false);
         check(scope, 'PDF carries the column',
-            allText(buildReportDocDefinition(audit, {})).includes('A+ Premium'), true);
+            // Column headers are drawn in capitals, as in the reference report.
+            allText(buildReportDocDefinition(audit, {})).includes('A+ PREMIUM'), true);
 
         APlusPremium.findOne = stubFindOne(null);
         audit = (await getEsfReports(client._id, acc.country, acc.region))

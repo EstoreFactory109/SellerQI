@@ -110,7 +110,8 @@ describe('ESF Reports page', () => {
         await waitFor(() => {
             expect(screen.getAllByText('Inventory Restock').length).toBeGreaterThan(0);
         });
-        expect(screen.getByText('40 SKUs tracked across this marketplace')).toBeInTheDocument();
+        // In the panel, and again as the table's subtitle inside the document.
+        expect(screen.getAllByText('40 SKUs tracked across this marketplace').length).toBeGreaterThan(0);
     });
 
     it('renders the document preview with the report title and its bullets', async () => {
@@ -118,10 +119,12 @@ describe('ESF Reports page', () => {
         renderPage();
 
         await waitFor(() => expect(screen.getByText('report preview · scroll to read')).toBeInTheDocument());
-        // The template's own heading and highlight bullets, not the app chrome.
+        // The document's own sections, not the app chrome: the manager's
+        // placeholder now sits under Actions Taken, as in the reference report.
+        expect(screen.getByText('Executive Summary')).toBeInTheDocument();
         expect(screen.getByText('Performance Highlights')).toBeInTheDocument();
+        expect(screen.getByText('Actions Taken This Cycle')).toBeInTheDocument();
         expect(screen.getByText(/Purchase orders raised this cycle/)).toBeInTheDocument();
-        expect(screen.getByText(/Legend:/)).toBeInTheDocument();
     });
 
     it('states the reason on a report with no data and does not make it clickable', async () => {

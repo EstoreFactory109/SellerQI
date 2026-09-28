@@ -37,8 +37,8 @@ const arg = (name) => {
     return found ? found.split('=').slice(1).join('=') : null;
 };
 
-/** The tile band paints every cell with the template's light blue. */
-const TILE_FILL = '#DCE6F1';
+/** Every stat tile is painted with the brand's tile grey (reportBrand.js). */
+const TILE_FILL = require('../Services/Reports/reportBrand.js').BRAND.tile;
 
 let passed = 0;
 const failures = [];
@@ -47,13 +47,20 @@ const check = (scope, label, actual, expected) => {
     failures.push(`${scope} :: ${label} -> got ${actual}, expected ${expected}`);
 };
 
-/** Count the stat tiles the document definition will actually draw. */
+/**
+ * Count the stat tiles the document definition will actually draw. Tiles sit
+ * in rows of `columns`, one single-cell table each, so this walks the tree
+ * rather than reading one table's first row.
+ */
 const countTiles = (definition) => {
     let tiles = 0;
-    for (const node of definition.content) {
-        const row = node?.table?.body?.[0];
-        if (Array.isArray(row)) tiles += row.filter((cell) => cell && cell.fillColor === TILE_FILL).length;
-    }
+    const walk = (node) => {
+        if (!node || typeof node !== 'object') return;
+        if (Array.isArray(node)) { node.forEach(walk); return; }
+        if (node.fillColor === TILE_FILL) tiles += 1;
+        Object.values(node).forEach(walk);
+    };
+    walk(definition.content);
     return tiles;
 };
 

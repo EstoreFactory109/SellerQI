@@ -1,12 +1,21 @@
 /**
  * Report PDF renderer.
  *
- * Turns one report from EsfReportsService into the PDF a client is emailed,
- * reproducing the shared report template (report-template.html): navy title
- * banner, stat tiles, teal-ruled sections, a bordered data table, and the
- * Performance Highlights bullets.
+ * Turns one report from EsfReportsService into the PDF a client is emailed, in
+ * the layout of the Monthly Performance Report the team designed by hand
+ * (reportBrand.js has the palette and the reasons):
  *
- * WHY THIS REDRAWS THE TEMPLATE RATHER THAN PRINTING THE HTML
+ *   every page    logo and report title header over a red rule; a navy/red
+ *                 footer band carrying "eStore Factory · Page x of y"
+ *   Executive     red-barred section title and subtitle, grey stat tiles with
+ *   Summary       a "vs <period>" change line, a Key Takeaway box, and charts
+ *                 where the report has them
+ *   Detail        the report's table under its own section title, then any
+ *                 second table
+ *   Close         Performance Highlights (blue bar), Actions Taken (red bar)
+ *                 with the account manager's placeholders, notes, issue date
+ *
+ * WHY THIS REDRAWS THE LAYOUT RATHER THAN PRINTING THE HTML
  * The on-screen preview is React, and printing it would need a headless browser
  * on the EC2 box — Chromium plus ~20 apt packages that the deploy workflow
  * (npm ci + pm2 restart) does not install, so it would fail silently in
@@ -14,33 +23,17 @@
  *
  * The cost is that the LAYOUT exists twice: here and in
  * client/src/Components/ESF/ReportDocumentPreview.jsx. The DATA does not — both
- * render the same `report` payload, so the numbers can never disagree, only the
- * styling can. The palette below is the template's `:root`, copied verbatim, and
- * is the thing to keep in step if the design changes.
+ * render the same `report` payload, and the charts arrive in it already drawn
+ * as SVG — so the numbers can never disagree, only the styling can.
  *
- * Fonts are PDF's built-in Helvetica family: no font files to ship, and the
- * template already asks for Arial/Helvetica.
+ * Fonts: Poppins, shipped in server/assets/fonts (SIL Open Font License), which
+ * also draws ₹, zł and ₺. The change arrows are drawn triangles, since Poppins
+ * has no triangle glyphs.
  */
 const pdfmake = require('pdfmake');
-const { getCurrencyCode, getCurrencySymbol } = require('../../utils/marketplaceCurrency.js');
-
-/** report-template.html :root, verbatim. */
-const DOC = {
-    navy: '#1F3864',
-    teal: '#0E7C7B',
-    light: '#DCE6F1',
-    yellow: '#FFF2CC',
-    red: '#C00000',
-    green: '#1E7E34',
-    greenBg: '#E2EFDA',
-    blueInput: '#0000FF',
-    border: '#B7B7B7',
-    subtitle: '#D9E2F3',
-    zebra: '#FAFBFD',
-    ink: '#111111',
-    muted: '#888888',
-    tileLabel: '#555555',
-};
+const {
+    BRAND, COMPANY, FONT_DIR, FONT_FILES, LOGO_SVG, CHART_W, printableCurrency,
+} = require('./reportBrand.js');
 
 /** Rows per PDF. A 27,000-row catalogue is a spreadsheet, not a report. */
 const MAX_PDF_ROWS = 40;
@@ -57,12 +50,7 @@ const MAX_PDF_ROWS = 40;
  *
  * Measured rather than guessed: twelve columns with a realistic SKU need 561pt
  * even at 7pt type, and A4 portrait leaves 515pt. Landscape leaves 762pt.
- * Shrinking the type instead would have meant 6pt — unreadable, and still one
- * long SKU from overflowing again. reportPdfTableWidth.test.js pins both
- * numbers.
- *
- * Nine columns still fit portrait comfortably, so every report that fitted
- * before is laid out exactly as it was.
+ * reportPdfTableWidth.test.js pins both numbers.
  */
 const LANDSCAPE_COLUMN_THRESHOLD = 9;
 
@@ -72,10 +60,12 @@ const widestTableColumnCount = (report) => Math.max(
     report?.summary?.secondaryTable?.columns?.length || 0
 );
 
+const MARGIN_X = 40;
+
 /**
- * The 14 fonts every PDF reader has built in. pdfmake resolves these through
- * the same local-access hook it uses for real files, so they have to be named
- * explicitly in the allow-list below or font loading is denied.
+ * The 14 fonts every PDF reader has built in, plus the shipped Poppins files.
+ * pdfmake resolves both through the same local-access hook, so both have to be
+ * named in the allow-list below or font loading is denied.
  */
 const STANDARD_PDF_FONTS = new Set([
     'Courier', 'Courier-Bold', 'Courier-Oblique', 'Courier-BoldOblique',
@@ -89,62 +79,21 @@ let fontsRegistered = false;
 /**
  * pdfmake is a singleton, so fonts and access policies are registered once.
  *
- * The access policies are an allow-list of exactly the built-in font names:
- * these documents embed no images and reference no URLs, so any other file read
- * or network fetch is a bug at best. Report content is client data, and a
+ * The access policies are an allow-list: the built-in font names and the files
+ * in the shipped font folder, nothing else. These documents reference no URLs
+ * and no images outside themselves; report content is client data, and a
  * document generator that will fetch what its input tells it to is an SSRF
  * waiting to happen.
  */
 const ensureConfigured = () => {
     if (fontsRegistered) return;
     pdfmake.addFonts({
-        Helvetica: {
-            normal: 'Helvetica',
-            bold: 'Helvetica-Bold',
-            italics: 'Helvetica-Oblique',
-            bolditalics: 'Helvetica-BoldOblique',
-        },
-        // Only for the change arrows — see deltaArrow.
-        ZapfDingbats: {
-            normal: 'ZapfDingbats',
-            bold: 'ZapfDingbats',
-            italics: 'ZapfDingbats',
-            bolditalics: 'ZapfDingbats',
-        },
+        Poppins: { ...FONT_FILES },
     });
     pdfmake.setUrlAccessPolicy(() => false);
-    pdfmake.setLocalAccessPolicy((name) => STANDARD_PDF_FONTS.has(name));
+    pdfmake.setLocalAccessPolicy((name) => STANDARD_PDF_FONTS.has(name) || String(name).startsWith(FONT_DIR));
     fontsRegistered = true;
 };
-
-/**
- * The characters Helvetica can draw here: ASCII plus Windows-1252.
- *
- * The built-in fonts carry no other glyphs, and pdfmake does not fall back or
- * warn — it writes the character's two bytes as two Latin-1 glyphs. Found in
- * rendered output rather than in the document definition: "₹1,234" drew as
- * "¹1,234", and every "▲ 12.5%" change line on every tile drew as "%² 12.5%".
- */
-const WIN_ANSI = new Set([...'€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ']);
-for (let code = 0xA0; code <= 0xFF; code += 1) WIN_ANSI.add(String.fromCharCode(code));
-const drawable = (text) => [...String(text)].every((ch) => ch.charCodeAt(0) < 0x80 || WIN_ANSI.has(ch));
-
-/**
- * A currency symbol the page can actually draw. £, € and $ can; ₹, zł, ₺ and
- * the Gulf symbols cannot, and get the marketplace's ISO code instead —
- * "INR 1,234" rather than a symbol that prints as noise.
- */
-const pdfCurrency = (symbol, country) => {
-    if (drawable(symbol)) return symbol;
-    const code = getCurrencyCode(country);
-    return code ? `${code} ` : '';
-};
-
-/**
- * ▲ / ▼, from ZapfDingbats (one of the 14 fonts every reader has), since
- * Helvetica has neither. 's' and 't' are that font's up and down triangles.
- */
-const deltaArrow = (up) => ({ text: up ? 's' : 't', font: 'ZapfDingbats', fontSize: 6 });
 
 /** Mirrors formatCell in ReportDocumentPreview.jsx. */
 const formatCell = (value, format, currency) => {
@@ -163,172 +112,268 @@ const formatCell = (value, format, currency) => {
     return value.toLocaleString('en-GB');
 };
 
-/** The template's title banner. A one-cell table is how pdfmake fills a band. */
-const banner = (report, subtitle) => ({
-    table: {
-        widths: ['*'],
-        body: [[{
-            stack: [
-                { text: String(report.name || '').toUpperCase(), color: '#FFFFFF', bold: true, fontSize: 15, alignment: 'center' },
-                { text: subtitle, color: DOC.subtitle, italics: true, fontSize: 9, alignment: 'center', margin: [0, 4, 0, 0] },
-            ],
-            fillColor: DOC.navy,
-            border: [false, false, false, false],
-            margin: [0, 12, 0, 12],
-        }]],
-    },
-    layout: 'noBorders',
-    margin: [0, 0, 0, 14],
-});
-
-/** Tiles per row, matching the template's four-across stat band. */
-const TILES_PER_ROW = 4;
+/** Numbers sit right, as in the reference table; words sit left. */
+const isNumericColumn = (column, rows) => ['number', 'currency', 'money', 'percent'].includes(column.format)
+    || (rows.length > 0 && rows.every((row) => typeof row[column.key] === 'number' || row[column.key] === null
+        || row[column.key] === undefined || row[column.key] === '' || /^[-+—]|^[\d.,]+(%| pts|x)?$/.test(String(row[column.key]))));
 
 /**
- * The stat tiles, wrapped onto as many rows of four as the report needs.
- *
- * It used to render `stats.slice(0, 4)`, which silently dropped everything
- * past the fourth tile — and what got dropped was not filler: the Monthly
- * Performance report lost ACOS, Listings Audit lost four of its six content
- * checks, and Inventory Restock lost the total reorder value. The figures were
- * right; they simply never reached the page.
- *
- * The last row is padded with blank cells so a row of two does not stretch its
- * tiles to twice the width of the row above.
+ * Column widths: long text (a product name, a reason) shares the spare width;
+ * everything else sizes to its content. Sharing it equally instead gave
+ * "Video" as much room as the product name, and pushed the Listings Audit's
+ * last two columns off the page.
  */
-const statTiles = (stats, currency) => {
+const LONG_TEXT = 24;
+const columnWidths = (columns, rows) => {
+    const longest = columns.map((column) => Math.max(
+        String(column.label).length,
+        ...rows.map((row) => String(row[column.key] ?? '').length)
+    ));
+    const stars = columns.map((column, i) => !isNumericColumn(column, rows) && longest[i] > LONG_TEXT);
+    // Always one column to take up the slack, so the table spans the page.
+    if (!stars.some(Boolean)) stars[longest.indexOf(Math.max(...longest))] = true;
+    return stars.map((star) => (star ? '*' : 'auto'));
+};
+
+/**
+ * ▲ / ▼ as a drawn triangle. Poppins has no triangle glyphs, and a ZapfDingbats
+ * glyph inline measured zero width in pdfmake, so the figure after it was drawn
+ * straight over the arrow ("▼ vs last week" where it should read "▼ 4").
+ */
+const deltaArrow = (up, color) => ({
+    width: 6,
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="6" height="6" viewBox="0 0 6 6"><path d="${up ? 'M3 0.5 L5.8 5.5 L0.2 5.5 Z' : 'M0.2 0.5 L5.8 0.5 L3 5.5 Z'}" fill="${color}"/></svg>`,
+    margin: [0, 1.6, 0, 0],
+});
+
+/* ------------------------------------------------------------ page chrome */
+
+const header = (report, subtitle) => (currentPage, pageCount, pageSize) => ({
+    margin: [MARGIN_X, 22, MARGIN_X, 0],
+    stack: [
+        {
+            columns: [
+                { svg: LOGO_SVG, width: 140 },
+                {
+                    width: '*',
+                    stack: [
+                        { text: String(report.name || '').toUpperCase(), bold: true, fontSize: 10.5, color: BRAND.blue, alignment: 'right', characterSpacing: 0.4 },
+                        { text: subtitle, fontSize: 7.5, color: BRAND.muted, alignment: 'right', margin: [0, 2, 0, 0] },
+                    ],
+                },
+            ],
+        },
+        {
+            canvas: [{ type: 'line', x1: 0, y1: 0, x2: pageSize.width - MARGIN_X * 2, y2: 0, lineWidth: 1.4, lineColor: BRAND.red }],
+            margin: [0, 7, 0, 0],
+        },
+    ],
+});
+
+/** The reference footer: navy end blocks either side of a red band. */
+const footer = (currentPage, pageCount) => ({
+    margin: [MARGIN_X, 10, MARGIN_X, 0],
+    table: {
+        widths: [70, '*', 70],
+        body: [[
+            { text: '', fillColor: BRAND.navy, border: [false, false, false, false] },
+            {
+                text: [
+                    { text: `${COMPANY}  ·  Page ` },
+                    { text: String(currentPage), fontSize: 9 },
+                    { text: ' of ' },
+                    { text: String(pageCount), fontSize: 9 },
+                ],
+                color: BRAND.white,
+                fontSize: 7.5,
+                alignment: 'center',
+                fillColor: BRAND.red,
+                border: [false, false, false, false],
+                margin: [0, 4, 0, 3],
+            },
+            { text: '', fillColor: BRAND.navy, border: [false, false, false, false] },
+        ]],
+    },
+    layout: 'noBorders',
+});
+
+/* --------------------------------------------------------------- sections */
+
+/** Coloured bar, blue capitals, grey italic subtitle — the reference section marker. */
+const sectionTitle = (title, subtitle, { color = BRAND.red, pageBreak } = {}) => ({
+    ...(pageBreak ? { pageBreak } : {}),
+    margin: [0, 6, 0, subtitle ? 8 : 6],
+    stack: [
+        {
+            columns: [
+                { width: 6, canvas: [{ type: 'rect', x: 0, y: 0, w: 3.2, h: 15, color }] },
+                { width: '*', text: String(title).toUpperCase(), bold: true, fontSize: 12.5, color: BRAND.blue, margin: [4, 0, 0, 0] },
+            ],
+        },
+        ...(subtitle ? [{ text: subtitle, italics: true, fontSize: 8, color: BRAND.muted, margin: [10, 2, 0, 0] }] : []),
+    ],
+});
+
+/** Tiles per row, as the reference's first row. */
+const TILES_PER_ROW = 4;
+const TILE_GAP = 7;
+
+/**
+ * The stat tiles: grey, thin-bordered, left-aligned, four to a row. A short last
+ * row stretches to the full width, as the reference's second row of three does.
+ *
+ * Every tile a report carries is drawn. It used to render `stats.slice(0, 4)`,
+ * which silently dropped ACOS from Monthly Performance and four of six content
+ * checks from Listings Audit.
+ */
+const statTiles = (stats, currency, comparisonLabel) => {
     const all = stats || [];
-    if (!all.length) return null;
+    if (!all.length) return [];
 
     const cell = (stat) => {
-        if (!stat) return { text: '', border: [false, false, false, false] };
         const hasDelta = stat.delta !== null && stat.delta !== undefined;
         const improved = stat.deltaGoodWhen === 'down' ? stat.delta < 0 : stat.delta > 0;
         const suffix = stat.deltaFormat === 'percent' ? '%' : stat.deltaFormat === 'points' ? ' pts' : '';
         const stack = [
-            { text: String(stat.label || '').toUpperCase(), fontSize: 7, bold: true, color: DOC.tileLabel, alignment: 'center' },
-            { text: formatCell(stat.value, stat.format, currency), fontSize: 15, bold: true, color: DOC.navy, alignment: 'center', margin: [0, 3, 0, 0] },
+            { text: String(stat.label || '').toUpperCase(), fontSize: 6.5, bold: true, color: BRAND.muted, characterSpacing: 0.2 },
+            { text: formatCell(stat.value, stat.format, currency), fontSize: 17, bold: true, color: BRAND.blue, margin: [0, 3, 0, 0] },
         ];
         if (hasDelta) {
-            stack.push({
-                text: stat.delta === 0 ? '\u2014' : [deltaArrow(stat.delta > 0), ` ${Math.abs(stat.delta)}${suffix}`],
-                fontSize: 8,
-                bold: true,
-                color: stat.delta === 0 ? DOC.muted : improved ? DOC.green : DOC.red,
-                alignment: 'center',
-                margin: [0, 2, 0, 0],
-            });
+            const color = stat.delta === 0 ? BRAND.muted : improved ? BRAND.teal : BRAND.red;
+            const line = { fontSize: 7, bold: true, color };
+            stack.push(stat.delta === 0
+                ? { ...line, text: `No change${comparisonLabel ? ` ${comparisonLabel}` : ''}`, margin: [0, 2, 0, 0] }
+                : {
+                    columns: [
+                        deltaArrow(stat.delta > 0, color),
+                        { ...line, width: '*', text: `${Math.abs(stat.delta)}${suffix}${comparisonLabel ? `  ${comparisonLabel}` : ''}` },
+                    ],
+                    columnGap: 3,
+                    margin: [0, 2, 0, 0],
+                });
         }
-        return { stack, fillColor: DOC.light, margin: [2, 8, 2, 8] };
+        return { stack, fillColor: BRAND.tile, margin: [8, 7, 6, 7] };
     };
-
     const rows = [];
-    for (let i = 0; i < all.length; i += TILES_PER_ROW) {
-        const slice = all.slice(i, i + TILES_PER_ROW);
-        while (slice.length < TILES_PER_ROW) slice.push(null);
-        rows.push(slice.map(cell));
-    }
+    for (let i = 0; i < all.length; i += TILES_PER_ROW) rows.push(all.slice(i, i + TILES_PER_ROW));
 
-    return rows.map((body, index) => ({
-        table: { widths: new Array(TILES_PER_ROW).fill('*'), body: [body] },
-        // Thin white gutters between tiles, as the template's 2px gap does.
-        layout: {
-            hLineWidth: () => 0,
-            vLineWidth: () => 2,
-            vLineColor: () => '#FFFFFF',
-            paddingLeft: () => 0,
-            paddingRight: () => 0,
-            paddingTop: () => 0,
-            paddingBottom: () => 0,
-        },
-        margin: [0, 0, 0, index === rows.length - 1 ? 16 : 2],
+    // One bordered box per tile, laid out as columns so the gaps between them
+    // are white space rather than table cells (which drew dark rules).
+    const tileLayout = {
+        hLineWidth: () => 0.75,
+        vLineWidth: () => 0.75,
+        hLineColor: () => BRAND.tileBorder,
+        vLineColor: () => BRAND.tileBorder,
+        paddingLeft: () => 0, paddingRight: () => 0, paddingTop: () => 0, paddingBottom: () => 0,
+    };
+    const hasDelta = (stat) => stat.delta !== null && stat.delta !== undefined;
+    return rows.map((slice, index) => ({
+        columns: slice.map((stat) => {
+            const tile = cell(stat);
+            // Each tile is its own box, so a row mixing tiles with and without
+            // a change line would be ragged; a blank line evens them out.
+            if (!hasDelta(stat) && slice.some(hasDelta)) tile.stack.push({ text: ' ', fontSize: 7, margin: [0, 2, 0, 0] });
+            return { width: '*', table: { widths: ['*'], body: [[tile]] }, layout: tileLayout };
+        }),
+        columnGap: TILE_GAP,
+        margin: [0, 0, 0, index === rows.length - 1 ? 12 : TILE_GAP],
     }));
 };
 
-/** Teal rule + uppercase heading, the template's section marker. */
-const sectionHeading = (text) => ({
-    stack: [
-        { text: String(text).toUpperCase(), color: DOC.teal, bold: true, fontSize: 10, characterSpacing: 0.3 },
-        {
-            canvas: [{ type: 'line', x1: 0, y1: 0, x2: 515, y2: 0, lineWidth: 2, lineColor: DOC.teal }],
-            margin: [0, 4, 0, 0],
-        },
-    ],
-    margin: [0, 0, 0, 8],
-});
+/** The pale blue Key Takeaway box with its blue left edge. */
+const takeawayBox = (text) => (text ? {
+    table: {
+        widths: ['*'],
+        body: [[{
+            stack: [
+                { text: 'KEY TAKEAWAY', bold: true, fontSize: 7, color: BRAND.blue, characterSpacing: 0.3 },
+                { text, fontSize: 8.5, color: BRAND.ink, margin: [0, 3, 0, 0], lineHeight: 1.25 },
+            ],
+            fillColor: BRAND.takeaway,
+            margin: [10, 7, 10, 8],
+        }]],
+    },
+    layout: {
+        hLineWidth: () => 0,
+        vLineWidth: (i) => (i === 0 ? 3 : 0),
+        vLineColor: () => BRAND.blue,
+        paddingLeft: () => 0, paddingRight: () => 0, paddingTop: () => 0, paddingBottom: () => 0,
+    },
+    margin: [0, 0, 0, 14],
+} : null);
+
+/** Charts side by side, each under its own small blue title. */
+const chartRow = (charts, contentWidth) => {
+    if (!charts?.length) return null;
+    const width = Math.min((contentWidth - 20) / 2, CHART_W);
+    return {
+        columns: charts.slice(0, 2).map((chart) => ({
+            width: (contentWidth - 20) / 2,
+            stack: [
+                { text: chart.title, bold: true, fontSize: 9, color: BRAND.blue, margin: [0, 0, 0, 4] },
+                { svg: chart.svg, width },
+            ],
+        })),
+        columnGap: 20,
+        margin: [0, 0, 0, 10],
+    };
+};
 
 /**
- * The data table. Column one carries the template's blue "fill in" ink, being
- * the identifier a manager checks each cycle; the rest are centred like the
- * template's numeric cells.
+ * A data table in the reference style: blue header, white capitals, the key
+ * column in bold blue, numbers right-aligned, pale zebra rows, fine grid.
  */
-const dataTable = (summary, currency, override) => {
-    const columns = override?.columns || summary?.columns || [];
-    const rows = (override?.rows || summary?.rows || []).slice(0, MAX_PDF_ROWS);
-    if (!columns.length || !rows.length) return null;
+const dataTable = (columns, allRows, currency) => {
+    const rows = (allRows || []).slice(0, MAX_PDF_ROWS);
+    if (!columns?.length || !rows.length) return null;
+    const numeric = columns.map((column) => isNumericColumn(column, rows));
+    // Past ten columns the type steps down a size so the table fits the page.
+    const compact = columns.length > 10;
+    const bodySize = compact ? 6.5 : 7.5;
+    const pad = compact ? [2.5, 3.5, 2.5, 3.5] : [4, 4, 4, 4];
 
-    const header = columns.map((column) => ({
-        text: column.label,
-        fillColor: DOC.navy,
-        color: '#FFFFFF',
+    const head = columns.map((column, i) => ({
+        text: String(column.label).toUpperCase(),
+        fillColor: BRAND.blue,
+        color: BRAND.white,
         bold: true,
-        fontSize: 8,
-        alignment: 'center',
-        margin: [2, 5, 2, 5],
+        fontSize: compact ? 5.8 : 6.5,
+        alignment: i === 0 ? 'left' : numeric[i] ? 'right' : 'left',
+        margin: [pad[0], 5, pad[2], 5],
     }));
 
-    const body = rows.map((row, index) => columns.map((column, cellIndex) => ({
-        text: formatCell(row[column.key], column.format, currency),
-        fontSize: 8,
-        color: cellIndex === 0 ? DOC.blueInput : DOC.ink,
-        alignment: cellIndex === 0 ? 'left' : 'center',
-        fillColor: index % 2 === 1 ? DOC.zebra : null,
-        margin: [2, 4, 2, 4],
+    // A row may carry its own format (`__format`) for its value columns — the
+    // Monthly table mixes money, counts and rates down one column.
+    const body = rows.map((row, index) => columns.map((column, i) => ({
+        text: formatCell(row[column.key], (i > 0 && row.__format) || column.format, currency),
+        fontSize: bodySize,
+        bold: i === 0,
+        color: i === 0 ? BRAND.blue : BRAND.ink,
+        alignment: i === 0 ? 'left' : numeric[i] ? 'right' : 'left',
+        fillColor: index % 2 === 1 ? BRAND.zebra : null,
+        margin: pad,
     })));
 
     return {
         table: {
             headerRows: 1,
-            // First column takes the slack; the rest size to their content.
-            widths: columns.map((_, i) => (i === 0 ? '*' : 'auto')),
-            body: [header, ...body],
+            widths: columnWidths(columns, rows),
+            body: [head, ...body],
             dontBreakRows: true,
         },
         layout: {
             hLineWidth: () => 0.5,
             vLineWidth: () => 0.5,
-            hLineColor: () => DOC.border,
-            vLineColor: () => DOC.border,
+            hLineColor: () => BRAND.grid,
+            vLineColor: () => BRAND.grid,
+            // Cell margins carry the padding; the layout's own default of 4pt
+            // a side doubled it and pushed wide tables off the page.
+            paddingLeft: () => 0, paddingRight: () => 0, paddingTop: () => 0, paddingBottom: () => 0,
         },
         margin: [0, 0, 0, 6],
     };
 };
 
-/** Teal bullets; red for a flagged line, blue italic for one still to be written. */
-const highlightList = (highlights) => {
-    if (!highlights?.length) return null;
-    return {
-        ul: highlights.map((item) => ({
-            text: item.text,
-            fontSize: 9,
-            color: item.tone === 'watch' ? DOC.red : item.tone === 'fill' ? DOC.blueInput : DOC.ink,
-            italics: item.tone === 'fill',
-            margin: [0, 0, 0, 4],
-        })),
-        markerColor: DOC.teal,
-        margin: [0, 0, 0, 12],
-    };
-};
-
-/**
- * Build the pdfmake document definition for one report.
- *
- * @param {object} report        one entry from getEsfReports().reports
- * @param {object} opts
- * @param {object} opts.marketplace  { country, region }
- * @param {string} opts.currency     symbol for currency-formatted cells
- * @param {string} [opts.clientName] shown in the banner subtitle
- */
 /**
  * "Showing the first N of M rows", when rows were left out.
  *
@@ -345,45 +390,75 @@ const truncationNote = (total, shown) => {
     if (!total || total <= rendered) return null;
     return {
         text: `Showing the first ${rendered} of ${Number(total).toLocaleString('en-GB')} rows. The full set is on your Reports page.`,
-        fontSize: 8,
+        fontSize: 7,
         italics: true,
-        color: DOC.muted,
+        color: BRAND.muted,
         margin: [0, 0, 0, 12],
     };
 };
 
-const buildReportDocDefinition = (report, { marketplace, currency: requestedCurrency, clientName = '' } = {}) => {
-    // The marketplace's own currency unless the caller names one, and always
-    // one the font can draw.
-    const currency = pdfCurrency(requestedCurrency ?? getCurrencySymbol(marketplace?.country), marketplace?.country);
+/** Plain dark bullets, as the reference; a flagged line gets a red bullet. */
+const bulletList = (items, { italic = false, color = BRAND.ink } = {}) => ({
+    stack: items.map((item) => ({
+        columns: [
+            { width: 9, text: '•', color: item.tone === 'watch' ? BRAND.red : BRAND.ink, fontSize: 9 },
+            { width: '*', text: item.text, fontSize: 8.5, color, italics: italic, lineHeight: 1.2 },
+        ],
+        margin: [2, 0, 0, 4],
+    })),
+    margin: [0, 0, 0, 12],
+});
+
+/** "28 September 2026" */
+const issueDate = (date = new Date()) => date.toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
+
+/* -------------------------------------------------------------- document */
+
+/**
+ * Build the pdfmake document definition for one report.
+ *
+ * @param {object} report        one entry from getEsfReports().reports
+ * @param {object} opts
+ * @param {object} opts.marketplace  { country, region }
+ * @param {string} [opts.currency]   override; defaults to the marketplace's own
+ * @param {string} [opts.clientName] shown in the page header
+ * @param {Date}   [opts.issuedAt]   the date printed at the end
+ */
+const buildReportDocDefinition = (report, { marketplace, currency: requestedCurrency, clientName = '', issuedAt } = {}) => {
+    const currency = printableCurrency(marketplace?.country, requestedCurrency);
     const place = marketplace?.country ? `Amazon ${marketplace.country}` : 'All marketplaces';
-    const subtitle = [clientName, place, report.date].filter(Boolean).join('  ·  ');
+    const summary = report.summary || {};
+    const landscape = widestTableColumnCount(report) > LANDSCAPE_COLUMN_THRESHOLD;
+    const contentWidth = (landscape ? 842 : 595) - MARGIN_X * 2;
 
-    const content = [banner(report, subtitle)];
+    const content = [];
 
-    const tiles = statTiles(report.summary?.stats, currency);
-    if (tiles) content.push(...tiles);
+    // ---- Executive summary ------------------------------------------------
+    content.push(sectionTitle('Executive Summary', [place, report.date].filter(Boolean).join('  ·  ')));
+    content.push(...statTiles(summary.stats, currency, summary.comparisonLabel));
+    const takeaway = takeawayBox(summary.takeaway);
+    if (takeaway) content.push(takeaway);
+    const charts = chartRow(summary.charts, contentWidth);
+    if (charts) content.push(charts);
 
-    content.push(sectionHeading(report.summary?.headline ? 'Summary' : 'Detail'));
-    if (report.summary?.headline) {
-        content.push({ text: report.summary.headline, fontSize: 9, color: DOC.ink, margin: [0, 0, 0, 8] });
-    }
-
-    const table = dataTable(report.summary, currency);
+    // ---- Detail ------------------------------------------------------------
+    // A report with charts fills its first page, as the reference does, so its
+    // table starts the second.
+    content.push(sectionTitle(report.tableTitle || 'Detail', summary.headline, { pageBreak: charts ? 'before' : undefined }));
+    const table = dataTable(summary.columns, summary.rows, currency);
     if (table) {
         content.push(table);
-        const note = truncationNote(report.summary?.totalRows, report.summary?.rows);
+        const note = truncationNote(summary.totalRows, summary.rows);
         if (note) content.push(note);
-    } else if (report.summary?.emptyMessage) {
-        content.push({ text: report.summary.emptyMessage, fontSize: 9, bold: true, color: DOC.green, margin: [0, 0, 0, 12] });
+        else content.push({ text: '', margin: [0, 0, 0, 6] });
+    } else if (summary.emptyMessage) {
+        content.push({ text: summary.emptyMessage, fontSize: 8.5, bold: true, color: BRAND.teal, margin: [0, 0, 0, 12] });
     }
 
-    // Amazon's policy metrics, where the report carries them. Its own section,
-    // because it answers a different question from the table above it.
-    const secondary = report.summary?.secondaryTable;
+    const secondary = summary.secondaryTable;
     if (secondary?.rows?.length) {
-        content.push(sectionHeading(secondary.title || 'Detail'));
-        const secondaryTable = dataTable(null, currency, secondary);
+        content.push(sectionTitle(secondary.title || 'Detail'));
+        const secondaryTable = dataTable(secondary.columns, secondary.rows, currency);
         if (secondaryTable) {
             content.push(secondaryTable);
             const note = truncationNote(secondary.totalRows, secondary.rows);
@@ -391,44 +466,41 @@ const buildReportDocDefinition = (report, { marketplace, currency: requestedCurr
         }
     }
 
-    const bullets = highlightList(report.highlights);
-    if (bullets) {
-        content.push(sectionHeading('Performance Highlights'));
-        content.push(bullets);
+    // ---- Close -------------------------------------------------------------
+    const written = (report.highlights || []).filter((item) => item.tone !== 'fill');
+    const toFill = (report.highlights || []).filter((item) => item.tone === 'fill');
+    if (written.length) {
+        content.push(sectionTitle('Performance Highlights', null, { color: BRAND.blue }));
+        content.push(bulletList(written));
+    }
+    if (toFill.length) {
+        content.push(sectionTitle(report.cadence === 'MONTHLY' ? 'Actions Taken This Month' : 'Actions Taken This Cycle'));
+        content.push(bulletList(toFill, { italic: true, color: BRAND.muted }));
     }
 
     // The limits travel with the document, so whoever reads the PDF sees the
     // same caveats as whoever opened the page.
     if (report.caveats?.length) {
+        content.push({ text: 'NOTES', bold: true, fontSize: 6.5, color: BRAND.muted, characterSpacing: 0.3, margin: [0, 4, 0, 3] });
         for (const caveat of report.caveats) {
-            content.push({ text: `Not included: ${caveat}`, fontSize: 7.5, italics: true, color: DOC.red, margin: [0, 0, 0, 4] });
+            content.push({ text: caveat, fontSize: 6.5, color: BRAND.muted, margin: [0, 0, 0, 2.5], lineHeight: 1.15 });
         }
     }
+    content.push({ text: issueDate(issuedAt), fontSize: 7.5, color: BRAND.muted, margin: [0, 12, 0, 0] });
 
     return {
         info: {
             title: `${report.name}${marketplace?.country ? ` - ${marketplace.country}` : ''}`,
-            author: 'Estore Factory',
+            author: COMPANY,
             subject: report.insight || report.name,
         },
         pageSize: 'A4',
-        pageOrientation: widestTableColumnCount(report) > LANDSCAPE_COLUMN_THRESHOLD ? 'landscape' : 'portrait',
-        pageMargins: [40, 36, 40, 44],
-        defaultStyle: { font: 'Helvetica', fontSize: 9, color: DOC.ink },
+        pageOrientation: landscape ? 'landscape' : 'portrait',
+        pageMargins: [MARGIN_X, 74, MARGIN_X, 46],
+        defaultStyle: { font: 'Poppins', fontSize: 8.5, color: BRAND.ink },
+        header: header(report, [clientName, place].filter(Boolean).join('  ·  ')),
+        footer,
         content,
-        footer: (currentPage, pageCount) => ({
-            columns: [
-                {
-                    text: 'Legend: Blue = fill in with this cycle’s figures  |  Green = on target  |  Yellow/red = needs attention',
-                    fontSize: 6.5,
-                    italics: true,
-                    color: DOC.muted,
-                    margin: [40, 0, 0, 0],
-                },
-                { text: `${currentPage} / ${pageCount}`, fontSize: 6.5, color: DOC.muted, alignment: 'right', margin: [0, 0, 40, 0] },
-            ],
-            margin: [0, 12, 0, 0],
-        }),
     };
 };
 

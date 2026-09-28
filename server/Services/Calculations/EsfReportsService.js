@@ -52,6 +52,7 @@ const ReviewOrder = require('../../models/review/ReviewOrderModel.js');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
 const logger = require('../../utils/Logger.js');
+const { BRAND, printableCurrency, barChartSvg, lineChartSvg } = require('../Reports/reportBrand.js');
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -118,9 +119,19 @@ const detailPageUrl = (asin, country) => {
     return asin && domain ? `https://www.${domain}/dp/${asin}` : null;
 };
 
+/** "$2,967" / "INR 2,967" in a sentence, in the marketplace's own currency. */
+const cash = (country, value, places = 0) => {
+    const symbol = printableCurrency(country);
+    const sign = value < 0 ? '-' : '';
+    return `${sign}${symbol}${Math.abs(value).toLocaleString('en-GB', { minimumFractionDigits: places, maximumFractionDigits: places })}`;
+};
+
+/** "1 unit is" / "2 units are" — the verb that agrees with a count. */
+const verb = (count, singular, pluralForm) => (count === 1 ? singular : pluralForm);
+
 /** "1 SKU" / "2 SKUs" — every insight line is a sentence a client reads. */
 const plural = (count, singular, pluralForm = `${singular}s`) =>
-    `${count.toLocaleString()} ${count === 1 ? singular : pluralForm}`;
+    `${count.toLocaleString('en-GB')} ${count === 1 ? singular : pluralForm}`;
 
 /**
  * Amazon's Account Health statuses, as stored.
@@ -348,6 +359,9 @@ const hasFbaStock = async (userId, country, region) => {
 /** Percent change guarding a zero baseline. null = "no baseline to compare". */
 const pctChange = (current, previous) => {
     if (!previous) return current ? null : 0;
+    // A change against a negative baseline has no meaning — organic sales of
+    // -17 (ad sales above total) turned 1,297 into "-7733%".
+    if (previous < 0) return null;
     return round(((current - previous) / previous) * 100);
 };
 
@@ -384,7 +398,7 @@ const settle = async (meta, builder) => {
 
 /* ----------------------------------------------------- 1. inventory restock */
 
-const REPORT_RESTOCK = { key: 'inventory-restock', name: 'Inventory Restock', cadence: 'BI-WEEKLY', format: 'xlsx' };
+const REPORT_RESTOCK = { key: 'inventory-restock', name: 'Inventory Restock', cadence: 'BI-WEEKLY', format: 'xlsx', tableTitle: 'Restock plan' };
 
 /**
  * Straight off GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT, which carries every
@@ -525,15 +539,15 @@ const buildRestock = async (userId, country, region) => {
             urgent
                 ? highlight(`${plural(urgent, 'SKU')} flagged urgent by Amazon and ${outOfStock} already out of stock.`, 'watch')
                 : highlight(`No SKU is flagged urgent; ${needsRestock} are due a routine replenishment.`, 'good'),
-            highlight(`Replenishing everything Amazon recommends is about ${Math.round(reorderValue).toLocaleString()} at current prices.`),
+            highlight(`Replenishing everything Amazon recommends is about ${cash(country, reorderValue)} at current prices.`),
             ...(inboundTotal
-                ? [highlight(`${plural(inboundTotal, 'unit')} are already inbound to Amazon — check these before raising new orders.`)]
+                ? [highlight(`${plural(inboundTotal, 'unit')} ${verb(inboundTotal, 'is', 'are')} already inbound to Amazon — check these before raising new orders.`)]
                 : []),
             ...(unfulfillableTotal
-                ? [highlight(`${plural(unfulfillableTotal, 'unit')} are unfulfillable and should be removed or disposed of.`, 'watch')]
+                ? [highlight(`${plural(unfulfillableTotal, 'unit')} ${verb(unfulfillableTotal, 'is', 'are')} unfulfillable and should be removed or disposed of.`, 'watch')]
                 : []),
             ...(rows[0]?.isUrgent
-                ? [highlight(`${rows[0].sku || rows[0].asin} carries the largest urgent reorder at ${Math.round(rows[0].reorderValue).toLocaleString()}.`, 'watch')]
+                ? [highlight(`${rows[0].sku || rows[0].asin} carries the largest urgent reorder at ${cash(country, rows[0].reorderValue)}.`, 'watch')]
                 : []),
             highlight('[Purchase orders raised this cycle]', 'fill'),
         ],
@@ -543,7 +557,7 @@ const buildRestock = async (userId, country, region) => {
 
 /* ------------------------------------------------- 2. weekly account overview */
 
-const REPORT_ACCOUNT = { key: 'account-overview', name: 'Weekly Account Overview', cadence: 'WEEKLY', format: 'xlsx' };
+const REPORT_ACCOUNT = { key: 'account-overview', name: 'Weekly Account Overview', cadence: 'WEEKLY', format: 'xlsx', tableTitle: 'Weekly history' };
 
 /**
  * Listing counts come from the Seller catalogue (status + quantity), and the
@@ -681,7 +695,7 @@ const buildAccountOverview = async (userId, country, region) => {
             const missing = Math.max(performance.trackedShipmentCount - performance.validTrackingCount, 0);
             healthRows.push({
                 metric: 'Shipments without valid tracking',
-                status: `${missing.toLocaleString()} of ${performance.trackedShipmentCount.toLocaleString()}`,
+                status: `${missing.toLocaleString('en-GB')} of ${performance.trackedShipmentCount.toLocaleString('en-GB')}`,
                 target: '0',
                 // Only flagged when Amazon flags the rate: a handful of untracked
                 // shipments inside a healthy rate is not a policy breach.
@@ -798,6 +812,8 @@ const buildAccountOverview = async (userId, country, region) => {
         insight: `${outOfStock} of ${products.length} listings out of stock`,
         summary: {
             headline: `${active} active listings, ${activeWithStock} with stock on hand`,
+            // The health and issue tiles move week on week.
+            comparisonLabel: 'vs last week',
             stats,
             // Amazon's policy metrics, where the performance report supplied them.
             secondaryTable: healthRows.length
@@ -852,24 +868,24 @@ const buildAccountOverview = async (userId, country, region) => {
                 : healthRows.length
                     ? [highlight('Every Amazon policy metric is within target.', 'good')]
                     : []),
-            ...(incomplete ? [highlight(`${plural(incomplete, 'listing')} are incomplete and will not sell until finished.`, 'watch')] : []),
+            ...(incomplete ? [highlight(`${plural(incomplete, 'listing')} ${verb(incomplete, 'is', 'are')} incomplete and will not sell until finished.`, 'watch')] : []),
             ...(suppression.total
                 ? [highlight(`${plural(suppression.total, 'listing')} suppressed by Amazon and hidden from shoppers — see the Buy Box report for each reason.`, 'watch')]
                 : []),
             ...(gpsrApplies && complianceListings
-                ? [highlight(`${plural(complianceListings, 'listing')} carry an EU product safety (GPSR) issue and risk removal until the details are supplied.`, 'watch')]
+                ? [highlight(`${plural(complianceListings, 'listing')} ${verb(complianceListings, 'carries', 'carry')} an EU product safety (GPSR) issue and risk removal until the details are supplied.`, 'watch')]
                 : []),
             // Spec 2F. The opportunity engine already ranks these and puts a
             // figure against each; the report just carries its top few rather
             // than inventing a second, competing ranking.
             ...(opportunities?.opportunities?.length
                 ? opportunities.opportunities.slice(0, 3).map((item) => highlight(
-                    `${item.title}${item.amount ? ` — about ${round(item.amount)} at stake` : ''}${item.count ? ` across ${plural(item.count, 'product')}` : ''}.`,
+                    `${item.title}${item.amount ? ` — about ${cash(country, item.amount)} at stake` : ''}${item.count ? ` across ${plural(item.count, 'product')}` : ''}.`,
                     'watch'
                 ))
                 : []),
             ...(opportunities?.totalEstimatedRecovery
-                ? [highlight(`${round(opportunities.totalEstimatedRecovery)} is recoverable in total across every opportunity we have ranked.`)]
+                ? [highlight(`${cash(country, opportunities.totalEstimatedRecovery)} is recoverable in total across every opportunity we have ranked.`)]
                 : []),
             highlight('[Observation / remarks for this week]', 'fill'),
         ],
@@ -879,7 +895,7 @@ const buildAccountOverview = async (userId, country, region) => {
 
 /* -------------------------------------------------------- 3. weekly buy box */
 
-const REPORT_BUYBOX = { key: 'buybox', name: 'Weekly Buybox Report', cadence: 'WEEKLY', format: 'xlsx' };
+const REPORT_BUYBOX = { key: 'buybox', name: 'Weekly Buybox Report', cadence: 'WEEKLY', format: 'xlsx', tableTitle: 'ASINs losing the Buy Box' };
 
 /**
  * BuyBoxData holds a daily Data Kiosk snapshot per marketplace: win/lose status
@@ -1189,7 +1205,7 @@ const buildBuyBox = async (userId, country, region) => {
 
 /* --------------------------------------------------- 4. FBA aged inventory */
 
-const REPORT_AGED = { key: 'fba-aged-inventory', name: 'FBA Aged Inventory', cadence: 'MONTHLY', format: 'xlsx' };
+const REPORT_AGED = { key: 'fba-aged-inventory', name: 'FBA Aged Inventory', cadence: 'MONTHLY', format: 'xlsx', tableTitle: 'Ageing stock by ASIN' };
 
 /**
  * Age bands come from GET_FBA_INVENTORY_PLANNING_DATA. Only the fee-bearing
@@ -1309,10 +1325,10 @@ const buildAgedInventory = async (userId, country, region) => {
                 : highlight('No stock has passed the 365-day mark.', 'good'),
             highlight(`${plural(aged, 'unit')} across ${items.length} ASINs are past 180 days and now incurring aged-storage fees.`, aged ? 'watch' : 'good'),
             ...(unfulfillable
-                ? [highlight(`${plural(unfulfillable, 'unit')} are unfulfillable and should be removed or disposed of.`, 'watch')]
+                ? [highlight(`${plural(unfulfillable, 'unit')} ${verb(unfulfillable, 'is', 'are')} unfulfillable and should be removed or disposed of.`, 'watch')]
                 : []),
             ...(pendingUnits
-                ? [highlight(`${plural(pendingUnits, 'unit')} across ${plural(pendingOrders, 'removal order')} are already on their way out — leave them out of any new removal plan.`)]
+                ? [highlight(`${plural(pendingUnits, 'unit')} across ${plural(pendingOrders, 'removal order')} ${verb(pendingUnits, 'is', 'are')} already on their way out — leave them out of any new removal plan.`)]
                 : removalsRead
                     ? [highlight('No removal orders are open, so every ageing unit above is still awaiting a decision.')]
                     : []),
@@ -1334,7 +1350,7 @@ const buildAgedInventory = async (userId, country, region) => {
 
 /* -------------------------------------------------------- 5. listings audit */
 
-const REPORT_AUDIT = { key: 'listings-audit', name: 'Listings Audit', cadence: 'QUARTERLY', format: 'xlsx' };
+const REPORT_AUDIT = { key: 'listings-audit', name: 'Listings Audit', cadence: 'QUARTERLY', format: 'xlsx', tableTitle: 'Listing scorecard' };
 
 /** Each listing is scored against these; completion is the share that pass. */
 const AUDIT_CHECKS = [
@@ -1507,7 +1523,7 @@ const buildListingsAudit = async (userId, country, region) => {
 
 /* -------------------------------------------------------- 6. review requests */
 
-const REPORT_REVIEWS = { key: 'review-requests', name: 'Review Requests', cadence: 'WEEKLY', format: 'docx' };
+const REPORT_REVIEWS = { key: 'review-requests', name: 'Review Requests', cadence: 'WEEKLY', format: 'docx', tableTitle: 'Review request funnel' };
 
 /**
  * The review funnel, counted over the last 7 days of orders. Every number here
@@ -1612,7 +1628,7 @@ const buildReviewRequests = async (userId, country, region) => {
 
 /* --------------------------------------------------- 7. monthly performance */
 
-const REPORT_MONTHLY = { key: 'monthly-performance', name: 'Monthly Performance Report', cadence: 'MONTHLY', format: 'docx' };
+const REPORT_MONTHLY = { key: 'monthly-performance', name: 'Monthly Performance Report', cadence: 'MONTHLY', format: 'docx', tableTitle: 'Month on month' };
 
 /** 1 when the field holds a value, 0 when it is missing or null. */
 const presentFlag = (field) => ({ $cond: [{ $ne: [{ $ifNull: [field, null] }, null] }, 1, 0] });
@@ -1763,6 +1779,54 @@ const sumPpc = async (userId, country, region, startDate, endDate) => {
     };
 };
 
+/** "August" — a chart's category label. */
+const monthName = (date) => new Date(date).toLocaleDateString('en-GB', { month: 'long', timeZone: 'UTC' });
+/** "Aug 2026" — the "vs ..." on a tile's change line. */
+const shortMonth = (date) => new Date(date).toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+
+/**
+ * The reference report's two page-one charts: sales split into ad and organic,
+ * and ACOS against TACOS, previous period beside current.
+ *
+ * Drawn here as SVG, once, so the emailed PDF and the downloaded copy show the
+ * same picture rather than two renderers' idea of it.
+ */
+const monthlyCharts = ({ country, categories, sales, adSales, organic, acos, tacos }) => {
+    const symbol = printableCurrency(country);
+    // Sign before the symbol: "-$17", never "$-17".
+    const money = (value) => `${value < 0 ? '-' : ''}${symbol}${Math.abs(Math.round(value)).toLocaleString('en-GB')}`;
+    const moneyAxis = (value) => (value >= 1000 ? `${symbol}${round(value / 1000, 1)}k` : `${symbol}${Math.round(value)}`);
+
+    const charts = [{
+        title: `${country} Sales Breakdown`,
+        svg: barChartSvg({
+            categories,
+            series: [
+                { name: 'Total Sales', color: BRAND.blue, values: sales },
+                { name: 'Ad Sales', color: BRAND.red, values: adSales },
+                { name: 'Organic Sales', color: BRAND.teal, values: organic },
+            ],
+            formatValue: money,
+            formatAxis: moneyAxis,
+        }),
+    }];
+    if ([...acos, ...tacos].some(isNum)) {
+        charts.push({
+            title: `${country} ACOS vs TACOS`,
+            svg: lineChartSvg({
+                categories,
+                series: [
+                    { name: 'ACOS', color: BRAND.red, values: acos },
+                    { name: 'TACOS', color: BRAND.blue, values: tacos },
+                ],
+                formatValue: (value) => `${round(value, 1)}%`,
+                formatAxis: (value) => `${round(value, 0)}%`,
+            }),
+        });
+    }
+    return charts;
+};
+
 const buildMonthlyPerformance = async (userId, country, region) => {
     // Anchor on the newest day we actually hold, NOT on the last complete
     // calendar month. Metric backfills run on a schedule and lag by weeks, so
@@ -1871,6 +1935,17 @@ const buildMonthlyPerformance = async (userId, country, region) => {
         insight: insightParts.join(', ') || 'Performance recorded for the month',
         summary: {
             headline: `${periodLabel} against ${comparisonLabel}`,
+            // What every tile's change line is measured against.
+            comparisonLabel: `vs ${shortMonth(previousStart)}`,
+            charts: monthlyCharts({
+                country,
+                categories: [monthName(previousStart), monthName(currentStart)],
+                sales: [previous.totalSales, current.totalSales],
+                adSales: [ppcPrevious.adSales, ppcCurrent.adSales],
+                organic: [organicPrev, organic],
+                acos: [ppcPrevious.acos, ppcCurrent.acos],
+                tacos: [tacosPrev, tacos],
+            }),
             stats: [
                 { label: 'Total sales', value: current.totalSales, format: 'currency', delta: salesChange, deltaFormat: 'percent' },
                 { label: 'Ad sales', value: ppcCurrent.adSales, format: 'currency', delta: pctChange(ppcCurrent.adSales, ppcPrevious.adSales), deltaFormat: 'percent' },
@@ -1907,12 +1982,15 @@ const buildMonthlyPerformance = async (userId, country, region) => {
             rows: [
                 {
                     metric: 'Total sales',
+                    // Money rows say so, since this table mixes money, counts
+                    // and rates down each column. Both renderers read it.
+                    __format: 'money',
                     current: current.totalSales,
                     previous: previous.totalSales,
                     change: salesChange === null ? '—' : `${salesChange >= 0 ? '+' : ''}${salesChange}%`,
                 },
-                { metric: 'Ad revenue', current: ppcCurrent.adSales, previous: ppcPrevious.adSales, change: pctCell(ppcCurrent.adSales, ppcPrevious.adSales) },
-                { metric: 'Organic revenue', current: organic, previous: organicPrev, change: pctCell(organic, organicPrev) },
+                { metric: 'Ad revenue', __format: 'money', current: ppcCurrent.adSales, previous: ppcPrevious.adSales, change: pctCell(ppcCurrent.adSales, ppcPrevious.adSales) },
+                { metric: 'Organic revenue', __format: 'money', current: organic, previous: organicPrev, change: pctCell(organic, organicPrev) },
                 { metric: 'Units sold', current: units, previous: unitsPrev, change: pctCell(units, unitsPrev) },
                 ...(current.b2b
                     ? [
@@ -1928,7 +2006,7 @@ const buildMonthlyPerformance = async (userId, country, region) => {
                     previous: conversionPrev === null ? '\u2014' : `${conversionPrev}%`,
                     change: ptsCell(conversion, conversionPrev),
                 },
-                { metric: 'Ad spend', current: ppcCurrent.adSpend, previous: ppcPrevious.adSpend, change: pctCell(ppcCurrent.adSpend, ppcPrevious.adSpend) },
+                { metric: 'Ad spend', __format: 'money', current: ppcCurrent.adSpend, previous: ppcPrevious.adSpend, change: pctCell(ppcCurrent.adSpend, ppcPrevious.adSpend) },
                 {
                     metric: 'ACOS',
                     current: ppcCurrent.acos === null ? '\u2014' : `${ppcCurrent.acos}%`,
@@ -1941,7 +2019,7 @@ const buildMonthlyPerformance = async (userId, country, region) => {
                     previous: tacosPrev === null ? '\u2014' : `${tacosPrev}%`,
                     change: ptsCell(tacos, tacosPrev),
                 },
-                { metric: 'Avg selling price', current: asp, previous: aspPrev, change: pctCell(asp, aspPrev) },
+                { metric: 'Avg selling price', __format: 'money', current: asp, previous: aspPrev, change: pctCell(asp, aspPrev) },
                 { metric: 'Impressions', current: ppcCurrent.impressions, previous: ppcPrevious.impressions, change: pctCell(ppcCurrent.impressions, ppcPrevious.impressions) },
                 { metric: 'Clicks', current: ppcCurrent.clicks, previous: ppcPrevious.clicks, change: pctCell(ppcCurrent.clicks, ppcPrevious.clicks) },
                 {
@@ -1950,7 +2028,7 @@ const buildMonthlyPerformance = async (userId, country, region) => {
                     previous: ppcPrevious.ctr === null ? '\u2014' : `${ppcPrevious.ctr}%`,
                     change: ptsCell(ppcCurrent.ctr, ppcPrevious.ctr),
                 },
-                { metric: 'CPC', current: ppcCurrent.cpc, previous: ppcPrevious.cpc, change: pctCell(ppcCurrent.cpc, ppcPrevious.cpc) },
+                { metric: 'CPC', __format: 'money', current: ppcCurrent.cpc, previous: ppcPrevious.cpc, change: pctCell(ppcCurrent.cpc, ppcPrevious.cpc) },
                 {
                     metric: 'ROAS',
                     current: ppcCurrent.roas === null ? '\u2014' : `${ppcCurrent.roas}x`,
@@ -1994,7 +2072,7 @@ const buildMonthlyPerformance = async (userId, country, region) => {
                 )]
                 : []),
             ...(ppcCurrent.adSales && current.totalSales
-                ? [highlight(`Advertising drove ${round((ppcCurrent.adSales / current.totalSales) * 100, 1)}% of total sales this period, leaving ${organic} organic.`)]
+                ? [highlight(`Advertising drove ${round((ppcCurrent.adSales / current.totalSales) * 100, 1)}% of total sales this period, leaving ${cash(country, organic)} organic.`)]
                 : []),
             ...(tacos !== null
                 ? [highlight(
@@ -2003,11 +2081,11 @@ const buildMonthlyPerformance = async (userId, country, region) => {
                 )]
                 : []),
             ...(conversion !== null
-                ? [highlight(`${plural(trafficCurrent.sessions, 'session')} converted at ${conversion}%${asp === null ? '' : `, at an average selling price of ${asp}`}.`)]
+                ? [highlight(`${plural(trafficCurrent.sessions, 'session')} converted at ${conversion}%${asp === null ? '' : `, at an average selling price of ${cash(country, asp, 2)}`}.`)]
                 : []),
             ...(ppcCurrent.roas !== null
                 ? [highlight(
-                    `Advertising returned ${ppcCurrent.roas}x on spend${ppcCurrent.ctr === null ? '' : `, from ${ppcCurrent.impressions.toLocaleString()} impressions at a ${ppcCurrent.ctr}% click-through rate`}.`,
+                    `Advertising returned ${ppcCurrent.roas}x on spend${ppcCurrent.ctr === null ? '' : `, from ${ppcCurrent.impressions.toLocaleString('en-GB')} impressions at a ${ppcCurrent.ctr}% click-through rate`}.`,
                     ppcPrevious.roas !== null && ppcCurrent.roas < ppcPrevious.roas ? 'watch' : 'good'
                 )]
                 : []),
@@ -2073,9 +2151,28 @@ const toCard = (report) => {
     const rows = report.summary.rows || [];
     return {
         ...report,
-        summary: { ...report.summary, rows: rows.slice(0, PREVIEW_ROWS), totalRows: rows.length },
+        summary: {
+            ...report.summary,
+            rows: rows.slice(0, PREVIEW_ROWS),
+            totalRows: rows.length,
+            takeaway: report.summary.takeaway || takeawayOf(report.highlights),
+        },
         pageSize: PREVIEW_ROWS,
     };
+};
+
+/**
+ * The Key Takeaway box: the report's lead highlight, then the first one that
+ * needs attention, if that is a different line. Chosen from the highlights the
+ * builder already wrote, so the box can never say something the bullets do not.
+ * Worked out here, once, so the emailed and downloaded copies agree.
+ */
+const takeawayOf = (highlights) => {
+    const written = (highlights || []).filter((item) => item?.text && item.tone !== 'fill');
+    if (!written.length) return '';
+    const lead = written[0];
+    const flagged = written.find((item) => item.tone === 'watch' && item !== lead);
+    return [lead.text, flagged?.text].filter(Boolean).join(' ');
 };
 
 /**
