@@ -1120,7 +1120,8 @@ class ScheduledIntegration {
             if (['RestockinventoryData', 'fbaInventoryPlanningData', 'strandedInventoryData', 'inboundNonComplianceData', 'productReview', 'adsKeywords', 'campaignData',
                  'ledgerSummaryViewData', 'ledgerDetailViewData', 'fbaReimbursementsData',
                  'calculateShipmentDiscrepancy', 'calculateLostInventoryReimbursement', 'calculateDamagedInventoryReimbursement',
-                 'calculateDisposedInventoryReimbursement', 'ltsfData'].includes(functionKey)) {
+                 'calculateDisposedInventoryReimbursement', 'ltsfData',
+                 'suppressedListingsData', 'removalOrdersData'].includes(functionKey)) {
                 return 2;
             }
             // Batch 3: Shipment Data, Brand Data, Ad Groups Data, MCP SalesOnly, MCP BuyBox
@@ -2736,7 +2737,8 @@ class ScheduledIntegration {
         // Inventory slice (batch 2)
         inventory: [
             'RestockinventoryData', 'fbaInventoryPlanningData',
-            'strandedInventoryData', 'inboundNonComplianceData', 'ltsfData'
+            'strandedInventoryData', 'inboundNonComplianceData', 'ltsfData',
+            'suppressedListingsData', 'removalOrdersData'
         ],
         // Performance slice (batch 1/2 — V2/V1 perf + reviews + ledger/reimbursement reads)
         performance: [
@@ -2890,6 +2892,8 @@ class ScheduledIntegration {
             require('../Sp_API/GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA.js').spApiAsync,
             require('../Sp_API/GET_LEDGER_SUMMARY_VIEW_DATA.js').spApiAsync,
             require('../Sp_API/GET_LEDGER_DETAIL_VIEW_DATA.js').spApiAsync,
+            require('../Sp_API/GET_MERCHANTS_LISTINGS_FYP_REPORT.js').spApiAsync,
+            require('../Sp_API/GET_FBA_FULFILLMENT_REMOVAL_ORDER_DETAIL_DATA.js').spApiAsync,
         ];
         const services = convertible.filter(s => shouldRunFunction(s.serviceName, dow));
         const excludeKeys = services.map(s => s.serviceName);

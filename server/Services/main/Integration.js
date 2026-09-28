@@ -51,6 +51,9 @@ const { addReviewDataTODatabase } = require('../Sp_API/NumberOfProductReviews.js
 // tier comes from, and it writes to its own collection so nothing that reads
 // the scraper's output changes.
 const getAPlusContent = require('../Sp_API/GET_APLUS_CONTENT.js');
+// ESF reports: Amazon's Suppressed Listings Report and FBA removal orders.
+const GET_MERCHANTS_LISTINGS_FYP_REPORT = require('../Sp_API/GET_MERCHANTS_LISTINGS_FYP_REPORT.js');
+const GET_FBA_FULFILLMENT_REMOVAL_ORDER_DETAIL_DATA = require('../Sp_API/GET_FBA_FULFILLMENT_REMOVAL_ORDER_DETAIL_DATA.js');
 // Offer-level pricing for the ASINs the Buy Box snapshot says we are losing.
 // Must run after that snapshot exists, so it is not in a batch — see below.
 const { syncCompetitiveOffers } = require('../Sp_API/GET_COMPETITIVE_OFFERS.js');
@@ -1209,9 +1212,15 @@ class Integration {
         if (AccessToken) {
             secondBatchPromises.push(
                 tokenManager.wrapSpApiFunction(getAPlusContent, userId, RefreshToken, AdsRefreshToken)
+                    (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
+                // ESF reports: suppressed listings and pending FBA removals.
+                // Also unread by index — each stores its own snapshot.
+                tokenManager.wrapSpApiFunction(GET_MERCHANTS_LISTINGS_FYP_REPORT, userId, RefreshToken, AdsRefreshToken)
+                    (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
+                tokenManager.wrapSpApiFunction(GET_FBA_FULFILLMENT_REMOVAL_ORDER_DETAIL_DATA, userId, RefreshToken, AdsRefreshToken)
                     (AccessToken, marketplaceIds, userId, Base_URI, Country, Region)
             );
-            secondBatchServiceNames.push("A+ Content");
+            secondBatchServiceNames.push("A+ Content", "Suppressed Listings", "Removal Orders");
         }
 
         const secondBatchResults = await Promise.allSettled(secondBatchPromises);
@@ -2962,9 +2971,13 @@ class Integration {
             if (AccessToken) {
                 secondBatchPromises.push(
                     tokenManager.wrapSpApiFunction(getAPlusContent, userId, RefreshToken, AdsRefreshToken)
+                        (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
+                    tokenManager.wrapSpApiFunction(GET_MERCHANTS_LISTINGS_FYP_REPORT, userId, RefreshToken, AdsRefreshToken)
+                        (AccessToken, marketplaceIds, userId, Base_URI, Country, Region),
+                    tokenManager.wrapSpApiFunction(GET_FBA_FULFILLMENT_REMOVAL_ORDER_DETAIL_DATA, userId, RefreshToken, AdsRefreshToken)
                         (AccessToken, marketplaceIds, userId, Base_URI, Country, Region)
                 );
-                secondBatchServiceNames.push("A+ Content");
+                secondBatchServiceNames.push("A+ Content", "Suppressed Listings", "Removal Orders");
             }
 
             const secondBatchResults = await Promise.allSettled(secondBatchPromises);

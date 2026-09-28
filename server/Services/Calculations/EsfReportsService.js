@@ -45,6 +45,9 @@ const APlusPremium = require('../../models/seller-performance/APlusPremiumModel.
 // Offer-level pricing for the ASINs we are losing. BuyBoxData is an aggregate
 // with no offers in it, so this is the only source for "to whom, at what price".
 const CompetitiveOffers = require('../../models/products/CompetitiveOffersModel.js');
+// Amazon's Suppressed Listings Report and FBA removal orders, one snapshot per fetch.
+const SuppressedListings = require('../../models/products/SuppressedListingsModel.js');
+const RemovalOrders = require('../../models/inventory/RemovalOrdersModel.js');
 const ReviewOrder = require('../../models/review/ReviewOrderModel.js');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
@@ -124,11 +127,11 @@ const plural = (count, singular, pluralForm = `${singular}s`) =>
  *
  * WHAT THIS IS AND IS NOT
  * The V2 Seller Performance report gives each policy metric a STATUS — "GOOD",
- * "AT RISK", "POOR" — not the percentage behind it. So this report can say
- * whether the Order Defect Rate is within Amazon's threshold, but not that it
- * is 0.24%. Reporting a made-up percentage would be worse than reporting the
- * status we actually have, so the status is what travels, and the caveat says
- * the number itself is not available.
+ * "AT RISK", "POOR" — and, on its rate node, the figure behind it. Only the
+ * statuses were stored at first, so older snapshots can say whether the Order
+ * Defect Rate is within Amazon's threshold but not that it is 0.24%. The status
+ * is always what decides the verdict; the figure travels beside it where the
+ * snapshot has one, and a caveat says so where it does not.
  */
 const HEALTH_TONE = { GOOD: 'good', EXCELLENT: 'good', FAIR: 'watch', 'AT RISK': 'watch', POOR: 'watch', BAD: 'watch' };
 
@@ -157,6 +160,160 @@ const healthLabel = (status) => {
     const text = String(status || '').trim();
     if (!text) return 'Not reported';
     return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+};
+
+const isNum = (value) => typeof value === 'number' && Number.isFinite(value);
+
+/**
+ * One Account Health row for a rate metric: "Good (0.24%)".
+ *
+ * Amazon's status decides whether it wants attention. The threshold is used
+ * only when a snapshot carries a figure without a status, so the row is never
+ * left without a verdict it could have had.
+ */
+const rateRow = (metric, status, pct, threshold) => {
+    const hasStatus = status !== undefined && status !== null && status !== '';
+    const hasPct = isNum(pct);
+    if (!hasStatus && !hasPct) return null;
+
+    const figure = hasPct ? `${round(pct, 2)}%` : '';
+    let concerning;
+    if (hasStatus) concerning = healthTone(status) === 'watch';
+    else concerning = threshold.under !== undefined ? pct >= threshold.under : pct < threshold.over;
+
+    return {
+        metric,
+        status: hasStatus ? `${healthLabel(status)}${figure ? ` (${figure})` : ''}` : figure,
+        target: threshold.under !== undefined ? `Under ${threshold.under}%` : `Over ${threshold.over}%`,
+        action: concerning ? 'Review in Seller Central' : 'None',
+    };
+};
+
+/** One Account Health row for a counted policy metric: "Good (0)". */
+const countRow = (metric, status, count) => {
+    const hasCount = isNum(count);
+    const label = status ? healthLabel(status) : '';
+    return {
+        metric,
+        status: label && hasCount ? `${label} (${count})` : (hasCount ? String(count) : label || 'Not reported'),
+        target: 'None',
+        action: healthTone(status) === 'watch' || (hasCount && count > 0) ? 'Review in Seller Central' : 'None',
+    };
+};
+
+/**
+ * Amazon's V2 policy metrics, by the key the report uses. The first five are
+ * the spec's IP violations and customer complaints and always get a row; the
+ * rest appear only when they carry something.
+ */
+const POLICY_METRIC_LABELS = {
+    receivedIntellectualPropertyComplaints: 'IP complaints received',
+    suspectedIntellectualPropertyViolations: 'Suspected IP violations',
+    productAuthenticityCustomerComplaints: 'Product authenticity complaints',
+    productConditionCustomerComplaints: 'Product condition complaints',
+    productSafetyCustomerComplaints: 'Product safety complaints',
+    restrictedProductPolicyViolations: 'Restricted product violations',
+    foodAndProductSafetyIssues: 'Food and product safety issues',
+    customerProductReviewsPolicyViolations: 'Product review policy violations',
+    otherPolicyViolations: 'Other policy violations',
+    documentRequests: 'Document requests',
+};
+const ALWAYS_SHOWN_POLICY = new Set(Object.keys(POLICY_METRIC_LABELS).slice(0, 5));
+
+/** "someNewViolations" -> "Some new violations", for a key we have no label for. */
+const humanise = (key) => {
+    const words = String(key).replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+    return words.charAt(0).toUpperCase() + words.slice(1);
+};
+
+/**
+ * EU marketplaces, where the General Product Safety Regulation applies. The UK
+ * left before it took effect and is not included.
+ */
+const GPSR_MARKETPLACES = new Set(['DE', 'FR', 'IT', 'ES', 'NL', 'SE', 'PL', 'BE', 'IE']);
+
+/**
+ * Does a stored listing issue concern GPSR product-safety compliance?
+ *
+ * There is no compliance API. What Amazon does expose is the listing issue it
+ * raises when a GPSR attribute — manufacturer, responsible person, safety
+ * information — is missing or invalid, so this matches on the attribute names
+ * and categories it names. That is partial coverage by nature: it sees a
+ * compliance gap Amazon has attached to a listing, not the Seller Central
+ * compliance dashboard.
+ */
+const GPSR_PATTERN = /gpsr|responsible[_ ]?(party|person)|dsa_responsible|product[_ ]?safety|safety[_ ]?(attestation|information|warning)|manufacturer[_ ]?(reference|contact)/i;
+
+const isComplianceIssue = (issue) => [
+    ...(issue?.attributeNames || []),
+    ...(issue?.categories || []),
+    issue?.code || '',
+].some((value) => GPSR_PATTERN.test(String(value)));
+
+/**
+ * Every listing Amazon is hiding from shoppers, from both sources we hold.
+ *
+ *   listing issues   per-SKU enforcement actions from the catalogue sync, with
+ *                    the exemption status — the richer row where both exist
+ *   Suppressed       Amazon's Suppressed Listings Report, the whole catalogue in
+ *   Listings Report  one file, and the only source for a listing suppressed
+ *                    since its last catalogue sync
+ *
+ * One helper for both reports that show a suppressed count, so the Account
+ * Overview and the Buy Box report cannot disagree about the number.
+ *
+ * "At risk" rows are not counted: Amazon is still showing those listings.
+ * `captured` is false only when neither source has ever reported, which is the
+ * one case where "0 suppressed" would be a claim we cannot back.
+ */
+const collectSuppressed = (products, fyp, country) => {
+    const bySku = new Map();
+    let issuesCaptured = false;
+    for (const product of products) {
+        if (Array.isArray(product.listingIssues)) issuesCaptured = true;
+        const hits = (product.listingIssues || []).filter((issue) => issue.isSuppression);
+        if (!hits.length) continue;
+        bySku.set(product.sku || product.asin, {
+            sku: product.sku || '',
+            asin: product.asin || '',
+            productName: product.itemName || '',
+            // One listing can carry several enforcements; show them all.
+            enforcement: [...new Set(hits.flatMap((issue) => issue.enforcementActions))].join(', '),
+            reason: hits[0].message || '',
+            // An exemption means Amazon is still showing it despite the issue.
+            exempt: hits.some((issue) => String(issue.exemptionStatus).toUpperCase() === 'EXEMPT') ? 'Yes' : 'No',
+            detailPage: detailPageUrl(product.asin, country),
+        });
+    }
+
+    const reportUsable = Boolean(fyp) && !fyp.unreadable;
+    const titleBySku = new Map(products.map((product) => [product.sku, product.itemName || '']));
+    const listed = reportUsable ? (fyp.items || []).filter((item) => !item.isAtRisk) : [];
+    for (const item of listed) {
+        if (bySku.has(item.sku)) continue;
+        bySku.set(item.sku, {
+            sku: item.sku,
+            asin: item.asin || '',
+            productName: item.productName || titleBySku.get(item.sku) || '',
+            enforcement: item.status || 'Suppressed',
+            reason: item.reason || item.issueDescription || '',
+            // The report carries no exemption status; unknown, not "No".
+            exempt: '—',
+            detailPage: detailPageUrl(item.asin, country),
+        });
+    }
+
+    // Rows past the snapshot's storage cap are counted, not shown.
+    const beyondCap = reportUsable ? Math.max((fyp.suppressedCount || 0) - listed.length, 0) : 0;
+    return {
+        rows: [...bySku.values()],
+        total: bySku.size + beyondCap,
+        atRisk: reportUsable ? fyp.atRiskCount || 0 : 0,
+        captured: issuesCaptured || reportUsable,
+        reportUsable,
+        reportUnreadable: Boolean(fyp?.unreadable),
+        reportFetchedAt: fyp?.createdAt || null,
+    };
 };
 
 /**
@@ -387,7 +544,7 @@ const REPORT_ACCOUNT = { key: 'account-overview', name: 'Weekly Account Overview
  * product counts and issue counts, hence the caveat.
  */
 const buildAccountOverview = async (userId, country, region) => {
-    const [seller, history, performance, v1Performance, strandedCount, opportunities] = await Promise.all([
+    const [seller, history, performance, v1Performance, strandedCount, opportunities, suppressedReport] = await Promise.all([
         Seller.findOne({ User: userId }).select('sellerAccount').lean(),
         AccountHistory.findOne({ User: userId, country, region }).lean(),
         // 17k of these have been collected and never shown to anyone.
@@ -397,6 +554,7 @@ const buildAccountOverview = async (userId, country, region) => {
         StrandedInventoryItem.countDocuments({ User: userId, country, region }),
         // Written by the existing opportunity engine; keyed by userId as a string.
         TopOpportunities.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
+        SuppressedListings.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
     ]);
 
     const account = (seller?.sellerAccount || []).find((acc) => acc.region === region && acc.country === country);
@@ -411,11 +569,20 @@ const buildAccountOverview = async (userId, country, region) => {
     let outOfStock = 0;
     let inactive = 0;
     let incomplete = 0;
+    // Listing issues are captured per listing from the catalogue sync on; a
+    // listing with none yet is not the same as one checked and found clean.
+    let issuesCaptured = 0;
+    let complianceListings = 0;
     for (const product of products) {
+        if (Array.isArray(product.listingIssues)) {
+            issuesCaptured += 1;
+            if (product.listingIssues.some(isComplianceIssue)) complianceListings += 1;
+        }
         const status = String(product.status || '').toLowerCase();
         if (status === 'inactive') inactive += 1;
-        // Amazon has no "suppressed" state in what we store; "Incomplete" is the
-        // nearest thing and is reported under its own name rather than relabelled.
+        // "Incomplete" is Amazon's own status and is reported under its own
+        // name. Suppression is not a stored status at all — it is counted
+        // below from the sources that actually carry it.
         if (status === 'incomplete') incomplete += 1;
         if (status !== 'active') continue;
         active += 1;
@@ -440,6 +607,13 @@ const buildAccountOverview = async (userId, country, region) => {
         { label: 'Incomplete', value: incomplete, tone: incomplete > 0 ? 'watch' : 'good' },
     ];
 
+    // Spec 2A. The same count the Buy Box report shows, from the same helper;
+    // no tile until a source has reported, since 0 would then be a guess.
+    const suppression = collectSuppressed(products, suppressedReport, country);
+    if (suppression.captured) {
+        stats.push({ label: 'Suppressed', value: suppression.total, tone: suppression.total > 0 ? 'watch' : 'good' });
+    }
+
     // Amazon's own Account Health, which the report has never carried.
     const healthRows = [];
     if (performance) {
@@ -450,21 +624,67 @@ const buildAccountOverview = async (userId, country, region) => {
                 tone: num(performance.ahrScore) >= 200 ? 'good' : 'watch',
             });
         }
-        const metrics = [
-            ['Order Defect Rate', performance.orderWithDefectsStatus, 'Under 1%'],
-            ['Pre-fulfilment cancellations', performance.CancellationRate, 'Under 2.5%'],
-            ['Valid Tracking Rate', performance.validTrackingRateStatus, 'Over 95%'],
-            ['Late Shipment Rate', performance.lateShipmentRateStatus, 'Under 4%'],
-            ['Listing policy violations', performance.listingPolicyViolations, 'None'],
+        // The figure travels beside the status where the snapshot carries one.
+        // Unit-based On-Time Delivery is Amazon's current metric but US-only;
+        // the shipment-based one covers the rest.
+        const unitOtdr = Boolean(performance.unitOnTimeDeliveryRateStatus || isNum(performance.unitOnTimeDeliveryRatePct));
+        const rates = [
+            ['Order Defect Rate', performance.orderWithDefectsStatus, performance.orderDefectRatePct, { under: 1 }],
+            ['Pre-fulfilment cancellations', performance.CancellationRate, performance.cancellationRatePct, { under: 2.5 }],
+            ['Valid Tracking Rate', performance.validTrackingRateStatus, performance.validTrackingRatePct, { over: 95 }],
+            ['Late Shipment Rate', performance.lateShipmentRateStatus, performance.lateShipmentRatePct, { under: 4 }],
+            unitOtdr
+                ? ['On-Time Delivery Rate (units)', performance.unitOnTimeDeliveryRateStatus, performance.unitOnTimeDeliveryRatePct, { over: 90 }]
+                : ['On-Time Delivery Rate', performance.onTimeDeliveryRateStatus, performance.onTimeDeliveryRatePct, { over: 90 }],
         ];
-        for (const [metric, status, target] of metrics) {
-            if (status === undefined || status === null || status === '') continue;
+        for (const [metric, status, pct, threshold] of rates) {
+            const row = rateRow(metric, status, pct, threshold);
+            if (row) healthRows.push(row);
+        }
+
+        const policy = new Map((performance.policyMetrics || []).map((entry) => [entry.key, entry]));
+        const listingPolicy = policy.get('listingPolicyViolations');
+        if (performance.listingPolicyViolations || listingPolicy) {
+            healthRows.push(countRow('Listing policy violations', listingPolicy?.status || performance.listingPolicyViolations, listingPolicy?.count ?? null));
+        }
+
+        // Chargebacks are an Order Defect Rate component, measured over the
+        // ODR window — which is part of the fact.
+        if (isNum(performance.chargebackCount)) {
+            const window = performance.odrWindowFrom && performance.odrWindowTo
+                ? ` (${formatDate(performance.odrWindowFrom)} to ${formatDate(performance.odrWindowTo)})`
+                : '';
             healthRows.push({
-                metric,
-                status: healthLabel(status),
-                target,
-                action: healthTone(status) === 'watch' ? 'Review in Seller Central' : 'None',
+                metric: `Chargebacks${window}`,
+                status: String(performance.chargebackCount),
+                target: '0',
+                action: performance.chargebackCount > 0 ? 'Review in Seller Central' : 'None',
             });
+        }
+
+        // Spec 2D: Valid Tracking Rate's own shipment counts, so the rate comes
+        // with the number of shipments behind it.
+        if (isNum(performance.trackedShipmentCount) && isNum(performance.validTrackingCount)) {
+            const missing = Math.max(performance.trackedShipmentCount - performance.validTrackingCount, 0);
+            healthRows.push({
+                metric: 'Shipments without valid tracking',
+                status: `${missing.toLocaleString()} of ${performance.trackedShipmentCount.toLocaleString()}`,
+                target: '0',
+                // Only flagged when Amazon flags the rate: a handful of untracked
+                // shipments inside a healthy rate is not a policy breach.
+                action: missing > 0 && healthTone(performance.validTrackingRateStatus) === 'watch' ? 'Add tracking in Seller Central' : 'None',
+            });
+        }
+
+        // IP and customer complaints always get a row — they are what the spec
+        // asks for, and a zero is worth stating. The rest only when non-zero or
+        // flagged, and a metric Amazon adds later still appears under its key.
+        for (const [key, entry] of policy) {
+            if (key === 'listingPolicyViolations') continue;
+            const named = POLICY_METRIC_LABELS[key];
+            const flagged = (entry.count || 0) > 0 || healthTone(entry.status) === 'watch';
+            if (!ALWAYS_SHOWN_POLICY.has(key) && !flagged) continue;
+            healthRows.push(countRow(named || humanise(key), entry.status, entry.count));
         }
     }
 
@@ -500,6 +720,18 @@ const buildAccountOverview = async (userId, country, region) => {
         });
     }
 
+    // Spec 2B, product compliance: EU GPSR only, and only once listing issues
+    // have been captured — a zero before then would be a false all-clear.
+    const gpsrApplies = GPSR_MARKETPLACES.has(String(country || '').toUpperCase());
+    if (gpsrApplies && issuesCaptured) {
+        healthRows.push({
+            metric: 'Product compliance issues (EU GPSR)',
+            status: `${complianceListings} of ${plural(issuesCaptured, 'listing')}`,
+            target: '0',
+            action: complianceListings > 0 ? 'Supply the missing product safety details' : 'None',
+        });
+    }
+
     if (current) {
         stats.push({
             label: 'SellerQI health',
@@ -520,9 +752,29 @@ const buildAccountOverview = async (userId, country, region) => {
     }
     caveats.push('History covers health score, listing counts and issue counts. Other account parameters are measured live and have no weekly history yet.');
     caveats.push('The "Checks" and "Observation / Remarks" columns are written by your account manager and are not part of this live view.');
-    if (healthRows.length) {
-        caveats.push('Amazon reports each policy metric as a status rather than a figure, so Order Defect Rate and the rest show as Good or At risk. The underlying percentages are in Seller Central.');
+    // A snapshot taken before the rest of the performance report was parsed
+    // has statuses only; policyMetrics is the marker, being absent until then.
+    const extendedCaptured = Array.isArray(performance?.policyMetrics);
+    const anyRate = [
+        performance?.orderDefectRatePct, performance?.lateShipmentRatePct,
+        performance?.cancellationRatePct, performance?.validTrackingRatePct,
+    ].some(isNum);
+    if (performance && !extendedCaptured) {
+        caveats.push('Order Defect Rate and the other policy metrics show as a status only in this edition. Their percentages, chargebacks, IP and customer complaints, on-time delivery and missing tracking are read from Amazon\'s performance report from the next sync onwards.');
+    } else if (healthRows.length && !anyRate) {
+        caveats.push('Amazon reported each policy metric as a status without the figure behind it, so Order Defect Rate and the rest show as Good or At risk. The underlying percentages are in Seller Central.');
     }
+    if (extendedCaptured && !healthRows.some((row) => row.metric.startsWith('On-Time Delivery'))) {
+        caveats.push('Amazon did not report an On-Time Delivery Rate for this marketplace. Its unit-based measure is published for the US only.');
+    }
+    if (gpsrApplies) {
+        caveats.push(issuesCaptured
+            ? 'Product compliance counts the GPSR issues Amazon attaches to a listing. Seller Central\'s compliance dashboard and its notifications have no API, so anything raised only there is not counted.'
+            : 'EU product compliance (GPSR) is read from the listing issues Amazon returns with each SKU, from the next catalogue sync onwards.');
+    }
+    // Spec 2B/2C: confirmed to have no Amazon API at all. Named, so their
+    // absence reads as a known limit rather than as nothing to report.
+    caveats.push('Fair Pricing violations, Voice of Customer, open cases, pending buyer messages and Seller Central case IDs have no Amazon API, so they are not in this live view. Your account manager adds them from Seller Central.');
 
     return {
         ...REPORT_ACCOUNT,
@@ -588,6 +840,12 @@ const buildAccountOverview = async (userId, country, region) => {
                     ? [highlight('Every Amazon policy metric is within target.', 'good')]
                     : []),
             ...(incomplete ? [highlight(`${plural(incomplete, 'listing')} are incomplete and will not sell until finished.`, 'watch')] : []),
+            ...(suppression.total
+                ? [highlight(`${plural(suppression.total, 'listing')} suppressed by Amazon and hidden from shoppers — see the Buy Box report for each reason.`, 'watch')]
+                : []),
+            ...(gpsrApplies && complianceListings
+                ? [highlight(`${plural(complianceListings, 'listing')} carry an EU product safety (GPSR) issue and risk removal until the details are supplied.`, 'watch')]
+                : []),
             // Spec 2F. The opportunity engine already ranks these and puts a
             // figure against each; the report just carries its top few rather
             // than inventing a second, competing ranking.
@@ -625,10 +883,11 @@ const REPORT_BUYBOX = { key: 'buybox', name: 'Weekly Buybox Report', cadence: 'W
  * cannot see gets no gap at all rather than a misleading one.
  */
 const buildBuyBox = async (userId, country, region) => {
-    const [snapshots, seller, pricing] = await Promise.all([
+    const [snapshots, seller, pricing, suppressedReport] = await Promise.all([
         BuyBoxData.find({ User: userId, country, region }).sort({ createdAt: -1 }).limit(8).lean(),
         Seller.findOne({ User: userId }).select('sellerAccount').lean(),
         CompetitiveOffers.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+        SuppressedListings.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
     ]);
 
     const latest = snapshots[0];
@@ -640,29 +899,16 @@ const buildBuyBox = async (userId, country, region) => {
     // alert service already joins these two collections.
     const account = (seller?.sellerAccount || []).find((acc) => acc.region === region && acc.country === country);
     const byAsin = new Map();
-    // Listings Amazon is actively suppressing. Reported here because a
-    // suppressed listing cannot be bought at all, which outranks losing the
-    // Buy Box on the same page.
-    const suppressed = [];
     for (const product of account?.products || []) {
         if (product.asin && !byAsin.has(product.asin)) {
             byAsin.set(product.asin, { sku: product.sku || '', price: num(product.price), title: product.itemName || '' });
         }
-        const hits = (product.listingIssues || []).filter((issue) => issue.isSuppression);
-        if (hits.length) {
-            suppressed.push({
-                sku: product.sku || '',
-                asin: product.asin || '',
-                productName: product.itemName || '',
-                // One listing can carry several enforcements; show them all.
-                enforcement: [...new Set(hits.flatMap((issue) => issue.enforcementActions))].join(', '),
-                reason: hits[0].message || '',
-                // An exemption means Amazon is still showing it despite the issue.
-                exempt: hits.some((issue) => String(issue.exemptionStatus).toUpperCase() === 'EXEMPT') ? 'Yes' : 'No',
-                detailPage: detailPageUrl(product.asin, country),
-            });
-        }
     }
+    // Listings Amazon is actively suppressing. Reported here because a
+    // suppressed listing cannot be bought at all, which outranks losing the
+    // Buy Box on the same page.
+    const suppression = collectSuppressed(account?.products || [], suppressedReport, country);
+    const suppressed = suppression.rows;
 
     // Absent until the pricing fetch has run at least once. Absent is reported
     // as an em dash, never as "no competitor" — the two look identical in a
@@ -815,7 +1061,10 @@ const buildBuyBox = async (userId, country, region) => {
                 { label: 'Below 50%', value: latest.productsWithLowBuyBox || 0, tone: (latest.productsWithLowBuyBox || 0) > 0 ? 'watch' : 'good' },
                 { label: 'Buy Box ownership', value: weightedOwnership, format: 'percent', tone: weightedOwnership >= 90 ? 'good' : 'watch' },
                 { label: 'Snapshots on file', value: snapshots.length },
-                { label: 'Suppressed listings', value: suppressed.length, tone: suppressed.length > 0 ? 'watch' : 'good' },
+                // Only once a source has reported: before that, 0 is not known.
+                ...(suppression.captured
+                    ? [{ label: 'Suppressed listings', value: suppression.total, tone: suppression.total > 0 ? 'watch' : 'good' }]
+                    : []),
                 // Only once pricing has actually run. A "0 priced above" tile
                 // on an account that was never fetched is a false all-clear.
                 ...(pricingCaptured && rows.length
@@ -860,7 +1109,7 @@ const buildBuyBox = async (userId, country, region) => {
                         { key: 'reason', label: 'Reason' },
                     ],
                     rows: suppressed.slice(0, 25),
-                    totalRows: suppressed.length,
+                    totalRows: suppression.total,
                 }
                 : null,
         },
@@ -874,11 +1123,14 @@ const buildBuyBox = async (userId, country, region) => {
             ...((latest.productsWithLowBuyBox || 0) > 0
                 ? [highlight(`${plural(latest.productsWithLowBuyBox, 'ASIN')} held the Buy Box less than half the time.`, 'watch')]
                 : []),
-            ...(suppressed.length
+            ...(suppression.total
                 ? [highlight(
-                    `${plural(suppressed.length, 'listing')} suppressed by Amazon and not visible to shoppers — a harder block on sales than losing the Buy Box.`,
+                    `${plural(suppression.total, 'listing')} suppressed by Amazon and not visible to shoppers — a harder block on sales than losing the Buy Box.`,
                     'watch'
                 )]
+                : []),
+            ...(suppression.atRisk
+                ? [highlight(`${plural(suppression.atRisk, 'listing')} Amazon marks as at risk of suppression; still visible, but worth fixing first.`, 'watch')]
                 : []),
             ...(widestGap
                 ? [highlight(
@@ -911,7 +1163,13 @@ const buildBuyBox = async (userId, country, region) => {
                         : []),
                 ]
                 : ['The competing seller and their price are fetched from Amazon\'s offer feed for contested ASINs only, from the next sync onwards. This edition shows them as not captured.']),
-            ...(suppressed.length ? [] : ['Suppression is read from the listing issues Amazon returns with each SKU. A listing suppressed since the last catalogue sync will not appear until the next one.']),
+            ...(suppression.reportUsable
+                ? [`Suppressed listings combine Amazon's Suppressed Listings Report, read on ${formatDate(suppression.reportFetchedAt)}, with the enforcement on each listing's own issues.`]
+                : suppression.reportUnreadable
+                    ? ["Amazon's Suppressed Listings Report arrived in a layout that could not be read, so only the enforcement on each listing's own issues is counted."]
+                    : ["Suppression is read from the listing issues Amazon returns with each SKU. Amazon's Suppressed Listings Report is added to it once it has first been fetched."]),
+            // Spec 1: there is no API for Seller Central support cases.
+            'Case IDs for Buy Box or suppression disputes live in Seller Central, which has no case API. Your account manager adds them.',
         ],
     };
 };
@@ -927,9 +1185,11 @@ const REPORT_AGED = { key: 'fba-aged-inventory', name: 'FBA Aged Inventory', cad
  * hence "of the units we can see" in the headline.
  */
 const buildAgedInventory = async (userId, country, region) => {
-    const latest = await FbaInventoryPlanningData.findOne({ User: userId, country, region })
-        .sort({ createdAt: -1 })
-        .lean();
+    const [latest, removals] = await Promise.all([
+        FbaInventoryPlanningData.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+        // Stock already on its way out, so it is not planned for removal twice.
+        RemovalOrders.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
+    ]);
 
     const items = latest?.data || [];
     if (!items.length) {
@@ -961,6 +1221,13 @@ const buildAgedInventory = async (userId, country, region) => {
 
     const aged = band181to270 + band271to365 + band365plus;
 
+    // Spec 6, pending removals. Three states kept apart: never fetched, fetched
+    // but unreadable, and read — only the last may say "none pending".
+    const removalsRead = Boolean(removals) && !removals.unreadable;
+    const pendingLines = removalsRead ? (removals.lines || []).filter((line) => line.isPending) : [];
+    const pendingOrders = removalsRead ? removals.pendingOrderCount || 0 : 0;
+    const pendingUnits = removalsRead ? removals.pendingUnits || 0 : 0;
+
     return {
         ...REPORT_AGED,
         available: true,
@@ -976,7 +1243,29 @@ const buildAgedInventory = async (userId, country, region) => {
                 { label: '271–365 days', value: band271to365, tone: band271to365 > 0 ? 'watch' : 'neutral' },
                 { label: '365+ days', value: band365plus, tone: band365plus > 0 ? 'watch' : 'neutral' },
                 { label: 'Unfulfillable', value: unfulfillable, tone: unfulfillable > 0 ? 'watch' : 'neutral' },
+                ...(removalsRead
+                    ? [
+                        { label: 'Pending removal orders', value: pendingOrders },
+                        { label: 'Units pending removal', value: pendingUnits },
+                    ]
+                    : []),
             ],
+            secondaryTable: pendingLines.length
+                ? {
+                    title: 'Pending removals',
+                    columns: [
+                        { key: 'orderId', label: 'Order ID' },
+                        { key: 'sku', label: 'SKU' },
+                        { key: 'orderType', label: 'Type' },
+                        { key: 'orderStatus', label: 'Status' },
+                        { key: 'requestedQuantity', label: 'Requested', format: 'number' },
+                        { key: 'pendingQuantity', label: 'Pending', format: 'number' },
+                        { key: 'requestDate', label: 'Requested on' },
+                    ],
+                    rows: pendingLines.slice(0, 25).map((line) => ({ ...line, requestDate: formatDate(line.requestDate) || line.requestDate })),
+                    totalRows: pendingLines.length,
+                }
+                : null,
             columns: [
                 { key: 'asin', label: 'ASIN' },
                 { key: 'band181to270', label: '181–270', format: 'number' },
@@ -1009,10 +1298,23 @@ const buildAgedInventory = async (userId, country, region) => {
             ...(unfulfillable
                 ? [highlight(`${plural(unfulfillable, 'unit')} are unfulfillable and should be removed or disposed of.`, 'watch')]
                 : []),
+            ...(pendingUnits
+                ? [highlight(`${plural(pendingUnits, 'unit')} across ${plural(pendingOrders, 'removal order')} are already on their way out — leave them out of any new removal plan.`)]
+                : removalsRead
+                    ? [highlight('No removal orders are open, so every ageing unit above is still awaiting a decision.')]
+                    : []),
             highlight('[Removal or liquidation plan for aged stock]', 'fill'),
         ],
         caveats: [
             'The 0–90 and 91–180 day bands are not shown. Amazon reports them, but only the storage-fee bands (181 days and older) are stored today, so younger stock is not counted here.',
+            ...(removalsRead
+                ? [`Pending removals cover orders requested in the ${removals.windowStart && removals.windowEnd ? `period ${formatDate(removals.windowStart)} to ${formatDate(removals.windowEnd)}` : 'last 180 days'}.`]
+                : removals?.unreadable
+                    ? ['Amazon\'s removal order report arrived in a layout that could not be read, so pending removals are not shown.']
+                    : ['Pending removals are read from Amazon\'s removal order report from the next sync onwards.']),
+            // Spec 6: outlet, coupon or liquidation is an agreed business rule,
+            // not something the data decides.
+            'The recommended action for each aged ASIN (outlet, coupon or liquidation) is set by your account manager.',
         ],
     };
 };
@@ -1299,8 +1601,18 @@ const buildReviewRequests = async (userId, country, region) => {
 
 const REPORT_MONTHLY = { key: 'monthly-performance', name: 'Monthly Performance Report', cadence: 'MONTHLY', format: 'docx' };
 
-/** Sum sales and units over a date window. */
+/** 1 when the field holds a value, 0 when it is missing or null. */
+const presentFlag = (field) => ({ $cond: [{ $ne: [{ $ifNull: [field, null] }, null] }, 1, 0] });
+
+/**
+ * Sum sales and units over a date window, plus the regular vs B2B split.
+ *
+ * The split only counts days where Amazon actually reported a B2B figure, and
+ * takes that day's all-channel total from the same row — so regular is always
+ * total minus B2B from one source, never a subtraction across two.
+ */
 const sumSales = async (userId, country, region, startDate, endDate) => {
+    const b2bReported = presentFlag('$b2b.unitsOrderedB2B');
     const [result] = await SalesOnlyMetrics.aggregate([
         { $match: { User: toObjectId(userId), country, region, date: { $gte: startDate, $lte: endDate } } },
         {
@@ -1308,10 +1620,35 @@ const sumSales = async (userId, country, region, startDate, endDate) => {
                 _id: null,
                 totalSales: { $sum: { $ifNull: ['$sales.amount', 0] } },
                 unitsSold: { $sum: { $ifNull: ['$unitsSold', 0] } },
+                // Days stored since the split was kept at all.
+                b2bCapturedDays: { $sum: presentFlag('$b2b.unitsOrderedTotal') },
+                b2bReportedDays: { $sum: b2bReported },
+                b2bUnits: { $sum: { $ifNull: ['$b2b.unitsOrderedB2B', 0] } },
+                b2bOrderItems: { $sum: { $ifNull: ['$b2b.orderItemsB2B', 0] } },
+                splitTotalUnits: {
+                    $sum: { $cond: [{ $eq: [b2bReported, 1] }, { $ifNull: ['$b2b.unitsOrderedTotal', 0] }, 0] },
+                },
             },
         },
     ]);
-    return { totalSales: round(result?.totalSales || 0), unitsSold: result?.unitsSold || 0 };
+
+    const reportedDays = result?.b2bReportedDays || 0;
+    return {
+        totalSales: round(result?.totalSales || 0),
+        unitsSold: result?.unitsSold || 0,
+        b2bCapturedDays: result?.b2bCapturedDays || 0,
+        b2b: reportedDays
+            ? {
+                days: reportedDays,
+                units: result.b2bUnits || 0,
+                // Floored at zero: a B2B figure revised after the day's total
+                // was captured must not produce negative regular units.
+                regularUnits: Math.max((result.splitTotalUnits || 0) - (result.b2bUnits || 0), 0),
+                orderItems: result.b2bOrderItems || 0,
+                share: result.splitTotalUnits ? round(((result.b2bUnits || 0) / result.splitTotalUnits) * 100, 1) : null,
+            }
+            : null,
+    };
 };
 
 /**
@@ -1537,6 +1874,16 @@ const buildMonthlyPerformance = async (userId, country, region) => {
                 { label: 'CTR', value: ppcCurrent.ctr, format: 'percent', delta: ppcCurrent.ctr !== null && ppcPrevious.ctr !== null ? round(ppcCurrent.ctr - ppcPrevious.ctr, 2) : null, deltaFormat: 'points' },
                 { label: 'CPC', value: ppcCurrent.cpc, format: 'currency', delta: pctChange(ppcCurrent.cpc, ppcPrevious.cpc), deltaFormat: 'percent', deltaGoodWhen: 'down' },
                 { label: 'Avg selling price', value: asp, format: 'currency', delta: pctChange(asp, aspPrev), deltaFormat: 'percent' },
+                // Spec 2G. Only when Amazon reported a B2B figure: before the
+                // first sync, or for a seller not in Amazon Business, a "0 B2B
+                // units" tile would state something we do not know.
+                ...(current.b2b
+                    ? [
+                        { label: 'Regular units', value: current.b2b.regularUnits, delta: previous.b2b ? pctChange(current.b2b.regularUnits, previous.b2b.regularUnits) : null, deltaFormat: 'percent' },
+                        { label: 'B2B units', value: current.b2b.units, delta: previous.b2b ? pctChange(current.b2b.units, previous.b2b.units) : null, deltaFormat: 'percent' },
+                        { label: 'B2B share of units', value: current.b2b.share, format: 'percent' },
+                    ]
+                    : []),
             ],
             columns: [
                 { key: 'metric', label: 'Metric' },
@@ -1554,6 +1901,13 @@ const buildMonthlyPerformance = async (userId, country, region) => {
                 { metric: 'Ad revenue', current: ppcCurrent.adSales, previous: ppcPrevious.adSales, change: pctCell(ppcCurrent.adSales, ppcPrevious.adSales) },
                 { metric: 'Organic revenue', current: organic, previous: organicPrev, change: pctCell(organic, organicPrev) },
                 { metric: 'Units sold', current: units, previous: unitsPrev, change: pctCell(units, unitsPrev) },
+                ...(current.b2b
+                    ? [
+                        { metric: 'Regular units', current: current.b2b.regularUnits, previous: previous.b2b ? previous.b2b.regularUnits : '—', change: previous.b2b ? pctCell(current.b2b.regularUnits, previous.b2b.regularUnits) : '—' },
+                        { metric: 'B2B units', current: current.b2b.units, previous: previous.b2b ? previous.b2b.units : '—', change: previous.b2b ? pctCell(current.b2b.units, previous.b2b.units) : '—' },
+                        { metric: 'B2B order items', current: current.b2b.orderItems, previous: previous.b2b ? previous.b2b.orderItems : '—', change: previous.b2b ? pctCell(current.b2b.orderItems, previous.b2b.orderItems) : '—' },
+                    ]
+                    : []),
                 { metric: 'Sessions', current: trafficCurrent.sessions, previous: trafficPrevious.sessions, change: pctCell(trafficCurrent.sessions, trafficPrevious.sessions) },
                 {
                     metric: 'Conversion rate',
@@ -1644,11 +1998,27 @@ const buildMonthlyPerformance = async (userId, country, region) => {
                     ppcPrevious.roas !== null && ppcCurrent.roas < ppcPrevious.roas ? 'watch' : 'good'
                 )]
                 : []),
+            ...(current.b2b && current.b2b.units && current.b2b.share !== null
+                ? [highlight(`Business customers bought ${plural(current.b2b.units, 'unit')}, ${current.b2b.share}% of units in the period.`)]
+                : []),
             highlight('[Actions taken this month and focus areas planned for next]', 'fill'),
         ],
         caveats: [
             ...(partial
                 ? [`${formatMonth(currentStart)} is still incomplete — this covers the ${spanDays + 1} days to ${formatDate(currentEnd)}, compared against the same ${spanDays + 1} days of ${formatMonth(previousStart)} so the two are like for like.`]
+                : []),
+            // Three different reasons the split can be missing or partial.
+            ...(!current.b2bCapturedDays
+                ? ['The regular vs B2B split is captured from the next sales sync onwards, so this edition does not show it.']
+                : !current.b2b
+                    ? ['Amazon returned no B2B figures for this marketplace. It fills them only for sellers enrolled in Amazon Business.']
+                    : current.b2b.days < spanDays + 1
+                        ? [`The regular vs B2B split covers ${current.b2b.days} of the ${spanDays + 1} days in this period.`]
+                        : []),
+            // Full coverage only: on a partial one the totals differ for the
+            // reason the caveat above already gives.
+            ...(current.b2b && current.b2b.days === spanDays + 1 && current.b2b.units + current.b2b.regularUnits !== units
+                ? ['The B2B split comes from Amazon\'s daily account totals, which can differ slightly from the per-ASIN units above.']
                 : []),
             'The per-marketplace narrative, actions taken and planned focus areas come from your account manager and are not part of this live view.',
         ],

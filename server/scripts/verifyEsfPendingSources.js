@@ -10,6 +10,14 @@
  *   APlusPremium       0 documents   (A+ Premium column)
  *   listingIssues[]    0 listings    (suppressed-listings table)
  *
+ * and, since the API feasibility check, four more:
+ *
+ *   V2 extended fields    (rates, on-time delivery, chargebacks, IP and
+ *                          customer complaints, missing tracking)
+ *   SuppressedListings    (Suppressed tile, merged suppressed table)
+ *   RemovalOrders         (pending removals on FBA Aged Inventory)
+ *   SalesOnlyMetrics.b2b  (regular vs B2B split on Monthly Performance)
+ *
  * Empty is the correct state today: the first two need a live Amazon call that
  * cannot be made from here (every SP-API account returns 401 invalid_client),
  * and the third fills on the next catalogue sync. But it means the code that
@@ -42,6 +50,10 @@ const User = require('../models/user-auth/userModel.js');
 const Seller = require('../models/user-auth/sellerCentralModel.js');
 const CompetitiveOffers = require('../models/products/CompetitiveOffersModel.js');
 const APlusPremium = require('../models/seller-performance/APlusPremiumModel.js');
+const V2SellerPerformance = require('../models/seller-performance/V2_Seller_Performance_ReportModel.js');
+const SuppressedListings = require('../models/products/SuppressedListingsModel.js');
+const RemovalOrders = require('../models/inventory/RemovalOrdersModel.js');
+const SalesOnlyMetrics = require('../models/MCP/SalesOnlyMetricsModel.js');
 const { getEsfReports } = require('../Services/Calculations/EsfReportsService.js');
 const { buildReportDocDefinition, renderReportPdf } = require('../Services/Reports/reportPdf.js');
 
@@ -122,13 +134,21 @@ const caveats = (report) => (report?.caveats || []).join(' ');
     console.log(`  contested ASIN under test: ${asin}\n`);
 
     const realSellerFindOne = Seller.findOne.bind(Seller);
+    const realV2FindOne = V2SellerPerformance.findOne.bind(V2SellerPerformance);
+    const realAggregate = SalesOnlyMetrics.aggregate.bind(SalesOnlyMetrics);
     const restore = () => {
         CompetitiveOffers.findOne = CompetitiveOffers.__real;
         APlusPremium.findOne = APlusPremium.__real;
+        SuppressedListings.findOne = SuppressedListings.__real;
+        RemovalOrders.findOne = RemovalOrders.__real;
+        V2SellerPerformance.findOne = realV2FindOne;
+        SalesOnlyMetrics.aggregate = realAggregate;
         Seller.findOne = realSellerFindOne;
     };
     CompetitiveOffers.__real = CompetitiveOffers.findOne.bind(CompetitiveOffers);
     APlusPremium.__real = APlusPremium.findOne.bind(APlusPremium);
+    SuppressedListings.__real = SuppressedListings.findOne.bind(SuppressedListings);
+    RemovalOrders.__real = RemovalOrders.findOne.bind(RemovalOrders);
 
     try {
         /* ============================================================ 1 + 2
@@ -303,6 +323,156 @@ const caveats = (report) => (report?.caveats || []).join(' ');
             buybox.highlights.some((h) => /suppressed by Amazon/.test(h.text || h)), true);
         text = allText(buildReportDocDefinition(buybox, {}));
         check(scope, 'PDF carries the enforcement', text.some((t) => t.includes('LISTING_SUPPRESSED')), true);
+        Seller.findOne = realSellerFindOne;
+
+        /* ================================================================ 2B
+         * The rest of the V2 performance report: rates, on-time delivery,
+         * chargebacks, IP and customer complaints, missing tracking. Laid over
+         * this account's REAL latest snapshot, so the seven fields it already
+         * holds are exercised alongside the new ones.
+         */
+        console.log('[2B] Account health from the V2 report');
+        const realPerf = await realV2FindOne({ User: client._id, country: acc.country, region: acc.region }).sort({ createdAt: -1 }).lean();
+        V2SellerPerformance.findOne = stubFindOne({
+            ...(realPerf || {}),
+            orderWithDefectsStatus: realPerf?.orderWithDefectsStatus || 'GOOD',
+            validTrackingRateStatus: 'AT RISK',
+            orderDefectRatePct: 0.24,
+            validTrackingRatePct: 93.5,
+            unitOnTimeDeliveryRateStatus: 'GOOD',
+            unitOnTimeDeliveryRatePct: 97.2,
+            chargebackCount: 2,
+            trackedShipmentCount: 200,
+            validTrackingCount: 187,
+            policyMetrics: [
+                { key: 'receivedIntellectualPropertyComplaints', status: 'GOOD', count: 0 },
+                { key: 'productAuthenticityCustomerComplaints', status: 'AT RISK', count: 1 },
+            ],
+        });
+        let overview = (await getEsfReports(client._id, acc.country, acc.region)).reports.find((r) => r.key === 'account-overview');
+        const healthRows = overview.summary.secondaryTable?.rows || [];
+        const healthRow = (prefix) => healthRows.find((r) => r.metric.startsWith(prefix));
+        check(scope, 'ODR carries its figure', healthRow('Order Defect Rate')?.status.endsWith('(0.24%)'), true);
+        check(scope, 'on-time delivery row', healthRow('On-Time Delivery Rate (units)')?.status, 'Good (97.2%)');
+        check(scope, 'chargebacks row', healthRow('Chargebacks')?.status, '2');
+        check(scope, 'missing tracking = 200 - 187', healthRow('Shipments without valid tracking')?.status, '13 of 200');
+        check(scope, 'missing tracking flagged with the rate', healthRow('Shipments without valid tracking')?.action, 'Add tracking in Seller Central');
+        check(scope, 'IP complaints always shown', healthRow('IP complaints received')?.status, 'Good (0)');
+        check(scope, 'customer complaint flagged', healthRow('Product authenticity complaints')?.action, 'Review in Seller Central');
+        check(scope, 'no "status only" caveat once captured', /status only in this edition/.test(caveats(overview)), false);
+        text = allText(buildReportDocDefinition(overview, {}));
+        check(scope, 'PDF carries the complaints row', text.includes('Product authenticity complaints'), true);
+        check(scope, 'PDF carries the rate', text.includes('At risk (93.5%)'), true);
+
+        V2SellerPerformance.findOne = realV2FindOne;
+        overview = (await getEsfReports(client._id, acc.country, acc.region)).reports.find((r) => r.key === 'account-overview');
+        check(scope, 'real snapshot, pre-parser: says statuses only',
+            /status only in this edition/.test(caveats(overview)), Boolean(realPerf) && !Array.isArray(realPerf?.policyMetrics));
+        check(scope, 'no-API items are named', /have no Amazon API/.test(caveats(overview)), true);
+
+        /* ================================================================ 2A
+         * Amazon's Suppressed Listings Report, merged with listing issues.
+         */
+        console.log('[2A] Suppressed Listings Report');
+        const catalogueSku = (catAccount?.products || []).find((p) => p.sku)?.sku;
+        SuppressedListings.findOne = stubFindOne({
+            createdAt: new Date('2026-09-27T00:00:00Z'),
+            items: [
+                { sku: catalogueSku, asin: suppressedAsin, status: 'Search Suppressed', reason: 'Missing main image', isAtRisk: false },
+                { sku: 'NOT-IN-CATALOGUE', asin: 'B000000000', productName: 'Only in the report', status: 'Blocked', reason: 'Pricing error', isAtRisk: false },
+                { sku: 'AT-RISK', asin: 'B000000001', status: 'At Risk', isAtRisk: true },
+            ],
+            suppressedCount: 2,
+            atRiskCount: 1,
+            unreadable: false,
+        });
+        payload = await getEsfReports(client._id, acc.country, acc.region);
+        overview = payload.reports.find((r) => r.key === 'account-overview');
+        buybox = payload.reports.find((r) => r.key === 'buybox');
+        check(scope, 'Account Overview gets a Suppressed tile', stat(overview, 'Suppressed')?.value, 2);
+        check(scope, 'Buy Box agrees on the count', stat(buybox, 'Suppressed listings')?.value, 2);
+        check(scope, 'report-only row reaches the table',
+            (buybox.summary.secondaryTable?.rows || []).some((r) => r.sku === 'NOT-IN-CATALOGUE' && r.enforcement === 'Blocked'), true);
+        check(scope, 'at-risk kept out of the table',
+            (buybox.summary.secondaryTable?.rows || []).some((r) => r.sku === 'AT-RISK'), false);
+        check(scope, 'caveat dates the report read', /Suppressed Listings Report, read on/.test(caveats(buybox)), true);
+        text = allText(buildReportDocDefinition(buybox, {}));
+        check(scope, 'PDF carries the report-only row', text.includes('NOT-IN-CATALOGUE'), true);
+        text = allText(buildReportDocDefinition(overview, {}));
+        // Tile labels are drawn in capitals.
+        check(scope, 'Account Overview PDF carries the tile', text.includes('SUPPRESSED'), true);
+
+        SuppressedListings.findOne = stubFindOne({ createdAt: new Date(), items: [], unreadable: true, headers: ['Estado'] });
+        overview = (await getEsfReports(client._id, acc.country, acc.region)).reports.find((r) => r.key === 'account-overview');
+        check(scope, 'unreadable report gets no false all-clear', Boolean(stat(overview, 'Suppressed')), false);
+        SuppressedListings.findOne = SuppressedListings.__real;
+
+        /* ================================================================== 6
+         * Pending removals. Needs an account with ageing stock; the account
+         * under test may not have any, and that is reported, not failed.
+         */
+        console.log('[6] Pending removals');
+        RemovalOrders.findOne = stubFindOne({
+            createdAt: new Date('2026-09-27T00:00:00Z'),
+            windowStart: new Date('2026-04-01T00:00:00Z'),
+            windowEnd: new Date('2026-09-27T00:00:00Z'),
+            pendingOrderCount: 1,
+            pendingUnits: 15,
+            lines: [{ orderId: 'RMV-TEST-1', sku: 'S1', orderType: 'Return', orderStatus: 'Pending', requestedQuantity: 20, pendingQuantity: 15, isPending: true, requestDate: '2026-09-10T00:00:00Z' }],
+        });
+        let agedTarget = null;
+        for (const candidate of clients) {
+            const seller = await realSellerFindOne({ User: candidate._id }).select('sellerAccount').lean();
+            for (const account of (seller?.sellerAccount || []).filter((a) => a.country && a.region)) {
+                const aged = (await getEsfReports(candidate._id, account.country, account.region)).reports.find((r) => r.key === 'fba-aged-inventory');
+                if (aged?.available) { agedTarget = { aged, scope: `${candidate.email} ${account.country}/${account.region}` }; break; }
+            }
+            if (agedTarget) break;
+        }
+        if (!agedTarget) {
+            console.log('  no ESF account has ageing stock today; pending removals covered by the unit suite only');
+        } else {
+            const { aged, scope: agedScope } = agedTarget;
+            check(agedScope, 'pending orders tile', stat(aged, 'Pending removal orders')?.value, 1);
+            check(agedScope, 'pending units tile', stat(aged, 'Units pending removal')?.value, 15);
+            check(agedScope, 'pending removals table', aged.summary.secondaryTable?.title, 'Pending removals');
+            text = allText(buildReportDocDefinition(aged, {}));
+            check(agedScope, 'PDF carries the removal order', text.includes('RMV-TEST-1'), true);
+            check(agedScope, 'PDF renders', Buffer.isBuffer(await renderReportPdf(aged, {})), true);
+        }
+        RemovalOrders.findOne = RemovalOrders.__real;
+
+        /* ================================================================ 2G
+         * Regular vs B2B. The real aggregate runs; only the split fields —
+         * which no stored day carries yet — are added to its first answer
+         * (the current period).
+         */
+        console.log('[2G] Regular vs B2B split');
+        let aggregateCalls = 0;
+        SalesOnlyMetrics.aggregate = async (...args) => {
+            // Numbered at call time, not on resolution: both periods are
+            // queried at once and may resolve in either order.
+            aggregateCalls += 1;
+            const call = aggregateCalls;
+            const result = await realAggregate(...args);
+            if (call === 1 && result[0]) {
+                Object.assign(result[0], { b2bCapturedDays: 5, b2bReportedDays: 5, b2bUnits: 3, b2bOrderItems: 2, splitTotalUnits: 30 });
+            }
+            return result;
+        };
+        const monthly = (await getEsfReports(client._id, acc.country, acc.region)).reports.find((r) => r.key === 'monthly-performance');
+        if (!monthly?.available) {
+            console.log('  monthly report unavailable on this account; B2B split covered by the unit suite only');
+        } else {
+            check(scope, 'B2B units tile', stat(monthly, 'B2B units')?.value, 3);
+            check(scope, 'regular = total - B2B', stat(monthly, 'Regular units')?.value, 27);
+            check(scope, 'B2B share', stat(monthly, 'B2B share of units')?.value, 10);
+            check(scope, 'no change against an uncaptured month', stat(monthly, 'B2B units')?.delta, null);
+            check(scope, 'partial coverage is named', /covers 5 of the/.test(caveats(monthly)), true);
+            text = allText(buildReportDocDefinition(monthly, {}));
+            check(scope, 'PDF carries the B2B row', text.includes('B2B order items'), true);
+        }
+        SalesOnlyMetrics.aggregate = realAggregate;
     } finally {
         restore();
     }

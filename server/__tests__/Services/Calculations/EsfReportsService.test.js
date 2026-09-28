@@ -32,6 +32,8 @@ jest.mock('../../../models/seller-performance/NumberOfProductReviewsModel.js', (
 jest.mock('../../../models/seller-performance/APlusContentModel.js', () => ({ findOne: jest.fn() }));
 jest.mock('../../../models/seller-performance/APlusPremiumModel.js', () => ({ findOne: jest.fn() }));
 jest.mock('../../../models/products/CompetitiveOffersModel.js', () => ({ findOne: jest.fn() }));
+jest.mock('../../../models/products/SuppressedListingsModel.js', () => ({ findOne: jest.fn() }));
+jest.mock('../../../models/inventory/RemovalOrdersModel.js', () => ({ findOne: jest.fn() }));
 jest.mock('../../../models/review/ReviewOrderModel.js', () => ({ aggregate: jest.fn(), countDocuments: jest.fn(), findOne: jest.fn() }));
 jest.mock('../../../models/MCP/SalesOnlyMetricsModel.js', () => ({ aggregate: jest.fn(), findOne: jest.fn() }));
 jest.mock('../../../models/amazon-ads/PPCMetricsModel.js', () => ({ aggregate: jest.fn(), findOne: jest.fn() }));
@@ -52,6 +54,8 @@ const Content = require('../../../models/seller-performance/NumberOfProductRevie
 const APlus = require('../../../models/seller-performance/APlusContentModel.js');
 const APlusPremium = require('../../../models/seller-performance/APlusPremiumModel.js');
 const Pricing = require('../../../models/products/CompetitiveOffersModel.js');
+const SuppressedListings = require('../../../models/products/SuppressedListingsModel.js');
+const RemovalOrders = require('../../../models/inventory/RemovalOrdersModel.js');
 const ReviewOrder = require('../../../models/review/ReviewOrderModel.js');
 const SalesOnlyMetrics = require('../../../models/MCP/SalesOnlyMetricsModel.js');
 const PPCMetrics = require('../../../models/amazon-ads/PPCMetricsModel.js');
@@ -90,6 +94,8 @@ const stubEmpty = () => {
     APlus.findOne.mockReturnValue(mockFindOne(null));
     APlusPremium.findOne.mockReturnValue(mockFindOne(null));
     Pricing.findOne.mockReturnValue(mockFindOne(null));
+    SuppressedListings.findOne.mockReturnValue(mockFindOne(null));
+    RemovalOrders.findOne.mockReturnValue(mockFindOne(null));
     ReviewOrder.aggregate.mockResolvedValue([]);
     ReviewOrder.countDocuments.mockResolvedValue(0);
     ReviewOrder.findOne.mockReturnValue({ sort: () => ({ select: () => ({ lean: () => Promise.resolve(null) }) }) });
@@ -989,5 +995,331 @@ describe('getEsfReportHistory', () => {
 
         const history = await getEsfReportHistory(USER, 'US', 'NA', 'buybox');
         expect(history.available).toBe(false);
+    });
+});
+
+/* -------------------------------------------------------------------------
+ * The spec items added from the API feasibility check. Each source below can
+ * be absent (never fetched), present-but-unusable, or read — and the reports
+ * must say which, because "0" means something different in each case.
+ * ---------------------------------------------------------------------- */
+describe('feasibility-check additions', () => {
+    const catalogue = (products, country = 'US', region = 'NA') => Seller.findOne.mockReturnValue(mockFindOne({
+        sellerAccount: [{ country, region, products }],
+    }));
+    const healthRow = (report, prefix) => report.summary.secondaryTable?.rows.find((row) => row.metric.startsWith(prefix));
+    const statOf = (report, label) => report.summary.stats.find((item) => item.label === label);
+
+    describe('account health from the V2 report', () => {
+        const extended = {
+            ahrScore: 250,
+            orderWithDefectsStatus: 'GOOD',
+            CancellationRate: 'GOOD',
+            validTrackingRateStatus: 'AT RISK',
+            lateShipmentRateStatus: 'GOOD',
+            listingPolicyViolations: 'GOOD',
+            orderDefectRatePct: 0.24,
+            cancellationRatePct: 1.1,
+            validTrackingRatePct: 93.5,
+            lateShipmentRatePct: 2,
+            unitOnTimeDeliveryRateStatus: 'GOOD',
+            unitOnTimeDeliveryRatePct: 97.2,
+            chargebackCount: 2,
+            odrWindowFrom: '2026-07-01',
+            odrWindowTo: '2026-09-28',
+            trackedShipmentCount: 200,
+            validTrackingCount: 187,
+            policyMetrics: [
+                { key: 'listingPolicyViolations', status: 'GOOD', count: 0 },
+                { key: 'receivedIntellectualPropertyComplaints', status: 'GOOD', count: 0 },
+                { key: 'suspectedIntellectualPropertyViolations', status: 'GOOD', count: 0 },
+                { key: 'productAuthenticityCustomerComplaints', status: 'AT RISK', count: 1 },
+                { key: 'productConditionCustomerComplaints', status: 'GOOD', count: 0 },
+                { key: 'productSafetyCustomerComplaints', status: 'GOOD', count: 0 },
+                { key: 'documentRequests', status: 'GOOD', count: 0 },
+                { key: 'someFutureViolations', status: 'GOOD', count: 3 },
+            ],
+        };
+
+        it('carries the rate beside the status, and Amazon\'s verdict decides the action', async () => {
+            catalogue([{ asin: 'B1', sku: 'S1', status: 'Active', quantity: 1 }]);
+            V2Perf.findOne.mockReturnValue(mockFindOne(extended));
+
+            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'account-overview');
+
+            expect(healthRow(report, 'Order Defect Rate')).toMatchObject({ status: 'Good (0.24%)', target: 'Under 1%', action: 'None' });
+            expect(healthRow(report, 'Valid Tracking Rate')).toMatchObject({ status: 'At risk (93.5%)', action: 'Review in Seller Central' });
+            // Unit-based OTDR wins where Amazon publishes it.
+            expect(healthRow(report, 'On-Time Delivery Rate (units)')).toMatchObject({ status: 'Good (97.2%)', target: 'Over 90%' });
+        });
+
+        it('reports chargebacks over their window, and missing tracking as a count of shipments', async () => {
+            catalogue([{ asin: 'B1', sku: 'S1', status: 'Active', quantity: 1 }]);
+            V2Perf.findOne.mockReturnValue(mockFindOne(extended));
+
+            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'account-overview');
+
+            expect(healthRow(report, 'Chargebacks')).toMatchObject({ status: '2', action: 'Review in Seller Central' });
+            expect(healthRow(report, 'Chargebacks').metric).toMatch(/1 Jul 2026 to 28 Sept 2026/);
+            // 200 - 187, and flagged because Amazon flags the rate itself.
+            expect(healthRow(report, 'Shipments without valid tracking')).toMatchObject({ status: '13 of 200', action: 'Add tracking in Seller Central' });
+        });
+
+        it('always shows IP and customer complaints, and the rest only when they carry something', async () => {
+            catalogue([{ asin: 'B1', sku: 'S1', status: 'Active', quantity: 1 }]);
+            V2Perf.findOne.mockReturnValue(mockFindOne(extended));
+
+            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'account-overview');
+
+            expect(healthRow(report, 'IP complaints received')).toMatchObject({ status: 'Good (0)', action: 'None' });
+            expect(healthRow(report, 'Suspected IP violations')).toBeDefined();
+            expect(healthRow(report, 'Product authenticity complaints')).toMatchObject({ status: 'At risk (1)', action: 'Review in Seller Central' });
+            expect(healthRow(report, 'Product condition complaints')).toBeDefined();
+            expect(healthRow(report, 'Product safety complaints')).toBeDefined();
+            // A zero on a metric outside the named five is not worth a row...
+            expect(healthRow(report, 'Document requests')).toBeUndefined();
+            // ...but a metric we have no label for still arrives when it counts.
+            expect(healthRow(report, 'Some future violations')).toMatchObject({ status: 'Good (3)' });
+            // Listing policy keeps a single row, now with its count.
+            expect(report.summary.secondaryTable.rows.filter((row) => row.metric === 'Listing policy violations')).toHaveLength(1);
+        });
+
+        it('says an older snapshot has statuses only, rather than showing blank figures', async () => {
+            catalogue([{ asin: 'B1', sku: 'S1', status: 'Active', quantity: 1 }]);
+            V2Perf.findOne.mockReturnValue(mockFindOne({ orderWithDefectsStatus: 'GOOD', lateShipmentRateStatus: 'GOOD' }));
+
+            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'account-overview');
+
+            expect(healthRow(report, 'Order Defect Rate').status).toBe('Good');
+            expect(healthRow(report, 'Chargebacks')).toBeUndefined();
+            expect(report.caveats.join(' ')).toMatch(/status only in this edition/);
+        });
+
+        it('says when Amazon published no On-Time Delivery Rate for the marketplace', async () => {
+            catalogue([{ asin: 'B1', sku: 'S1', status: 'Active', quantity: 1 }], 'UK', 'EU');
+            V2Perf.findOne.mockReturnValue(mockFindOne({ ...extended, unitOnTimeDeliveryRateStatus: '', unitOnTimeDeliveryRatePct: null }));
+
+            const report = byKey(await getEsfReports(USER, 'UK', 'EU'), 'account-overview');
+
+            expect(healthRow(report, 'On-Time Delivery')).toBeUndefined();
+            expect(report.caveats.join(' ')).toMatch(/US only/);
+        });
+
+        it('names the items that have no Amazon API at all', async () => {
+            catalogue([{ asin: 'B1', sku: 'S1', status: 'Active', quantity: 1 }]);
+            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'account-overview');
+            expect(report.caveats.join(' ')).toMatch(/Fair Pricing violations, Voice of Customer, open cases, pending buyer messages and Seller Central case IDs have no Amazon API/);
+        });
+    });
+
+    describe('product compliance (EU GPSR)', () => {
+        const gpsrIssue = { code: '99300', attributeNames: ['gpsr_manufacturer_reference'], categories: ['MISSING_ATTRIBUTE'], enforcementActions: [], isSuppression: false };
+        const otherIssue = { code: '8541', attributeNames: ['item_name'], categories: ['INVALID_ATTRIBUTE'], enforcementActions: [], isSuppression: false };
+
+        it('counts listings carrying a GPSR issue in an EU marketplace', async () => {
+            catalogue([
+                { asin: 'B1', sku: 'S1', status: 'Active', listingIssues: [gpsrIssue] },
+                { asin: 'B2', sku: 'S2', status: 'Active', listingIssues: [otherIssue] },
+                { asin: 'B3', sku: 'S3', status: 'Active', listingIssues: [] },
+            ], 'DE', 'EU');
+
+            const report = byKey(await getEsfReports(USER, 'DE', 'EU'), 'account-overview');
+
+            expect(healthRow(report, 'Product compliance')).toMatchObject({ status: '1 of 3 listings', action: 'Supply the missing product safety details' });
+            expect(report.highlights.some((h) => /GPSR/.test(h.text))).toBe(true);
+        });
+
+        it('gives no all-clear before any listing issue has been captured', async () => {
+            catalogue([{ asin: 'B1', sku: 'S1', status: 'Active' }], 'DE', 'EU');
+            const report = byKey(await getEsfReports(USER, 'DE', 'EU'), 'account-overview');
+
+            expect(healthRow(report, 'Product compliance')).toBeUndefined();
+            expect(report.caveats.join(' ')).toMatch(/GPSR\) is read from the listing issues/);
+        });
+
+        it('does not apply GPSR outside the EU', async () => {
+            catalogue([{ asin: 'B1', sku: 'S1', status: 'Active', listingIssues: [gpsrIssue] }]);
+            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'account-overview');
+            expect(healthRow(report, 'Product compliance')).toBeUndefined();
+        });
+    });
+
+    describe('suppressed listings', () => {
+        const buyBoxSnapshot = () => BuyBoxData.find.mockReturnValue({
+            sort: () => ({
+                limit: () => ({
+                    lean: () => Promise.resolve([{
+                        createdAt: new Date('2026-09-20T00:00:00Z'),
+                        totalProducts: 1,
+                        productsWithBuyBox: 1,
+                        asinBuyBoxData: [{ childAsin: 'B1', buyBoxPercentage: 100, sessions: 1 }],
+                    }]),
+                }),
+            }),
+        });
+        const report = (items, extra = {}) => SuppressedListings.findOne.mockReturnValue(mockFindOne({
+            createdAt: new Date('2026-09-27T00:00:00Z'),
+            items,
+            suppressedCount: items.filter((item) => !item.isAtRisk).length,
+            atRiskCount: items.filter((item) => item.isAtRisk).length,
+            unreadable: false,
+            ...extra,
+        }));
+
+        it('shows no Suppressed tile before either source has reported', async () => {
+            catalogue([{ asin: 'B1', sku: 'S1', status: 'Active' }]);
+            buyBoxSnapshot();
+            const payload = await getEsfReports(USER, 'US', 'NA');
+
+            expect(statOf(byKey(payload, 'account-overview'), 'Suppressed')).toBeUndefined();
+            expect(statOf(byKey(payload, 'buybox'), 'Suppressed listings')).toBeUndefined();
+        });
+
+        it('counts the same listings on both reports, with the at-risk ones kept out', async () => {
+            catalogue([
+                { asin: 'B1', sku: 'S1', status: 'Active', itemName: 'One', listingIssues: [{ message: 'Missing image', enforcementActions: ['SEARCH_SUPPRESSED'], isSuppression: true, exemptionStatus: '' }] },
+                { asin: 'B2', sku: 'S2', status: 'Active', itemName: 'Two' },
+            ]);
+            buyBoxSnapshot();
+            report([
+                // Also suppressed per its listing issues: counted once, with the richer row.
+                { sku: 'S1', asin: 'B1', status: 'Search Suppressed', reason: 'Missing image', isAtRisk: false },
+                { sku: 'S2', asin: 'B2', status: 'Blocked', reason: 'Price alert', isAtRisk: false },
+                { sku: 'S3', asin: 'B3', status: 'At Risk', reason: 'Low quality', isAtRisk: true },
+            ]);
+
+            const payload = await getEsfReports(USER, 'US', 'NA');
+            const overview = byKey(payload, 'account-overview');
+            const buybox = byKey(payload, 'buybox');
+
+            expect(statOf(overview, 'Suppressed').value).toBe(2);
+            expect(statOf(buybox, 'Suppressed listings').value).toBe(2);
+            const rows = buybox.summary.secondaryTable.rows;
+            expect(rows.find((row) => row.sku === 'S1').enforcement).toBe('SEARCH_SUPPRESSED');
+            // The report has no exemption status: unknown, never "No".
+            expect(rows.find((row) => row.sku === 'S2')).toMatchObject({ enforcement: 'Blocked', exempt: '—', productName: 'Two' });
+            expect(buybox.highlights.some((h) => /at risk of suppression/.test(h.text))).toBe(true);
+            expect(buybox.caveats.join(' ')).toMatch(/Suppressed Listings Report, read on 27 Sept 2026/);
+        });
+
+        it('treats an empty report as a real all-clear', async () => {
+            catalogue([{ asin: 'B1', sku: 'S1', status: 'Active' }]);
+            buyBoxSnapshot();
+            report([]);
+
+            const overview = byKey(await getEsfReports(USER, 'US', 'NA'), 'account-overview');
+            expect(statOf(overview, 'Suppressed')).toMatchObject({ value: 0, tone: 'good' });
+        });
+
+        it('never reads an unreadable report as zero suppressed', async () => {
+            catalogue([{ asin: 'B1', sku: 'S1', status: 'Active' }]);
+            buyBoxSnapshot();
+            report([], { unreadable: true });
+
+            const payload = await getEsfReports(USER, 'US', 'NA');
+            expect(statOf(byKey(payload, 'account-overview'), 'Suppressed')).toBeUndefined();
+            expect(byKey(payload, 'buybox').caveats.join(' ')).toMatch(/could not be read/);
+        });
+
+        it('counts rows past the storage cap in the total', async () => {
+            catalogue([{ asin: 'B1', sku: 'S1', status: 'Active' }]);
+            buyBoxSnapshot();
+            report([{ sku: 'S9', asin: 'B9', status: 'Blocked', isAtRisk: false }], { suppressedCount: 6000 });
+
+            const buybox = byKey(await getEsfReports(USER, 'US', 'NA'), 'buybox');
+            expect(statOf(buybox, 'Suppressed listings').value).toBe(6000);
+            expect(buybox.summary.secondaryTable.totalRows).toBe(6000);
+        });
+
+        it('says Case IDs have no API', async () => {
+            buyBoxSnapshot();
+            const buybox = byKey(await getEsfReports(USER, 'US', 'NA'), 'buybox');
+            expect(buybox.caveats.join(' ')).toMatch(/Case IDs .* no case API/);
+        });
+    });
+
+    describe('pending removals', () => {
+        const planning = () => Planning.findOne.mockReturnValue(mockFindOne({
+            createdAt: new Date('2026-09-01T00:00:00Z'),
+            data: [{ asin: 'B1', quantity_to_be_charged_ais_365_plus_days: '40' }],
+        }));
+
+        it('shows open removal orders as their own table', async () => {
+            planning();
+            RemovalOrders.findOne.mockReturnValue(mockFindOne({
+                createdAt: new Date('2026-09-27T00:00:00Z'),
+                windowStart: new Date('2026-04-01T00:00:00Z'),
+                windowEnd: new Date('2026-09-27T00:00:00Z'),
+                pendingOrderCount: 1,
+                pendingUnits: 15,
+                lines: [
+                    { orderId: 'R1', sku: 'S1', orderType: 'Return', orderStatus: 'Pending', requestedQuantity: 20, pendingQuantity: 15, isPending: true, requestDate: '2026-09-10T00:00:00Z' },
+                    { orderId: 'R0', sku: 'S2', orderType: 'Disposal', orderStatus: 'Completed', requestedQuantity: 5, pendingQuantity: 0, isPending: false },
+                ],
+            }));
+
+            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'fba-aged-inventory');
+
+            expect(statOf(report, 'Pending removal orders').value).toBe(1);
+            expect(statOf(report, 'Units pending removal').value).toBe(15);
+            expect(report.summary.secondaryTable.rows).toHaveLength(1);
+            expect(report.summary.secondaryTable.rows[0]).toMatchObject({ orderId: 'R1', pendingQuantity: 15, requestDate: '10 Sept 2026' });
+            expect(report.highlights.some((h) => /already on their way out/.test(h.text))).toBe(true);
+        });
+
+        it('says "next sync" before the first fetch rather than showing 0 pending', async () => {
+            planning();
+            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'fba-aged-inventory');
+
+            expect(statOf(report, 'Pending removal orders')).toBeUndefined();
+            expect(report.caveats.join(' ')).toMatch(/removal order report from the next sync/);
+        });
+
+        it('leaves the recommended action to the account manager', async () => {
+            planning();
+            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'fba-aged-inventory');
+            expect(report.caveats.join(' ')).toMatch(/outlet, coupon or liquidation/);
+        });
+    });
+
+    describe('regular vs B2B split', () => {
+        it('splits units from the same daily source, and compares like with like', async () => {
+            latestMetricDays({ sales: '2026-08-31' });
+            SalesOnlyMetrics.aggregate
+                .mockResolvedValueOnce([{ totalSales: 1000, b2bCapturedDays: 31, b2bReportedDays: 31, b2bUnits: 20, b2bOrderItems: 8, splitTotalUnits: 100 }])
+                .mockResolvedValueOnce([{ totalSales: 800, b2bCapturedDays: 31, b2bReportedDays: 31, b2bUnits: 10, b2bOrderItems: 4, splitTotalUnits: 90 }]);
+
+            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'monthly-performance');
+
+            expect(statOf(report, 'B2B units')).toMatchObject({ value: 20, delta: 100 });
+            expect(statOf(report, 'Regular units')).toMatchObject({ value: 80, delta: 0 });
+            expect(statOf(report, 'B2B share of units').value).toBe(20);
+            expect(report.summary.rows.find((row) => row.metric === 'B2B order items')).toMatchObject({ current: 8, previous: 4 });
+        });
+
+        it('keeps "not captured yet" and "not in Amazon Business" apart', async () => {
+            latestMetricDays({ sales: '2026-08-31' });
+            SalesOnlyMetrics.aggregate.mockResolvedValue([{ totalSales: 1000 }]);
+            let report = byKey(await getEsfReports(USER, 'US', 'NA'), 'monthly-performance');
+            expect(statOf(report, 'B2B units')).toBeUndefined();
+            expect(report.caveats.join(' ')).toMatch(/from the next sales sync onwards/);
+
+            SalesOnlyMetrics.aggregate.mockResolvedValue([{ totalSales: 1000, b2bCapturedDays: 31, b2bReportedDays: 0 }]);
+            report = byKey(await getEsfReports(USER, 'US', 'NA'), 'monthly-performance');
+            expect(statOf(report, 'B2B units')).toBeUndefined();
+            expect(report.caveats.join(' ')).toMatch(/enrolled in Amazon Business/);
+        });
+
+        it('names partial coverage and gives no change against an uncaptured month', async () => {
+            latestMetricDays({ sales: '2026-08-31' });
+            SalesOnlyMetrics.aggregate
+                .mockResolvedValueOnce([{ totalSales: 1000, b2bCapturedDays: 5, b2bReportedDays: 5, b2bUnits: 3, splitTotalUnits: 30 }])
+                .mockResolvedValueOnce([{ totalSales: 800 }]);
+
+            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'monthly-performance');
+
+            expect(statOf(report, 'B2B units').delta).toBeNull();
+            expect(report.caveats.join(' ')).toMatch(/covers 5 of the 31 days/);
+        });
     });
 });

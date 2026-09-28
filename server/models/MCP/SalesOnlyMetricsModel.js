@@ -50,6 +50,23 @@ const salesOnlyMetricsSchema = new mongoose.Schema(
     },
     unitsSold: { type: Number, required: false, default: 0 },
 
+    // Regular vs B2B, from the same Data Kiosk row. Absent on days stored
+    // before it was kept; the B2B fields are null for sellers not enrolled in
+    // Amazon Business, which Amazon leaves empty rather than zero.
+    b2b: {
+      type: new mongoose.Schema(
+        {
+          unitsOrderedTotal: { type: Number, default: null },
+          unitsOrderedB2B: { type: Number, default: null },
+          orderItemsTotal: { type: Number, default: null },
+          orderItemsB2B: { type: Number, default: null },
+        },
+        { _id: false }
+      ),
+      required: false,
+      default: undefined,
+    },
+
     dataSource: { type: String, enum: ['DataKiosk'], default: 'DataKiosk' },
   },
   { timestamps: true }

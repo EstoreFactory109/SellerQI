@@ -244,6 +244,15 @@ async function fetchAndStoreSalesOnlyData(userId, refreshToken, region, country)
       sales: d.sales || { amount: 0, currencyCode },
       grossProfit: { amount: 0, currencyCode: d.sales?.currencyCode || currencyCode },
       unitsSold: 0,
+      // Regular vs B2B split (ESF spec 2G). The all-channel total is taken
+      // from the same query row as the B2B figure, so the two always
+      // subtract cleanly; unitsSold above is deliberately left as it was.
+      b2b: {
+        unitsOrderedTotal: typeof d.unitsOrdered === 'number' ? d.unitsOrdered : null,
+        unitsOrderedB2B: d.unitsOrderedB2B ?? null,
+        orderItemsTotal: d.totalOrderItems ?? null,
+        orderItemsB2B: d.totalOrderItemsB2B ?? null,
+      },
     }));
 
     const saved = await saveSalesOnlyMetrics({

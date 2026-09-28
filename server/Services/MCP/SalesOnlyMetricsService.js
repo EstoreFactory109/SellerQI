@@ -53,6 +53,9 @@ async function saveSalesOnlyMetrics({ userId, region, country, datewiseSales }) 
           grossProfit: day.grossProfit || { amount: 0, currencyCode: 'USD' },
           unitsSold: day.unitsSold || 0,
           dataSource: 'DataKiosk',
+          // Only when the caller supplied it: the other writers (backfills,
+          // test controller) do not, and must not blank a split already held.
+          ...(day.b2b ? { b2b: day.b2b } : {}),
         },
       },
       upsert: true,

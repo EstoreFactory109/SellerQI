@@ -6,6 +6,117 @@ const zlib = require('zlib');
 const { promisify } = require('util');
 const gunzip = promisify(zlib.gunzip);
 
+/**
+ * Amazon's rates arrive as fractions (0.0024) with a target in the same unit
+ * (0.01 for "under 1%"). The target is the one thing on the node that says which
+ * unit Amazon used, so it decides the scale; without one the documented
+ * fraction form is assumed. Returns a percentage, or null when there is no rate.
+ */
+const toPercent = (node) => {
+    const rate = node?.rate;
+    if (typeof rate !== 'number' || !Number.isFinite(rate)) return null;
+    const target = node?.targetValue?.value;
+    const isFraction = typeof target === 'number' ? target <= 1 : rate <= 1;
+    return Math.round((isFraction ? rate * 100 : rate) * 10000) / 10000;
+};
+
+const countOf = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : null);
+
+/**
+ * Everything the report carries beyond the seven fields stored since day one.
+ *
+ * The report has always held the rates, the chargeback and claim counts, the
+ * tracking shipment counts and a dozen policy metrics — ours kept seven
+ * statuses and threw the rest away. Nothing here is a new Amazon call.
+ *
+ * Read defensively, and unlike the original seven, never allowed to throw:
+ * these fields vary by marketplace (unitOnTimeDeliveryRate is US-only) and by
+ * fulfilment channel (an FBA-only seller has no mfn block), and a missing one
+ * must cost its own row, not the whole snapshot. The original seven keep their
+ * exact extraction so nothing that already reads them changes.
+ *
+ * No live response could be inspected (every SP-API account available here
+ * returns 401), so this follows Amazon's published V2 schema; a policy metric
+ * we have no label for is still kept, under its own key.
+ */
+const extractExtendedMetrics = (refinedData) => {
+    const metrics = refinedData?.performanceMetrics?.[0] || {};
+    const odr = metrics.orderDefectRate || {};
+    // Channel blocks present on this account; an FBA-only seller has no mfn.
+    const channels = [odr.afn, odr.mfn].filter(Boolean);
+    const sumCounts = (field) => {
+        const counts = channels.map((channel) => countOf(channel?.[field]?.count)).filter((c) => c !== null);
+        return counts.length ? counts.reduce((sum, c) => sum + c, 0) : null;
+    };
+    // The worse of the two channels is the one Amazon acts on.
+    const worstStatus = (field) => {
+        const statuses = channels.map((channel) => String(channel?.[field]?.status || '')).filter(Boolean);
+        return statuses.find((status) => status.toUpperCase() !== 'GOOD') || statuses[0] || '';
+    };
+    const primaryOdr = odr.afn || odr.mfn || null;
+
+    const tracking = metrics.validTrackingRate || {};
+    const otdr = metrics.onTimeDeliveryRate || {};
+    const unitOtdr = metrics.unitOnTimeDeliveryRate || {};
+
+    // Every node that reads as a policy metric: a status plus a defect count.
+    // Collected generically so a metric Amazon adds later still arrives.
+    const policyMetrics = [];
+    for (const [key, node] of Object.entries(metrics)) {
+        if (!node || typeof node !== 'object' || Array.isArray(node)) continue;
+        if (!('defectsCount' in node)) continue;
+        policyMetrics.push({
+            key,
+            status: String(node.status || ''),
+            count: countOf(node.defectsCount),
+        });
+    }
+
+    return {
+        orderDefectRatePct: primaryOdr ? toPercent(primaryOdr) : null,
+        lateShipmentRatePct: toPercent(metrics.lateShipmentRate),
+        cancellationRatePct: toPercent(metrics.preFulfillmentCancellationRate),
+        validTrackingRatePct: toPercent(tracking),
+        onTimeDeliveryRateStatus: String(otdr.status || ''),
+        onTimeDeliveryRatePct: toPercent(otdr),
+        unitOnTimeDeliveryRateStatus: String(unitOtdr.status || ''),
+        unitOnTimeDeliveryRatePct: toPercent(unitOtdr),
+        chargebackCount: sumCounts('chargebacks'),
+        chargebackStatus: worstStatus('chargebacks'),
+        claimsCount: sumCounts('claims'),
+        // The window every ODR count was measured over; "0 chargebacks" means
+        // nothing without it.
+        odrWindowFrom: String(primaryOdr?.reportingDateRange?.reportingDateFrom || ''),
+        odrWindowTo: String(primaryOdr?.reportingDateRange?.reportingDateTo || ''),
+        trackedShipmentCount: countOf(tracking.shipmentCount),
+        validTrackingCount: countOf(tracking.validTrackingCount),
+        policyMetrics,
+    };
+};
+
+/**
+ * One snapshot's worth of fields, from the parsed report. The first seven are
+ * extracted exactly as they always were — including throwing when absent,
+ * which is what has always kept a malformed report out of the collection.
+ */
+const buildSnapshot = (refinedData) => ({
+    ahrScore: refinedData.performanceMetrics[0].accountHealthRating.ahrScore,
+    accountStatuses: refinedData.accountStatuses[0].status,
+    listingPolicyViolations: refinedData.performanceMetrics[0].listingPolicyViolations.status,
+    validTrackingRateStatus: refinedData.performanceMetrics[0].validTrackingRate.status,
+    orderWithDefectsStatus: refinedData.performanceMetrics[0].orderDefectRate.afn.orderWithDefects.status,
+    lateShipmentRateStatus: refinedData.performanceMetrics[0].lateShipmentRate.status,
+    CancellationRate: refinedData.performanceMetrics[0].preFulfillmentCancellationRate.status,
+    ...(() => {
+        try {
+            return extractExtendedMetrics(refinedData);
+        } catch (error) {
+            logger.warn(`V2_Seller_Performance_Report: extended metrics not read: ${error.message}`);
+            return {};
+        }
+    })(),
+});
+
 
 const generateReport=async(accessToken, marketplaceIds,baseuri)=> {
    
@@ -162,15 +273,7 @@ const getReport = async (accessToken, marketplaceIds,userId,baseuri,country,regi
        // ReportData (raw JSON string) no longer needed — let GC reclaim it
 
        const User=userId;
-       const ahrScore=refinedData.performanceMetrics[0].accountHealthRating.ahrScore;
-       const accountStatuses=refinedData.accountStatuses[0].status;
-       const listingPolicyViolations=refinedData.performanceMetrics[0].listingPolicyViolations.status;
-       const validTrackingRateStatus=refinedData.performanceMetrics[0].validTrackingRate.status;
-       const orderWithDefectsStatus=refinedData.performanceMetrics[0].orderDefectRate.afn.orderWithDefects.status;
-       const lateShipmentRateStatus=refinedData.performanceMetrics[0].lateShipmentRate.status;
-       const CancellationRate=refinedData.performanceMetrics[0].preFulfillmentCancellationRate.status;
-
-       const storeData=await GET_V2_SELLER_PERFORMANCE_REPORT.create({User,region,country,ahrScore,accountStatuses,listingPolicyViolations,validTrackingRateStatus,orderWithDefectsStatus,lateShipmentRateStatus,CancellationRate});
+       const storeData=await GET_V2_SELLER_PERFORMANCE_REPORT.create({User,region,country,...buildSnapshot(refinedData)});
 
        if(!storeData){
         logger.error("Failed to store report data");
@@ -217,14 +320,7 @@ getReport.spApiAsync = {
             fullReport.data = null;
             const refinedData = JSON.parse(decompressedBuffer.toString('utf8'));
             const User = userId;
-            const ahrScore = refinedData.performanceMetrics[0].accountHealthRating.ahrScore;
-            const accountStatuses = refinedData.accountStatuses[0].status;
-            const listingPolicyViolations = refinedData.performanceMetrics[0].listingPolicyViolations.status;
-            const validTrackingRateStatus = refinedData.performanceMetrics[0].validTrackingRate.status;
-            const orderWithDefectsStatus = refinedData.performanceMetrics[0].orderDefectRate.afn.orderWithDefects.status;
-            const lateShipmentRateStatus = refinedData.performanceMetrics[0].lateShipmentRate.status;
-            const CancellationRate = refinedData.performanceMetrics[0].preFulfillmentCancellationRate.status;
-            await GET_V2_SELLER_PERFORMANCE_REPORT.create({ User, region, country, ahrScore, accountStatuses, listingPolicyViolations, validTrackingRateStatus, orderWithDefectsStatus, lateShipmentRateStatus, CancellationRate });
+            await GET_V2_SELLER_PERFORMANCE_REPORT.create({ User, region, country, ...buildSnapshot(refinedData) });
             return { empty: false };
         },
     }]),
@@ -232,3 +328,6 @@ getReport.spApiAsync = {
 };
 
 module.exports = getReport;
+// Exported for tests: the part that can be checked without a live response.
+module.exports.buildSnapshot = buildSnapshot;
+module.exports.extractExtendedMetrics = extractExtendedMetrics;

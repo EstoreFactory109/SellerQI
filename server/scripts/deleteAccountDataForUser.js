@@ -101,6 +101,8 @@ const V1_Seller_Performance_Report = require('../models/seller-performance/V1_Se
 const APlusContent = require('../models/seller-performance/APlusContentModel.js');
 const APlusPremium = require('../models/seller-performance/APlusPremiumModel.js');
 const CompetitiveOffers = require('../models/products/CompetitiveOffersModel.js');
+const SuppressedListings = require('../models/products/SuppressedListingsModel.js');
+const RemovalOrders = require('../models/inventory/RemovalOrdersModel.js');
 const NumberOfProductReviews = require('../models/seller-performance/NumberOfProductReviewsModel.js');
 
 // ── MCP ──
@@ -253,6 +255,8 @@ const USER_TARGETS = [
   { label: 'APlusContent', model: APlusContent },
   { label: 'APlusPremium', model: APlusPremium },
   { label: 'CompetitiveOffers', model: CompetitiveOffers },
+  { label: 'SuppressedListings', model: SuppressedListings },
+  { label: 'RemovalOrders', model: RemovalOrders },
   { label: 'NumberOfProductReviews', model: NumberOfProductReviews },
   { label: 'BuyBoxData', model: BuyBoxData },
   { label: 'EconomicsMetrics', model: EconomicsMetrics },
