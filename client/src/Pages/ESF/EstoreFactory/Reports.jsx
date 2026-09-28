@@ -3,7 +3,7 @@ import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { PALETTE } from '../../../Components/ESF/estoreFactoryTheme.js';
 import axiosInstance from '../../../config/axios.config.js';
-import ReportDocumentPreview, { reportNeedsLandscape, FULL_ROWS, POPPINS_HREF } from '../../../Components/ESF/ReportDocumentPreview.jsx';
+import ReportDocumentPreview, { reportNeedsLandscape, POPPINS_HREF } from '../../../Components/ESF/ReportDocumentPreview.jsx';
 
 /**
  * Estore Factory > Reports.
@@ -122,9 +122,13 @@ const printReportDocument = (html, title, landscape = false) => {
     else frame.contentWindow.addEventListener('load', done, { once: true });
 };
 
-/** "Inventory Restock - US - Fetched 25 Apr 2026" */
-const downloadName = (report, marketplace) =>
-    [report.name, marketplace?.country, report.date].filter(Boolean).join(' - ');
+/** "Inventory Restock - US - Fetched 25 Apr 2026", or "- US, IN -" for an account-wide one. */
+const downloadName = (report, marketplace) => {
+    const scope = report.multi && report.sections?.length > 1
+        ? report.sections.map((section) => section.marketplace.country).join(', ')
+        : (report.marketplace || marketplace)?.country;
+    return [report.name, scope, report.date].filter(Boolean).join(' - ');
+};
 
 /** Formats a stat or cell according to the `format` the API tagged it with. */
 const formatValue = (value, format, currency) => {
@@ -185,7 +189,7 @@ const Stat = ({ stat, currency }) => (
  * than replaced by a spinner) so the table does not collapse and jump the page
  * on every click.
  */
-const PagedTable = ({ report, currency }) => {
+const PagedTable = ({ report, currency, marketplace = null }) => {
     // Memoised: a fresh [] each render would give goTo a new identity every time
     // and re-fire the reset effect below on every parent render.
     const firstPage = useMemo(() => report.summary?.rows || [], [report.summary]);
@@ -216,9 +220,11 @@ const PagedTable = ({ report, currency }) => {
         }
         setLoading(true);
         try {
+            // An account-wide report's tables each belong to one marketplace,
+            // and must page through that one — not whichever is selected.
             const res = await axiosInstance.get(
                 `/api/pagewise/esf/reports/${report.key}/rows`,
-                { params: { page: next, limit: pageSize } }
+                { params: { page: next, limit: pageSize, ...(marketplace ? { country: marketplace.country, region: marketplace.region } : {}) } }
             );
             const data = res.data?.data;
             if (data?.rows) {
@@ -234,7 +240,7 @@ const PagedTable = ({ report, currency }) => {
         } finally {
             setLoading(false);
         }
-    }, [report.key, page, totalPages, pageSize, firstPage]);
+    }, [report.key, page, totalPages, pageSize, firstPage, marketplace]);
 
     // A report can legitimately have nothing to list — no ASIN losing the Buy
     // Box, no stock ageing. That is a result, not an absence, so it is stated
@@ -441,6 +447,73 @@ const ScaledDocument = ({ children }) => {
  * Both halves read from one payload, so the preview can never show a figure the
  * table disagrees with.
  */
+/** The All Marketplaces comparison, cells already formatted in each market's currency. */
+const ComparisonTable = ({ comparison }) => (
+    <div className="overflow-x-auto esf-scroll flex-none">
+        <table className="w-full border-collapse text-[12px] min-w-[460px]">
+            <thead>
+                <tr>
+                    {comparison.columns.map((column, i) => (
+                        <th
+                            key={column.key}
+                            className="text-[10.5px] font-semibold tracking-[.04em] uppercase whitespace-nowrap px-2 py-[7px]"
+                            style={{ color: PALETTE.textMuted, borderBottom: `1px solid ${PALETTE.border}`, textAlign: i === 0 ? 'left' : 'right' }}
+                        >
+                            {column.label}
+                        </th>
+                    ))}
+                </tr>
+            </thead>
+            <tbody>
+                {comparison.rows.map((row) => (
+                    <tr key={row.market}>
+                        {comparison.columns.map((column, i) => (
+                            <td
+                                key={column.key}
+                                className="px-2 py-[7px] whitespace-nowrap tabular-nums"
+                                style={{ color: i === 0 ? PALETTE.textPrimary : PALETTE.textBody, fontWeight: i === 0 ? 600 : 400, borderBottom: `1px solid ${PALETTE.divider}`, textAlign: i === 0 ? 'left' : 'right' }}
+                            >
+                                {row[column.key]}
+                            </td>
+                        ))}
+                    </tr>
+                ))}
+            </tbody>
+        </table>
+    </div>
+);
+
+/**
+ * One marketplace's block in an account-wide report: its own tiles and its own
+ * table, paged against that marketplace, in its own currency.
+ */
+const MarketplaceBlock = ({ reportKey, section }) => (
+    <div className="flex flex-col gap-2 flex-none">
+        <div className="flex items-baseline gap-2">
+            <span className="text-[13px] font-semibold" style={{ color: PALETTE.textPrimary }}>Amazon {section.marketplace.country}</span>
+            <span className="text-[11.5px]" style={{ color: PALETTE.textMuted }}>{section.available ? section.date : 'No data yet'}</span>
+        </div>
+        {!section.available ? (
+            <p className="m-0 text-[12px]" style={{ color: PALETTE.textMuted }}>{section.reason}</p>
+        ) : (
+            <>
+                {section.summary?.stats?.length > 0 && (
+                    <div className="flex gap-x-7 overflow-x-auto pb-1 flex-none esf-scroll">
+                        {section.summary.stats.map((stat) => (
+                            <Stat key={stat.label} stat={stat} currency={section.marketplace.currency} />
+                        ))}
+                    </div>
+                )}
+                <PagedTable
+                    report={{ key: reportKey, summary: section.summary, pageSize: section.pageSize }}
+                    currency={section.marketplace.currency}
+                    marketplace={section.marketplace}
+                />
+            </>
+        )}
+    </div>
+);
+
 const SummaryPanel = ({ report, currency, failed, marketplace }) => {
     // Nothing selectable: every report is still waiting on data, or the fetch
     // failed. Say so here rather than leaving the top of the page blank, which
@@ -463,6 +536,12 @@ const SummaryPanel = ({ report, currency, failed, marketplace }) => {
         );
     }
 
+    // Money is in the report's own marketplace currency, never the one the app
+    // happens to have selected — the page is the same wherever you are.
+    const reportCurrency = report.marketplace?.currency || currency;
+    const multi = Boolean(report.multi && report.sections?.length > 1);
+    const panelStats = multi ? (report.overview?.stats || []) : (report.summary?.stats || []);
+
     return (
         <section
             className="rounded-lg flex flex-col md:flex-row gap-7"
@@ -471,7 +550,7 @@ const SummaryPanel = ({ report, currency, failed, marketplace }) => {
             {/* Left: the document as it will be sent, as a scrollable thumbnail. */}
             <div className="flex-none flex flex-col gap-2">
                 <ScaledDocument>
-                    <ReportDocumentPreview report={report} marketplace={marketplace} currency={currency} />
+                    <ReportDocumentPreview report={report} marketplace={marketplace} currency={reportCurrency} />
                 </ScaledDocument>
                 <span className="text-[10.5px] tracking-[.04em]" style={{ color: PALETTE.textFaint, fontFamily: 'ui-monospace, Menlo, monospace' }}>
                     report preview &middot; scroll to read
@@ -497,24 +576,40 @@ const SummaryPanel = ({ report, currency, failed, marketplace }) => {
                         <span className="text-[12px]" style={{ color: PALETTE.textSecondary }}>{report.date}</span>
                     </div>
                     <h2 className="m-0 text-[19px] font-bold tracking-[-0.02em] leading-tight">{report.name}</h2>
-                    {report.summary?.headline && (
+                    {multi ? (
+                        <span className="text-[12.5px]" style={{ color: PALETTE.textTertiary }}>
+                            All {report.sections.length} marketplaces · led by Amazon {report.marketplace?.country}
+                            {report.isPrimary ? ' (primary)' : ''}
+                        </span>
+                    ) : report.summary?.headline && (
                         <span className="text-[12.5px]" style={{ color: PALETTE.textTertiary }}>{report.summary.headline}</span>
                     )}
                 </div>
 
-                {report.summary?.stats?.length > 0 && (
+                {panelStats.length > 0 && (
                     // One row, scrolled sideways when there are more stats than fit,
                     // so a six-stat report cannot push the table off the panel.
                     <div className="flex gap-x-7 overflow-x-auto pb-1 flex-none esf-scroll">
-                        {report.summary.stats.map((stat) => (
-                            <Stat key={stat.label} stat={stat} currency={currency} />
+                        {panelStats.map((stat) => (
+                            <Stat key={stat.label} stat={stat} currency={reportCurrency} />
                         ))}
                     </div>
                 )}
 
-                <div className="flex-1 min-h-0">
-                    <PagedTable report={report} currency={currency} />
-                </div>
+                {multi ? (
+                    // Every marketplace, in the order the report puts them:
+                    // the comparison first, then each one's own data.
+                    <div className="flex-1 min-h-0 overflow-y-auto esf-scroll flex flex-col gap-5 pr-1">
+                        <ComparisonTable comparison={report.comparison} />
+                        {report.sections.map((section) => (
+                            <MarketplaceBlock key={`${section.marketplace.country}-${section.marketplace.region}`} reportKey={report.key} section={section} />
+                        ))}
+                    </div>
+                ) : (
+                    <div className="flex-1 min-h-0">
+                        <PagedTable report={report} currency={reportCurrency} />
+                    </div>
+                )}
 
                 {/* Rendered verbatim from the API: what this report cannot show, and
                     why. Capped and scrollable so a long caveat cannot squeeze the
@@ -545,20 +640,25 @@ const SummaryPanel = ({ report, currency, failed, marketplace }) => {
 };
 
 /**
- * The report a Download prints: the card, with its table deepened to the same
- * first page of rows the emailed PDF is rendered from.
+ * The report a Download prints, at the depth the emailed PDF is rendered at.
  *
- * `fetchPage(key)` returns the paged endpoint's `data`. Any failure falls back
- * to the preview rows — the same fallback the mailer takes — so Download never
- * produces nothing.
+ * `fetchDocument(key)` returns /esf/reports/:key/document's `data`: the same
+ * report for the whole account, every table to FULL_ROWS rows — every
+ * marketplace section, not only the lead one. The page payload carries a
+ * 10-row preview per table; printing it saved a quarter of the email's table.
+ * Any failure falls back to the preview — the same fallback the mailer takes —
+ * so Download never produces nothing.
  */
-export const withDownloadRows = async (report, fetchPage) => {
-    const shown = report?.summary?.rows?.length || 0;
-    if (!report?.available || (report.summary?.totalRows || 0) <= shown) return report;
+export const withDownloadRows = async (report, fetchDocument) => {
+    if (!report?.available) return report;
+    const cut = (summary) => Boolean(summary) && (summary.totalRows || 0) > (summary.rows?.length || 0);
+    const needsMore = report.multi
+        ? (report.sections || []).some((section) => cut(section.summary))
+        : cut(report.summary);
+    if (!needsMore) return report;
     try {
-        const page = await fetchPage(report.key);
-        if (!page?.rows?.length) return report;
-        return { ...report, summary: { ...report.summary, rows: page.rows, totalRows: page.totalRows } };
+        const document = await fetchDocument(report.key);
+        return document?.report?.available ? document.report : report;
     } catch {
         return report;
     }
@@ -714,13 +814,13 @@ const Reports = () => {
     const [pendingDownload, setPendingDownload] = useState(null);
     const printRef = useRef(null);
 
-    // The card carries a 10-row preview; the emailed PDF is rendered from the
-    // first FULL_ROWS rows (esfReportsMailer). Fetch the same page before
+    // The card carries a 10-row preview per table; the emailed PDF is rendered
+    // 40 deep (esfReportsMailer). Fetch the document at that depth before
     // printing, or the saved file holds a quarter of the email's table — the
     // Monthly report lost CTR, CPC and ROAS that way.
     const startDownload = useCallback(async (report) => {
         setPendingDownload(await withDownloadRows(report, async (key) => {
-            const res = await axiosInstance.get(`/api/pagewise/esf/reports/${key}/rows`, { params: { page: 1, limit: FULL_ROWS } });
+            const res = await axiosInstance.get(`/api/pagewise/esf/reports/${key}/document`);
             return res.data?.data;
         }));
     }, []);
@@ -802,7 +902,7 @@ const Reports = () => {
                         >
                             {failed
                                 ? 'Reports could not be loaded just now. Refresh the page to try again.'
-                                : 'No reports are available for this marketplace yet.'}
+                                : 'No reports are available for your account yet.'}
                         </div>
                     )}
 
@@ -814,7 +914,10 @@ const Reports = () => {
                                     report={report}
                                     selected={selected?.key === report.key}
                                     onSelect={setSelectedKey}
-                                    onViewHistory={() => navigate(`/seller-central-checker/estore-factory/report-history/${report.key}`)}
+                                    onViewHistory={() => navigate(
+                                        `/seller-central-checker/estore-factory/report-history/${report.key}`
+                                        + (report.marketplace?.country ? `?country=${report.marketplace.country}&region=${report.marketplace.region}` : '')
+                                    )}
                                     onDownload={startDownload}
                                 />
                             ))}
@@ -839,7 +942,7 @@ const Reports = () => {
                         <ReportDocumentPreview
                             report={pendingDownload}
                             marketplace={data?.marketplace}
-                            currency={currency}
+                            currency={pendingDownload.marketplace?.currency || currency}
                             full
                         />
                     </div>

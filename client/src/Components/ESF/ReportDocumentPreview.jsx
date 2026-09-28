@@ -13,11 +13,12 @@
  * come from the payload.
  *
  * KEEP IN STEP WITH server/Services/Reports/reportPdf.js, which draws the
- * emailed PDF from the same payload. BRAND and LOGO_SVG below mirror
- * server/Services/Reports/reportBrand.js. Charts are NOT mirrored: they arrive
+ * emailed PDF from the same payload. BRAND below mirrors
+ * server/Services/Reports/reportBrand.js, and the logo is the same file. Charts are NOT mirrored: they arrive
  * in the payload already drawn as SVG, so both files show the same picture.
  */
 import { useEffect } from 'react';
+import LOGO_SRC from '../../assets/Logo/esf-logo.png?inline';
 
 /** Mirror of reportBrand.js BRAND. */
 const BRAND = {
@@ -38,12 +39,12 @@ const BRAND = {
 
 const COMPANY = 'eStore Factory';
 
-/** Mirror of reportBrand.js LOGO_SVG — a stand-in wordmark until the real logo exists. */
-const LOGO_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="170" height="28" viewBox="0 0 170 28">'
-    + `<circle cx="14" cy="14" r="13" fill="${BRAND.red}"/>`
-    + `<text x="14" y="19.6" text-anchor="middle" font-family="Poppins, Arial, sans-serif" font-weight="bold" font-size="17" fill="${BRAND.white}">e</text>`
-    + `<text x="32" y="19.8" font-family="Poppins, Arial, sans-serif" font-size="16.5" fill="${BRAND.blue}">${COMPANY}</text>`
-    + '</svg>';
+/**
+ * The eStore Factory logo, the same file the emailed PDF embeds
+ * (server/assets/brand/esf-logo.png). Inlined as a data URL, so the print
+ * window has nothing to fetch before it prints.
+ */
+const LOGO_ALT = COMPANY;
 
 const FONT = 'Poppins, Arial, Helvetica, sans-serif';
 
@@ -77,7 +78,12 @@ export const WIDE_TABLE_COLUMNS = 9;
 /** Whether this report's widest table needs the page turned. */
 export const reportNeedsLandscape = (report) => Math.max(
     report?.summary?.columns?.length || 0,
-    report?.summary?.secondaryTable?.columns?.length || 0
+    report?.summary?.secondaryTable?.columns?.length || 0,
+    report?.comparison?.columns?.length || 0,
+    ...(report?.sections || []).flatMap((section) => [
+        section.summary?.columns?.length || 0,
+        section.summary?.secondaryTable?.columns?.length || 0,
+    ])
 ) > WIDE_TABLE_COLUMNS;
 
 /**
@@ -209,7 +215,7 @@ const DataTable = ({ columns, rows, currency, full, totalRows, shownLimit }) => 
                                 style={{
                                     background: BRAND.blue, color: BRAND.white, fontSize: full ? 8.5 : 9.5, fontWeight: 700,
                                     textTransform: 'uppercase', letterSpacing: '.2px',
-                                    textAlign: i > 0 && numeric[i] ? 'right' : 'left',
+                                    textAlign: i > 0 ? (column.align || (numeric[i] ? 'right' : 'left')) : 'left',
                                     padding: cellPad,
                                     border: `1px solid ${BRAND.grid}`,
                                     // Wrapping a header costs a line; not wrapping it costs the
@@ -233,7 +239,7 @@ const DataTable = ({ columns, rows, currency, full, totalRows, shownLimit }) => 
                                         wordBreak: full && !keepWhole[i] ? 'break-word' : undefined,
                                         whiteSpace: keepWhole[i] ? 'nowrap' : undefined,
                                         border: `1px solid ${BRAND.grid}`,
-                                        textAlign: i > 0 && numeric[i] ? 'right' : 'left',
+                                        textAlign: i > 0 ? (column.align || (numeric[i] ? 'right' : 'left')) : 'left',
                                         fontWeight: i === 0 ? 700 : 400,
                                         color: i === 0 ? BRAND.blue : BRAND.ink,
                                     }}
@@ -280,28 +286,101 @@ const issueDate = () => new Date().toLocaleDateString('en-GB', { day: '2-digit',
  * fifth, which on the Buy Box report meant four of nine tiles and seven of
  * twelve columns, including the whole of the competitor pricing.
  */
+/** A smaller blue heading, for a table inside a marketplace's section. */
+const SubTitle = ({ children }) => (
+    <div style={{ fontSize: 11.5, fontWeight: 700, color: BRAND.blue, textTransform: 'uppercase', letterSpacing: '.3px', margin: '6px 0 7px' }}>
+        {children}
+    </div>
+);
+
+const Takeaway = ({ text }) => (text ? (
+    <div style={{ background: BRAND.takeaway, borderLeft: `4px solid ${BRAND.blue}`, padding: '10px 14px', marginBottom: 16 }}>
+        <div style={{ fontSize: 9.5, fontWeight: 700, color: BRAND.blue, letterSpacing: '.3px' }}>KEY TAKEAWAY</div>
+        <div style={{ fontSize: 12, marginTop: 4, lineHeight: 1.45 }}>{text}</div>
+    </div>
+) : null);
+
+const Charts = ({ charts }) => (charts.length > 0 ? (
+    <div style={{ display: 'flex', gap: 24, marginBottom: 8, breakInside: 'avoid' }}>
+        {charts.map((chart) => (
+            <div key={chart.title} style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: BRAND.blue, marginBottom: 4 }}>{chart.title}</div>
+                {/* Drawn by the server from numbers only (reportBrand.js escapes every label). */}
+                <div dangerouslySetInnerHTML={{ __html: String(chart.svg).replace('<svg ', '<svg style="width:100%;height:auto;display:block" ') }} />
+            </div>
+        ))}
+    </div>
+) : null);
+
+/** A report body — main table then second table — in the given currency. */
+const Detail = ({ summary, tableTitle, currency, full, sub = false }) => {
+    const allColumns = summary.columns || [];
+    const columns = full ? allColumns : allColumns.slice(0, 5);
+    const rows = (summary.rows || []).slice(0, full ? FULL_ROWS : DOC_ROWS);
+    const secondary = summary.secondaryTable;
+    return (
+        <>
+            {sub ? <SubTitle>{tableTitle || 'Detail'}</SubTitle> : <SectionTitle title={tableTitle || 'Detail'} subtitle={summary.headline} />}
+            {rows.length > 0 ? (
+                <DataTable columns={columns} rows={rows} currency={currency} full={full} totalRows={summary.totalRows} shownLimit={FULL_ROWS} />
+            ) : (
+                <p style={{ margin: '0 0 8px', fontSize: 12, color: BRAND.teal, fontWeight: 700 }}>
+                    {summary.emptyMessage || 'Nothing to list for this period.'}
+                </p>
+            )}
+            {secondary?.rows?.length > 0 && (
+                <>
+                    {sub ? <SubTitle>{secondary.title || 'Detail'}</SubTitle> : <SectionTitle title={secondary.title || 'Detail'} />}
+                    <DataTable columns={secondary.columns} rows={secondary.rows} currency={currency} full={full} totalRows={secondary.totalRows} shownLimit={FULL_ROWS} />
+                </>
+            )}
+        </>
+    );
+};
+
+/**
+ * @param {boolean} full  render everything, for the off-screen copy that gets
+ *   printed to PDF. The on-screen panel is a thumbnail and stays truncated.
+ *
+ * WHY THIS PROP EXISTS
+ * One component serves two jobs. In the panel the truncation is the point — it
+ * is a small preview beside the data table. In a download it is a bug: the
+ * saved file silently lost every stat past the fourth and every column past the
+ * fifth, which on the Buy Box report meant four of nine tiles and seven of
+ * twelve columns, including the whole of the competitor pricing.
+ *
+ * ACCOUNT-WIDE REPORTS (report.multi)
+ * A client with several marketplaces gets one report covering them all, laid
+ * out as reportPdf.js lays it out: an Executive Summary led by the primary
+ * marketplace, the All Marketplaces comparison, then a section per
+ * marketplace in its own currency. The thumbnail stops after the comparison.
+ */
 const ReportDocumentPreview = ({ report, marketplace, currency, clientName = '', full = false }) => {
     useEffect(ensurePoppins, []);
     if (!report?.available) return null;
 
+    const lead = report.marketplace || marketplace;
+    const leadCurrency = lead?.currency || currency;
+    const multi = Boolean(report.multi && report.sections?.length > 1);
+    const countries = multi ? report.sections.map((section) => section.marketplace.country) : [];
+    const place = multi ? `Amazon ${countries.join(' & ')}` : (lead?.country ? `Amazon ${lead.country}` : 'All marketplaces');
+
     const summary = report.summary || {};
-    const allStats = summary.stats || [];
-    const allColumns = summary.columns || [];
+    const overview = multi ? (report.overview || {}) : summary;
+    const allStats = overview.stats || [];
     const stats = full ? allStats : allStats.slice(0, 4);
-    const columns = full ? allColumns : allColumns.slice(0, 5);
-    const rows = (summary.rows || []).slice(0, full ? FULL_ROWS : DOC_ROWS);
-    const place = marketplace?.country ? `Amazon ${marketplace.country}` : 'All marketplaces';
+    const charts = full ? (overview.charts || []).slice(0, 2) : [];
     const written = (report.highlights || []).filter((item) => item.tone !== 'fill');
     const toFill = (report.highlights || []).filter((item) => item.tone === 'fill');
-    const charts = full ? (summary.charts || []).slice(0, 2) : [];
-    const secondary = summary.secondaryTable;
+    const subtitle = multi
+        ? [`Amazon ${lead.country} (${report.isPrimary ? 'primary marketplace' : 'leading marketplace'})`, report.date].join(' · ')
+        : [place, report.date].filter(Boolean).join(' · ');
 
-    return (
-        <div style={{ background: BRAND.white, color: BRAND.ink, fontFamily: FONT, boxShadow: full ? 'none' : '0 1px 4px rgba(0,0,0,0.15)', padding: '18px 26px 0' }}>
-
-            {/* Header: logo, then the report title and who it is for. */}
+    // Header: logo, then the report title and who it is for.
+    const header = (
+        <div style={{ paddingTop: full ? 4 : 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                <span style={{ display: 'inline-flex', width: 170, flex: 'none' }} dangerouslySetInnerHTML={{ __html: LOGO_SVG }} />
+                <img src={LOGO_SRC} alt={LOGO_ALT} style={{ width: 176, height: 'auto', flex: 'none', display: 'block' }} />
                 <div style={{ textAlign: 'right', minWidth: 0 }}>
                     <h1 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: BRAND.blue, textTransform: 'uppercase', letterSpacing: '.4px' }}>
                         {report.name}
@@ -312,47 +391,53 @@ const ReportDocumentPreview = ({ report, marketplace, currency, clientName = '',
                 </div>
             </div>
             <div style={{ height: 2, background: BRAND.red, margin: '9px 0 4px' }} />
+        </div>
+    );
 
-            <SectionTitle title="Executive Summary" subtitle={[place, report.date].filter(Boolean).join(' · ')} />
-            {stats.length > 0 && <StatTiles stats={stats} currency={currency} comparisonLabel={summary.comparisonLabel} />}
+    // The reference footer band. A browser print cannot number its pages,
+    // so the page count lives only in the emailed PDF.
+    const footer = (
+        <div style={{ display: 'flex', margin: full ? '10px -26px 0' : '0 -26px' }}>
+            <div style={{ width: '14%', background: BRAND.navy }} />
+            <div style={{ flex: 1, background: BRAND.red, color: BRAND.white, textAlign: 'center', fontSize: 10.5, padding: '6px 0' }}>{COMPANY}</div>
+            <div style={{ width: '14%', background: BRAND.navy }} />
+        </div>
+    );
 
-            {summary.takeaway && (
-                <div style={{ background: BRAND.takeaway, borderLeft: `4px solid ${BRAND.blue}`, padding: '10px 14px', marginBottom: 16 }}>
-                    <div style={{ fontSize: 9.5, fontWeight: 700, color: BRAND.blue, letterSpacing: '.3px' }}>KEY TAKEAWAY</div>
-                    <div style={{ fontSize: 12, marginTop: 4, lineHeight: 1.45 }}>{summary.takeaway}</div>
-                </div>
-            )}
-
-            {charts.length > 0 && (
-                <div style={{ display: 'flex', gap: 24, marginBottom: 8, breakInside: 'avoid' }}>
-                    {charts.map((chart) => (
-                        <div key={chart.title} style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 12, fontWeight: 700, color: BRAND.blue, marginBottom: 4 }}>{chart.title}</div>
-                            {/* Drawn by the server from numbers only (reportBrand.js escapes every label). */}
-                            <div dangerouslySetInnerHTML={{ __html: String(chart.svg).replace('<svg ', '<svg style="width:100%;height:auto;display:block" ') }} />
-                        </div>
-                    ))}
-                </div>
-            )}
+    const body = (
+        <>
+            <SectionTitle title="Executive Summary" subtitle={subtitle} />
+            {stats.length > 0 && <StatTiles stats={stats} currency={leadCurrency} comparisonLabel={overview.comparisonLabel} />}
+            <Takeaway text={overview.takeaway} />
+            <Charts charts={charts} />
 
             {/* A report with charts fills its first page, as the reference does. */}
             <div style={charts.length ? { breakBefore: 'page', pageBreakBefore: 'always' } : undefined}>
-                <SectionTitle title={report.tableTitle || 'Detail'} subtitle={summary.headline} />
-                {rows.length > 0 ? (
-                    <DataTable columns={columns} rows={rows} currency={currency} full={full} totalRows={summary.totalRows} shownLimit={FULL_ROWS} />
+                {multi ? (
+                    <>
+                        <SectionTitle title="All Marketplaces" subtitle={`${report.date} snapshot · ${countries.length} marketplaces, each in its own currency`} />
+                        <DataTable columns={report.comparison.columns} rows={report.comparison.rows} currency={leadCurrency} full={full} totalRows={0} shownLimit={FULL_ROWS} />
+                    </>
                 ) : (
-                    <p style={{ margin: '0 0 8px', fontSize: 12, color: BRAND.teal, fontWeight: 700 }}>
-                        {summary.emptyMessage || 'Nothing to list for this period.'}
-                    </p>
+                    <Detail summary={summary} tableTitle={report.tableTitle} currency={leadCurrency} full={full} />
                 )}
             </div>
 
-            {secondary?.rows?.length > 0 && (
-                <>
-                    <SectionTitle title={secondary.title || 'Detail'} />
-                    <DataTable columns={secondary.columns} rows={secondary.rows} currency={currency} full={full} totalRows={secondary.totalRows} shownLimit={FULL_ROWS} />
-                </>
-            )}
+            {multi && full && report.sections.map((section) => {
+                const headline = section.summary?.headline || '';
+                const sectionSubtitle = headline.includes(section.date) ? headline : [section.date, headline].filter(Boolean).join(' · ');
+                return (
+                    <div key={`${section.marketplace.country}-${section.marketplace.region}`}>
+                        <SectionTitle title={`Amazon ${section.marketplace.country}`} subtitle={section.available ? sectionSubtitle : section.reason} />
+                        {section.available && (
+                            <>
+                                <StatTiles stats={section.summary.stats || []} currency={section.marketplace.currency} comparisonLabel={section.summary.comparisonLabel} />
+                                <Detail summary={section.summary} tableTitle={section.tableTitle} currency={section.marketplace.currency} full sub />
+                            </>
+                        )}
+                    </div>
+                );
+            })}
 
             {written.length > 0 && (
                 <>
@@ -379,14 +464,38 @@ const ReportDocumentPreview = ({ report, marketplace, currency, clientName = '',
                 </div>
             )}
             <div style={{ fontSize: 10.5, color: BRAND.muted, margin: '14px 0 16px' }}>{issueDate()}</div>
+        </>
+    );
 
-            {/* The reference footer band. A browser print cannot number its pages,
-                so the page count lives only in the emailed PDF. */}
-            <div style={{ display: 'flex', margin: '0 -26px' }}>
-                <div style={{ width: '14%', background: BRAND.navy }} />
-                <div style={{ flex: 1, background: BRAND.red, color: BRAND.white, textAlign: 'center', fontSize: 10.5, padding: '6px 0' }}>{COMPANY}</div>
-                <div style={{ width: '14%', background: BRAND.navy }} />
+    const page = { background: BRAND.white, color: BRAND.ink, fontFamily: FONT, boxShadow: full ? 'none' : '0 1px 4px rgba(0,0,0,0.15)', padding: '18px 26px 0' };
+
+    // The on-screen thumbnail: one header, one footer.
+    if (!full) {
+        return (
+            <div style={page}>
+                {header}
+                {body}
+                {footer}
             </div>
+        );
+    }
+
+    // The printed copy: the logo header and footer band repeat on EVERY page,
+    // as they do in the emailed PDF. A table's thead and tfoot are the one
+    // construct browsers repeat across printed pages; the row holding the body
+    // is allowed to break, overriding the print sheet's tr{break-inside:avoid}.
+    const cell = { padding: 0, border: 0 };
+    return (
+        <div style={page}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead><tr><td style={cell}>{header}</td></tr></thead>
+                <tfoot><tr><td style={cell}>{footer}</td></tr></tfoot>
+                <tbody>
+                    <tr style={{ breakInside: 'auto', pageBreakInside: 'auto' }}>
+                        <td style={cell}>{body}</td>
+                    </tr>
+                </tbody>
+            </table>
         </div>
     );
 };

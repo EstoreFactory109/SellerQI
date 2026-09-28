@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PALETTE } from '../../../Components/ESF/estoreFactoryTheme.js';
 import axiosInstance from '../../../config/axios.config.js';
 
@@ -80,6 +80,12 @@ const ReportHistory = () => {
     // Older links land here with no key; the Buy Box report is the one the
     // original mock showed, so it stays the default rather than erroring.
     const { reportKey = 'buybox' } = useParams();
+    // Editions are captured per marketplace. The Reports page links here with
+    // the report's lead marketplace; a client with several can switch below.
+    // Without one, the server falls back to the marketplace selected in the app.
+    const [searchParams, setSearchParams] = useSearchParams();
+    const marketCountry = searchParams.get('country') || '';
+    const marketRegion = searchParams.get('region') || '';
 
     const [history, setHistory] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -90,7 +96,9 @@ const ReportHistory = () => {
     const load = useCallback(async () => {
         setLoading(true);
         try {
-            const res = await axiosInstance.get(`/api/pagewise/esf/reports/${reportKey}/history`);
+            const res = await axiosInstance.get(`/api/pagewise/esf/reports/${reportKey}/history`, {
+                params: marketCountry && marketRegion ? { country: marketCountry, region: marketRegion } : {},
+            });
             setHistory(res.data?.data || null);
             setFailed(false);
         } catch {
@@ -99,7 +107,7 @@ const ReportHistory = () => {
         } finally {
             setLoading(false);
         }
-    }, [reportKey]);
+    }, [reportKey, marketCountry, marketRegion]);
 
     useEffect(() => { load(); }, [load]);
 
@@ -151,6 +159,30 @@ const ReportHistory = () => {
                         )}
                         <span>{loading ? '…' : shownLabel}</span>
                     </div>
+                    {history?.marketplaces?.length > 1 && (
+                        <div className="flex items-center gap-2 flex-wrap pt-1" role="tablist" aria-label="Marketplace">
+                            {history.marketplaces.map((option) => {
+                                const active = option.country === history.marketplace?.country && option.region === history.marketplace?.region;
+                                return (
+                                    <button
+                                        key={`${option.country}-${option.region}`}
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={active}
+                                        onClick={() => setSearchParams({ country: option.country, region: option.region })}
+                                        className="text-[12px] rounded-md px-2.5 py-1"
+                                        style={{
+                                            color: active ? PALETTE.accent : PALETTE.textSecondary,
+                                            background: active ? PALETTE.accentLight : 'transparent',
+                                            border: `1px solid ${active ? PALETTE.accent : PALETTE.border}`,
+                                        }}
+                                    >
+                                        Amazon {option.country}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
                 </header>
 
                 {loading && (

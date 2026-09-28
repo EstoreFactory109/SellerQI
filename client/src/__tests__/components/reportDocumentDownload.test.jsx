@@ -227,18 +227,33 @@ describe('withDownloadRows', () => {
     const card = (rows, totalRows) => ({ key: 'monthly-performance', available: true, summary: { rows, totalRows, columns: [] } });
     const rowsOf = (n) => Array.from({ length: n }, (_, i) => ({ metric: `m${i}` }));
 
-    it('deepens a preview to the page the emailed PDF uses', async () => {
-        const fetchPage = vi.fn(async () => ({ rows: rowsOf(18), totalRows: 18 }));
-        const printable = await withDownloadRows(card(rowsOf(10), 18), fetchPage);
-        expect(fetchPage).toHaveBeenCalledWith('monthly-performance');
-        expect(printable.summary.rows).toHaveLength(18);
+    it('prints the document at emailed-PDF depth when the preview was cut', async () => {
+        const deep = { ...card(rowsOf(18), 18), marker: 'document' };
+        const fetchDocument = vi.fn(async () => ({ report: deep }));
+        const printable = await withDownloadRows(card(rowsOf(10), 18), fetchDocument);
+        expect(fetchDocument).toHaveBeenCalledWith('monthly-performance');
+        expect(printable).toBe(deep);
+    });
+
+    it('fetches for an account-wide report when ANY marketplace section was cut', async () => {
+        // The lead summary can be complete while another marketplace's is not.
+        const multi = {
+            ...card(rowsOf(4), 4),
+            multi: true,
+            sections: [
+                { marketplace: { country: 'US' }, summary: { rows: rowsOf(4), totalRows: 4 } },
+                { marketplace: { country: 'IN' }, summary: { rows: rowsOf(10), totalRows: 27 } },
+            ],
+        };
+        const fetchDocument = vi.fn(async () => ({ report: { ...multi, deep: true } }));
+        expect((await withDownloadRows(multi, fetchDocument)).deep).toBe(true);
     });
 
     it('does not fetch when the preview already holds every row', async () => {
-        const fetchPage = vi.fn();
+        const fetchDocument = vi.fn();
         const report = card(rowsOf(4), 4);
-        expect(await withDownloadRows(report, fetchPage)).toBe(report);
-        expect(fetchPage).not.toHaveBeenCalled();
+        expect(await withDownloadRows(report, fetchDocument)).toBe(report);
+        expect(fetchDocument).not.toHaveBeenCalled();
     });
 
     it('prints the preview rather than nothing when the fetch fails', async () => {

@@ -32,7 +32,7 @@
  */
 const pdfmake = require('pdfmake');
 const {
-    BRAND, COMPANY, FONT_DIR, FONT_FILES, LOGO_SVG, CHART_W, printableCurrency,
+    BRAND, COMPANY, FONT_DIR, FONT_FILES, BRAND_DIR, LOGO_FILE, CHART_W, printableCurrency,
 } = require('./reportBrand.js');
 
 /** Rows per PDF. A 27,000-row catalogue is a spreadsheet, not a report. */
@@ -80,7 +80,7 @@ let fontsRegistered = false;
  * pdfmake is a singleton, so fonts and access policies are registered once.
  *
  * The access policies are an allow-list: the built-in font names and the files
- * in the shipped font folder, nothing else. These documents reference no URLs
+ * in the shipped font and brand folders, nothing else. These documents reference no URLs
  * and no images outside themselves; report content is client data, and a
  * document generator that will fetch what its input tells it to is an SSRF
  * waiting to happen.
@@ -91,7 +91,9 @@ const ensureConfigured = () => {
         Poppins: { ...FONT_FILES },
     });
     pdfmake.setUrlAccessPolicy(() => false);
-    pdfmake.setLocalAccessPolicy((name) => STANDARD_PDF_FONTS.has(name) || String(name).startsWith(FONT_DIR));
+    pdfmake.setLocalAccessPolicy((name) => STANDARD_PDF_FONTS.has(name)
+        || String(name).startsWith(FONT_DIR)
+        || String(name).startsWith(BRAND_DIR));
     fontsRegistered = true;
 };
 
@@ -153,7 +155,8 @@ const header = (report, subtitle) => (currentPage, pageCount, pageSize) => ({
     stack: [
         {
             columns: [
-                { svg: LOGO_SVG, width: 140 },
+                // The brand logo, on every page with the report's title and scope.
+                { image: LOGO_FILE, width: 132 },
                 {
                     width: '*',
                     stack: [
@@ -276,6 +279,8 @@ const statTiles = (stats, currency, comparisonLabel) => {
             return { width: '*', table: { widths: ['*'], body: [[tile]] }, layout: tileLayout };
         }),
         columnGap: TILE_GAP,
+        // A row of tiles is never split across a page break.
+        unbreakable: true,
         margin: [0, 0, 0, index === rows.length - 1 ? 12 : TILE_GAP],
     }));
 };
@@ -338,7 +343,7 @@ const dataTable = (columns, allRows, currency) => {
         color: BRAND.white,
         bold: true,
         fontSize: compact ? 5.8 : 6.5,
-        alignment: i === 0 ? 'left' : numeric[i] ? 'right' : 'left',
+        alignment: i === 0 ? 'left' : (column.align || (numeric[i] ? 'right' : 'left')),
         margin: [pad[0], 5, pad[2], 5],
     }));
 
@@ -349,7 +354,7 @@ const dataTable = (columns, allRows, currency) => {
         fontSize: bodySize,
         bold: i === 0,
         color: i === 0 ? BRAND.blue : BRAND.ink,
-        alignment: i === 0 ? 'left' : numeric[i] ? 'right' : 'left',
+        alignment: i === 0 ? 'left' : (column.align || (numeric[i] ? 'right' : 'left')),
         fillColor: index % 2 === 1 ? BRAND.zebra : null,
         margin: pad,
     })));
@@ -357,7 +362,12 @@ const dataTable = (columns, allRows, currency) => {
     return {
         table: {
             headerRows: 1,
-            widths: columnWidths(columns, rows),
+            // A comparison table (every value column aligned by its builder)
+            // shares the page evenly, as the reference's does; any other table
+            // sizes by content.
+            widths: columns.slice(1).every((column) => column.align)
+                ? columns.map(() => '*')
+                : columnWidths(columns, rows),
             body: [head, ...body],
             dontBreakRows: true,
         },
@@ -424,73 +434,154 @@ const issueDate = (date = new Date()) => date.toLocaleDateString('en-GB', { day:
  * @param {string} [opts.clientName] shown in the page header
  * @param {Date}   [opts.issuedAt]   the date printed at the end
  */
-const buildReportDocDefinition = (report, { marketplace, currency: requestedCurrency, clientName = '', issuedAt } = {}) => {
-    const currency = printableCurrency(marketplace?.country, requestedCurrency);
-    const place = marketplace?.country ? `Amazon ${marketplace.country}` : 'All marketplaces';
-    const summary = report.summary || {};
-    const landscape = widestTableColumnCount(report) > LANDSCAPE_COLUMN_THRESHOLD;
-    const contentWidth = (landscape ? 842 : 595) - MARGIN_X * 2;
+/** A smaller blue heading, for a table inside a marketplace's section. */
+const subTitle = (text) => ({ text: String(text).toUpperCase(), bold: true, fontSize: 9, color: BRAND.blue, characterSpacing: 0.3, margin: [0, 4, 0, 5] });
 
-    const content = [];
+/**
+ * One report body — main table, second table — as blocks. Used as-is for a
+ * single-marketplace report, and once per marketplace section in an
+ * account-wide one.
+ */
+const detailBlocks = (summary, tableTitle, currency, { heading = 'section', pageBreak } = {}) => {
+    const blocks = [];
+    if (heading === 'section') blocks.push(sectionTitle(tableTitle || 'Detail', summary.headline, { pageBreak }));
+    else blocks.push(subTitle(tableTitle || 'Detail'));
 
-    // ---- Executive summary ------------------------------------------------
-    content.push(sectionTitle('Executive Summary', [place, report.date].filter(Boolean).join('  ·  ')));
-    content.push(...statTiles(summary.stats, currency, summary.comparisonLabel));
-    const takeaway = takeawayBox(summary.takeaway);
-    if (takeaway) content.push(takeaway);
-    const charts = chartRow(summary.charts, contentWidth);
-    if (charts) content.push(charts);
-
-    // ---- Detail ------------------------------------------------------------
-    // A report with charts fills its first page, as the reference does, so its
-    // table starts the second.
-    content.push(sectionTitle(report.tableTitle || 'Detail', summary.headline, { pageBreak: charts ? 'before' : undefined }));
     const table = dataTable(summary.columns, summary.rows, currency);
     if (table) {
-        content.push(table);
+        blocks.push(table);
         const note = truncationNote(summary.totalRows, summary.rows);
-        if (note) content.push(note);
-        else content.push({ text: '', margin: [0, 0, 0, 6] });
+        blocks.push(note || { text: '', margin: [0, 0, 0, 6] });
     } else if (summary.emptyMessage) {
-        content.push({ text: summary.emptyMessage, fontSize: 8.5, bold: true, color: BRAND.teal, margin: [0, 0, 0, 12] });
+        blocks.push({ text: summary.emptyMessage, fontSize: 8.5, bold: true, color: BRAND.teal, margin: [0, 0, 0, 12] });
     }
 
     const secondary = summary.secondaryTable;
     if (secondary?.rows?.length) {
-        content.push(sectionTitle(secondary.title || 'Detail'));
+        blocks.push(heading === 'section' ? sectionTitle(secondary.title || 'Detail') : subTitle(secondary.title || 'Detail'));
         const secondaryTable = dataTable(secondary.columns, secondary.rows, currency);
         if (secondaryTable) {
-            content.push(secondaryTable);
+            blocks.push(secondaryTable);
             const note = truncationNote(secondary.totalRows, secondary.rows);
-            if (note) content.push(note);
+            if (note) blocks.push(note);
         }
     }
+    return blocks;
+};
 
-    // ---- Close -------------------------------------------------------------
+/** Highlights, Actions Taken, Notes and the issue date — the same for every layout. */
+const closingBlocks = (report, issuedAt) => {
+    const blocks = [];
     const written = (report.highlights || []).filter((item) => item.tone !== 'fill');
     const toFill = (report.highlights || []).filter((item) => item.tone === 'fill');
     if (written.length) {
-        content.push(sectionTitle('Performance Highlights', null, { color: BRAND.blue }));
-        content.push(bulletList(written));
+        blocks.push(sectionTitle('Performance Highlights', null, { color: BRAND.blue }));
+        blocks.push(bulletList(written));
     }
     if (toFill.length) {
-        content.push(sectionTitle(report.cadence === 'MONTHLY' ? 'Actions Taken This Month' : 'Actions Taken This Cycle'));
-        content.push(bulletList(toFill, { italic: true, color: BRAND.muted }));
+        blocks.push(sectionTitle(report.cadence === 'MONTHLY' ? 'Actions Taken This Month' : 'Actions Taken This Cycle'));
+        blocks.push(bulletList(toFill, { italic: true, color: BRAND.muted }));
     }
-
     // The limits travel with the document, so whoever reads the PDF sees the
     // same caveats as whoever opened the page.
     if (report.caveats?.length) {
-        content.push({ text: 'NOTES', bold: true, fontSize: 6.5, color: BRAND.muted, characterSpacing: 0.3, margin: [0, 4, 0, 3] });
+        blocks.push({ text: 'NOTES', bold: true, fontSize: 6.5, color: BRAND.muted, characterSpacing: 0.3, margin: [0, 4, 0, 3] });
         for (const caveat of report.caveats) {
-            content.push({ text: caveat, fontSize: 6.5, color: BRAND.muted, margin: [0, 0, 0, 2.5], lineHeight: 1.15 });
+            blocks.push({ text: caveat, fontSize: 6.5, color: BRAND.muted, margin: [0, 0, 0, 2.5], lineHeight: 1.15 });
         }
     }
-    content.push({ text: issueDate(issuedAt), fontSize: 7.5, color: BRAND.muted, margin: [0, 12, 0, 0] });
+    blocks.push({ text: issueDate(issuedAt), fontSize: 7.5, color: BRAND.muted, margin: [0, 12, 0, 0] });
+    return blocks;
+};
+
+/** Every table in a report, for the page-orientation decision. */
+const allTables = (report) => [
+    report.summary,
+    report.summary?.secondaryTable,
+    report.comparison,
+    ...(report.sections || []).flatMap((section) => [section.summary, section.summary?.secondaryTable]),
+].filter(Boolean);
+
+/**
+ * Build the pdfmake document definition for one report.
+ *
+ * Two layouts from one set of parts:
+ *   single marketplace   Executive Summary, the report's tables, close
+ *   account-wide         Executive Summary led by the primary marketplace,
+ *   (report.multi)       All Marketplaces comparison, a section per
+ *                        marketplace in its own currency, close
+ *
+ * @param {object} report        one entry from getEsfAccountReports().reports
+ * @param {object} opts
+ * @param {object} opts.marketplace  { country, region } the report is led by
+ * @param {string} [opts.currency]   override; defaults to the marketplace's own
+ * @param {string} [opts.clientName] shown in the page header
+ * @param {Date}   [opts.issuedAt]   the date printed at the end
+ */
+const buildReportDocDefinition = (report, { marketplace, currency: requestedCurrency, clientName = '', issuedAt } = {}) => {
+    const lead = report.marketplace || marketplace;
+    const currency = printableCurrency(lead?.country, requestedCurrency);
+    const multi = Boolean(report.multi && report.available && report.sections?.length > 1);
+    const countries = multi ? report.sections.map((section) => section.marketplace.country) : [];
+    const place = multi
+        ? `Amazon ${countries.join(' & ')}`
+        : (lead?.country ? `Amazon ${lead.country}` : 'All marketplaces');
+    const summary = report.summary || {};
+    const landscape = widestTableColumnCount(report) > LANDSCAPE_COLUMN_THRESHOLD
+        || allTables(report).some((table) => (table.columns?.length || 0) > LANDSCAPE_COLUMN_THRESHOLD);
+    const contentWidth = (landscape ? 842 : 595) - MARGIN_X * 2;
+
+    const content = [];
+
+    if (!multi) {
+        // ---- Executive summary --------------------------------------------
+        content.push(sectionTitle('Executive Summary', [place, report.date].filter(Boolean).join('  ·  ')));
+        content.push(...statTiles(summary.stats, currency, summary.comparisonLabel));
+        const takeaway = takeawayBox(summary.takeaway);
+        if (takeaway) content.push(takeaway);
+        const charts = chartRow(summary.charts, contentWidth);
+        if (charts) content.push(charts);
+        // A report with charts fills its first page, as the reference does, so
+        // its table starts the second.
+        content.push(...detailBlocks(summary, report.tableTitle, currency, { pageBreak: charts ? 'before' : undefined }));
+    } else {
+        const overview = report.overview || {};
+        const leadLabel = `Amazon ${lead.country} (${report.isPrimary ? 'primary marketplace' : 'leading marketplace'})`;
+
+        // ---- Executive summary, led by the primary marketplace -------------
+        content.push(sectionTitle('Executive Summary', [leadLabel, report.date].filter(Boolean).join('  ·  ')));
+        content.push(...statTiles(overview.stats, currency, overview.comparisonLabel));
+        const takeaway = takeawayBox(overview.takeaway);
+        if (takeaway) content.push(takeaway);
+        const charts = chartRow(overview.charts, contentWidth);
+        if (charts) content.push(charts);
+
+        // ---- All Marketplaces: the reference report's page two ------------
+        content.push(sectionTitle('All Marketplaces', `${report.date} snapshot  ·  ${countries.length} marketplaces, each in its own currency`, {
+            pageBreak: charts ? 'before' : undefined,
+        }));
+        const comparison = dataTable(report.comparison.columns, report.comparison.rows, currency);
+        if (comparison) content.push({ ...comparison, margin: [0, 0, 0, 12] });
+
+        // ---- One section per marketplace, primary first -------------------
+        for (const section of report.sections) {
+            const sectionCurrency = printableCurrency(section.marketplace.country);
+            // The headline already names the period on some reports (Monthly's
+            // does), so the date is added only when it does not.
+            const headline = section.summary?.headline || '';
+            const subtitle = headline.includes(section.date) ? headline : [section.date, headline].filter(Boolean).join('  ·  ');
+            content.push(sectionTitle(`Amazon ${section.marketplace.country}`, section.available ? subtitle : section.reason));
+            if (!section.available) continue;
+            content.push(...statTiles(section.summary.stats, sectionCurrency, section.summary.comparisonLabel));
+            content.push(...detailBlocks(section.summary, section.tableTitle, sectionCurrency, { heading: 'sub' }));
+        }
+    }
+
+    content.push(...closingBlocks(report, issuedAt));
 
     return {
         info: {
-            title: `${report.name}${marketplace?.country ? ` - ${marketplace.country}` : ''}`,
+            title: `${report.name} - ${multi ? countries.join(', ') : (lead?.country || '')}`.replace(/ - $/, ''),
             author: COMPANY,
             subject: report.insight || report.name,
         },

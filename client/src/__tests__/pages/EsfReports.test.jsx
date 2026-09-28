@@ -291,3 +291,67 @@ describe('ESF Reports page', () => {
         await waitFor(() => expect(screen.getByText('Reports are unavailable right now')).toBeInTheDocument());
     });
 });
+
+/*
+ * Account-wide: a client with several marketplaces sees every one of them,
+ * the same whichever marketplace the app has selected — each in its own
+ * currency, and each table paged against its own marketplace.
+ */
+describe('ESF Reports page, account with several marketplaces', () => {
+    const section = (marketplace, value, rows = 10, total = 10) => ({
+        marketplace,
+        available: true,
+        date: 'September 2026',
+        tableTitle: 'Restock plan',
+        pageSize: 10,
+        summary: {
+            headline: `${marketplace.country} headline`,
+            stats: [{ label: 'Reorder value', value, format: 'currency' }],
+            columns: [{ key: 'sku', label: 'SKU' }],
+            rows: makeRows(rows, `${marketplace.country}-SKU`),
+            totalRows: total,
+        },
+    });
+    const US = { country: 'US', region: 'NA', currency: '$' };
+    const IN = { country: 'IN', region: 'EU', currency: '₹' };
+    const MULTI = {
+        ...AVAILABLE_REPORT,
+        multi: true,
+        marketplace: US,
+        isPrimary: true,
+        overview: { stats: [{ label: 'SKUs tracked · All marketplaces', value: 55 }], takeaway: 'Lead line.' },
+        comparison: {
+            title: 'All Marketplaces',
+            columns: [{ key: 'market', label: 'Market' }, { key: 'c0', label: 'Reorder value', align: 'right' }],
+            rows: [{ market: 'US', c0: '$1,200' }, { market: 'IN', c0: '₹9,488' }],
+        },
+        sections: [section(US, 1200), section(IN, 9488, 10, 30)],
+    };
+
+    it('shows every marketplace, each in its own currency, whatever the app has selected', async () => {
+        // The store says '$' — the selected marketplace — and IN must still read ₹.
+        axiosInstance.get.mockResolvedValue(payload([MULTI]));
+        renderPage();
+
+        await waitFor(() => expect(screen.getAllByText('Amazon IN').length).toBeGreaterThan(0));
+        expect(screen.getByText(/All 2 marketplaces · led by Amazon US/)).toBeInTheDocument();
+        expect(screen.getAllByText('₹9,488').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('SKUs tracked · All marketplaces').length).toBeGreaterThan(0);
+    });
+
+    it("pages a marketplace's table against that marketplace, not the selected one", async () => {
+        axiosInstance.get.mockImplementation(async (url) => (url.endsWith('/rows')
+            ? { data: { data: { rows: makeRows(10, 'IN-PAGE2'), page: 2, totalRows: 30 } } }
+            : payload([MULTI])));
+        renderPage();
+
+        await waitFor(() => expect(screen.getByText('1–10 of 30 rows')).toBeInTheDocument());
+        const pager = screen.getByText('1–10 of 30 rows').closest('div').parentElement;
+        await userEvent.click(within(pager).getByRole('button', { name: /next/i }));
+
+        await waitFor(() => expect(axiosInstance.get).toHaveBeenCalledWith(
+            '/api/pagewise/esf/reports/inventory-restock/rows',
+            { params: { page: 2, limit: 10, country: 'IN', region: 'EU' } }
+        ));
+    });
+});

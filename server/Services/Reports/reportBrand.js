@@ -8,8 +8,8 @@
  *
  * The emailed PDF (reportPdf.js) reads everything from here. The downloaded
  * copy (client/src/Components/ESF/ReportDocumentPreview.jsx) keeps a mirror of
- * BRAND and LOGO_SVG, since the client cannot import server code — those two
- * are the things to keep in step. Charts are not mirrored: they are drawn here
+ * BRAND and its own copy of the logo, since the client cannot import server
+ * code — those are the things to keep in step. Charts are not mirrored: they are drawn here
  * once, as SVG, and travel inside the report payload to both renderers.
  */
 const path = require('path');
@@ -41,15 +41,14 @@ const FONT_FILES = Object.freeze({
 });
 
 /**
- * A stand-in wordmark: red roundel with a white "e", then the name in blue.
- * Replace with the real logo file when there is one — nothing else depends on
- * its shape.
+ * The eStore Factory logo, drawn at the top of every page. An 800px copy of
+ * the brand PNG (transparent), shipped with the server so a render never
+ * fetches anything. client/src/assets/Logo/esf-logo.png is the same file.
  */
-const LOGO_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="170" height="28" viewBox="0 0 170 28">'
-    + `<circle cx="14" cy="14" r="13" fill="${BRAND.red}"/>`
-    + `<text x="14" y="19.6" text-anchor="middle" font-family="Poppins" font-weight="bold" font-size="17" fill="${BRAND.white}">e</text>`
-    + `<text x="32" y="19.8" font-family="Poppins" font-size="16.5" fill="${BRAND.blue}">${COMPANY}</text>`
-    + '</svg>';
+const BRAND_DIR = path.resolve(__dirname, '../../assets/brand');
+const LOGO_FILE = path.join(BRAND_DIR, 'esf-logo.png');
+/** Width over height, so the header can size it without reading the file. */
+const LOGO_ASPECT = 800 / 116;
 
 /* ------------------------------------------------------------ currency */
 
@@ -196,7 +195,9 @@ module.exports = {
     COMPANY,
     FONT_DIR,
     FONT_FILES,
-    LOGO_SVG,
+    BRAND_DIR,
+    LOGO_FILE,
+    LOGO_ASPECT,
     CHART_W,
     CHART_H,
     drawable,

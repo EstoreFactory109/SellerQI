@@ -17,9 +17,8 @@
  * rule the Reports page follows on screen. A client whose cadence group has no
  * available report gets no email at all — silence is better than an empty one.
  *
- * A client with several marketplaces gets one message per cadence covering all
- * of them, with each PDF named for its marketplace, rather than one message per
- * marketplace.
+ * A client with several marketplaces gets one message per cadence, and in it
+ * one PDF per report covering every marketplace — not one PDF per marketplace.
  *
  * DELIVERY
  * One pooled SMTP transport for the whole run and clients processed one at a
@@ -30,7 +29,7 @@
 const logger = require('../../utils/Logger.js');
 const User = require('../../models/user-auth/userModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
-const { getEsfReports, getEsfReportRows } = require('../Calculations/EsfReportsService.js');
+const { getEsfAccountReports } = require('../Calculations/EsfAccountReportsService.js');
 const { renderReportPdf, reportPdfFilename, MAX_PDF_ROWS } = require('../Reports/reportPdf.js');
 const { sendEsfReportsEmail, createReportsTransport } = require('../Email/SendEsfReportsEmail.js');
 
@@ -56,9 +55,6 @@ const CADENCE_GROUPS = {
         reportKeys: ['listings-audit'],
     },
 };
-
-/** Marketplaces are processed in series; this spaces out the SP-API-backed reads. */
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * ISO-8601 week number. Used to make "bi-weekly" mean every OTHER week rather
@@ -96,62 +92,54 @@ const findEsfClients = async () => {
 /**
  * Build the attachments for one client and one cadence.
  *
- * Rows are re-fetched at PDF depth: the card payload carries only a preview
- * page, so rendering straight from it would put ten rows in every document.
+ * ONE PDF PER REPORT TYPE, COVERING EVERY MARKETPLACE. A client with US and IN
+ * used to get two Buy Box PDFs, two Monthly PDFs and so on; the account-wide
+ * report now leads with the primary marketplace, compares them all and carries
+ * a section for each (EsfAccountReportsService.js).
+ *
+ * Built at PDF depth directly — up to MAX_PDF_ROWS rows per table, per
+ * marketplace — so there is no second fetch to deepen a preview page.
  */
 const buildAttachmentsForClient = async (client, group) => {
     const attachments = [];
     const summaries = [];
 
-    for (const marketplace of client.marketplaces) {
-        let payload;
+    let account;
+    try {
+        account = await getEsfAccountReports(client._id, { keys: group.reportKeys, rowLimit: MAX_PDF_ROWS });
+    } catch (error) {
+        logger.error(`[EsfReportsMailer] Could not build reports for ${client._id}: ${error.message}`);
+        return { attachments, summaries };
+    }
+
+    // Primary first, in the filename and the email alike.
+    const countries = (account.marketplaces || [])
+        .map((marketplace) => marketplace.country)
+        .sort((x, y) => Number(y === account.primary?.country) - Number(x === account.primary?.country));
+    const scope = countries.length > 1 ? { country: countries.join(', ') } : account.marketplace;
+    const marketplaceLabel = countries.length > 1 ? `Amazon ${countries.join(', ')}` : `Amazon ${countries[0] || ''}`.trim();
+
+    for (const key of group.reportKeys) {
+        const report = account.reports.find((r) => r.key === key);
+        if (!report?.available) continue;
+
         try {
-            payload = await getEsfReports(client._id, marketplace.country, marketplace.region);
+            const content = await renderReportPdf(report, {
+                marketplace: report.marketplace,
+                marketplaces: account.marketplaces,
+                clientName: client.firstName || '',
+            });
+            attachments.push({ filename: reportPdfFilename(report, scope), content });
+            summaries.push({
+                name: report.name,
+                date: report.date,
+                insight: report.insight,
+                tone: report.tone,
+                marketplaceLabel,
+            });
         } catch (error) {
-            logger.error(`[EsfReportsMailer] Could not build reports for ${client._id} ${marketplace.country}: ${error.message}`);
-            continue;
+            logger.error(`[EsfReportsMailer] PDF render failed for ${key} / ${client._id}: ${error.message}`);
         }
-
-        for (const key of group.reportKeys) {
-            const report = payload.reports.find((r) => r.key === key);
-            if (!report?.available) continue;
-
-            // Deepen the table beyond the preview page before rendering.
-            try {
-                const paged = await getEsfReportRows(
-                    client._id, marketplace.country, marketplace.region, key,
-                    { page: 1, limit: MAX_PDF_ROWS }
-                );
-                if (paged?.available && paged.rows?.length) {
-                    report.summary = { ...report.summary, rows: paged.rows, totalRows: paged.totalRows };
-                }
-            } catch (error) {
-                // Not fatal — fall back to the preview rows already in hand.
-                logger.warn(`[EsfReportsMailer] Row fetch failed for ${key}, using preview rows: ${error.message}`);
-            }
-
-            try {
-                // No currency passed: the renderer takes the marketplace's own.
-                // This used to send '$' for every marketplace, so an India or
-                // UK client's rupee and pound figures went out as dollars.
-                const content = await renderReportPdf(report, {
-                    marketplace: payload.marketplace,
-                    clientName: client.firstName || '',
-                });
-                attachments.push({ filename: reportPdfFilename(report, payload.marketplace), content });
-                summaries.push({
-                    name: report.name,
-                    date: report.date,
-                    insight: report.insight,
-                    tone: report.tone,
-                    marketplaceLabel: `Amazon ${marketplace.country}`,
-                });
-            } catch (error) {
-                logger.error(`[EsfReportsMailer] PDF render failed for ${key} / ${client._id}: ${error.message}`);
-            }
-        }
-
-        await sleep(200);
     }
 
     return { attachments, summaries };

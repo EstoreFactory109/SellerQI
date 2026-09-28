@@ -1399,7 +1399,6 @@ const buildListingsAudit = async (userId, country, region) => {
     const premiumByAsin = new Map((premium?.documents || []).map((doc) => [doc.asin, doc.isPremium]));
     const premiumCaptured = Boolean(premium);
 
-    const marketplaces = (seller?.sellerAccount || []).filter((acc) => acc.country).length;
     const passCount = Object.fromEntries(AUDIT_CHECKS.map((check) => [check.key, 0]));
 
     let passed = 0;
@@ -1462,7 +1461,10 @@ const buildListingsAudit = async (userId, country, region) => {
         date: formatDate(content?.createdAt || new Date()),
         generatedAt: content?.createdAt || new Date(),
         tone: completion >= 80 ? 'good' : 'neutral',
-        insight: `${completion}% completion across ${marketplaces} marketplace${marketplaces === 1 ? '' : 's'}`,
+        // This marketplace's own listings. It used to say "across N
+        // marketplaces", counting every connected one, while the figure only
+        // ever covered this one — wrong as soon as reports became account-wide.
+        insight: `${completion}% completion across ${plural(products.length, 'listing')}`,
         summary: {
             headline: `${products.length} listings reviewed against ${AUDIT_CHECKS.length} content checks`,
             stats: [
@@ -1950,8 +1952,10 @@ const buildMonthlyPerformance = async (userId, country, region) => {
                 { label: 'Total sales', value: current.totalSales, format: 'currency', delta: salesChange, deltaFormat: 'percent' },
                 { label: 'Ad sales', value: ppcCurrent.adSales, format: 'currency', delta: pctChange(ppcCurrent.adSales, ppcPrevious.adSales), deltaFormat: 'percent' },
                 { label: 'Organic sales', value: organic, format: 'currency', delta: pctChange(organic, organicPrev), deltaFormat: 'percent' },
-                { label: 'Units sold', value: units, delta: pctChange(units, unitsPrev), deltaFormat: 'percent' },
-                { label: 'Sessions', value: trafficCurrent.sessions, delta: pctChange(trafficCurrent.sessions, trafficPrevious.sessions), deltaFormat: 'percent' },
+                // `previous` lets an account-wide report sum the change across
+                // marketplaces rather than averaging percentages.
+                { label: 'Units sold', value: units, previous: unitsPrev, delta: pctChange(units, unitsPrev), deltaFormat: 'percent' },
+                { label: 'Sessions', value: trafficCurrent.sessions, previous: trafficPrevious.sessions, delta: pctChange(trafficCurrent.sessions, trafficPrevious.sessions), deltaFormat: 'percent' },
                 { label: 'Conversion rate', value: conversion, format: 'percent', delta: conversion !== null && conversionPrev !== null ? round(conversion - conversionPrev, 2) : null, deltaFormat: 'points' },
                 { label: 'Ad spend', value: ppcCurrent.adSpend, format: 'currency', delta: pctChange(ppcCurrent.adSpend, ppcPrevious.adSpend), deltaFormat: 'percent', deltaGoodWhen: 'down' },
                 { label: 'ACOS', value: ppcCurrent.acos, format: 'percent', delta: acosDelta, deltaFormat: 'points', deltaGoodWhen: 'down' },
@@ -2146,18 +2150,18 @@ const BUILDERS = {
  * many travel, so the preview and the paged fetch can never disagree about the
  * total.
  */
-const toCard = (report) => {
+const toCard = (report, rowLimit = PREVIEW_ROWS) => {
     if (!report.available || !report.summary) return report;
     const rows = report.summary.rows || [];
     return {
         ...report,
         summary: {
             ...report.summary,
-            rows: rows.slice(0, PREVIEW_ROWS),
+            rows: rows.slice(0, rowLimit),
             totalRows: rows.length,
             takeaway: report.summary.takeaway || takeawayOf(report.highlights),
         },
-        pageSize: PREVIEW_ROWS,
+        pageSize: Math.min(rowLimit, PREVIEW_ROWS),
     };
 };
 
@@ -2188,7 +2192,8 @@ const getEsfReports = async (userId, country, region) => {
     const built = await Promise.all(
         Object.values(BUILDERS).map(({ meta, build }) => settle(meta, () => build(userId, country, region)))
     );
-    const reports = built.map(toCard);
+    // Not .map(toCard): map would pass each index as toCard's row limit.
+    const reports = built.map((report) => toCard(report));
 
     const available = reports.filter((report) => report.available);
 
@@ -2586,6 +2591,13 @@ module.exports = {
     getEsfReports,
     getEsfReportRows,
     getEsfReportHistory,
+    // for the account-wide layer (EsfAccountReportsService.js)
+    BUILDERS,
+    settle,
+    toCard,
+    takeawayOf,
+    formatDate,
+    printableMoney: cash,
     // exported for tests
     num,
     pctChange,
