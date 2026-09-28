@@ -1323,3 +1323,30 @@ describe('feasibility-check additions', () => {
         });
     });
 });
+
+describe('account health against live V2 shapes', () => {
+    const healthRow = (report, prefix) => report.summary.secondaryTable?.rows.find((row) => row.metric.startsWith(prefix));
+
+    it("uses Amazon's own target for the marketplace, and says when nothing was measured", async () => {
+        Seller.findOne.mockReturnValue(mockFindOne({ sellerAccount: [{ country: 'IN', region: 'EU', products: [{ asin: 'B1', sku: 'S1', status: 'Active' }] }] }));
+        V2Perf.findOne.mockReturnValue(mockFindOne({
+            lateShipmentRateStatus: 'BAD',
+            lateShipmentRatePct: 3.3333,
+            validTrackingRateStatus: 'GOOD',
+            validTrackingRatePct: null,
+            policyMetrics: [],
+            rateDetails: {
+                lateShipmentRate: { status: 'BAD', pct: 3.3333, targetPct: 2, condition: 'LESS_THAN', basis: 30 },
+                validTrackingRate: { status: 'GOOD', pct: null, targetPct: 95, condition: 'GREATER_THAN', basis: 0 },
+            },
+        }));
+
+        const report = byKey(await getEsfReports(USER, 'IN', 'EU'), 'account-overview');
+
+        // India's 2%, not the US 4%.
+        expect(healthRow(report, 'Late Shipment Rate')).toMatchObject({ status: 'Bad (3.33%)', target: 'Under 2%', action: 'Review in Seller Central' });
+        // Never "Good (0%)" for a rate over zero shipments.
+        expect(healthRow(report, 'Valid Tracking Rate').status).toBe('Good (no shipments in the window)');
+        expect(healthRow(report, 'Shipments without valid tracking')).toBeUndefined();
+    });
+});

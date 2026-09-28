@@ -3,7 +3,7 @@ import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { PALETTE } from '../../../Components/ESF/estoreFactoryTheme.js';
 import axiosInstance from '../../../config/axios.config.js';
-import ReportDocumentPreview, { reportNeedsLandscape } from '../../../Components/ESF/ReportDocumentPreview.jsx';
+import ReportDocumentPreview, { reportNeedsLandscape, FULL_ROWS } from '../../../Components/ESF/ReportDocumentPreview.jsx';
 
 /**
  * Estore Factory > Reports.
@@ -528,6 +528,26 @@ const SummaryPanel = ({ report, currency, failed, marketplace }) => {
 };
 
 /**
+ * The report a Download prints: the card, with its table deepened to the same
+ * first page of rows the emailed PDF is rendered from.
+ *
+ * `fetchPage(key)` returns the paged endpoint's `data`. Any failure falls back
+ * to the preview rows — the same fallback the mailer takes — so Download never
+ * produces nothing.
+ */
+export const withDownloadRows = async (report, fetchPage) => {
+    const shown = report?.summary?.rows?.length || 0;
+    if (!report?.available || (report.summary?.totalRows || 0) <= shown) return report;
+    try {
+        const page = await fetchPage(report.key);
+        if (!page?.rows?.length) return report;
+        return { ...report, summary: { ...report.summary, rows: page.rows, totalRows: page.totalRows } };
+    } catch {
+        return report;
+    }
+};
+
+/**
  * One report card. Hovering lifts and outlines it; selecting it fills the panel
  * above. An unavailable report cannot be selected — it carries no data to show —
  * so it is dimmed and does not respond to hover either.
@@ -677,6 +697,17 @@ const Reports = () => {
     const [pendingDownload, setPendingDownload] = useState(null);
     const printRef = useRef(null);
 
+    // The card carries a 10-row preview; the emailed PDF is rendered from the
+    // first FULL_ROWS rows (esfReportsMailer). Fetch the same page before
+    // printing, or the saved file holds a quarter of the email's table — the
+    // Monthly report lost CTR, CPC and ROAS that way.
+    const startDownload = useCallback(async (report) => {
+        setPendingDownload(await withDownloadRows(report, async (key) => {
+            const res = await axiosInstance.get(`/api/pagewise/esf/reports/${key}/rows`, { params: { page: 1, limit: FULL_ROWS } });
+            return res.data?.data;
+        }));
+    }, []);
+
     useEffect(() => {
         if (!pendingDownload || !printRef.current) return undefined;
         // One frame so the off-screen copy is laid out before it is read.
@@ -767,7 +798,7 @@ const Reports = () => {
                                     selected={selected?.key === report.key}
                                     onSelect={setSelectedKey}
                                     onViewHistory={() => navigate(`/seller-central-checker/estore-factory/report-history/${report.key}`)}
-                                    onDownload={setPendingDownload}
+                                    onDownload={startDownload}
                                 />
                             ))}
                         </div>

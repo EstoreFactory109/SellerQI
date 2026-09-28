@@ -41,7 +41,7 @@ const DOC_ROWS = 4;
  * Rows in a downloaded copy. Matches MAX_PDF_ROWS in reportPdf.js so the file a
  * client saves and the file they are emailed hold the same data.
  */
-const FULL_ROWS = 40;
+export const FULL_ROWS = 40;
 
 /**
  * Past this many columns a printed copy needs a landscape page. Mirrors
@@ -55,6 +55,19 @@ export const reportNeedsLandscape = (report) => Math.max(
     report?.summary?.columns?.length || 0,
     report?.summary?.secondaryTable?.columns?.length || 0
 ) > WIDE_TABLE_COLUMNS;
+
+/**
+ * "Showing the first N of M rows", worded as truncationNote in reportPdf.js,
+ * so a saved file says it was cut exactly where the emailed one does.
+ */
+const TruncationNote = ({ total, shown }) => {
+    if (!total || total <= shown) return null;
+    return (
+        <p style={{ margin: '0 0 12px', fontSize: 10.5, fontStyle: 'italic', color: '#888' }}>
+            Showing the first {shown} of {Number(total).toLocaleString('en-GB')} rows. The full set is on your Reports page.
+        </p>
+    );
+};
 
 const formatCell = (value, format, currency) => {
     if (value === null || value === undefined || value === '') return '—';
@@ -200,6 +213,7 @@ const ReportDocumentPreview = ({ report, marketplace, currency, full = false }) 
                                 ))}
                             </tbody>
                         </table>
+                        {full && <TruncationNote total={report.summary?.totalRows} shown={rows.length} />}
                     </div>
                 ) : (
                     <p style={{ margin: '0 0 8px', fontSize: 12.5, color: DOC.green, fontWeight: 700 }}>
@@ -254,6 +268,12 @@ const ReportDocumentPreview = ({ report, marketplace, currency, full = false }) 
                                 ))}
                             </tbody>
                         </table>
+                        {full && (
+                            <TruncationNote
+                                total={report.summary.secondaryTable.totalRows}
+                                shown={Math.min(report.summary.secondaryTable.rows.length, FULL_ROWS)}
+                            />
+                        )}
                     </div>
                 </div>
             )}

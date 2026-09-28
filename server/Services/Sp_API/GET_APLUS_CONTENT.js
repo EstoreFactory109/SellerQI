@@ -18,12 +18,11 @@
  *       -> contentMetadataRecords[]: { contentReferenceKey, contentMetadata:
  *          { name, status, badgeSet, marketplaceId } }
  *   GET /aplus/2020-11-01/contentDocuments/{key}/asins?marketplaceId=…
- *       -> publishRecordList[]: which ASINs that document is live on
+ *       -> asinMetadataSet[]: { asin, ... }, paged by nextPageToken
  *
- * The badge field could not be confirmed against a live response — the machine
- * this was written on has no working SP-API credentials, every account returns
- * 401 invalid_client. So several spellings are accepted and anything
- * unrecognised is preserved rather than dropped. If none of them match, the
+ * Checked against a live account (September 2026): badgeSet is an array such
+ * as ["GENERATED", "STANDARD"] on contentMetadata, as read below. Other
+ * spellings are still accepted, and if no record carries a badge field the
  * service says so in the log instead of quietly reporting "no Premium
  * anywhere", which would read as a finding rather than a parsing gap.
  *
@@ -216,14 +215,28 @@ const getAPlusContent = async (accessToken, marketplaceIds, userId, baseUri, cou
 
             let asins = [];
             try {
-                const body = await getWithRetry(
-                    host,
-                    `/aplus/2020-11-01/contentDocuments/${encodeURIComponent(key)}/asins?marketplaceId=${encodeURIComponent(marketplaceId)}`,
-                    accessToken,
-                    `asins for ${key}`
-                );
-                const publishRecords = body?.publishRecordList || body?.PublishRecordList || [];
-                asins = publishRecords.map((entry) => entry.asin || entry.Asin).filter(Boolean);
+                // Live responses carry `asinMetadataSet` and page with
+                // nextPageToken. `publishRecordList` belongs to a different
+                // endpoint (searchContentPublishRecords); reading it here
+                // dropped every ASIN on a live account with 33 documents.
+                let asinToken = null;
+                let asinPages = 0;
+                do {
+                    const query = new URLSearchParams({ marketplaceId });
+                    if (asinToken) query.append('pageToken', asinToken);
+                    const body = await getWithRetry(
+                        host,
+                        `/aplus/2020-11-01/contentDocuments/${encodeURIComponent(key)}/asins?${query.toString()}`,
+                        accessToken,
+                        `asins for ${key}`
+                    );
+                    const entries = body?.asinMetadataSet || body?.AsinMetadataSet || body?.publishRecordList || [];
+                    asins.push(...entries.map((entry) => entry.asin || entry.Asin).filter(Boolean));
+                    asinToken = body?.nextPageToken || null;
+                    asinPages += 1;
+                    if (asinToken) await sleep(RATE_LIMIT_MS);
+                } while (asinToken && asinPages < 20);
+                asins = [...new Set(asins)];
             } catch (error) {
                 if (error.code === 'APLUS_FORBIDDEN') throw error;
                 // One document failing must not lose the rest.

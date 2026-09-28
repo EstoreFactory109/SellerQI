@@ -65,6 +65,24 @@ async function getSpApiDocumentUrl(accessToken, reportDocumentId, baseuri) {
 
 const SP_API_DOWNLOAD_TIMEOUT_MS = 120000;
 
+/**
+ * Amazon's documented meaning of CANCELLED on a report nobody cancelled: "an
+ * automatic cancellation if there is no data to return". Seen live on the
+ * removal-order report for two India accounts with no FBA removals.
+ *
+ * For the report services that opt in, that is NO_DATA, not a failure. It is
+ * NOT applied in mapSpApiStatus, which older services rely on treating it as
+ * a failure (their finalize cannot run without a document).
+ */
+const cancelledMeansNoData = (result) => (result?.failed && /CANCELLED/.test(result.note || '')
+    ? { ready: true, empty: true, handle: { reportDocumentId: null } }
+    : result);
+
+/** checkSpApiStatusOnce for a service that reads CANCELLED as no data. */
+async function checkSpApiStatusOnceNoDataOnCancel(accessToken, reportId, baseuri) {
+    return cancelledMeansNoData(await checkSpApiStatusOnce(accessToken, reportId, baseuri));
+}
+
 /** POST /reports. Returns the reportId. */
 async function createSpApiReport(accessToken, baseuri, body) {
     const response = await axios.post(
@@ -114,7 +132,7 @@ async function runSpApiReportInline({ accessToken, baseuri, body, retries = 0, p
         for (let poll = 0; poll < maxPolls && result === 'PROCESSING'; poll += 1) {
             await new Promise((resolve) => setTimeout(resolve, pollMs));
             try {
-                result = await checkSpApiStatusOnce(accessToken, reportId, baseuri);
+                result = cancelledMeansNoData(await checkSpApiStatusOnce(accessToken, reportId, baseuri));
             } catch (error) {
                 logger.warn(`[${label}] status check failed, retrying: ${error.message}`);
             }
@@ -138,6 +156,7 @@ async function runSpApiReportInline({ accessToken, baseuri, body, retries = 0, p
 module.exports = {
     mapSpApiStatus,
     checkSpApiStatusOnce,
+    checkSpApiStatusOnceNoDataOnCancel,
     getSpApiDocumentUrl,
     createSpApiReport,
     downloadSpApiDocument,

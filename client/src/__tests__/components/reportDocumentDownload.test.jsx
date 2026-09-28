@@ -18,12 +18,13 @@
  * Nothing else catches this: the server-side PDF tests exercise reportPdf.js,
  * which the download path never touches.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import ReportDocumentPreview, {
     reportNeedsLandscape,
     WIDE_TABLE_COLUMNS,
 } from '../../Components/ESF/ReportDocumentPreview.jsx';
+import { withDownloadRows } from '../../Pages/ESF/EstoreFactory/Reports.jsx';
 
 /** A Buy Box report at full width: nine stats, twelve columns. */
 const report = {
@@ -214,5 +215,54 @@ describe('reportNeedsLandscape', () => {
     it('survives a report with no summary', () => {
         expect(reportNeedsLandscape(undefined)).toBe(false);
         expect(reportNeedsLandscape({})).toBe(false);
+    });
+});
+
+/*
+ * The card carries a 10-row preview, the email up to 40. Download used to print
+ * the card as it was, so a saved Monthly report lost CTR, CPC and ROAS — rows
+ * 11 onwards — while the emailed one had them.
+ */
+describe('withDownloadRows', () => {
+    const card = (rows, totalRows) => ({ key: 'monthly-performance', available: true, summary: { rows, totalRows, columns: [] } });
+    const rowsOf = (n) => Array.from({ length: n }, (_, i) => ({ metric: `m${i}` }));
+
+    it('deepens a preview to the page the emailed PDF uses', async () => {
+        const fetchPage = vi.fn(async () => ({ rows: rowsOf(18), totalRows: 18 }));
+        const printable = await withDownloadRows(card(rowsOf(10), 18), fetchPage);
+        expect(fetchPage).toHaveBeenCalledWith('monthly-performance');
+        expect(printable.summary.rows).toHaveLength(18);
+    });
+
+    it('does not fetch when the preview already holds every row', async () => {
+        const fetchPage = vi.fn();
+        const report = card(rowsOf(4), 4);
+        expect(await withDownloadRows(report, fetchPage)).toBe(report);
+        expect(fetchPage).not.toHaveBeenCalled();
+    });
+
+    it('prints the preview rather than nothing when the fetch fails', async () => {
+        const report = card(rowsOf(10), 50);
+        expect(await withDownloadRows(report, async () => { throw new Error('offline'); })).toBe(report);
+    });
+});
+
+describe('a cut table says it was cut', () => {
+    const wide = (total) => ({
+        ...report,
+        summary: { ...report.summary, rows: Array.from({ length: 40 }, (_, i) => ({ sku: `S${i}` })), totalRows: total },
+    });
+
+    it('in the downloaded copy, worded as the emailed PDF words it', () => {
+        render(<ReportDocumentPreview report={wide(120)} currency="$" full />);
+        expect(screen.getByText('Showing the first 40 of 120 rows. The full set is on your Reports page.')).toBeInTheDocument();
+    });
+
+    it('not when nothing was cut, and never in the panel thumbnail', () => {
+        const { unmount } = render(<ReportDocumentPreview report={wide(40)} currency="$" full />);
+        expect(screen.queryByText(/Showing the first/)).toBeNull();
+        unmount();
+        render(<ReportDocumentPreview report={wide(120)} currency="$" />);
+        expect(screen.queryByText(/Showing the first/)).toBeNull();
     });
 });

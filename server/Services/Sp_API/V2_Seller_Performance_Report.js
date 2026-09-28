@@ -6,21 +6,52 @@ const zlib = require('zlib');
 const { promisify } = require('util');
 const gunzip = promisify(zlib.gunzip);
 
+const countOf = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : null);
+
 /**
- * Amazon's rates arrive as fractions (0.0024) with a target in the same unit
- * (0.01 for "under 1%"). The target is the one thing on the node that says which
- * unit Amazon used, so it decides the scale; without one the documented
- * fraction form is assumed. Returns a percentage, or null when there is no rate.
+ * Amazon's target, which live reports send as a bare number beside a separate
+ * `targetCondition` (0.01, "LESS_THAN"). An object form is accepted as well.
  */
-const toPercent = (node) => {
-    const rate = node?.rate;
-    if (typeof rate !== 'number' || !Number.isFinite(rate)) return null;
-    const target = node?.targetValue?.value;
-    const isFraction = typeof target === 'number' ? target <= 1 : rate <= 1;
-    return Math.round((isFraction ? rate * 100 : rate) * 10000) / 10000;
+const targetOf = (node) => {
+    const raw = node?.targetValue;
+    return countOf(typeof raw === 'object' && raw !== null ? raw.value : raw);
 };
 
-const countOf = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : null);
+/**
+ * Amazon's rates arrive as fractions (0.0024) with a target in the same unit
+ * (0.01 for "under 1%"), so the target decides the scale; without one the
+ * fraction form seen in every live report is assumed. Returns a percentage.
+ */
+const scale = (node) => {
+    const target = targetOf(node);
+    return typeof target === 'number' ? target <= 1 : true;
+};
+const toPct = (value, fraction) => (value === null ? null : Math.round((fraction ? value * 100 : value) * 10000) / 10000);
+
+/**
+ * One rate metric, with what it was measured against.
+ *
+ * `basisField` names the count the rate is a share of. When that count is 0,
+ * Amazon still sends `rate: 0` and status GOOD — seen live on an FBA-only
+ * account's tracking rate and on unit OTDR with no units — and printing "0%"
+ * there reads as a failure. So a rate with nothing behind it has no figure.
+ *
+ * The target is kept because it varies by marketplace: Late Shipment is 4% in
+ * the US and 2% in India, in the same report format.
+ */
+const rateDetail = (node, basisField) => {
+    if (!node || typeof node !== 'object') return null;
+    const basis = countOf(node[basisField]);
+    const fraction = scale(node);
+    const rate = countOf(node.rate);
+    return {
+        status: String(node.status || ''),
+        pct: basis === 0 ? null : toPct(rate, fraction),
+        targetPct: toPct(targetOf(node), fraction),
+        condition: String(node.targetCondition || node.targetValue?.condition || ''),
+        basis,
+    };
+};
 
 /**
  * Everything the report carries beyond the seven fields stored since day one.
@@ -35,9 +66,10 @@ const countOf = (value) => (typeof value === 'number' && Number.isFinite(value) 
  * must cost its own row, not the whole snapshot. The original seven keep their
  * exact extraction so nothing that already reads them changes.
  *
- * No live response could be inspected (every SP-API account available here
- * returns 401), so this follows Amazon's published V2 schema; a policy metric
- * we have no label for is still kept, under its own key.
+ * Checked against five live reports (US and IN, FBA and FBM, September 2026):
+ * bare-number targets, a separate targetCondition, "NONE" on empty ODR
+ * components, and rate 0 over a basis of 0 all come from those. A policy
+ * metric we have no label for is still kept, under its own key.
  */
 const extractExtendedMetrics = (refinedData) => {
     const metrics = refinedData?.performanceMetrics?.[0] || {};
@@ -48,16 +80,29 @@ const extractExtendedMetrics = (refinedData) => {
         const counts = channels.map((channel) => countOf(channel?.[field]?.count)).filter((c) => c !== null);
         return counts.length ? counts.reduce((sum, c) => sum + c, 0) : null;
     };
-    // The worse of the two channels is the one Amazon acts on.
+    // The worse of the two channels is the one Amazon acts on. "NONE" is what
+    // Amazon sends for a component with nothing in it, not a verdict.
     const worstStatus = (field) => {
-        const statuses = channels.map((channel) => String(channel?.[field]?.status || '')).filter(Boolean);
+        const statuses = channels.map((channel) => String(channel?.[field]?.status || ''))
+            .filter((status) => status && status.toUpperCase() !== 'NONE');
         return statuses.find((status) => status.toUpperCase() !== 'GOOD') || statuses[0] || '';
     };
-    const primaryOdr = odr.afn || odr.mfn || null;
+    // The channel that actually carried orders. An FBM-only seller still gets
+    // an afn block, with orderCount 0 and rate 0 — reading that one first
+    // reported a meaningless 0% on a live FBM account.
+    const primaryOdr = [odr.afn, odr.mfn].filter(Boolean)
+        .sort((a, b) => (countOf(b.orderCount) || 0) - (countOf(a.orderCount) || 0))[0] || null;
 
     const tracking = metrics.validTrackingRate || {};
-    const otdr = metrics.onTimeDeliveryRate || {};
-    const unitOtdr = metrics.unitOnTimeDeliveryRate || {};
+    const details = {
+        orderDefectRate: rateDetail(primaryOdr, 'orderCount'),
+        lateShipmentRate: rateDetail(metrics.lateShipmentRate, 'orderCount'),
+        cancellationRate: rateDetail(metrics.preFulfillmentCancellationRate, 'orderCount'),
+        validTrackingRate: rateDetail(metrics.validTrackingRate, 'shipmentCount'),
+        onTimeDeliveryRate: rateDetail(metrics.onTimeDeliveryRate, 'shipmentCountWithValidTracking'),
+        unitOnTimeDeliveryRate: rateDetail(metrics.unitOnTimeDeliveryRate, 'totalUnitCount'),
+    };
+    const rateDetails = Object.fromEntries(Object.entries(details).filter(([, detail]) => detail));
 
     // Every node that reads as a policy metric: a status plus a defect count.
     // Collected generically so a metric Amazon adds later still arrives.
@@ -73,14 +118,17 @@ const extractExtendedMetrics = (refinedData) => {
     }
 
     return {
-        orderDefectRatePct: primaryOdr ? toPercent(primaryOdr) : null,
-        lateShipmentRatePct: toPercent(metrics.lateShipmentRate),
-        cancellationRatePct: toPercent(metrics.preFulfillmentCancellationRate),
-        validTrackingRatePct: toPercent(tracking),
-        onTimeDeliveryRateStatus: String(otdr.status || ''),
-        onTimeDeliveryRatePct: toPercent(otdr),
-        unitOnTimeDeliveryRateStatus: String(unitOtdr.status || ''),
-        unitOnTimeDeliveryRatePct: toPercent(unitOtdr),
+        orderDefectRateStatus: details.orderDefectRate?.status || '',
+        orderDefectRatePct: details.orderDefectRate?.pct ?? null,
+        lateShipmentRatePct: details.lateShipmentRate?.pct ?? null,
+        cancellationRatePct: details.cancellationRate?.pct ?? null,
+        validTrackingRatePct: details.validTrackingRate?.pct ?? null,
+        onTimeDeliveryRateStatus: details.onTimeDeliveryRate?.status || '',
+        onTimeDeliveryRatePct: details.onTimeDeliveryRate?.pct ?? null,
+        unitOnTimeDeliveryRateStatus: details.unitOnTimeDeliveryRate?.status || '',
+        unitOnTimeDeliveryRatePct: details.unitOnTimeDeliveryRate?.pct ?? null,
+        // Target, condition and basis for each rate, keyed as above.
+        rateDetails,
         chargebackCount: sumCounts('chargebacks'),
         chargebackStatus: worstStatus('chargebacks'),
         claimsCount: sumCounts('claims'),

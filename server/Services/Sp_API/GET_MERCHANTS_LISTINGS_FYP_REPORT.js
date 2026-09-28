@@ -22,7 +22,7 @@ const SuppressedListings = require('../../models/products/SuppressedListingsMode
 const { mapFlatFileRecords } = require('./flatFileFields.js');
 const {
     createSpApiReport,
-    checkSpApiStatusOnce,
+    checkSpApiStatusOnceNoDataOnCancel,
     downloadSpApiDocument,
     runSpApiReportInline,
 } = require('./spApiReportAdapter.js');
@@ -116,7 +116,7 @@ getReport.spApiAsync = {
         params: {},
         marketplaceId: '',
         submit: async () => await createSpApiReport(accessToken, baseuri, requestBody(marketplaceIds)),
-        checkStatusOnce: (reportId) => checkSpApiStatusOnce(accessToken, reportId, baseuri),
+        checkStatusOnce: (reportId) => checkSpApiStatusOnceNoDataOnCancel(accessToken, reportId, baseuri),
         finalize: async (handle) => {
             if (!handle?.reportDocumentId) {
                 await save(userId, country, region, EMPTY);

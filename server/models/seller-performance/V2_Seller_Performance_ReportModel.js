@@ -61,6 +61,9 @@ const GET_V2_SELLER_PERFORMANCE_REPORT_Schema = new mongoose.Schema(
    // Numbers default to null, never 0: a snapshot taken before this was parsed
    // has no answer, and "0 chargebacks" would be a finding it cannot back.
    // Rates are stored as percentages (0.24 means 0.24%).
+   // Status of the channel that carried the orders (FBA or FBM), unlike
+   // orderWithDefectsStatus above, which has always been read from FBA.
+   orderDefectRateStatus: { type: String, default: "" },
    orderDefectRatePct: { type: Number, default: null },
    lateShipmentRatePct: { type: Number, default: null },
    cancellationRatePct: { type: Number, default: null },
@@ -79,6 +82,10 @@ const GET_V2_SELLER_PERFORMANCE_REPORT_Schema = new mongoose.Schema(
    // Shipments counted for Valid Tracking Rate; the gap is missing tracking.
    trackedShipmentCount: { type: Number, default: null },
    validTrackingCount: { type: Number, default: null },
+   // Per rate: { status, pct, targetPct, condition, basis }. Targets vary by
+   // marketplace (Late Shipment is 4% in the US, 2% in India), and basis 0
+   // means there was nothing to measure, whatever the rate says.
+   rateDetails: { type: mongoose.Schema.Types.Mixed, default: undefined },
    // IP complaints, customer complaints and the other policy metrics, each a
    // status plus a defect count, keyed by Amazon's own field name.
    policyMetrics: {

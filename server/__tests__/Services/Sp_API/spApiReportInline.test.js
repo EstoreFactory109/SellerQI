@@ -57,8 +57,17 @@ it('re-requests a report Amazon failed, when retries allow', async () => {
 
 it('returns, rather than throws, a failure that outlasts its retries', async () => {
     axios.post.mockResolvedValue({ data: { reportId: 'r1' } });
+    axios.get.mockResolvedValue(status('FATAL'));
+    expect(await runSpApiReportInline(args({ retries: 1 }))).toEqual({ status: 'FAILED', note: 'report FATAL' });
+});
+
+it('reads CANCELLED as "no data", which is what Amazon documents it to mean', async () => {
+    // Seen live: the removal-order report comes back CANCELLED for an account
+    // with no removals. Retrying it would only get the same answer.
+    axios.post.mockResolvedValue({ data: { reportId: 'r1' } });
     axios.get.mockResolvedValue(status('CANCELLED'));
-    expect(await runSpApiReportInline(args({ retries: 1 }))).toEqual({ status: 'FAILED', note: 'report CANCELLED' });
+    expect(await runSpApiReportInline(args({ retries: 1 }))).toEqual({ status: 'NO_DATA' });
+    expect(axios.post).toHaveBeenCalledTimes(1);
 });
 
 it('throws an expired token so the refresh wrapper can act on it', async () => {

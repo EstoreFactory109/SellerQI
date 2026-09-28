@@ -22,6 +22,7 @@
  * template already asks for Arial/Helvetica.
  */
 const pdfmake = require('pdfmake');
+const { getCurrencyCode, getCurrencySymbol } = require('../../utils/marketplaceCurrency.js');
 
 /** report-template.html :root, verbatim. */
 const DOC = {
@@ -103,11 +104,47 @@ const ensureConfigured = () => {
             italics: 'Helvetica-Oblique',
             bolditalics: 'Helvetica-BoldOblique',
         },
+        // Only for the change arrows — see deltaArrow.
+        ZapfDingbats: {
+            normal: 'ZapfDingbats',
+            bold: 'ZapfDingbats',
+            italics: 'ZapfDingbats',
+            bolditalics: 'ZapfDingbats',
+        },
     });
     pdfmake.setUrlAccessPolicy(() => false);
     pdfmake.setLocalAccessPolicy((name) => STANDARD_PDF_FONTS.has(name));
     fontsRegistered = true;
 };
+
+/**
+ * The characters Helvetica can draw here: ASCII plus Windows-1252.
+ *
+ * The built-in fonts carry no other glyphs, and pdfmake does not fall back or
+ * warn — it writes the character's two bytes as two Latin-1 glyphs. Found in
+ * rendered output rather than in the document definition: "₹1,234" drew as
+ * "¹1,234", and every "▲ 12.5%" change line on every tile drew as "%² 12.5%".
+ */
+const WIN_ANSI = new Set([...'€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ']);
+for (let code = 0xA0; code <= 0xFF; code += 1) WIN_ANSI.add(String.fromCharCode(code));
+const drawable = (text) => [...String(text)].every((ch) => ch.charCodeAt(0) < 0x80 || WIN_ANSI.has(ch));
+
+/**
+ * A currency symbol the page can actually draw. £, € and $ can; ₹, zł, ₺ and
+ * the Gulf symbols cannot, and get the marketplace's ISO code instead —
+ * "INR 1,234" rather than a symbol that prints as noise.
+ */
+const pdfCurrency = (symbol, country) => {
+    if (drawable(symbol)) return symbol;
+    const code = getCurrencyCode(country);
+    return code ? `${code} ` : '';
+};
+
+/**
+ * ▲ / ▼, from ZapfDingbats (one of the 14 fonts every reader has), since
+ * Helvetica has neither. 's' and 't' are that font's up and down triangles.
+ */
+const deltaArrow = (up) => ({ text: up ? 's' : 't', font: 'ZapfDingbats', fontSize: 6 });
 
 /** Mirrors formatCell in ReportDocumentPreview.jsx. */
 const formatCell = (value, format, currency) => {
@@ -174,7 +211,7 @@ const statTiles = (stats, currency) => {
         ];
         if (hasDelta) {
             stack.push({
-                text: stat.delta === 0 ? '\u2014' : `${stat.delta > 0 ? '\u25B2' : '\u25BC'} ${Math.abs(stat.delta)}${suffix}`,
+                text: stat.delta === 0 ? '\u2014' : [deltaArrow(stat.delta > 0), ` ${Math.abs(stat.delta)}${suffix}`],
                 fontSize: 8,
                 bold: true,
                 color: stat.delta === 0 ? DOC.muted : improved ? DOC.green : DOC.red,
@@ -315,7 +352,10 @@ const truncationNote = (total, shown) => {
     };
 };
 
-const buildReportDocDefinition = (report, { marketplace, currency = '$', clientName = '' } = {}) => {
+const buildReportDocDefinition = (report, { marketplace, currency: requestedCurrency, clientName = '' } = {}) => {
+    // The marketplace's own currency unless the caller names one, and always
+    // one the font can draw.
+    const currency = pdfCurrency(requestedCurrency ?? getCurrencySymbol(marketplace?.country), marketplace?.country);
     const place = marketplace?.country ? `Amazon ${marketplace.country}` : 'All marketplaces';
     const subtitle = [clientName, place, report.date].filter(Boolean).join('  ·  ');
 

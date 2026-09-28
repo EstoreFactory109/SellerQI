@@ -131,9 +131,11 @@ const buildAttachmentsForClient = async (client, group) => {
             }
 
             try {
+                // No currency passed: the renderer takes the marketplace's own.
+                // This used to send '$' for every marketplace, so an India or
+                // UK client's rupee and pound figures went out as dollars.
                 const content = await renderReportPdf(report, {
                     marketplace: payload.marketplace,
-                    currency: '$',
                     clientName: client.firstName || '',
                 });
                 attachments.push({ filename: reportPdfFilename(report, payload.marketplace), content });

@@ -171,12 +171,19 @@ const isNum = (value) => typeof value === 'number' && Number.isFinite(value);
  * only when a snapshot carries a figure without a status, so the row is never
  * left without a verdict it could have had.
  */
-const rateRow = (metric, status, pct, threshold) => {
+const rateRow = (metric, status, pct, fallback, detail = null, noun = 'orders') => {
     const hasStatus = status !== undefined && status !== null && status !== '';
     const hasPct = isNum(pct);
     if (!hasStatus && !hasPct) return null;
 
-    const figure = hasPct ? `${round(pct, 2)}%` : '';
+    // Amazon's own target where the snapshot has it: it varies by marketplace
+    // (Late Shipment is 4% in the US, 2% in India).
+    let threshold = fallback;
+    if (isNum(detail?.targetPct) && /LESS/i.test(detail.condition || '')) threshold = { under: round(detail.targetPct, 2) };
+    else if (isNum(detail?.targetPct) && /GREATER/i.test(detail.condition || '')) threshold = { over: round(detail.targetPct, 2) };
+
+    // Amazon sends rate 0 over a basis of 0; that is "nothing measured".
+    const figure = hasPct ? `${round(pct, 2)}%` : (detail?.basis === 0 ? `no ${noun} in the window` : '');
     let concerning;
     if (hasStatus) concerning = healthTone(status) === 'watch';
     else concerning = threshold.under !== undefined ? pct >= threshold.under : pct < threshold.over;
@@ -627,18 +634,23 @@ const buildAccountOverview = async (userId, country, region) => {
         // The figure travels beside the status where the snapshot carries one.
         // Unit-based On-Time Delivery is Amazon's current metric but US-only;
         // the shipment-based one covers the rest.
-        const unitOtdr = Boolean(performance.unitOnTimeDeliveryRateStatus || isNum(performance.unitOnTimeDeliveryRatePct));
+        const detail = performance.rateDetails || {};
+        // Unit-based OTDR is preferred, unless it measured nothing and the
+        // shipment-based one did.
+        const unitOtdr = Boolean(performance.unitOnTimeDeliveryRateStatus || isNum(performance.unitOnTimeDeliveryRatePct))
+            && !(detail.unitOnTimeDeliveryRate?.basis === 0 && isNum(performance.onTimeDeliveryRatePct));
         const rates = [
-            ['Order Defect Rate', performance.orderWithDefectsStatus, performance.orderDefectRatePct, { under: 1 }],
-            ['Pre-fulfilment cancellations', performance.CancellationRate, performance.cancellationRatePct, { under: 2.5 }],
-            ['Valid Tracking Rate', performance.validTrackingRateStatus, performance.validTrackingRatePct, { over: 95 }],
-            ['Late Shipment Rate', performance.lateShipmentRateStatus, performance.lateShipmentRatePct, { under: 4 }],
+            // The channel that carried the orders, where the snapshot says which.
+            ['Order Defect Rate', performance.orderDefectRateStatus || performance.orderWithDefectsStatus, performance.orderDefectRatePct, { under: 1 }, detail.orderDefectRate, 'orders'],
+            ['Pre-fulfilment cancellations', performance.CancellationRate, performance.cancellationRatePct, { under: 2.5 }, detail.cancellationRate, 'orders'],
+            ['Valid Tracking Rate', performance.validTrackingRateStatus, performance.validTrackingRatePct, { over: 95 }, detail.validTrackingRate, 'shipments'],
+            ['Late Shipment Rate', performance.lateShipmentRateStatus, performance.lateShipmentRatePct, { under: 4 }, detail.lateShipmentRate, 'orders'],
             unitOtdr
-                ? ['On-Time Delivery Rate (units)', performance.unitOnTimeDeliveryRateStatus, performance.unitOnTimeDeliveryRatePct, { over: 90 }]
-                : ['On-Time Delivery Rate', performance.onTimeDeliveryRateStatus, performance.onTimeDeliveryRatePct, { over: 90 }],
+                ? ['On-Time Delivery Rate (units)', performance.unitOnTimeDeliveryRateStatus, performance.unitOnTimeDeliveryRatePct, { over: 90 }, detail.unitOnTimeDeliveryRate, 'units']
+                : ['On-Time Delivery Rate', performance.onTimeDeliveryRateStatus, performance.onTimeDeliveryRatePct, { over: 97 }, detail.onTimeDeliveryRate, 'shipments'],
         ];
-        for (const [metric, status, pct, threshold] of rates) {
-            const row = rateRow(metric, status, pct, threshold);
+        for (const [metric, status, pct, threshold, rateInfo, noun] of rates) {
+            const row = rateRow(metric, status, pct, threshold, rateInfo, noun);
             if (row) healthRows.push(row);
         }
 
@@ -664,7 +676,8 @@ const buildAccountOverview = async (userId, country, region) => {
 
         // Spec 2D: Valid Tracking Rate's own shipment counts, so the rate comes
         // with the number of shipments behind it.
-        if (isNum(performance.trackedShipmentCount) && isNum(performance.validTrackingCount)) {
+        // "0 of 0" says nothing, and is what every FBA-only account reports.
+        if (performance.trackedShipmentCount > 0 && isNum(performance.validTrackingCount)) {
             const missing = Math.max(performance.trackedShipmentCount - performance.validTrackingCount, 0);
             healthRows.push({
                 metric: 'Shipments without valid tracking',
@@ -761,7 +774,7 @@ const buildAccountOverview = async (userId, country, region) => {
     ].some(isNum);
     if (performance && !extendedCaptured) {
         caveats.push('Order Defect Rate and the other policy metrics show as a status only in this edition. Their percentages, chargebacks, IP and customer complaints, on-time delivery and missing tracking are read from Amazon\'s performance report from the next sync onwards.');
-    } else if (healthRows.length && !anyRate) {
+    } else if (healthRows.length && !anyRate && !performance?.rateDetails) {
         caveats.push('Amazon reported each policy metric as a status without the figure behind it, so Order Defect Rate and the rest show as Good or At risk. The underlying percentages are in Seller Central.');
     }
     if (extendedCaptured && !healthRows.some((row) => row.metric.startsWith('On-Time Delivery'))) {

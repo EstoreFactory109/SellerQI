@@ -8,6 +8,8 @@
  *   fyp       Suppressed Listings Report
  *   removals  FBA removal order detail
  *   b2b       Data Kiosk sales & traffic, now keeping the B2B split
+ *   offers    Buy Box competitor price, for the ASINs we are losing
+ *   aplus     A+ Content API, for the A+ Premium column
  *
  * WRITES TO MONGO, exactly as the sync would: one new snapshot per source per
  * marketplace, through the same parsers and models. Nothing else is touched.
@@ -40,6 +42,9 @@ const { buildSnapshot } = require('../Services/Sp_API/V2_Seller_Performance_Repo
 const { parseSuppressedListings } = require('../Services/Sp_API/GET_MERCHANTS_LISTINGS_FYP_REPORT.js');
 const removals = require('../Services/Sp_API/GET_FBA_FULFILLMENT_REMOVAL_ORDER_DETAIL_DATA.js');
 const { fetchAndStoreSalesOnlyData } = require('../Services/MCP/MCPSalesOnlyIntegration.js');
+// The two sources added earlier on this branch, also never fetched from here.
+const { syncCompetitiveOffers } = require('../Services/Sp_API/GET_COMPETITIVE_OFFERS.js');
+const getAPlusContent = require('../Services/Sp_API/GET_APLUS_CONTENT.js');
 
 const arg = (name) => {
     const hit = process.argv.slice(2).find((a) => a.startsWith(`--${name}=`));
@@ -47,7 +52,7 @@ const arg = (name) => {
 };
 const USER_ID = arg('user-id');
 const COUNTRY = (arg('country') || '').toUpperCase();
-const ONLY = new Set((arg('only') || 'v2,fyp,removals,b2b').split(',').map((s) => s.trim()));
+const ONLY = new Set((arg('only') || 'v2,fyp,removals,b2b,offers,aplus').split(',').map((s) => s.trim()));
 const RAW_DIR = path.resolve(arg('raw-dir') || 'esf-raw');
 
 const gunzipIfNeeded = (buffer) => (buffer?.[0] === 0x1f && buffer?.[1] === 0x8b ? zlib.gunzipSync(buffer) : buffer);
@@ -134,6 +139,20 @@ const fetchB2b = async (ctx) => {
     return `${days.length} days carry the split, ${reported.length} with a B2B figure (${b2bUnits} B2B units)`;
 };
 
+const fetchOffers = async (ctx) => {
+    const doc = await syncCompetitiveOffers(ctx.accessToken, [ctx.marketplaceId], ctx.userId, ctx.baseuri, ctx.country, ctx.region);
+    if (!doc) return 'nothing stored (no contested ASIN, or the call failed — see log)';
+    const items = doc.items || [];
+    return `${items.length} contested ASIN(s) priced, ${items.filter((i) => i.buyBoxPrice !== null && i.buyBoxPrice !== undefined).length} with a Buy Box price`;
+};
+
+const fetchAplus = async (ctx) => {
+    const doc = await getAPlusContent(ctx.accessToken, [ctx.marketplaceId], ctx.userId, ctx.baseuri, ctx.country, ctx.region);
+    if (!doc) throw new Error('A+ fetch returned nothing — see log');
+    const docs = doc.documents || [];
+    return `${docs.length} ASIN(s) with A+, ${docs.filter((d) => d.isPremium).length} Premium`;
+};
+
 (async () => {
     const uri = dbConsts.dbUri && dbConsts.dbName ? `${dbConsts.dbUri}/${dbConsts.dbName}` : process.env.MONGODB_URI;
     await mongoose.connect(uri, { connectTimeoutMS: 60000 });
@@ -190,6 +209,8 @@ const fetchB2b = async (ctx) => {
             if (ONLY.has('fyp')) jobs.push(run('fyp', () => fetchFyp(ctx)));
             if (ONLY.has('removals')) jobs.push(run('removals', () => fetchRemovals(ctx)));
             if (ONLY.has('b2b')) jobs.push(run('b2b', () => fetchB2b(ctx)));
+            if (ONLY.has('offers')) jobs.push(run('offers', () => fetchOffers(ctx)));
+            if (ONLY.has('aplus')) jobs.push(run('aplus', () => fetchAplus(ctx)));
             for (const success of await Promise.all(jobs)) success ? ok += 1 : failed += 1;
         }
     }

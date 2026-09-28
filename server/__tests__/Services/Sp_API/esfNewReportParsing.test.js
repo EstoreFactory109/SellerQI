@@ -120,6 +120,45 @@ describe('V2 performance: the rest of the report', () => {
         expect(metrics.unitOnTimeDeliveryRateStatus).toBe('');
     });
 
+    /* Shapes taken from five live reports, September 2026. */
+    describe('live response shapes', () => {
+        const live = () => v2Report({
+            lateShipmentRate: { status: 'BAD', targetValue: 0.02, targetCondition: 'LESS_THAN', orderCount: 30, rate: 0.03333333333333333 },
+            validTrackingRate: { status: 'GOOD', targetValue: 0.95, targetCondition: 'GREATER_THAN', shipmentCount: 0, validTrackingCount: 0, rate: 0 },
+            unitOnTimeDeliveryRate: { status: 'GOOD', targetValue: 0.9, targetCondition: 'GREATER_THAN', totalUnitCount: 14, rate: 0.9285714285714286 },
+            orderDefectRate: {
+                afn: { status: 'GOOD', targetValue: 0.01, orderCount: 0, rate: 0, orderWithDefects: { status: 'GOOD', count: 0 }, chargebacks: { status: 'NONE', count: 0 } },
+                mfn: { status: 'AT RISK', targetValue: 0.01, orderCount: 62, rate: 0.0161, chargebacks: { status: 'NONE', count: 1 } },
+            },
+        });
+
+        it('reads a bare-number target with its separate condition', () => {
+            const { rateDetails, lateShipmentRatePct } = extractExtendedMetrics(live());
+            expect(lateShipmentRatePct).toBe(3.3333);
+            expect(rateDetails.lateShipmentRate).toMatchObject({ status: 'BAD', targetPct: 2, condition: 'LESS_THAN', basis: 30 });
+        });
+
+        it('gives no figure for a rate with nothing behind it', () => {
+            const { validTrackingRatePct, rateDetails } = extractExtendedMetrics(live());
+            expect(validTrackingRatePct).toBeNull();
+            expect(rateDetails.validTrackingRate.basis).toBe(0);
+        });
+
+        it('takes ODR from the channel that carried the orders', () => {
+            const metrics = extractExtendedMetrics(live());
+            expect(metrics.orderDefectRatePct).toBe(1.61);
+            expect(metrics.orderDefectRateStatus).toBe('AT RISK');
+        });
+
+        it('does not read Amazon\'s "NONE" as a verdict', () => {
+            expect(extractExtendedMetrics(live()).chargebackStatus).toBe('');
+        });
+
+        it('parses a real saved report end to end without throwing', () => {
+            expect(() => buildSnapshot(live())).not.toThrow();
+        });
+    });
+
     it('reads the US-only unit-based On-Time Delivery Rate when present', () => {
         const metrics = extractExtendedMetrics(v2Report({ unitOnTimeDeliveryRate: { status: 'GOOD', rate: 0.972, targetValue: { value: 0.9 } } }));
         expect(metrics).toMatchObject({ unitOnTimeDeliveryRateStatus: 'GOOD', unitOnTimeDeliveryRatePct: 97.2 });
