@@ -370,8 +370,10 @@ const ReportDocumentPreview = ({ report, marketplace, currency, clientName = '',
     const allStats = overview.stats || [];
     const stats = full ? allStats : allStats.slice(0, 4);
     const charts = full ? (overview.charts || []).slice(0, 2) : [];
+    // The account manager's "[... this cycle]" placeholders are not printed:
+    // nothing lets anyone fill them in, so they went out raw (see
+    // closingBlocks in reportPdf.js).
     const written = (report.highlights || []).filter((item) => item.tone !== 'fill');
-    const toFill = (report.highlights || []).filter((item) => item.tone === 'fill');
     const subtitle = multi
         ? [`Amazon ${lead.country} (${report.isPrimary ? 'primary marketplace' : 'leading marketplace'})`, report.date].join(' · ')
         : [place, report.date].filter(Boolean).join(' · ');
@@ -443,12 +445,6 @@ const ReportDocumentPreview = ({ report, marketplace, currency, clientName = '',
                 <>
                     <SectionTitle title="Performance Highlights" color={BRAND.blue} />
                     <Bullets items={written} />
-                </>
-            )}
-            {toFill.length > 0 && (
-                <>
-                    <SectionTitle title={report.cadence === 'MONTHLY' ? 'Actions Taken This Month' : 'Actions Taken This Cycle'} />
-                    <Bullets items={toFill} muted />
                 </>
             )}
 

@@ -408,15 +408,15 @@ const truncationNote = (total, shown) => {
 };
 
 /** Plain dark bullets, as the reference; a flagged line gets a red bullet. */
-const bulletList = (items, { italic = false, color = BRAND.ink } = {}) => ({
+const bulletList = (items, { italic = false, color = BRAND.ink, compact = 0 } = {}) => ({
     stack: items.map((item) => ({
         columns: [
             { width: 9, text: '•', color: item.tone === 'watch' ? BRAND.red : BRAND.ink, fontSize: 9 },
-            { width: '*', text: item.text, fontSize: 8.5, color, italics: italic, lineHeight: 1.2 },
+            { width: '*', text: item.text, fontSize: compact ? 8 : 8.5, color, italics: italic, lineHeight: compact ? 1.1 : 1.2 },
         ],
-        margin: [2, 0, 0, 4],
+        margin: [2, 0, 0, compact ? 2.5 : 4],
     })),
-    margin: [0, 0, 0, 12],
+    margin: [0, 0, 0, compact ? 8 : 12],
 });
 
 /** "28 September 2026" */
@@ -469,28 +469,58 @@ const detailBlocks = (summary, tableTitle, currency, { heading = 'section', page
     return blocks;
 };
 
-/** Highlights, Actions Taken, Notes and the issue date — the same for every layout. */
-const closingBlocks = (report, issuedAt) => {
+/**
+ * Highlights, Notes and the issue date — the same for every layout.
+ *
+ * NO "ACTIONS TAKEN" SECTION. The builders carry a placeholder bullet for the
+ * account manager ("[Purchase orders raised this cycle]"), from the original
+ * template. Nothing in the system lets anyone fill it in, so it went out to
+ * clients as a raw bracketed placeholder on every report. It stays in the data
+ * for when a manager-comment feature exists, and is not printed until then.
+ *
+ * `compact` pulls the closing together when it would otherwise leave one or
+ * two notes alone on a last page (see renderReportPdf):
+ *   1  tighter spacing, and the issue date on the Notes heading line
+ *   2  as 1, with the notes set in two columns
+ */
+const closingBlocks = (report, issuedAt, compact = 0) => {
     const blocks = [];
     const written = (report.highlights || []).filter((item) => item.tone !== 'fill');
-    const toFill = (report.highlights || []).filter((item) => item.tone === 'fill');
     if (written.length) {
         blocks.push(sectionTitle('Performance Highlights', null, { color: BRAND.blue }));
-        blocks.push(bulletList(written));
+        blocks.push(bulletList(written, { compact }));
     }
-    if (toFill.length) {
-        blocks.push(sectionTitle(report.cadence === 'MONTHLY' ? 'Actions Taken This Month' : 'Actions Taken This Cycle'));
-        blocks.push(bulletList(toFill, { italic: true, color: BRAND.muted }));
-    }
+
+    const date = issueDate(issuedAt);
     // The limits travel with the document, so whoever reads the PDF sees the
-    // same caveats as whoever opened the page.
+    // same caveats as whoever opened the page. One node, with an id, so the
+    // renderer can see which pages it landed on.
     if (report.caveats?.length) {
-        blocks.push({ text: 'NOTES', bold: true, fontSize: 6.5, color: BRAND.muted, characterSpacing: 0.3, margin: [0, 4, 0, 3] });
-        for (const caveat of report.caveats) {
-            blocks.push({ text: caveat, fontSize: 6.5, color: BRAND.muted, margin: [0, 0, 0, 2.5], lineHeight: 1.15 });
+        const note = (caveat) => ({ text: caveat, fontSize: compact ? 6 : 6.5, color: BRAND.muted, margin: [0, 0, 0, compact ? 1.5 : 2.5], lineHeight: compact ? 1.08 : 1.15 });
+        const label = { text: 'NOTES', bold: true, fontSize: 6.5, color: BRAND.muted, characterSpacing: 0.3 };
+        const heading = compact
+            ? { columns: [label, { text: date, fontSize: 7, color: BRAND.muted, alignment: 'right' }], margin: [0, 2, 0, 2] }
+            : { ...label, margin: [0, 4, 0, 3] };
+        let body;
+        if (compact >= 2 && report.caveats.length > 1) {
+            const half = Math.ceil(report.caveats.length / 2);
+            body = [{
+                columns: [
+                    { width: '*', stack: report.caveats.slice(0, half).map(note) },
+                    { width: '*', stack: report.caveats.slice(half).map(note) },
+                ],
+                columnGap: 14,
+            }];
+        } else {
+            body = report.caveats.map(note);
         }
+        blocks.push({ id: 'close-notes', stack: [heading, ...body] });
+        if (compact) return blocks;
     }
-    blocks.push({ text: issueDate(issuedAt), fontSize: 7.5, color: BRAND.muted, margin: [0, 12, 0, 0] });
+    // Compact with no notes to carry it: the date moves up into the page
+    // header (see buildReportDocDefinition) rather than sit alone on a page.
+    if (compact && !report.caveats?.length) return blocks;
+    blocks.push({ id: 'close-date', text: date, fontSize: 7.5, color: BRAND.muted, margin: [0, 12, 0, 0] });
     return blocks;
 };
 
@@ -517,8 +547,10 @@ const allTables = (report) => [
  * @param {string} [opts.currency]   override; defaults to the marketplace's own
  * @param {string} [opts.clientName] shown in the page header
  * @param {Date}   [opts.issuedAt]   the date printed at the end
+ * @param {number} [opts.compact]    closing density, 0-2 (see closingBlocks);
+ *                                   3 keeps the whole closing on one page
  */
-const buildReportDocDefinition = (report, { marketplace, currency: requestedCurrency, clientName = '', issuedAt } = {}) => {
+const buildReportDocDefinition = (report, { marketplace, currency: requestedCurrency, clientName = '', issuedAt, compact = 0 } = {}) => {
     const lead = report.marketplace || marketplace;
     const currency = printableCurrency(lead?.country, requestedCurrency);
     const multi = Boolean(report.multi && report.available && report.sections?.length > 1);
@@ -577,7 +609,11 @@ const buildReportDocDefinition = (report, { marketplace, currency: requestedCurr
         }
     }
 
-    content.push(...closingBlocks(report, issuedAt));
+    // Level 3: the closing could not be pulled back, so it is kept in one
+    // piece instead — the last page then carries the highlights with their
+    // notes, never one or two notes on their own.
+    if (compact >= 3) content.push({ stack: closingBlocks(report, issuedAt, 2), unbreakable: true });
+    else content.push(...closingBlocks(report, issuedAt, compact));
 
     return {
         info: {
@@ -589,7 +625,9 @@ const buildReportDocDefinition = (report, { marketplace, currency: requestedCurr
         pageOrientation: landscape ? 'landscape' : 'portrait',
         pageMargins: [MARGIN_X, 74, MARGIN_X, 46],
         defaultStyle: { font: 'Poppins', fontSize: 8.5, color: BRAND.ink },
-        header: header(report, [clientName, place].filter(Boolean).join('  ·  ')),
+        // The issue date joins the header only when the closing had nowhere
+        // else to put it (compact, no notes).
+        header: header(report, [clientName, place, compact && !report.caveats?.length ? issueDate(issuedAt) : null].filter(Boolean).join('  ·  ')),
         footer,
         content,
     };
@@ -600,11 +638,58 @@ const buildReportDocDefinition = (report, { marketplace, currency: requestedCurr
  *
  * @returns {Promise<Buffer>}
  */
-const renderReportPdf = async (report, opts = {}) => {
-    ensureConfigured();
-    const pdf = pdfmake.createPdf(buildReportDocDefinition(report, opts));
-    return pdf.getBuffer();
+/**
+ * Lay a document out and report whether its closing was orphaned: the Notes
+ * split so their last lines sit alone on a final page, or the Notes (or the
+ * issue date) starting a final page with nothing above them.
+ *
+ * pdfmake's pageBreakBefore hook sees every node with the pages it landed on;
+ * it is used here only to look, never to insert a break.
+ */
+const layOut = async (definition) => {
+    const seen = { orphaned: false, pages: 0 };
+    const probe = (node, nodes) => {
+        seen.pages = node.pages;
+        if (node.id !== 'close-notes' && node.id !== 'close-date') return false;
+        const [first] = node.pageNumbers;
+        const last = node.pageNumbers[node.pageNumbers.length - 1];
+        const endsDocument = last === node.pages;
+        const split = node.pageNumbers.length > 1 && endsDocument;
+        // Only nodes that draw something count: pdfmake also reports empty
+        // container stacks whose margins spill onto the next page.
+        const drawn = nodes.getPreviousNodesOnPage().filter((n) => n.text || n.table || n.image || n.svg || n.canvas);
+        const alone = first === node.pages && drawn.length === 0;
+        if (split || alone) seen.orphaned = true;
+        return false;
+    };
+    const buffer = await pdfmake.createPdf({ ...definition, pageBreakBefore: probe }).getBuffer();
+    return { buffer, ...seen };
 };
+
+/**
+ * Render one report to a PDF buffer, ready to attach to an email.
+ *
+ * A last page holding one or two stray notes read as a mistake, so when the
+ * closing would be orphaned the document is laid out again with a tighter
+ * closing (closingBlocks' compact levels), keeping the first layout that
+ * pulls it back. When the page above is simply full, the last resort keeps the
+ * closing in one piece so it moves over whole. Most reports need one pass.
+ *
+ * @returns {Promise<Buffer>}
+ */
+const renderReportPdfDetailed = async (report, opts = {}) => {
+    ensureConfigured();
+    let best = null;
+    for (const compact of [0, 1, 2, 3]) {
+        const attempt = { ...(await layOut(buildReportDocDefinition(report, { ...opts, compact }))), compact };
+        if (!attempt.orphaned) return attempt;
+        // Nothing pulled it back: keep the layout with the fewest pages.
+        if (!best || attempt.pages < best.pages) best = attempt;
+    }
+    return best;
+};
+
+const renderReportPdf = async (report, opts = {}) => (await renderReportPdfDetailed(report, opts)).buffer;
 
 /** "Weekly Buybox Report - US.pdf", safe for a mail client and a filesystem. */
 const reportPdfFilename = (report, marketplace) => {
@@ -614,6 +699,8 @@ const reportPdfFilename = (report, marketplace) => {
 
 module.exports = {
     renderReportPdf,
+    // exported for tests: which compact level was used, and whether it held
+    renderReportPdfDetailed,
     buildReportDocDefinition,
     reportPdfFilename,
     MAX_PDF_ROWS,

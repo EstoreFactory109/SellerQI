@@ -119,12 +119,12 @@ describe('ESF Reports page', () => {
         renderPage();
 
         await waitFor(() => expect(screen.getByText('report preview · scroll to read')).toBeInTheDocument());
-        // The document's own sections, not the app chrome: the manager's
-        // placeholder now sits under Actions Taken, as in the reference report.
+        // The document's own sections, not the app chrome.
         expect(screen.getByText('Executive Summary')).toBeInTheDocument();
         expect(screen.getByText('Performance Highlights')).toBeInTheDocument();
-        expect(screen.getByText('Actions Taken This Cycle')).toBeInTheDocument();
-        expect(screen.getByText(/Purchase orders raised this cycle/)).toBeInTheDocument();
+        // The manager's unfillable placeholder is never shown to a client.
+        expect(screen.queryByText('Actions Taken This Cycle')).toBeNull();
+        expect(screen.queryByText(/Purchase orders raised this cycle/)).toBeNull();
     });
 
     it('states the reason on a report with no data and does not make it clickable', async () => {
