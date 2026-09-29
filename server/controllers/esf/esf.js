@@ -17,6 +17,9 @@ const {
     issueClientSession,
     ESF_CLIENT_QUERY,
 } = require('../../Services/User/ManagedClientService.js');
+const {
+    scopeClientQuery, canAccessClient, sanitizeClientIds, seesAllClients,
+} = require('../../Services/User/esfClientScope.js');
 const { getLinkableUsers, linkUsersToEsf } = require('../../Services/User/esfLinkableUsers.js');
 const { createAccessToken, verifyAccessToken, revokeRefreshToken } = require('../../utils/Tokens.js');
 const { hashPassword, verifyPassword } = require('../../utils/HashPassword.js');
@@ -60,6 +63,14 @@ const toStaffResponse = (user, extra = {}) => ({
     isOwner: isEsfOwner(user),
     // Owner is never restricted, so their blocklist is always reported empty.
     esfDeniedPages: isEsfOwner(user) ? [] : sanitizeDeniedPages(user.esfDeniedPages),
+    /**
+     * Reported as an empty list for anyone exempt, the same way the blocklist is for the
+     * owner — an owner or admin has no allocation, and sending stale ids would let the
+     * team page render "2 allocated" beside someone who sees all five.
+     */
+    esfAllowedClients: seesAllClients(user)
+        ? []
+        : (user.esfAllowedClients || []).map((id) => String(id)),
     lastLoginAt: user.lastLoginAt || null,
     createdAt: user.createdAt,
     ...extra,
@@ -262,7 +273,7 @@ const getEsfClients = asyncHandler(async (req, res) => {
      * in the inbox and then finds the name, email and phone on this page has not been
      * stopped by anything, and the redaction was theatre.
      */
-    const clients = await listManagedClients(ESF_CLIENT_QUERY, {
+    const clients = await listManagedClients(scopeClientQuery(ESF_CLIENT_QUERY, req.esfUser), {
         redactIdentity: !canSeeClientIdentity(req.esfUser),
     });
 
@@ -312,6 +323,21 @@ const createEsfClient = asyncHandler(async (req, res) => {
     const { client, accessToken, refreshToken } = result;
     const options = getHttpsCookieOptions();
 
+    /**
+     * A member who creates a client keeps it.
+     *
+     * Without this they would add a client and watch it vanish from their own list a
+     * second later, which reads as the save having failed. Owner and admin need nothing
+     * here — they are exempt, and writing to their allocation would leave ids on an
+     * account that never consults them.
+     */
+    if (!seesAllClients(req.esfUser)) {
+        await UserModel.updateOne(
+            { _id: req.esfUserId },
+            { $addToSet: { esfAllowedClients: client._id } }
+        );
+    }
+
     logger.info(`ESF user ${req.esfUserId} created client ${client._id} (${client.email})`);
 
     return res
@@ -349,8 +375,11 @@ const removeEsfClient = asyncHandler(async (req, res) => {
     }
 
     // Scope the lookup to ESF clients so this endpoint can never touch an
-    // agency client or a self-serve seller.
-    const client = await UserModel.findOne({ _id: clientId, ...ESF_CLIENT_QUERY });
+    // agency client or a self-serve seller, and to the caller's allocation so it stays
+    // correct if the owner/admin gate above is ever loosened.
+    const client = await UserModel.findOne(
+        scopeClientQuery({ _id: clientId, ...ESF_CLIENT_QUERY }, req.esfUser)
+    );
     if (!client) {
         logger.error(new ApiError(404, 'Client not found in the ESF portal'));
         return res.status(404).json(new ApiResponse(404, '', 'Client not found'));
@@ -361,6 +390,21 @@ const removeEsfClient = asyncHandler(async (req, res) => {
         { _id: clientId },
         { $set: { isEsfClient: false, esfAddedBy: null } }
     );
+
+    /**
+     * And take it out of every member's allocation.
+     *
+     * A removed client left in an allocation is a dangling id: harmless while the
+     * account stays unlinked, but it silently comes back the moment it is re-added to
+     * the portal, handing it to whoever happened to hold it before.
+     */
+    const cleared = await UserModel.updateMany(
+        { esfAllowedClients: clientId },
+        { $pull: { esfAllowedClients: clientId } }
+    );
+    if (cleared.modifiedCount) {
+        logger.info(`[ESF] cleared client ${clientId} from ${cleared.modifiedCount} allocation(s)`);
+    }
 
     logger.info(`ESF user ${req.esfUserId} unlinked client ${clientId} (${client.email}) from the ESF portal`);
     return res.status(200).json(new ApiResponse(200, '', 'Client removed from the eStore Factory portal'));
@@ -395,7 +439,9 @@ const switchToEsfClient = asyncHandler(async (req, res) => {
         return res.status(400).json(new ApiResponse(400, '', 'A valid client ID is required'));
     }
 
-    const client = await UserModel.findOne({ _id: clientId, ...ESF_CLIENT_QUERY });
+    const client = await UserModel.findOne(
+        scopeClientQuery({ _id: clientId, ...ESF_CLIENT_QUERY }, req.esfUser)
+    );
     if (!client) {
         logger.error(new ApiError(404, 'Client not found in the ESF portal'));
         return res.status(404).json(new ApiResponse(404, '', 'Client not found'));
@@ -430,6 +476,16 @@ const switchToEsfClient = asyncHandler(async (req, res) => {
  * before passwords existed, which otherwise have no way to sign in.
  */
 const setEsfClientPassword = asyncHandler(async (req, res) => {
+    /**
+     * Owner and admin only — this had NO role check at all.
+     *
+     * Setting a client's password and then signing in as them at /app/login is a
+     * complete route around switchToEsfClient, which is owner/admin gated precisely
+     * because impersonation exposes everything the identity redaction hides. A member
+     * could take over any client account through this endpoint.
+     */
+    if (!requireTeamManager(req, res)) return;
+
     const { clientId } = req.params;
     const { newPassword } = req.body;
 
@@ -440,8 +496,11 @@ const setEsfClientPassword = asyncHandler(async (req, res) => {
         return res.status(400).json(new ApiResponse(400, '', passwordPolicyMessage(newPassword)));
     }
 
-    // Scoped to ESF clients so this can never reset an agency client or a seller.
-    const client = await UserModel.findOne({ _id: clientId, ...ESF_CLIENT_QUERY });
+    // Scoped to ESF clients so this can never reset an agency client or a seller, and
+    // to the caller's allocation.
+    const client = await UserModel.findOne(
+        scopeClientQuery({ _id: clientId, ...ESF_CLIENT_QUERY }, req.esfUser)
+    );
     if (!client) {
         return res.status(404).json(new ApiResponse(404, '', 'Client not found'));
     }
@@ -502,7 +561,7 @@ const linkExistingUsers = asyncHandler(async (req, res) => {
 /** GET /app/esf/users — the staff who can access this portal. */
 const getEsfUsers = asyncHandler(async (req, res) => {
     const users = await UserModel.find({ accessType: 'esfUser' })
-        .select('firstName lastName email phone esfRole esfDeniedPages createdAt lastLoginAt')
+        .select('firstName lastName email phone esfRole esfDeniedPages esfAllowedClients accessType createdAt lastLoginAt')
         .sort({ createdAt: -1 })
         .lean();
 
@@ -519,6 +578,14 @@ const getEsfUsers = asyncHandler(async (req, res) => {
         esfRole: resolveEsfRole(user),
         isOwner: isEsfOwner(user),
         esfDeniedPages: isEsfOwner(user) ? [] : sanitizeDeniedPages(user.esfDeniedPages),
+        /**
+         * Built here rather than through toStaffResponse, which this function does not
+         * call — so the same rule has to be repeated. Empty for anyone exempt, or the
+         * team page would show an allocation count beside someone who sees everything.
+         */
+        esfAllowedClients: seesAllClients({ ...user, esfRole: resolveEsfRole(user) })
+            ? []
+            : (user.esfAllowedClients || []).map((id) => String(id)),
         clientsAdded: countById.get(String(user._id)) || 0,
     }));
 
@@ -659,6 +726,52 @@ const updateEsfUserPermissions = asyncHandler(async (req, res) => {
 });
 
 /**
+ * PUT /app/esf/users/:userId/clients
+ * Body: { clientIds: string[] }  — the ESF clients this member may see.
+ *
+ * An ALLOW-list, unlike the page permissions directly above. Sending `[]` is a real and
+ * meaningful instruction here: it leaves the member able to see nothing, which is the
+ * state every member starts in.
+ */
+const updateEsfUserClients = asyncHandler(async (req, res) => {
+    if (!requireTeamManager(req, res)) return;
+
+    const { userId } = req.params;
+    const { clientIds } = req.body;
+
+    if (!Array.isArray(clientIds)) {
+        return res.status(400).json(new ApiResponse(400, '', 'clientIds must be an array of client ids'));
+    }
+
+    // Refuses when the target is the portal owner.
+    const user = await loadModifiableStaff(userId, res);
+    if (!user) return;
+
+    /**
+     * Allocating to an owner or admin is refused rather than quietly stored.
+     *
+     * They are exempt by role, so the list would never be read — and an admin's team
+     * page would then show "3 allocated" next to someone who actually sees every
+     * client. Saying so is better than saving a number that means nothing.
+     */
+    if (seesAllClients(user)) {
+        return res.status(409).json(new ApiResponse(
+            409, '', 'Owners and admins already see every client, so they cannot be allocated'
+        ));
+    }
+
+    // Validated on the way in, so every read afterwards can trust the stored list.
+    user.esfAllowedClients = await sanitizeClientIds(clientIds, UserModel);
+    await user.save();
+
+    logger.info(
+        `ESF user ${req.esfUserId} allocated ${user.esfAllowedClients.length} client(s) to ${user.email}`
+    );
+
+    return res.status(200).json(new ApiResponse(200, toStaffResponse(user), 'Client access updated successfully'));
+});
+
+/**
  * GET /app/esf/session-permissions
  *
  * Called from inside a client's account (not the portal) so the sidebar knows
@@ -729,6 +842,7 @@ module.exports = {
     updateEsfUserRole,
     getEsfPageCatalogue,
     updateEsfUserPermissions,
+    updateEsfUserClients,
     getEsfSessionPermissions,
     updateEsfUserName,
 };

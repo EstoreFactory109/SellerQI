@@ -123,8 +123,16 @@ const scoreProject = (project, needles) => {
  * Which ESF client each already-linked project belongs to.
  * Surfaced in the picker so nobody attaches one project to two clients by
  * accident — it does not block the link, it just makes the collision visible.
+ *
+ * ── `redactNames` IS NOT COSMETIC ──
+ * This walks every ESF client and returns their real first and last name. The clients
+ * list redacts exactly those fields from a member, and the Messages page is built on the
+ * claim that staff are not shown who they are writing to — so handing the names back
+ * here would undo both, through a picker nobody thinks of as an identity surface. A
+ * restricted caller gets the collision warning without the name, which is all the
+ * warning was ever for.
  */
-const linkedProjectOwners = async (excludeClientId) => {
+const linkedProjectOwners = async (excludeClientId, { redactNames = false } = {}) => {
     const linked = await UserModel.find({
         isEsfClient: true,
         'zohoProject.projectId': { $ne: null },
@@ -134,7 +142,9 @@ const linkedProjectOwners = async (excludeClientId) => {
     return new Map(
         linked.map((u) => [
             String(u.zohoProject.projectId),
-            `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'another client',
+            redactNames
+                ? 'another client'
+                : `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'another client',
         ])
     );
 };
@@ -158,7 +168,7 @@ const loadClientContext = async (clientId) => {
  * With no search term it returns brand-matched suggestions (falling back to the
  * newest projects when nothing matches); with one it returns name matches.
  */
-const getProjectOptions = async ({ clientId, search = '', refresh = false }) => {
+const getProjectOptions = async ({ clientId, search = '', refresh = false, redactOwnerNames = false }) => {
     const client = await loadClientContext(clientId);
     if (!client) {
         throw new ApiError(404, 'Client not found in the ESF portal');
@@ -180,7 +190,7 @@ const getProjectOptions = async ({ clientId, search = '', refresh = false }) => 
 
     const [projects, owners] = await Promise.all([
         getProjects({ refresh }),
-        linkedProjectOwners(clientId),
+        linkedProjectOwners(clientId, { redactNames: redactOwnerNames }),
     ]);
 
     const decorate = (p) => ({
