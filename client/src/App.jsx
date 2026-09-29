@@ -86,6 +86,7 @@ import EsfEstoreFactoryZoho from './Pages/ESF/EsfEstoreFactoryZoho.jsx';
 import EsfMessages from './Pages/ESF/EsfMessages.jsx';
 import EsfTaskRequests from './Pages/ESF/EsfTaskRequests.jsx'
 import EsfPageAccessGuard from './Layout/EsfPageAccessGuard.jsx';
+import EsfClientOnlyRoute from './Layout/EsfClientOnlyRoute.jsx';
 import AdminSubscription from './Pages/Admin/Subscription.jsx';
 import AdminEmailLogs from './Pages/Admin/EmailLogs.jsx';
 import AdminPaymentLogs from './Pages/Admin/PaymentLogs.jsx';
@@ -275,20 +276,28 @@ const App = () => {
                 client. No-ops for everyone else. */}
             <Route element={<EsfPageAccessGuard />}>
             <Route path='dashboard' element={<DashBoard />} />
-            {/* ESF-only pages. Server returns 403 for non-ESF accounts (client-dashboard;
-                the rest are static/local-state so far, see the note in ClientDashboard.jsx)
-                and the guard above redirects away, so this whole group stays invisible
-                to everyone else. */}
-            <Route path='client-dashboard' element={<EsfClientDashboard />} />
-            <Route path='estore-factory/status' element={<EstoreFactoryStatus />} />
-            <Route path='estore-factory/untapped' element={<EstoreFactoryUntapped />} />
-            <Route path='estore-factory/reports' element={<EstoreFactoryReports />} />
-            {/* Keyless path kept so older links still resolve; the page falls back
-                to the Buy Box report, which is the one the original mock showed. */}
-            <Route path='estore-factory/report-history' element={<EstoreFactoryReportHistory />} />
-            <Route path='estore-factory/report-history/:reportKey' element={<EstoreFactoryReportHistory />} />
-            <Route path='estore-factory/messages' element={<EstoreFactoryMessages />} />
-            <Route path='estore-factory/billing' element={<EstoreFactoryBilling />} />
+            {/* ESF-only pages.
+
+                EsfPageAccessGuard above does NOT cover this group — it only acts on a
+                restricted session (ESF staff, or a limited member) and no-ops for an
+                ordinary client, so these were reachable by URL from any account. The
+                sidebar link being hidden was the only thing keeping them out.
+
+                EsfClientOnlyRoute applies the server's own esfClientOnly rule, so the
+                answer is a redirect rather than a shell that renders and then 403s on
+                every request it makes. */}
+            <Route element={<EsfClientOnlyRoute />}>
+              <Route path='client-dashboard' element={<EsfClientDashboard />} />
+              <Route path='estore-factory/status' element={<EstoreFactoryStatus />} />
+              <Route path='estore-factory/untapped' element={<EstoreFactoryUntapped />} />
+              <Route path='estore-factory/reports' element={<EstoreFactoryReports />} />
+              {/* Keyless path kept so older links still resolve; the page falls back
+                  to the Buy Box report, which is the one the original mock showed. */}
+              <Route path='estore-factory/report-history' element={<EstoreFactoryReportHistory />} />
+              <Route path='estore-factory/report-history/:reportKey' element={<EstoreFactoryReportHistory />} />
+              <Route path='estore-factory/messages' element={<EstoreFactoryMessages />} />
+              <Route path='estore-factory/billing' element={<EstoreFactoryBilling />} />
+            </Route>
             <Route path='review-request' element={<RecentOrders />} />
             <Route path='qmate' element={<QMate />} />
             <Route path='profitibility-dashboard' element={<ProfitibilityDashboard />} />

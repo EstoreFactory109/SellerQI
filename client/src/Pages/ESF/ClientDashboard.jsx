@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSelector } from 'react-redux';
-import { Navigate, Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { PALETTE } from '../../Components/ESF/estoreFactoryTheme.js';
 import axiosInstance from '../../config/axios.config.js';
 // Read from the pages these cards summarise, so Overview can never show a number
@@ -177,14 +177,10 @@ const ClientDashboard = () => {
 
     useEffect(() => { loadBoard(); }, [loadBoard]);
 
-    // Same admission rule as the backend's esfClientOnly middleware (server/middlewares/
-    // Auth/esfClientOnly.js): isEsfClient, or a superAdmin servicing the account.
-    // user is null only for an instant on first load (ProtectedRouteWrapper populates
-    // it); undefined here means "not decided yet", not "denied" — only redirect once
-    // we actually know.
-    if (user && user.isEsfClient !== true && user.accessType !== 'superAdmin') {
-        return <Navigate to="/seller-central-checker/dashboard" replace />;
-    }
+    // The admission check used to live here. It now sits on the route
+    // (Layout/EsfClientOnlyRoute.jsx) so the six estore-factory pages get it too, and
+    // so a denied account never mounts this component — the old check ran after the
+    // hooks, which meant loadBoard had already fired its 403 before the redirect.
 
     const marketplaces = (user?.sellerCentral?.sellerAccount || []).filter((acc) => acc.country);
 
