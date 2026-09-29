@@ -455,6 +455,142 @@ describe('intent analysis never costs a message', () => {
     });
 });
 
+/**
+ * Clients answer questions by typing under each one inside the quote. Cutting the chain
+ * used to throw those answers away: a real thread kept 3 lines of 56, so the intent model
+ * saw a thank-you and a task request sat waiting for detail already sent.
+ */
+describe('answers typed inside the quoted email', () => {
+    const INLINE = [
+        'Hi Nora,',
+        '',
+        'Answers below. Thank you.',
+        '',
+        '> Could you please confirm the correct pack size/quantity? 2500 sets.',
+        '>',
+        '> Should we include the bundle SKU KB-100?',
+        '',
+        'Warm Regards,',
+        'Nitesh Kumar',
+        '913-269-8400',
+        '',
+        '> On Sep 21, 2026, at 2:30 AM, Support eStore Factory <hello@estorefactory.com> wrote:',
+        '> Could you please confirm the correct pack size/quantity?',
+    ].join('\n');
+
+    /** `find` serves two callers here — the previous-message lookup and the read receipt. */
+    const withPreviousOutbound = (bodies) => {
+        mockMsgFind.mockImplementation((query) => (query.direction === 'outbound'
+            ? chain(bodies.map((bodyRedacted) => ({ bodyRedacted })))
+            : chain([{ direction: 'inbound', sentAt: new Date('2026-09-22T10:00:00Z') }])));
+    };
+
+    beforeEach(() => {
+        const msg = gmailMessage();
+        msg.payload.parts = [{ mimeType: 'text/plain', body: { data: b64(INLINE) } }];
+        mockGetMessage.mockResolvedValue(msg);
+        // Echo, so the assertions can see what was actually handed over for redaction.
+        mockRedactBody.mockImplementation(async (text) => ({
+            text, generatedBy: 'ai', sourceHash: 'hash1', redactionVersion: 1,
+        }));
+    });
+
+    test('the recovered answer reaches the intent model', async () => {
+        withPreviousOutbound(['Could you please confirm the correct pack size/quantity?']);
+
+        await GmailIngest.ingestMessage('msg-1');
+
+        const [args] = mockAnalyseMessage.mock.calls[0];
+        expect(args.rawText).toContain('2500 sets.');
+        // Labelled with the line it answers — "2500 sets." alone means nothing.
+        expect(args.rawText).toContain('Replies the client typed inside the quoted email');
+    });
+
+    test('staff see it too: it is composed into the stored body, not kept beside it', async () => {
+        withPreviousOutbound(['Could you please confirm the correct pack size/quantity?']);
+
+        await GmailIngest.ingestMessage('msg-1');
+
+        const stored = mockMsgUpdateOne.mock.calls[0][1].$setOnInsert;
+        expect(stored.bodyRedacted).toContain('2500 sets.');
+        // Composed BEFORE redaction, so it crossed the same boundary as everything else.
+        expect(mockRedactBody.mock.calls[0][0]).toContain('2500 sets.');
+        expect(stored).not.toHaveProperty('bodyRaw');
+    });
+
+    test('the quoted chain itself is still cut from what is stored', async () => {
+        withPreviousOutbound(['Could you please confirm the correct pack size/quantity?']);
+
+        await GmailIngest.ingestMessage('msg-1');
+
+        const stored = mockMsgUpdateOne.mock.calls[0][1].$setOnInsert;
+        expect(stored.quotedTrimmed).toBe(true);
+        expect(stored.bodyRedacted).not.toContain('wrote:');
+        // The signature under the quote is not an answer.
+        expect(stored.bodyRedacted).not.toContain('913-269-8400');
+    });
+
+    test('it asks only for our own earlier replies on this thread', async () => {
+        withPreviousOutbound(['Could you please confirm the correct pack size/quantity?']);
+
+        await GmailIngest.ingestMessage('msg-1');
+
+        const call = mockMsgFind.mock.calls.find(([q]) => q.direction === 'outbound');
+        expect(call[0]).toEqual({ gmailThreadId: 'thread-1', direction: 'outbound' });
+    });
+
+    test('a lookup failure costs the diff, not the email', async () => {
+        // The heuristic path still finds it, and ingest behaves exactly as it did before
+        // any of this existed.
+        mockMsgFind.mockImplementation((query) => {
+            if (query.direction === 'outbound') throw new Error('mongo is down');
+            return chain([{ direction: 'inbound', sentAt: new Date('2026-09-22T10:00:00Z') }]);
+        });
+
+        const result = await GmailIngest.ingestMessage('msg-1');
+
+        expect(result.status).toBe('ingested');
+        expect(mockAnalyseMessage.mock.calls[0][0].rawText).toContain('2500 sets.');
+    });
+
+    test('an HTML quote with no text marker is still cut structurally', async () => {
+        /**
+         * The floor on all of this: recovery may only ever store LESS of the chain than
+         * before, never more. A <blockquote> carrying no "On … wrote:" is the case where
+         * the two cuts disagree — stripping tags first leaves the splitter nothing to
+         * match on, while prepareBody removes the container while the structure is intact.
+         */
+        const msg = gmailMessage();
+        msg.payload.parts = [{
+            mimeType: 'text/html',
+            body: {
+                data: b64('<p>Approved.</p><blockquote>Our earlier note about the pack '
+                    + 'size, which names a warehouse contact we hold no identifiers for.'
+                    + '</blockquote>'),
+            },
+        }];
+        mockGetMessage.mockResolvedValue(msg);
+        withPreviousOutbound([]);
+
+        await GmailIngest.ingestMessage('msg-1');
+
+        const stored = mockMsgUpdateOne.mock.calls[0][1].$setOnInsert;
+        expect(stored.bodyRedacted).toBe('Approved.');
+        expect(stored.bodyRedacted).not.toContain('warehouse contact');
+    });
+
+    test('an ordinary message gains nothing and loses nothing', async () => {
+        mockGetMessage.mockResolvedValue(gmailMessage());
+        withPreviousOutbound(['Anything at all.']);
+
+        await GmailIngest.ingestMessage('msg-1');
+
+        const stored = mockMsgUpdateOne.mock.calls[0][1].$setOnInsert;
+        expect(stored.bodyRedacted).toBe('Please hold the listings.');
+        expect(stored.bodyRedacted).not.toContain('Replies the client typed');
+    });
+});
+
 describe('a reply counts as having read what came before it', () => {
     /**
      * The read receipt originally listened only for the client opening the thread in

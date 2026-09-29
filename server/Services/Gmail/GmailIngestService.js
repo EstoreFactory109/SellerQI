@@ -34,7 +34,8 @@ const { EmailThread, EmailMessage } = require('../../models/system/EmailThreadMo
 const GmailClient = require('./GmailClient.js');
 const { parseMessage } = require('./gmailMessageParser.js');
 const { routeMessage } = require('./inboundRouting.js');
-const { prepareBody, toPlainLabel } = require('../Email/emailRichText.js');
+const { prepareBody, toPlainText, toPlainLabel } = require('../Email/emailRichText.js');
+const { splitEmail, buildBodyForModel } = require('../Email/quoteSplitter.js');
 const { buildIdentityBundle } = require('../Email/identityRedaction.js');
 const { redactBody } = require('../AI/EmailRedactionService.js');
 const {
@@ -104,18 +105,86 @@ const resolveClient = async (lookup) => {
     return null;
 };
 
+/** How many of our own earlier replies the inline-answer diff compares against. */
+const PREVIOUS_MESSAGES_FOR_DIFF = 1;
+
 /**
- * Flatten, strip the quoted chain, and redact.
+ * The most recent things WE sent on this thread, for quoteSplitter's diff.
+ *
+ * These are the redacted copies — the only ones that exist, since the models never hold a
+ * raw body. quoteSplitter knows that and treats [name]/[email]/[phone]/[link] as
+ * wildcards; without it the client's own name comes back as something they just typed.
+ *
+ * Fails open to []. A lookup failure should cost the diff, not the client's email: the
+ * heuristic path still runs, and ingest carries on exactly as it did before this existed.
+ */
+const previousOutboundBodies = async (gmailThreadId) => {
+    if (!gmailThreadId) return [];
+    try {
+        const rows = await EmailMessage
+            .find({ gmailThreadId, direction: 'outbound' })
+            .sort({ sentAt: -1 })
+            .limit(PREVIOUS_MESSAGES_FOR_DIFF)
+            .select('bodyRedacted')
+            .lean();
+        return rows.map((row) => row.bodyRedacted).filter(Boolean);
+    } catch (error) {
+        logger.warn(`[GmailIngest] previous-message lookup failed: ${error.message}`);
+        return [];
+    }
+};
+
+/**
+ * Flatten, cut the quoted chain, and recover the answers typed INSIDE that chain.
+ *
+ * ── WHY THE CUT IS COMPUTED TWICE AND THE SHORTER ONE WINS ──
+ * prepareBody and quoteSplitter cut at overlapping but not identical markers, and only
+ * prepareBody strips HTML quote containers structurally, before the tags come off. Taking
+ * whichever kept LESS guarantees the one property that matters here: this can only ever
+ * store less of the quoted chain than it did yesterday, never more.
+ *
+ * The recovered answers are the sole addition, and they are composed into the body rather
+ * than stored beside it — so they pass through the same redactBody and the same
+ * assertNoIdentityLeak as everything else, with no new field and no new boundary.
+ *
+ * Inbound only. Recovery asks "what did the client type into our words", which is
+ * meaningless for a message we sent.
+ *
+ * @returns {{ text: string, quotedTrimmed: boolean }}  prepareBody's shape, deliberately
+ */
+const composeBody = async (parsed, decision) => {
+    const isHtml = Boolean(parsed.bodyHtml);
+    const raw = parsed.bodyHtml || parsed.bodyText || '';
+    const prepared = prepareBody(raw, { isHtml });
+
+    if (decision.direction !== 'inbound') return prepared;
+
+    try {
+        const split = splitEmail(toPlainText(raw, { isHtml }), {
+            previousMessages: await previousOutboundBodies(parsed.gmailThreadId),
+        });
+        const body = split.body.length < prepared.text.length ? split.body : prepared.text;
+
+        return {
+            text: buildBodyForModel(body, split.inlineReplies),
+            quotedTrimmed: prepared.quotedTrimmed || split.quotedTrimmed,
+        };
+    } catch (error) {
+        // Recovery is an enhancement; prepareBody alone is what shipped before it.
+        logger.warn(`[GmailIngest] inline-reply recovery failed: ${error.message}`);
+        return prepared;
+    }
+};
+
+/**
+ * Redact the composed body.
  *
  * Fails CLOSED on content and open on availability, inverting this repo's usual "never
  * hard-fail on the LLM" rule: the normal fallback is to show more raw text, and here
  * that would show precisely what must be hidden. If the deterministic pass throws,
  * nothing is stored.
  */
-const redactMessage = async (parsed, user) => {
-    const isHtml = Boolean(parsed.bodyHtml);
-    const { text, quotedTrimmed } = prepareBody(parsed.bodyHtml || parsed.bodyText || '', { isHtml });
-
+const redactMessage = async ({ text, quotedTrimmed }, user) => {
     const truncated = text.length > MAX_BODY_CHARS;
     const source = truncated ? text.slice(0, MAX_BODY_CHARS) : text;
 
@@ -222,17 +291,19 @@ const ingestMessage = async (gmailMessageId) => {
 
     const { user } = match;
     const bundle = buildIdentityBundle(user);
-    const redacted = await redactMessage(parsed, user);
 
     /**
-     * The flattened body before redaction, held only for the duration of this call.
+     * Composed ONCE and used twice, which is the asymmetry to keep straight: the same
+     * text goes to storage through redactMessage and to the intent model raw. This used
+     * to be two identical prepareBody calls on the same input.
      *
-     * Never written anywhere: the models keep the redacted copy alone, and that is the
-     * property the whole staff/client boundary rests on.
+     * The raw copy is held only for the duration of this call and is never written
+     * anywhere — the models keep the redacted copy alone, and that is the property the
+     * whole staff/client boundary rests on.
      */
-    const rawBodyForIntent = prepareBody(parsed.bodyHtml || parsed.bodyText || '', {
-        isHtml: Boolean(parsed.bodyHtml),
-    }).text;
+    const prepared = await composeBody(parsed, decision);
+    const redacted = await redactMessage(prepared, user);
+    const rawBodyForIntent = prepared.text;
 
     const thread = await upsertThread(parsed, user, decision);
     await EmailMessage.updateOne(
