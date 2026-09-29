@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Shield,
   ShieldCheck,
+  Users,
   Crown,
   ChevronLeft,
   ChevronRight,
@@ -22,6 +23,7 @@ import { useNavigate } from 'react-router-dom';
 import axiosInstance from '../../config/axios.config.js';
 import EsfInviteUserForm from '../../Components/ESF/EsfInviteUserForm.jsx';
 import EsfPagePermissionsModal from '../../Components/ESF/EsfPagePermissionsModal.jsx';
+import EsfClientAccessModal from '../../Components/ESF/EsfClientAccessModal.jsx';
 import { useEsfUser } from '../../contexts/EsfUserContext.js';
 import RenameDialog from '../../Components/Shared/RenameDialog.jsx';
 
@@ -61,6 +63,7 @@ const EsfUsers = () => {
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [invites, setInvites] = useState([]);
   const [permissionsMember, setPermissionsMember] = useState(null);
+    const [clientsMember, setClientsMember] = useState(null);
   const [renameTarget, setRenameTarget] = useState(null);
   // In-page confirmation for "Make admin" / "Make member" (was window.confirm).
   const [roleTarget, setRoleTarget] = useState(null);
@@ -371,6 +374,7 @@ const EsfUsers = () => {
                       <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider min-w-[150px]">Member</th>
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Role</th>
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Page Access</th>
+                      <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap">Client Access</th>
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap">Clients Added</th>
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap">Last Login</th>
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap">Joining Date</th>
@@ -423,6 +427,21 @@ const EsfUsers = () => {
                             ) : (
                               <span className="inline-flex items-center justify-center rounded-full border border-amber-400/30 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-300">
                                 {user.esfDeniedPages.length} blocked
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-2 py-2.5 text-center">
+                            {/* Owners and admins are exempt, so a count would be a lie.
+                                Zero is amber because that member can see nothing. */}
+                            {user.isOwner || user.esfRole === 'admin' ? (
+                              <span className="text-xs text-gray-500">All clients</span>
+                            ) : (user.esfAllowedClients?.length || 0) === 0 ? (
+                              <span className="inline-flex items-center justify-center rounded-full border border-amber-400/30 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-300">
+                                None
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center justify-center rounded-full border border-white/10 bg-white/[0.035] px-2 py-1 text-xs font-medium text-gray-300 tabular-nums">
+                                {user.esfAllowedClients.length} allocated
                               </span>
                             )}
                           </td>
@@ -613,6 +632,18 @@ const EsfUsers = () => {
                     onClick={() => {
                       setOpenDropdownId(null);
                       setDropdownPosition(null);
+                      setClientsMember(user);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-blue-400 hover:bg-[#252525] hover:text-blue-300"
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    Client access
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenDropdownId(null);
+                      setDropdownPosition(null);
                       setRenameTarget(user);
                     }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-gray-300 hover:bg-[#252525] hover:text-gray-100"
@@ -723,6 +754,19 @@ const EsfUsers = () => {
                 onSaved={(userId, deniedPages) => {
                   setUsers((prev) => prev.map((u) => (u._id === userId ? { ...u, esfDeniedPages: deniedPages } : u)));
                   setPermissionsMember(null);
+                }}
+              />
+            )}
+
+            {clientsMember && (
+              <EsfClientAccessModal
+                member={clientsMember}
+                onClose={() => setClientsMember(null)}
+                onSaved={(userId, clientIds) => {
+                  setUsers((prev) => prev.map((u) => (
+                    u._id === userId ? { ...u, esfAllowedClients: clientIds } : u
+                  )));
+                  setClientsMember(null);
                 }}
               />
             )}

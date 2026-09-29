@@ -22,6 +22,8 @@ const { ApiResponse } = require('../../utils/ApiResponse.js');
 const asyncHandler = require('../../utils/AsyncHandler.js');
 const logger = require('../../utils/Logger.js');
 const ZohoProjectLinks = require('../../Services/Zoho/ZohoProjectLinks.js');
+const { canAccessClient, seesAllClients } = require('../../Services/User/esfClientScope.js');
+const { canSeeClientIdentity } = require('../../Services/User/esfRoles.js');
 
 /** Shared guard: a valid ObjectId, or a 400 that has already been sent. */
 const validClientId = (req, res) => {
@@ -30,6 +32,23 @@ const validClientId = (req, res) => {
         res.status(400).json(new ApiResponse(400, '', 'Invalid client id'));
         return null;
     }
+
+    /**
+     * And it must be a client this staff member was allocated.
+     *
+     * All three handlers in this file go through here, which is why the check lives in
+     * the helper rather than three times below — these routes carry `esfAuth` and
+     * nothing else, so without it any member can read, re-point or detach the Zoho
+     * project of any client in the portal by id alone.
+     *
+     * 404 rather than 403, so an id cannot be probed to learn which clients exist.
+     */
+    if (!canAccessClient(req.esfUser, clientId)) {
+        logger.warn(`ESF user ${req.esfUserId} touched an unallocated client ${clientId}`);
+        res.status(404).json(new ApiResponse(404, '', 'Client not found'));
+        return null;
+    }
+
     return clientId;
 };
 
@@ -63,6 +82,10 @@ const getClientProjectOptions = asyncHandler(async (req, res) => {
             clientId,
             search: req.query.search || '',
             refresh: req.query.refresh === 'true',
+            // Each option says which client already holds that project. For anyone not
+            // allowed to see client identity that is a name they cannot get anywhere
+            // else in this portal, so they get the collision without the name.
+            redactOwnerNames: !canSeeClientIdentity(req.esfUser),
         });
         return res.status(200).json(new ApiResponse(200, options, 'Project options fetched'));
     } catch (error) {

@@ -214,7 +214,13 @@ const issueClientSession = async (clientId) => {
 
 /**
  * Ownership filter for clients created through the ESF staff portal.
- * Every ESF staff member sees every ESF client.
+ *
+ * This used to read "Every ESF staff member sees every ESF client", and that is no
+ * longer true: owner and admin still do, but a member sees only the clients allocated
+ * to them. This constant is the UNSCOPED base — pass it through
+ * Services/User/esfClientScope.js `scopeClientQuery(ESF_CLIENT_QUERY, req.esfUser)`
+ * before using it in anything a staff member can reach, or that member sees every
+ * client again.
  */
 const ESF_CLIENT_QUERY = { isEsfClient: true };
 

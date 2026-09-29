@@ -30,9 +30,24 @@ const esfAuth = asyncHandler(async (req, res, next) => {
         return res.status(401).json(new ApiResponse(401, '', 'Invalid or expired ESF token'));
     }
 
-    // Re-check the role on every request so revoking access takes effect
-    // immediately rather than when the 15-day token happens to expire.
-    const user = await UserModel.findById(decoded.tokenData).select('accessType esfRole firstName lastName email phone');
+    /**
+     * Re-check the role on every request so revoking access takes effect
+     * immediately rather than when the 15-day token happens to expire.
+     *
+     * ── THIS SELECT IS LOAD-BEARING FOR EVERY PERMISSION CHECK ──
+     * Controllers read permissions off `req.esfUser`, which is this document. A field
+     * left out here is not merely missing — it reads as `undefined` on a staff member
+     * who really does have it set, and the check silently decides the wrong way without
+     * throwing or logging. `esfAllowedClients` is listed for exactly that reason: an
+     * allocation check that cannot see the allocation would show a restricted member
+     * every client.
+     *
+     * (`esfDeniedPages` is deliberately still absent: the page blocklist is enforced by
+     * esfPageGuard, which loads its own copy, and `isPageDeniedFor` treats a missing
+     * array as "not denied". Add it here before writing any in-controller page check.)
+     */
+    const user = await UserModel.findById(decoded.tokenData)
+        .select('accessType esfRole firstName lastName email phone esfAllowedClients');
     if (!user) {
         logger.error(new ApiError(401, 'ESF user not found'));
         return res.status(401).json(new ApiResponse(401, '', 'ESF user not found'));

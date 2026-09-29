@@ -31,11 +31,53 @@ const {
     toStaffThread, toStaffMessage, assertNoIdentityLeak, PROJECTION,
 } = require('../../Services/Email/messagePresenter.js');
 
+const { allowedClientIds, canAccessClient } = require('../../Services/User/esfClientScope.js');
+
 const PAGE_KEY = 'messages';
 const THREADS_PER_PAGE = 50;
 
 /** Blocked from the Messages page means blocked from its data, not just its nav item. */
 const denied = (req) => isPageDeniedFor(req.esfUser, PAGE_KEY);
+
+/**
+ * Narrow a thread query to the clients this staff member is allocated.
+ *
+ * This file's header used to say "There is no per-client scoping to apply — this repo
+ * has none anywhere." It has some now, and the inbox is the one place a member can
+ * actually reach a client they were not given.
+ */
+const scopeThreads = (query, req) => {
+    const ids = allowedClientIds(req.esfUser);
+    // null means exempt (owner/admin). An empty array matches nothing, which is correct
+    // for a member with no allocation and is the case that must not be optimised away.
+    return ids === null ? query : { ...query, userId: { $in: ids } };
+};
+
+/**
+ * May this staff member touch this thread?
+ *
+ * For handlers that hand the threadId straight to a service instead of querying the
+ * thread themselves, so the scope cannot be folded into their own query.
+ *
+ * Exempt staff short-circuit without a round trip; only a restricted member pays for
+ * the lookup.
+ */
+const threadAllowed = async (req, threadId) => {
+    const ids = allowedClientIds(req.esfUser);
+    if (ids === null) return true;
+    if (!threadId) return false;
+
+    const thread = await EmailThread.findById(threadId).select('userId').lean();
+    return Boolean(thread) && canAccessClient(req.esfUser, thread.userId);
+};
+
+/**
+ * 404, not 403, on a thread belonging to an unallocated client.
+ *
+ * A 403 would confirm the conversation exists, which is exactly what a member who was
+ * not given that client should not be able to establish by probing ids.
+ */
+const notFound = (res) => res.status(404).json(new ApiResponse(404, '', 'Conversation not found'));
 
 /**
  * Labels for a set of threads, in one pass.
@@ -80,7 +122,7 @@ const listStaffThreads = asyncHandler(async (req, res) => {
         const includeResolved = req.query.resolved === 'true';
 
         const threads = await EmailThread
-            .find(includeResolved ? {} : { resolvedAt: null })
+            .find(scopeThreads(includeResolved ? {} : { resolvedAt: null }, req))
             .select(PROJECTION.thread)
             .sort({ lastMessageAt: -1 })
             .limit(THREADS_PER_PAGE)
@@ -93,7 +135,9 @@ const listStaffThreads = asyncHandler(async (req, res) => {
                 .map((thread) => toStaffThread(thread, labels.get(String(thread.userId)) || 'Unknown client'))
                 // Needs-a-reply first; the sort above already orders within each group.
                 .sort((a, b) => Number(b.needsReply) - Number(a.needsReply)),
-            unresolvedCount: await EmailThread.countDocuments({ resolvedAt: null }),
+            // Scoped too. A global count would badge the inbox with threads the
+            // member cannot open, which reads as messages going missing.
+            unresolvedCount: await EmailThread.countDocuments(scopeThreads({ resolvedAt: null }, req)),
         };
 
         // Checked on its own line, before any part of the response is built. Inlining
@@ -120,9 +164,14 @@ const getStaffThread = asyncHandler(async (req, res) => {
             return res.status(403).json(new ApiResponse(403, '', 'You do not have access to Messages'));
         }
 
-        const thread = await EmailThread.findById(req.params.threadId).select(PROJECTION.thread).lean();
+        // Scoped into the query itself, so an unallocated thread is indistinguishable
+        // from one that does not exist.
+        const thread = await EmailThread
+            .findOne(scopeThreads({ _id: req.params.threadId }, req))
+            .select(PROJECTION.thread)
+            .lean();
         if (!thread) {
-            return res.status(404).json(new ApiResponse(404, '', 'Conversation not found'));
+            return notFound(res);
         }
 
         const [messages, labels] = await Promise.all([
@@ -171,8 +220,8 @@ const setThreadResolved = asyncHandler(async (req, res) => {
 
         const resolved = req.body?.resolved !== false;
 
-        const updated = await EmailThread.findByIdAndUpdate(
-            req.params.threadId,
+        const updated = await EmailThread.findOneAndUpdate(
+            scopeThreads({ _id: req.params.threadId }, req),
             {
                 $set: {
                     resolvedAt: resolved ? new Date() : null,
@@ -212,6 +261,12 @@ const postStaffReply = asyncHandler(async (req, res) => {
             return res.status(403).json(new ApiResponse(403, '', 'You do not have access to Messages'));
         }
 
+        // Before anything is sent. This one leaves the building — a reply on an
+        // unallocated thread is a real email to a real client.
+        if (!(await threadAllowed(req, req.params.threadId))) {
+            return notFound(res);
+        }
+
         const { sendStaffReply } = require('../../Services/Gmail/GmailSendService.js');
 
         const result = await sendStaffReply({
@@ -245,6 +300,10 @@ const downloadStaffAttachment = asyncHandler(async (req, res) => {
     try {
         if (denied(req)) {
             return res.status(403).json(new ApiResponse(403, '', 'You do not have access to Messages'));
+        }
+
+        if (!(await threadAllowed(req, req.params.threadId))) {
+            return notFound(res);
         }
 
         const { fetchAttachment, sendAttachment } = require('../../Services/Gmail/GmailAttachmentService.js');

@@ -18,15 +18,21 @@ const mockThreadFindById = jest.fn();
 const mockThreadCount = jest.fn();
 const mockThreadUpdateOne = jest.fn();
 const mockThreadFindByIdAndUpdate = jest.fn();
+// The by-id reads became findOne/findOneAndUpdate when client allocation landed, so the
+// ownership filter could be folded into the query instead of checked after the fact.
+const mockThreadFindOne = jest.fn();
+const mockThreadFindOneAndUpdate = jest.fn();
 const mockMessageFind = jest.fn();
 
 jest.mock('../../models/system/EmailThreadModels.js', () => ({
     EmailThread: {
         find: mockThreadFind,
         findById: mockThreadFindById,
+        findOne: mockThreadFindOne,
         countDocuments: mockThreadCount,
         updateOne: mockThreadUpdateOne,
         findByIdAndUpdate: mockThreadFindByIdAndUpdate,
+        findOneAndUpdate: mockThreadFindOneAndUpdate,
     },
     EmailMessage: { find: mockMessageFind },
 }));
@@ -89,22 +95,40 @@ const run = async (handler, req) => {
     return { status: res.status.mock.calls[0][0], body: res.json.mock.calls[0][0] };
 };
 
+/**
+ * An UNRESTRICTED staff member.
+ *
+ * `esfRole: 'owner'` is load-bearing since client allocation landed: a staff object with
+ * no role resolves to 'member', and a member with no allocation is scoped to nothing —
+ * so every assertion below about what the inbox returns would be testing an empty inbox.
+ */
 const staffReq = (over = {}) => ({
     esfUserId: 'staff1',
-    esfUser: { esfDeniedPages: [] },
+    esfUser: { esfDeniedPages: [], accessType: 'esfUser', esfRole: 'owner' },
     query: {},
     params: {},
     body: {},
     ...over,
 });
 
+/** A member restricted to the clients named, which may be none. */
+const memberReq = (allowedClients = [], over = {}) => staffReq({
+    esfUser: {
+        esfDeniedPages: [], accessType: 'esfUser', esfRole: 'member',
+        esfAllowedClients: allowedClients,
+    },
+    ...over,
+});
+
 beforeEach(() => {
     jest.clearAllMocks();
     mockThreadFind.mockReturnValue(chain([THREAD]));
-    mockThreadFindById.mockReturnValue(chain(THREAD));
+    mockThreadFindOne.mockReturnValue(chain(THREAD));
+    mockThreadFindOne.mockReturnValue(chain(THREAD));
     mockThreadCount.mockResolvedValue(1);
     mockThreadUpdateOne.mockResolvedValue({});
-    mockThreadFindByIdAndUpdate.mockReturnValue(chain({ ...THREAD, resolvedAt: new Date() }));
+    mockThreadFindOneAndUpdate.mockReturnValue(chain({ ...THREAD, resolvedAt: new Date() }));
+    mockThreadFindOneAndUpdate.mockReturnValue(chain({ ...THREAD, resolvedAt: new Date() }));
     mockMessageFind.mockReturnValue(chain([MESSAGE]));
     mockUserFind.mockReturnValue(chain([{
         _id: 'u1',
@@ -175,14 +199,14 @@ describe('page access is enforced here, not by esfPageGuard', () => {
         const { status } = await run(getStaffThread, { ...blocked, params: { threadId: 't1' } });
 
         expect(status).toBe(403);
-        expect(mockThreadFindById).not.toHaveBeenCalled();
+        expect(mockThreadFindOne).not.toHaveBeenCalled();
     });
 
     test('…nor resolve one', async () => {
         const { status } = await run(setThreadResolved, { ...blocked, params: { threadId: 't1' } });
 
         expect(status).toBe(403);
-        expect(mockThreadFindByIdAndUpdate).not.toHaveBeenCalled();
+        expect(mockThreadFindOneAndUpdate).not.toHaveBeenCalled();
     });
 });
 
@@ -240,7 +264,7 @@ describe('read receipts', () => {
     const OUTBOUND = { ...MESSAGE, _id: 'm-out', direction: 'outbound' };
 
     test('an outbound message the client opened afterwards shows as seen', async () => {
-        mockThreadFindById.mockReturnValue(chain({
+        mockThreadFindOne.mockReturnValue(chain({
             ...THREAD, lastClientReadAt: new Date('2026-09-22T11:00:00Z'),
         }));
         mockMessageFind.mockReturnValue(chain([OUTBOUND])); // sent 10:00
@@ -251,7 +275,7 @@ describe('read receipts', () => {
     });
 
     test('one sent after their last visit does not', async () => {
-        mockThreadFindById.mockReturnValue(chain({
+        mockThreadFindOne.mockReturnValue(chain({
             ...THREAD, lastClientReadAt: new Date('2026-09-22T09:00:00Z'),
         }));
         mockMessageFind.mockReturnValue(chain([OUTBOUND])); // sent 10:00
@@ -262,7 +286,7 @@ describe('read receipts', () => {
     });
 
     test('a client who has never opened the portal shows as not seen, not as unknown', async () => {
-        mockThreadFindById.mockReturnValue(chain({ ...THREAD, lastClientReadAt: null }));
+        mockThreadFindOne.mockReturnValue(chain({ ...THREAD, lastClientReadAt: null }));
         mockMessageFind.mockReturnValue(chain([OUTBOUND]));
 
         const { body } = await run(getStaffThread, staffReq({ params: { threadId: 't1' } }));
@@ -274,7 +298,7 @@ describe('read receipts', () => {
         // Null rather than false: a tick here would be telling staff whether staff
         // have read it, which is both useless and easily misread as being about the
         // client. The UI renders nothing for null.
-        mockThreadFindById.mockReturnValue(chain({
+        mockThreadFindOne.mockReturnValue(chain({
             ...THREAD, lastClientReadAt: new Date('2026-09-22T11:00:00Z'),
         }));
 
@@ -301,7 +325,7 @@ describe('read receipts', () => {
         // getStaffThread writes lastStaffReadAt on the way out. Reading the receipt
         // from that write instead of from lastClientReadAt would make every message
         // show as seen the moment a staff member opened it.
-        mockThreadFindById.mockReturnValue(chain({ ...THREAD, lastClientReadAt: null }));
+        mockThreadFindOne.mockReturnValue(chain({ ...THREAD, lastClientReadAt: null }));
         mockMessageFind.mockReturnValue(chain([OUTBOUND]));
 
         const { body } = await run(getStaffThread, staffReq({ params: { threadId: 't1' } }));
@@ -323,7 +347,7 @@ describe('opening a thread', () => {
     });
 
     test('404s for a thread that does not exist', async () => {
-        mockThreadFindById.mockReturnValue(chain(null));
+        mockThreadFindOne.mockReturnValue(chain(null));
 
         expect((await run(getStaffThread, staffReq({ params: { threadId: 'nope' } }))).status).toBe(404);
     });
@@ -333,18 +357,90 @@ describe('resolving', () => {
     test('records who resolved it', async () => {
         await run(setThreadResolved, staffReq({ params: { threadId: 't1' }, body: { resolved: true } }));
 
-        const [, update] = mockThreadFindByIdAndUpdate.mock.calls[0];
+        const [, update] = mockThreadFindOneAndUpdate.mock.calls[0];
         expect(update.$set.resolvedBy).toBe('staff1');
         expect(update.$set.resolvedAt).toBeInstanceOf(Date);
     });
 
     test('reopening clears both fields rather than leaving a stale resolver', async () => {
-        mockThreadFindByIdAndUpdate.mockReturnValue(chain({ ...THREAD, resolvedAt: null }));
+        mockThreadFindOneAndUpdate.mockReturnValue(chain({ ...THREAD, resolvedAt: null }));
 
         await run(setThreadResolved, staffReq({ params: { threadId: 't1' }, body: { resolved: false } }));
 
-        const [, update] = mockThreadFindByIdAndUpdate.mock.calls[0];
+        const [, update] = mockThreadFindOneAndUpdate.mock.calls[0];
         expect(update.$set.resolvedAt).toBeNull();
         expect(update.$set.resolvedBy).toBeNull();
+    });
+});
+
+describe('the inbox only shows clients this member was allocated', () => {
+    /**
+     * The inbox is the one cross-client surface a member can actually reach — task
+     * requests and impersonation are already owner/admin only. So this is where an
+     * unallocated client would otherwise still be readable.
+     */
+    test('an allocated member is narrowed to their own clients', async () => {
+        await run(listStaffThreads, memberReq(['c1', 'c2']));
+
+        expect(mockThreadFind).toHaveBeenCalledWith({
+            resolvedAt: null,
+            userId: { $in: ['c1', 'c2'] },
+        });
+    });
+
+    test('a member with NO allocation matches nothing, not everything', async () => {
+        // The fail-open case: dropping the filter here would show them every client's
+        // conversations, and would look exactly like a working inbox.
+        await run(listStaffThreads, memberReq([]));
+
+        expect(mockThreadFind).toHaveBeenCalledWith({
+            resolvedAt: null,
+            userId: { $in: [] },
+        });
+    });
+
+    test('owner and admin are not narrowed at all', async () => {
+        await run(listStaffThreads, staffReq());
+
+        expect(mockThreadFind).toHaveBeenCalledWith({ resolvedAt: null });
+    });
+
+    test('the unresolved badge counts only what they can open', async () => {
+        // A global count would badge the inbox with threads the member cannot reach,
+        // which reads as messages having gone missing.
+        await run(listStaffThreads, memberReq(['c1']));
+
+        expect(mockThreadCount).toHaveBeenCalledWith({
+            resolvedAt: null,
+            userId: { $in: ['c1'] },
+        });
+    });
+});
+
+describe('a single thread belonging to an unallocated client', () => {
+    test('is fetched through a scoped query, not by id alone', async () => {
+        await run(getStaffThread, memberReq(['c1'], { params: { threadId: 't1' } }));
+
+        expect(mockThreadFindOne).toHaveBeenCalledWith({
+            _id: 't1',
+            userId: { $in: ['c1'] },
+        });
+    });
+
+    test('answers 404 rather than 403, so ids cannot be probed', async () => {
+        // A 403 would confirm the conversation exists. That is precisely what a member
+        // who was not given the client should not be able to establish.
+        mockThreadFindOne.mockReturnValue(chain(null));
+
+        const { status } = await run(getStaffThread, memberReq(['c1'], { params: { threadId: 'someone-elses' } }));
+
+        expect(status).toBe(404);
+    });
+
+    test('resolving one is scoped the same way', async () => {
+        await run(setThreadResolved, memberReq(['c1'], { params: { threadId: 't1' }, body: {} }));
+
+        const [filter] = mockThreadFindOneAndUpdate.mock.calls[0];
+        expect(filter).toEqual({ _id: 't1', userId: { $in: ['c1'] } });
     });
 });

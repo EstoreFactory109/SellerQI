@@ -18,6 +18,7 @@ const {
     updateEsfUserRole,
     getEsfPageCatalogue,
     updateEsfUserPermissions,
+    updateEsfUserClients,
     getEsfSessionPermissions,
     updateEsfUserName,
 } = require('../controllers/esf/esf.js');
@@ -117,6 +118,9 @@ router.get('/pages', esfAuth, getEsfPageCatalogue);
 router.patch('/users/:userId/role', esfAuth, validateEsfRole, updateEsfUserRole);
 router.patch('/users/:userId/name', esfAuth, validateEsfNickname, updateEsfUserName);
 router.put('/users/:userId/permissions', esfAuth, updateEsfUserPermissions);
+// Which CLIENTS a member may see. An allow-list, so an empty array is a real
+// instruction meaning "nothing" rather than a no-op.
+router.put('/users/:userId/clients', esfAuth, updateEsfUserClients);
 router.delete('/users/:userId', esfAuth, removeEsfUser);
 
 /**
