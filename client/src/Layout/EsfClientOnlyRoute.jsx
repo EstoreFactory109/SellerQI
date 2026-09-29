@@ -17,10 +17,15 @@ import { Navigate, Outlet } from 'react-router-dom';
  * a 403 from esfClientOnly and sat there looking blank and broken.
  *
  * ── THE SAME RULE AS THE SERVER, DELIBERATELY ──
- * `isEsfClient`, or a superAdmin servicing the account — copied from
- * server/middlewares/Auth/esfClientOnly.js. The server is still the thing that refuses
- * the DATA, and nothing here is load-bearing for that. This exists so the answer is a
- * clean redirect rather than a page full of failed requests.
+ * `isEsfClient`, and nothing else — copied from server/middlewares/Auth/esfClientOnly.js.
+ * The server is still the thing that refuses the DATA, and nothing here is load-bearing
+ * for that. This exists so the answer is a clean redirect rather than a page full of
+ * failed requests.
+ *
+ * A platform superAdmin is NOT an exception. Servicing a real ESF client mints a session
+ * as that client, so the account in hand is an ESF client and passes on its own account.
+ * An admin on their OWN account has no agency relationship to show, and these pages would
+ * describe one that does not exist.
  *
  * ── UNDECIDED IS NOT DENIED ──
  * `user` is null for an instant on first paint, before ProtectedRouteWrapper populates
@@ -31,7 +36,7 @@ import { Navigate, Outlet } from 'react-router-dom';
 const EsfClientOnlyRoute = () => {
   const user = useSelector((state) => state.Auth?.user);
 
-  if (user && user.isEsfClient !== true && user.accessType !== 'superAdmin') {
+  if (user && user.isEsfClient !== true) {
     return <Navigate to="/seller-central-checker/dashboard" replace />;
   }
 

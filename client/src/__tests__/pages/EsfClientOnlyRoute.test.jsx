@@ -79,10 +79,27 @@ describe('accounts that are allowed through', () => {
         expect(screen.getByText('ESF PAGE')).toBeInTheDocument();
     });
 
-    it('lets a superAdmin service the account', () => {
-        // Matches esfClientOnly, which allows superAdmin through so platform admins
-        // can support the page.
+});
+
+describe('a platform superAdmin gets no exception', () => {
+    it('is redirected away from a non-ESF account', () => {
+        /**
+         * Deliberate, and it reads like a gap until you follow the session: servicing a
+         * real ESF client goes through the ESF switch, which mints a session AS that
+         * client - so the account in hand is an ESF client and is admitted on its own
+         * account, above. The clause that used to sit here only ever fired for an admin
+         * on their OWN account, where these pages would describe an agency relationship
+         * that does not exist.
+         */
         renderAt(ESF_PATHS[0], { isEsfClient: false, accessType: 'superAdmin' });
+
+        expect(screen.getByText('ORDINARY DASHBOARD')).toBeInTheDocument();
+        expect(screen.queryByText('ESF PAGE')).not.toBeInTheDocument();
+    });
+
+    it('still gets in once switched into a real ESF client', () => {
+        // The session is the client's by then, which is what admits them.
+        renderAt(ESF_PATHS[0], { isEsfClient: true, accessType: 'user' });
 
         expect(screen.getByText('ESF PAGE')).toBeInTheDocument();
     });
