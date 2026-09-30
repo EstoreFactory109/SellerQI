@@ -56,12 +56,22 @@ const sanitizeDeniedPages = (keys) =>
     Array.isArray(keys) ? [...new Set(keys.filter((k) => ESF_PAGE_KEYS.includes(k)))] : [];
 
 /**
- * API path prefix -> page key.
+ * API path matcher -> page key.
  *
- * Longest match wins, so '/api/pagewise/esf/' resolves to the ESF dashboard
- * rather than being swallowed by a shorter prefix. Anything not listed is
- * unrestricted — shared endpoints (navbar, profile, location) must keep working
- * whatever the member can see, or the whole app breaks rather than one page.
+ * A matcher is either a STRING PREFIX or a RegExp. Longest prefix wins, so
+ * '/api/pagewise/esf/' resolves to the ESF dashboard rather than being swallowed
+ * by a shorter prefix. Anything not listed is unrestricted — shared endpoints
+ * (navbar, profile, location) must keep working whatever the member can see, or
+ * the whole app breaks rather than one page.
+ *
+ * ── WHY REGEXPS ARE ALLOWED HERE AT ALL ──
+ * Prefixes cannot express a route whose variable segment sits in the MIDDLE.
+ * '/esf/reports/:reportKey/history' is the Report History page, but every string
+ * prefix that matches it also matches '/esf/reports' — so with prefixes alone,
+ * denying 'report-history' while allowing 'reports' is unexpressible, and the
+ * history endpoint stays open. A RegExp says exactly what it means, and because
+ * it is strictly more specific than any prefix it wins outright rather than
+ * competing on length. Reach for one only when a prefix genuinely cannot do it.
  */
 const API_PATH_TO_PAGE = [
     ['/api/pagewise/esf/client-dashboard', 'client-dashboard'],
@@ -75,6 +85,16 @@ const API_PATH_TO_PAGE = [
     // 'billing' until it was found.
     ['/api/pagewise/esf/messages', 'messages'],
     ['/api/pagewise/esf/untapped', 'untapped'],
+    /**
+     * ...and it existed a THIRD time, for Reports, until this line.
+     *
+     * Order matters only for the reader: the RegExp below wins over the prefix
+     * regardless of position, because '/esf/reports/:key/history' would otherwise
+     * resolve to 'reports' and a member denied only Report History would still be
+     * served every archived report through the API.
+     */
+    [/^\/api\/pagewise\/esf\/reports\/[^/]+\/history(?:[/?]|$)/, 'report-history'],
+    ['/api/pagewise/esf/reports', 'reports'],
 
     ['/api/pagewise/dashboard', 'dashboard'],
     ['/api/pagewise/product-checker', 'dashboard'],
@@ -102,21 +122,49 @@ const API_PATH_TO_PAGE = [
 ];
 
 /**
+ * Pages with no endpoint of their own beneath a GUARDED prefix.
+ *
+ * The guards run on '/api/pagewise' and '/api/qmate' only (api/app.js), so this
+ * list is what stops the coverage test below from being satisfied by silence: a
+ * page is either mapped, or it is named here with a reason someone can check.
+ *
+ * `review-request` is deliberately NOT on this list even though it is unmapped,
+ * because it is not a mapping gap — it is served from '/api/review', which no
+ * guard is mounted on at all. Adding a mapping for it would change nothing.
+ * Recorded in the test so the distinction cannot be quietly lost.
+ */
+const PAGES_WITHOUT_GUARDED_API = {
+    'pre-analysis': 'Listing Analyzer posts to /api/listings, outside the guarded prefixes.',
+    'user-logging': 'Super-admin only; never offered in the member catalogue.',
+    'ecommerce-calendar': 'Static reference data held in the client bundle.',
+    settings: 'Account settings are served from the shared /app routes, not /api/pagewise.',
+    'review-request': 'Served from /api/review, which carries no page guard — see the test.',
+};
+
+/**
  * Which page does this API path belong to? Returns null when the path is shared
  * infrastructure and must never be blocked.
+ *
+ * A RegExp entry beats every prefix entry: it can only have been written because
+ * no prefix expressed the route, so it is by construction the more specific rule.
+ * Among prefixes, the longest wins.
  */
 const pageKeyForApiPath = (path) => {
     if (typeof path !== 'string') return null;
     // Strip the query string before matching.
     const clean = path.split('?')[0];
 
-    let match = null;
-    for (const [prefix, key] of API_PATH_TO_PAGE) {
-        if (clean.startsWith(prefix) && (!match || prefix.length > match[0].length)) {
-            match = [prefix, key];
+    let prefixMatch = null;
+    for (const [matcher, key] of API_PATH_TO_PAGE) {
+        if (matcher instanceof RegExp) {
+            if (matcher.test(clean)) return key;
+            continue;
+        }
+        if (clean.startsWith(matcher) && (!prefixMatch || matcher.length > prefixMatch[0].length)) {
+            prefixMatch = [matcher, key];
         }
     }
-    return match ? match[1] : null;
+    return prefixMatch ? prefixMatch[1] : null;
 };
 
 /**
@@ -148,6 +196,8 @@ module.exports = {
     memberPageCatalogue,
     ESF_CLIENT_PAGES,
     ESF_PAGE_KEYS,
+    API_PATH_TO_PAGE,
+    PAGES_WITHOUT_GUARDED_API,
     sanitizeDeniedPages,
     pageKeyForApiPath,
     isPageDeniedFor,
