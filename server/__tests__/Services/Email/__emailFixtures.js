@@ -254,7 +254,72 @@ Hi Nitesh,
 
 Yes, if the inventory is physically available in Amazon's warehouse, we can create a case with Amazon Support and request a bin check.`;
 
+/**
+ * Every business identifier shape the support@ inbox actually carries, in one place.
+ *
+ * This is the over-redaction fixture, and it is the more important of the two directions:
+ * a leaked number is a privacy failure, but a mangled order number or SKU destroys the
+ * operational content of a task brief and nobody notices until a client asks why the work
+ * was done against the wrong item. Case, order, shipment, SKU, UPC, ASIN and FNSKU numbers
+ * are all 9-14 digits — indistinguishable from a phone number by shape alone, which is why
+ * redaction protects them explicitly rather than hoping a pattern tells them apart.
+ *
+ * The identifiers are invented but the SHAPES are real, and so are the phone formats: this
+ * is what people actually write in a signature, including the two that used to survive
+ * redaction untouched.
+ */
+const CONTACT_CASES = `Walmart case # is 16425298 and your case information is attached.
+Ref: Cases 13157354022 and 13186582392, Order 205-8795220-8289913
+Case ID: 22088339131. Case 3500441563 is still open. Shipment FBA19NDZ4D3Z.
+SKU: 198168045893, UPC 850085664426, FNSKU B0GJYCTMFY, ASIN B0HKW36R58
+Total budget $5,931.30 per month, $197.71 per day, pack of 2,500 sets, 4.5 oz, 90%.
+DNS resolves to 69.16.221.246. Dates: 2026-09-24, 10/09/2026 at 14:05:22.
+Business License Number: 134248
+SPC-EUAmazon-87962626245003. Dimensions 13 x 8 x 13 in.
+Office: (800) 548-4710
+Email: walmart@morgansrepellent.com
+m:+61424812404
+Phone: 913 269 8400
+0412841105
+(925) 216-8961
+Nitesh Kumar | Natural Environmental Solutions | +1 (818) 350-5302 | Sell More Online`;
+
+/** The identifiers in CONTACT_CASES that must come out the other side untouched. */
+const CONTACT_CASES_IDENTIFIERS = [
+    '16425298', '13157354022', '13186582392', '205-8795220-8289913', '22088339131',
+    '3500441563', 'FBA19NDZ4D3Z', '198168045893', '850085664426', 'B0GJYCTMFY',
+    'B0HKW36R58', '5,931.30', '197.71', '2,500 sets', '4.5 oz', '90%',
+    '69.16.221.246', '2026-09-24', '10/09/2026', '14:05:22', '134248',
+    'SPC-EUAmazon-87962626245003', '13 x 8 x 13',
+];
+
+/** The contact details in CONTACT_CASES that must all be gone. */
+const CONTACT_CASES_CONTACTS = [
+    '(800) 548-4710', 'walmart@morgansrepellent.com', '+61424812404',
+    '913 269 8400', '0412841105', '(925) 216-8961', '+1 (818) 350-5302',
+];
+
+/**
+ * Gmail's plain-text rendering, where an auto-linked number is followed by a `<tel:…>`
+ * artifact carrying a second copy of it.
+ *
+ * The SKU on the first line sits immediately before one of those artifacts, so anything
+ * that strips the wrapper carelessly takes the SKU with it. That pairing is the whole
+ * point of the fixture.
+ */
+const GMAIL_TEL_ARTIFACT = `Item 13100301<tel:310-0301>:
+
+On this picture, add a note: WINDOWS NOT INCLUDED
+
+Nitesh Kumar
+Natural Environmental Solutions
++1 (818) 308-1444<tel:(818)%20308-1444>`;
+
 module.exports = {
+    CONTACT_CASES,
+    CONTACT_CASES_IDENTIFIERS,
+    CONTACT_CASES_CONTACTS,
+    GMAIL_TEL_ARTIFACT,
     INLINE_ANSWERS,
     INLINE_ANSWERS_PREVIOUS,
     INLINE_ANSWERS_PREVIOUS_REDACTED,

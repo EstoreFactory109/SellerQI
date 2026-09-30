@@ -21,6 +21,7 @@
  */
 
 const { deriveThreadStatus } = require('./threadStatus.js');
+const { withoutBusinessIdentifiers } = require('./identityRedaction.js');
 
 /** Anything that looks like contact detail, whatever field it arrived in. */
 const EMAIL_SHAPE = /[\w.+-]+@[\w-]+\.[\w.-]+/;
@@ -61,7 +62,23 @@ const assertNoIdentityLeak = (payload, { logger = null } = {}) => {
     const found = [];
 
     if (EMAIL_SHAPE.test(serialised)) found.push('email address');
-    if (LONG_DIGITS.test(serialised)) found.push('long digit run');
+
+    /*
+     * Scan for a stray number AFTER business identifiers have been taken out.
+     *
+     * LONG_DIGITS needs only ten characters from [\d\s.\-()], so on its own it matches
+     * "Order 112-4567890-1234567" and "Case 13157354022" — both of which staff are
+     * supposed to receive, and both of which redaction deliberately preserves. Scanning
+     * the raw payload therefore reported a leak on ordinary messages, which is why this
+     * assertion could only ever be advisory in production: an alarm that fires on normal
+     * traffic is one nobody can act on.
+     *
+     * Identifiers are taken out and NOT put back, which is the part that matters: this
+     * must scan what the payload actually holds. Running it through the redactor instead
+     * would report what the redactor WOULD do — replacing the very leak this is here to
+     * catch, and restoring the identifiers so they trip it anyway. Exactly backwards.
+     */
+    if (LONG_DIGITS.test(withoutBusinessIdentifiers(serialised))) found.push('long digit run');
 
     if (found.length === 0) return payload;
 

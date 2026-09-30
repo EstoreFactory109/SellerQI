@@ -188,6 +188,190 @@ const redactKnown = (text, bundle) => {
     return { text: out, counts };
 };
 
+/* ------------------------------------------------------------------ */
+/* Phone shapes, and the identifiers that must survive them            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Gmail's plain-text rendering of an auto-linked number or address.
+ *
+ * Gmail writes "+1 (818) 308-1444<tel:(818)%20308-1444>" into the text/plain part. The
+ * visible number is redacted by the patterns below, but the artifact carries a second
+ * copy — and one beginning with "(" defeated the scheme-link rule, whose character class
+ * excluded parentheses. The result was "[phone]<tel:(818)%20308-1444>": a placeholder
+ * sitting next to the number it was supposed to replace.
+ *
+ * Stripping the whole wrapper is better than redacting inside it, because "<[link]>" left
+ * in the middle of a signature is noise a staff member has to read past.
+ */
+const cleanGmailArtifacts = (text) => String(text)
+    .replace(/[ \t]?<tel:[^>]*>/gi, '')
+    .replace(/[ \t]?<mailto:[^>]*>/gi, '')
+    .replace(/[ \t]?<callto:[^>]*>/gi, '')
+    // "+1 (818) 308-1444 <(818)%20308-1444>" — the same thing without the scheme.
+    .replace(/[ \t]?<\+?\(?\d[\d()%+\-. ]*>/g, '');
+
+const SENTINEL_OPEN = '⟦';
+const SENTINEL_CLOSE = '⟧';
+const SENTINEL_RE = /⟦ID(\d+)⟧/g;
+
+/**
+ * Labels that introduce a business identifier. The value after one is protected.
+ *
+ * ── WHY PROTECTION EXISTS AT ALL ──
+ * A case number, a SKU and a UPC are 9-14 digits, which is exactly a phone number. No
+ * pattern can tell them apart by shape, so the only way to redact aggressively without
+ * eating them is to take them out of the text first and put them back afterwards.
+ *
+ * Over-redaction here is not cosmetic. This module's own history records what it costs:
+ * matching a bare email local part rewrote "hold the Walmart listings until Friday" as
+ * "hold the [email] listings until Friday", destroying the meaning of nearly every
+ * message about the channel the client's project exists to serve. An eaten order number
+ * does the same thing to a task brief.
+ */
+const ID_LABEL = '(?:asins?|fnskus?|skus?|upcs?|eans?|gtins?|isbns?|msku|'
+    + 'items?(?:\\s*(?:no\\.?|number|#))?|models?(?:\\s*(?:no\\.?|number))?|'
+    + 'orders?(?:\\s*(?:id|no\\.?|number|#))?|cases?(?:\\s*(?:id|no\\.?|number|#))?|'
+    + 'tickets?(?:\\s*(?:id|no\\.?|#))?|shipments?(?:\\s*id)?|'
+    + 'tracking(?:\\s*(?:no\\.?|number|id|#))?|invoices?(?:\\s*(?:no\\.?|number|#))?|'
+    + 'po(?:\\s*(?:no\\.?|number|#))?|batch(?:\\s*id)?|'
+    + 'ref(?:erence)?(?:\\s*(?:no\\.?|number|#))?|licen[cs]e(?:\\s*(?:no\\.?|number))?|'
+    + 'account\\s*(?:id|no\\.?|number)|seller\\s*id|merchant\\s*(?:id|token))';
+const ID_VALUE = '(?=[A-Za-z0-9\\-_/.]*\\d)[A-Za-z0-9][A-Za-z0-9\\-_/.]*[A-Za-z0-9]';
+const LABELLED_ID_RE = new RegExp(`\\b${ID_LABEL}\\s*(?:#|:|=|\\bis\\b|-)?\\s*(?:#\\s*)?(${ID_VALUE})`, 'gi');
+/** "Cases 13157354022 and 13186582392" — the values after the first. */
+const LIST_CONTINUATION_RE = new RegExp(`^\\s*(?:,|and|&|or|/)\\s*(${ID_VALUE})`, 'i');
+
+/** Identifiers distinctive enough to protect with no label in front of them. */
+const STANDALONE_IDS = [
+    /\bB0[A-Z0-9]{8}\b/g,                       // ASIN
+    /\bX0[A-Z0-9]{8}\b/g,                       // FNSKU
+    /\b\d{3}-\d{7}-\d{7}\b/g,                   // Amazon order id
+    /\bFBA[A-Z0-9]{8,12}\b/g,                   // FBA shipment id
+    /\b(?:\d{1,3}\.){3}\d{1,3}\b/g,             // IPv4
+    /\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?)?\b/g,  // ISO date/time
+    /\b\d{1,2}[/.]\d{1,2}[/.]\d{2,4}\b/g,       // 10/09/2026
+    /\b\d{1,2}:\d{2}(?::\d{2})?\b/g,            // 14:05:22
+    /(?:[$€£₹]|\b(?:USD|EUR|GBP|AUD|CAD|INR)\s?)\d[\d,]*(?:\.\d+)?/g,
+    /\b\d[\d,]*(?:\.\d+)?\s?(?:%|oz|fl\s?oz|lbs?|kg|g|mg|ml|l|units?|sets?|ct|pack|pk|pcs|pieces|days?|hrs?|hours?|weeks?|months?|years?|inch(?:es)?|in|cm|mm|ft)\b/gi,
+    /\b\d+(?:\.\d+)?\s?x\s?\d+(?:\.\d+)?(?:\s?x\s?\d+(?:\.\d+)?)?\b/gi,  // 13 x 8 x 13
+];
+
+const protectIdentifiers = (text, store) => {
+    const keep = (value) => {
+        store.push(value);
+        return `${SENTINEL_OPEN}ID${store.length - 1}${SENTINEL_CLOSE}`;
+    };
+
+    // Labelled values, including lists that continue with "and" or a comma.
+    let out = '';
+    let last = 0;
+    let match;
+    LABELLED_ID_RE.lastIndex = 0;
+    while ((match = LABELLED_ID_RE.exec(text)) !== null) {
+        const value = match[1];
+        const valueStart = match.index + match[0].lastIndexOf(value);
+        out += text.slice(last, valueStart) + keep(value);
+        let cursor = match.index + match[0].length;
+        let continuation;
+        while ((continuation = text.slice(cursor).match(LIST_CONTINUATION_RE)) !== null) {
+            const segment = continuation[0];
+            out += segment.slice(0, segment.lastIndexOf(continuation[1])) + keep(continuation[1]);
+            cursor += segment.length;
+        }
+        last = cursor;
+        LABELLED_ID_RE.lastIndex = cursor;
+    }
+    let result = out + text.slice(last);
+
+    for (const pattern of STANDALONE_IDS) {
+        result = result.replace(pattern, (hit) => (hit.includes(SENTINEL_OPEN) ? hit : keep(hit)));
+    }
+    return result;
+};
+
+const restoreIdentifiers = (text, store) =>
+    text.replace(SENTINEL_RE, (_, index) => store[Number(index)] ?? '');
+
+/**
+ * The same text with business identifiers taken out and NOT put back.
+ *
+ * For callers that want to ask "is there a digit run here that is not an identifier?" —
+ * messagePresenter's leak scan is the one. It cannot use `redactPhoneShapes`, because
+ * that both restores the identifiers (so they still trip a digit scan) and replaces the
+ * leaked numbers (so a real leak stops being visible). Scanning text that has been put
+ * through a redactor tells you what the redactor would do, not what the payload holds.
+ *
+ * The replacement carries no digits on purpose, so it cannot itself look like a run.
+ */
+const withoutBusinessIdentifiers = (text) => {
+    const store = [];
+    return protectIdentifiers(String(text), store).replace(SENTINEL_RE, '[id]');
+};
+
+/**
+ * Digit runs that are a telephone number rather than an identifier.
+ *
+ * Narrow ON PURPOSE. A blanket "9 to 15 digits" rule would be simpler and would eat every
+ * UPC and case number in the inbox; these three require a shape a dialable number has and
+ * an identifier usually does not — a separator, a leading "+", or a leading "0".
+ *
+ * Each consumes its own "+" or "(". Leaving one behind produces "+[phone]", which tells a
+ * reader both that a number was removed and roughly where it came from.
+ */
+const PHONE_SHAPES = [
+    // Separated: "913 269 8400", "(913) 269-8400", "+1 913.269.8400".
+    /(?<![\w.])(?:\+\d{1,3}[\s.\-]?)?(?:\(?\d{2,4}\)?[\s.\-]){1,4}\d{2,6}(?![\w.])/g,
+    // International with no separators at all: "+61424812404".
+    /(?<![\w+])\+\d{8,15}(?![\w])/g,
+    // National mobile/landline with no separators: "0412841105".
+    /(?<![\w\-+])0\d{8,14}(?![\w\-])/g,
+    // Vanity numbers: "(417) 2-STORES", "1-800-FLOWERS". See VANITY_PHONE below.
+    /(?:\(\d{3}\)|\b\d{3})[\s\-]\d{1,3}-[A-Z]{3,}\b/g,
+    /\b1-\d{3}-[A-Z]{4,}\b/g,
+];
+
+/**
+ * A match whose letters ARE the number, so the digit count means nothing.
+ *
+ * "(417) 2-STORES" holds four digits and is a dialable phone number; the nine-digit floor
+ * that keeps SKUs safe would discard it. Three or more consecutive capitals is what marks
+ * the difference, and it is specific enough not to fire on ordinary text: the patterns
+ * above already require a leading area code and a hyphen before the letters.
+ */
+const VANITY_PHONE = /[A-Z]{3,}/;
+
+/**
+ * Redact phone-shaped runs, leaving business identifiers alone.
+ *
+ * Shared so `redactStructural` here and `stripContacts` in TaskBriefService cannot drift.
+ * They held byte-identical copies of the separated pattern, and updating one without the
+ * other fails silently and badly: the brief layer would reject every rewrite containing a
+ * number it had itself failed to redact, then fall back to its own un-redacted text.
+ *
+ * Links are NOT handled here — the two callers disagree about URLs on purpose, and that
+ * disagreement is the reason they are separate functions at all.
+ */
+const redactPhoneShapes = (text) => {
+    const store = [];
+    let out = protectIdentifiers(String(text), store);
+    let count = 0;
+
+    for (const pattern of PHONE_SHAPES) {
+        out = out.replace(pattern, (match) => {
+            if (match.includes(SENTINEL_OPEN)) return match;
+            const digits = match.replace(/\D/g, '');
+            // The digit floor is what keeps SKUs and order numbers intact, so it applies
+            // to everything EXCEPT a number spelled with letters, where it cannot.
+            if (!VANITY_PHONE.test(match) && (digits.length < 9 || digits.length > 15)) return match;
+            count += 1;
+            return PLACEHOLDER.phone;
+        });
+    }
+
+    return { text: restoreIdentifiers(out, store), count };
+};
+
 /**
  * Redact anything shaped like contact detail, held or not.
  *
@@ -201,32 +385,27 @@ const redactStructural = (text) => {
 
     const counts = { email: 0, phone: 0, link: 0 };
 
-    let out = text
+    // The Gmail "<tel:…>" wrapper goes before anything else, so the number inside it is
+    // not still sitting beside the placeholder that replaced its visible twin.
+    let out = cleanGmailArtifacts(text)
         // Any address at all, including ones we do not hold — a colleague's, a
         // supplier's, a second address of their own.
         .replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, () => { counts.email += 1; return PLACEHOLDER.email; })
         .replace(/\b(?:https?:\/\/|www\.)[^\s<>()]+/gi, () => { counts.link += 1; return PLACEHOLDER.link; })
-        .replace(/\b(?:tel|mailto|callto|sms):[^\s<>()]+/gi, () => { counts.link += 1; return PLACEHOLDER.link; });
+        // The character class allows "(" and ")" — a tel: value that begins with one,
+        // which is what Gmail writes for a US number, matched nothing at all before.
+        .replace(/\b(?:tel|mailto|callto|sms):[^\s<>]+/gi, () => { counts.link += 1; return PLACEHOLDER.link; });
 
     /*
-     * Long digit runs, with separators allowed.
+     * Phone-shaped runs, with business identifiers protected across the pass.
      *
-     * Deliberately NOT a phone-number grammar: clients write numbers every way
-     * imaginable and a strict pattern misses most of them. The guard against eating
-     * order numbers and ASINs is the 9-digit floor plus requiring at least one
-     * separator or a leading +, which is what distinguishes a dialable number from
-     * an identifier. Shorter runs are left alone; a 7-digit local number we do not
-     * already hold is a residual risk, and a smaller one than mangling every SKU.
+     * Addresses and links are resolved FIRST, deliberately: protecting identifiers before
+     * them would let a date or a price inside a URL become a sentinel, and the URL pattern
+     * would then no longer match the thing it was meant to remove.
      */
-    out = out.replace(
-        /(?<![\w.])(?:\+\d{1,3}[\s.\-]?)?(?:\(?\d{2,4}\)?[\s.\-]){1,4}\d{2,6}(?![\w.])/g,
-        (match) => {
-            const digits = match.replace(/\D/g, '');
-            if (digits.length < 9 || digits.length > 15) return match;
-            counts.phone += 1;
-            return PLACEHOLDER.phone;
-        }
-    );
+    const phones = redactPhoneShapes(out);
+    out = phones.text;
+    counts.phone += phones.count;
 
     return { text: out, counts };
 };
@@ -271,6 +450,9 @@ module.exports = {
     buildIdentityBundle,
     redactKnown,
     redactStructural,
+    redactPhoneShapes,
+    withoutBusinessIdentifiers,
+    cleanGmailArtifacts,
     redactAll,
     containsIdentity,
     PLACEHOLDER,

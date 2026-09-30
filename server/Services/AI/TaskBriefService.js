@@ -40,7 +40,9 @@
 
 const OpenAI = require('openai');
 const logger = require('../../utils/Logger.js');
-const { redactKnown, containsIdentity, PLACEHOLDER } = require('../Email/identityRedaction.js');
+const {
+    redactKnown, containsIdentity, redactPhoneShapes, cleanGmailArtifacts, PLACEHOLDER,
+} = require('../Email/identityRedaction.js');
 
 const MODEL = process.env.TASK_BRIEF_MODEL || 'gpt-4o-mini';
 const BRIEF_VERSION = 1;
@@ -72,24 +74,25 @@ const stripContacts = (text, bundle) => {
     // Everything we actually hold for this client — their name, addresses, numbers.
     let out = redactKnown(String(text || ''), bundle).text;
 
-    out = out
+    out = cleanGmailArtifacts(out)
         // Any address, including ones we hold nothing for: a colleague's, a supplier's.
         .replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, PLACEHOLDER.email)
         // Contact links specifically. http/https are left alone on purpose.
-        .replace(/\b(?:tel|mailto|callto|sms):[^\s<>()]+/gi, PLACEHOLDER.phone);
+        .replace(/\b(?:tel|mailto|callto|sms):[^\s<>]+/gi, PLACEHOLDER.phone);
 
     /**
-     * Phone-shaped digit runs. Same grammar as identityRedaction's: a 9-digit floor plus
-     * a separator or a leading +, which is what tells a dialable number from an order id
-     * or a SKU. Anything tighter eats identifiers the team needs.
+     * Phone-shaped digit runs, via the SHARED helper.
+     *
+     * This used to be a byte-identical copy of identityRedaction's pattern, and the
+     * copy is what made it dangerous. `leaksContact` below gates the model's rewrite
+     * with `containsIdentity`, which runs identityRedaction's patterns — so the moment
+     * the two drifted, this function would leave a number in `safeDescription`, the
+     * model would faithfully preserve it, `leaksContact` would reject the rewrite, and
+     * the fallback would send that same un-redacted text to Zoho. Silently, with one
+     * log line. The comment at the bottom of this file records the same class of
+     * failure switching the AI layer off once before.
      */
-    out = out.replace(
-        /(?<![\w.])(?:\+\d{1,3}[\s.\-]?)?(?:\(?\d{2,4}\)?[\s.\-]){1,4}\d{2,6}(?![\w.])/g,
-        (match) => {
-            const digits = match.replace(/\D/g, '');
-            return digits.length >= 9 && digits.length <= 15 ? PLACEHOLDER.phone : match;
-        }
-    );
+    out = redactPhoneShapes(out).text;
 
     return out;
 };
