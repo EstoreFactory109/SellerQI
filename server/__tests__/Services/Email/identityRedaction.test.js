@@ -197,6 +197,32 @@ describe('phone numbers with no separators at all', () => {
     });
 });
 
+/**
+ * Numbers spelled with letters, where the digit floor that protects every SKU cannot help:
+ * "(417) 2-STORES" holds four digits and is perfectly dialable.
+ *
+ * These reach staff the same way any other number does — a supplier's line quoted in
+ * prose, a storefront in a signature — and the nine-digit rule discards them by design.
+ */
+describe('vanity numbers', () => {
+    test.each([
+        ['a bracketed area code', 'call (417) 2-STORES today'],
+        ['the 1-800 form', 'call 1-800-FLOWERS today'],
+        ['a bare area code', 'call 417 2-STORES today'],
+    ])('redacts %s despite holding too few digits', (_label, text) => {
+        expect(redactStructural(text).text).toBe(text.replace(/(?:\(?\d{3}\)?[\s-]|1-\d{3}-)\S+/, PLACEHOLDER.phone));
+    });
+
+    test('does not fire on an ordinary hyphenated identifier', () => {
+        // The letters must follow an area code and a hyphen, so a part code is untouched.
+        [
+            'part MTG-400 is on order',
+            'use code SAVE-20 at checkout',
+            'ASIN B0HKW36R58 is live',
+        ].forEach((text) => expect(redactStructural(text).text).toBe(text));
+    });
+});
+
 describe("Gmail's tel: artifact", () => {
     test('does not leave a second copy of the number behind', () => {
         // "<tel:(818)%20308-1444>" begins with a parenthesis, which the scheme-link

@@ -326,7 +326,20 @@ const PHONE_SHAPES = [
     /(?<![\w+])\+\d{8,15}(?![\w])/g,
     // National mobile/landline with no separators: "0412841105".
     /(?<![\w\-+])0\d{8,14}(?![\w\-])/g,
+    // Vanity numbers: "(417) 2-STORES", "1-800-FLOWERS". See VANITY_PHONE below.
+    /(?:\(\d{3}\)|\b\d{3})[\s\-]\d{1,3}-[A-Z]{3,}\b/g,
+    /\b1-\d{3}-[A-Z]{4,}\b/g,
 ];
+
+/**
+ * A match whose letters ARE the number, so the digit count means nothing.
+ *
+ * "(417) 2-STORES" holds four digits and is a dialable phone number; the nine-digit floor
+ * that keeps SKUs safe would discard it. Three or more consecutive capitals is what marks
+ * the difference, and it is specific enough not to fire on ordinary text: the patterns
+ * above already require a leading area code and a hyphen before the letters.
+ */
+const VANITY_PHONE = /[A-Z]{3,}/;
 
 /**
  * Redact phone-shaped runs, leaving business identifiers alone.
@@ -348,7 +361,9 @@ const redactPhoneShapes = (text) => {
         out = out.replace(pattern, (match) => {
             if (match.includes(SENTINEL_OPEN)) return match;
             const digits = match.replace(/\D/g, '');
-            if (digits.length < 9 || digits.length > 15) return match;
+            // The digit floor is what keeps SKUs and order numbers intact, so it applies
+            // to everything EXCEPT a number spelled with letters, where it cannot.
+            if (!VANITY_PHONE.test(match) && (digits.length < 9 || digits.length > 15)) return match;
             count += 1;
             return PLACEHOLDER.phone;
         });
