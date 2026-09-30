@@ -10,12 +10,13 @@
  *  - "bi-weekly" meaning a fortnight. Cron cannot express it, so it is a gate in
  *    code — get it inverted and the cycle runs every week.
  *  - never emailing an empty envelope when a cycle has no data behind it.
+ *  - ONE PDF per report for the whole account. A client with US and IN used
+ *    to get two of every report; now each covers every marketplace.
  */
 jest.mock('../../../models/user-auth/userModel.js', () => ({ find: jest.fn() }));
 jest.mock('../../../models/user-auth/sellerCentralModel.js', () => ({ findOne: jest.fn() }));
-jest.mock('../../../Services/Calculations/EsfReportsService.js', () => ({
-    getEsfReports: jest.fn(),
-    getEsfReportRows: jest.fn(),
+jest.mock('../../../Services/Calculations/EsfAccountReportsService.js', () => ({
+    getEsfAccountReports: jest.fn(),
 }));
 jest.mock('../../../Services/Reports/reportPdf.js', () => ({
     renderReportPdf: jest.fn(),
@@ -30,7 +31,7 @@ jest.mock('../../../utils/Logger.js', () => ({ info: jest.fn(), warn: jest.fn(),
 
 const User = require('../../../models/user-auth/userModel.js');
 const Seller = require('../../../models/user-auth/sellerCentralModel.js');
-const { getEsfReports, getEsfReportRows } = require('../../../Services/Calculations/EsfReportsService.js');
+const { getEsfAccountReports } = require('../../../Services/Calculations/EsfAccountReportsService.js');
 const { renderReportPdf, reportPdfFilename } = require('../../../Services/Reports/reportPdf.js');
 const { sendEsfReportsEmail, createReportsTransport } = require('../../../Services/Email/SendEsfReportsEmail.js');
 
@@ -51,9 +52,14 @@ const stubClients = (users, marketplaces = [{ country: 'US', region: 'NA' }]) =>
     });
 };
 
-/** A report payload shaped like getEsfReports returns. */
-const reportPayload = (available = []) => ({
-    marketplace: { country: 'US', region: 'NA' },
+const US = { country: 'US', region: 'NA', currency: '$' };
+const IN = { country: 'IN', region: 'EU', currency: '₹' };
+
+/** A payload shaped like getEsfAccountReports returns. */
+const reportPayload = (available = [], marketplaces = [US], primary = marketplaces[0]) => ({
+    marketplace: primary,
+    primary,
+    marketplaces,
     reports: Object.values(CADENCE_GROUPS)
         .flatMap((g) => g.reportKeys)
         .map((key) => ({
@@ -63,13 +69,15 @@ const reportPayload = (available = []) => ({
             insight: `${key} insight`,
             tone: 'neutral',
             available: available.includes(key),
+            marketplace: primary,
+            multi: marketplaces.length > 1,
             summary: available.includes(key) ? { rows: [{ a: 1 }], columns: [{ key: 'a', label: 'A' }], totalRows: 1 } : undefined,
         })),
 });
 
 /**
- * Freeze the clock WITHOUT faking setTimeout: the mailer sleeps between
- * marketplaces, and a faked setTimeout never resolves that promise, so the test
+ * Freeze the clock WITHOUT faking setTimeout: a faked setTimeout never
+ * resolves anything awaiting one, so a test
  * hangs to its timeout and — worse — leaves fake timers installed for every
  * test after it.
  */
@@ -92,8 +100,7 @@ const freezeClock = (iso) => {
 // jest.mock factories above — so every one of them is re-established here.
 beforeEach(() => {
     stubClients([CLIENT]);
-    getEsfReports.mockResolvedValue(reportPayload([]));
-    getEsfReportRows.mockResolvedValue({ available: true, rows: [{ a: 1 }], totalRows: 1 });
+    getEsfAccountReports.mockResolvedValue(reportPayload([]));
     renderReportPdf.mockResolvedValue(Buffer.from('%PDF-fake'));
     reportPdfFilename.mockImplementation((report, mk) => `${report.name} - ${mk?.country}.pdf`);
     sendEsfReportsEmail.mockResolvedValue('msg-1');
@@ -142,7 +149,7 @@ describe('bi-weekly gate', () => {
 
     it('force overrides the gate, for a manual run', async () => {
         freezeClock('2026-09-23T08:15:00Z');
-        getEsfReports.mockResolvedValue(reportPayload(['inventory-restock']));
+        getEsfAccountReports.mockResolvedValue(reportPayload(['inventory-restock']));
 
         const result = await runEsfReportsCadence('biweekly', { force: true });
 
@@ -166,7 +173,7 @@ describe('audience', () => {
 
     it('skips a client with no email rather than throwing', async () => {
         stubClients([{ _id: 'c2', firstName: 'NoMail' }]);
-        getEsfReports.mockResolvedValue(reportPayload(['buybox']));
+        getEsfAccountReports.mockResolvedValue(reportPayload(['buybox']));
 
         const result = await runEsfReportsCadence('weekly');
 
@@ -177,7 +184,7 @@ describe('audience', () => {
 
 describe('what gets attached', () => {
     it('sends one email carrying every available report in the cycle', async () => {
-        getEsfReports.mockResolvedValue(reportPayload(['account-overview', 'buybox', 'review-requests']));
+        getEsfAccountReports.mockResolvedValue(reportPayload(['account-overview', 'buybox', 'review-requests']));
 
         const result = await runEsfReportsCadence('weekly');
 
@@ -191,7 +198,7 @@ describe('what gets attached', () => {
     });
 
     it('omits a report with no data instead of attaching a blank page', async () => {
-        getEsfReports.mockResolvedValue(reportPayload(['buybox']));
+        getEsfAccountReports.mockResolvedValue(reportPayload(['buybox']));
 
         await runEsfReportsCadence('weekly');
 
@@ -201,7 +208,7 @@ describe('what gets attached', () => {
     });
 
     it('sends no email at all when the whole cycle has no data', async () => {
-        getEsfReports.mockResolvedValue(reportPayload([]));
+        getEsfAccountReports.mockResolvedValue(reportPayload([]));
 
         const result = await runEsfReportsCadence('weekly');
 
@@ -209,46 +216,49 @@ describe('what gets attached', () => {
         expect(result.nothingToSend).toBe(1);
     });
 
-    it('covers every marketplace in one email, naming each PDF for its own', async () => {
-        stubClients([CLIENT], [{ country: 'US', region: 'NA' }, { country: 'IN', region: 'EU' }]);
-        getEsfReports
-            .mockResolvedValueOnce({ ...reportPayload(['buybox']), marketplace: { country: 'US', region: 'NA' } })
-            .mockResolvedValueOnce({ ...reportPayload(['buybox']), marketplace: { country: 'IN', region: 'EU' } });
+    it('sends ONE PDF per report covering every marketplace, primary first in its name', async () => {
+        stubClients([CLIENT], [{ country: 'IN', region: 'EU' }, { country: 'US', region: 'NA' }]);
+        // Connected IN first; US is primary (highest sales), so it leads.
+        getEsfAccountReports.mockResolvedValue(reportPayload(['buybox'], [IN, US], US));
 
         await runEsfReportsCadence('weekly');
+
+        const call = sendEsfReportsEmail.mock.calls[0][0];
+        expect(call.attachments.map((a) => a.filename)).toEqual(['buybox - US, IN.pdf']);
+        expect(call.reports[0].marketplaceLabel).toBe('Amazon US, IN');
+        // Rendered led by the primary marketplace.
+        expect(renderReportPdf.mock.calls[0][1].marketplace).toEqual(US);
+    });
+
+    it('builds the cycle once per client, at the depth of the PDF', async () => {
+        getEsfAccountReports.mockResolvedValue(reportPayload(['buybox']));
+
+        await runEsfReportsCadence('weekly');
+
+        expect(getEsfAccountReports).toHaveBeenCalledTimes(1);
+        expect(getEsfAccountReports).toHaveBeenCalledWith('client1', {
+            keys: CADENCE_GROUPS.weekly.reportKeys,
+            rowLimit: 40,
+        });
+    });
+
+    it('sends nothing for a client whose reports could not be built, and moves on', async () => {
+        stubClients([CLIENT, { ...CLIENT, _id: 'client2', email: 'b@example.com' }]);
+        getEsfAccountReports
+            .mockRejectedValueOnce(new Error('mongo down'))
+            .mockResolvedValueOnce(reportPayload(['buybox']));
+
+        const result = await runEsfReportsCadence('weekly');
 
         expect(sendEsfReportsEmail).toHaveBeenCalledTimes(1);
-        const names = sendEsfReportsEmail.mock.calls[0][0].attachments.map((a) => a.filename);
-        expect(names).toEqual(['buybox - US.pdf', 'buybox - IN.pdf']);
-    });
-
-    it('deepens the table past the preview page before rendering', async () => {
-        getEsfReports.mockResolvedValue(reportPayload(['buybox']));
-        const deepRows = Array.from({ length: 40 }, (_, i) => ({ a: i }));
-        getEsfReportRows.mockResolvedValue({ available: true, rows: deepRows, totalRows: 900 });
-
-        await runEsfReportsCadence('weekly');
-
-        // The PDF is rendered from the deep rows, not the 1-row preview.
-        const rendered = renderReportPdf.mock.calls[0][0];
-        expect(rendered.summary.rows).toHaveLength(40);
-        expect(rendered.summary.totalRows).toBe(900);
-    });
-
-    it('falls back to preview rows when the deep fetch fails', async () => {
-        getEsfReports.mockResolvedValue(reportPayload(['buybox']));
-        getEsfReportRows.mockRejectedValue(new Error('mongo down'));
-
-        await runEsfReportsCadence('weekly');
-
-        expect(renderReportPdf).toHaveBeenCalled();
-        expect(renderReportPdf.mock.calls[0][0].summary.rows).toHaveLength(1);
+        expect(result.nothingToSend).toBe(1);
+        expect(result.sent).toBe(1);
     });
 });
 
 describe('robustness', () => {
     it('keeps going when one report fails to render', async () => {
-        getEsfReports.mockResolvedValue(reportPayload(['account-overview', 'buybox', 'review-requests']));
+        getEsfAccountReports.mockResolvedValue(reportPayload(['account-overview', 'buybox', 'review-requests']));
         renderReportPdf
             .mockRejectedValueOnce(new Error('pdf exploded'))
             .mockResolvedValue(Buffer.from('%PDF-fake'));
@@ -262,7 +272,7 @@ describe('robustness', () => {
     it('closes the pooled transport even when a send throws', async () => {
         const transport = { close: jest.fn() };
         createReportsTransport.mockReturnValue(transport);
-        getEsfReports.mockResolvedValue(reportPayload(['buybox']));
+        getEsfAccountReports.mockResolvedValue(reportPayload(['buybox']));
         sendEsfReportsEmail.mockRejectedValue(new Error('smtp gone'));
 
         await expect(runEsfReportsCadence('weekly')).rejects.toThrow('smtp gone');
@@ -271,7 +281,7 @@ describe('robustness', () => {
 
     it('counts a failed send without aborting the run', async () => {
         stubClients([CLIENT, { ...CLIENT, _id: 'client2', email: 'b@example.com' }]);
-        getEsfReports.mockResolvedValue(reportPayload(['buybox']));
+        getEsfAccountReports.mockResolvedValue(reportPayload(['buybox']));
         sendEsfReportsEmail.mockResolvedValueOnce(false).mockResolvedValueOnce('msg-2');
 
         const result = await runEsfReportsCadence('weekly');

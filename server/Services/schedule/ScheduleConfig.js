@@ -57,6 +57,16 @@ const SUNDAY_FUNCTIONS = {
         requiresAccessToken: true,
         apiDataKey: 'listingItems'
     },
+    // FBA removal orders, for "Pending removals" on the ESF FBA Aged Inventory
+    // report. Weekly: that report is monthly, and removals move over days.
+    'removalOrdersData': {
+        service: require('../Sp_API/GET_FBA_FULFILLMENT_REMOVAL_ORDER_DETAIL_DATA.js'),
+        functionName: null, // Default export, use service directly
+        description: 'FBA Removal Orders',
+        requiresAccessToken: true,
+        apiDataKey: 'removalOrdersData',
+        isDefaultExport: true
+    },
     // Issue calculation - runs after productReview to update issue counts
     // This calculates/updates IssueSummary and per-product issueCount
     'issueSummary': {
@@ -272,6 +282,18 @@ const DAILY_FUNCTIONS = {
         description: 'Inbound Non-Compliance',
         requiresAccessToken: true,
         apiDataKey: 'inboundNonComplianceData',
+        isDefaultExport: true
+    },
+    // Amazon's Suppressed Listings Report, for the ESF catalogue "Suppressed"
+    // count and the Buy Box report's suppressed-listings table. Daily because a
+    // suppressed listing cannot be bought at all, so a week's lag is a week of
+    // lost sales nobody was told about.
+    'suppressedListingsData': {
+        service: require('../Sp_API/GET_MERCHANTS_LISTINGS_FYP_REPORT.js'),
+        functionName: null, // Default export, use service directly
+        description: 'Suppressed Listings Report',
+        requiresAccessToken: true,
+        apiDataKey: 'suppressedListingsData',
         isDefaultExport: true
     },
     'shipment': {

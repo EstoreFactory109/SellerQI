@@ -1120,7 +1120,8 @@ class ScheduledIntegration {
             if (['RestockinventoryData', 'fbaInventoryPlanningData', 'strandedInventoryData', 'inboundNonComplianceData', 'productReview', 'adsKeywords', 'campaignData',
                  'ledgerSummaryViewData', 'ledgerDetailViewData', 'fbaReimbursementsData',
                  'calculateShipmentDiscrepancy', 'calculateLostInventoryReimbursement', 'calculateDamagedInventoryReimbursement',
-                 'calculateDisposedInventoryReimbursement', 'ltsfData'].includes(functionKey)) {
+                 'calculateDisposedInventoryReimbursement', 'ltsfData',
+                 'suppressedListingsData', 'removalOrdersData'].includes(functionKey)) {
                 return 2;
             }
             // Batch 3: Shipment Data, Brand Data, Ad Groups Data, MCP SalesOnly, MCP BuyBox
@@ -2049,10 +2050,16 @@ class ScheduledIntegration {
             // report B2B pricing without reporting issues and vice versa, and a SKU absent
             // from the response must not be forced to false.
             const b2bPricingMap = new Map();
+            const listingIssuesMap = new Map();
             issuesDataArray.forEach(item => {
                 if (!item || !item.sku) return;
                 if (Array.isArray(item.issues)) {
                     issuesMap.set(item.sku, item.issues);
+                }
+                // Structured issues travel separately: a SKU can report one
+                // without the other, so neither may gate the other.
+                if (Array.isArray(item.listingIssues)) {
+                    listingIssuesMap.set(item.sku, item.listingIssues);
                 }
                 if (item.has_b2b_pricing !== undefined) {
                     b2bPricingMap.set(item.sku, item.has_b2b_pricing);
@@ -2069,6 +2076,11 @@ class ScheduledIntegration {
                 if ((product.status === 'Inactive' || product.status === 'Incomplete') && issuesMap.has(product.sku)) {
                     product.issues = issuesMap.get(product.sku);
                     updatedCount++;
+                }
+                // Not gated on status: an ACTIVE listing can be suppressed, and
+                // that is exactly the case worth reporting.
+                if (listingIssuesMap.has(product.sku)) {
+                    product.listingIssues = listingIssuesMap.get(product.sku);
                 }
                 // B2B pricing is not status-dependent — match Integration's semantics and
                 // key purely on SKU.
@@ -2725,7 +2737,8 @@ class ScheduledIntegration {
         // Inventory slice (batch 2)
         inventory: [
             'RestockinventoryData', 'fbaInventoryPlanningData',
-            'strandedInventoryData', 'inboundNonComplianceData', 'ltsfData'
+            'strandedInventoryData', 'inboundNonComplianceData', 'ltsfData',
+            'suppressedListingsData', 'removalOrdersData'
         ],
         // Performance slice (batch 1/2 — V2/V1 perf + reviews + ledger/reimbursement reads)
         performance: [
@@ -2879,6 +2892,8 @@ class ScheduledIntegration {
             require('../Sp_API/GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA.js').spApiAsync,
             require('../Sp_API/GET_LEDGER_SUMMARY_VIEW_DATA.js').spApiAsync,
             require('../Sp_API/GET_LEDGER_DETAIL_VIEW_DATA.js').spApiAsync,
+            require('../Sp_API/GET_MERCHANTS_LISTINGS_FYP_REPORT.js').spApiAsync,
+            require('../Sp_API/GET_FBA_FULFILLMENT_REMOVAL_ORDER_DETAIL_DATA.js').spApiAsync,
         ];
         const services = convertible.filter(s => shouldRunFunction(s.serviceName, dow));
         const excludeKeys = services.map(s => s.serviceName);

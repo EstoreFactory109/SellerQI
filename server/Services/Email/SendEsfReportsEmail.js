@@ -82,6 +82,8 @@ const buildRows = (reports) => reports.map((report) => `
  *   comma-separated list) instead of resolving the client's own. ONLY for test
  *   and staging scripts — it bypasses agency redirection and multi-address
  *   fan-out, so a real run must never set it. Every use is logged at warn.
+ * @param {string}   [params.cc]  address (or comma-separated list) to copy.
+ *   Not set by the scheduled mailer; for test sends that someone else reviews.
  * @returns {Promise<string|false>} messageId, or false on failure
  */
 const sendEsfReportsEmail = async ({
@@ -93,6 +95,7 @@ const sendEsfReportsEmail = async ({
     attachments,
     transport,
     recipientOverride = null,
+    cc = null,
 }) => {
     let recipients;
     if (recipientOverride) {
@@ -108,7 +111,8 @@ const sendEsfReportsEmail = async ({
 
     const emailLog = new EmailLogs({
         emailType: 'ESF_REPORTS',
-        receiverEmail: recipients,
+        // The log field takes a plain address list, so a cc is recorded in it.
+        receiverEmail: cc ? `${recipients}, ${cc}` : recipients,
         receiverId: userId,
         status: 'PENDING',
         subject,
@@ -138,6 +142,7 @@ const sendEsfReportsEmail = async ({
         const info = await transport.sendMail({
             from: senderEmail,
             to: recipients,
+            ...(cc ? { cc } : {}),
             subject,
             text,
             html,
@@ -149,7 +154,7 @@ const sendEsfReportsEmail = async ({
         });
 
         await emailLog.markAsSent();
-        logger.info(`[EsfReportsEmail] Sent ${cadenceLabel} reports to ${recipients} (${attachments.length} PDFs), messageId ${info.messageId}`);
+        logger.info(`[EsfReportsEmail] Sent ${cadenceLabel} reports to ${recipients}${cc ? ` cc ${cc}` : ''} (${attachments.length} PDFs), messageId ${info.messageId}`);
         return info.messageId;
     } catch (error) {
         logger.error(`[EsfReportsEmail] Failed sending ${cadenceLabel} reports to ${recipients}: ${error.message}`);

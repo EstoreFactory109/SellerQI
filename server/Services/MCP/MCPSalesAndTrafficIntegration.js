@@ -16,6 +16,13 @@ const {
 } = require('./DataKioskService.js');
 const logger = require('../../utils/Logger.js');
 
+/** A count Amazon may leave empty. Keeps the difference between empty and 0. */
+const numberOrNull = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
 /**
  * Fetch sales and traffic data by date from MCP Data Kiosk API
  * @param {string} refreshToken - SP-API refresh token
@@ -191,6 +198,13 @@ function calculateSalesMetrics(documentContent, startDate, endDate, marketplace)
                 currencyCode: currencyCode
             },
             unitsOrdered: unitsOrdered,
+            // The query has always asked for these and they were dropped here.
+            // Null, not 0, when Amazon leaves them empty: it only fills them for
+            // sellers enrolled in Amazon Business, and "not enrolled" is not
+            // the same statement as "sold nothing to businesses".
+            unitsOrderedB2B: numberOrNull(item.sales?.unitsOrderedB2B),
+            totalOrderItems: numberOrNull(item.sales?.totalOrderItems),
+            totalOrderItemsB2B: numberOrNull(item.sales?.totalOrderItemsB2B),
             sessions: item.traffic?.sessions || 0,
             pageViews: item.traffic?.pageViews || 0,
             buyBoxPercentage: item.traffic?.buyBoxPercentage || 0,

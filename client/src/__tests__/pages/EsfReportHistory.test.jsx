@@ -59,7 +59,8 @@ describe('ESF Report History page', () => {
         renderAt('/report-history/listings-audit');
 
         await waitFor(() => expect(axiosInstance.get).toHaveBeenCalledWith(
-            '/api/pagewise/esf/reports/listings-audit/history'
+            '/api/pagewise/esf/reports/listings-audit/history',
+            { params: {} }
         ));
     });
 
@@ -67,8 +68,32 @@ describe('ESF Report History page', () => {
         renderAt('/report-history');
 
         await waitFor(() => expect(axiosInstance.get).toHaveBeenCalledWith(
-            '/api/pagewise/esf/reports/buybox/history'
+            '/api/pagewise/esf/reports/buybox/history',
+            { params: {} }
         ));
+    });
+
+    it('reads the marketplace the Reports page linked with', async () => {
+        renderAt('/report-history/buybox?country=IN&region=EU');
+        await waitFor(() => expect(axiosInstance.get).toHaveBeenCalledWith(
+            '/api/pagewise/esf/reports/buybox/history',
+            { params: { country: 'IN', region: 'EU' } }
+        ));
+    });
+
+    it('offers every marketplace of an account with several, and no picker for one', async () => {
+        axiosInstance.get.mockResolvedValue(history({
+            marketplaces: [{ country: 'US', region: 'NA' }, { country: 'IN', region: 'EU' }],
+        }));
+        const { unmount } = renderAt();
+        await waitFor(() => expect(screen.getByRole('tab', { name: 'Amazon IN' })).toBeInTheDocument());
+        expect(screen.getByRole('tab', { name: 'Amazon US' })).toHaveAttribute('aria-selected', 'true');
+        unmount();
+
+        axiosInstance.get.mockResolvedValue(history({ marketplaces: [{ country: 'US', region: 'NA' }] }));
+        renderAt();
+        await waitFor(() => expect(screen.getByRole('heading', { name: 'Weekly Buybox Report' })).toBeInTheDocument());
+        expect(screen.queryByRole('tab')).toBeNull();
     });
 
     it('renders the real editions and headline stats', async () => {
