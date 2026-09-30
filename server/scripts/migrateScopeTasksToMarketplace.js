@@ -90,6 +90,72 @@ const log = (...a) => console.log(...a);
 const OLD_TASKITEM_INDEX = 'userId_1_asin_1_errorCategory_1_errorType_1';
 const OLD_TASK_INDEX = 'userId_1';
 
+/** Matches a row that has not been given a marketplace yet. */
+const unstamped = (userId) => ({
+    userId,
+    $or: [{ country: { $exists: false } }, { country: null }],
+});
+
+/**
+ * Remove unstamped rows that would collide with one a previous run already stamped.
+ *
+ * ── WHY THIS IS NEEDED AT ALL ──
+ * The migration is phased around a deploy, and the running code keeps inserting the whole
+ * time. An unstamped insert indexes as (userId, null, null, …) — a different index entry
+ * from the stamped row's — so the unique index admits it quite happily. Stamping it later
+ * then tries to create a duplicate key, and the updateMany aborts with E11000 partway
+ * through, leaving the account half-migrated.
+ *
+ * The two rows are the same logical thing, so the unstamped copy goes and the stamped one
+ * stays: it is the one the scoped code has been maintaining, and for TaskItem it is the one
+ * that may carry the seller's completed / in-progress status.
+ *
+ * ── IT APPLIES TO BOTH COLLECTIONS, WHICH IS THE EASY HALF TO MISS ──
+ * TaskItem collides on {userId, country, region, asin, errorCategory, errorType}; Task
+ * metadata collides on {userId, country, region}. Task has no discriminator beyond the
+ * marketplace itself, so ANY stamped metadata doc collides with ANY unstamped one for that
+ * user — `keyOf` returns a constant and the rest of the logic is unchanged. Eight accounts
+ * are in exactly that state today, and each would have aborted the run.
+ *
+ * Counted in report mode as well as under --apply. A destructive step that will only tell
+ * you what it deletes by deleting it is not a dry run.
+ *
+ * Memory: this loads two id-and-key projections per account. At today's ~364k task rows
+ * spread across hundreds of accounts that is small, but it is per-account and unbounded in
+ * principle — if one account ever holds a seven-figure row count, batch it.
+ *
+ * @returns {number} rows removed, or without --apply, rows that would be
+ */
+const dropClashingUnstamped = async ({ model, userId, mk, projection, keyOf, apply = APPLY }) => {
+    const stamped = await model
+        .find({ userId, country: mk.country, region: mk.region }, projection)
+        .lean();
+    if (stamped.length === 0) return 0;
+
+    const stampedKeys = new Set(stamped.map(keyOf));
+    const clashing = (await model.find(unstamped(userId), projection).lean())
+        .filter((doc) => stampedKeys.has(keyOf(doc)))
+        .map((doc) => doc._id);
+    if (clashing.length === 0) return 0;
+
+    if (!apply) return clashing.length;
+    const result = await model.deleteMany({ _id: { $in: clashing } });
+    return result.deletedCount || 0;
+};
+
+/** The two collections this runs over, and how a collision is identified in each. */
+const TASK_ITEM_DEDUP = {
+    model: TaskItem,
+    projection: { asin: 1, errorCategory: 1, errorType: 1 },
+    keyOf: (t) => `${t.asin}|${t.errorCategory}|${t.errorType}`,
+};
+const TASK_META_DEDUP = {
+    model: Task,
+    projection: { _id: 1 },
+    // One metadata doc per marketplace, so every unstamped one collides with a stamped one.
+    keyOf: () => 'one-per-marketplace',
+};
+
 async function main() {
     if (!MONGODB_URI) throw new Error('No Mongo URI configured');
     await mongoose.connect(MONGODB_URI);
@@ -123,24 +189,44 @@ async function main() {
     log(`accounts: ${single.length} single-marketplace, ${multi.length} multi-marketplace\n`);
 
     // ── 1. stamp single-marketplace accounts ────────────────────────────────
-    let stampedTasks = 0, stampedMeta = 0;
+    let stampedTasks = 0, stampedMeta = 0, dedupedTasks = 0, dedupedMeta = 0;
     for (const s of single) {
-        const filter = { userId: s.userId, $or: [{ country: { $exists: false } }, { country: null }] };
-        const n = await TaskItem.countDocuments(filter);
-        if (n === 0) continue;
+        const filter = unstamped(s.userId);
+        const taskCount = await TaskItem.countDocuments(filter);
+        const metaCount = await Task.countDocuments(filter);
+        /**
+         * Both counts, not just the task one. An account can have every task row
+         * stamped and still hold an unstamped metadata doc — 86 of 249 metadata docs
+         * are unstamped today — and skipping on the task count alone leaves those
+         * behind for the next run to collide on.
+         */
+        if (taskCount === 0 && metaCount === 0) continue;
+
+        // Before stamping, never after: the whole point is to clear the duplicate-key
+        // collision out of the way of the updateMany below.
+        const droppedTasks = await dropClashingUnstamped({ ...TASK_ITEM_DEDUP, userId: s.userId, mk: s.mk });
+        const droppedMeta = await dropClashingUnstamped({ ...TASK_META_DEDUP, userId: s.userId, mk: s.mk });
+        dedupedTasks += droppedTasks;
+        dedupedMeta += droppedMeta;
+
         if (APPLY) {
             const r = await TaskItem.updateMany(filter, { $set: { country: s.mk.country, region: s.mk.region } });
             stampedTasks += r.modifiedCount || 0;
-            const m = await Task.updateMany(
-                { userId: s.userId, $or: [{ country: { $exists: false } }, { country: null }] },
-                { $set: { country: s.mk.country, region: s.mk.region } }
-            );
+            const m = await Task.updateMany(filter, { $set: { country: s.mk.country, region: s.mk.region } });
             stampedMeta += m.modifiedCount || 0;
         } else {
-            stampedTasks += n;
+            // Nothing was deleted in report mode, so the counts still include the rows
+            // the dedup would have removed. Subtract them, or the preview overstates
+            // what ends up stamped.
+            stampedTasks += taskCount - droppedTasks;
+            stampedMeta += metaCount - droppedMeta;
         }
     }
     log(`single-marketplace: ${APPLY ? 'stamped' : 'would stamp'} ${stampedTasks} tasks, ${stampedMeta} metadata docs`);
+    if (dedupedTasks > 0 || dedupedMeta > 0) {
+        log(`  ${APPLY ? 'dropped' : 'would drop'} ${dedupedTasks} task(s) and ${dedupedMeta} metadata doc(s)`);
+        log('  that duplicate an already-stamped row — each would otherwise abort the run with E11000');
+    }
 
     // ── 2. clear multi-marketplace accounts for a scoped rebuild ────────────
     let clearedTasks = 0, clearedMeta = 0;
@@ -220,9 +306,21 @@ async function main() {
     process.exit(0);
 }
 
-main().catch(async (e) => {
-    console.error('FATAL:', e.message);
-    console.error(e.stack);
-    try { await mongoose.disconnect(); } catch {}
-    process.exit(1);
-});
+if (require.main === module) {
+    main().catch(async (e) => {
+        console.error('FATAL:', e.message);
+        console.error(e.stack);
+        try { await mongoose.disconnect(); } catch {}
+        process.exit(1);
+    });
+}
+
+/**
+ * Exported for tests only — nothing else requires this file.
+ *
+ * The dedup rule is the one part of this script that DELETES, so it is the one part that
+ * has to be provable without a database in front of it. `dropClashingUnstamped` takes its
+ * model and its `apply` flag as arguments precisely so a test can hand it a fake and
+ * exercise both modes.
+ */
+module.exports = { dropClashingUnstamped, unstamped, TASK_ITEM_DEDUP, TASK_META_DEDUP };
