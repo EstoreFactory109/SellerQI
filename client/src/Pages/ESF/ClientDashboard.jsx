@@ -162,15 +162,25 @@ const ClientDashboard = () => {
     // so the two pages cannot report different numbers for the same work.
     const [board, setBoard] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState('');
 
     const loadBoard = useCallback(async () => {
         try {
             const res = await axiosInstance.get('/api/pagewise/esf/project-status');
             setBoard(res.data?.data || null);
-        } catch {
-            // Fails quiet: the header above still renders, and every section below
-            // degrades to its own empty state rather than the page erroring out.
+            setLoadError('');
+        } catch (err) {
+            /*
+             * Keep the failure, rather than swallowing it.
+             *
+             * This used to set board = null and say nothing, which made `linked` false —
+             * so a 500, a dropped connection or a 403 all rendered "No project is connected
+             * to your account yet". That is a confident, false statement about the client's
+             * own account, and the one thing worse than an error is an error disguised as a
+             * fact. Status.jsx and Untapped.jsx both already do it this way.
+             */
             setBoard(null);
+            setLoadError(err.response?.data?.message || 'Could not load your account right now.');
         } finally {
             setLoading(false);
         }
@@ -323,7 +333,9 @@ const ClientDashboard = () => {
                         <h2 className="m-0 mb-3 text-[15px] font-semibold tracking-[-0.01em]">What we&rsquo;re working on</h2>
 
                         {loading && <EmptyLine>Loading…</EmptyLine>}
-                        {!loading && !linked && <EmptyLine>No project is connected to your account yet.</EmptyLine>}
+                        {!loading && loadError && <EmptyLine>{loadError}</EmptyLine>}
+                        {!loading && !loadError && !linked
+                            && <EmptyLine>No project is connected to your account yet.</EmptyLine>}
                         {!loading && linked && workItems.length === 0 && <EmptyLine>Nothing is in progress right now.</EmptyLine>}
 
                         {workItems.map((task) => (

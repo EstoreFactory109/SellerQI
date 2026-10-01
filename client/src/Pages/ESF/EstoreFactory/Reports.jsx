@@ -507,7 +507,7 @@ const MarketplaceBlock = ({ reportKey, section }) => (
     </div>
 );
 
-const SummaryPanel = ({ report, currency, failed, marketplace }) => {
+const SummaryPanel = ({ report, currency, failed, failReason, marketplace }) => {
     // Nothing selectable: every report is still waiting on data, or the fetch
     // failed. Say so here rather than leaving the top of the page blank, which
     // reads as a broken panel.
@@ -522,7 +522,10 @@ const SummaryPanel = ({ report, currency, failed, marketplace }) => {
                 </h2>
                 <p className="m-0 text-[13px] leading-[1.6] max-w-[620px]" style={{ color: PALETTE.textMuted }}>
                     {failed
-                        ? 'We could not reach your report data. Refresh the page to try again.'
+                        // The server's own words when it gave any, rather than a guess. The
+                        // generic line told a client with no marketplace to refresh, which
+                        // was never going to help them.
+                        ? (failReason || 'We could not reach your report data. Refresh the page to try again.')
                         : 'Every report we run on your account is listed below, each with what it is waiting on. They fill in as your marketplace data syncs.'}
                 </p>
             </section>
@@ -770,6 +773,7 @@ const Reports = () => {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [failed, setFailed] = useState(false);
+    const [failReason, setFailReason] = useState('');
     // null until the user picks one, at which point their choice wins over the
     // backend's suggested default for the rest of the visit.
     const [selectedKey, setSelectedKey] = useState(null);
@@ -779,11 +783,17 @@ const Reports = () => {
             const res = await axiosInstance.get('/api/pagewise/esf/reports');
             setData(res.data?.data || null);
             setFailed(false);
-        } catch {
-            // Fails quiet, like the Overview page: the header still renders and
-            // the body shows an empty state rather than the page erroring out.
+        } catch (err) {
+            /*
+             * Keep the reason. The error was not even bound before, so a 401 from a client
+             * with no marketplace, a 400, a 500 and a dropped connection all rendered the
+             * same "Refresh the page to try again" — advice that would never have helped the
+             * first of those. The server now answers 200 with an empty payload for a client
+             * who has no marketplace, so anything reaching here is a genuine fault.
+             */
             setData(null);
             setFailed(true);
+            setFailReason(err.response?.data?.message || '');
         } finally {
             setLoading(false);
         }
@@ -871,7 +881,7 @@ const Reports = () => {
 
                 {loading
                     ? <PanelSkeleton />
-                    : <SummaryPanel report={selected} currency={currency} failed={failed} marketplace={data?.marketplace} />}
+                    : <SummaryPanel report={selected} currency={currency} failed={failed} failReason={failReason} marketplace={data?.marketplace} />}
 
                 <section className="flex flex-col gap-4">
                     <div className="flex items-baseline gap-[10px] flex-wrap">
@@ -906,7 +916,7 @@ const Reports = () => {
                             style={{ background: PALETTE.surface, border: `1px solid ${PALETTE.border}`, padding: '28px 24px', color: PALETTE.textMuted }}
                         >
                             {failed
-                                ? 'Reports could not be loaded just now. Refresh the page to try again.'
+                                ? (failReason || 'Reports could not be loaded just now. Refresh the page to try again.')
                                 : 'No reports are available for your account yet.'}
                         </div>
                     )}

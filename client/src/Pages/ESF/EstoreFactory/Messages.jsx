@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Search, Send, Check, CheckCheck, Clock, MessageSquare } from 'lucide-react';
 import axiosInstance from '../../../config/axios.config.js';
+import downloadFile from '../../../utils/downloadFile.js';
 import { PALETTE } from '../../../Components/ESF/estoreFactoryTheme.js';
 import AttachmentPicker from '../../../Components/ESF/AttachmentPicker.jsx';
 import useAutoGrow from '../../../Components/ESF/useAutoGrow.js';
@@ -548,16 +549,15 @@ const Messages = () => {
                                                         {message.attachments?.length > 0 && (
                                                             <div className="mt-2 flex flex-wrap gap-1.5">
                                                                 {message.attachments.map((file, i) => (
-                                                                    <a
+                                                                    <button
                                                                         key={file.id || `${file.name}-${i}`}
-                                                                        href={`/api/pagewise/esf/messages/${open.id}/attachments/${message.id}/${i}`}
-                                                                        target="_blank"
-                                                                        rel="noreferrer"
+                                                                        type="button"
+                                                                        onClick={() => downloadFile(`/api/pagewise/esf/messages/${open.id}/attachments/${message.id}/${i}`, file.name)}
                                                                         className="rounded px-2 py-1 text-[11px] underline-offset-2 hover:underline"
                                                                         style={{ background: 'rgba(0,0,0,.25)', color: PALETTE.textSecondary }}
                                                                     >
                                                                         {file.name || 'Attachment'}
-                                                                    </a>
+                                                                    </button>
                                                                 ))}
                                                             </div>
                                                         )}

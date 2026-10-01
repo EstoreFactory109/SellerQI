@@ -30,8 +30,20 @@ import { PALETTE, dividerStyle } from '../../../Components/ESF/estoreFactoryThem
 /** Longest first, so the bar reads big-to-small like the cards do. */
 const BAR_COLORS = [PALETTE.accent, '#2F5FCB', '#6B7684', '#4A525C', '#3B424B', '#31373F'];
 
-/** Where "Discuss this" goes — the same Calendly consultation the rest of the app uses. */
-const CONSULTATION_PATH = '/seller-central-checker/consultation';
+/**
+ * Where "Discuss this" goes.
+ *
+ * It used to open /seller-central-checker/consultation, which books the SellerQI support
+ * calendar — so an eStore Factory client clicking the only action on an opportunity booked
+ * thirty minutes with the wrong company. The reasoning for a booking was sound (the header
+ * below still argues it); the destination was not, and no agency calendar exists anywhere
+ * in the codebase to point it at.
+ *
+ * Raising a ticket reaches the people who would actually scope the work: it lands in the
+ * shared ESF inbox the same as any other message, and the thread sits alongside the rest of
+ * their history rather than in a calendar invite nobody else can see.
+ */
+const MESSAGES_PATH = '/seller-central-checker/estore-factory/messages';
 
 const SECTIONS = {
     within: {
@@ -129,7 +141,7 @@ const OpportunityCard = ({ opp, eyebrow, raised, onDiscuss }) => {
             <div className="flex items-center gap-4 pt-3.5" style={dividerStyle()}>
                 <button
                     type="button"
-                    onClick={onDiscuss}
+                    onClick={() => onDiscuss(opp)}
                     className="text-[12.5px] font-medium px-4 py-[9px] rounded-lg"
                     style={{ color: PALETTE.textBody, border: `1px solid ${PALETTE.borderHover}` }}
                 >
@@ -226,6 +238,30 @@ const Untapped = () => {
     const periods = new Set(priced.map((o) => o.period).filter(Boolean));
     const heroSuffix = periods.size === 1 ? periodSuffix([...periods][0]) : null;
 
+    /**
+     * Start a conversation about one opportunity.
+     *
+     * Pre-filled rather than dropping the client into an empty composer: they clicked a
+     * specific card, and making them retype what it said is how a two-click action becomes a
+     * thing nobody bothers with. The agency's own wording is quoted back so the thread is
+     * unambiguous about which opportunity it is.
+     *
+     * Navigates regardless of the outcome. On success the thread is already there; on failure
+     * the Messages page is still where they would go to ask, and its composer carries the
+     * error handling this page has no business duplicating.
+     */
+    const discuss = useCallback(async (opp) => {
+        try {
+            const form = new FormData();
+            form.append('subject', `About: ${opp.title}`);
+            form.append('body', `I would like to discuss this opportunity.\n\n${opp.title}\n${opp.body || ''}`.trim());
+            await axiosInstance.post('/api/pagewise/esf/messages', form);
+        } catch {
+            // Deliberately quiet — see above.
+        }
+        navigate(MESSAGES_PATH);
+    }, [navigate]);
+
     return (
         <div className="flex w-full flex-1 flex-col" style={{ background: PALETTE.bg, color: PALETTE.textPrimary, fontFamily: "system-ui, -apple-system, 'Helvetica Neue', Helvetica, sans-serif" }}>
             <div className="w-full max-w-[1170px] mx-auto flex flex-col gap-[34px] px-4 sm:px-8 md:px-10 py-9 md:py-11">
@@ -282,7 +318,7 @@ const Untapped = () => {
                     loading={loading}
                     error={loadError}
                     linked={Boolean(data?.linked)}
-                    onDiscuss={() => navigate(CONSULTATION_PATH)}
+                    onDiscuss={discuss}
                 />
 
                 <OpportunitySection
@@ -292,7 +328,7 @@ const Untapped = () => {
                     loading={loading}
                     error={loadError}
                     linked={Boolean(data?.linked)}
-                    onDiscuss={() => navigate(CONSULTATION_PATH)}
+                    onDiscuss={discuss}
                 />
 
             </div>

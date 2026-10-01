@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { MessageSquare, CheckCircle2, RotateCcw, Search, Send, Paperclip, Lock, Check, CheckCheck, ArrowLeft, Clock } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
+import downloadFile from '../../utils/downloadFile.js';
 import AttachmentPicker from '../../Components/ESF/AttachmentPicker.jsx';
 import useAutoGrow from '../../Components/ESF/useAutoGrow.js';
 import useConversationPolling from '../../Components/ESF/useConversationPolling.js';
@@ -505,16 +506,15 @@ const EsfMessages = () => {
                                                                         identifies the client — the accepted
                                                                         exception, made concrete here.
                                                                     */
-                                                                    <a
+                                                                    <button
                                                                         key={file.id || `${file.name}-${i}`}
-                                                                        href={`/app/esf/messages/${open.id}/attachments/${message.id}/${i}`}
-                                                                        target="_blank"
-                                                                        rel="noreferrer"
+                                                                        type="button"
+                                                                        onClick={() => downloadFile(`/app/esf/messages/${open.id}/attachments/${message.id}/${i}`, file.name)}
                                                                         className="flex items-center gap-1.5 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-[11px] text-gray-300 transition-colors hover:border-white/25 hover:text-gray-100"
                                                                     >
                                                                         <Paperclip className="h-3 w-3" />
                                                                         {file.name || 'Attachment'}
-                                                                    </a>
+                                                                    </button>
                                                                 ))}
                                                             </div>
                                                         )}
