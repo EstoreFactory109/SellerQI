@@ -21,7 +21,9 @@ const {
     scopeClientQuery, canAccessClient, sanitizeClientIds, seesAllClients,
 } = require('../../Services/User/esfClientScope.js');
 const { getLinkableUsers, linkUsersToEsf } = require('../../Services/User/esfLinkableUsers.js');
-const { createAccessToken, verifyAccessToken, revokeRefreshToken } = require('../../utils/Tokens.js');
+const {
+    createAccessToken, createLocationToken, verifyAccessToken, revokeRefreshToken,
+} = require('../../utils/Tokens.js');
 const { hashPassword, verifyPassword } = require('../../utils/HashPassword.js');
 const { getHttpsCookieOptions } = require('../../utils/cookieConfig.js');
 const { ApiError } = require('../../utils/ApiError.js');
@@ -340,10 +342,26 @@ const createEsfClient = asyncHandler(async (req, res) => {
 
     logger.info(`ESF user ${req.esfUserId} created client ${client._id} (${client.email})`);
 
+    /*
+     * The THIRD cookie, which this used to leave out.
+     *
+     * A brand-new client has no Seller record at all, so no marketplace — and every other
+     * session mint in the app defaults to US/NA rather than skipping the cookie
+     * (ManagedClientService.issueClientSession, memberSession, the login paths). Leaving it
+     * out here meant a staff member who created a client and opened it immediately carried an
+     * access/refresh pair with no location token, which is precisely the state getLocation
+     * answered 401 for — a dead Reports page until they re-entered through
+     * POST /app/esf/clients/switch, which does mint it.
+     *
+     * getLocationOptional now stops that being fatal; this stops it happening at all.
+     */
+    const locationToken = await createLocationToken('US', 'NA');
+
     return res
         .status(201)
         .cookie('IBEXAccessToken', accessToken, options)
         .cookie('IBEXRefreshToken', refreshToken, options)
+        .cookie('IBEXLocationToken', locationToken, options)
         .json(new ApiResponse(201, {
             clientId: client._id,
             firstName: client.firstName,

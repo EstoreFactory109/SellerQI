@@ -8,7 +8,7 @@
 const express = require('express');
 const router = express.Router();
 const auth = require('../middlewares/Auth/auth.js');
-const { getLocation } = require('../middlewares/Auth/getLocation.js');
+const { getLocation, getLocationOptional } = require('../middlewares/Auth/getLocation.js');
 const { analyseDataCache } = require('../middlewares/redisCache.js');
 const { validateAsinParam, validateTaskStatusBody } = require('../middlewares/validator/pageWiseDataValidate.js');
 // Rate limiters disabled except for authentication
@@ -301,7 +301,7 @@ router.post('/ads/pause-and-add-to-negative-bulk', auth, getLocation, pauseAndAd
 // Visible ONLY to ESF-managed clients - esfClientOnly returns 403 otherwise.
 // Query params: startDate, endDate, compareStartDate, compareEndDate (YYYY-MM-DD)
 // Cache TTL: 10 minutes (keyed per date range by the cache middleware)
-router.get('/esf/client-dashboard', auth, esfClientOnly, getLocation, analyseDataCache(600, 'esf-client-dashboard'), getEsfClientDashboard);
+router.get('/esf/client-dashboard', auth, esfClientOnly, getLocationOptional, analyseDataCache(600, 'esf-client-dashboard'), getEsfClientDashboard);
 
 // The Status page reads the nightly Zoho task sync. No getLocation: this is
 // project data, not marketplace data, so it has no country/region dimension.
@@ -328,12 +328,16 @@ router.get('/esf/billing/invoices/:invoiceNumber/pdf', auth, esfClientOnly, down
 
 // Every recurring report type, each computed live from the collection that backs it,
 // for the WHOLE account: each report covers every connected marketplace, whichever one
-// is selected. getLocation stays only because analyseDataCache keys on it — the payload
-// is the same under every marketplace, so that is a duplicate entry, never a wrong one.
+// is selected. getLocationOptional stays only because analyseDataCache keys on it — the
+// payload is the same under every marketplace, so that is a duplicate entry, never a wrong
+// one. It is the OPTIONAL variant because the strict one answers 401 without the cookie,
+// and a client who has not connected Amazon yet does not have one: that made Reports the
+// only client-facing ESF page that hard-failed on day one. Clients with a marketplace
+// still get the cache; clients without get an uncached page instead of a dead one.
 // Cached for 10 minutes:
 // the underlying snapshots are refreshed hourly at most, and the fan-out here touches
 // eight collections, so re-running it per page view would be wasteful.
-router.get('/esf/reports', auth, esfClientOnly, getLocation, analyseDataCache(600, 'esf-reports'), getEsfReportsData);
+router.get('/esf/reports', auth, esfClientOnly, getLocationOptional, analyseDataCache(600, 'esf-reports'), getEsfReportsData);
 
 // One page of a single report's table, for the preview panel's pagination.
 // Deliberately NOT behind analyseDataCache: that middleware builds its key from
@@ -341,15 +345,15 @@ router.get('/esf/reports', auth, esfClientOnly, getLocation, analyseDataCache(60
 // pageTypes (see redisCache.js). This route would therefore serve page 1 of the
 // first report for every page of every report. Rebuilding one report costs a
 // couple of Mongo reads against snapshots, which is cheaper than the bug.
-router.get('/esf/reports/:reportKey/rows', auth, esfClientOnly, getLocation, getEsfReportRowsData);
+router.get('/esf/reports/:reportKey/rows', auth, esfClientOnly, getLocationOptional, getEsfReportRowsData);
 
 // Every captured edition of one report, for the Report History page. Cached for
 // 10 minutes and keyed per report by the path, which analyseDataCache does not
 // see — so, like the rows route above, it is left uncached rather than served
 // the wrong report's history.
-router.get('/esf/reports/:reportKey/history', auth, esfClientOnly, getLocation, getEsfReportHistoryData);
+router.get('/esf/reports/:reportKey/history', auth, esfClientOnly, getLocationOptional, getEsfReportHistoryData);
 // One report for the whole account at emailed-PDF depth, for Download.
-router.get('/esf/reports/:reportKey/document', auth, esfClientOnly, getLocation, getEsfReportDocumentData);
+router.get('/esf/reports/:reportKey/document', auth, esfClientOnly, getLocationOptional, getEsfReportDocumentData);
 
 // Deliberately NOT behind analyseDataCache. Every sibling ESF route uses a 300s TTL;
 // on a chat surface that makes a reply appear to vanish for five minutes.
