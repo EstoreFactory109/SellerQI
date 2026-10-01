@@ -180,4 +180,36 @@ const getEsfReportDocumentData = asyncHandler(async (req, res) => {
     }
 });
 
-module.exports = { getEsfReportsData, getEsfReportRowsData, getEsfReportHistoryData, getEsfReportDocumentData };
+/**
+ * GET /api/pagewise/esf/reports/next
+ *
+ * Just the "your next reports arrive on ..." block, for the Overview card.
+ *
+ * It is its own endpoint because Overview has no reports fetch of its own, and the
+ * alternatives were both worse. Putting it on /esf/project-status would make a cheap route
+ * fan out across eight collections for one stat card. Having Overview call /esf/reports would
+ * do the same and throw the rest away. This returns the one object both surfaces render, and
+ * the full Reports payload carries an identical copy, so the page and its summary cannot
+ * disagree about what they say.
+ */
+const getEsfNextReport = asyncHandler(async (req, res) => {
+    try {
+        const { nextReport } = await getEsfAccountReports(req.userId);
+        return res.status(200).json(new ApiResponse(200, nextReport, 'Next report fetched successfully'));
+    } catch (error) {
+        logger.error(new ApiError(500, `[EsfReports] next report failed: ${error.message}`));
+        /*
+         * A card is not worth an error state. The client renders nothing for a null answer,
+         * which is the same thing it does while the request is in flight.
+         */
+        return res.status(200).json(new ApiResponse(200, null, 'Next report is unavailable'));
+    }
+});
+
+module.exports = {
+    getEsfReportsData,
+    getEsfReportRowsData,
+    getEsfReportHistoryData,
+    getEsfReportDocumentData,
+    getEsfNextReport,
+};

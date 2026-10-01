@@ -5,7 +5,7 @@ import { PALETTE } from '../../Components/ESF/estoreFactoryTheme.js';
 import axiosInstance from '../../config/axios.config.js';
 // Read from the pages these cards summarise, so Overview can never show a number
 // that page disagrees with.
-import { NEXT_REPORT } from './EstoreFactory/Reports.jsx';
+import useNextReport, { formatDueLabel, formatDueTitle } from '../../hooks/useNextReport.js';
 
 /**
  * "Overview" — the landing page of the Estore Factory section on a client's own
@@ -45,9 +45,10 @@ const MARKETPLACE_DOMAIN = {
 
 /** Each card is a doorway to the section it summarises — the mock's cards looked
  *  clickable but swallowed the click, so they now actually navigate. */
-const StatCard = ({ label, value, valueColor, sub, subColor, tone, href }) => (
+const StatCard = ({ label, value, valueColor, sub, subColor, tone, href, title }) => (
     <Link
         to={href}
+        title={title || undefined}
         className="flex flex-col gap-3 rounded-lg p-5 pb-[18px] transition-colors"
         style={{
             background: tone === 'alert' ? PALETTE.amberBg : PALETTE.surface,
@@ -187,6 +188,17 @@ const ClientDashboard = () => {
     // From the dashboard API, not counted on this page: the Messages page and this
     // card must never disagree by counting differently.
     const openTickets = board?.openMessageCount ?? 0;
+    const nextReport = useNextReport();
+    /*
+     * One report gets named; several get counted. Weekly sends three in one email, so
+     * naming "the first" would be the hardcoded-constant bug again in a smaller font —
+     * and which one came first would change as the client's data changed.
+     */
+    const nextReportSub = nextReport?.status === 'scheduled'
+        ? (nextReport.reportCount === 1
+            ? nextReport.reportNames[0]
+            : `${nextReport.cadenceLabel} - ${nextReport.reportCount} reports`)
+        : (nextReport?.note || '-');
 
     const linked = Boolean(board?.linked);
     const inProgress = board?.inProgress || [];
@@ -296,10 +308,11 @@ const ClientDashboard = () => {
                     />
                     <StatCard
                         label="Next report"
-                        value={NEXT_REPORT.due}
+                        value={nextReport?.at ? formatDueLabel(nextReport.at) : '-'}
                         valueColor={PALETTE.textPrimary}
-                        sub={NEXT_REPORT.name}
+                        sub={nextReportSub}
                         href={REPORTS_PAGE}
+                        title={formatDueTitle(nextReport)}
                     />
                 </section>
 

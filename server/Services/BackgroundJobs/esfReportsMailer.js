@@ -37,40 +37,18 @@ const { sendEsfReportsEmail, createReportsTransport } = require('../Email/SendEs
  * Which report types belong to which cycle. Keys are the report keys from
  * EsfReportsService; the cadence strings there are the source of this grouping.
  */
-const CADENCE_GROUPS = {
-    weekly: {
-        label: 'Weekly',
-        reportKeys: ['account-overview', 'buybox', 'review-requests'],
-    },
-    biweekly: {
-        label: 'Bi-weekly',
-        reportKeys: ['inventory-restock'],
-    },
-    monthly: {
-        label: 'Monthly',
-        reportKeys: ['fba-aged-inventory', 'monthly-performance'],
-    },
-    quarterly: {
-        label: 'Quarterly',
-        reportKeys: ['listings-audit'],
-    },
-};
-
-/**
- * ISO-8601 week number. Used to make "bi-weekly" mean every OTHER week rather
- * than every week — cron cannot express a fortnight, so the job runs weekly and
- * returns early on odd weeks.
+/*
+ * CADENCE_GROUPS, isoWeek and isBiweeklyWeek now live in esfReportsSchedule.js.
+ *
+ * They moved so the Reports page can answer "when is my next report" without requiring
+ * this module, which pulls in the report builders and, through them, the database. Keeping
+ * them here and importing the schedule the other way round made a require cycle:
+ * EsfAccountReportsService -> schedule -> mailer -> EsfAccountReportsService, which left
+ * getEsfAccountReports undefined at load depending on who was required first.
+ *
+ * Re-exported below, so every existing caller and test is unaffected.
  */
-const isoWeek = (date = new Date()) => {
-    const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-    // Thursday of this week decides the year, per ISO-8601.
-    d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
-    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-    return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
-};
-
-/** True on the weeks the bi-weekly cycle should actually send. */
-const isBiweeklyWeek = (date = new Date()) => isoWeek(date) % 2 === 0;
+const { CADENCE_GROUPS, isoWeek, isBiweeklyWeek } = require('./esfReportsSchedule.js');
 
 /** Every ESF-managed client with at least one connected marketplace. */
 const findEsfClients = async () => {

@@ -3,6 +3,7 @@ import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { PALETTE } from '../../../Components/ESF/estoreFactoryTheme.js';
 import axiosInstance from '../../../config/axios.config.js';
+import useNextReport, { formatDueLabel, formatDueTitle } from '../../../hooks/useNextReport.js';
 import ReportDocumentPreview, { reportNeedsLandscape, POPPINS_HREF } from '../../../Components/ESF/ReportDocumentPreview.jsx';
 
 /**
@@ -31,14 +32,6 @@ import ReportDocumentPreview, { reportNeedsLandscape, POPPINS_HREF } from '../..
  * "View history" opens that report's own editions, read from the snapshot trail
  * each fetcher leaves behind (see the history section of EsfReportsService).
  */
-
-/**
- * The next scheduled report. Still hardcoded — there is no recurring-report
- * model, so the publishing schedule genuinely is not knowable from data. Kept
- * exported because the Overview card reads it from here rather than holding its
- * own copy; when a schedule exists, this is the single line that changes.
- */
-export const NEXT_REPORT = { name: 'Weekly Sales Summary', due: 'Monday' };
 
 const TONE_COLOR = {
     good: PALETTE.good,
@@ -772,6 +765,7 @@ const ReportCard = ({ report, selected, onSelect, onViewHistory, onDownload }) =
 const Reports = () => {
     const navigate = useNavigate();
     const currency = useSelector((state) => state.currency?.currency) || '$';
+    const nextReport = useNextReport();
 
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -859,9 +853,20 @@ const Reports = () => {
                             Every recurring report we publish on your account, kept by report type.
                         </p>
                     </div>
-                    <span className="flex-none text-[12.5px] pb-[3px]" style={{ color: PALETTE.textSecondary }}>
-                        Next report: <span style={{ color: PALETTE.textBody }}>{NEXT_REPORT.name}</span>, {NEXT_REPORT.due}
-                    </span>
+                    {nextReport?.status === 'scheduled' ? (
+                        <span
+                            className="flex-none text-[12.5px] pb-[3px]"
+                            style={{ color: PALETTE.textSecondary }}
+                            title={formatDueTitle(nextReport)}
+                        >
+                            Next: <span style={{ color: PALETTE.textBody }}>{nextReport.cadenceLabel} reports</span>
+                            {' - '}{nextReport.reportNames.join(', ')}, {formatDueLabel(nextReport.at)}
+                        </span>
+                    ) : nextReport?.note ? (
+                        <span className="flex-none text-[12.5px] pb-[3px]" style={{ color: PALETTE.textSecondary }}>
+                            {nextReport.note}
+                        </span>
+                    ) : null}
                 </header>
 
                 {loading

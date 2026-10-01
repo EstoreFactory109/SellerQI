@@ -105,7 +105,7 @@ const { postEsfTaskReply } = require('../controllers/analytics/EsfProjectReplyCo
 const { getEsfBilling, downloadEsfInvoice } = require('../controllers/analytics/EsfBillingController.js');
 const { getEsfMessages, getEsfMessageThread, postEsfMessageReply, postEsfNewTicket, downloadEsfAttachment, postEsfTaskRequest } = require('../controllers/analytics/EsfClientMessagesController.js');
 const gmailUpload = require('../middlewares/multer/gmailUpload.js');
-const { getEsfReportsData, getEsfReportRowsData, getEsfReportHistoryData, getEsfReportDocumentData } = require('../controllers/analytics/EsfReportsController.js');
+const { getEsfReportsData, getEsfReportRowsData, getEsfReportHistoryData, getEsfReportDocumentData, getEsfNextReport } = require('../controllers/analytics/EsfReportsController.js');
 const { zohoUpload, MAX_FILES, MAX_FILE_BYTES } = require('../middlewares/multer/zohoUpload.js');
 const { ApiResponse } = require('../utils/ApiResponse.js');
 const esfClientOnly = require('../middlewares/Auth/esfClientOnly.js');
@@ -338,6 +338,14 @@ router.get('/esf/billing/invoices/:invoiceNumber/pdf', auth, esfClientOnly, down
 // the underlying snapshots are refreshed hourly at most, and the fan-out here touches
 // eight collections, so re-running it per page view would be wasteful.
 router.get('/esf/reports', auth, esfClientOnly, getLocationOptional, analyseDataCache(600, 'esf-reports'), getEsfReportsData);
+
+// When the client's next batch of reports goes out. Registered before the :reportKey routes
+// so a future bare '/esf/reports/:reportKey' cannot swallow "next" as a key.
+//
+// No getLocationOptional: nothing here is marketplace-scoped. No analyseDataCache either —
+// that middleware keys on req.country and bails without it, so it would read as caching while
+// doing nothing at all for exactly the clients this endpoint was added for.
+router.get('/esf/reports/next', auth, esfClientOnly, getEsfNextReport);
 
 // One page of a single report's table, for the preview panel's pagination.
 // Deliberately NOT behind analyseDataCache: that middleware builds its key from

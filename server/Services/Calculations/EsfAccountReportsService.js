@@ -31,6 +31,7 @@ const mongoose = require('mongoose');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
 const logger = require('../../utils/Logger.js');
+const { nextScheduledReport } = require('../BackgroundJobs/esfReportsSchedule.js');
 const { getCurrencySymbol, getCurrencyCode } = require('../../utils/marketplaceCurrency.js');
 const {
     BUILDERS, settle, toCard, takeawayOf, pctChange, PREVIEW_ROWS,
@@ -365,6 +366,23 @@ const getEsfAccountReports = async (userId, opts = {}) => {
 
     logger.info(`[EsfAccountReports] user=${userId} ${marketplaces.length} marketplace(s), ${available.length}/${reports.length} reports in ${Date.now() - startTime}ms`);
 
+    /*
+     * When the client's next batch of reports actually goes out.
+     *
+     * Derived here rather than in the client because the schedule depends on four env
+     * overrides and the scheduler's TIMEZONE — knowledge that only exists server-side.
+     * The page used to hardcode "Weekly Sales Summary, Monday", which was wrong on both
+     * counts: the weekly cron runs on Saturday, and no report has that name.
+     *
+     * `available` is passed through so the answer respects THIS client: a cadence whose
+     * reports all lack data sends no email at all, so promising its date would promise
+     * mail that never arrives.
+     */
+    const nextReport = nextScheduledReport({
+        availableKeys: available.map((report) => report.key),
+        nameForKey: (key) => reports.find((report) => report.key === key)?.name || key,
+    });
+
     return {
         // `marketplace` kept for older readers: the primary.
         marketplace: primary ? { country: primary.country, region: primary.region } : null,
@@ -373,6 +391,7 @@ const getEsfAccountReports = async (userId, opts = {}) => {
         reports,
         featuredKey: featured?.key || null,
         counts: { total: reports.length, available: available.length },
+        nextReport,
     };
 };
 
