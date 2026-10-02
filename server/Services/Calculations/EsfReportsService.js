@@ -369,13 +369,20 @@ const pctChange = (current, previous) => {
  * One bullet in a report's Performance Highlights block.
  *
  * `tone` maps onto the shared report stylesheet the whole family uses:
- *   good/neutral -> plain bullet, watch -> red "flag" text,
- *   fill -> blue italic, the account manager's own copy for this cycle.
+ *   good/neutral -> plain bullet, watch -> red "flag" text.
+ *
+ * There was a third, `fill`: blue italic, for the account manager's own copy.
+ * Seven reports ended on one - "[Account manager commentary for this cycle]",
+ * "[Purchase orders raised this cycle]" and so on - and nothing anywhere let
+ * anyone write that copy, so the brackets went to clients verbatim in an
+ * emailed PDF carrying a legend that explained how to fill them in.
+ *
+ * Every render site now filters `fill` out, which stopped the bleeding. These
+ * no longer emit it either, so the suppression is a backstop rather than the
+ * only thing standing between a template and a client. Reintroduce the tone
+ * when there is somewhere to write the copy, not before.
  */
 const highlight = (text, tone = 'neutral') => ({ text, tone });
-
-/** Bullets every report ends on: what a person still has to write. */
-const MANAGER_NOTE = highlight('[Account manager commentary for this cycle]', 'fill');
 
 /**
  * A report that exists but has nothing behind it yet.
@@ -549,7 +556,6 @@ const buildRestock = async (userId, country, region) => {
             ...(rows[0]?.isUrgent
                 ? [highlight(`${rows[0].sku || rows[0].asin} carries the largest urgent reorder at ${cash(country, rows[0].reorderValue)}.`, 'watch')]
                 : []),
-            highlight('[Purchase orders raised this cycle]', 'fill'),
         ],
         caveats: [],
     };
@@ -887,7 +893,6 @@ const buildAccountOverview = async (userId, country, region) => {
             ...(opportunities?.totalEstimatedRecovery
                 ? [highlight(`${cash(country, opportunities.totalEstimatedRecovery)} is recoverable in total across every opportunity we have ranked.`)]
                 : []),
-            highlight('[Observation / remarks for this week]', 'fill'),
         ],
         caveats,
     };
@@ -1173,7 +1178,6 @@ const buildBuyBox = async (userId, country, region) => {
                     'good'
                 )]
                 : []),
-            highlight('[Pricing or fulfilment action taken on the contested listings]', 'fill'),
         ],
         caveats: [
             ...(pricingCaptured
@@ -1332,7 +1336,6 @@ const buildAgedInventory = async (userId, country, region) => {
                 : removalsRead
                     ? [highlight('No removal orders are open, so every ageing unit above is still awaiting a decision.')]
                     : []),
-            highlight('[Removal or liquidation plan for aged stock]', 'fill'),
         ],
         caveats: [
             'The 0–90 and 91–180 day bands are not shown. Amazon reports them, but only the storage-fee bands (181 days and older) are stored today, so younger stock is not counted here.',
@@ -1513,7 +1516,6 @@ const buildListingsAudit = async (userId, country, region) => {
             ...(rows[0]?.gaps
                 ? [highlight(`${rows[0].sku || rows[0].asin} needs the most work, failing ${rows[0].gaps} of ${AUDIT_CHECKS.length} checks.`, 'watch')]
                 : []),
-            highlight('[Listings scheduled for content work this quarter]', 'fill'),
         ],
         caveats: [
             ...(premiumCaptured
@@ -1620,7 +1622,6 @@ const buildReviewRequests = async (userId, country, region) => {
             ...(failed
                 ? [highlight(`${plural(failed, 'request')} failed on send and should be retried.`, 'watch')]
                 : []),
-            MANAGER_NOTE,
         ],
         caveats: daysBehind > 10
             ? [`This is the most recent week with order data. The newest order we hold is from ${formatDate(anchor)}, ${daysBehind} days ago - order ingestion has not run since.`]
@@ -2096,7 +2097,6 @@ const buildMonthlyPerformance = async (userId, country, region) => {
             ...(current.b2b && current.b2b.units && current.b2b.share !== null
                 ? [highlight(`Business customers bought ${plural(current.b2b.units, 'unit')}, ${current.b2b.share}% of units in the period.`)]
                 : []),
-            highlight('[Actions taken this month and focus areas planned for next]', 'fill'),
         ],
         caveats: [
             ...(partial
