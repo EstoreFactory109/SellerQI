@@ -366,6 +366,44 @@ const shortDate = (value) => {
         : date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 };
 
+/** A day label the server can produce — "3 Feb" / "13 Sept", or "Undated". */
+const DAY_LABEL_RE = /^(\d{1,2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sept|Oct|Nov|Dec)|Undated): (.*)$/;
+/** The trailing "(N) earlier day(s)..." note appended when the thread is windowed down — never itself a day's update. */
+const EARLIER_NOTE_RE = /^\d+ earlier days? with activity not shown\.$/;
+
+/**
+ * `task.summary` is a flat string, one dated line per day (see
+ * ZohoTaskSummaryService's day-wise contract) — plain text was readable but
+ * ran every day into the next with nothing to anchor the eye on. This turns
+ * it back into a structured `{ label, text }[]` so the detail panel can
+ * render an actual timeline instead of a wall of text.
+ *
+ * Returns null for anything that isn't day-wise shaped — the two fixed
+ * "no updates" phrases, most notably — so the caller can fall back to
+ * plain-text rendering rather than mangling them.
+ */
+const parseDayWiseSummary = (text) => {
+    if (!text) return null;
+    const lines = text.split('\n');
+    if (!DAY_LABEL_RE.test(lines[0])) return null;
+
+    const days = [];
+    let note = null;
+    for (const line of lines) {
+        if (EARLIER_NOTE_RE.test(line)) { note = line; continue; }
+        const match = line.match(DAY_LABEL_RE);
+        if (match) {
+            days.push({ label: match[1], text: match[2] });
+        } else if (days.length) {
+            // The model's "1-2 short sentences" is almost always one line, but
+            // isn't guaranteed to be — keep a stray continuation with the day
+            // it belongs to rather than dropping or misreading it as its own row.
+            days[days.length - 1].text += ` ${line}`;
+        }
+    }
+    return days.length ? { days, note } : null;
+};
+
 /**
  * One task row, expanding to the AI progress summary of its Zoho discussion.
  *
@@ -377,6 +415,7 @@ const TaskRow = ({ task, isFirst }) => {
     const [open, setOpen] = useState(false);
     const priority = badgeFor(PRIORITY_STYLE, task.priority);
     const hasDetail = Boolean(task.summary) || task.updateCount > 0;
+    const dayWise = task.summary ? parseDayWiseSummary(task.summary) : null;
 
     return (
         <>
@@ -415,7 +454,45 @@ const TaskRow = ({ task, isFirst }) => {
 
             {open && (
                 <div className="flex flex-col gap-3 pb-5" style={dividerStyle()}>
-                    {task.summary ? (
+                    {dayWise ? (
+                        <div className="max-w-[80ch]">
+                            {dayWise.days.map((day, i) => {
+                                const isLatest = i === dayWise.days.length - 1;
+                                return (
+                                    <div key={i} className="flex gap-3">
+                                        <div className="flex-none w-[9px] flex flex-col items-center">
+                                            <span
+                                                className="w-[9px] h-[9px] rounded-full flex-none mt-[5px]"
+                                                style={{
+                                                    background: isLatest ? PALETTE.accent : PALETTE.borderHover,
+                                                    boxShadow: isLatest ? '0 0 0 3px rgba(59,130,246,.18)' : 'none',
+                                                }}
+                                            />
+                                            {!isLatest && <span className="flex-1 w-px mt-1" style={{ background: PALETTE.dividerFaint, minHeight: 10 }} />}
+                                        </div>
+                                        <div className="flex-1 min-w-0 pb-3">
+                                            <div className="flex items-baseline gap-2 flex-wrap">
+                                                <span className="text-[11px] font-semibold tracking-wide" style={{ color: isLatest ? PALETTE.accentLight : PALETTE.textMuted }}>
+                                                    {day.label}
+                                                </span>
+                                                {isLatest && (
+                                                    <span className="text-[9.5px] font-semibold uppercase tracking-wider rounded px-[6px] py-[1px]" style={{ background: 'rgba(59,130,246,.14)', color: PALETTE.accentLight }}>
+                                                        Latest
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <p className="m-0 mt-[3px] text-[13px] leading-[1.6]" style={{ color: isLatest ? PALETTE.textBody : '#9099A3' }}>
+                                                {day.text}
+                                            </p>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                            {dayWise.note && (
+                                <p className="m-0 pl-5 pt-1 text-[11.5px] italic" style={{ color: PALETTE.textFaint }}>{dayWise.note}</p>
+                            )}
+                        </div>
+                    ) : task.summary ? (
                         <p className="m-0 text-[13px] leading-[1.65] max-w-[80ch] whitespace-pre-line" style={{ color: '#B7BDC6' }}>
                             {task.summary}
                         </p>
