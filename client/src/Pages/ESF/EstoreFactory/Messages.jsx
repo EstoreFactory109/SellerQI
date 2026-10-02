@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Search, Send, Check, CheckCheck, Clock, MessageSquare } from 'lucide-react';
+import { Search, Send, Check, CheckCheck, Clock, MessageSquare, ChevronDown } from 'lucide-react';
 import axiosInstance from '../../../config/axios.config.js';
 import downloadFile from '../../../utils/downloadFile.js';
 import { PALETTE } from '../../../Components/ESF/estoreFactoryTheme.js';
 import AttachmentPicker from '../../../Components/ESF/AttachmentPicker.jsx';
 import useAutoGrow from '../../../Components/ESF/useAutoGrow.js';
 import useConversationPolling from '../../../Components/ESF/useConversationPolling.js';
+import useConversationScroll from '../../../Components/ESF/useConversationScroll.js';
 
 /**
  * Estore Factory > Messages — the client's own conversations.
@@ -293,13 +294,33 @@ const Messages = () => {
         }
     }, [ticketSubject, ticketBody, ticketFiles, raising, loadThreads, openThread]);
 
+    const markOpenThreadRead = useCallback(() => {
+        if (!openId) return;
+        axiosInstance.get(`/api/pagewise/esf/messages/${openId}`).catch(() => {});
+    }, [openId]);
+
+    const { containerRef, newCount, scrollToBottom, isAtBottom } = useConversationScroll({
+        threadId: openId,
+        messages: conversation?.messages,
+        /*
+         * INVERTED against the staff page, and this is the easy thing to get backwards.
+         * On this side of the boundary `inbound` is the CLIENT's own message - the one
+         * they just sent - exactly as toClientMessage documents. Reading it the staff
+         * way makes the pane chase the agency's replies and ignore the reader's own.
+         */
+        isOwn: (message) => message.direction === 'inbound',
+        onReachBottom: markOpenThreadRead,
+    });
+
     // Same reasoning as the staff inbox: a reply from the team arrives by email and
     // lands in the database with nothing telling this page about it.
     useConversationPolling(async () => {
         if (sending || raising) return;
         try {
             if (openId) {
-                const res = await axiosInstance.get(`/api/pagewise/esf/messages/${openId}`);
+                const res = await axiosInstance.get(`/api/pagewise/esf/messages/${openId}`, {
+                    params: { markRead: isAtBottom() ? '1' : '0' },
+                });
                 setConversation(res.data?.data || null);
             }
             const list = await axiosInstance.get('/api/pagewise/esf/messages');
@@ -513,7 +534,10 @@ const Messages = () => {
                                 </span>
                             </div>
 
-                            <div className="flex-1 space-y-1 overflow-y-auto px-3 py-4 sm:px-4 md:px-8">
+                            {/* min-h-0: without it this flex child will not shrink and the
+                                pane stops scrolling entirely. */}
+                            <div className="relative flex min-h-0 flex-1 flex-col">
+                            <div ref={containerRef} className="flex-1 space-y-1 overflow-y-auto px-3 py-4 sm:px-4 md:px-8">
                                 {dayGroups.map((group) => (
                                     <div key={group.key} className="space-y-1">
                                         <div className="flex justify-center py-3">
@@ -577,6 +601,19 @@ const Messages = () => {
                                         })}
                                     </div>
                                 ))}
+                            </div>
+
+                            {newCount > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={() => scrollToBottom()}
+                                    className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium shadow-lg"
+                                    style={{ background: PALETTE.good, color: PALETTE.bg }}
+                                >
+                                    {newCount} new message{newCount === 1 ? '' : 's'}
+                                    <ChevronDown className="h-3.5 w-3.5" />
+                                </button>
+                            )}
                             </div>
 
                             <div className="border-t px-4 py-3" style={{ borderColor: PALETTE.border }}>

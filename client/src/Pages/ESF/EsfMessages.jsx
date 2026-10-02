@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { MessageSquare, CheckCircle2, RotateCcw, Search, Send, Paperclip, Lock, Check, CheckCheck, ArrowLeft, Clock } from 'lucide-react';
+import { MessageSquare, CheckCircle2, RotateCcw, Search, Send, Paperclip, Lock, Check, CheckCheck, ArrowLeft, Clock, ChevronDown } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 import downloadFile from '../../utils/downloadFile.js';
 import AttachmentPicker from '../../Components/ESF/AttachmentPicker.jsx';
 import useAutoGrow from '../../Components/ESF/useAutoGrow.js';
 import useConversationPolling from '../../Components/ESF/useConversationPolling.js';
+import useConversationScroll from '../../Components/ESF/useConversationScroll.js';
 
 /**
  * "Estore Factory" > Messages — the staff inbox.
@@ -282,11 +283,34 @@ const EsfMessages = () => {
      * Skipped entirely while a send is in flight: replacing the messages mid-send would
      * wipe the optimistic bubble and make the message flicker out and back.
      */
+    /**
+     * Mark the thread read when reaching the bottom, not when the poll happens to fire.
+     * Being parked at the bottom is already covered by the poll's own markRead flag, so
+     * this only fires on the away -> bottom transition and costs no extra request in the
+     * common case.
+     */
+    const markOpenThreadRead = useCallback(() => {
+        if (!openId) return;
+        axiosInstance.get(`/app/esf/messages/${openId}`).catch(() => {});
+    }, [openId]);
+
+    const { containerRef, newCount, scrollToBottom, isAtBottom } = useConversationScroll({
+        threadId: openId,
+        messages: conversation?.messages,
+        // Outbound is OURS on the staff side. Inverted on the client page.
+        isOwn: (message) => message.direction === 'outbound',
+        onReachBottom: markOpenThreadRead,
+    });
+
     useConversationPolling(async () => {
         if (sending) return;
         try {
             if (openId) {
-                const res = await axiosInstance.get(`/app/esf/messages/${openId}`);
+                const res = await axiosInstance.get(`/app/esf/messages/${openId}`, {
+                    // Parked at the bottom means the new message lands on screen, so it
+                    // has honestly been read. Scrolled away, it has not.
+                    params: { markRead: isAtBottom() ? '1' : '0' },
+                });
                 setConversation(res.data?.data || null);
             }
             const list = await axiosInstance.get('/app/esf/messages', {
@@ -302,6 +326,7 @@ const EsfMessages = () => {
 
     const open = conversation?.thread;
     const dayGroups = useMemo(() => groupByDay(conversation?.messages || []), [conversation]);
+
 
     return (
         /*
@@ -460,7 +485,11 @@ const EsfMessages = () => {
                             </div>
 
                             {/* Messages */}
-                            <div className="flex-1 space-y-1 overflow-y-auto px-3 py-4 sm:px-4 md:px-8">
+                            {/* min-h-0 is load-bearing: without it this flex child refuses to
+                                shrink, the pane stops scrolling and the composer is pushed off
+                                the bottom of the 100dvh calc. */}
+                            <div className="relative flex min-h-0 flex-1 flex-col">
+                            <div ref={containerRef} className="flex-1 space-y-1 overflow-y-auto px-3 py-4 sm:px-4 md:px-8">
                                 {/* The slot WhatsApp gives its encryption notice, used for the
                                     same kind of statement: what the ticks can actually tell you. */}
                                 <div className="flex justify-center pb-1">
@@ -547,6 +576,21 @@ const EsfMessages = () => {
                                         Quoted history is trimmed — earlier messages appear above.
                                     </p>
                                 )}
+                            </div>
+
+                            {/* Offered rather than forced: a reply that arrives while someone
+                                is reading back through the history must not yank them to the
+                                bottom mid-sentence. */}
+                            {newCount > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={() => scrollToBottom()}
+                                    className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-medium text-white shadow-lg shadow-blue-950/40 hover:bg-blue-500"
+                                >
+                                    {newCount} new message{newCount === 1 ? '' : 's'}
+                                    <ChevronDown className="h-3.5 w-3.5" />
+                                </button>
+                            )}
                             </div>
 
                             {/* Composer */}
