@@ -47,8 +47,8 @@ jest.mock('../../../models/system/EsfUntappedModel.js', () => {
     return model;
 });
 jest.mock('../../../models/system/TopOpportunitiesModel.js', () => ({
-    findOne: jest.fn().mockReturnValue({
-        sort: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }),
+    find: jest.fn().mockReturnValue({
+        sort: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }),
     }),
 }));
 jest.mock('../../../Services/AI/ZohoOpportunityMatchService.js', () => ({
@@ -98,8 +98,8 @@ beforeEach(() => {
     EsfUntapped.deleteMany.mockResolvedValue({ deletedCount: 0 });
     EsfUntapped.MAX_OPPORTUNITIES = 40;
     UserModel.findOne.mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }) });
-    TopOpportunities.findOne.mockReturnValue({
-        sort: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }),
+    TopOpportunities.find.mockReturnValue({
+        sort: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }),
     });
     mockClients([]);
     mockRows([]);
@@ -186,6 +186,65 @@ describe('getTaskBoard', () => {
         ]);
         const board = await Sync.getTaskBoard('p1', { now: NOW });
         expect(board.syncedAt).toEqual(new Date('2026-09-11T02:00:00.000Z'));
+    });
+});
+
+/**
+ * The Dashboard's "Top things to fix" is scoped per (user, country, region), so a
+ * multi-marketplace seller can have one TopOpportunities doc per marketplace. The
+ * Status page has no marketplace selector, so this has to pick one — and picking
+ * strictly "most recently written" is wrong: a scheduled rescan of a quiet
+ * marketplace can finish seconds after a populated one and sort first while
+ * empty, starving "Coming up" even though the Dashboard still shows real
+ * opportunities for the marketplace that actually has them.
+ */
+describe('refreshSuggestedWork — choosing which marketplace scope to show', () => {
+    const client = (id = 'c1') => ({ _id: id });
+    const opp = (candidateId) => ({ candidateId, rank: 1, title: 'Fix it', action: 'do it', category: 'ppc', issueType: 'waste', amount: 100, count: 1 });
+
+    beforeEach(() => {
+        UserModel.findOne.mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(client()) }) });
+        EsfSuggestedWork.findOne.mockReturnValue({ lean: jest.fn().mockResolvedValue(null) });
+    });
+
+    test('a newer but empty scope does not shadow an older scope that has real opportunities', async () => {
+        // US/NA rescanned last and found nothing; IN/EU is older but has 6 real items —
+        // this is the exact shape that produced an empty "Coming up" for a live client.
+        TopOpportunities.find.mockReturnValue({
+            sort: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([
+                { country: 'US', region: 'NA', opportunities: [], updatedAt: new Date('2026-09-26T18:52:14.000Z') },
+                { country: 'IN', region: 'EU', opportunities: [opp('a'), opp('b')], updatedAt: new Date('2026-09-26T18:52:09.000Z') },
+            ]) }),
+        });
+
+        const result = await Sync.refreshSuggestedWork('p1', []);
+
+        expect(result.skipped).not.toBe('no opportunities');
+        expect(EsfSuggestedWork.deleteOne).not.toHaveBeenCalled();
+    });
+
+    test('falls back to the newest scope when every scope is genuinely empty', async () => {
+        TopOpportunities.find.mockReturnValue({
+            sort: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([
+                { country: 'US', region: 'NA', opportunities: [], updatedAt: new Date('2026-09-26T18:52:14.000Z') },
+                { country: 'IN', region: 'EU', opportunities: [], updatedAt: new Date('2026-09-26T18:52:09.000Z') },
+            ]) }),
+        });
+
+        const result = await Sync.refreshSuggestedWork('p1', []);
+
+        expect(result).toEqual({ suggestions: 0, skipped: 'no opportunities' });
+        expect(EsfSuggestedWork.deleteOne).toHaveBeenCalledWith({ projectId: 'p1' });
+    });
+
+    test('no TopOpportunities doc at all for this user is the same as none having content', async () => {
+        TopOpportunities.find.mockReturnValue({
+            sort: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }),
+        });
+
+        const result = await Sync.refreshSuggestedWork('p1', []);
+
+        expect(result).toEqual({ suggestions: 0, skipped: 'no opportunities' });
     });
 });
 

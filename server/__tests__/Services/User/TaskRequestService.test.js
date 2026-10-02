@@ -40,7 +40,12 @@ jest.mock('../../../Services/AI/TasklistRouterService.js', () => ({
 }));
 
 const mockSyncProject = jest.fn();
-jest.mock('../../../Services/Zoho/ZohoTaskSync.js', () => ({ syncProject: (...a) => mockSyncProject(...a) }));
+jest.mock('../../../Services/Zoho/ZohoTaskSync.js', () => {
+    // classifyTask/SECTIONS are pure data rules reused as-is — only syncProject (which
+    // reaches Zoho and the DB) is stubbed.
+    const real = jest.requireActual('../../../Services/Zoho/ZohoTaskSync.js');
+    return { ...real, syncProject: (...a) => mockSyncProject(...a) };
+});
 
 const mockCreate = jest.fn();
 const mockCount = jest.fn();
@@ -57,6 +62,21 @@ jest.mock('../../../models/system/TaskRequestModel.js', () => {
 
 const mockUserFindById = jest.fn();
 jest.mock('../../../models/user-auth/userModel.js', () => ({ findById: (...a) => mockUserFindById(...a) }));
+
+/**
+ * The client's open Zoho tasks, read by findInProgressMatch before a request is ever
+ * queued. Empty by default so every existing test below (none of which are about this
+ * check) keeps behaving exactly as it did before the check existed.
+ */
+const mockTaskFind = jest.fn();
+jest.mock('../../../models/system/ZohoProjectTaskModel.js', () => ({
+    find: (...a) => mockTaskFind(...a),
+}));
+
+const mockMatchOpportunities = jest.fn();
+jest.mock('../../../Services/AI/ZohoOpportunityMatchService.js', () => ({
+    matchOpportunities: (...a) => mockMatchOpportunities(...a),
+}));
 
 const TaskRequestService = require('../../../Services/User/TaskRequestService.js');
 
@@ -95,6 +115,10 @@ beforeEach(() => {
     mockUserFindById.mockReturnValue(chain({
         zohoProject: { projectId: 'p1', projectName: 'Morgan Repellent', portalId: 'portal-1' },
     }));
+    // No open tasks by default — findInProgressMatch short-circuits before ever calling
+    // the AI matcher, so every pre-existing test here is unaffected by this check.
+    mockTaskFind.mockReturnValue(chain([]));
+    mockMatchOpportunities.mockResolvedValue({ matches: [{ candidateId: 'request', covered: false }] });
 });
 
 describe('submitting', () => {
@@ -153,6 +177,76 @@ describe('submitting', () => {
 
         await expect(submit()).rejects.toThrow(/already have 10 requests/);
         expect(mockSendTaskRequestEmail).not.toHaveBeenCalled();
+    });
+});
+
+describe('catching a duplicate before it is ever queued', () => {
+    test('a client with no open Zoho tasks is never checked against the AI matcher', async () => {
+        await submit();
+
+        expect(mockMatchOpportunities).not.toHaveBeenCalled();
+        expect(mockSendTaskRequestEmail).toHaveBeenCalled();
+    });
+
+    test('an open task the AI judges to already cover this refuses the request, before any email or row', async () => {
+        mockTaskFind.mockReturnValue(chain([
+            { taskId: 'z1', name: 'Content Phase 1', tasklist: 'Content', isCompleted: false, statusIsClosed: false, startDate: null },
+        ]));
+        mockMatchOpportunities.mockResolvedValue({
+            matches: [{ candidateId: 'request', covered: true, coveredByTaskId: 'z1', coveredByTaskName: 'Content Phase 1' }],
+        });
+
+        await expect(submit()).rejects.toThrow(/already.*in progress/i);
+        expect(mockSendTaskRequestEmail).not.toHaveBeenCalled();
+        expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    test('names the matched task in the message the client sees', async () => {
+        mockTaskFind.mockReturnValue(chain([
+            { taskId: 'z1', name: 'Content Phase 1', tasklist: 'Content', isCompleted: false, statusIsClosed: false, startDate: null },
+        ]));
+        mockMatchOpportunities.mockResolvedValue({
+            matches: [{ candidateId: 'request', covered: true, coveredByTaskId: 'z1', coveredByTaskName: 'Content Phase 1' }],
+        });
+
+        await expect(submit()).rejects.toThrow(/Content Phase 1/);
+    });
+
+    test('an open task the AI judges UNRELATED still lets the request through', async () => {
+        mockTaskFind.mockReturnValue(chain([
+            { taskId: 'z1', name: 'Reimbursement claims', tasklist: 'Finance', isCompleted: false, statusIsClosed: false, startDate: null },
+        ]));
+        mockMatchOpportunities.mockResolvedValue({
+            matches: [{ candidateId: 'request', covered: false }],
+        });
+
+        await submit();
+
+        expect(mockSendTaskRequestEmail).toHaveBeenCalled();
+    });
+
+    test('a completed task is never treated as still in progress', async () => {
+        // Same rule refreshSuggestedWork uses for the Dashboard: if the team finished the
+        // work and the client asks again, that is worth raising, not suppressing.
+        mockTaskFind.mockReturnValue(chain([
+            { taskId: 'z1', name: 'Add a size chart', tasklist: 'Content', isCompleted: true, statusIsClosed: false, startDate: null },
+        ]));
+
+        await submit();
+
+        // Never even reached the AI matcher: the only task on file was filtered out as
+        // completed before the open-tasks list was built.
+        expect(mockMatchOpportunities).not.toHaveBeenCalled();
+        expect(mockSendTaskRequestEmail).toHaveBeenCalled();
+    });
+
+    test('a client with no linked Zoho project is never checked — nothing to compare against', async () => {
+        mockUserFindById.mockReturnValue(chain({ zohoProject: {} }));
+
+        await submit();
+
+        expect(mockTaskFind).not.toHaveBeenCalled();
+        expect(mockSendTaskRequestEmail).toHaveBeenCalled();
     });
 });
 

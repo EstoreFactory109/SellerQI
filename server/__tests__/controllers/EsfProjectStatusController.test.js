@@ -29,7 +29,7 @@ jest.mock('../../Services/Calculations/EsfProjectStatusService.js', () => ({
     getProjectBoard: (...a) => mockGetBoard(...a),
 }), { virtual: true });
 
-const { getEsfProjectStatus } = require('../../controllers/analytics/EsfProjectStatusController.js');
+const { getEsfProjectStatus, toClientTask } = require('../../controllers/analytics/EsfProjectStatusController.js');
 
 const USER_ID = 'u1';
 
@@ -103,5 +103,41 @@ describe('the no-project payload is still complete', () => {
 
         ['linked', 'inProgress', 'waitingOnYou', 'completed', 'comingUp', 'syncedAt', 'openMessageCount']
             .forEach((field) => expect(body.data).toHaveProperty(field));
+    });
+});
+
+/**
+ * toClientTask carries BOTH shapes of the AI progress summary, not tested
+ * anywhere else: the full dated history for the Status page's detail panel,
+ * and the single newest line for the Client Dashboard's "What we're working
+ * on" widget, which has no newline handling and would otherwise collapse the
+ * full history into one run-on sentence.
+ */
+describe('toClientTask — the two summary shapes', () => {
+    const task = (commentSummary) => ({
+        taskId: 't1', name: 'Rewrite bullets', comments: [], commentSummary,
+    });
+
+    test('summary carries the full text; latestSummaryLine carries only the newest day', () => {
+        const out = toClientTask(task({
+            text: '1 Sept: Pulled search terms.\n2 Sept: Draft sent for review.',
+        }));
+
+        expect(out.summary).toBe('1 Sept: Pulled search terms.\n2 Sept: Draft sent for review.');
+        expect(out.latestSummaryLine).toBe('2 Sept: Draft sent for review.');
+    });
+
+    test('a task with no summary yet gives both fields as null, not a blank string', () => {
+        const out = toClientTask(task(undefined));
+
+        expect(out.summary).toBeNull();
+        expect(out.latestSummaryLine).toBeNull();
+    });
+
+    test('"no updates yet" is still null on latestSummaryLine, not the phrase itself', () => {
+        const out = toClientTask(task({ text: 'No detailed updates on this task yet.' }));
+
+        expect(out.summary).toBe('No detailed updates on this task yet.');
+        expect(out.latestSummaryLine).toBeNull();
     });
 });

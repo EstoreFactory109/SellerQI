@@ -16,6 +16,7 @@ const logger = require('../../utils/Logger.js');
 const UserModel = require('../../models/user-auth/userModel.js');
 const ZohoTaskSync = require('../../Services/Zoho/ZohoTaskSync.js');
 const { ATTACHMENTS_ENABLED } = require('../../Services/Zoho/config.js');
+const { latestLine } = require('../../Services/AI/ZohoTaskSummaryService.js');
 
 /**
  * Only what the page renders.
@@ -50,7 +51,14 @@ const toClientTask = (task) => {
         endDate: task.endDate,
         updatedAt: task.taskUpdatedAt,
         hasAttachments: task.hasAttachments,
+        // The full, dated, multi-line history — for the Status page's detail
+        // panel, which renders it with white-space: pre-line.
         summary: task.commentSummary?.text || null,
+        // Just the newest dated line — for a surface with room for one line,
+        // such as the Client Dashboard's "What we're working on" widget. Kept
+        // alongside `summary` rather than replacing it, since the two surfaces
+        // genuinely want different shapes of the same underlying text.
+        latestSummaryLine: latestLine(task.commentSummary?.text),
         updateCount: comments.length,
         lastUpdateAt: latest?.createdAt || null,
         waitingOnYou: task.waitingOnClient?.ask
@@ -193,6 +201,7 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
                 endDate: null,
                 percentComplete: null,
                 summary: null,
+                latestSummaryLine: null,
                 updateCount: 0,
                 lastUpdateAt: null,
                 waitingOnYou: null,
@@ -247,4 +256,4 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
     }
 });
 
-module.exports = { getEsfProjectStatus };
+module.exports = { getEsfProjectStatus, toClientTask };

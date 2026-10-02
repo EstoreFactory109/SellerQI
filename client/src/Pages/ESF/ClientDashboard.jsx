@@ -109,17 +109,26 @@ const CLAMP_2 = { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: '
 /**
  * One line of "What we're working on".
  *
- * Carries the AI progress summary, which is the whole point of this section — the
- * task NAME alone ("Details", "Progress update") tells a client nothing, and the
- * summary is what turns it into an update they can actually read.
+ * Carries the newest dated line of the AI progress summary, which is the whole
+ * point of this section — the task NAME alone ("Details", "Progress update")
+ * tells a client nothing, and the update is what turns it into something they
+ * can actually read.
+ *
+ * `latestSummaryLine`, not `summary`. The Status page's own detail panel wants
+ * the full dated history and renders it with white-space: pre-line; this is a
+ * compact "what's happening right now" row with no such handling, so handing
+ * it the whole multi-day text would collapse every "\n" into a plain space —
+ * one run-on sentence, then cut off mid-word by the two-line clamp below.
+ * `latestSummaryLine` is already just the single newest line, computed
+ * server-side in EsfProjectStatusController.js alongside `summary`.
  */
 const WorkItemRow = ({ task, status }) => (
     <div className="flex items-start gap-4 py-[15px]" style={{ borderTop: `1px solid ${PALETTE.divider}` }}>
         <div className="flex-1 min-w-0 flex flex-col gap-[5px]">
             <span className="text-[13.5px]" style={{ color: PALETTE.textBody }}>{task.name}</span>
-            {task.summary && (
+            {task.latestSummaryLine && (
                 <span className="text-[12.5px] leading-[1.55]" style={{ color: PALETTE.textTertiary, ...CLAMP_2 }}>
-                    {task.summary}
+                    {task.latestSummaryLine}
                 </span>
             )}
             {task.team && (
