@@ -254,6 +254,25 @@ const printRow = (row) => {
     console.log('  ' + bits.join('  '));
 };
 
+/**
+ * Every id currently in the backlog, in either shape, de-duplicated.
+ *
+ * GmailIngestService.runSync migrates the legacy pendingMessageIds into pendingMessages on
+ * its first run after a deploy, clearing the legacy field in the same write. So depending
+ * on whether that first sync has happened yet, the live backlog is in one field or the
+ * other - and reading only pendingMessageIds (what this script originally did) would
+ * report an empty backlog forever once that migration has run. Exactly the kind of silent
+ * wrong answer this script exists to prevent, and it would have been one.
+ *
+ * Pulled out as its own function so this can be tested without mocking main()'s mongoose
+ * connection, token warm-up and write guard.
+ */
+const backlogIds = (connection) => {
+    const fromStructured = (connection?.pendingMessages || []).map((entry) => entry.id).filter(Boolean);
+    const fromLegacy = connection?.pendingMessageIds || [];
+    return [...new Set([...fromStructured, ...fromLegacy])];
+};
+
 async function main() {
     if (!MONGODB_URI) throw new Error('No Mongo URI configured');
     await mongoose.connect(MONGODB_URI);
@@ -266,7 +285,7 @@ async function main() {
         return;
     }
 
-    const ids = ONLY_ID ? [ONLY_ID] : (connection.pendingMessageIds || []);
+    const ids = ONLY_ID ? [ONLY_ID] : backlogIds(connection);
 
     /*
      * Redis FIRST, then warm the token, then install the guard. The order is the whole
@@ -336,4 +355,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { classify, maskAddress, VERDICTS };
+module.exports = { classify, maskAddress, VERDICTS, backlogIds };
