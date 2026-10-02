@@ -67,7 +67,7 @@ describe("the 'money' format", () => {
         // Null means "not priced", and 0 would mean "matched" — the two must
         // never render the same.
         const text = render(columns, [{ sku: 'S1', ourPrice: null, competingPrice: null, priceGap: null }]);
-        expect(text).toEqual(expect.arrayContaining(['—']));
+        expect(text).toEqual(expect.arrayContaining(['-']));
         expect(text).not.toEqual(expect.arrayContaining(['$0.00']));
     });
 

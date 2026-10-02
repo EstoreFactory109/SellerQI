@@ -125,7 +125,7 @@ const downloadName = (report, marketplace) => {
 
 /** Formats a stat or cell according to the `format` the API tagged it with. */
 const formatValue = (value, format, currency) => {
-    if (value === null || value === undefined || value === '') return '—';
+    if (value === null || value === undefined || value === '') return '-';
     if (typeof value !== 'number') return value;
     // Per-unit money, to the cent — see the note in reportPdf.js formatCell.
     // 'currency' rounds to whole units, which is right for an aggregate and
@@ -156,7 +156,7 @@ const DeltaCaption = ({ stat }) => {
             className="text-[10.5px] whitespace-nowrap"
             style={{ color: unchanged ? PALETTE.textMuted : improved ? PALETTE.good : PALETTE.amberValue }}
         >
-            {unchanged ? '— no change' : `${stat.delta > 0 ? '▲' : '▼'} ${Math.abs(stat.delta)}${suffix}`}
+            {unchanged ? '- no change' : `${stat.delta > 0 ? '▲' : '▼'} ${Math.abs(stat.delta)}${suffix}`}
         </span>
     );
 };

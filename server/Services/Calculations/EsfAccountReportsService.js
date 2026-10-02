@@ -127,7 +127,7 @@ const LEAD_TILES = 5;
 
 /** A stat as text, in its OWN marketplace's currency — what a comparison cell holds. */
 const formatStat = (stat, currency) => {
-    if (!stat || stat.value === null || stat.value === undefined || stat.value === '') return '—';
+    if (!stat || stat.value === null || stat.value === undefined || stat.value === '') return '-';
     const { value, format } = stat;
     if (typeof value !== 'number') return String(value);
     const sign = value < 0 ? '-' : '';
@@ -139,8 +139,8 @@ const formatStat = (stat, currency) => {
 
 /** "+35.8%" / "-2.1%" / "New" — the reference report's Sales Δ column. */
 const changeCell = (stat) => {
-    if (!stat || stat.value === null || stat.value === undefined) return '—';
-    if (stat.delta === null || stat.delta === undefined) return stat.value ? 'New' : '—';
+    if (!stat || stat.value === null || stat.value === undefined) return '-';
+    if (stat.delta === null || stat.delta === undefined) return stat.value ? 'New' : '-';
     return `${stat.delta >= 0 ? '+' : ''}${stat.delta}%`;
 };
 
@@ -196,9 +196,9 @@ const comparisonTable = (key, sections) => {
     const rows = sections.map((section) => {
         const row = { market: section.marketplace.country };
         labels.forEach((label, i) => {
-            row[`c${i}`] = section.report.available ? formatStat(statOf(section.report, label), section.marketplace.currency) : '—';
+            row[`c${i}`] = section.report.available ? formatStat(statOf(section.report, label), section.marketplace.currency) : '-';
         });
-        if (withChange) row.salesChange = section.report.available ? changeCell(statOf(section.report, 'Total sales')) : '—';
+        if (withChange) row.salesChange = section.report.available ? changeCell(statOf(section.report, 'Total sales')) : '-';
         return row;
     });
     return { title: 'All Marketplaces', columns, rows };

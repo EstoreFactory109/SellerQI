@@ -236,7 +236,7 @@ const ClientDashboard = () => {
     const activity = [...completed]
         .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
         .slice(0, 6)
-        .map((t) => ({ text: `${t.name} — completed`, time: relativeTime(t.updatedAt) }));
+        .map((t) => ({ text: `${t.name} - completed`, time: relativeTime(t.updatedAt) }));
 
     // The biggest thing nobody has picked up yet, straight from the audit. Already
     // filtered against open Zoho tasks at sync time, so it is never something the
@@ -291,14 +291,14 @@ const ClientDashboard = () => {
                 <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                     <StatCard
                         label="Tasks in progress"
-                        value={loading ? '—' : String(inProgress.length)}
+                        value={loading ? '-' : String(inProgress.length)}
                         valueColor={PALETTE.good}
                         sub="Your team is handling this"
                         href={STATUS_PAGE}
                     />
                     <StatCard
                         label="Waiting on you"
-                        value={loading ? '—' : String(waitingOnYou.length)}
+                        value={loading ? '-' : String(waitingOnYou.length)}
                         valueColor={waitingOnYou.length > 0 ? PALETTE.amberValue : PALETTE.textPrimary}
                         sub={waitingOnYou.length === 0
                             ? 'Nothing needs your reply'

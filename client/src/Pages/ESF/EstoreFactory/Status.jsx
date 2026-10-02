@@ -344,9 +344,9 @@ const COMING_UP_COLS = '110px minmax(0,1fr) 140px';
 
 /** "2 hours ago" / "Yesterday" / "Aug 24" — matching the mock's relative style. */
 const relativeTime = (value) => {
-    if (!value) return '—';
+    if (!value) return '-';
     const then = new Date(value);
-    if (Number.isNaN(then.getTime())) return '—';
+    if (Number.isNaN(then.getTime())) return '-';
     const mins = Math.round((Date.now() - then.getTime()) / 60000);
     if (mins < 1) return 'Just now';
     if (mins < 60) return `${mins} min ago`;
@@ -391,20 +391,20 @@ const TaskRow = ({ task, isFirst }) => {
                 {/* Zoho task ids are 19-digit numbers — useless in a narrow column.
                     The task list ("Meta", "TikTok", "Google") is the short, real,
                     meaningful identifier in this portal. */}
-                <span className="text-xs truncate" style={{ color: PALETTE.textMuted }}>{task.tasklist || '—'}</span>
+                <span className="text-xs truncate" style={{ color: PALETTE.textMuted }}>{task.tasklist || '-'}</span>
                 <span className="text-[13.5px] min-w-0 truncate" style={{ color: PALETTE.textBody }} title={task.name}>{task.name}</span>
                 <span className="justify-self-start text-[11.5px] font-semibold rounded-md px-[10px] py-1" style={{ background: priority.bg, color: priority.color }}>
                     {task.priority || 'Normal'}
                 </span>
                 <span className="justify-self-start text-[11.5px] font-semibold rounded-md px-[10px] py-1 truncate max-w-full" style={{ background: NEUTRAL_BADGE.bg, color: PALETTE.good }}>
-                    {task.status || '—'}
+                    {task.status || '-'}
                 </span>
                 {/* The team handling it, never the individual — see the note on
                     ZohoProjectTaskModel.team. */}
                 <span className="flex items-center gap-2 min-w-0">
                     <span className="w-[22px] h-[22px] flex-none rounded-full" style={{ background: 'repeating-linear-gradient(135deg, #1E2228 0 4px, #252A31 4px 8px)', border: '1px solid rgba(255,255,255,.09)' }} />
                     <span className="text-[12.5px] truncate" style={{ color: PALETTE.textTertiary }}>
-                        {task.team || '—'}
+                        {task.team || '-'}
                     </span>
                 </span>
                 <span className="text-xs text-right" style={{ color: PALETTE.textMuted }}>{relativeTime(task.updatedAt)}</span>
@@ -805,7 +805,7 @@ const Status = () => {
                                     return (
                                         <div key={t.id} className="grid items-center gap-[18px] py-[14px]" style={{ gridTemplateColumns: COMING_UP_COLS, ...(i > 0 ? dividerStyle('rgba(255,255,255,.04)') : undefined) }}>
                                             <span className="text-xs truncate" style={{ color: suggested ? PALETTE.accentLight : PALETTE.textDim }}>
-                                                {suggested ? 'Recommended' : (t.tasklist || '—')}
+                                                {suggested ? 'Recommended' : (t.tasklist || '-')}
                                             </span>
                                             <span className="text-[13px] min-w-0 truncate" style={{ color: PALETTE.textTertiary }} title={t.action || t.name}>
                                                 {t.name}
@@ -856,7 +856,7 @@ const Status = () => {
                                     {c.team && (
                                         <span className="flex-none text-xs" style={{ color: PALETTE.textDim }}>{c.team}</span>
                                     )}
-                                    <span className="flex-none text-xs" style={{ color: PALETTE.textMuted }}>Completed {shortDate(c.updatedAt) || '—'}</span>
+                                    <span className="flex-none text-xs" style={{ color: PALETTE.textMuted }}>Completed {shortDate(c.updatedAt) || '-'}</span>
                                 </div>
                             ))
                         )}

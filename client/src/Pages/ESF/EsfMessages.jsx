@@ -37,7 +37,7 @@ const STATUS_STYLE = {
 /** Initials of the LABEL, never of a person. */
 const initialsOf = (label = '') => {
     const words = String(label).replace(/[^\w\s-]/g, ' ').trim().split(/\s+/).filter(Boolean);
-    if (words.length === 0) return '—';
+    if (words.length === 0) return '-';
     return (words[0][0] + (words[1]?.[0] || '')).toUpperCase();
 };
 
@@ -526,7 +526,7 @@ const EsfMessages = () => {
                                                             title={mine
                                                                 ? (message.seenByClient
                                                                     ? 'Opened in the client portal'
-                                                                    : 'Sent. Not opened in the portal — opens in their own email are not tracked.')
+                                                                    : 'Sent. Not opened in the portal - opens in their own email are not tracked.')
                                                                 : undefined}
                                                         >
                                                             {message.redactedBy === 'deterministic' && (

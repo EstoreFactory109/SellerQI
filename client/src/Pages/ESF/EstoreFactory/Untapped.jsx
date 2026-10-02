@@ -78,9 +78,9 @@ const periodSuffix = (period) => {
 };
 
 const relativeTime = (value) => {
-    if (!value) return '—';
+    if (!value) return '-';
     const then = new Date(value);
-    if (Number.isNaN(then.getTime())) return '—';
+    if (Number.isNaN(then.getTime())) return '-';
     const mins = Math.round((Date.now() - then.getTime()) / 60000);
     if (mins < 1) return 'Just now';
     if (mins < 60) return `${mins} min ago`;

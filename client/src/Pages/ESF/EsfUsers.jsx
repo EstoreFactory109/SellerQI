@@ -142,7 +142,7 @@ const EsfUsers = () => {
   const getPaginationGroup = () => Array.from({ length: totalPages }, (_, i) => i + 1);
 
   const formatDate = (dateString) => {
-    if (!dateString) return '—';
+    if (!dateString) return '-';
     return new Date(dateString).toLocaleDateString('en-GB', {
       day: 'numeric',
       month: 'short',
@@ -167,7 +167,7 @@ const EsfUsers = () => {
       setDeleteError(
         err.response
           ? (err.response.data?.message || 'Failed to remove team member')
-          : 'No response from the server. The request timed out — please try again.'
+          : 'No response from the server. The request timed out - please try again.'
       );
     } finally {
       setDeletingId(null);
@@ -401,7 +401,7 @@ const EsfUsers = () => {
                                   <Mail className="w-3 h-3 shrink-0" />
                                   {user.email}
                                 </p>
-                                <p className="text-xs text-gray-500">{user.phone || '—'}</p>
+                                <p className="text-xs text-gray-500">{user.phone || '-'}</p>
                               </div>
                             </div>
                           </td>

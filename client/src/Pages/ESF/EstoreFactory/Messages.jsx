@@ -118,7 +118,7 @@ const ClientReceipt = ({ seen, pending = false }) => {
  */
 const initialsOf = (subject = '') => {
     const words = String(subject).replace(/[^\w\s-]/g, ' ').trim().split(/\s+/).filter(Boolean);
-    if (words.length === 0) return '—';
+    if (words.length === 0) return '-';
     return (words[0][0] + (words[1]?.[0] || '')).toUpperCase();
 };
 

@@ -316,7 +316,7 @@ const collectSuppressed = (products, fyp, country) => {
             enforcement: item.status || 'Suppressed',
             reason: item.reason || item.issueDescription || '',
             // The report carries no exemption status; unknown, not "No".
-            exempt: '—',
+            exempt: '-',
             detailPage: detailPageUrl(item.asin, country),
         });
     }
@@ -541,7 +541,7 @@ const buildRestock = async (userId, country, region) => {
                 : highlight(`No SKU is flagged urgent; ${needsRestock} are due a routine replenishment.`, 'good'),
             highlight(`Replenishing everything Amazon recommends is about ${cash(country, reorderValue)} at current prices.`),
             ...(inboundTotal
-                ? [highlight(`${plural(inboundTotal, 'unit')} ${verb(inboundTotal, 'is', 'are')} already inbound to Amazon — check these before raising new orders.`)]
+                ? [highlight(`${plural(inboundTotal, 'unit')} ${verb(inboundTotal, 'is', 'are')} already inbound to Amazon - check these before raising new orders.`)]
                 : []),
             ...(unfulfillableTotal
                 ? [highlight(`${plural(unfulfillableTotal, 'unit')} ${verb(unfulfillableTotal, 'is', 'are')} unfulfillable and should be removed or disposed of.`, 'watch')]
@@ -870,7 +870,7 @@ const buildAccountOverview = async (userId, country, region) => {
                     : []),
             ...(incomplete ? [highlight(`${plural(incomplete, 'listing')} ${verb(incomplete, 'is', 'are')} incomplete and will not sell until finished.`, 'watch')] : []),
             ...(suppression.total
-                ? [highlight(`${plural(suppression.total, 'listing')} suppressed by Amazon and hidden from shoppers — see the Buy Box report for each reason.`, 'watch')]
+                ? [highlight(`${plural(suppression.total, 'listing')} suppressed by Amazon and hidden from shoppers - see the Buy Box report for each reason.`, 'watch')]
                 : []),
             ...(gpsrApplies && complianceListings
                 ? [highlight(`${plural(complianceListings, 'listing')} ${verb(complianceListings, 'carries', 'carry')} an EU product safety (GPSR) issue and risk removal until the details are supplied.`, 'watch')]
@@ -880,7 +880,7 @@ const buildAccountOverview = async (userId, country, region) => {
             // than inventing a second, competing ranking.
             ...(opportunities?.opportunities?.length
                 ? opportunities.opportunities.slice(0, 3).map((item) => highlight(
-                    `${item.title}${item.amount ? ` — about ${cash(country, item.amount)} at stake` : ''}${item.count ? ` across ${plural(item.count, 'product')}` : ''}.`,
+                    `${item.title}${item.amount ? ` - about ${cash(country, item.amount)} at stake` : ''}${item.count ? ` across ${plural(item.count, 'product')}` : ''}.`,
                     'watch'
                 ))
                 : []),
@@ -993,10 +993,10 @@ const buildBuyBox = async (userId, country, region) => {
      * of them is reported as a number.
      */
     const pricingFor = (asin, catalogPrice) => {
-        if (!pricingCaptured) return { competingSeller: null, competingPrice: null, priceGap: null, pricingFlag: '\u2014' };
+        if (!pricingCaptured) return { competingSeller: null, competingPrice: null, priceGap: null, pricingFlag: '-' };
 
         const item = offersByAsin.get(asin);
-        if (!item || item.error) return { competingSeller: null, competingPrice: null, priceGap: null, pricingFlag: '\u2014' };
+        if (!item || item.error) return { competingSeller: null, competingPrice: null, priceGap: null, pricingFlag: '-' };
 
         const competingPrice = item.buyBoxPrice ?? null;
         // Our landed price where Amazon showed us our own offer; the catalogue
@@ -1007,7 +1007,7 @@ const buildBuyBox = async (userId, country, region) => {
 
         const gap = (competingPrice !== null && basis !== null) ? round(basis - competingPrice, 2) : null;
 
-        let flag = '\u2014';
+        let flag = '-';
         if (gap !== null) {
             // A penny either way is not a pricing decision worth a flag.
             if (gap > 0.009) flag = 'Priced above';
@@ -1039,7 +1039,7 @@ const buildBuyBox = async (userId, country, region) => {
             const priced = pricingFor(row.childAsin, match.price || null);
             return {
                 asin: row.childAsin,
-                sku: match.sku || '\u2014',
+                sku: match.sku || '-',
                 productName: match.title || '',
                 ourPrice: match.price || null,
                 status: 'Losing',
@@ -1054,7 +1054,7 @@ const buildBuyBox = async (userId, country, region) => {
                 // Amazon returns a merchant token, not a storefront name, and
                 // there is no endpoint that turns one into the other. The token
                 // is what identifies the competitor, so it is what we show.
-                competingSeller: priced.competingSeller || '\u2014',
+                competingSeller: priced.competingSeller || '-',
             };
         })
         .sort((a, b) => b.periodsLosing - a.periodsLosing || b.sessions - a.sessions);
@@ -1065,7 +1065,7 @@ const buildBuyBox = async (userId, country, region) => {
     const pricedRows = rows.filter((row) => row.competingPrice !== null && row.competingPrice !== undefined);
     const above = pricedRows.filter((row) => row.pricingFlag === 'Priced above');
     const listPriceRows = rows.filter((row) => row.gapFromListPrice);
-    const unknownSeller = pricedRows.filter((row) => row.competingSeller === '\u2014');
+    const unknownSeller = pricedRows.filter((row) => row.competingSeller === '-');
     // The biggest amount we are asking over the Buy Box holder — the single
     // number a manager acts on first.
     const widestGap = above.reduce((worst, row) => (worst && worst.priceGap >= row.priceGap ? worst : row), null);
@@ -1147,14 +1147,14 @@ const buildBuyBox = async (userId, country, region) => {
                 ? highlight(`${plural(losing.length, 'ASIN')} of ${total} lost the Buy Box in the latest snapshot.`, 'watch')
                 : highlight(`All ${total} tracked ASINs held the Buy Box in the latest snapshot.`, 'good'),
             ...(rows[0]?.periodsLosing > 1
-                ? [highlight(`${rows[0].sku !== '—' ? rows[0].sku : rows[0].asin} has been losing for ${rows[0].periodsLosing} consecutive snapshots — the longest run on the account.`, 'watch')]
+                ? [highlight(`${rows[0].sku !== '-' ? rows[0].sku : rows[0].asin} has been losing for ${rows[0].periodsLosing} consecutive snapshots - the longest run on the account.`, 'watch')]
                 : []),
             ...((latest.productsWithLowBuyBox || 0) > 0
                 ? [highlight(`${plural(latest.productsWithLowBuyBox, 'ASIN')} held the Buy Box less than half the time.`, 'watch')]
                 : []),
             ...(suppression.total
                 ? [highlight(
-                    `${plural(suppression.total, 'listing')} suppressed by Amazon and not visible to shoppers — a harder block on sales than losing the Buy Box.`,
+                    `${plural(suppression.total, 'listing')} suppressed by Amazon and not visible to shoppers - a harder block on sales than losing the Buy Box.`,
                     'watch'
                 )]
                 : []),
@@ -1163,7 +1163,7 @@ const buildBuyBox = async (userId, country, region) => {
                 : []),
             ...(widestGap
                 ? [highlight(
-                    `${widestGap.sku !== '\u2014' ? widestGap.sku : widestGap.asin} is ${money(widestGap.priceGap)} above the Buy Box holder — the widest gap on the account.`,
+                    `${widestGap.sku !== '-' ? widestGap.sku : widestGap.asin} is ${money(widestGap.priceGap)} above the Buy Box holder - the widest gap on the account.`,
                     'watch'
                 )]
                 : []),
@@ -1328,7 +1328,7 @@ const buildAgedInventory = async (userId, country, region) => {
                 ? [highlight(`${plural(unfulfillable, 'unit')} ${verb(unfulfillable, 'is', 'are')} unfulfillable and should be removed or disposed of.`, 'watch')]
                 : []),
             ...(pendingUnits
-                ? [highlight(`${plural(pendingUnits, 'unit')} across ${plural(pendingOrders, 'removal order')} ${verb(pendingUnits, 'is', 'are')} already on their way out — leave them out of any new removal plan.`)]
+                ? [highlight(`${plural(pendingUnits, 'unit')} across ${plural(pendingOrders, 'removal order')} ${verb(pendingUnits, 'is', 'are')} already on their way out - leave them out of any new removal plan.`)]
                 : removalsRead
                     ? [highlight('No removal orders are open, so every ageing unit above is still awaiting a decision.')]
                     : []),
@@ -1441,13 +1441,13 @@ const buildListingsAudit = async (userId, country, region) => {
             bullets: detail?.about_product?.length || 0,
             // Em dash, not "No", until the A+ Content API has run at least once:
             // "not captured" and "not Premium" are different statements.
-            aPlusPremium: premiumCaptured ? (premiumByAsin.get(product.asin) ? 'Yes' : 'No') : '\u2014',
+            aPlusPremium: premiumCaptured ? (premiumByAsin.get(product.asin) ? 'Yes' : 'No') : '-',
             price: num(product.price),
             detailPage: detailPageUrl(product.asin, country),
             // Listing Quality Score: the share of checks passed, on a 1-10 scale.
             lqs: round((listingPassed / AUDIT_CHECKS.length) * 10, 1),
             score: `${listingPassed}/${AUDIT_CHECKS.length}`,
-            missing: AUDIT_CHECKS.filter((check) => !checks[check.key]).map((check) => check.label).join(', ') || '\u2014',
+            missing: AUDIT_CHECKS.filter((check) => !checks[check.key]).map((check) => check.label).join(', ') || '-',
             gaps: AUDIT_CHECKS.length - listingPassed,
         });
     }
@@ -1507,7 +1507,7 @@ const buildListingsAudit = async (userId, country, region) => {
                     .map((check) => ({ check, missing: products.length - passCount[check.key] }))
                     .sort((a, b) => b.missing - a.missing)[0];
                 return worst && worst.missing > 0
-                    ? [highlight(`${worst.check.label} is the widest gap — missing on ${worst.missing} of ${products.length} listings.`, 'watch')]
+                    ? [highlight(`${worst.check.label} is the widest gap - missing on ${worst.missing} of ${products.length} listings.`, 'watch')]
                     : [highlight('Every listing passes all content checks.', 'good')];
             })(),
             ...(rows[0]?.gaps
@@ -1517,8 +1517,8 @@ const buildListingsAudit = async (userId, country, region) => {
         ],
         caveats: [
             ...(premiumCaptured
-                ? ['Storefront presence and content language are not audited — neither is available from the data we hold.']
-                : ['Premium A+ is captured from the next A+ Content sync onwards; this edition shows it as not captured. Storefront presence and content language are not audited — neither is available from the data we hold.']),
+                ? ['Storefront presence and content language are not audited - neither is available from the data we hold.']
+                : ['Premium A+ is captured from the next A+ Content sync onwards; this edition shows it as not captured. Storefront presence and content language are not audited - neither is available from the data we hold.']),
         ],
     };
 };
@@ -1615,7 +1615,7 @@ const buildReviewRequests = async (userId, country, region) => {
         highlights: [
             highlight(`${plural(sent, 'review request')} sent from ${totalOrders} orders checked in the week to ${formatDate(anchor)}.`, sent ? 'good' : 'neutral'),
             highlight(
-                `${ineligible} orders were not eligible — typically outside Amazon's 5 to 30 day solicitation window, or already requested.`
+                `${ineligible} orders were not eligible - typically outside Amazon's 5 to 30 day solicitation window, or already requested.`
             ),
             ...(failed
                 ? [highlight(`${plural(failed, 'request')} failed on send and should be retried.`, 'watch')]
@@ -1623,7 +1623,7 @@ const buildReviewRequests = async (userId, country, region) => {
             MANAGER_NOTE,
         ],
         caveats: daysBehind > 10
-            ? [`This is the most recent week with order data. The newest order we hold is from ${formatDate(anchor)}, ${daysBehind} days ago — order ingestion has not run since.`]
+            ? [`This is the most recent week with order data. The newest order we hold is from ${formatDate(anchor)}, ${daysBehind} days ago - order ingestion has not run since.`]
             : [],
     };
 };
@@ -1896,18 +1896,18 @@ const buildMonthlyPerformance = async (userId, country, region) => {
         // answer is that the marketplace sold nothing, so say which it is.
         return unavailable(
             REPORT_MONTHLY,
-            `No sales or ad spend recorded in ${formatMonth(currentStart)} — this marketplace was dormant.`
+            `No sales or ad spend recorded in ${formatMonth(currentStart)} - this marketplace was dormant.`
         );
     }
 
     /** "+4.32%" / "-12%" / "—" — the change column's one format. */
     const pctCell = (now, before) => {
         const change = pctChange(now, before);
-        return change === null ? '\u2014' : `${change >= 0 ? '+' : ''}${change}%`;
+        return change === null ? '-' : `${change >= 0 ? '+' : ''}${change}%`;
     };
     /** "+1.59 pts" — for the metrics that move in points, not percent. */
     const ptsCell = (now, before) => (now === null || before === null
-        ? '\u2014'
+        ? '-'
         : `${now - before >= 0 ? '+' : ''}${round(now - before, 2)} pts`);
 
     // Both windows are the same length, so the label must say so — otherwise
@@ -1991,36 +1991,36 @@ const buildMonthlyPerformance = async (userId, country, region) => {
                     __format: 'money',
                     current: current.totalSales,
                     previous: previous.totalSales,
-                    change: salesChange === null ? '—' : `${salesChange >= 0 ? '+' : ''}${salesChange}%`,
+                    change: salesChange === null ? '-' : `${salesChange >= 0 ? '+' : ''}${salesChange}%`,
                 },
                 { metric: 'Ad revenue', __format: 'money', current: ppcCurrent.adSales, previous: ppcPrevious.adSales, change: pctCell(ppcCurrent.adSales, ppcPrevious.adSales) },
                 { metric: 'Organic revenue', __format: 'money', current: organic, previous: organicPrev, change: pctCell(organic, organicPrev) },
                 { metric: 'Units sold', current: units, previous: unitsPrev, change: pctCell(units, unitsPrev) },
                 ...(current.b2b
                     ? [
-                        { metric: 'Regular units', current: current.b2b.regularUnits, previous: previous.b2b ? previous.b2b.regularUnits : '—', change: previous.b2b ? pctCell(current.b2b.regularUnits, previous.b2b.regularUnits) : '—' },
-                        { metric: 'B2B units', current: current.b2b.units, previous: previous.b2b ? previous.b2b.units : '—', change: previous.b2b ? pctCell(current.b2b.units, previous.b2b.units) : '—' },
-                        { metric: 'B2B order items', current: current.b2b.orderItems, previous: previous.b2b ? previous.b2b.orderItems : '—', change: previous.b2b ? pctCell(current.b2b.orderItems, previous.b2b.orderItems) : '—' },
+                        { metric: 'Regular units', current: current.b2b.regularUnits, previous: previous.b2b ? previous.b2b.regularUnits : '-', change: previous.b2b ? pctCell(current.b2b.regularUnits, previous.b2b.regularUnits) : '-' },
+                        { metric: 'B2B units', current: current.b2b.units, previous: previous.b2b ? previous.b2b.units : '-', change: previous.b2b ? pctCell(current.b2b.units, previous.b2b.units) : '-' },
+                        { metric: 'B2B order items', current: current.b2b.orderItems, previous: previous.b2b ? previous.b2b.orderItems : '-', change: previous.b2b ? pctCell(current.b2b.orderItems, previous.b2b.orderItems) : '-' },
                     ]
                     : []),
                 { metric: 'Sessions', current: trafficCurrent.sessions, previous: trafficPrevious.sessions, change: pctCell(trafficCurrent.sessions, trafficPrevious.sessions) },
                 {
                     metric: 'Conversion rate',
-                    current: conversion === null ? '\u2014' : `${conversion}%`,
-                    previous: conversionPrev === null ? '\u2014' : `${conversionPrev}%`,
+                    current: conversion === null ? '-' : `${conversion}%`,
+                    previous: conversionPrev === null ? '-' : `${conversionPrev}%`,
                     change: ptsCell(conversion, conversionPrev),
                 },
                 { metric: 'Ad spend', __format: 'money', current: ppcCurrent.adSpend, previous: ppcPrevious.adSpend, change: pctCell(ppcCurrent.adSpend, ppcPrevious.adSpend) },
                 {
                     metric: 'ACOS',
-                    current: ppcCurrent.acos === null ? '\u2014' : `${ppcCurrent.acos}%`,
-                    previous: ppcPrevious.acos === null ? '\u2014' : `${ppcPrevious.acos}%`,
-                    change: acosDelta === null ? '\u2014' : `${acosDelta >= 0 ? '+' : ''}${acosDelta} pts`,
+                    current: ppcCurrent.acos === null ? '-' : `${ppcCurrent.acos}%`,
+                    previous: ppcPrevious.acos === null ? '-' : `${ppcPrevious.acos}%`,
+                    change: acosDelta === null ? '-' : `${acosDelta >= 0 ? '+' : ''}${acosDelta} pts`,
                 },
                 {
                     metric: 'TACOS',
-                    current: tacos === null ? '\u2014' : `${tacos}%`,
-                    previous: tacosPrev === null ? '\u2014' : `${tacosPrev}%`,
+                    current: tacos === null ? '-' : `${tacos}%`,
+                    previous: tacosPrev === null ? '-' : `${tacosPrev}%`,
                     change: ptsCell(tacos, tacosPrev),
                 },
                 { metric: 'Avg selling price', __format: 'money', current: asp, previous: aspPrev, change: pctCell(asp, aspPrev) },
@@ -2028,15 +2028,15 @@ const buildMonthlyPerformance = async (userId, country, region) => {
                 { metric: 'Clicks', current: ppcCurrent.clicks, previous: ppcPrevious.clicks, change: pctCell(ppcCurrent.clicks, ppcPrevious.clicks) },
                 {
                     metric: 'CTR',
-                    current: ppcCurrent.ctr === null ? '\u2014' : `${ppcCurrent.ctr}%`,
-                    previous: ppcPrevious.ctr === null ? '\u2014' : `${ppcPrevious.ctr}%`,
+                    current: ppcCurrent.ctr === null ? '-' : `${ppcCurrent.ctr}%`,
+                    previous: ppcPrevious.ctr === null ? '-' : `${ppcPrevious.ctr}%`,
                     change: ptsCell(ppcCurrent.ctr, ppcPrevious.ctr),
                 },
                 { metric: 'CPC', __format: 'money', current: ppcCurrent.cpc, previous: ppcPrevious.cpc, change: pctCell(ppcCurrent.cpc, ppcPrevious.cpc) },
                 {
                     metric: 'ROAS',
-                    current: ppcCurrent.roas === null ? '\u2014' : `${ppcCurrent.roas}x`,
-                    previous: ppcPrevious.roas === null ? '\u2014' : `${ppcPrevious.roas}x`,
+                    current: ppcCurrent.roas === null ? '-' : `${ppcCurrent.roas}x`,
+                    previous: ppcPrevious.roas === null ? '-' : `${ppcPrevious.roas}x`,
                     change: pctCell(ppcCurrent.roas, ppcPrevious.roas),
                 },
             ],
@@ -2071,7 +2071,7 @@ const buildMonthlyPerformance = async (userId, country, region) => {
                 : []),
             ...(acosDelta !== null
                 ? [highlight(
-                    `ACOS moved from ${ppcPrevious.acos}% to ${ppcCurrent.acos}% — ${acosDelta <= 0 ? 'an improvement' : 'a decline'} of ${Math.abs(acosDelta)} points.`,
+                    `ACOS moved from ${ppcPrevious.acos}% to ${ppcCurrent.acos}% - ${acosDelta <= 0 ? 'an improvement' : 'a decline'} of ${Math.abs(acosDelta)} points.`,
                     acosDelta <= 0 ? 'good' : 'watch'
                 )]
                 : []),
@@ -2080,7 +2080,7 @@ const buildMonthlyPerformance = async (userId, country, region) => {
                 : []),
             ...(tacos !== null
                 ? [highlight(
-                    `TACOS is ${tacos}% — ad spend against total sales, the figure that shows whether advertising is carrying the account.`,
+                    `TACOS is ${tacos}% - ad spend against total sales, the figure that shows whether advertising is carrying the account.`,
                     tacosPrev !== null && tacos > tacosPrev ? 'watch' : 'neutral'
                 )]
                 : []),
@@ -2100,7 +2100,7 @@ const buildMonthlyPerformance = async (userId, country, region) => {
         ],
         caveats: [
             ...(partial
-                ? [`${formatMonth(currentStart)} is still incomplete — this covers the ${spanDays + 1} days to ${formatDate(currentEnd)}, compared against the same ${spanDays + 1} days of ${formatMonth(previousStart)} so the two are like for like.`]
+                ? [`${formatMonth(currentStart)} is still incomplete - this covers the ${spanDays + 1} days to ${formatDate(currentEnd)}, compared against the same ${spanDays + 1} days of ${formatMonth(previousStart)} so the two are like for like.`]
                 : []),
             // Three different reasons the split can be missing or partial.
             ...(!current.b2bCapturedDays

@@ -312,8 +312,8 @@ const EsfTaskRequests = () => {
                                             className="rounded-lg bg-violet-500/80 px-3 py-1.5 text-xs font-semibold text-[#0b0f17] transition-opacity hover:bg-violet-500 disabled:opacity-40"
                                         >
                                             {request.stagedDecision.intent === 'accept'
-                                                ? 'Confirm — create the task'
-                                                : 'Confirm — decline it'}
+                                                ? 'Confirm - create the task'
+                                                : 'Confirm - decline it'}
                                         </button>
                                         <button
                                             type="button"

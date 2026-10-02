@@ -350,10 +350,10 @@ describe('getEsfReports', () => {
                 // Not null and not zero: an em dash, because "we have not
                 // looked" and "there is no competitor" are opposite facts that
                 // a blank cell would render identically.
-                expect(row.competingSeller).toBe('\u2014');
+                expect(row.competingSeller).toBe('-');
                 expect(row.competingPrice).toBeNull();
                 expect(row.priceGap).toBeNull();
-                expect(row.pricingFlag).toBe('\u2014');
+                expect(row.pricingFlag).toBe('-');
                 // No tile either — "0 priced above" on an unfetched account is
                 // a false all-clear.
                 expect(report.summary.stats.some((stat) => stat.label === 'Priced above Buy Box')).toBe(false);
@@ -457,7 +457,7 @@ describe('getEsfReports', () => {
                 const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'buybox');
 
                 // Half an answer beats none: the gap is what gets actioned.
-                expect(report.summary.rows[0].competingSeller).toBe('\u2014');
+                expect(report.summary.rows[0].competingSeller).toBe('-');
                 expect(report.summary.rows[0].priceGap).toBe(4.99);
                 expect(report.caveats.join(' ')).toMatch(/withheld the seller identity/);
             });
@@ -472,7 +472,7 @@ describe('getEsfReports', () => {
                 }));
 
                 const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'buybox');
-                expect(report.summary.rows[0].pricingFlag).toBe('\u2014');
+                expect(report.summary.rows[0].pricingFlag).toBe('-');
                 expect(report.summary.rows[0].priceGap).toBeNull();
             });
         });
@@ -524,7 +524,7 @@ describe('getEsfReports', () => {
             const rows = Object.fromEntries(report.summary.rows.map((row) => [row.sku, row]));
 
             expect(rows.FULL.score).toBe('6/6');
-            expect(rows.FULL.missing).toBe('—');
+            expect(rows.FULL.missing).toBe('-');
             expect(rows.BARE.score).toBe('0/6');
             // Worst listing first, so the audit opens on what needs work.
             expect(report.summary.rows[0].sku).toBe('BARE');
@@ -585,7 +585,7 @@ describe('getEsfReports', () => {
             APlusPremium.findOne.mockReturnValue(mockFindOne(null));
 
             const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'listings-audit');
-            expect(report.summary.rows[0].aPlusPremium).toBe('\u2014');
+            expect(report.summary.rows[0].aPlusPremium).toBe('-');
             // No count either: reporting zero Premium is the same false claim
             // in another shape.
             expect(report.summary.stats.some((stat) => stat.label === 'A+ Premium')).toBe(false);
@@ -1197,7 +1197,7 @@ describe('feasibility-check additions', () => {
             const rows = buybox.summary.secondaryTable.rows;
             expect(rows.find((row) => row.sku === 'S1').enforcement).toBe('SEARCH_SUPPRESSED');
             // The report has no exemption status: unknown, never "No".
-            expect(rows.find((row) => row.sku === 'S2')).toMatchObject({ enforcement: 'Blocked', exempt: '—', productName: 'Two' });
+            expect(rows.find((row) => row.sku === 'S2')).toMatchObject({ enforcement: 'Blocked', exempt: '-', productName: 'Two' });
             expect(buybox.highlights.some((h) => /at risk of suppression/.test(h.text))).toBe(true);
             expect(buybox.caveats.join(' ')).toMatch(/Suppressed Listings Report, read on 27 Sept 2026/);
         });
