@@ -51,15 +51,26 @@ function getGmailInboxQueue() {
  * Ask for a sync.
  *
  * @param {object} [payload]
- * @param {string} [payload.reason]     'push' | 'poll' | 'manual'
- * @param {string} [payload.historyId]  what the notification announced — recorded for
+ * @param {string} [payload.reason]        'push' | 'poll' | 'manual'
+ * @param {string} [payload.historyId]     what the notification announced — recorded for
  *   diagnostics ONLY. It is a doorbell, never a cursor: Pub/Sub delivers out of order
  *   and at least once, so adopting it would regularly skip mail.
+ * @param {number} [payload.delayMs]       delay before BullMQ makes this job available —
+ *   see requeueBlockedSync in gmailInboxStandalone.js, the only caller that sets it.
+ * @param {number} [payload.requeueCount]  how many times a push has already been put
+ *   back after finding the lock held. Carried on the job data so the next attempt knows
+ *   how long it has already waited.
  */
-async function enqueueGmailSync({ reason = 'push', historyId = null } = {}) {
+async function enqueueGmailSync({
+    reason = 'push', historyId = null, delayMs = 0, requeueCount = 0,
+} = {}) {
     const queue = getGmailInboxQueue();
     // No explicit jobId — see the header.
-    return queue.add('sync', { reason, announcedHistoryId: historyId ? String(historyId) : null });
+    return queue.add(
+        'sync',
+        { reason, announcedHistoryId: historyId ? String(historyId) : null, requeueCount },
+        delayMs > 0 ? { delay: delayMs } : {},
+    );
 }
 
 module.exports = {
