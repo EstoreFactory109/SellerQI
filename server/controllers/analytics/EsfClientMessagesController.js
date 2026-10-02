@@ -27,7 +27,9 @@ const asyncHandler = require('../../utils/AsyncHandler.js');
 const logger = require('../../utils/Logger.js');
 const UserModel = require('../../models/user-auth/userModel.js');
 const { EmailThread, EmailMessage } = require('../../models/system/EmailThreadModels.js');
-const { toClientThread, toClientMessage, PROJECTION } = require('../../Services/Email/messagePresenter.js');
+const {
+    toClientThread, toClientMessage, shouldMarkRead, PROJECTION,
+} = require('../../Services/Email/messagePresenter.js');
 
 const THREADS_PER_PAGE = 50;
 
@@ -102,10 +104,14 @@ const getEsfMessageThread = asyncHandler(async (req, res) => {
             .sort({ sentAt: 1 })
             .lean();
 
-        await EmailThread.updateOne(
-            { _id: thread._id },
-            { $set: { clientUnreadCount: 0, lastClientReadAt: new Date() } }
-        );
+        // The mirror of the staff rule - see shouldMarkRead. A poll must not
+        // clear the client's own unread badge for a message still off-screen.
+        if (shouldMarkRead(req.query)) {
+            await EmailThread.updateOne(
+                { _id: thread._id },
+                { $set: { clientUnreadCount: 0, lastClientReadAt: new Date() } }
+            );
+        }
 
         return res.status(200).json(new ApiResponse(200, {
             thread: toClientThread(thread),

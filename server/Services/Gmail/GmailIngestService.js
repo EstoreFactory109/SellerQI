@@ -476,6 +476,62 @@ const refreshThreadCounters = async (threadId, parsed, decision) => {
  * @returns {object} a summary; never throws for a per-message failure, because one
  *   unparseable message must not stop the mailbox.
  */
+/**
+ * Give up only when BOTH are exceeded. See the schema comment on pendingMessages.
+ *
+ * Tuned to a ten-minute poll: 25 attempts is roughly four hours, so the age bound is the
+ * one that actually binds. Confirm GMAIL_POLL_MINUTES before changing either.
+ */
+const MAX_PENDING_ATTEMPTS = 25;
+const MIN_PENDING_AGE_MS = 6 * 60 * 60 * 1000;
+
+/** How many retired entries to keep. The newest are the ones worth looking at. */
+const MAX_DEAD_LETTERS = 50;
+
+/**
+ * An error that will never succeed, however long we wait.
+ *
+ * Gmail answers 404 for a message deleted from the mailbox while history.list still
+ * reports it as added. Every one of the 37 messages stuck in the live backlog was this.
+ * Retrying it is not optimism, it is just cost: there is no message left to fetch.
+ *
+ * Narrow on purpose. Anything that is not a definite 404 keeps its place, because the
+ * expensive mistake here is retiring a message that was only temporarily unreachable.
+ */
+const PERMANENT_FAILURE = (error) => error?.statusCode === 404;
+
+/**
+ * Read the backlog, adopting anything still in the legacy [String] field.
+ *
+ * Lazy rather than a migration script, because the backlog is a live, moving value: a
+ * script would race the poll, while the singleton has exactly one writer (worker
+ * concurrency is 1) so the next sync is a guaranteed serialised migration point.
+ *
+ * Adopted entries get firstSeenAt = now, NOT epoch. We do not know how long they have
+ * been failing, and guessing "forever" would retire the whole existing backlog on the
+ * first run after deploy - before anyone had seen what was in it. They get one full
+ * bounded cycle from the moment this code starts running.
+ */
+const loadBacklog = (connection) => {
+    const entries = new Map();
+    for (const entry of connection.pendingMessages || []) {
+        if (entry?.id) entries.set(entry.id, { ...entry });
+    }
+    const now = new Date();
+    for (const id of connection.pendingMessageIds || []) {
+        if (!id || entries.has(id)) continue;
+        entries.set(id, { id, attempts: 0, firstSeenAt: now, lastAttemptAt: null, lastOutcome: 'throw', lastReason: null });
+    }
+    return entries;
+};
+
+/** Has this entry earned retirement? */
+const shouldRetire = (entry, { permanent = false } = {}) => {
+    if (permanent) return true;
+    const ageMs = Date.now() - new Date(entry.firstSeenAt || Date.now()).getTime();
+    return entry.attempts >= MAX_PENDING_ATTEMPTS && ageMs >= MIN_PENDING_AGE_MS;
+};
+
 const runSync = async ({ reason = 'poll' } = {}) => {
     if (!isMessagingEnabled()) return { skipped: 'disabled' };
 
@@ -501,19 +557,73 @@ const runSync = async ({ reason = 'poll' } = {}) => {
      * the cursor at it would stop all client mail until someone noticed. Tracking
      * failures here lets the cursor move while nothing is dropped.
      */
-    const pending = new Set(connection.pendingMessageIds || []);
+    const pending = loadBacklog(connection);
+    const retired = [...(connection.deadLetterMessages || [])];
+    const retiredThisRun = [];
+
+    /**
+     * One attempt at one message, from the backlog or newly seen.
+     *
+     * ── THE TWO BUGS THIS SHAPE FIXES ──
+     * The previous loop dropped an id on ANY non-throwing return, `deferred` included.
+     * So a portal echo whose own write had genuinely failed - the exact case the
+     * deferral was invented for - got one retry and was then forgotten permanently,
+     * which is the loss the deferral exists to prevent. Meanwhile a throwing message
+     * was kept forever with no counter, which is how 37 of them accumulated unseen.
+     *
+     * Deferral and throw are now the same thing: a bounded failure with a count on it.
+     *
+     * @returns {'cleared'|'retained'|'retired'}
+     */
+    const attemptOne = async (entry) => {
+        let outcome = 'throw';
+        let reason = null;
+        let permanent = false;
+
+        try {
+            const result = await ingestMessage(entry.id);
+            /*
+             * ingested / duplicate / skipped / unmatched are terminal DECISIONS, not
+             * failures. Clearing them on the first attempt is what drains most of a
+             * backlog for free.
+             */
+            if (result.status !== 'deferred') return 'cleared';
+            outcome = 'deferred';
+            reason = result.reason || 'deferred';
+        } catch (error) {
+            permanent = PERMANENT_FAILURE(error);
+            // The error text only - Gmail's messages carry no client content.
+            reason = String(error?.message || 'unknown').slice(0, 300);
+        }
+
+        entry.attempts = (entry.attempts || 0) + 1;
+        entry.lastAttemptAt = new Date();
+        entry.lastOutcome = outcome;
+        entry.lastReason = reason;
+
+        if (!shouldRetire(entry, { permanent })) return 'retained';
+
+        retired.push({
+            id: entry.id,
+            attempts: entry.attempts,
+            firstSeenAt: entry.firstSeenAt || null,
+            retiredAt: new Date(),
+            lastOutcome: entry.lastOutcome,
+            lastReason: entry.lastReason,
+        });
+        retiredThisRun.push(entry.id);
+        // Once, at retirement - not on every one of the attempts that led here.
+        logger.error(new ApiError(500, `[GmailIngest] giving up on ${entry.id} after ${entry.attempts} attempt(s): ${reason}`));
+        return 'retired';
+    };
 
     // Retry the backlog first, so a message that failed for a transient reason is
     // stored before anything newer is, and the conversation stays in order.
-    for (const messageId of [...pending]) {
+    for (const entry of [...pending.values()]) {
         summary.retried += 1;
-        try {
-            // eslint-disable-next-line no-await-in-loop
-            await ingestMessage(messageId);
-            pending.delete(messageId);
-        } catch (error) {
-            logger.warn(`[GmailIngest] retry of ${messageId} failed again: ${error.message}`);
-        }
+        // eslint-disable-next-line no-await-in-loop
+        const verdict = await attemptOne(entry);
+        if (verdict !== 'retained') pending.delete(entry.id);
     }
 
     try {
@@ -538,25 +648,31 @@ const runSync = async ({ reason = 'poll' } = {}) => {
             // parallel redactions is how the OpenAI rate limit gets tripped.
             for (const messageId of messageIds) {
                 summary.seen += 1;
-                try {
-                    // eslint-disable-next-line no-await-in-loop
-                    const result = await ingestMessage(messageId);
-                    summary[result.status === 'ingested' ? 'ingested' : result.status] += 1;
-                    /**
-                     * Our own write has not landed yet — or never will. Held for retry
-                     * rather than skipped, so the message cannot be lost if it was the
-                     * latter. The next run either finds our row (duplicate, cleared) or
-                     * defers again, which is visible in the backlog.
-                     */
-                    if (result.status === 'deferred') pending.add(messageId);
-                } catch (error) {
-                    // One bad message must not stop the mailbox, and must not be lost
-                    // either. Held in `pending` so the cursor can advance while this
-                    // message is retried on every later run.
-                    summary.failed += 1;
-                    pending.add(messageId);
-                    logger.error(new ApiError(500, `[GmailIngest] message ${messageId} failed: ${error.message}`));
-                }
+                /**
+                 * Newly seen, so it enters the backlog the same way a retry stays in it:
+                 * through attemptOne, which counts the failure and can retire it.
+                 *
+                 * A deferral - our own write has not landed yet, or never will - is held
+                 * rather than skipped, so the message cannot be lost in the second case.
+                 * A thrown error is held for the same reason: one bad message must not
+                 * stop the mailbox, and must not disappear either.
+                 */
+                const entry = {
+                    id: messageId,
+                    attempts: 0,
+                    firstSeenAt: new Date(),
+                    lastAttemptAt: null,
+                    lastOutcome: 'throw',
+                    lastReason: null,
+                };
+                // eslint-disable-next-line no-await-in-loop
+                const verdict = await attemptOne(entry);
+
+                if (verdict === 'cleared') summary.ingested += 1;
+                else if (verdict === 'retained') {
+                    summary[entry.lastOutcome === 'deferred' ? 'deferred' : 'failed'] += 1;
+                    pending.set(messageId, entry);
+                } else summary.failed += 1;
             }
 
             /**
@@ -594,23 +710,47 @@ const runSync = async ({ reason = 'poll' } = {}) => {
      * an alarm rather than quietly expanding a document. The newest are kept: they are
      * the ones a client is currently waiting on.
      */
-    const pendingIds = [...pending].slice(-MAX_PENDING_MESSAGES);
-    const backlogWarning = pending.size > MAX_PENDING_MESSAGES
-        ? `${pending.size} messages are failing to ingest; only the newest ${MAX_PENDING_MESSAGES} are still being retried`
+    const pendingEntries = [...pending.values()].slice(-MAX_PENDING_MESSAGES);
+    const deadLetters = retired.slice(-MAX_DEAD_LETTERS);
+
+    /*
+     * What `lastError` says, in priority order.
+     *
+     * It used to be set by exactly one condition - the backlog passing its 200-entry cap
+     * - and a small inbox never reaches that, which is why 37 stuck messages reported as
+     * a healthy connection for a week. AGE is the signal that matters, not size: one
+     * message retrying for six days is a broken integration, two hundred that arrived in
+     * the last ten minutes are a busy morning.
+     */
+    const oldestPendingMs = pendingEntries.length
+        ? Math.min(...pendingEntries.map((e) => new Date(e.firstSeenAt || Date.now()).getTime()))
         : null;
+    const stuckHours = oldestPendingMs ? (Date.now() - oldestPendingMs) / 3600000 : 0;
+
+    const backlogWarning = retiredThisRun.length
+        ? `${retiredThisRun.length} message(s) retired after repeated ingest failures; see /api/gmail/status`
+        : pending.size > MAX_PENDING_MESSAGES
+            ? `${pending.size} messages are failing to ingest; only the newest ${MAX_PENDING_MESSAGES} are still being retried`
+            : stuckHours >= 2
+                ? `a message has been failing to ingest for ${Math.floor(stuckHours)}h; see /api/gmail/status`
+                : null;
 
     // Persisted once, at the end, and only forward.
     await GmailConnection.updateOne({ key: SINGLETON_KEY }, {
         $set: {
             ...(isNewer(cursor, connection.historyId) ? { historyId: cursor } : {}),
             lastSyncAt: new Date(),
-            pendingMessageIds: pendingIds,
+            pendingMessages: pendingEntries,
+            deadLetterMessages: deadLetters,
+            // Adopted into pendingMessages above; cleared so the migration runs once.
+            pendingMessageIds: [],
             lastError: backlogWarning,
             lastErrorAt: backlogWarning ? new Date() : null,
         },
     });
 
-    summary.pending = pendingIds.length;
+    summary.pending = pendingEntries.length;
+    summary.retired = retiredThisRun.length;
 
     if (summary.seen > 0) {
         logger.info(`[GmailIngest] ${reason}: ${JSON.stringify(summary)}`);

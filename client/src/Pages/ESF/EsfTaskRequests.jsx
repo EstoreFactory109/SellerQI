@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ClipboardList, Check, X, Trash2, Paperclip, AlertTriangle, Sparkles, MessageSquare, Search } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
+import downloadFile from '../../utils/downloadFile.js';
 
 /**
  * Task Requests — work clients have asked for, awaiting a decision.
@@ -229,16 +230,15 @@ const EsfTaskRequests = () => {
                                             letterhead still identifies the client — the
                                             accepted exception, made concrete here.
                                         */
-                                        <a
+                                        <button
                                             key={file.index}
-                                            href={`/app/esf/task-requests/${request.id}/attachments/${file.index}`}
-                                            target="_blank"
-                                            rel="noreferrer"
+                                            type="button"
+                                            onClick={() => downloadFile(`/app/esf/task-requests/${request.id}/attachments/${file.index}`, file.name)}
                                             className="flex items-center gap-1.5 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-[11px] text-gray-300 transition-colors hover:border-white/25 hover:text-gray-100"
                                         >
                                             <Paperclip className="h-3 w-3" />
                                             {file.name || 'Attachment'}
-                                        </a>
+                                        </button>
                                     ))}
                                 </div>
                             )}
@@ -312,8 +312,8 @@ const EsfTaskRequests = () => {
                                             className="rounded-lg bg-violet-500/80 px-3 py-1.5 text-xs font-semibold text-[#0b0f17] transition-opacity hover:bg-violet-500 disabled:opacity-40"
                                         >
                                             {request.stagedDecision.intent === 'accept'
-                                                ? 'Confirm — create the task'
-                                                : 'Confirm — decline it'}
+                                                ? 'Confirm - create the task'
+                                                : 'Confirm - decline it'}
                                         </button>
                                         <button
                                             type="button"

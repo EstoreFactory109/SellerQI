@@ -32,7 +32,7 @@ jest.mock('../../Services/Gmail/GmailIngestService.js', () => ({ resolveClient: 
 jest.mock('../../Services/Gmail/config.js', () => ({ getCredentials: () => ({ inboxAddress: 'support@estorefactory.com' }) }));
 jest.mock('../../config/config.js', () => ({ dbUri: 'mongodb://x', dbName: 'y' }));
 
-const { classify, maskAddress, VERDICTS } = require('../../scripts/diagnoseGmailPendingBacklog.js');
+const { classify, maskAddress, VERDICTS, backlogIds } = require('../../scripts/diagnoseGmailPendingBacklog.js');
 
 const INBOX = { inboxAddress: 'support@estorefactory.com' };
 
@@ -196,5 +196,39 @@ describe('maskAddress', () => {
         expect(maskAddress('')).toBe('');
         expect(maskAddress(null)).toBe('');
         expect(maskAddress('nonsense')).toBe('n***');
+    });
+});
+
+/**
+ * Which field the live backlog is actually in depends on whether runSync's migration
+ * has run yet (GmailIngestService.loadBacklog adopts pendingMessageIds into
+ * pendingMessages and clears the legacy field, in one write, on its first run after
+ * this deploy). A diagnostic that only read the legacy field would report an empty
+ * backlog forever, the moment that migration completed - the exact silent wrong
+ * answer this whole script was built to avoid.
+ */
+describe('backlogIds — reading the backlog regardless of migration state', () => {
+    test('reads the legacy field before the migration has run', () => {
+        expect(backlogIds({ pendingMessageIds: ['a', 'b'], pendingMessages: [] })).toEqual(['a', 'b']);
+    });
+
+    test('reads the structured field after the migration has run', () => {
+        expect(backlogIds({ pendingMessageIds: [], pendingMessages: [{ id: 'a' }, { id: 'b' }] }))
+            .toEqual(['a', 'b']);
+    });
+
+    test('reads both at once, de-duplicated, during the window between syncs', () => {
+        // A connection document read between deploy and the first sync completing.
+        expect(backlogIds({ pendingMessageIds: ['a'], pendingMessages: [{ id: 'a' }, { id: 'c' }] }))
+            .toEqual(['a', 'c']);
+    });
+
+    test('an entry with no id is dropped rather than reported as "undefined"', () => {
+        expect(backlogIds({ pendingMessages: [{ attempts: 1 }], pendingMessageIds: [] })).toEqual([]);
+    });
+
+    test('survives a connection document written before either field existed', () => {
+        expect(backlogIds({})).toEqual([]);
+        expect(backlogIds(null)).toEqual([]);
     });
 });

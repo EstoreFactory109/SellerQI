@@ -27,11 +27,20 @@ afterEach(() => {
 });
 
 describe('polling', () => {
-    it('calls the refresh on each interval', () => {
+    it('calls the refresh on each interval', async () => {
+        /*
+         * advanceTimersByTimeAsync, not the synchronous form, because the hook's tick
+         * is now async (it awaits refresh so it can count a rejection). Advancing
+         * synchronously fires all three interval callbacks before any of their
+         * microtasks resolve, so the in-flight guard added for the failure counter
+         * would see the first tick still "running" and skip the second and third —
+         * three calls becoming one. The async form flushes microtasks between ticks,
+         * which is what a real 15-second gap does anyway.
+         */
         const refresh = vi.fn();
         renderHook(() => useConversationPolling(refresh, { intervalMs: 1000 }));
 
-        act(() => { vi.advanceTimersByTime(3000); });
+        await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
 
         expect(refresh).toHaveBeenCalledTimes(3);
     });
@@ -108,5 +117,89 @@ describe('teardown', () => {
         act(() => { vi.advanceTimersByTime(5000); });
 
         expect(refresh).not.toHaveBeenCalled();
+    });
+});
+
+/**
+ * Both pages used to swallow every poll failure with an empty catch, reasoning that
+ * "the next poll is 15s away." True for one blip; silent forever for an expired session
+ * or a revoked Messages permission, where the page keeps polling, keeps failing, and
+ * shows nothing to say so. These pin the replacement: the hook itself tracks failures,
+ * because a page-local catch cannot be checked for consistency between the two pages
+ * that each used to write their own.
+ */
+describe('failure tracking', () => {
+    it('reports a rejected refresh as a failure, not silently', async () => {
+        const refresh = vi.fn().mockRejectedValue(new Error('network blip'));
+        const { result } = renderHook(() => useConversationPolling(refresh, { intervalMs: 1000 }));
+
+        await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+
+        expect(result.current.failures).toBe(1);
+        expect(result.current.lastError).toBeInstanceOf(Error);
+    });
+
+    it('is not stale after a single failure', async () => {
+        // One transient blip must stay invisible — only a run of them is worth showing.
+        const refresh = vi.fn().mockRejectedValue(new Error('blip'));
+        const { result } = renderHook(() => useConversationPolling(refresh, { intervalMs: 1000 }));
+
+        await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+
+        expect(result.current.stale).toBe(false);
+    });
+
+    it('becomes stale after two CONSECUTIVE failures', async () => {
+        const refresh = vi.fn().mockRejectedValue(new Error('down'));
+        const { result } = renderHook(() => useConversationPolling(refresh, { intervalMs: 1000 }));
+
+        await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+
+        expect(result.current.failures).toBe(2);
+        expect(result.current.stale).toBe(true);
+    });
+
+    it('a single success resets the count back to zero', async () => {
+        // The run must be CONSECUTIVE: two old failures from an hour ago must not
+        // combine with a brand new one to read as "still failing."
+        const refresh = vi.fn()
+            .mockRejectedValueOnce(new Error('one'))
+            .mockResolvedValueOnce(undefined)
+            .mockRejectedValueOnce(new Error('two'));
+        const { result } = renderHook(() => useConversationPolling(refresh, { intervalMs: 1000 }));
+
+        await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+
+        expect(result.current.failures).toBe(1);
+        expect(result.current.stale).toBe(false);
+    });
+
+    it('the stale threshold is configurable', async () => {
+        const refresh = vi.fn().mockRejectedValue(new Error('down'));
+        const { result } = renderHook(() => useConversationPolling(refresh, {
+            intervalMs: 1000, staleAfterFailures: 1,
+        }));
+
+        await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+
+        expect(result.current.stale).toBe(true);
+    });
+
+    it('a request still in flight is not restarted by the next tick', async () => {
+        // Without the in-flight guard, a slow request stacks a fresh call every
+        // interval, and the failure count stops meaning anything.
+        let resolveFirst;
+        const refresh = vi.fn()
+            .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+            .mockResolvedValue(undefined);
+
+        renderHook(() => useConversationPolling(refresh, { intervalMs: 1000 }));
+
+        await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+        expect(refresh).toHaveBeenCalledTimes(1);
+
+        resolveFirst();
+        await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+        expect(refresh).toHaveBeenCalledTimes(2);
     });
 });

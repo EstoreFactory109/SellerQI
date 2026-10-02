@@ -32,7 +32,7 @@ const TONE_COLOR = {
 const REPORTS_PAGE = '/seller-central-checker/estore-factory/reports';
 
 const formatStat = (stat) => {
-    if (stat.value === null || stat.value === undefined) return '—';
+    if (stat.value === null || stat.value === undefined) return '-';
     if (typeof stat.value !== 'number') return stat.value;
     if (stat.format === 'percent') return `${stat.value}%`;
     if (stat.format === 'currency') return stat.value.toLocaleString();

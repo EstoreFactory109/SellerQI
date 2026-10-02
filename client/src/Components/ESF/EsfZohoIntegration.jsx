@@ -152,24 +152,24 @@ export default function EsfZohoIntegration() {
             <dl className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
               <div>
                 <dt className="text-gray-500">Portal</dt>
-                <dd className="text-gray-200">{status.portalName || status.portalId || '—'}</dd>
+                <dd className="text-gray-200">{status.portalName || status.portalId || '-'}</dd>
               </div>
               <div>
                 <dt className="text-gray-500">Data center</dt>
                 <dd className="text-gray-200 break-all">
-                  {status.apiDomain ? status.apiDomain.replace(/^https?:\/\//, '') : '—'}
+                  {status.apiDomain ? status.apiDomain.replace(/^https?:\/\//, '') : '-'}
                 </dd>
               </div>
               <div>
                 <dt className="text-gray-500">Connected</dt>
                 <dd className="text-gray-200">
-                  {status.connectedAt ? new Date(status.connectedAt).toLocaleString() : '—'}
+                  {status.connectedAt ? new Date(status.connectedAt).toLocaleString() : '-'}
                 </dd>
               </div>
               <div>
                 <dt className="text-gray-500">Token last refreshed</dt>
                 <dd className="text-gray-200">
-                  {status.lastRefreshAt ? new Date(status.lastRefreshAt).toLocaleString() : '—'}
+                  {status.lastRefreshAt ? new Date(status.lastRefreshAt).toLocaleString() : '-'}
                 </dd>
               </div>
             </dl>

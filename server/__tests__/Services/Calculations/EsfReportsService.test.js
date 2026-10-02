@@ -350,10 +350,10 @@ describe('getEsfReports', () => {
                 // Not null and not zero: an em dash, because "we have not
                 // looked" and "there is no competitor" are opposite facts that
                 // a blank cell would render identically.
-                expect(row.competingSeller).toBe('\u2014');
+                expect(row.competingSeller).toBe('-');
                 expect(row.competingPrice).toBeNull();
                 expect(row.priceGap).toBeNull();
-                expect(row.pricingFlag).toBe('\u2014');
+                expect(row.pricingFlag).toBe('-');
                 // No tile either — "0 priced above" on an unfetched account is
                 // a false all-clear.
                 expect(report.summary.stats.some((stat) => stat.label === 'Priced above Buy Box')).toBe(false);
@@ -457,7 +457,7 @@ describe('getEsfReports', () => {
                 const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'buybox');
 
                 // Half an answer beats none: the gap is what gets actioned.
-                expect(report.summary.rows[0].competingSeller).toBe('\u2014');
+                expect(report.summary.rows[0].competingSeller).toBe('-');
                 expect(report.summary.rows[0].priceGap).toBe(4.99);
                 expect(report.caveats.join(' ')).toMatch(/withheld the seller identity/);
             });
@@ -472,7 +472,7 @@ describe('getEsfReports', () => {
                 }));
 
                 const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'buybox');
-                expect(report.summary.rows[0].pricingFlag).toBe('\u2014');
+                expect(report.summary.rows[0].pricingFlag).toBe('-');
                 expect(report.summary.rows[0].priceGap).toBeNull();
             });
         });
@@ -524,7 +524,7 @@ describe('getEsfReports', () => {
             const rows = Object.fromEntries(report.summary.rows.map((row) => [row.sku, row]));
 
             expect(rows.FULL.score).toBe('6/6');
-            expect(rows.FULL.missing).toBe('—');
+            expect(rows.FULL.missing).toBe('-');
             expect(rows.BARE.score).toBe('0/6');
             // Worst listing first, so the audit opens on what needs work.
             expect(report.summary.rows[0].sku).toBe('BARE');
@@ -585,7 +585,7 @@ describe('getEsfReports', () => {
             APlusPremium.findOne.mockReturnValue(mockFindOne(null));
 
             const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'listings-audit');
-            expect(report.summary.rows[0].aPlusPremium).toBe('\u2014');
+            expect(report.summary.rows[0].aPlusPremium).toBe('-');
             // No count either: reporting zero Premium is the same false claim
             // in another shape.
             expect(report.summary.stats.some((stat) => stat.label === 'A+ Premium')).toBe(false);
@@ -888,14 +888,44 @@ describe('document highlights', () => {
         expect(report.highlights.some((h) => h.tone === 'watch')).toBe(false);
     });
 
-    it('always leaves one blue fill-in bullet for the account manager', async () => {
+    /**
+     * The inverse of what this once asserted, and the reason it changed.
+     *
+     * Seven reports used to end on a blue "fill" bullet - "[Account manager
+     * commentary for this cycle]", "[Purchase orders raised this cycle]" - and
+     * nothing in the portal ever let anyone write that copy. The brackets reached
+     * clients verbatim in an emailed PDF, under a legend explaining how to fill
+     * them in. Every render site now drops the tone, but a template that is only
+     * ever suppressed is one forgotten filter away from going out again.
+     *
+     * So: no builder emits one. Asserted across EVERY report rather than the one
+     * that happened to be checked before, because the next placeholder will be
+     * added to whichever report is being worked on that day.
+     */
+    it('emits no fill-in placeholder, in any report', async () => {
         Restock.findOne.mockReturnValue(mockFindOne({
             createdAt: new Date('2026-04-25T00:00:00Z'),
             Products: [{ asin: 'B1', merchantSku: 'S1', price: '10', recommendedReplenishmentQty: '4', available: '2' }],
         }));
 
-        const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'inventory-restock');
-        expect(report.highlights.filter((h) => h.tone === 'fill')).toHaveLength(1);
+        const { reports } = await getEsfReports(USER, 'US', 'NA');
+        const offenders = reports
+            .filter((r) => (r.highlights || []).some((h) => h.tone === 'fill'))
+            .map((r) => r.key);
+
+        expect(offenders).toEqual([]);
+    });
+
+    it('leaves no bracketed template text in any highlight', () => {
+        // The tone is one way to spot a placeholder; the brackets are the other,
+        // and they survive a copy-paste that forgets the tone.
+        const source = require('fs').readFileSync(
+            require('path').join(__dirname, '../../../Services/Calculations/EsfReportsService.js'),
+            'utf8',
+        );
+        const emitted = source.match(/highlight\(\s*'\[[A-Z][^']*\]'/g) || [];
+
+        expect(emitted).toEqual([]);
     });
 });
 
@@ -1197,7 +1227,7 @@ describe('feasibility-check additions', () => {
             const rows = buybox.summary.secondaryTable.rows;
             expect(rows.find((row) => row.sku === 'S1').enforcement).toBe('SEARCH_SUPPRESSED');
             // The report has no exemption status: unknown, never "No".
-            expect(rows.find((row) => row.sku === 'S2')).toMatchObject({ enforcement: 'Blocked', exempt: '—', productName: 'Two' });
+            expect(rows.find((row) => row.sku === 'S2')).toMatchObject({ enforcement: 'Blocked', exempt: '-', productName: 'Two' });
             expect(buybox.highlights.some((h) => /at risk of suppression/.test(h.text))).toBe(true);
             expect(buybox.caveats.join(' ')).toMatch(/Suppressed Listings Report, read on 27 Sept 2026/);
         });

@@ -34,19 +34,22 @@ const logger = require('../../utils/Logger.js');
 const dbConnect = require('../../config/dbConn.js');
 const { runEsfReportsCadence } = require('./esfReportsMailer.js');
 
-const DEFAULT_SCHEDULES = {
-    weekly: '0 8 * * 6',
-    biweekly: '15 8 * * 6',
-    monthly: '30 8 1 * *',
-    quarterly: '45 8 1 1,4,7,10 *',
-};
-
-const scheduleFor = (cadence) =>
-    process.env[`ESF_REPORTS_${cadence.toUpperCase()}_CRON`] || DEFAULT_SCHEDULES[cadence];
+/*
+ * The schedule lives in esfReportsSchedule.js, not here.
+ *
+ * It moved because the Reports page has to show the client when their next batch arrives,
+ * and an API process cannot require this file to find out — it pulls in node-cron and a
+ * database connection at load. Keeping one copy is the point: an operator who sets
+ * ESF_REPORTS_WEEKLY_CRON changes both the cron that fires and the date the client sees,
+ * and the two cannot drift.
+ *
+ * Still re-exported below so existing callers and tests are unaffected.
+ */
+const { DEFAULT_SCHEDULES, scheduleFor, isMailerEnabled } = require('./esfReportsSchedule.js');
 
 const setupEsfReportsCrons = () => {
     const timezone = process.env.TIMEZONE || 'UTC';
-    const enabled = String(process.env.ESF_REPORTS_MAILER_ENABLED ?? 'true') !== 'false';
+    const enabled = isMailerEnabled();
 
     if (!enabled) {
         logger.warn('[EsfReportsMailer] Disabled by ESF_REPORTS_MAILER_ENABLED=false — no cycles scheduled');

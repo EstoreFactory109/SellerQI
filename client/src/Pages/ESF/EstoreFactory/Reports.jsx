@@ -3,6 +3,7 @@ import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { PALETTE } from '../../../Components/ESF/estoreFactoryTheme.js';
 import axiosInstance from '../../../config/axios.config.js';
+import useNextReport, { formatDueLabel, formatDueTitle } from '../../../hooks/useNextReport.js';
 import ReportDocumentPreview, { reportNeedsLandscape, POPPINS_HREF } from '../../../Components/ESF/ReportDocumentPreview.jsx';
 
 /**
@@ -31,14 +32,6 @@ import ReportDocumentPreview, { reportNeedsLandscape, POPPINS_HREF } from '../..
  * "View history" opens that report's own editions, read from the snapshot trail
  * each fetcher leaves behind (see the history section of EsfReportsService).
  */
-
-/**
- * The next scheduled report. Still hardcoded — there is no recurring-report
- * model, so the publishing schedule genuinely is not knowable from data. Kept
- * exported because the Overview card reads it from here rather than holding its
- * own copy; when a schedule exists, this is the single line that changes.
- */
-export const NEXT_REPORT = { name: 'Weekly Sales Summary', due: 'Monday' };
 
 const TONE_COLOR = {
     good: PALETTE.good,
@@ -132,7 +125,7 @@ const downloadName = (report, marketplace) => {
 
 /** Formats a stat or cell according to the `format` the API tagged it with. */
 const formatValue = (value, format, currency) => {
-    if (value === null || value === undefined || value === '') return '—';
+    if (value === null || value === undefined || value === '') return '-';
     if (typeof value !== 'number') return value;
     // Per-unit money, to the cent — see the note in reportPdf.js formatCell.
     // 'currency' rounds to whole units, which is right for an aggregate and
@@ -163,7 +156,7 @@ const DeltaCaption = ({ stat }) => {
             className="text-[10.5px] whitespace-nowrap"
             style={{ color: unchanged ? PALETTE.textMuted : improved ? PALETTE.good : PALETTE.amberValue }}
         >
-            {unchanged ? '— no change' : `${stat.delta > 0 ? '▲' : '▼'} ${Math.abs(stat.delta)}${suffix}`}
+            {unchanged ? '- no change' : `${stat.delta > 0 ? '▲' : '▼'} ${Math.abs(stat.delta)}${suffix}`}
         </span>
     );
 };
@@ -514,7 +507,7 @@ const MarketplaceBlock = ({ reportKey, section }) => (
     </div>
 );
 
-const SummaryPanel = ({ report, currency, failed, marketplace }) => {
+const SummaryPanel = ({ report, currency, failed, failReason, marketplace }) => {
     // Nothing selectable: every report is still waiting on data, or the fetch
     // failed. Say so here rather than leaving the top of the page blank, which
     // reads as a broken panel.
@@ -529,7 +522,10 @@ const SummaryPanel = ({ report, currency, failed, marketplace }) => {
                 </h2>
                 <p className="m-0 text-[13px] leading-[1.6] max-w-[620px]" style={{ color: PALETTE.textMuted }}>
                     {failed
-                        ? 'We could not reach your report data. Refresh the page to try again.'
+                        // The server's own words when it gave any, rather than a guess. The
+                        // generic line told a client with no marketplace to refresh, which
+                        // was never going to help them.
+                        ? (failReason || 'We could not reach your report data. Refresh the page to try again.')
                         : 'Every report we run on your account is listed below, each with what it is waiting on. They fill in as your marketplace data syncs.'}
                 </p>
             </section>
@@ -772,10 +768,12 @@ const ReportCard = ({ report, selected, onSelect, onViewHistory, onDownload }) =
 const Reports = () => {
     const navigate = useNavigate();
     const currency = useSelector((state) => state.currency?.currency) || '$';
+    const nextReport = useNextReport();
 
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [failed, setFailed] = useState(false);
+    const [failReason, setFailReason] = useState('');
     // null until the user picks one, at which point their choice wins over the
     // backend's suggested default for the rest of the visit.
     const [selectedKey, setSelectedKey] = useState(null);
@@ -785,11 +783,17 @@ const Reports = () => {
             const res = await axiosInstance.get('/api/pagewise/esf/reports');
             setData(res.data?.data || null);
             setFailed(false);
-        } catch {
-            // Fails quiet, like the Overview page: the header still renders and
-            // the body shows an empty state rather than the page erroring out.
+        } catch (err) {
+            /*
+             * Keep the reason. The error was not even bound before, so a 401 from a client
+             * with no marketplace, a 400, a 500 and a dropped connection all rendered the
+             * same "Refresh the page to try again" — advice that would never have helped the
+             * first of those. The server now answers 200 with an empty payload for a client
+             * who has no marketplace, so anything reaching here is a genuine fault.
+             */
             setData(null);
             setFailed(true);
+            setFailReason(err.response?.data?.message || '');
         } finally {
             setLoading(false);
         }
@@ -859,14 +863,25 @@ const Reports = () => {
                             Every recurring report we publish on your account, kept by report type.
                         </p>
                     </div>
-                    <span className="flex-none text-[12.5px] pb-[3px]" style={{ color: PALETTE.textSecondary }}>
-                        Next report: <span style={{ color: PALETTE.textBody }}>{NEXT_REPORT.name}</span>, {NEXT_REPORT.due}
-                    </span>
+                    {nextReport?.status === 'scheduled' ? (
+                        <span
+                            className="flex-none text-[12.5px] pb-[3px]"
+                            style={{ color: PALETTE.textSecondary }}
+                            title={formatDueTitle(nextReport)}
+                        >
+                            Next: <span style={{ color: PALETTE.textBody }}>{nextReport.cadenceLabel} reports</span>
+                            {' - '}{nextReport.reportNames.join(', ')}, {formatDueLabel(nextReport.at)}
+                        </span>
+                    ) : nextReport?.note ? (
+                        <span className="flex-none text-[12.5px] pb-[3px]" style={{ color: PALETTE.textSecondary }}>
+                            {nextReport.note}
+                        </span>
+                    ) : null}
                 </header>
 
                 {loading
                     ? <PanelSkeleton />
-                    : <SummaryPanel report={selected} currency={currency} failed={failed} marketplace={data?.marketplace} />}
+                    : <SummaryPanel report={selected} currency={currency} failed={failed} failReason={failReason} marketplace={data?.marketplace} />}
 
                 <section className="flex flex-col gap-4">
                     <div className="flex items-baseline gap-[10px] flex-wrap">
@@ -901,7 +916,7 @@ const Reports = () => {
                             style={{ background: PALETTE.surface, border: `1px solid ${PALETTE.border}`, padding: '28px 24px', color: PALETTE.textMuted }}
                         >
                             {failed
-                                ? 'Reports could not be loaded just now. Refresh the page to try again.'
+                                ? (failReason || 'Reports could not be loaded just now. Refresh the page to try again.')
                                 : 'No reports are available for your account yet.'}
                         </div>
                     )}

@@ -305,6 +305,40 @@ const persistLink = async ({ clientId, project, connection, staffUserId }) => {
     await invalidateProjectCache();
 
     logger.info(`[ZohoProjectLinks] Linked project ${project.id} ("${project.name}") to client ${clientId}`);
+
+    /*
+     * Pull the project's tasks in now, rather than leaving the client an empty portal.
+     *
+     * Linking used to end here, and nothing else reads a newly-linked project until the
+     * nightly sweep — so a client whose project was connected in the morning saw an empty
+     * Status page, an empty Untapped page and an empty Overview work list for up to 24 hours,
+     * on the first day they ever signed in.
+     *
+     * NOT awaited, for the reason TaskRequestService records where it does the same thing
+     * after accepting a request: a full project sync measured ~30s on the linked project
+     * (76 tasks, 1,062 comments), which is far too long to hold this response open. A failure
+     * costs latency, not data — the nightly run reconciles regardless — so it must not fail
+     * the link, which is why nothing here rethrows.
+     */
+    try {
+        const ZohoTaskSync = require('./ZohoTaskSync.js');
+        // Promise.resolve wraps it rather than calling .then directly: a synchronous throw,
+        // or a return value that is not a promise, would otherwise propagate out of a call
+        // whose entire contract is that it cannot fail the link.
+        Promise.resolve(ZohoTaskSync.syncProject({
+            projectId: zohoProject.projectId,
+            projectName: zohoProject.projectName,
+            portalId: zohoProject.portalId,
+        }))
+            .then(() => logger.info(`[ZohoProjectLinks] first sync done for project ${project.id}`))
+            .catch((error) => logger.error(
+                `[ZohoProjectLinks] project ${project.id} linked but its first sync failed `
+                + `(it will fill in after the nightly run): ${error.message}`
+            ));
+    } catch (error) {
+        logger.error(`[ZohoProjectLinks] could not start the first sync for ${project.id}: ${error.message}`);
+    }
+
     return zohoProject;
 };
 
