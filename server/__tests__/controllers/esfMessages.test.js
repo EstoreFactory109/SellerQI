@@ -346,6 +346,41 @@ describe('opening a thread', () => {
         expect(update.$set).not.toHaveProperty('clientUnreadCount');
     });
 
+    /**
+     * The 15-second poll hits this same endpoint, so marking read on every call
+     * meant a reply landing in an open thread was read before anyone could have
+     * seen it - and the left rail never badged it either.
+     *
+     * The default is deliberately "do mark read" rather than the other way
+     * round. During a deploy the bundles already running in browsers keep using
+     * the old URLs; if the default were "do not", their open-a-thread would stop
+     * clearing badges entirely and the inbox would fill with threads nobody
+     * could ever mark read. Opt-out keeps an old bundle behaving exactly as it
+     * does today.
+     */
+    test('marks read by default, so a bundle from before this change still works', async () => {
+        await run(getStaffThread, staffReq({ params: { threadId: 't1' } }));
+
+        expect(mockThreadUpdateOne).toHaveBeenCalled();
+    });
+
+    test.each([['0'], ['false']])('does NOT mark read when markRead=%s', async (value) => {
+        await run(getStaffThread, staffReq({ params: { threadId: 't1' }, query: { markRead: value } }));
+
+        expect(mockThreadUpdateOne).not.toHaveBeenCalled();
+    });
+
+    test('still returns the conversation when it declines to mark it read', async () => {
+        // The poll needs the messages; it just must not touch the counter.
+        const { status, body } = await run(
+            getStaffThread,
+            staffReq({ params: { threadId: 't1' }, query: { markRead: '0' } }),
+        );
+
+        expect(status).toBe(200);
+        expect(body.data.messages).toHaveLength(1);
+    });
+
     test('404s for a thread that does not exist', async () => {
         mockThreadFindOne.mockReturnValue(chain(null));
 

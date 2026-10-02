@@ -237,11 +237,36 @@ const PROJECTION = {
     message: 'direction bodyRedacted sentAt bodyTruncated quotedTrimmed redactedBy attachments threadId userId',
 };
 
+/**
+ * Should this thread fetch also mark the thread read?
+ *
+ * ── WHY A QUERY PARAM AND NOT A SEPARATE ROUTE ──
+ * A POST /:threadId/read would mean re-implementing the page check, the client
+ * scoping and the 404-not-403 probing defence in two routers. The header of
+ * controllers/esf/esfMessages.js records that forgetting exactly that check is
+ * the hole that existed on the Billing API. Reusing the handler makes it
+ * impossible to omit by accident.
+ *
+ * ── WHY OPT-OUT, WHICH READS BACKWARDS AND IS DELIBERATE ──
+ * The obvious design is opt-IN: mark read only when asked. It is wrong here.
+ * This is a single-page app, so during a deploy the bundles already in people's
+ * browsers keep polling with the old URLs. Under opt-in, an old bundle's
+ * "open a thread" stops clearing badges at all and the inbox silently fills
+ * with threads that can never be marked read. Under opt-out, an old bundle
+ * behaves exactly as it does today - buggy in the one way this fixes, not
+ * newly broken.
+ *
+ * The cost is a default that is wrong-ish for any future caller, so: new
+ * callers that are not a deliberate human open should pass markRead=0.
+ */
+const shouldMarkRead = (query = {}) => query.markRead !== '0' && query.markRead !== 'false';
+
 module.exports = {
     toClientThread,
     toClientMessage,
     toStaffThread,
     toStaffMessage,
     assertNoIdentityLeak,
+    shouldMarkRead,
     PROJECTION,
 };

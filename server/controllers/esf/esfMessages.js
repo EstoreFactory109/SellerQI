@@ -28,7 +28,7 @@ const { EmailThread, EmailMessage } = require('../../models/system/EmailThreadMo
 const { esfClientLabel } = require('../../Services/User/esfClientLabel.js');
 const { isPageDeniedFor } = require('../../Services/User/esfPages.js');
 const {
-    toStaffThread, toStaffMessage, assertNoIdentityLeak, PROJECTION,
+    toStaffThread, toStaffMessage, assertNoIdentityLeak, shouldMarkRead, PROJECTION,
 } = require('../../Services/Email/messagePresenter.js');
 
 const { allowedClientIds, canAccessClient } = require('../../Services/User/esfClientScope.js');
@@ -182,10 +182,21 @@ const getStaffThread = asyncHandler(async (req, res) => {
             labelsForThreads([thread]),
         ]);
 
-        await EmailThread.updateOne(
-            { _id: thread._id },
-            { $set: { staffUnreadCount: 0, lastStaffReadAt: new Date() } }
-        );
+        /*
+         * Marking read is a deliberate act, not a side effect of fetching.
+         *
+         * This fired on EVERY call, and the page polls this endpoint every 15
+         * seconds - so a reply arriving into the thread a staff member had open
+         * was marked read before they could possibly have seen it, and the left
+         * rail never showed a badge for it either. Between that and the pane
+         * never scrolling, a new message arrived with no cue at all.
+         */
+        if (shouldMarkRead(req.query)) {
+            await EmailThread.updateOne(
+                { _id: thread._id },
+                { $set: { staffUnreadCount: 0, lastStaffReadAt: new Date() } }
+            );
+        }
 
         const payload = {
             thread: toStaffThread(thread, labels.get(String(thread.userId)) || 'Unknown client'),
