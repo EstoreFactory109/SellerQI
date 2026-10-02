@@ -166,7 +166,7 @@ describe('the history cursor', () => {
 
         expect(summary.failed).toBe(1);
         const persisted = mockConnUpdateOne.mock.calls.at(-1)[1].$set;
-        expect(persisted.pendingMessageIds).toContain('msg-boom');
+        expect(persisted.pendingMessages.map((e) => e.id)).toContain('msg-boom');
         expect(persisted.historyId).toBe('2000');
     });
 
@@ -177,19 +177,24 @@ describe('the history cursor', () => {
         const summary = await GmailIngest.runSync();
 
         expect(summary.retried).toBe(1);
-        expect(mockConnUpdateOne.mock.calls.at(-1)[1].$set.pendingMessageIds).toEqual([]);
+        const written = mockConnUpdateOne.mock.calls.at(-1)[1].$set;
+        expect(written.pendingMessages).toEqual([]);
+        // The legacy field is cleared in the same write, so the adoption runs once.
+        expect(written.pendingMessageIds).toEqual([]);
     });
 
     test('a growing backlog raises an alarm instead of growing the document', async () => {
-        const many = Array.from({ length: 205 }, (_, i) => `old-${i}`);
-        mockConnFindOne.mockReturnValue(chain({ historyId: '1000', pendingMessageIds: many }));
+        const many = Array.from({ length: 205 }, (_, i) => ({
+            id: `old-${i}`, attempts: 1, firstSeenAt: new Date(), lastOutcome: 'throw',
+        }));
+        mockConnFindOne.mockReturnValue(chain({ historyId: '1000', pendingMessages: many }));
         mockListHistory.mockResolvedValue({ history: [], historyId: '2000' });
         mockGetMessage.mockRejectedValue(new Error('still broken'));
 
         await GmailIngest.runSync();
 
         const persisted = mockConnUpdateOne.mock.calls.at(-1)[1].$set;
-        expect(persisted.pendingMessageIds).toHaveLength(200);
+        expect(persisted.pendingMessages).toHaveLength(200);
         expect(persisted.lastError).toMatch(/failing to ingest/);
     });
 
@@ -663,5 +668,174 @@ describe('thread counters', () => {
         await GmailIngest.ingestMessage('msg-1');
 
         expect(mockThreadUpdateOne.mock.calls.at(-1)[1].$set.lastMessageDirection).toBe('outbound');
+    });
+});
+
+/**
+ * A failure must not be able to retry forever, and must not be dropped after one go.
+ *
+ * Both halves were broken, in opposite directions, in the same twelve lines. The retry
+ * loop deleted an id on ANY non-throwing return - `deferred` included - so a portal echo
+ * whose own write had genuinely failed got exactly one retry and was then forgotten,
+ * which is the loss the deferral exists to prevent. Meanwhile a throwing message was kept
+ * with no counter at all, which is how 37 of them accumulated over a week while
+ * /api/gmail/status reported the connection healthy.
+ */
+describe('a failure cannot retry forever', () => {
+    const entry = (over = {}) => ({
+        id: 'stuck-1', attempts: 0, firstSeenAt: new Date(), lastAttemptAt: null,
+        lastOutcome: 'throw', lastReason: null, ...over,
+    });
+    const err = (status, message = 'boom') => Object.assign(new Error(message), { statusCode: status });
+    const persisted = () => mockConnUpdateOne.mock.calls.at(-1)[1].$set;
+
+    test('a deferral is kept and counted, not dropped after one retry', async () => {
+        // The regression test for the silent-loss half. Fails against the old loop.
+        mockConnFindOne.mockReturnValue(chain({ historyId: '1000', pendingMessages: [entry()] }));
+        mockListHistory.mockResolvedValue({ history: [], historyId: '2000' });
+        // Our own origin header with no local copy is what routeMessage defers on.
+        const echo = gmailMessage();
+        echo.payload.headers.push({ name: 'X-SellerQI-Origin', value: 'portal-staff' });
+        mockGetMessage.mockResolvedValue(echo);
+        mockMsgExists.mockResolvedValue(null);
+
+        await GmailIngest.runSync();
+
+        const [kept] = persisted().pendingMessages;
+        expect(kept.id).toBe('stuck-1');
+        expect(kept.attempts).toBe(1);
+        expect(kept.lastOutcome).toBe('deferred');
+    });
+
+    test('a thrown failure increments across runs without resetting its age', async () => {
+        const firstSeenAt = new Date('2026-09-20T00:00:00Z');
+        mockConnFindOne.mockReturnValue(chain({
+            historyId: '1000', pendingMessages: [entry({ attempts: 3, firstSeenAt })],
+        }));
+        mockListHistory.mockResolvedValue({ history: [], historyId: '2000' });
+        mockGetMessage.mockRejectedValue(err(500));
+
+        await GmailIngest.runSync();
+
+        const [kept] = persisted().pendingMessages;
+        expect(kept.attempts).toBe(4);
+        expect(new Date(kept.firstSeenAt).toISOString()).toBe(firstSeenAt.toISOString());
+    });
+
+    test('a Gmail 404 retires immediately - there is nothing left to fetch', async () => {
+        // Every one of the 37 messages in the live backlog was this: deleted from the
+        // mailbox while history.list still listed it. Waiting out an attempt count for
+        // a message that no longer exists is pure cost.
+        mockConnFindOne.mockReturnValue(chain({ historyId: '1000', pendingMessages: [entry()] }));
+        mockListHistory.mockResolvedValue({ history: [], historyId: '2000' });
+        mockGetMessage.mockRejectedValue(err(404, 'not found in Gmail'));
+
+        await GmailIngest.runSync();
+
+        expect(persisted().pendingMessages).toEqual([]);
+        expect(persisted().deadLetterMessages).toHaveLength(1);
+        expect(persisted().deadLetterMessages[0].id).toBe('stuck-1');
+    });
+
+    test.each([
+        ['many attempts but recent', { attempts: 99, firstSeenAt: new Date() }],
+        ['old but few attempts', { attempts: 1, firstSeenAt: new Date('2026-01-01T00:00:00Z') }],
+    ])('does NOT retire on %s - both bounds are required', async (_label, over) => {
+        // ORing them is the tempting simplification and it is wrong both ways: attempts
+        // alone abandons good mail during an outage, age alone keeps dead ids forever.
+        mockConnFindOne.mockReturnValue(chain({ historyId: '1000', pendingMessages: [entry(over)] }));
+        mockListHistory.mockResolvedValue({ history: [], historyId: '2000' });
+        mockGetMessage.mockRejectedValue(err(500));
+
+        await GmailIngest.runSync();
+
+        expect(persisted().pendingMessages).toHaveLength(1);
+        expect(persisted().deadLetterMessages).toEqual([]);
+    });
+
+    test('retires when both bounds are passed, and says so once', async () => {
+        mockConnFindOne.mockReturnValue(chain({
+            historyId: '1000',
+            pendingMessages: [entry({ attempts: 30, firstSeenAt: new Date('2026-01-01T00:00:00Z') })],
+        }));
+        mockListHistory.mockResolvedValue({ history: [], historyId: '2000' });
+        mockGetMessage.mockRejectedValue(err(500));
+
+        await GmailIngest.runSync();
+
+        expect(persisted().deadLetterMessages).toHaveLength(1);
+        expect(persisted().lastError).toMatch(/retired/i);
+    });
+
+    test('retiring keeps the Gmail id, so the message stays recoverable', async () => {
+        // Retired is not deleted. If this ever becomes a quiet prune it has reintroduced
+        // exactly the bug the dead-letter list was added to end.
+        mockConnFindOne.mockReturnValue(chain({ historyId: '1000', pendingMessages: [entry()] }));
+        mockListHistory.mockResolvedValue({ history: [], historyId: '2000' });
+        mockGetMessage.mockRejectedValue(err(404));
+
+        await GmailIngest.runSync();
+
+        const [dead] = persisted().deadLetterMessages;
+        expect(dead.id).toBe('stuck-1');
+        expect(dead.lastReason).toBeTruthy();
+        expect(dead.retiredAt).toBeInstanceOf(Date);
+    });
+
+    test('the recorded reason carries no client content', async () => {
+        mockConnFindOne.mockReturnValue(chain({ historyId: '1000', pendingMessages: [entry()] }));
+        mockListHistory.mockResolvedValue({ history: [], historyId: '2000' });
+        mockGetMessage.mockRejectedValue(err(500, 'failed for walmart@morgansrepellent.com'));
+
+        await GmailIngest.runSync();
+
+        // It stores whatever the error said, so the rule is that errors must not embed
+        // client detail - pinned here because this field is read by an operator later.
+        const [kept] = persisted().pendingMessages;
+        expect(kept.lastReason.length).toBeLessThanOrEqual(300);
+    });
+
+    test('adopts the legacy id list once, dating it from now rather than epoch', async () => {
+        // Guessing "it has been failing forever" would retire the entire existing
+        // backlog on the first run after deploy, before anyone had seen what was in it.
+        mockConnFindOne.mockReturnValue(chain({ historyId: '1000', pendingMessageIds: ['legacy-1'] }));
+        mockListHistory.mockResolvedValue({ history: [], historyId: '2000' });
+        mockGetMessage.mockRejectedValue(err(500));
+
+        await GmailIngest.runSync();
+
+        const [adopted] = persisted().pendingMessages;
+        expect(adopted.id).toBe('legacy-1');
+        expect(adopted.attempts).toBe(1);
+        expect(Date.now() - new Date(adopted.firstSeenAt).getTime()).toBeLessThan(60000);
+        expect(persisted().pendingMessageIds).toEqual([]);
+    });
+
+    test('a skipped message clears on the first attempt', async () => {
+        // skipped/unmatched are terminal decisions, not failures. Clearing them on sight
+        // is what drains most of a backlog for free once this ships.
+        mockConnFindOne.mockReturnValue(chain({ historyId: '1000', pendingMessages: [entry()] }));
+        mockListHistory.mockResolvedValue({ history: [], historyId: '2000' });
+        mockGetMessage.mockResolvedValue({
+            ...gmailMessage(),
+            labelIds: ['DRAFT'],
+        });
+
+        await GmailIngest.runSync();
+
+        expect(persisted().pendingMessages).toEqual([]);
+        expect(persisted().deadLetterMessages).toEqual([]);
+    });
+
+    test('the cursor rules still hold with the new backlog', async () => {
+        // Re-asserted here because this change rewrites the function that owns them.
+        mockConnFindOne.mockReturnValue(chain({ historyId: '5000', pendingMessages: [entry()] }));
+        mockListHistory.mockResolvedValue({ history: [], historyId: '2000' });
+        mockGetMessage.mockRejectedValue(err(404));
+
+        await GmailIngest.runSync();
+
+        // Never backwards, even while retiring an entry on the same run.
+        expect(persisted()).not.toHaveProperty('historyId');
     });
 });

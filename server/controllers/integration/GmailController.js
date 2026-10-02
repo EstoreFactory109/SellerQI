@@ -90,6 +90,51 @@ const consumeState = async (state) => {
  * opts in. Surfaces enough for an expired token to banner in the UI rather than mail
  * simply stopping, which is indistinguishable from "nobody emailed today".
  */
+/** Two hours of failing is a broken integration; ten minutes is a busy morning. */
+const STUCK_HOURS = 2;
+
+/**
+ * What the ingest backlog is doing, for an operator reading /api/gmail/status.
+ *
+ * ── WHY AGE AND NOT SIZE ──
+ * This endpoint reported `connected: true, lastError: null` for a week while 37 messages
+ * were being re-fetched on every ten-minute sync. Nothing was wrong with the connection;
+ * the backlog was the problem and nothing here described it. The one thing that ever set
+ * lastError was the list passing its 200-entry cap, which a small inbox never reaches.
+ *
+ * So the field to alert on is `pendingOldestAgeHours`, not `pendingCount`. One message
+ * retrying for six days is a broken integration. Two hundred that arrived in the last ten
+ * minutes are a busy morning, and the difference is invisible in a count.
+ *
+ * `deadLetterCount` above zero is not an error - it is mail we have stopped chasing, most
+ * often because Gmail says it no longer exists. It is reported so that stopping is a
+ * visible decision rather than a disappearance.
+ */
+const backlogStatus = (connection) => {
+    const pending = connection.pendingMessages || [];
+    const legacy = connection.pendingMessageIds || [];
+    const dead = connection.deadLetterMessages || [];
+
+    const ages = pending
+        .map((entry) => (entry.firstSeenAt ? Date.now() - new Date(entry.firstSeenAt).getTime() : 0))
+        .filter((ms) => ms > 0);
+    const oldestMs = ages.length ? Math.max(...ages) : null;
+    const stuckCount = ages.filter((ms) => ms >= STUCK_HOURS * 3600000).length;
+
+    return {
+        // Legacy ids are counted too: before the first sync after deploy they ARE the
+        // backlog, and reporting 0 then would be the same silence this is fixing.
+        pendingCount: pending.length + legacy.length,
+        pendingOldestAgeHours: oldestMs === null ? null : Math.round(oldestMs / 3600000),
+        pendingMaxAttempts: pending.reduce((max, e) => Math.max(max, e.attempts || 0), 0),
+        pendingStuckCount: stuckCount,
+        deadLetterCount: dead.length,
+        deadLetterNewestAt: dead.length ? dead[dead.length - 1].retiredAt : null,
+        /** The single boolean worth alerting on. */
+        backlogHealthy: stuckCount === 0 && dead.length === 0,
+    };
+};
+
 const getGmailStatus = asyncHandler(async (req, res) => {
     const connection = await GmailConnection.findOne({ key: GmailConnection.SINGLETON_KEY }).lean();
     const { inboxAddress } = getCredentials();
@@ -129,6 +174,7 @@ const getGmailStatus = asyncHandler(async (req, res) => {
         watchHealthy: Boolean(connection.watchExpiration && watchExpiresInHours > 0),
         lastError: connection.lastError,
         lastErrorAt: connection.lastErrorAt,
+        ...backlogStatus(connection),
     }, 'Gmail connection status'));
 });
 
