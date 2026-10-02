@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { Search, Send, Check, CheckCheck, Clock, MessageSquare, ChevronDown } from 'lucide-react';
 import axiosInstance from '../../../config/axios.config.js';
 import downloadFile from '../../../utils/downloadFile.js';
@@ -165,6 +165,8 @@ const Messages = () => {
     const [search, setSearch] = useState('');
     const [inboxAddress, setInboxAddress] = useState(null);
     const [openId, setOpenId] = useState(null);
+    /** The thread the reader is actually on, readable from inside an async callback. */
+    const openIdRef = useRef(null);
     const [conversation, setConversation] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -194,12 +196,21 @@ const Messages = () => {
     useEffect(() => { loadThreads(); }, [loadThreads]);
 
     const openThread = useCallback(async (id) => {
+        /*
+         * Written synchronously alongside the state, not derived in an effect, because
+         * the check that matters happens AFTER an await and an effect has not
+         * necessarily run by then.
+         */
+        openIdRef.current = id;
         setOpenId(id);
         setConversation(null);
         setDraft('');
         setFiles([]);
         try {
             const res = await axiosInstance.get(`/api/pagewise/esf/messages/${id}`);
+            // Clicking B while A is still in flight used to let A's response land and
+            // paint B's header over A's messages until the next poll corrected it.
+            if (openIdRef.current !== id) return;
             setConversation(res.data?.data || null);
             // The count goes with the flag — the badge reads unreadCount, so clearing
             // only `unread` would leave a stale "3" behind on the next render that
@@ -318,9 +329,11 @@ const Messages = () => {
         if (sending || raising) return;
         try {
             if (openId) {
-                const res = await axiosInstance.get(`/api/pagewise/esf/messages/${openId}`, {
+                const pollingId = openIdRef.current;
+                const res = await axiosInstance.get(`/api/pagewise/esf/messages/${pollingId}`, {
                     params: { markRead: isAtBottom() ? '1' : '0' },
                 });
+                if (openIdRef.current !== pollingId) return;
                 setConversation(res.data?.data || null);
             }
             const list = await axiosInstance.get('/api/pagewise/esf/messages');
@@ -509,7 +522,7 @@ const Messages = () => {
                             >
                                 <button
                                     type="button"
-                                    onClick={() => { setOpenId(null); setConversation(null); }}
+                                    onClick={() => { openIdRef.current = null; setOpenId(null); setConversation(null); }}
                                     className="-ml-1 shrink-0 rounded-lg px-1.5 py-1 text-[16px] leading-none md:hidden"
                                     style={{ color: PALETTE.textTertiary }}
                                     aria-label="Back to conversations"

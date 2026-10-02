@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { MessageSquare, CheckCircle2, RotateCcw, Search, Send, Paperclip, Lock, Check, CheckCheck, ArrowLeft, Clock, ChevronDown } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 import downloadFile from '../../utils/downloadFile.js';
@@ -145,6 +145,8 @@ const groupByDay = (messages) => {
 const EsfMessages = () => {
     const [threads, setThreads] = useState([]);
     const [openId, setOpenId] = useState(null);
+    /** The thread the reader is actually on, readable from inside an async callback. */
+    const openIdRef = useRef(null);
     const [conversation, setConversation] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -174,6 +176,12 @@ const EsfMessages = () => {
     useEffect(() => { loadThreads(); }, [loadThreads]);
 
     const openThread = useCallback(async (id) => {
+        /*
+         * Written synchronously alongside the state, not derived in an effect, because
+         * the check that matters happens AFTER an await and an effect has not
+         * necessarily run by then.
+         */
+        openIdRef.current = id;
         setOpenId(id);
         setConversation(null);
         // Per-conversation, so a half-written reply and its attachments are never
@@ -182,6 +190,9 @@ const EsfMessages = () => {
         setFiles([]);
         try {
             const res = await axiosInstance.get(`/app/esf/messages/${id}`);
+            // Clicking B while A is still in flight used to let A's response land and
+            // paint B's header over A's messages until the next poll corrected it.
+            if (openIdRef.current !== id) return;
             setConversation(res.data?.data || null);
             setThreads((current) => current.map((t) => (t.id === id ? { ...t, unread: false } : t)));
         } catch (err) {
@@ -306,11 +317,13 @@ const EsfMessages = () => {
         if (sending) return;
         try {
             if (openId) {
-                const res = await axiosInstance.get(`/app/esf/messages/${openId}`, {
+                const pollingId = openIdRef.current;
+                const res = await axiosInstance.get(`/app/esf/messages/${pollingId}`, {
                     // Parked at the bottom means the new message lands on screen, so it
                     // has honestly been read. Scrolled away, it has not.
                     params: { markRead: isAtBottom() ? '1' : '0' },
                 });
+                if (openIdRef.current !== pollingId) return;
                 setConversation(res.data?.data || null);
             }
             const list = await axiosInstance.get('/app/esf/messages', {
@@ -457,7 +470,7 @@ const EsfMessages = () => {
                             <div className="flex items-center gap-3 border-b border-white/10 bg-white/[0.03] px-3 py-2.5 md:px-4">
                                 <button
                                     type="button"
-                                    onClick={() => { setOpenId(null); setConversation(null); }}
+                                    onClick={() => { openIdRef.current = null; setOpenId(null); setConversation(null); }}
                                     className="-ml-1 shrink-0 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-white/5 hover:text-gray-200 md:hidden"
                                     aria-label="Back to conversations"
                                 >
