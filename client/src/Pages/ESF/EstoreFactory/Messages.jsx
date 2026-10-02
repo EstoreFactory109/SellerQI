@@ -325,23 +325,23 @@ const Messages = () => {
 
     // Same reasoning as the staff inbox: a reply from the team arrives by email and
     // lands in the database with nothing telling this page about it.
-    useConversationPolling(async () => {
+    // The mirror of the staff page's reasoning: letting this reject lets the shared
+    // hook count it, rather than an empty catch hiding a session that has quietly died.
+    const { stale: pollStale, lastError: pollError } = useConversationPolling(async () => {
         if (sending || raising) return;
-        try {
-            if (openId) {
-                const pollingId = openIdRef.current;
-                const res = await axiosInstance.get(`/api/pagewise/esf/messages/${pollingId}`, {
-                    params: { markRead: isAtBottom() ? '1' : '0' },
-                });
-                if (openIdRef.current !== pollingId) return;
-                setConversation(res.data?.data || null);
-            }
-            const list = await axiosInstance.get('/api/pagewise/esf/messages');
-            setThreads(list.data?.data?.threads || []);
-        } catch {
-            // Transient failures are not worth a banner over a working page.
+        if (openId) {
+            const pollingId = openIdRef.current;
+            const res = await axiosInstance.get(`/api/pagewise/esf/messages/${pollingId}`, {
+                params: { markRead: isAtBottom() ? '1' : '0' },
+            });
+            if (openIdRef.current !== pollingId) return;
+            setConversation(res.data?.data || null);
         }
+        const list = await axiosInstance.get('/api/pagewise/esf/messages');
+        setThreads(list.data?.data?.threads || []);
     }, { enabled: true });
+
+    const pollSessionExpired = [401, 403].includes(pollError?.response?.status);
 
     const open = conversation?.thread;
     const dayGroups = useMemo(() => groupByDay(conversation?.messages || []), [conversation]);
@@ -506,6 +506,12 @@ const Messages = () => {
                         </p>
                     )}
 
+                    {pollSessionExpired && (
+                        <p className="border-b px-5 py-2.5 text-sm" style={{ borderColor: PALETTE.border, color: PALETTE.amberValue }}>
+                            Your session has expired — reload the page to carry on.
+                        </p>
+                    )}
+
                     {!open && (
                         <div className="flex flex-1 items-center justify-center p-10 text-center">
                             <p className="max-w-sm text-sm" style={{ color: PALETTE.textTertiary }}>
@@ -545,6 +551,12 @@ const Messages = () => {
                                 >
                                     {open.status}
                                 </span>
+                                {pollStale && !pollSessionExpired && (
+                                    <span className="flex shrink-0 items-center gap-1.5 text-[11px]" style={{ color: PALETTE.textTertiary }}>
+                                        <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: PALETTE.amberValue }} />
+                                        Reconnecting…
+                                    </span>
+                                )}
                             </div>
 
                             {/* min-h-0: without it this flex child will not shrink and the

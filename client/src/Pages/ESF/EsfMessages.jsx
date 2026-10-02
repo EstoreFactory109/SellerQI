@@ -313,29 +313,31 @@ const EsfMessages = () => {
         onReachBottom: markOpenThreadRead,
     });
 
-    useConversationPolling(async () => {
+    /*
+     * The catch used to be empty here — "the next poll is 15s away" is true for one
+     * blip and silent forever for an expired session or a revoked Messages permission.
+     * Letting the promise reject lets the hook count it instead, so both pages answer
+     * the same question about a failing poll the same way.
+     */
+    const { stale: pollStale, lastError: pollError } = useConversationPolling(async () => {
         if (sending) return;
-        try {
-            if (openId) {
-                const pollingId = openIdRef.current;
-                const res = await axiosInstance.get(`/app/esf/messages/${pollingId}`, {
-                    // Parked at the bottom means the new message lands on screen, so it
-                    // has honestly been read. Scrolled away, it has not.
-                    params: { markRead: isAtBottom() ? '1' : '0' },
-                });
-                if (openIdRef.current !== pollingId) return;
-                setConversation(res.data?.data || null);
-            }
-            const list = await axiosInstance.get('/app/esf/messages', {
-                params: showResolved ? { resolved: 'true' } : {},
+        if (openId) {
+            const pollingId = openIdRef.current;
+            const res = await axiosInstance.get(`/app/esf/messages/${pollingId}`, {
+                // Parked at the bottom means the new message lands on screen, so it
+                // has honestly been read. Scrolled away, it has not.
+                params: { markRead: isAtBottom() ? '1' : '0' },
             });
-            setThreads(list.data?.data?.threads || []);
-        } catch {
-            // A failed poll is not worth an error banner — the next one is 15s away, and
-            // a red message over a working page for a transient blip is worse than
-            // briefly stale data.
+            if (openIdRef.current !== pollingId) return;
+            setConversation(res.data?.data || null);
         }
+        const list = await axiosInstance.get('/app/esf/messages', {
+            params: showResolved ? { resolved: 'true' } : {},
+        });
+        setThreads(list.data?.data?.threads || []);
     }, { enabled: true });
+
+    const pollSessionExpired = [401, 403].includes(pollError?.response?.status);
 
     const open = conversation?.thread;
     const dayGroups = useMemo(() => groupByDay(conversation?.messages || []), [conversation]);
@@ -451,6 +453,15 @@ const EsfMessages = () => {
                         <p className="border-b border-white/10 bg-amber-500/5 px-5 py-2.5 text-sm text-amber-300">{error}</p>
                     )}
 
+                    {pollSessionExpired && (
+                        /* A revoked session reads identically to a dead network from here —
+                           the chip below would just pulse forever with no way out. This is
+                           the one poll failure actionable enough to name outright. */
+                        <p className="border-b border-white/10 bg-red-500/5 px-5 py-2.5 text-sm text-red-300">
+                            Your session has expired — reload the page to carry on.
+                        </p>
+                    )}
+
                     {!open && (
                         <div className="flex flex-1 items-center justify-center p-10 text-center">
                             <div className="max-w-sm">
@@ -484,6 +495,12 @@ const EsfMessages = () => {
                                 <span className={`shrink-0 rounded-md px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[open.status] || 'bg-white/10 text-gray-400'}`}>
                                     {open.status}
                                 </span>
+                                {pollStale && !pollSessionExpired && (
+                                    <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-gray-500">
+                                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400/70" />
+                                        Reconnecting…
+                                    </span>
+                                )}
                                 <button
                                     type="button"
                                     disabled={busy}
