@@ -34,6 +34,58 @@ const redactFilename = (filename, bundle) => {
 };
 
 /**
+ * Is a client already being helped with this, on an open Zoho task?
+ *
+ * Checked before a request is ever queued, for BOTH entry points — the portal form
+ * (submitTaskRequest) and an AI-detected request read out of a message
+ * (MessageIntentHandler.handleClientMessage) — so neither can duplicate work a staff
+ * member already has open.
+ *
+ * Reuses ZohoOpportunityMatchService's own judgement call rather than inventing a
+ * second, looser one: it already solves exactly this problem for the Dashboard's
+ * opportunities ("is an open task already covering this?"), with the bias this needs
+ * too — when unsure, say NOT covered. A false "already in progress" here silently
+ * drops a client's real, new ask; a duplicate reaching the queue just costs an admin
+ * one glance before merging it away.
+ *
+ * Completed tasks are excluded, same rule refreshSuggestedWork uses: if the team
+ * finished the work and the client is asking again, that is worth raising again, not
+ * suppressing as "already done".
+ */
+const findInProgressMatch = async ({ userId, title, description }) => {
+    const none = { inProgress: false, taskId: null, taskName: null };
+
+    const UserModel = require('../../models/user-auth/userModel.js');
+    const client = await UserModel.findById(userId).select('zohoProject').lean();
+    const projectId = client?.zohoProject?.projectId;
+    if (!projectId) return none;
+
+    const ZohoProjectTask = require('../../models/system/ZohoProjectTaskModel.js');
+    const { classifyTask, SECTIONS } = require('../Zoho/ZohoTaskSync.js');
+
+    const rows = await ZohoProjectTask.find({ projectId })
+        .select('taskId name tasklist isCompleted statusIsClosed startDate')
+        .lean();
+
+    const openTasks = rows
+        .filter((task) => classifyTask(task) !== SECTIONS.COMPLETED)
+        .map((task) => ({ taskId: task.taskId, name: task.name, tasklist: task.tasklist }));
+
+    if (openTasks.length === 0) return none;
+
+    const ZohoOpportunityMatchService = require('../AI/ZohoOpportunityMatchService.js');
+    const result = await ZohoOpportunityMatchService.matchOpportunities({
+        opportunities: [{ candidateId: 'request', title, action: description }],
+        tasks: openTasks,
+    });
+
+    const match = result.matches[0];
+    if (!match?.covered) return none;
+
+    return { inProgress: true, taskId: match.coveredByTaskId, taskName: match.coveredByTaskName };
+};
+
+/**
  * Submit a request.
  *
  * ── THE EMAIL IS SENT BEFORE THE ROW IS WRITTEN, AND THAT ORDER IS THE DESIGN ──
@@ -67,6 +119,20 @@ const submitTaskRequest = async ({ user, title, description, neededBy, files = [
             409,
             `You already have ${pending} requests awaiting a decision. Please wait for those `
             + 'before adding another.'
+        );
+    }
+
+    /**
+     * Checked before the email goes out, not after — see the header on sending before
+     * writing: once that email is sent, this request exists whether or not a row ever
+     * gets written for it, so a duplicate has to be caught earlier than that.
+     */
+    const duplicate = await findInProgressMatch({ userId: user._id, title: cleanTitle, description: cleanDescription });
+    if (duplicate.inProgress) {
+        throw new ApiError(
+            409,
+            `This already looks like it's in progress${duplicate.taskName ? ` — "${duplicate.taskName}"` : ''}. `
+            + 'Check your Status page for the latest update.'
         );
     }
 
@@ -342,6 +408,7 @@ module.exports = {
     submitTaskRequest,
     acceptTaskRequest,
     rejectTaskRequest,
+    findInProgressMatch,
     MAX_TITLE_CHARS,
     MAX_DESCRIPTION_CHARS,
     MAX_REASON_CHARS,
