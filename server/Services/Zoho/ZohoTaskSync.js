@@ -249,14 +249,17 @@ const refreshSuggestedWork = async (projectId, tasks, now = new Date()) => {
 
         /*
          * TopOpportunities is stored per (user, country, region) but the Status page has
-         * no marketplace dimension, so take the most recently written one. For a typical
-         * ESF client that is their only marketplace; for a multi-marketplace seller it is
-         * the one whose data moved last, which is the closest thing to "current" available
-         * without inventing a primary-marketplace concept here.
+         * no marketplace dimension. Picking "most recently written" outright is wrong for
+         * a multi-marketplace seller: a scheduled rescan of a quiet marketplace can finish
+         * a few seconds after a populated one and overwrite which doc sorts first, leaving
+         * "Coming up" empty while the real Dashboard (which asks for a specific marketplace)
+         * still shows opportunities. So prefer the newest doc that actually has content, and
+         * only fall back to the newest doc overall when every scope is genuinely empty.
          */
-        const opportunityDoc = await TopOpportunities.findOne({ userId: client._id })
+        const opportunityDocs = await TopOpportunities.find({ userId: client._id })
             .sort({ updatedAt: -1 })
             .lean();
+        const opportunityDoc = opportunityDocs.find((d) => (d.opportunities || []).length > 0) || opportunityDocs[0];
 
         const opportunities = (opportunityDoc?.opportunities || []).map((o) => ({
             candidateId: o.candidateId,
