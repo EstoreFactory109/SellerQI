@@ -23,6 +23,10 @@ const validateSignup = [
             if (!/^\d+$/.test(digitsOnly)) {
                 throw new Error('Phone number must contain only numbers');
             }
+            // The admin registration email and country stats rely on it.
+            if (!cleaned.startsWith('+')) {
+                throw new Error('Country code is required');
+            }
             // 10 digits minimum (a bare local number), 15 max (E.164 with country code)
             if (digitsOnly.length < 10 || digitsOnly.length > 15) {
                 throw new Error('Phone number must be between 10 and 15 digits');

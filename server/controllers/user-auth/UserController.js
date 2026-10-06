@@ -37,6 +37,27 @@ const MEMBER_EMAIL_MESSAGE = "This email is a member of another SellerQI account
 const isMemberEmail = async (email) =>
     typeof email === 'string' && email.trim() !== '' && Boolean(await AccountMember.exists({ email: email.trim().toLowerCase() }));
 
+// Admin "New User Registered" email, with one retry for transient SMTP/network
+// hiccups. Never throws: the auth flow must succeed even if the email fails.
+const notifyAdminOfRegistration = async (user, context) => {
+    const userId = user._id || user.id;
+    try {
+        logger.info(`Attempting ${context} registration email for user ${userId}`);
+        const send = () => sendRegisteredEmail(userId, user.firstName, user.lastName, user.phone, user.email, userId);
+
+        let sendEmailResult = await send();
+        if (!sendEmailResult) {
+            logger.warn(`${context} registration email first attempt failed for user ${userId}, retrying once`);
+            sendEmailResult = await send();
+        }
+        if (!sendEmailResult) {
+            logger.warn(`Failed to send ${context} registration email for user ${userId} after retry`);
+        }
+    } catch (emailError) {
+        logger.error(`Error sending ${context} registration email (non-critical) for user ${userId}: ${emailError.message}`);
+    }
+};
+
 const registerUser = asyncHandler(async (req, res) => {
     const { firstname, lastname, phone, email, password, allTermsAndConditionsAgreed, packageType, isInTrialPeriod, subscriptionStatus, trialEndsDate, intendedPackage, agencyName } = req.body;
     // console.log(firstname)
@@ -244,47 +265,15 @@ const verifyUser = asyncHandler(async (req, res) => {
         // Don't fail the verification process if scheduling fails
     }
 
-    // Send admin registration email right after OTP verification.
-    // Non-blocking: auth flow must succeed even if email fails.
+    // Send admin registration email right after OTP verification - the phone
+    // (with country code) was already collected on the signup form.
+    let emailUser = verifyUser;
     try {
-        const fallbackUser = {
-            firstName: verifyUser.firstName,
-            lastName: verifyUser.lastName,
-            phone: verifyUser.phone,
-            email: verifyUser.email
-        };
-        const dbUser = await UserModel.findById(verifyUser.id).select('firstName lastName phone email');
-        const emailUser = dbUser || fallbackUser;
-
-        logger.info(`Attempting post-verification registration email for user ${verifyUser.id}`);
-        let sendEmailResult = await sendRegisteredEmail(
-            verifyUser.id,
-            emailUser.firstName,
-            emailUser.lastName,
-            emailUser.phone,
-            emailUser.email,
-            verifyUser.id
-        );
-
-        // One retry for transient SMTP/network hiccups
-        if (!sendEmailResult) {
-            logger.warn(`Post-verification registration email first attempt failed for user ${verifyUser.id}, retrying once`);
-            sendEmailResult = await sendRegisteredEmail(
-                verifyUser.id,
-                emailUser.firstName,
-                emailUser.lastName,
-                emailUser.phone,
-                emailUser.email,
-                verifyUser.id
-            );
-        }
-
-        if (!sendEmailResult) {
-            logger.warn(`Failed to send post-verification registration email for user ${verifyUser.id} after retry`);
-        }
-    } catch (emailError) {
-        logger.error(`Error sending post-verification registration email (non-critical) for user ${verifyUser.id}: ${emailError.message}`);
+        emailUser = (await UserModel.findById(verifyUser.id).select('firstName lastName phone email')) || verifyUser;
+    } catch (lookupError) {
+        logger.error(`Could not reload user ${verifyUser.id} for registration email: ${lookupError.message}`);
     }
+    await notifyAdminOfRegistration(emailUser, 'post-verification');
 
     const options = getHttpsCookieOptions();
 
@@ -756,31 +745,45 @@ const updateUserPhone = asyncHandler(async (req, res) => {
     }
 
     try {
-        const updated = await UserModel.findByIdAndUpdate(
+        // Returns the document as it was before the update, so the pending admin
+        // email flag is read and cleared in one atomic step - a double submit
+        // cannot send it twice.
+        const previous = await UserModel.findByIdAndUpdate(
             userId,
             {
                 $set: {
                     phone: phone,
                     whatsapp: phone,
                     needsPhoneUpdate: false,
-                    phoneUpdateReason: null
+                    phoneUpdateReason: null,
+                    adminSignupEmailPending: false
                 }
             },
-            { new: true, runValidators: true }
-        ).select('phone whatsapp needsPhoneUpdate phoneUpdateReason');
+            { new: false, runValidators: true }
+        ).select('firstName lastName email adminSignupEmailPending');
 
-        if (!updated) {
+        if (!previous) {
             logger.error(new ApiError(404, "User not found"));
             return res.status(404).json(new ApiResponse(404, "", "User not found"));
         }
 
         logger.info(`Phone number collected for user ${userId}`);
-        return res.status(200).json(new ApiResponse(200, {
-            phone: updated.phone,
-            whatsapp: updated.whatsapp,
-            needsPhoneUpdate: updated.needsPhoneUpdate,
-            phoneUpdateReason: updated.phoneUpdateReason
+        res.status(200).json(new ApiResponse(200, {
+            phone: phone,
+            whatsapp: phone,
+            needsPhoneUpdate: false,
+            phoneUpdateReason: null
         }, "Phone number updated successfully"));
+
+        // A Google signup's admin email was held back for this number. Sent after
+        // the response so the user is not kept waiting on SMTP.
+        if (previous.adminSignupEmailPending === true) {
+            await notifyAdminOfRegistration(
+                { _id: previous._id, firstName: previous.firstName, lastName: previous.lastName, email: previous.email, phone },
+                'post-google-phone'
+            );
+        }
+        return;
     } catch (error) {
         // phone still carries a unique index in the DB, so the same number cannot
         // be saved on two accounts. Tell the user instead of failing silently.
@@ -1365,7 +1368,8 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
             isInTrialPeriod: isInTrialPeriod,
             subscriptionStatus: subscriptionStatus,
             needsPhoneUpdate: true,        // phone above is a placeholder, not a real number
-            phoneUpdateReason: 'missing'
+            phoneUpdateReason: 'missing',
+            adminSignupEmailPending: true  // admin email waits for the real number (see updateUserPhone)
         };
 
         // Only set trialEndsDate if it's provided (for trial users)
@@ -1402,38 +1406,8 @@ const googleRegisterUser = asyncHandler(async (req, res) => {
             // Don't fail the registration process if scheduling fails
         }
 
-        // Send admin registration email for Google signup as well.
-        // Non-blocking: registration should succeed even if email fails.
-        try {
-            logger.info(`Attempting post-google-registration email for user ${savedUser._id}`);
-            let sendEmailResult = await sendRegisteredEmail(
-                savedUser._id,
-                savedUser.firstName,
-                savedUser.lastName,
-                savedUser.phone,
-                savedUser.email,
-                savedUser._id
-            );
-
-            // One retry for transient SMTP/network issues
-            if (!sendEmailResult) {
-                logger.warn(`Post-google-registration email first attempt failed for user ${savedUser._id}, retrying once`);
-                sendEmailResult = await sendRegisteredEmail(
-                    savedUser._id,
-                    savedUser.firstName,
-                    savedUser.lastName,
-                    savedUser.phone,
-                    savedUser.email,
-                    savedUser._id
-                );
-            }
-
-            if (!sendEmailResult) {
-                logger.warn(`Failed to send post-google-registration email for user ${savedUser._id} after retry`);
-            }
-        } catch (emailError) {
-            logger.error(`Error sending post-google-registration email (non-critical) for user ${savedUser._id}: ${emailError.message}`);
-        }
+        // No admin registration email here: the phone is still a placeholder.
+        // updateUserPhone sends it once the real number is collected.
 
         const options = getHttpsCookieOptions();
 
