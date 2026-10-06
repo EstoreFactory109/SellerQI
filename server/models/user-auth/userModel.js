@@ -74,6 +74,13 @@ const userSchema = new mongoose.Schema(
         enum: ["missing", "country_code", null],
         default: null,
       },
+      // Set on a Google signup, whose admin "New User Registered" email is held
+      // back until the real phone number is collected. updateUserPhone clears it
+      // atomically and sends the email, so it goes out exactly once.
+      adminSignupEmailPending: {
+        type: Boolean,
+        default: false,
+      },
       whatsapp: {
         type: String,
         required: [requiredUnlessEsfStaff, "WhatsApp number is required"],
