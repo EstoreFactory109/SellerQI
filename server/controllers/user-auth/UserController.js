@@ -30,6 +30,7 @@ const sendVerificationCode = require('../../Services/SMS/sendSMS.js');
 const subscriptionVerificationService = require('../../Services/User/SubscriptionVerificationService.js');
 const { sendRegisteredEmail } = require('../../Services/Email/SendEmailOnRegistered.js');
 const AccountMember = require('../../models/user-auth/AccountMemberModel.js');
+const { assertPrimaryEmailAvailable } = require('../../Services/User/emailAccounts.js');
 
 // A member of someone else's account signs in by emailed link with this address;
 // it cannot also be the login of an account of its own.
@@ -730,7 +731,15 @@ const updateDetails = asyncHandler(async (req, res) => {
         return res.status(400).json(new ApiResponse(400, "", "User id is missing"));
     }
 
-    const UpdateInfo = await updateInfo(userId, firstName, lastName, phone, whatsapp, email);
+    // The email is saved directly, as it always has been. This only stops it
+    // landing on an address another account (or a member) already uses, which
+    // used to fail as an unexplained 500 from the unique index.
+    const emailCheck = await assertPrimaryEmailAvailable(email, userId);
+    if (!emailCheck.ok) {
+        return res.status(emailCheck.status).json(new ApiResponse(emailCheck.status, "", emailCheck.message));
+    }
+
+    const UpdateInfo = await updateInfo(userId, firstName, lastName, phone, whatsapp, emailCheck.email);
 
     if (!UpdateInfo) {
         logger.error(new ApiError(500, "Internal server error in updating details"));

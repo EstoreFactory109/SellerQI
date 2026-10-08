@@ -20,6 +20,7 @@ const {
     updateEsfUserPermissions,
     getEsfSessionPermissions,
     updateEsfUserName,
+    updateEsfClientEmail,
 } = require('../controllers/esf/esf.js');
 const {
     listInvites,
@@ -98,6 +99,8 @@ router.post('/clients/switch', esfAuth, switchToEsfClient);
 router.get('/linkable-users', esfAuth, listLinkableUsers);
 router.post('/clients/link', esfAuth, linkExistingUsers);
 router.post('/clients/:clientId/set-password', esfAuth, setEsfClientPassword);
+// Owner/admin change a client's primary email directly (no verification).
+router.patch('/clients/:clientId/email', esfAuth, updateEsfClientEmail);
 router.delete('/clients/:clientId', esfAuth, removeEsfClient);
 
 // Connecting a client to an existing Zoho project. Projects are created in

@@ -21,6 +21,10 @@ import EsfAddClientForm from '../../Components/ESF/EsfAddClientForm.jsx';
 import EsfExistingUsersPicker from '../../Components/ESF/EsfExistingUsersPicker.jsx';
 import EsfConnectProjectModal from '../../Components/ESF/EsfConnectProjectModal.jsx';
 import { useEsfUser } from '../../contexts/EsfUserContext.js';
+import RenameDialog from '../../Components/Shared/RenameDialog.jsx';
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const validateEmail = (value) => (!value ? 'Email is required' : EMAIL_REGEX.test(value) ? '' : 'Enter a valid email address');
 
 const ITEMS_PER_PAGE = 10;
 const DROPDOWN_MENU_WIDTH = 180;
@@ -32,7 +36,10 @@ const EsfClients = () => {
   // Members may open a client, but only the owner and admins may detach one.
   // The server enforces the same rule on DELETE /app/esf/clients/:id.
   const canRemoveClients = signedInUser?.esfRole === 'owner' || signedInUser?.esfRole === 'admin';
-  const menuHeight = DROPDOWN_MENU_ITEM_HEIGHT * (canRemoveClients ? 3 : 2);
+  // Same rule for changing a client's email (PATCH /app/esf/clients/:id/email).
+  const canChangeEmail = canRemoveClients;
+  const menuHeight = DROPDOWN_MENU_ITEM_HEIGHT * (canRemoveClients ? 4 : 2);
+  const [emailTarget, setEmailTarget] = useState(null);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -149,6 +156,21 @@ const EsfClients = () => {
       setNotice(err.response?.data?.message || 'Failed to open this client');
       setLoginLoadingId(null);
     }
+  };
+
+  // Called by the Change email dialog; throwing keeps it open with the message.
+  const saveClientEmail = async (email) => {
+    const client = emailTarget;
+    let res;
+    try {
+      res = await axiosInstance.patch(`/app/esf/clients/${client._id}/email`, { email });
+    } catch (err) {
+      throw new Error(err.response?.data?.message || 'Could not change the email');
+    }
+    const updated = res.data?.data?.email || email;
+    setClients((prev) => prev.map((c) => (c._id === client._id ? { ...c, email: updated } : c)));
+    setEmailTarget(null);
+    setSuccessNotice(`Email changed to ${updated}. They sign in with it from now on.`);
   };
 
   const handleRemoveClient = async (client) => {
@@ -594,6 +616,20 @@ const EsfClients = () => {
                     <FolderGit2 className="w-3.5 h-3.5" />
                     {client.zohoProject?.projectId ? 'Change project' : 'Connect a project'}
                   </button>
+                  {canChangeEmail && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenDropdownId(null);
+                      setDropdownPosition(null);
+                      setEmailTarget(client);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-gray-300 hover:bg-[#252525] hover:text-gray-100"
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    Change email
+                  </button>
+                  )}
                   {canRemoveClients && (
                   <button
                     type="button"
@@ -613,6 +649,21 @@ const EsfClients = () => {
                 document.body
               );
             })()}
+
+            <RenameDialog
+              open={!!emailTarget}
+              title="Change email"
+              description={emailTarget ? `${emailTarget.firstName || ''} ${emailTarget.lastName || ''}`.trim() || emailTarget.email : ''}
+              initialValue={emailTarget?.email || ''}
+              placeholder="name@company.com"
+              tone="esf"
+              inputType="email"
+              validate={validateEmail}
+              helperText="Saved straight away, no verification email. They sign in with the new address; their password stays the same."
+              saveLabel="Change email"
+              onCancel={() => setEmailTarget(null)}
+              onSave={saveClientEmail}
+            />
 
             {/* Remove confirmation */}
             {deleteConfirmClient && canRemoveClients && (

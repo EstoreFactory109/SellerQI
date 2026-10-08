@@ -627,6 +627,9 @@ describe('getEsfReports', () => {
         });
 
         it('does not cry stale when the newest order is recent', async () => {
+            // Relative to the real clock: a fixed date here goes "stale" (over 10
+            // days behind) as the calendar moves on, and the test starts failing.
+            newestOrderAt(new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString());
             ReviewOrder.countDocuments.mockResolvedValue(10);
             ReviewOrder.aggregate.mockResolvedValue([{ _id: 'sent', count: 10, eligible: 10 }]);
 

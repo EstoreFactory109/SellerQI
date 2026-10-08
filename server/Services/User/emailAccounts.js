@@ -156,7 +156,36 @@ const countRecipientsWithout = (user, email) => {
     return getMailRecipients(user).filter((addr) => addr !== normalized).length;
 };
 
+/**
+ * Can `email` become this user's PRIMARY (login) address? No verification is
+ * involved - this is used where staff set it on the account's behalf, and by the
+ * profile page, which has always saved it directly. It only guarantees the address
+ * is not someone else's: another account's primary or extra address, or a member's.
+ *
+ * Returns { ok: true, email, unchanged } or { ok: false, status, message }.
+ */
+const assertPrimaryEmailAvailable = async (email, userId) => {
+    const normalized = normalizeEmail(email);
+    if (!isValidEmail(normalized)) {
+        return { ok: false, status: 400, message: 'Please enter a valid email address' };
+    }
+
+    const holder = await UserModel.findOne({
+        $or: [{ email: normalized }, { 'additionalEmails.email': normalized }],
+    }).select('_id email').lean();
+
+    if (holder && String(holder._id) !== String(userId)) {
+        return { ok: false, status: 409, message: 'This email is already used by another account' };
+    }
+    if (await AccountMember.exists({ email: normalized })) {
+        return { ok: false, status: 409, message: 'This email belongs to a member of a SellerQI account' };
+    }
+
+    return { ok: true, email: normalized, unchanged: Boolean(holder) && normalizeEmail(holder.email) === normalized };
+};
+
 module.exports = {
+    assertPrimaryEmailAvailable,
     MAX_ADDITIONAL_EMAILS,
     VERIFICATION_TTL_MINUTES,
     normalizeEmail,

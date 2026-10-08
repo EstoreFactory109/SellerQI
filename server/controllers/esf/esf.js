@@ -35,6 +35,7 @@ const {
     canSeeClientIdentity,
 } = require('../../Services/User/esfRoles.js');
 const { splitStaffName } = require('../../Services/User/staffName.js');
+const { assertPrimaryEmailAvailable } = require('../../Services/User/emailAccounts.js');
 const {
     ESF_CLIENT_PAGES,
     sanitizeDeniedPages,
@@ -454,6 +455,43 @@ const setEsfClientPassword = asyncHandler(async (req, res) => {
 });
 
 /**
+ * PATCH /app/esf/clients/:clientId/email — body: { email }
+ *
+ * Owner/admin set a client's primary (login) email directly, with no
+ * verification email - the team manages these accounts for the client. The
+ * client's password, sessions and data are untouched; they simply sign in with
+ * the new address from now on.
+ */
+const updateEsfClientEmail = asyncHandler(async (req, res) => {
+    if (!requireTeamManager(req, res, "Only the owner and admins can change a client's email")) return;
+
+    const { clientId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(clientId)) {
+        return res.status(400).json(new ApiResponse(400, '', 'Invalid client id'));
+    }
+
+    // Scoped to ESF clients, so this can never change an agency client or a seller.
+    const client = await UserModel.findOne({ _id: clientId, ...ESF_CLIENT_QUERY }).select('email');
+    if (!client) {
+        return res.status(404).json(new ApiResponse(404, '', 'Client not found'));
+    }
+
+    const check = await assertPrimaryEmailAvailable(req.body?.email, client._id);
+    if (!check.ok) {
+        return res.status(check.status).json(new ApiResponse(check.status, '', check.message));
+    }
+    if (check.unchanged) {
+        return res.status(200).json(new ApiResponse(200, { clientId: client._id, email: check.email }, 'Email unchanged'));
+    }
+
+    const previous = client.email;
+    await UserModel.updateOne({ _id: client._id }, { $set: { email: check.email } });
+
+    logger.info(`ESF user ${req.esfUserId} changed client ${client._id} email from ${previous} to ${check.email}`);
+    return res.status(200).json(new ApiResponse(200, { clientId: client._id, email: check.email }, 'Client email updated'));
+});
+
+/**
  * GET /app/esf/linkable-users
  * Existing SellerQI sellers who can be adopted into the portal, with the counts
  * behind each filter capsule.
@@ -731,4 +769,5 @@ module.exports = {
     updateEsfUserPermissions,
     getEsfSessionPermissions,
     updateEsfUserName,
+    updateEsfClientEmail,
 };

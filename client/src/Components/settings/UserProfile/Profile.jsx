@@ -20,6 +20,10 @@ export default function ProfileForm() {
   const [email, setEmail] = useState('');
 
   const [loading, setLoading] = useState(false);
+  // Result of the last save. Failures used to go only to the console, so a taken
+  // email silently left the old one in place.
+  const [saveError, setSaveError] = useState('');
+  const [saveSuccess, setSaveSuccess] = useState('');
   const [image, setImage] = useState(null);
   const [close, setClose] = useState(true);
 
@@ -90,14 +94,22 @@ export default function ProfileForm() {
       email: email,
     };
 
+    setSaveError('');
+    setSaveSuccess('');
     try {
       const response = await axios.put(`${import.meta.env.VITE_BASE_URI}/app/updateDetails`, data, { withCredentials: true });
       if (response.status === 200) {
         dispatch(updateProfileDetails(response.data.data.UpdateInfo));
+        setSaveSuccess('Profile updated');
+        setTimeout(() => setSaveSuccess(''), 4000);
        
       }
     } catch (error) {
       console.error(error);
+      setSaveError(error.response?.data?.errors?.[0]?.msg || error.response?.data?.message || 'Could not save your details. Please try again.');
+      setLoading(false);
+      // Leave the fields editable so the value can be corrected.
+      return;
     }
     setLoading(false);
     setFirstNameStatus(true);
@@ -294,7 +306,19 @@ export default function ProfileForm() {
 
         {/* Save Button */}
         {!isMemberSession && (
-        <div className="flex justify-end pt-4 border-t border-[#30363d] mt-4">
+        <div className="flex items-center justify-end gap-3 pt-4 border-t border-[#30363d] mt-4">
+          {saveError && (
+            <p className="flex-1 flex items-center gap-2 text-sm text-red-400">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              {saveError}
+            </p>
+          )}
+          {saveSuccess && (
+            <p className="flex-1 flex items-center gap-2 text-sm text-emerald-400">
+              <CheckCircle className="w-4 h-4 shrink-0" />
+              {saveSuccess}
+            </p>
+          )}
           <button
             type="submit"
             className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 transition-all duration-200 shadow-lg hover:shadow-xl min-w-[160px] justify-center"
