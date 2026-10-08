@@ -13,6 +13,7 @@ const AccountMember = require('../../models/user-auth/AccountMemberModel.js');
 const { createAccessToken, createRefreshToken, createLocationToken } = require('../../utils/Tokens.js');
 const { getHttpsCookieOptions } = require('../../utils/cookieConfig.js');
 const logger = require('../../utils/Logger.js');
+const { recordLogin } = require('../Activity/activityTracker.js');
 
 /** The owner's account name as a member would recognise it. */
 const accountNameFor = async (ownerId) => {
@@ -60,6 +61,7 @@ const issueMemberSession = async (member, res) => {
         .cookie('IBEXLocationToken', locationToken, options);
 
     logger.info(`Member ${member.email} signed in to account ${owner._id}`);
+    recordLogin(owner._id, { memberId: member._id, method: 'email link' });
     return { ok: true };
 };
 

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, useLocation, useNavigate, NavLink } from 'react-router-dom';
-import { Users, UserCog, LogOut, Menu, User, Key, HelpCircle, Building2, MessageSquare, ClipboardList } from 'lucide-react';
+import { Users, UserCog, LogOut, Menu, User, Key, HelpCircle, Building2, MessageSquare, ClipboardList, BarChart3 } from 'lucide-react';
 import axiosInstance from '../config/axios.config.js';
 import { useEsfUser } from '../contexts/EsfUserContext.js';
 import sellerQILogo from '../assets/Logo/sellerQILogo.png';
@@ -12,6 +12,7 @@ const PAGE_TITLES = {
   '/esf/messages': { title: 'Messages', subtitle: 'Client conversations — shown by project, never by name' },
   '/esf/task-requests': { title: 'Task requests', subtitle: 'Work clients have asked for — accepting creates the task in Zoho' },
   '/esf/settings': { title: 'Settings', subtitle: 'Your profile and preferences' },
+  '/esf/activity': { title: 'Client activity', subtitle: 'How each client uses SellerQI — last 90 days' },
 };
 
 const EsfLayout = () => {
@@ -22,7 +23,12 @@ const EsfLayout = () => {
   const esfUser = useEsfUser();
 
   const pathname = location.pathname;
-  const pageInfo = PAGE_TITLES[pathname] || { title: 'ESF Portal', subtitle: '' };
+  const pageInfo = PAGE_TITLES[pathname]
+    || (pathname.startsWith('/esf/activity/') ? { title: 'Client activity', subtitle: 'Sessions, pages and actions for one client' } : null)
+    || { title: 'ESF Portal', subtitle: '' };
+  // Client activity names the client, so - like the client list - it is for the
+  // owner and admins only (the server refuses members too).
+  const canSeeActivity = ['owner', 'admin'].includes(esfUser?.esfRole) || esfUser?.accessType === 'superAdmin';
   const isClients = pathname === '/esf' || pathname.startsWith('/esf/clients');
   const isUsers = pathname.startsWith('/esf/users');
 
@@ -96,6 +102,12 @@ const EsfLayout = () => {
               <ClipboardList className="w-5 h-5 shrink-0" />
               <span className="text-sm font-medium">Task requests</span>
             </NavLink>
+            {canSeeActivity && (
+              <NavLink to="/esf/activity" className={({ isActive }) => navItemClass(isActive)}>
+                <BarChart3 className="w-5 h-5 shrink-0" />
+                <span className="text-sm font-medium">Client activity</span>
+              </NavLink>
+            )}
           </nav>
 
           <div className="p-3 border-t border-white/10 space-y-0.5">

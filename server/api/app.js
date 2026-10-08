@@ -72,6 +72,8 @@ const reviewRoute=require('../routes/review.routes.js')
 const rankingContentAIRoute=require('../routes/rankingContentAI.routes.js')
 const demoRoute=require('../routes/demo.routes.js')
 const membersRoute=require('../routes/members.routes.js')
+const activityRoute=require('../routes/activity.routes.js')
+const activityActionTracker=require('../middlewares/activityActionTracker.js')
 const dbConnect=require('../config/dbConn.js')
 const logger=require('../utils/Logger.js')
 const {connectRedis} = require('../config/redisConn.js')
@@ -169,6 +171,9 @@ app.use(express.urlencoded({extended:true,limit:"16kb",}))
 // app.use(globalRateLimiter);
 
 
+// Counts what sellers do (saves, deletes, exports...) for the User activity pages.
+// Waits for each response, so it sees the user that the route's own auth identified.
+app.use(activityActionTracker)
 app.use('/app/demo',demoRoute)
 app.use('/app',userRoute)
 app.use('/app/token',tokenRoute)
@@ -189,6 +194,7 @@ app.use('/app/auth',adminRoute)
 app.use('/app/esf',esfRoute)
 // Members of a seller account ("Add member" in the seller sidebar).
 app.use('/app/members',membersRoute)
+app.use('/app/activity',activityRoute)
 app.use('/app/getUserDetails',userDetailsRoute)
 app.use('/app/user-location',userLocationRoute)
 app.use('/app/reimbursements',reimbursementRoute)

@@ -6,6 +6,7 @@ const { getAdminEmailLogs } = require('../controllers/admin/AdminEmailLogsContro
 const { getAdminTicketMessages } = require('../controllers/admin/AdminTicketMessagesController.js');
 const { getAdminUserSessions, getAdminUserErrorLogs, getAdminUserSessionDetails } = require('../controllers/admin/AdminUserLogsController.js');
 const superAdminAuth = require('../middlewares/Auth/superAdminAuth.js');
+const { getAdminActivityList, getAdminUserActivity } = require('../controllers/system/ActivityController.js');
 const { authRateLimiter } = require('../middlewares/rateLimiting.js');
 const { validateAdminLogin } = require('../middlewares/validator/adminValidate.js');
 const { refuseIfOtherSession } = require('../middlewares/Auth/singleSession.js');
@@ -16,6 +17,9 @@ router.post('/admin-login', authRateLimiter, validateAdminLogin, refuseIfOtherSe
 // Protected admin routes (require superAdmin authentication)
 router.post('/admin-logout', superAdminAuth, adminLogout);
 router.get('/admin/accounts', superAdminAuth, getAllAccounts);
+// User activity: how each seller uses the app (last 90 days).
+router.get('/admin/activity', superAdminAuth, getAdminActivityList);
+router.get('/admin/activity/:userId', superAdminAuth, getAdminUserActivity);
 router.get('/admin/accounts/export', superAdminAuth, exportAllAccountsCsv);
 router.get('/admin/accounts/country-stats', superAdminAuth, getCountryStats);
 router.get('/admin/accounts/:agencyId/clients', superAdminAuth, getAgencyClients);

@@ -31,6 +31,7 @@ const subscriptionVerificationService = require('../../Services/User/Subscriptio
 const { sendRegisteredEmail } = require('../../Services/Email/SendEmailOnRegistered.js');
 const AccountMember = require('../../models/user-auth/AccountMemberModel.js');
 const { assertPrimaryEmailAvailable } = require('../../Services/User/emailAccounts.js');
+const { recordLogin } = require('../../Services/Activity/activityTracker.js');
 
 // A member of someone else's account signs in by emailed link with this address;
 // it cannot also be the login of an account of its own.
@@ -634,7 +635,9 @@ const loginUser = asyncHandler(async (req, res) => {
         };
     }
 
-    console.log(adminToken);
+    // Activity: only sellers' own sign-ins (not an agency owner's or super admin's).
+    if (checkUserIfExists.accessType === 'user') recordLogin(checkUserIfExists._id, { method: 'password' });
+
     res.status(200)
         .cookie("AdminToken", adminToken, option)
         .cookie("IBEXAccessToken", AccessToken, option)
@@ -1255,6 +1258,9 @@ const googleLoginUser = asyncHandler(async (req, res) => {
                 region: getSellerCentral.sellerAccount[0].region
             };
         }
+
+        // Activity: only sellers' own sign-ins (not an agency owner's or super admin's).
+        if (checkUserIfExists.accessType === 'user') recordLogin(checkUserIfExists._id, { method: 'google' });
 
         res.status(200)
             .cookie("AdminToken", adminToken, option)

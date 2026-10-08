@@ -53,6 +53,7 @@ const {
     downloadTaskRequestAttachment,
 } = require('../controllers/esf/esfTaskRequests.js');
 const esfAuth = require('../middlewares/Auth/esfAuth.js');
+const { getEsfActivityList, getEsfClientActivity } = require('../controllers/system/ActivityController.js');
 const { refuseIfOtherSession } = require('../middlewares/Auth/singleSession.js');
 const gmailUpload = require('../middlewares/multer/gmailUpload.js');
 const { authRateLimiter, registerRateLimiter } = require('../middlewares/rateLimiting.js');
@@ -93,6 +94,9 @@ router.put('/update-password', esfAuth, updateEsfPassword);
 
 // Clients
 router.get('/clients', esfAuth, getEsfClients);
+// Client activity: how each ESF client uses the app (owner/admin only).
+router.get('/activity', esfAuth, getEsfActivityList);
+router.get('/activity/:userId', esfAuth, getEsfClientActivity);
 router.post('/clients', esfAuth, registerRateLimiter, validateEsfClient, createEsfClient);
 router.post('/clients/switch', esfAuth, switchToEsfClient);
 // Adopting existing SellerQI sellers instead of creating a new account.

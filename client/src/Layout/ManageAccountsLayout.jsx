@@ -11,6 +11,7 @@ import {
   FileText,
   Mail,
   Activity,
+  BarChart3,
 } from 'lucide-react';
 import axiosInstance from '../config/axios.config.js';
 import sellerQILogo from '../assets/Logo/sellerQILogo.png';
@@ -22,6 +23,7 @@ const PAGE_TITLES = {
   '/manage-accounts/logs/payment': { title: 'Payment Logs', subtitle: 'Payment and transaction logs' },
   '/manage-accounts/logs/user': { title: 'User Logs', subtitle: 'User activity and session logs' },
   '/manage-accounts/ticket-messages': { title: 'User messages', subtitle: 'Ticket and support messages' },
+  '/manage-accounts/activity': { title: 'User activity', subtitle: 'How each seller uses SellerQI — last 90 days' },
 };
 
 const ManageAccountsLayout = () => {
@@ -36,6 +38,9 @@ const ManageAccountsLayout = () => {
   // Get page info - handle dynamic routes like /manage-accounts/logs/user/:userId
   const getPageInfo = () => {
     if (PAGE_TITLES[pathname]) return PAGE_TITLES[pathname];
+    if (pathname.startsWith('/manage-accounts/activity/')) {
+      return { title: 'User activity', subtitle: 'Sessions, pages and actions for one seller' };
+    }
     if (pathname.startsWith('/manage-accounts/logs/user/')) {
       return { title: 'User Log Details', subtitle: 'Activity and session logs for user' };
     }
@@ -116,6 +121,16 @@ const ManageAccountsLayout = () => {
             >
               <CreditCard className="w-5 h-5 shrink-0" />
               <span className="text-sm font-medium">Subscription</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => navTo('/manage-accounts/activity')}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${
+                pathname.startsWith('/manage-accounts/activity') ? 'bg-blue-500/15 border border-blue-500/30 text-blue-100 shadow-sm' : 'text-gray-400 hover:bg-white/[0.04] hover:text-gray-200'
+              }`}
+            >
+              <BarChart3 className="w-5 h-5 shrink-0" />
+              <span className="text-sm font-medium">User activity</span>
             </button>
             <div>
               <button
