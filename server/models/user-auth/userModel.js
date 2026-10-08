@@ -396,6 +396,14 @@ const userSchema = new mongoose.Schema(
 
 // Indexes for better query performance
 // Note: email index is automatically created by unique: true in schema
+// A phone number belongs to one account, but ESF staff join with no phone at all.
+// Partial, so only stored numbers are unique: a plain unique index counts every
+// missing phone as null, lets the first phoneless account in and rejects the rest
+// (E11000 dup key { phone: null } on every later ESF invitation).
+userSchema.index(
+  { phone: 1 },
+  { unique: true, name: "phone_1", partialFilterExpression: { phone: { $type: "string" } } }
+);
 userSchema.index({ packageType: 1 });
 userSchema.index({ subscriptionStatus: 1 });
 userSchema.index({ isInTrialPeriod: 1 });
