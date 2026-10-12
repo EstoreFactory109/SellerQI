@@ -81,6 +81,12 @@ describe('a member with an allocation', () => {
             .toEqual({ isEsfClient: true, _id: { $in: ['c1', 'c2'] } });
     });
 
+    test('a by-id lookup keeps the asked-for id instead of being replaced by the allocation', () => {
+        // Spreading the scope over { _id } replaced it, so asking for c3 matched c1.
+        expect(scopeClientQuery({ _id: 'c3', isEsfClient: true }, MEMBER(['c1', 'c2'])))
+            .toEqual({ $and: [{ _id: 'c3', isEsfClient: true }, { _id: { $in: ['c1', 'c2'] } }] });
+    });
+
     test('can act on an allocated client and not on any other', () => {
         const staff = MEMBER(['c1', 'c2']);
 

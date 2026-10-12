@@ -710,7 +710,7 @@ const EsfUsers = () => {
                   <p className="text-xs text-gray-500 mb-4">
                     {nextRoleOf(roleTarget) === 'admin'
                       ? 'Admins can see client details, open client accounts, and manage team members.'
-                      : 'Members work on clients but cannot see client identities, open client accounts, or manage the team.'}
+                      : 'Members work only on the clients assigned to them, can open only those client accounts, and cannot manage the team.'}
                   </p>
                   {roleError && <p className="text-xs text-red-400 mb-4">{roleError}</p>}
                   <div className="flex gap-2">
