@@ -130,13 +130,16 @@ const EsfClients = () => {
       const res = await axiosInstance.post('/app/esf/clients/switch', { clientId: client._id });
 
       if (res.data?.statusCode === 200) {
+        // From the switch response, not the list row: a member's list is redacted, so
+        // the row has a label in place of the client's name and email.
+        const opened = res.data.data || {};
         localStorage.setItem(
           'loggedInAsClient',
           JSON.stringify({
-            clientId: client._id,
-            firstName: client.firstName,
-            lastName: client.lastName,
-            email: client.email,
+            clientId: opened.userId || client._id,
+            firstName: opened.firstName,
+            lastName: opened.lastName,
+            email: opened.email,
           })
         );
         localStorage.setItem('isAuth', 'true');

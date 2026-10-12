@@ -78,7 +78,14 @@ const scopeClientQuery = (query = {}, staff) => {
      * and is the single most important line in this file. The tempting "optimisation" —
      * skipping the filter when the array is empty — inverts it into "sees everything".
      */
-    return { ...query, _id: { $in: ids } };
+    const scope = { _id: { $in: ids } };
+
+    // A by-id lookup already has an `_id`. Spreading over it would REPLACE the asked-for
+    // id with the whole allocation, so a member asking for client B would be handed
+    // their first allocated client instead. Both conditions must hold.
+    if ('_id' in query) return { $and: [{ ...query }, scope] };
+
+    return { ...query, ...scope };
 };
 
 /** May this staff member act on this one client? The by-id counterpart to the filter. */

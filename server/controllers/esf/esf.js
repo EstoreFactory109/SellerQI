@@ -434,27 +434,26 @@ const removeEsfClient = asyncHandler(async (req, res) => {
  * the staff member stays signed in to the portal underneath.
  */
 const switchToEsfClient = asyncHandler(async (req, res) => {
-    /**
-     * Owner/admin only, and this is the check that makes the redaction above mean
-     * anything.
-     *
-     * Impersonation mints a real client session. Inside it, the client's OWN Settings
-     * page shows their name, email and phone — so a member who can switch can read
-     * every field this portal just went to some trouble to hide, and can do it for any
-     * client, in two clicks. Redacting the list while leaving this open would be a
-     * lock on a door standing next to an open window.
-     */
-    if (!canSeeClientIdentity(req.esfUser)) {
-        logger.warn(`ESF user ${req.esfUserId} (${req.esfRole}) attempted to impersonate a client`);
-        return res.status(403).json(
-            new ApiResponse(403, '', 'Only the portal owner and admins can open a client account')
-        );
-    }
-
     const { clientId } = req.body;
 
     if (!clientId || !mongoose.Types.ObjectId.isValid(clientId)) {
         return res.status(400).json(new ApiResponse(400, '', 'A valid client ID is required'));
+    }
+
+    /**
+     * Owner and admin may open any client; a member only the clients allocated to them.
+     *
+     * Impersonation mints a real client session, and inside it the client's OWN Settings
+     * page shows their name, email and phone. That is accepted for an allocated client —
+     * the member was assigned to work inside that account — but it is why the check is
+     * the allocation and not merely "is staff": opening an unallocated client would
+     * expose every identity the Clients list redacts, for any client, in two clicks.
+     */
+    if (!canAccessClient(req.esfUser, clientId)) {
+        logger.warn(`ESF user ${req.esfUserId} (${req.esfRole}) attempted to open unallocated client ${clientId}`);
+        return res.status(403).json(
+            new ApiResponse(403, '', 'You can only open client accounts assigned to you')
+        );
     }
 
     const client = await UserModel.findOne(
