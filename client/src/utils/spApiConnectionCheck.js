@@ -2,9 +2,11 @@
  * Utility function to check if SP-API is connected for a user
  * Checks if user has seller account and if any account has SP-API refresh token
  * @param {Object} user - User object from API response
+ * @param {string} country - Optional country code to check specific account
+ * @param {string} region - Optional region code to check specific account
  * @returns {boolean} - True if SP-API is connected, false otherwise
  */
-export const isSpApiConnected = (user) => {
+export const isSpApiConnected = (user, country = null, region = null) => {
   // Check if user has sellerCentral data
   if (!user || !user.sellerCentral) {
     return false;
@@ -20,9 +22,14 @@ export const isSpApiConnected = (user) => {
     return false;
   }
   
+  // If country and region are provided, only that account counts
+  const accounts = country && region
+    ? user.sellerCentral.sellerAccount.filter(acc => acc.country === country && acc.region === region)
+    : user.sellerCentral.sellerAccount;
+
   // Check if any seller account has SP-API refresh token
   // Note: Backend may return 'connected' string instead of actual token for security
-  const hasSpApiToken = user.sellerCentral.sellerAccount.some(account => {
+  const hasSpApiToken = accounts.some(account => {
     const hasToken = account.spiRefreshToken && account.spiRefreshToken.toString().trim() !== '';
     return hasToken;
   });
@@ -50,7 +57,7 @@ export const isSpApiConnectedFromAccounts = (allAccounts, country = null, region
     if (specificAccount) {
       // Check both property names for backward compatibility
       return specificAccount.SpAPIrefreshTokenStatus === true ||
-             (specificAccount.spiRefreshToken && specificAccount.spiRefreshToken.trim() !== '');
+             Boolean(specificAccount.spiRefreshToken && specificAccount.spiRefreshToken.trim() !== '');
     }
     return false;
   }

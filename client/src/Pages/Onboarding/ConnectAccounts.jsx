@@ -200,6 +200,10 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
   const countryCode = searchParams.get('country') || searchParams.get('countryCode');
   const region = searchParams.get('region');
   const spApiConnectedFromUrl = searchParams.get('spApiConnected') === 'true';
+  // The marketplace whose SP-API status decides which step to show. Null when
+  // the URL names none, in which case any connected marketplace counts.
+  const scopeCountry = countryCode && region ? countryCode.toUpperCase() : null;
+  const scopeRegion = countryCode && region ? region.toUpperCase() : null;
 
   // Check authentication on mount - allow all authenticated users to proceed
   useEffect(() => {
@@ -245,7 +249,7 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
           const response = await axiosInstance.get('/app/profile');
           if (response?.status === 200 && response.data?.data) {
             const user = response.data.data;
-            const connected = isSpApiConnected(user);
+            const connected = isSpApiConnected(user, scopeCountry, scopeRegion);
             setIsSpApiConnectedState(connected);
             if (connected) {
               setIsSellerCentralConnected(true);
@@ -261,23 +265,11 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
         return;
       }
       
-      // Check SP-API status for the specific account (country/region) if provided
-      if (countryCode && region && allAccounts && allAccounts.length > 0) {
-        const specificAccount = allAccounts.find(
-          acc => acc.country === countryCode && acc.region === region
-        );
-        if (specificAccount && specificAccount.SpAPIrefreshTokenStatus) {
-          devLog('ConnectAccounts: SP-API connected for specific account from Redux');
-          setIsSpApiConnectedState(true);
-          setIsSellerCentralConnected(true);
-          setCheckingSpApi(false);
-          return;
-        }
-      }
-      
-      // Initial check from Redux state (no API call)
+      // Initial check from Redux state (no API call). Scoped to the marketplace
+      // in the URL when there is one, so adding a second marketplace starts at
+      // Seller Central rather than skipping to Ads because another one is connected.
       if (allAccounts && allAccounts.length > 0) {
-        const connected = isSpApiConnectedFromAccounts(allAccounts);
+        const connected = isSpApiConnectedFromAccounts(allAccounts, scopeCountry, scopeRegion);
         setIsSpApiConnectedState(connected);
         if (connected) {
           setIsSellerCentralConnected(true);
@@ -287,7 +279,7 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
       }
 
       if (userData && userData.sellerCentral) {
-        const connected = isSpApiConnected(userData);
+        const connected = isSpApiConnected(userData, scopeCountry, scopeRegion);
         setIsSpApiConnectedState(connected);
         if (connected) {
           setIsSellerCentralConnected(true);
@@ -302,7 +294,7 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
         const response = await axiosInstance.get('/app/profile');
         if (response?.status === 200 && response.data?.data) {
           const user = response.data.data;
-          const connected = isSpApiConnected(user);
+          const connected = isSpApiConnected(user, scopeCountry, scopeRegion);
           setIsSpApiConnectedState(connected);
           if (connected) {
             setIsSellerCentralConnected(true);
@@ -325,21 +317,24 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
   useEffect(() => {
     // Skip on first render (handled by initial useEffect)
     if (checkingSpApi) return;
-    
+    // Coming back from SP-API OAuth: trust the URL, since Redux may not have
+    // the new token yet and a marketplace-scoped check would undo it.
+    if (spApiConnectedFromUrl) return;
+
     if (allAccounts && allAccounts.length > 0) {
-      const connected = isSpApiConnectedFromAccounts(allAccounts);
+      const connected = isSpApiConnectedFromAccounts(allAccounts, scopeCountry, scopeRegion);
       setIsSpApiConnectedState(connected);
       if (connected) {
         setIsSellerCentralConnected(true);
       }
     } else if (userData && userData.sellerCentral) {
-      const connected = isSpApiConnected(userData);
+      const connected = isSpApiConnected(userData, scopeCountry, scopeRegion);
       setIsSpApiConnectedState(connected);
       if (connected) {
         setIsSellerCentralConnected(true);
       }
     }
-  }, [allAccounts, userData, checkingSpApi]);
+  }, [allAccounts, userData, checkingSpApi, spApiConnectedFromUrl, scopeCountry, scopeRegion]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
