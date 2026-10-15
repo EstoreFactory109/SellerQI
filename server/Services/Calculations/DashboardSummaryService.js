@@ -23,6 +23,7 @@ const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const adsKeywordsPerformanceModel = require('../../models/amazon-ads/adsKeywordsPerformanceModel.js');
 const DataFetchTracking = require('../../models/system/DataFetchTrackingModel.js');
 const { calculateAccountHealthPercentage, checkAccountHealth } = require('./AccountHealth.js');
+const { loadV2History } = require('./AccountHealthHistory.js');
 const IssueSummary = require('../../models/system/IssueSummaryModel.js');
 const PPCCampaignAnalysisService = require('./PPCCampaignAnalysisService.js');
 
@@ -64,6 +65,7 @@ async function getDashboardSummary(userId, country, region) {
             buyBoxData,
             v2Data,
             v1Data,
+            v2History,
             orderData,
             sellerData,
             adsKeywordsData,
@@ -87,6 +89,10 @@ async function getDashboardSummary(userId, country, region) {
             V1_Model.findOne({ User: userId, country, region })
                 .sort({ createdAt: -1 })
                 .lean(),
+
+            // Last 7 days of V2 reports: account health is judged over the week,
+            // the same way the tasks and the Account Health page judge it.
+            loadV2History(userId, country, region),
             
             // Orders: Only need RevenueData for order count (filter on client or use aggregation)
             GetOrderDataModel.findOne({ User: userId, country, region })
@@ -137,7 +143,7 @@ async function getDashboardSummary(userId, country, region) {
 
         // Calculate account health
         const accountHealthPercentage = calculateAccountHealthPercentage(v2Data);
-        const accountErrors = checkAccountHealth(v2Data, v1Data);
+        const accountErrors = checkAccountHealth(v2Data, v1Data, v2History);
 
         // Calculate total sales from datewiseSales for consistency
         let totalWeeklySale = 0;
@@ -531,7 +537,7 @@ async function getDashboardPhase2(userId, country, region) {
     logger.info(`[PERF] Starting getDashboardPhase2 for user ${userId}, country ${country}, region ${region}`);
 
     try {
-        const [salesOnlyMetrics, v2Data, v1Data, buyBoxData] = await Promise.all([
+        const [salesOnlyMetrics, v2Data, v1Data, buyBoxData, v2HistoryPhase2] = await Promise.all([
             SalesOnlyMetrics.getRecentDays(userId, region, country, 31),
             V2_Model.findOne({ User: userId, country, region })
                 .sort({ createdAt: -1 })
@@ -542,14 +548,15 @@ async function getDashboardPhase2(userId, country, region) {
             BuyBoxData.findOne({ User: userId, country, region })
                 .sort({ createdAt: -1 })
                 .select('totalProducts productsWithBuyBox productsWithoutBuyBox')
-                .lean()
+                .lean(),
+            loadV2History(userId, country, region)
         ]);
 
         const ppcRollupPhase2 = await PPCMetrics.rollupLastDays(userId.toString(), country, region, 30);
         const ppcMetrics = ppcRollupPhase2?.found ? { summary: ppcRollupPhase2.summary } : null;
 
         const accountHealthPercentage = calculateAccountHealthPercentage(v2Data);
-        const accountErrors = checkAccountHealth(v2Data, v1Data);
+        const accountErrors = checkAccountHealth(v2Data, v1Data, v2HistoryPhase2);
 
         const totalWeeklySale = salesOnlyMetrics?.totalSales?.amount || 0;
         const grossProfit = 0;

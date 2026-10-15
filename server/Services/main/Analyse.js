@@ -27,6 +27,7 @@ const {
     inboundNonComplianceData: processInboundNonComplianceData 
 } = require('../Calculations/Inventory_.js');
 const { calculateAccountHealthPercentage, checkAccountHealth } = require('../Calculations/AccountHealth.js');
+const { loadV2History } = require('../Calculations/AccountHealthHistory.js');
 const { getRankings, BackendKeyWordOrAttributesStatus } = require('../Calculations/Rankings.js');
 const {
     checkNumberOfImages,
@@ -372,6 +373,7 @@ class AnalyseService {
         const [
             v2Data,
             v1Data,
+            v2History,
             economicsMetricsData, // Replaces financeData and TotalSales
             buyBoxData, // BuyBox data from MCP
             restockInventoryRecommendationsData,
@@ -401,6 +403,9 @@ class AnalyseService {
         ] = await Promise.all([
             timedQuery('v2Data', () => V2_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
             timedQuery('v1Data', () => V1_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
+            // Last 7 days of reports, so a status Amazon flips day to day is judged
+            // over the week rather than on whichever report came last.
+            timedQuery('v2History', () => loadV2History(userId, country, region)),
             // Use EconomicsMetrics instead of financeModel and TotalSalesModel
             timedQuery('economicsMetrics', () => EconomicsMetrics.findLatest(userId, region, country)),
             // Fetch BuyBox data
@@ -540,6 +545,7 @@ class AnalyseService {
         return {
             v2Data,
             v1Data,
+            v2History,
             financeData,
             economicsMetricsData: processedEconomicsMetricsData, // Raw economics data with asinWiseSales combined for big accounts
             buyBoxData: buyBoxDataPlain, // Already a plain object from .lean()
@@ -975,7 +981,7 @@ class AnalyseService {
                 getAccountHealthPercentge: (!allData.v2Data || allData.v2Data === null || (typeof allData.v2Data === 'object' && Object.keys(allData.v2Data).length === 0) || (!allData.v2Data.ahrScore && allData.v2Data.ahrScore !== 0))
                     ? { status: "Data Not Found", Percentage: 0 }
                     : calculateAccountHealthPercentage(allData.v2Data),
-                accountHealth: checkAccountHealth(allData.v2Data, allData.v1Data)
+                accountHealth: checkAccountHealth(allData.v2Data, allData.v1Data, allData.v2History)
             },
             FinanceData: safeFinanceData,
             TotalSales: (allData.TotalSales || { totalSales: [] }).totalSales,

@@ -132,7 +132,16 @@ const EFFORT_MINUTES = {
     'account:PolicyViolations': 30,
     'account:orderWithDefectsStatus': 30,
     'account:NCX': 30,
-    'account:accountStatus': 60
+    'account:accountStatus': 60,
+
+    // Statuses Amazon keeps flipping (checkAccountHealth level 'warning'): the same
+    // remediation, so the same effort as the sustained type.
+    'account:accountStatus_unstable': 60,
+    'account:PolicyViolations_unstable': 30,
+    'account:orderWithDefectsStatus_unstable': 30,
+    'account:lateShipmentRateStatus_unstable': 20,
+    'account:CancellationRate_unstable': 20,
+    'account:validTrackingRateStatus_unstable': 10
 };
 
 /**
@@ -155,6 +164,14 @@ const IMPACT_WEIGHT = {
     'account:negativeFeedbacks': 50,
     'account:validTrackingRateStatus': 30,
     'account:responseUnder24HoursCount': 28,
+    // A status that keeps slipping is a warning, not a sustained failure: about 60%
+    // of the sustained type, so it sorts below real problems but above polish.
+    'account:accountStatus_unstable': 60,
+    'account:PolicyViolations_unstable': 55,
+    'account:orderWithDefectsStatus_unstable': 45,
+    'account:lateShipmentRateStatus_unstable': 41,
+    'account:CancellationRate_unstable': 41,
+    'account:validTrackingRateStatus_unstable': 18,
 
     // Money leaving the account right now.
     'profitability:negative_profit': 85,

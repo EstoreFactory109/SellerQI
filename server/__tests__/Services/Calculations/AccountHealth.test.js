@@ -279,3 +279,125 @@ describe('AccountHealth', () => {
     });
   });
 });
+
+describe('checkAccountHealth over the last daily reports', () => {
+  const GOOD_V2 = {
+    accountStatuses: 'NORMAL',
+    listingPolicyViolations: 'GOOD',
+    validTrackingRateStatus: 'GOOD',
+    orderWithDefectsStatus: 'GOOD',
+    lateShipmentRateStatus: 'GOOD',
+    CancellationRate: 'GOOD',
+    ahrScore: 204,
+  };
+  const V1 = {
+    negativeFeedbacks: { count: 0 }, lateShipmentCount: { count: 0 },
+    preFulfillmentCancellationCount: { count: 0 }, refundsCount: { count: 0 },
+    a_z_claims: { count: 0 }, responseUnder24HoursCount: 0,
+  };
+  const day = (d, over = {}) => ({ ...GOOD_V2, createdAt: new Date(`${d}T08:04:33Z`), ...over });
+  // The real US account: AT_RISK on Oct 10 and Oct 13, no report on Oct 12.
+  const REAL = [
+    day('2026-10-08'), day('2026-10-09'), day('2026-10-10', { accountStatuses: 'AT_RISK' }),
+    day('2026-10-11'), day('2026-10-13', { accountStatuses: 'AT_RISK' }), day('2026-10-14'),
+  ];
+  const newest = (h) => h[h.length - 1];
+
+  it('turns the flip-flopping status into a warning with dates and the rating gap', () => {
+    const r = checkAccountHealth(newest(REAL), V1, REAL);
+    expect(r.accountStatus).toMatchObject({ status: 'Error', level: 'warning' });
+    expect(r.accountStatus.Message).toBe(
+      'Amazon flagged your account At Risk on 2 of the last 6 daily reports (Oct 10, Oct 13). ' +
+      "It's Normal today, but it keeps slipping. Your Account Health Rating is 204 — just 4 points " +
+      'above the 200 cutoff, so it can tip back at any time.'
+    );
+    expect(r.accountStatus.badDays.sort()).toEqual(['2026-10-10', '2026-10-13']);
+    expect(r.accountStatus.days).toHaveLength(6);
+  });
+
+  it('counts a warning in TotalErrors, so issue counts and tasks still see it', () => {
+    expect(checkAccountHealth(newest(REAL), V1, REAL).TotalErrors).toBe(1);
+  });
+
+  it('says it is At Risk today, without "tip back", when the newest report is the bad one', () => {
+    const asOf13 = REAL.slice(0, 5);
+    const msg = checkAccountHealth(newest(asOf13), V1, asOf13).accountStatus.Message;
+    expect(msg).toContain("It's At Risk today.");
+    expect(msg).not.toContain('tip back');
+  });
+
+  it('leaves out the rating sentence when the rating is not near the cutoff', () => {
+    const far = REAL.map(d => ({ ...d, ahrScore: 640 }));
+    expect(checkAccountHealth(newest(far), V1, far).accountStatus.Message).not.toContain('Account Health Rating');
+  });
+
+  it('a sustained problem stays an error and says for how long', () => {
+    const h = [day('2026-10-12'), day('2026-10-13', { listingPolicyViolations: 'BAD' }), day('2026-10-14', { listingPolicyViolations: 'BAD' })];
+    const r = checkAccountHealth(newest(h), V1, h);
+    expect(r.PolicyViolations).toMatchObject({ status: 'Error', level: 'error' });
+    expect(r.PolicyViolations.Message).toContain('Amazon has reported this for 2 days in a row.');
+  });
+
+  it('a one-day blip is a success', () => {
+    const h = [day('2026-10-12'), day('2026-10-13', { accountStatuses: 'AT_RISK' }), day('2026-10-14')];
+    expect(checkAccountHealth(newest(h), V1, h).accountStatus).toMatchObject({ status: 'Success', level: 'ok' });
+  });
+
+  it('DEACTIVATED is an error at once', () => {
+    const h = [day('2026-10-13'), day('2026-10-14', { accountStatuses: 'DEACTIVATED' })];
+    expect(checkAccountHealth(newest(h), V1, h).accountStatus.level).toBe('error');
+  });
+
+  it('without history behaves as before (a bad newest value is an error)', () => {
+    const r = checkAccountHealth({ ...GOOD_V2, accountStatuses: 'AT_RISK' }, V1);
+    expect(r.accountStatus).toMatchObject({ status: 'Error', level: 'error' });
+    expect(r.accountStatus.Message).toContain('not in normal standing');
+    expect(r.accountStatus.days).toBeUndefined();
+  });
+
+  describe('missing data is "no data", not an error', () => {
+    it('a missing V2 report no longer fails all six V2 checks', () => {
+      const r = checkAccountHealth(null, { ...V1, negativeFeedbacks: { count: 2 } });
+      expect(r.accountStatus).toBeUndefined();
+      expect(r.PolicyViolations).toBeUndefined();
+      expect(r.negativeFeedbacks.status).toBe('Error');
+      expect(r.TotalErrors).toBe(1);
+    });
+
+    it('a blank V2 status field is skipped, the others still judged', () => {
+      const r = checkAccountHealth({ ...GOOD_V2, accountStatuses: '' }, V1);
+      expect(r.accountStatus).toBeUndefined();
+      expect(r.PolicyViolations.status).toBe('Success');
+    });
+
+    // Amazon sends NONE when there is nothing to measure (no seller-fulfilled shipments).
+    it('a NONE status is no data, not a failing metric', () => {
+      const r = checkAccountHealth({ ...GOOD_V2, validTrackingRateStatus: 'NONE' }, V1);
+      expect(r.validTrackingRateStatus).toBeUndefined();
+      expect(r.TotalErrors).toBe(0);
+    });
+
+    it('a NONE status is no data in the history judgement too', () => {
+      const h = [day('2026-10-13', { validTrackingRateStatus: 'NONE' }), day('2026-10-14', { validTrackingRateStatus: 'NONE' })];
+      expect(checkAccountHealth(newest(h), V1, h).validTrackingRateStatus).toBeUndefined();
+    });
+
+    it('a V1 report missing its count fields does not throw', () => {
+      expect(() => checkAccountHealth(GOOD_V2, { negativeFeedbacks: {}, a_z_claims: null })).not.toThrow();
+    });
+  });
+
+  describe('copy fixes', () => {
+    it('Cancellation Rate talks about cancellations, not message response times', () => {
+      const r = checkAccountHealth({ ...GOOD_V2, CancellationRate: 'BAD' }, V1);
+      expect(r.CancellationRate.Message).toContain('Cancellation Rate');
+      expect(r.CancellationRate.Message).not.toContain('24 hours');
+      expect(r.CancellationRate.HowTOSolve).not.toContain('24 hours');
+    });
+
+    it('Policy Violations has real fix instructions, not the message repeated', () => {
+      const r = checkAccountHealth({ ...GOOD_V2, listingPolicyViolations: 'BAD' }, V1);
+      expect(r.PolicyViolations.HowTOSolve).not.toBe(r.PolicyViolations.Message);
+    });
+  });
+});
