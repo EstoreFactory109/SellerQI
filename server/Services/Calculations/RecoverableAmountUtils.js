@@ -7,8 +7,8 @@
 
 const logger = require('../../utils/Logger.js');
 
-const TARGET_PROFIT_MARGIN_PERCENT = 10;
-const TARGET_ACOS_PERCENT = 40;
+// Shared with detection in DashboardCalculation; see TaskRules.
+const { TARGET_PROFIT_MARGIN_PERCENT, TARGET_ACOS_PERCENT } = require('./TaskRules.js');
 
 // The long-term storage fee report is a MONTHLY snapshot (snapShotDate lands on
 // the 15th), and the sync that populates it runs weekly at most. 60 days

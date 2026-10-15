@@ -89,11 +89,27 @@ const TaskItemSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
+    // `resolved` is set only by the system: the issue stopped being detected
+    // without the seller ticking it off. `completed` is the seller's own action.
     status: {
         type: String,
-        enum: ['pending', 'completed', 'in_progress'],
+        enum: ['pending', 'completed', 'in_progress', 'resolved'],
         default: 'pending'
-    }
+    },
+
+    // ── Lifecycle (written by CreateTasksService.reconcileTasks) ──
+    // First and most recent run that detected this issue.
+    firstSeenAt: { type: Date },
+    lastSeenAt: { type: Date },
+    // When the seller marked it completed. Starts the grace period before a
+    // still-detected issue is reopened.
+    completedAt: { type: Date },
+    // When the system found the issue gone.
+    resolvedAt: { type: Date },
+    reopenedAt: { type: Date },
+    reopenCount: { type: Number, default: 0 },
+    // Reopened because the seller marked it done but the data still shows it.
+    stillDetected: { type: Boolean, default: false }
 }, {
     timestamps: true
 });
@@ -116,6 +132,13 @@ TaskItemSchema.index({ userId: 1, country: 1, region: 1 });
 
 // Index for status queries
 TaskItemSchema.index({ userId: 1, status: 1 });
+
+// Open-work reads (dashboard groups, top products) for one marketplace.
+TaskItemSchema.index({ userId: 1, country: 1, region: 1, status: 1 });
+
+// Statuses that still need the seller's attention. Everything the dashboard sums
+// and ranks is drawn from these only.
+const OPEN_STATUSES = ['pending', 'in_progress'];
 
 /**
  * Build a {userId, country?, region?} filter.
@@ -200,7 +223,7 @@ TaskItemSchema.statics.countByStatus = async function(userId, country = null, re
         { $group: { _id: '$status', count: { $sum: 1 } } }
     ]);
     
-    const counts = { pending: 0, completed: 0, in_progress: 0, total: 0 };
+    const counts = { pending: 0, completed: 0, in_progress: 0, resolved: 0, total: 0 };
     results.forEach(r => {
         counts[r._id] = r.count;
         counts.total += r.count;
@@ -245,18 +268,70 @@ TaskItemSchema.statics.bulkInsertTasks = async function(userId, tasks, chunkSize
             const result = await this.insertMany(docsToInsert, { ordered: false });
             insertedCount += result.length;
         } catch (error) {
-            // Handle duplicate key errors gracefully
-            if (error.code === 11000 || error.writeErrors) {
-                // Some docs may have been inserted before the error
-                insertedCount += error.insertedDocs?.length || 0;
-            } else {
-                throw error;
-            }
+            // Duplicates are expected (the dedup index is how repeats are dropped);
+            // anything else is a real failure and must not be reported as success.
+            if (!isOnlyDuplicateKeyErrors(error)) throw error;
+            insertedCount += error.insertedDocs?.length ?? error.result?.insertedCount ?? 0;
         }
     }
-    
+
     return { insertedCount };
 };
+
+/**
+ * True when every write error in a bulk failure is a duplicate key (11000).
+ *
+ * The old check accepted any error carrying `writeErrors`, so a validation
+ * failure or a 16MB rejection was swallowed and logged as a normal insert.
+ */
+function isOnlyDuplicateKeyErrors(error) {
+    if (!error) return false;
+    const writeErrors = error.writeErrors
+        ? (Array.isArray(error.writeErrors) ? error.writeErrors : [error.writeErrors])
+        : null;
+    if (writeErrors && writeErrors.length > 0) {
+        return writeErrors.every(e => (e?.code ?? e?.err?.code) === 11000);
+    }
+    return error.code === 11000;
+}
+
+/**
+ * Apply one reconcile pass as a single unordered bulkWrite.
+ *
+ * Unordered so one bad op cannot stop the rest. A duplicate key on an insert
+ * means a concurrent writer already created that task, which is the same end
+ * state, so it is tolerated; any other write error is rethrown.
+ *
+ * @param {Array} ops - bulkWrite operations
+ * @returns {{inserted: number, modified: number, deleted: number, duplicates: number}}
+ */
+TaskItemSchema.statics.reconcileWrite = async function(ops) {
+    if (!Array.isArray(ops) || ops.length === 0) {
+        return { inserted: 0, modified: 0, deleted: 0, duplicates: 0 };
+    }
+    try {
+        const r = await this.bulkWrite(ops, { ordered: false });
+        return {
+            inserted: r.insertedCount || 0,
+            modified: r.modifiedCount || 0,
+            deleted: r.deletedCount || 0,
+            duplicates: 0
+        };
+    } catch (error) {
+        if (!isOnlyDuplicateKeyErrors(error)) throw error;
+        const r = error.result || {};
+        const writeErrors = Array.isArray(error.writeErrors) ? error.writeErrors : [error.writeErrors].filter(Boolean);
+        return {
+            inserted: r.insertedCount || 0,
+            modified: r.modifiedCount || 0,
+            deleted: r.deletedCount || 0,
+            duplicates: writeErrors.length || 1
+        };
+    }
+};
+
+TaskItemSchema.statics.OPEN_STATUSES = OPEN_STATUSES;
+TaskItemSchema.statics.isOnlyDuplicateKeyErrors = isOnlyDuplicateKeyErrors;
 
 const TaskItem = mongoose.model('TaskItem', TaskItemSchema);
 

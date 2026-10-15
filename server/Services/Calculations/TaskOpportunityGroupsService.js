@@ -258,6 +258,16 @@ function getGroupCopy(category, normalizedType) {
     };
 }
 
+/**
+ * One marketplace's tasks that still need the seller. A completed or
+ * auto-resolved task counted here would inflate "Top things to fix" with work
+ * that is already done.
+ */
+const openTasksFilter = (userId, country, region) => ({
+    ...TaskItem.scopeFilter(userId, country, region),
+    status: { $in: TaskItem.OPEN_STATUSES }
+});
+
 const toCents = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 /**
@@ -395,7 +405,8 @@ async function getTaskOpportunityGroups(userId, country = null, region = null) {
     const startTime = Date.now();
 
     try {
-        const tasks = await TaskItem.find(TaskItem.scopeFilter(userId, country, region))
+        // Open work only — completed and auto-resolved tasks are not left to fix.
+        const tasks = await TaskItem.find(openTasksFilter(userId, country, region))
             .select('taskId productName asin errorCategory errorType amount amountIsEstimated status')
             .lean();
 
@@ -647,7 +658,7 @@ async function getTopProductsToFix(userId, country, region, options = {}) {
         // Project only the two renderData fields ad attribution needs. Pulling the
         // whole blob would drag every keyword/search-term string and metric along
         // with it — needless weight on an account with tens of thousands of tasks.
-        const tasks = await TaskItem.find(TaskItem.scopeFilter(userId, country, region))
+        const tasks = await TaskItem.find(openTasksFilter(userId, country, region))
             .select('taskId productName asin errorCategory errorType amount amountIsEstimated capitalAmount renderData.campaignId renderData.campaignName status')
             .lean();
 
