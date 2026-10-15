@@ -1920,7 +1920,9 @@ const analyseData = async (data, userId = null, options = {}) => {
                     profitabilityRows: profitibilityData,
                     profitabilityOk: profitabilityErrorsOk,
                     financeFresh,
-                    campaignRows: campaignWiseTotalSalesAndCost,
+                    // The rows high-ACOS was actually judged on (the PPC page's campaign
+                    // totals when available), so coverage describes the real input.
+                    campaignRows: Array.isArray(data.campaignSpendSales) ? data.campaignSpendSales : campaignWiseTotalSalesAndCost,
                     sponsoredAdsOk: sponsoredAdsErrorsOk
                 })
             }, country, region);
