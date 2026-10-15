@@ -206,6 +206,33 @@ const GROUP_COPY = {
     'account:responseUnder24HoursCount': {
         title: 'Buyer messages answered too slowly',
         action: 'Reply to buyer messages within 24 hours'
+    },
+
+    // Statuses Amazon keeps flipping between good and bad (checkAccountHealth level
+    // 'warning'): not failing today, but not stable either.
+    'account:accountStatus_unstable': {
+        title: 'Your account status keeps slipping to At Risk',
+        action: 'Lift your Account Health Rating clear of the 200 cutoff'
+    },
+    'account:PolicyViolations_unstable': {
+        title: 'Policy violations keep reappearing on your account',
+        action: 'Find and fix the listings that keep getting flagged'
+    },
+    'account:orderWithDefectsStatus_unstable': {
+        title: 'Order defect rate keeps crossing Amazon\'s limit',
+        action: 'Work the defect causes down so it stays in range'
+    },
+    'account:lateShipmentRateStatus_unstable': {
+        title: 'Late shipment rate keeps slipping',
+        action: 'Tighten handling times so it stays in range'
+    },
+    'account:CancellationRate_unstable': {
+        title: 'Cancellation rate keeps slipping',
+        action: 'Keep stock accurate so orders are not cancelled'
+    },
+    'account:validTrackingRateStatus_unstable': {
+        title: 'Valid tracking rate keeps dipping',
+        action: 'Add valid tracking to every shipment'
     }
 };
 

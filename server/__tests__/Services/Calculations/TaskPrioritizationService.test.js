@@ -66,7 +66,14 @@ const ALL_TASK_TYPES = [
     ['account', 'negativeFeedbacks'],
     ['account', 'NCX'],
     ['account', 'a_z_claims'],
-    ['account', 'responseUnder24HoursCount']
+    ['account', 'responseUnder24HoursCount'],
+    // Statuses Amazon keeps flipping (checkAccountHealth level 'warning').
+    ['account', 'accountStatus_unstable'],
+    ['account', 'PolicyViolations_unstable'],
+    ['account', 'validTrackingRateStatus_unstable'],
+    ['account', 'orderWithDefectsStatus_unstable'],
+    ['account', 'lateShipmentRateStatus_unstable'],
+    ['account', 'CancellationRate_unstable']
 ];
 
 describe('normalizeErrorType', () => {

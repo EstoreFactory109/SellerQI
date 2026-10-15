@@ -4,12 +4,25 @@ import { Shield, AlertTriangle, XCircle, Download, ChevronDown, Search, External
 import { useSelector, useDispatch } from 'react-redux';
 import { fetchAccountIssues } from '../../redux/slices/PageDataSlice';
 import { COLORS, STATUS, getStatusConfig, HealthGauge, VerdictBanner, StatusPill } from '../Shared/index.js';
+import ReportHistoryStrip from './ReportHistoryStrip.jsx';
 
 // Generic, real Amazon Seller Central destination for account health metrics
 // (not a per-issue deep link - we don't have one - but a genuine working page).
 const SELLER_CENTRAL_HEALTH_URL = 'https://sellercentral.amazon.com/performance/dashboard';
 
 const PRIORITY_RANK = { high: 0, medium: 1, low: 2 };
+
+// Statuses read from Amazon's daily V2 report. When no report carries one, the
+// server sends no entry for it: that is "no data", not "healthy".
+const V2_METRIC_KEYS = new Set([
+    'accountStatus', 'PolicyViolations', 'validTrackingRateStatus',
+    'orderWithDefectsStatus', 'lateShipmentRateStatus', 'CancellationRate',
+]);
+
+// A status Amazon keeps flipping between good and bad (server level 'warning'):
+// still listed under "Needs attention", but amber and labelled Unstable.
+const isUnstable = (data) => data?.status === 'Error' && data?.level === 'warning';
+const hasNoData = (metric) => V2_METRIC_KEYS.has(metric.key) && !metric.data?.status;
 
 export default function AccountHealthDashboard() {
     const dispatch = useDispatch();
@@ -156,9 +169,12 @@ export default function AccountHealthDashboard() {
 
     // Worst-priority-first, same spirit as the mock's "sorted worst first" - using the
     // real (previously unused) priority field already on each metric.
+    // Sustained problems before ones that keep slipping, then by priority.
     const issueMetrics = accountMetrics
         .filter(m => m.data?.status === "Error" && matchesSearch(m))
-        .sort((a, b) => (PRIORITY_RANK[a.priority] ?? 3) - (PRIORITY_RANK[b.priority] ?? 3));
+        .sort((a, b) =>
+            (isUnstable(a.data) - isUnstable(b.data)) ||
+            ((PRIORITY_RANK[a.priority] ?? 3) - (PRIORITY_RANK[b.priority] ?? 3)));
     const healthyMetrics = accountMetrics.filter(m => m.data?.status !== "Error" && matchesSearch(m));
 
     const showIssueCards = activeTab !== 'healthy';
@@ -175,7 +191,7 @@ export default function AccountHealthDashboard() {
         return accountMetrics.map(metric => ({
             Category: metric.name,
             Issue: metric.data?.Message || 'N/A',
-            Status: metric.data?.status || 'Unknown',
+            Status: isUnstable(metric.data) ? 'Unstable' : (metric.data?.status || (hasNoData(metric) ? 'No data' : 'Unknown')),
             Solution: metric.data?.HowTOSolve?.length > 0 ? metric.data.HowTOSolve : 'N/A'
         }));
     };
@@ -331,7 +347,9 @@ export default function AccountHealthDashboard() {
                     <div className="flex flex-col gap-3">
                         {issueMetrics.map((metric, index) => {
                             const Icon = metric.icon;
-                            const fixColor = getStatusConfig(STATUS.FIX).color;
+                            const unstable = isUnstable(metric.data);
+                            const tone = unstable ? STATUS.WATCH : STATUS.FIX;
+                            const fixColor = getStatusConfig(tone).color;
                             return (
                                 <motion.div
                                     key={metric.key}
@@ -348,11 +366,12 @@ export default function AccountHealthDashboard() {
                                             <div className="flex-1 min-w-[220px]">
                                                 <div className="flex items-center gap-2 flex-wrap mb-1">
                                                     <span className="text-base font-semibold" style={{ color: COLORS.textPrimary }}>{metric.name}</span>
-                                                    <StatusPill status={STATUS.FIX} label="Issue" compact />
+                                                    <StatusPill status={tone} label={unstable ? 'Unstable' : 'Issue'} compact />
                                                 </div>
                                                 <div className="text-sm leading-relaxed" style={{ color: COLORS.textSecondary }}>
                                                     {metric.data?.Message || 'No details available.'}
                                                 </div>
+                                                <ReportHistoryStrip days={metric.data?.days} badDays={metric.data?.badDays} tone={tone} />
                                             </div>
                                         </div>
                                         <div className="mt-3.5 pt-3.5 flex items-center gap-4 flex-wrap" style={{ borderTop: `1px solid ${COLORS.border}` }}>
@@ -429,8 +448,11 @@ export default function AccountHealthDashboard() {
                                     className="flex items-center gap-2.5 py-1.5 text-[13px]"
                                     style={{ borderBottom: `1px solid ${COLORS.surfaceElevated}`, color: COLORS.textSecondary }}
                                 >
-                                    <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: getStatusConfig(STATUS.GOOD).color }} />
+                                    <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: hasNoData(metric) ? COLORS.textMuted : getStatusConfig(STATUS.GOOD).color }} />
                                     {metric.name}
+                                    {hasNoData(metric) && (
+                                        <span className="text-[11px]" style={{ color: COLORS.textMuted }}>no data yet</span>
+                                    )}
                                 </div>
                             ))}
                         </div>

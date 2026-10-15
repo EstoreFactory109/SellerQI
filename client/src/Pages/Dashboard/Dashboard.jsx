@@ -730,11 +730,15 @@ const Dashboard = () => {
   // no numeric rate exists anywhere in the data layer, so these show real status + real
   // message text rather than a fabricated percentage (unlike the mock's "8.3%" example).
   const accountErrorsDetail = dashboardInfo?.AccountErrors || {};
+  // Level 'warning' = a status Amazon keeps flipping (judged over the last 7 daily
+  // reports server-side): shown amber as Unstable, not red as an issue.
+  const isUnstableDetail = (d) => d?.status === 'Error' && d?.level === 'warning';
   const accountHealthDetail = [
     {
       key: 'cr',
       label: 'Cancellation Rate',
       isError: accountErrorsDetail?.CancellationRate?.status === 'Error',
+      isUnstable: isUnstableDetail(accountErrorsDetail?.CancellationRate),
       message: accountErrorsDetail?.CancellationRate?.Message,
     },
     {
@@ -742,12 +746,14 @@ const Dashboard = () => {
       label: 'NCX',
       tooltip: 'Negative Customer Experience rate — orders that ended in a complaint, return, or bad review.',
       isError: accountErrorsDetail?.NCX?.status === 'Error',
+      isUnstable: isUnstableDetail(accountErrorsDetail?.NCX),
       message: accountErrorsDetail?.NCX?.Message,
     },
     {
       key: 'policy',
       label: 'Policy Violations',
       isError: accountErrorsDetail?.PolicyViolations?.status === 'Error',
+      isUnstable: isUnstableDetail(accountErrorsDetail?.PolicyViolations),
       message: accountErrorsDetail?.PolicyViolations?.Message,
     },
     {
@@ -755,6 +761,7 @@ const Dashboard = () => {
       label: 'ODR',
       tooltip: 'Order Defect Rate — orders with a claim, chargeback, or negative feedback.',
       isError: accountErrorsDetail?.orderWithDefectsStatus?.status === 'Error',
+      isUnstable: isUnstableDetail(accountErrorsDetail?.orderWithDefectsStatus),
       message: accountErrorsDetail?.orderWithDefectsStatus?.Message,
     },
   ];
@@ -886,7 +893,7 @@ const Dashboard = () => {
     accountHealthDetail.forEach((item) => {
       rows.push([
         item.label,
-        pillLabel(item.isError ? STATUS.FIX : STATUS.GOOD),
+        item.isUnstable ? 'Unstable' : pillLabel(item.isError ? STATUS.FIX : STATUS.GOOD),
         item.message || (item.isError ? 'Needs attention — see Account Issues for details.' : 'No issues detected.'),
       ]);
     });
@@ -1268,7 +1275,11 @@ const Dashboard = () => {
                         <div className='text-xs font-semibold uppercase tracking-wide' style={{ color: COLORS.textSecondary }}>{item.label}</div>
                         {item.tooltip && <InfoTooltip text={item.tooltip} position="right" />}
                       </div>
-                      <StatusPill status={item.isError ? STATUS.FIX : STATUS.GOOD} compact />
+                      <StatusPill
+                        status={item.isUnstable ? STATUS.WATCH : item.isError ? STATUS.FIX : STATUS.GOOD}
+                        label={item.isUnstable ? 'Unstable' : undefined}
+                        compact
+                      />
                       <div className='text-xs leading-[18px] line-clamp-3' style={{ color: COLORS.textSecondary }}>
                         {item.message || (item.isError ? 'Needs attention — see Account Issues for details.' : 'No issues detected.')}
                       </div>

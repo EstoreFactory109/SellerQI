@@ -27,6 +27,7 @@ const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
 const V2SellerPerformance = require('../../models/seller-performance/V2_Seller_Performance_ReportModel.js');
 const V1SellerPerformance = require('../../models/seller-performance/V1_Seller_Performance_Report_Model.js');
 const { calculateAccountHealthPercentage, checkAccountHealth } = require('../Calculations/AccountHealth.js');
+const { loadV2History } = require('../Calculations/AccountHealthHistory.js');
 const OrderAndRevenue = require('../../models/products/OrderAndRevenueModel.js');
 const adsKeywordsPerformance = require('../../models/amazon-ads/adsKeywordsPerformanceModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
@@ -892,11 +893,12 @@ async function getAccountHealthData(userId, country, region) {
             : userId;
         
         // Fetch V2/V1 seller performance like Analyse.js does for the Account Health page.
-        const [v2Data, v1Data] = await Promise.all([
+        const [v2Data, v1Data, v2History] = await Promise.all([
             V2SellerPerformance.findOne({ User: userObjectId, country, region })
                 .sort({ createdAt: -1 }).lean(),
             V1SellerPerformance.findOne({ User: userObjectId, country, region })
                 .sort({ createdAt: -1 }).lean(),
+            loadV2History(userObjectId, country, region),
         ]);
         
         if (!v2Data) {
@@ -914,7 +916,7 @@ async function getAccountHealthData(userId, country, region) {
         const status = calculated?.status ?? 'Data Not Available';
 
         // Metric-level issues and HowTOSolve (same object the Account Health UI consumes).
-        const accountErrors = checkAccountHealth(v2Data, v1Data);
+        const accountErrors = checkAccountHealth(v2Data, v1Data, v2History);
         
         const accountHealth = {
             accountHealthPercentage: calculated,

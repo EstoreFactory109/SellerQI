@@ -879,15 +879,20 @@ class CreateTaskService {
             const errorData = accountErrors[key];
             if (!errorData || !errorData.status || errorData.status !== 'Error') return;
             
-            const errorLabel = errorLabels[key] || key;
+            const baseLabel = errorLabels[key] || key;
+            // A status Amazon keeps flipping (checkAccountHealth level 'warning') is a
+            // different, lower-priority task from a sustained problem: its own type,
+            // so it never inherits the sustained problem's weight or wording.
+            const unstable = errorData.level === 'warning';
+            const errorLabel = unstable ? `${baseLabel} (unstable)` : baseLabel;
             
             tasks.push({
                 taskId: generateTaskId(),
                 productName: 'Account Health',
                 asin: 'ACCOUNT',
                 errorCategory: 'account',
-                errorType: key,
-                error: `Account | ${errorLabel}: ${errorData.Message || `Your ${errorLabel.toLowerCase()} requires attention.`}`,
+                errorType: unstable ? `${key}_unstable` : key,
+                error: `Account | ${errorLabel}: ${errorData.Message || `Your ${baseLabel.toLowerCase()} requires attention.`}`,
                 solution: errorData.HowTOSolve || errorData.HowToSolve || `Check your Account Health Dashboard in Seller Central to address this ${errorLabel.toLowerCase()} issue.`,
                 status: TaskStatus.PENDING
             });
