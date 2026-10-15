@@ -123,9 +123,15 @@ const addReviewDataTODatabase = async (asinArray, country, userId, region) => {
         ? data.data.product_description
         : (data.data.product_description ? [data.data.product_description] : []),
       product_photos: data.data.product_photos || [],
-      video_url: data.data.product_videos?.map(video => video.video_url) || [],
+      // Entries without a URL are not videos; [undefined] used to count as one.
+      video_url: Array.isArray(data.data.product_videos)
+        ? data.data.product_videos.map(video => video?.video_url).filter(Boolean)
+        : [],
       product_num_ratings: String(data.data.product_num_ratings || 0),
-      product_star_ratings: String(data.data.product_star_rating || "0"),
+      // No rating (a product with no reviews) is stored as null, not "0": "0" read as
+      // a real rating below 4.3 everywhere downstream. checkStarRating treats both as
+      // no data, so rows already stored as "0" need no backfill.
+      product_star_ratings: data.data.product_star_rating ? String(data.data.product_star_rating) : null,
       aplus: data.data.has_aplus || false,
       has_brandstory: data.data.has_brandstory || false
     };

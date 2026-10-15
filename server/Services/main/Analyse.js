@@ -27,6 +27,7 @@ const {
     inboundNonComplianceData: processInboundNonComplianceData 
 } = require('../Calculations/Inventory_.js');
 const { calculateAccountHealthPercentage, checkAccountHealth } = require('../Calculations/AccountHealth.js');
+const { loadV2History } = require('../Calculations/AccountHealthHistory.js');
 const { getRankings, BackendKeyWordOrAttributesStatus } = require('../Calculations/Rankings.js');
 const {
     checkNumberOfImages,
@@ -53,7 +54,8 @@ const CogsService = require('../Finance/CogsService.js');
 // const FBAFeesModel = require('../../models/finance/FBAFees.js');
 const adsKeywordsPerformanceModel = require('../../models/amazon-ads/adsKeywordsPerformanceModel.js');
 const { loadLatestSnapshotDoc, loadKeywordSnapshot } = require('../../utils/ppcSnapshotLoader.js');
-const { buildLtsfAmountMap } = require('../Calculations/RecoverableAmountUtils.js');
+const { buildLtsfAmountMap, classifyBuyBoxLoss } = require('../Calculations/RecoverableAmountUtils.js');
+const { freshInventoryReportOrNull, filterInboundIssuesToWindow } = require('../Calculations/InventoryReportFreshness.js');
 const GetOrderDataModel = require('../../models/products/OrderAndRevenueModel.js');
 const WeeklyFinanceModel = require('../../models/finance/WeekLyFinanceModel.js');
 const userModel = require('../../models/user-auth/userModel.js');
@@ -162,7 +164,7 @@ class AnalyseService {
 
         // Process inventory analysis
         stepStart = Date.now();
-        const inventoryAnalysis = this.processInventoryAnalysis(allData);
+        const inventoryAnalysis = this.processInventoryAnalysis(allData, { userId, country, region });
         result.InventoryAnalysis = inventoryAnalysis.analysis;
         logger.info(`[PERF] processInventoryAnalysis completed in ${Date.now() - stepStart}ms`);
         
@@ -372,6 +374,7 @@ class AnalyseService {
         const [
             v2Data,
             v1Data,
+            v2History,
             economicsMetricsData, // Replaces financeData and TotalSales
             buyBoxData, // BuyBox data from MCP
             restockInventoryRecommendationsData,
@@ -397,14 +400,21 @@ class AnalyseService {
             ppcUnitsSoldData,
             cogsData,
             ltsfData,
-            fbaInventoryDetailData
+            fbaInventoryDetailData,
+            campaignSpendSales
         ] = await Promise.all([
             timedQuery('v2Data', () => V2_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
             timedQuery('v1Data', () => V1_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
+            // Last 7 days of reports, so a status Amazon flips day to day is judged
+            // over the week rather than on whichever report came last.
+            timedQuery('v2History', () => loadV2History(userId, country, region)),
             // Use EconomicsMetrics instead of financeModel and TotalSalesModel
             timedQuery('economicsMetrics', () => EconomicsMetrics.findLatest(userId, region, country)),
-            // Fetch BuyBox data
-            timedQuery('buyBoxData', () => BuyBoxData.findLatest(userId, region, country)),
+            // Fetch BuyBox data: the last 7 non-empty data days, reduced to one
+            // effective doc. Judging from the newest doc alone let an empty day wipe
+            // every Buy Box issue and a one-day 0% blip create a week-long task
+            // (see classifyBuyBoxLoss). null when there are no days = no Buy Box issues.
+            timedQuery('buyBoxData', () => BuyBoxData.findRecentDays(userId, region, country, 7).then(classifyBuyBoxLoss)),
             timedQuery('restockInventory', () => restockInventoryRecommendationsModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
             timedQuery('productReviews', () => numberofproductreviews.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
             // Use service layer for ListingItems (handles both old and new formats)
@@ -449,7 +459,15 @@ class AnalyseService {
             // For threading a dollar `amount` onto Inventory error records (unfulfillable/stranded/LTSF)
             timedQuery('cogsData', () => CogsService.getCogs(userId, country)),
             timedQuery('ltsfData', () => LongTermStorageFeesModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
-            timedQuery('fbaInventoryDetailData', () => FbaInventoryApiDetailModel.find({ User: userId, country, region }).lean())
+            timedQuery('fbaInventoryDetailData', () => FbaInventoryApiDetailModel.find({ User: userId, country, region }).lean()),
+            // The PPC page's campaign totals, so high-ACOS tasks judge the same campaigns
+            // over the same window as the page the seller checks them against.
+            timedQuery('campaignSpendSales', () =>
+                require('../Calculations/PPCCampaignAnalysisService.js').getCampaignSpendSales(userId, country, region)
+                    .catch((error) => {
+                        logger.warn('[Analyse] PPC campaign totals unavailable; high-ACOS tasks fall back to date-wise spend', { error: error.message });
+                        return null;
+                    }))
         ]);
         
         const fetchEndTime = Date.now();
@@ -534,12 +552,13 @@ class AnalyseService {
             console.log('[DEBUG] No KeywordTrackingData found for userId:', userId, 'country:', country, 'region:', region);
         }
 
-        // With .lean(), buyBoxData is already a plain object, no need for toObject()
+        // Plain object: built by classifyBuyBoxLoss from lean docs
         const buyBoxDataPlain = buyBoxData || null;
         
         return {
             v2Data,
             v1Data,
+            v2History,
             financeData,
             economicsMetricsData: processedEconomicsMetricsData, // Raw economics data with asinWiseSales combined for big accounts
             buyBoxData: buyBoxDataPlain, // Already a plain object from .lean()
@@ -567,7 +586,8 @@ class AnalyseService {
             ppcUnitsSoldData,
             cogsData,
             ltsfData,
-            fbaInventoryDetailData
+            fbaInventoryDetailData,
+            campaignSpendSales
         };
     }
 
@@ -975,7 +995,7 @@ class AnalyseService {
                 getAccountHealthPercentge: (!allData.v2Data || allData.v2Data === null || (typeof allData.v2Data === 'object' && Object.keys(allData.v2Data).length === 0) || (!allData.v2Data.ahrScore && allData.v2Data.ahrScore !== 0))
                     ? { status: "Data Not Found", Percentage: 0 }
                     : calculateAccountHealthPercentage(allData.v2Data),
-                accountHealth: checkAccountHealth(allData.v2Data, allData.v1Data)
+                accountHealth: checkAccountHealth(allData.v2Data, allData.v1Data, allData.v2History)
             },
             FinanceData: safeFinanceData,
             TotalSales: (allData.TotalSales || { totalSales: [] }).totalSales,
@@ -1007,7 +1027,10 @@ class AnalyseService {
                 productsWithoutBuyBox: allData.buyBoxData.productsWithoutBuyBox,
                 productsWithLowBuyBox: allData.buyBoxData.productsWithLowBuyBox,
                 asinBuyBoxData: allData.buyBoxData.asinBuyBoxData,
-                dateRange: allData.buyBoxData.dateRange
+                dateRange: allData.buyBoxData.dateRange,
+                // How many days the Buy Box verdicts rest on (classifyBuyBoxLoss)
+                observedDays: allData.buyBoxData.observedDays,
+                observedDates: allData.buyBoxData.observedDates
             } : null,
             ProductWiseSponsoredAds: sponsoredAdsData.mostRecentSponsoredAds,
             ProductWiseSponsoredAdsGraphData: sponsoredAdsData.sponsoredAdsGraphData,
@@ -1020,6 +1043,7 @@ class AnalyseService {
             adsKeywordsPerformanceData: (allData.adsKeywordsPerformanceData || { keywordsData: [] }).keywordsData,
             GetOrderData: (allData.GetOrderData || { RevenueData: [] }).RevenueData,
             GetDateWisePPCspendData: (allData.GetDateWisePPCspendData || { dateWisePPCSpends: [] }).dateWisePPCSpends,
+            campaignSpendSales: allData.campaignSpendSales || null,
             AdsGroupData: (allData.AdsGroupData || { adsGroupData: [] }).adsGroupData,
             keywordTrackingData: (allData.keywordTrackingData || { keywords: [] }).keywords || [],
             DifferenceData: differenceData.percentageDifference,
@@ -1048,7 +1072,11 @@ class AnalyseService {
         const asinBuyBoxData = buyBoxData.asinBuyBoxData || [];
         const buyBoxProducts = asinBuyBoxData.map(item => ({
             asin: item.childAsin || item.asin,
-            belongsToRequester: (item.buyBoxPercentage || 0) > 0
+            // buyBoxLost is classifyBuyBoxLoss's verdict; an "unknown" (null %) row
+            // is not a loss. Raw % only for rows without a verdict.
+            belongsToRequester: typeof item.buyBoxLost === 'boolean'
+                ? !item.buyBoxLost
+                : (item.buyBoxPercentage || 0) > 0
         }));
 
         const asinSet = new Set(SellerAccount.products.map(p => p.asin));
@@ -1077,11 +1105,13 @@ class AnalyseService {
             if (!DefaulterList.ProductReviews.includes(product.asin)) {
                 const imageResult = checkNumberOfImages(product.product_photos);
                 const videoResult = checkIfVideoExists(product.video_url);
-                const productStarRatingResult = checkStarRating(product.product_star_ratings);
+                const productStarRatingResult = checkStarRating(product.product_star_ratings, product.product_num_ratings);
                 const rankings = getRankings(product);
 
+                // "No data" (no reviews yet, no image data) must not cost a product its
+                // Amazon-ready status: only a real problem does.
                 if (rankings.TotalErrors === 0 && 
-                    [imageResult, videoResult, productStarRatingResult].every(r => r.status === "Success")) {
+                    [imageResult, videoResult, productStarRatingResult].every(r => r.status !== "Error")) {
                     AmazonReadyProductsSet.add(product.asin);
                 }
 
@@ -1129,7 +1159,7 @@ class AnalyseService {
     /**
      * Process inventory analysis
      */
-    static processInventoryAnalysis(allData) {
+    static processInventoryAnalysis(allData, context = {}) {
         const inventoryAnalysis = {
             inventoryPlanning: [],
             strandedInventory: [],
@@ -1137,11 +1167,24 @@ class AnalyseService {
             replenishment: []
         };
 
+        // These three daily reports are read as "newest document wins", so a
+        // document older than a week is treated as absent rather than shown as
+        // today's position — see InventoryReportFreshness.js for how stale ones
+        // arose. Stranded is dated by its batch's createdAt.
+        const strandedDoc = freshInventoryReportOrNull(allData.inventoryStrandedData, 'Stranded inventory', context);
+        const inboundDoc = freshInventoryReportOrNull(allData.inboundNonComplianceData, 'Inbound non-compliance', context);
+        const restockDoc = freshInventoryReportOrNull(allData.restockInventoryRecommendationsData, 'Restock recommendations', context);
+
         // Create safe defaults for inventory data
         const safeInventoryPlanningData = allData.inventoryPlanningData || { data: [] };
-        const safeInventoryStrandedData = allData.inventoryStrandedData || { strandedUIData: [] };
-        const safeInboundNonComplianceData = allData.inboundNonComplianceData || { ErrorData: [] };
-        const safeRestockData = allData.restockInventoryRecommendationsData || { Products: [] };
+        const safeInventoryStrandedData = strandedDoc || { strandedUIData: [] };
+        // The writer keeps only issues reported in the last 30 days, but that
+        // window was applied on the day it ran; re-apply it now so a document
+        // from earlier in the week cannot surface issues that have aged out.
+        const safeInboundNonComplianceData = {
+            ErrorData: filterInboundIssuesToWindow(inboundDoc?.ErrorData)
+        };
+        const safeRestockData = restockDoc || { Products: [] };
 
         // Per-unit COGS, keyed by ASIN — used to turn unfulfillable/stranded
         // quantities into a dollar amount. Empty map (amount = 0) for accounts

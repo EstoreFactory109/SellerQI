@@ -62,15 +62,11 @@ async function detectAndStoreBuyBoxMissingAlerts(userId, region, country, option
     const seller = await Seller.findOne({ User: userId }).select('sellerAccount').lean();
     const activeAsins = getActiveAsins(seller, regionNorm, countryNorm);
 
-    // 2) Last two BuyBoxData docs (latest and second-latest)
-    const lastTwoDocs = await BuyBoxData.find({
-      User: userId,
-      region: regionNorm,
-      country: countryNorm,
-    })
-      .sort({ createdAt: -1 })
-      .limit(2)
-      .lean();
+    // 2) Last two DATA DAYS (latest and second-latest). Not the last two docs:
+    // an empty day (totalProducts 0 — 539 of 3,279 docs in 14 days) or a second
+    // capture of the same day would otherwise stand in for "the previous fetch"
+    // and break the already-alerted check below.
+    const lastTwoDocs = await BuyBoxData.findRecentDays(userId, regionNorm, countryNorm, 2);
 
     const buyBoxDoc = lastTwoDocs[0] || null;
     const previousDoc = lastTwoDocs[1] || null;

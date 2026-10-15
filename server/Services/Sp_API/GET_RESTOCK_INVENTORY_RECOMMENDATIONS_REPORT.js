@@ -44,6 +44,10 @@ const generateReport = async (accessToken, marketplaceIds,baseuri) => {
     }
 };
 
+// Returned by checkReportStatus for DONE_NO_DATA. Distinct from false (failed)
+// and null (still processing) so the poll loop can save an empty snapshot.
+const NO_DATA = 'DONE_NO_DATA';
+
 const checkReportStatus = async (accessToken, reportId,baseuri) => {
     try {
         const response = await axios.get(
@@ -74,9 +78,16 @@ const checkReportStatus = async (accessToken, reportId,baseuri) => {
             case "IN_PROGRESS":
                 return null;
 
+            // Was missing, so a queued report fell to `default` and the inline
+            // run gave up as failed on its first poll.
+            case "IN_QUEUE":
+                return null;
+
             case "DONE_NO_DATA":
-                logger.error("Report completed but contains no data.");
-                return false;
+                // Amazon's answer when it has nothing to recommend: a result to
+                // save as an empty snapshot, not a failure.
+                logger.info("Report completed with no data (no restock recommendations).");
+                return NO_DATA;
 
             case "FAILED":
                 logger.error("Report failed for an unknown reason.");
@@ -137,6 +148,9 @@ const getReport = async (accessToken, marketplaceIds, userId,baseuri,country,reg
                     message: "Error in generating the report",
                 };
             }
+            if (reportDocumentId === NO_DATA) {
+                return await _saveRestockProducts([], userId, country, region);
+            }
             retries--;
         }
 
@@ -173,14 +187,12 @@ async function _processRestockDocument(accessToken, reportDocumentId, baseuri, u
 
         const refinedData = await convertTSVToJson(fullReport.data);
 
+        // A downloaded report with no rows is Amazon saying "nothing to
+        // restock". It used to be logged as a 5-minute timeout and not saved,
+        // which left the previous recommendations standing as current.
         if (refinedData.length === 0) {
-            logger.error(new ApiError(408, "Report did not complete within 5 minutes"));
-            return {
-                success: false,
-                message: "Report did not complete within 5 minutes",
-            };
+            logger.info("GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT returned no rows; saving an empty snapshot");
         }
-
 
 
         let products = [];
@@ -237,6 +249,12 @@ async function _processRestockDocument(accessToken, reportDocumentId, baseuri, u
             });
         })
 
+        return await _saveRestockProducts(products, userId, country, region);
+}
+
+// Save step shared by a downloaded report and DONE_NO_DATA. An empty products
+// array is saved too, so the newest document reflects Amazon's latest answer.
+async function _saveRestockProducts(products, userId, country, region) {
         const createReport= await RestockInventoryRecommendations.create({
             User:userId,
             region:region,
@@ -283,7 +301,9 @@ async function convertTSVToJson(tsvBuffer) {
             logger.error('[GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT] Fallback parsing also failed', { 
                 error: fallbackError.message 
             });
-            return [];
+            // Thrown, not `return []`: an empty result is now saved as "no
+            // problems", so an unreadable report must not be mistaken for one.
+            throw new Error(`[GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT] report could not be parsed: ${fallbackError.message}`);
         }
     }
 }
@@ -314,8 +334,15 @@ getReport.spApiAsync = {
         submit: async () => await generateReport(accessToken, marketplaceIds, baseuri),
         checkStatusOnce: (reportId) => checkSpApiStatusOnce(accessToken, reportId, baseuri),
         finalize: async (handle) => {
-            await _processRestockDocument(accessToken, handle.reportDocumentId, baseuri, userId, country, region);
-            return { empty: false };
+            // DONE_NO_DATA arrives here with no document to download. Passing it
+            // to the download threw, so the run was recorded FAILED and the old
+            // recommendations stayed the newest.
+            if (!handle?.reportDocumentId) {
+                await _saveRestockProducts([], userId, country, region);
+                return { empty: true };
+            }
+            const r = await _processRestockDocument(accessToken, handle.reportDocumentId, baseuri, userId, country, region);
+            return { empty: !!r && Array.isArray(r.Products) && r.Products.length === 0 };
         },
     }]),
     saveFromRows: async () => ({ documentsSaved: 0 }),

@@ -391,6 +391,75 @@ const getPPCKPISummary = async (userId, country, region, startDate = null, endDa
 };
 
 /**
+ * The ProductWiseSponsoredAds match for one marketplace's campaign window: the
+ * requested dates, else the default report window, else (when the window holds
+ * nothing) the latest batch. Returns null when there is no data at all.
+ *
+ * Shared by the PPC page (getHighAcosCampaigns) and the high-ACOS tasks
+ * (getCampaignSpendSales → DashboardCalculation) so both judge the same campaigns
+ * over the same days. They used to use different collections, attribution and date
+ * windows and disagreed in 34 of 44 marketplaces with any high-ACOS campaign.
+ */
+const resolveCampaignWindowMatch = async (userIdObj, country, region, startDate = null, endDate = null) => {
+    const matchStage = { userId: userIdObj, country, region };
+    const startStr = startDate && endDate ? toYyyyMmDd(startDate) : null;
+    const endStr = startDate && endDate ? toYyyyMmDd(endDate) : null;
+    if (startStr && endStr) {
+        matchStage.date = { $gte: startStr, $lte: endStr };
+    } else {
+        const w = defaultReportWindowStrings();
+        matchStage.date = { $gte: w.startStr, $lte: w.endStr };
+    }
+
+    let effectiveMatch = { ...matchStage };
+    const countInWindow = await ProductWiseSponsoredAdsItem.countDocuments(effectiveMatch);
+    if (countInWindow === 0) {
+        const latestItem = await ProductWiseSponsoredAdsItem.findOne({ userId: userIdObj, country, region })
+            .sort({ createdAt: -1 })
+            .select('batchId')
+            .lean();
+        if (!latestItem || !latestItem.batchId) return null;
+        effectiveMatch = { userId: userIdObj, country, region, batchId: latestItem.batchId };
+        if (startStr && endStr) {
+            effectiveMatch.date = { $gte: startStr, $lte: endStr };
+        }
+    }
+    return effectiveMatch;
+};
+
+// Per-campaign totals over a window match: the one definition of campaign spend/sales.
+const CAMPAIGN_TOTALS_GROUP = {
+    $group: {
+        _id: '$campaignId',
+        campaignName: { $first: '$campaignName' },
+        totalSpend: { $sum: '$spend' },
+        totalSales: { $sum: { $ifNull: ['$sales', { $ifNull: ['$salesIn30Days', 0] }] } },
+        totalImpressions: { $sum: '$impressions' },
+        totalClicks: { $sum: '$clicks' }
+    }
+};
+
+/**
+ * Every campaign's spend and sales over the PPC page's default window, shaped like
+ * DashboardCalculation.calculateCampaignWiseTotalSalesAndCost's output so the
+ * high-ACOS task check can use it unchanged.
+ * @returns {Promise<Array<{campaignId, campaignName, totalSpend, totalSales}>|null>}
+ *   null when there is no ads data for the marketplace.
+ */
+const getCampaignSpendSales = async (userId, country, region) => {
+    const userIdObj = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+    const effectiveMatch = await resolveCampaignWindowMatch(userIdObj, country, region);
+    if (!effectiveMatch) return null;
+    const rows = await ProductWiseSponsoredAdsItem.aggregate([{ $match: effectiveMatch }, CAMPAIGN_TOTALS_GROUP]);
+    return rows.map((r) => ({
+        campaignId: r._id,
+        campaignName: r.campaignName || 'Unknown Campaign',
+        totalSpend: Math.round((r.totalSpend || 0) * 100) / 100,
+        totalSales: Math.round((r.totalSales || 0) * 100) / 100,
+    }));
+};
+
+/**
  * Get High ACOS Campaigns (ACOS > 40% and sales > 0)
  * Tab 0: Aggregates ProductWiseSponsoredAds by campaign
  */
@@ -401,45 +470,15 @@ const getHighAcosCampaigns = async (userId, country, region, page = 1, limit = 1
     try {
         const userIdObj = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
 
-        const matchStage = { userId: userIdObj, country, region };
-        const startStr = startDate && endDate ? toYyyyMmDd(startDate) : null;
-        const endStr = startDate && endDate ? toYyyyMmDd(endDate) : null;
-        if (startStr && endStr) {
-            matchStage.date = { $gte: startStr, $lte: endStr };
-        } else {
-            const w = defaultReportWindowStrings();
-            matchStage.date = { $gte: w.startStr, $lte: w.endStr };
-        }
-
-        let effectiveMatch = { ...matchStage };
-        const countInWindow = await ProductWiseSponsoredAdsItem.countDocuments(effectiveMatch);
-        if (countInWindow === 0) {
-            const latestItem = await ProductWiseSponsoredAdsItem.findOne({ userId: userIdObj, country, region })
-                .sort({ createdAt: -1 })
-                .select('batchId')
-                .lean();
-            if (!latestItem || !latestItem.batchId) {
-                return { data: [], pagination: createPaginationMeta(page, limit, 0) };
-            }
-            effectiveMatch = { userId: userIdObj, country, region, batchId: latestItem.batchId };
-            if (startStr && endStr) {
-                effectiveMatch.date = { $gte: startStr, $lte: endStr };
-            }
+        const effectiveMatch = await resolveCampaignWindowMatch(userIdObj, country, region, startDate, endDate);
+        if (!effectiveMatch) {
+            return { data: [], pagination: createPaginationMeta(page, limit, 0) };
         }
 
         // Aggregate by campaign to get total spend and sales
         const aggregationPipeline = [
             { $match: effectiveMatch },
-            {
-                $group: {
-                    _id: '$campaignId',
-                    campaignName: { $first: '$campaignName' },
-                    totalSpend: { $sum: '$spend' },
-                    totalSales: { $sum: { $ifNull: ['$sales', { $ifNull: ['$salesIn30Days', 0] }] } },
-                    totalImpressions: { $sum: '$impressions' },
-                    totalClicks: { $sum: '$clicks' }
-                }
-            },
+            CAMPAIGN_TOTALS_GROUP,
             {
                 $addFields: {
                     acos: {
@@ -1150,6 +1189,8 @@ const getTotalWastedSpend = async (userId, country, region, startDate = null, en
 module.exports = {
     getPPCKPISummary,
     getHighAcosCampaigns,
+    getCampaignSpendSales,
+    resolveCampaignWindowMatch,
     getWastedSpendKeywords,
     getTotalWastedSpend,
     getCampaignsWithoutNegatives,

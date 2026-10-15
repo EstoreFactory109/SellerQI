@@ -331,6 +331,37 @@ describe('getEsfReports', () => {
             expect(row.ourPrice).toBe(19.99);
         });
 
+        it('counts a day captured twice once, and skips empty days, in the streak', async () => {
+            const snap = (date, pct, totalProducts = 2) => ({
+                createdAt: new Date(`${date}T12:00:00Z`),
+                date,
+                totalProducts,
+                asinBuyBoxData: [{ childAsin: 'B1', buyBoxPercentage: pct, sessions: 10 }],
+            });
+            let query;
+            BuyBoxData.find.mockImplementation((q) => {
+                query = q;
+                return {
+                    sort: () => ({
+                        limit: () => ({
+                            lean: () => Promise.resolve([
+                                snap('2026-01-30', 0),
+                                snap('2026-01-30', 0), // second capture of the same day
+                                snap('2026-01-29', 100),
+                            ]),
+                        }),
+                    }),
+                };
+            });
+            Seller.findOne.mockReturnValue(mockFindOne({ sellerAccount: [] }));
+
+            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'buybox');
+            const row = report.summary.rows.find((item) => item.asin === 'B1');
+
+            expect(row.periodsLosing).toBe(1);
+            expect(query.totalProducts).toEqual({ $gt: 0 });
+        });
+
         describe('competitor pricing', () => {
             /** A catalogue whose one losing ASIN is listed at 19.99. */
             const catalogue = () => Seller.findOne.mockReturnValue(mockFindOne({

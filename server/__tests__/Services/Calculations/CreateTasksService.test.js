@@ -15,6 +15,7 @@ jest.mock('../../../models/MCP/TaskModel.js', () => {
     return Task;
 });
 jest.mock('../../../models/MCP/TaskItemModel.js', () => ({
+    OPEN_STATUSES: ['pending', 'in_progress'],
     findByUserId: jest.fn(),
     countByStatus: jest.fn(),
     deleteByUserId: jest.fn(),

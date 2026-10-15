@@ -22,7 +22,12 @@ const AsinWiseSalesRun = require('../../models/finance/AsinWiseSalesRunModel.js'
 const AsinWiseSalesItem = require('../../models/finance/AsinWiseSalesItemModel.js');
 const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
 const DataFetchTracking = require('../../models/system/DataFetchTrackingModel.js');
-const { computeProfitabilityAmount, computeSponsoredAdsAmount, computeBuyBoxBenchmark, computeBuyBoxLostRevenueAmount, computeBuyBoxProfitImpact } = require('./RecoverableAmountUtils.js');
+const { computeProfitabilityAmount, classifyProfitabilityRow, isEconomicsFresh, ECONOMICS_MAX_AGE_DAYS, computeSponsoredAdsAmount, computeBuyBoxBenchmark, computeBuyBoxLostRevenueAmount, computeBuyBoxProfitImpact } = require('./RecoverableAmountUtils.js');
+const {
+    TARGET_ACOS_PERCENT,
+    SEARCH_TERM_MIN_CLICKS,
+    AUTO_MIGRATION_MIN_SALES
+} = require('./TaskRules.js');
 
 // Chunk size for yielding to event loop during large data processing
 const YIELD_CHUNK_SIZE = 500;
@@ -522,7 +527,7 @@ const calculateCampaignWiseTotalSalesAndCost = (dateWisePPCData) => {
  * @param {Array} totalProducts - Array of all products with names
  * @returns {Object} Total errors and error details
  */
-const calculateProfitabilityErrors = (profitibilityData, totalProducts = []) => {
+const calculateProfitabilityErrors = (profitibilityData, totalProducts = [], { financeFresh = true } = {}) => {
     let totalErrors = 0;
     let totalAmount = 0;
     const errorDetails = [];
@@ -538,28 +543,22 @@ const calculateProfitabilityErrors = (profitibilityData, totalProducts = []) => 
     }
 
     profitibilityData.forEach((item) => {
-        // Calculate net profit (assuming COGS is 0 initially, will be updated when user enters values)
-        const netProfit = (item.sales || 0) - (item.ads || 0) - (item.amzFee || 0);
-
-        // Determine status based on profit margin
-        const profitMargin = item.sales > 0 ? (netProfit / item.sales) * 100 : 0;
-
-        // Count as error if profit margin is below 10% or negative
-        if (profitMargin < 10 || netProfit < 0) {
-            totalErrors++;
-            const errorType = netProfit < 0 ? 'negative_profit' : 'low_margin';
-            const amount = computeProfitabilityAmount({ netProfit, profitMargin, sales: item.sales, issueType: errorType });
-            totalAmount += amount;
-            errorDetails.push({
-                asin: item.asin,
-                productName: productNameMap.get(item.asin) || null,
-                sales: item.sales,
-                netProfit: netProfit,
-                profitMargin: profitMargin,
-                errorType,
-                amount
-            });
-        }
+        // COGS is 0 until the seller enters it. The rule itself is shared with the
+        // Profitability pages (RecoverableAmountUtils.classifyProfitabilityRow).
+        const verdict = classifyProfitabilityRow(item, { financeFresh });
+        if (!verdict) return;
+        totalErrors++;
+        totalAmount += verdict.amount;
+        errorDetails.push({
+            asin: item.asin,
+            productName: productNameMap.get(item.asin) || null,
+            sales: item.sales,
+            ads: item.ads || 0,
+            netProfit: verdict.netProfit,
+            profitMargin: verdict.profitMargin,
+            errorType: verdict.errorType,
+            amount: verdict.amount
+        });
     });
 
     return { totalErrors, errorDetails, totalAmount };
@@ -600,7 +599,7 @@ const calculateSponsoredAdsErrors = (
             const acos = sales > 0 ? (spend / sales) * 100 : 0;
 
             // Count as error if ACOS > 40% and has sales
-            if (acos > 40 && sales > 0) {
+            if (acos > TARGET_ACOS_PERCENT && sales > 0) {
                 totalErrors++;
                 const amount = computeSponsoredAdsAmount({ errorType: 'high_acos_campaign', spend, sales });
                 totalAmount += amount;
@@ -709,7 +708,7 @@ const calculateSponsoredAdsErrors = (
     
     aggregatedSearchTerms.forEach((term) => {
         // Count as error if clicks >= 10 and sales < 0.01
-        if (term.clicks >= 10 && term.sales < 0.01) {
+        if (term.clicks >= SEARCH_TERM_MIN_CLICKS && term.sales < 0.01) {
             totalErrors++;
             const amount = computeSponsoredAdsAmount({ errorType: 'search_term_zero_sales', spend: term.spend, sales: term.sales });
             totalAmount += amount;
@@ -752,7 +751,7 @@ const calculateSponsoredAdsErrors = (
     // Filter aggregated search terms for auto campaigns with sales > 30
     aggregatedSearchTerms.forEach((term) => {
         // Check if sales > 30 and belongs to an auto campaign
-        if (term.sales > 30 && 
+        if (term.sales > AUTO_MIGRATION_MIN_SALES && 
             term.campaignId && 
             autoCampaignIds.includes(term.campaignId)) {
             
@@ -787,6 +786,69 @@ const calculateSponsoredAdsErrors = (
     return { totalErrors, errorDetails, totalAmount };
 };
 
+const nonEmpty = (a) => Array.isArray(a) && a.length > 0;
+
+/**
+ * Which task data sources actually arrived this run, keyed as
+ * TaskReconcilePlanner.coverageSourceFor expects. Task reconcile only resolves a
+ * stored task when its source is covered: a missing input produces an empty error
+ * list, and treating that as "the seller fixed everything" would silently close
+ * real work.
+ *
+ * `uncoveredProductAsins` are active products the ranking loop never visited.
+ * Conversion and inventory tasks are generated inside that loop, so those ASINs'
+ * product-level tasks cannot be judged this run either.
+ *
+ * @param {Object} data - the Analyse() message
+ * @param {Object} ctx
+ * @returns {Object}
+ */
+const buildTaskCoverage = (data = {}, {
+    activeProductSet = new Set(),
+    profitabilityRows = [],
+    profitabilityOk = false,
+    financeFresh = false,
+    campaignRows = [],
+    sponsoredAdsOk = false
+} = {}) => {
+    const rankingRows = data.RankingsData?.RankingResultArray;
+    const products = activeProductSet.size > 0 && nonEmpty(rankingRows);
+    const conv = data.ConversionData || {};
+    const keywords = nonEmpty(data.adsKeywordsPerformanceData);
+    const searchTerms = nonEmpty(data.searchTerms);
+    const campaigns = nonEmpty(campaignRows);
+    const accountHealth = data.AccountData?.accountHealth;
+
+    const visited = new Set((rankingRows || []).map(r => r?.asin).filter(Boolean));
+    const uncoveredProductAsins = [...activeProductSet].filter(asin => !visited.has(asin));
+
+    return {
+        ranking: products,
+        'ranking.backend': products && nonEmpty(data.RankingsData?.BackendKeywordResultArray),
+        conversion: products && Object.keys(conv).length > 0,
+        'conversion.aplus': products && nonEmpty(conv.aPlusResult),
+        'conversion.brandStory': products && nonEmpty(conv.brandStoryResult),
+        'conversion.images': products && nonEmpty(conv.imageResult),
+        'conversion.video': products && nonEmpty(conv.videoResult),
+        'conversion.rating': products && nonEmpty(conv.productStarRatingResult),
+        // Real Buy Box rows only. With no Buy Box days at all, Analyse still builds an
+        // (empty) legacy ProductWithOutBuybox list; "the list exists" must not read as
+        // "every Buy Box problem was fixed".
+        'conversion.buybox': products && (nonEmpty(data.BuyBoxData?.asinBuyBoxData) || nonEmpty(conv.ProductWithOutBuybox)),
+        inventory: products && !!data.InventoryAnalysis && typeof data.InventoryAnalysis === 'object',
+        // Rows exist even on stale finance (ads-only / legacy), but no verdict is made on
+        // them, so their absence of tasks says nothing about what was fixed.
+        profitability: profitabilityOk && financeFresh && nonEmpty(profitabilityRows),
+        sponsoredAds: sponsoredAdsOk && (keywords || searchTerms || campaigns),
+        'sponsoredAds.campaigns': sponsoredAdsOk && campaigns,
+        'sponsoredAds.keywords': sponsoredAdsOk && keywords,
+        'sponsoredAds.searchTerms': sponsoredAdsOk && searchTerms,
+        'sponsoredAds.autoMigration': sponsoredAdsOk && searchTerms && nonEmpty(data.campaignData),
+        account: !!accountHealth && typeof accountHealth === 'object' && Object.keys(accountHealth).length > 0,
+        uncoveredProductAsins
+    };
+};
+
 /**
  * Main analysis function - calculates dashboard data from raw input
  * @param {Object} data - Raw input data from Analyse service
@@ -798,6 +860,8 @@ const calculateSponsoredAdsErrors = (
  * @param {string|null} userId - needed both to write tasks and to read the
  *   account's live per-ASIN finance. Pass it whenever you have it.
  * @param {Object} [options]
+ * @param {boolean} [options.forceTaskReconcile=false] - reconcile tasks even if
+ *   this marketplace was reconciled recently (task reconcile mode only).
  * @param {boolean} [options.persistTasks=true] - set false to compute everything
  *   and write nothing. Kept separate from `userId` so a read-only rehearsal still
  *   gets real per-ASIN finance; nulling the userId to avoid writes would silently
@@ -805,6 +869,9 @@ const calculateSponsoredAdsErrors = (
  */
 const analyseData = async (data, userId = null, options = {}) => {
     const persistTasks = options.persistTasks !== false;
+    // Set by the scheduled/integration pipeline. Other callers (page loads, QMate,
+    // the issue services) still reconcile, but only when the last reconcile is stale.
+    const forceTaskReconcile = options.forceTaskReconcile === true;
     const calcStartTime = Date.now();
     logger.info("[PERF] === DashboardCalculation: Processing data ===");
 
@@ -862,6 +929,19 @@ const analyseData = async (data, userId = null, options = {}) => {
     // Only the per-ASIN map is substituted. Account-level totals (totalSales,
     // totalPpcSpent) keep their existing sources so the dashboard headline figures
     // are not moved by this.
+    // A stale EconomicsMetrics doc is worse than none: its per-ASIN map would be used
+    // as if current. Drop it so the live fallback below takes over.
+    const economicsStale = Object.keys(economicsData.asinPpcSales || {}).length > 0
+        && !isEconomicsFresh(data.EconomicsMetrics);
+    if (economicsStale) {
+        logger.warn('Ignoring stale EconomicsMetrics per-ASIN finance', {
+            userId, country, region,
+            createdAt: data.EconomicsMetrics?.createdAt,
+            maxAgeDays: ECONOMICS_MAX_AGE_DAYS,
+            staleAsins: Object.keys(economicsData.asinPpcSales).length
+        });
+        economicsData.asinPpcSales = {};
+    }
     if (userId && Object.keys(economicsData.asinPpcSales || {}).length === 0) {
         try {
             const { getAsinFinanceForWindow } = require('../Finance/AsinFinanceWindowService.js');
@@ -1125,7 +1205,12 @@ const analyseData = async (data, userId = null, options = {}) => {
     if (data.BuyBoxData && Array.isArray(data.BuyBoxData.asinBuyBoxData)) {
         // Seller's own conversion rate + price from ASINs that DO have the Buy Box —
         // used to estimate lost revenue for the ones that don't, without an external benchmark.
-        const { benchmarkCVR, benchmarkPrice } = computeBuyBoxBenchmark(data.BuyBoxData.asinBuyBoxData);
+        // Rows whose % was carried forward from an earlier day (classifyBuyBoxLoss)
+        // are left out: on the newest day they read 0%, so their sessions did not
+        // convert like a Buy Box holder's and would drag the benchmark down.
+        const { benchmarkCVR, benchmarkPrice } = computeBuyBoxBenchmark(
+            data.BuyBoxData.asinBuyBoxData.filter((p) => p && !p.buyBoxPercentageCarriedForward)
+        );
 
         // Per-ASIN margin, so lost REVENUE can be converted into the profit it
         // actually represents. profitibilityData is computed earlier in this same
@@ -1144,13 +1229,17 @@ const analyseData = async (data, userId = null, options = {}) => {
             ? (totalGrossProfit / totalSalesForMargin) * 100
             : 0;
 
-        // Use MCP BuyBox data - filter products with buyBoxPercentage = 0
+        // Use MCP BuyBox data - filter products with buyBoxPercentage = 0.
+        // BuyBoxData is the multi-day effective doc from classifyBuyBoxLoss, so 0%
+        // here means "0% on the ASIN's last two days with traffic", not one bad day.
         productsWithOutBuyboxError = data.BuyBoxData.asinBuyBoxData
             .filter((p) => p && p.buyBoxPercentage === 0 && p.childAsin && activeProductSet.has(p.childAsin))
             .map((p) => {
+                // Average day across the observed days when the effective doc
+                // carries it; the newest day's figures otherwise (older callers).
                 const lostRevenueAmount = computeBuyBoxLostRevenueAmount({
-                    sessions: p.sessions,
-                    actualRevenue: p.sales?.amount || 0,
+                    sessions: typeof p.avgDailySessions === 'number' ? p.avgDailySessions : p.sessions,
+                    actualRevenue: typeof p.avgDailySales === 'number' ? p.avgDailySales : (p.sales?.amount || 0),
                     benchmarkCVR,
                     benchmarkPrice
                 });
@@ -1175,7 +1264,10 @@ const analyseData = async (data, userId = null, options = {}) => {
                         // overstated Buy Box roughly tenfold.
                         amount: computeBuyBoxProfitImpact({ lostRevenue: lostRevenueAmount, profitMargin }),
                         amountIsEstimated: true,
-                        estimatedFromSingleDaySnapshot: true
+                        // How many days of Buy Box data the verdict and the estimate
+                        // rest on (was a hard-coded single-day snapshot).
+                        observedDays: data.BuyBoxData.observedDays || 1,
+                        zeroDays: p.zeroDays
                     }
                 };
             });
@@ -1205,11 +1297,10 @@ const analyseData = async (data, userId = null, options = {}) => {
         (sum, p) => sum + (p.data?.amount || 0), 0
     );
 
-    // Override count with MCP data if available (for dashboard display)
-    // Use the stored count from database, which is more accurate than filtering
-    const productsWithoutBuyBoxCount = (data.BuyBoxData && data.BuyBoxData.productsWithoutBuyBox !== undefined && data.BuyBoxData.productsWithoutBuyBox !== null) 
-        ? data.BuyBoxData.productsWithoutBuyBox 
-        : productsWithOutBuyboxError.length;
+    // The count IS the list: one task per entry. The stored productsWithoutBuyBox
+    // counted every ASIN in the report (inactive and zero-traffic ones included),
+    // so the dashboard showed a different number from the tasks it produced.
+    const productsWithoutBuyBoxCount = productsWithOutBuyboxError.length;
     
     logger.info("Final productsWithoutBuyBoxCount", {
         count: productsWithoutBuyBoxCount,
@@ -1670,9 +1761,19 @@ const analyseData = async (data, userId = null, options = {}) => {
     // Calculate profitability and sponsored ads errors (already filtered for active products) with error handling
     let profitabilityErrorsData = { totalErrors: 0, errorDetails: [] };
     let sponsoredAdsErrorsData = { totalErrors: 0, errorDetails: [] };
+    // Whether each calculation actually ran. A throw leaves an empty error list that
+    // is indistinguishable from "no issues", so task reconcile must not trust it.
+    let profitabilityErrorsOk = false;
+    let sponsoredAdsErrorsOk = false;
+    // Fresh = the per-ASIN map is non-empty after a stale EconomicsMetrics doc was
+    // dropped, i.e. it is live DailySkuFinance or a recent doc. Without it no
+    // profitability verdict is trustworthy, so none is made — and task reconcile must
+    // not read "no verdicts" as "every profitability problem was fixed".
+    const financeFresh = Object.keys(economicsData.asinPpcSales || {}).length > 0;
     
     try {
-        profitabilityErrorsData = calculateProfitabilityErrors(profitibilityData, TotalProducts);
+        profitabilityErrorsData = calculateProfitabilityErrors(profitibilityData, TotalProducts, { financeFresh });
+        profitabilityErrorsOk = true;
     } catch (error) {
         logger.error("Error calculating profitability errors:", error);
     }
@@ -1681,12 +1782,16 @@ const analyseData = async (data, userId = null, options = {}) => {
         // Calculate sponsored ads errors using campaign/keyword-level analysis
         // This matches the PPC Dashboard Campaign Analysis logic
         sponsoredAdsErrorsData = calculateSponsoredAdsErrors(
-            campaignWiseTotalSalesAndCost,
+            // High-ACOS is judged on the PPC page's campaign totals when available, so a
+            // task and the page agree on which campaigns are over 40%. The date-wise
+            // spend totals stay as the fallback and still feed the dashboard charts.
+            Array.isArray(data.campaignSpendSales) ? data.campaignSpendSales : campaignWiseTotalSalesAndCost,
             data.adsKeywordsPerformanceData || [],
             data.searchTerms || [],
             data.campaignData || [],
             data.keywords || []
         );
+        sponsoredAdsErrorsOk = true;
     } catch (error) {
         logger.error("Error calculating sponsored ads errors:", error);
     }
@@ -1798,6 +1903,9 @@ const analyseData = async (data, userId = null, options = {}) => {
     
     // Call CreateTask service if userId is provided and writes are wanted
     let tasksRebuilt = false;
+    // How old the AI views must be before this change regenerates them. 0 for a full
+    // build; reconcile asks for more so routine drift does not buy an LLM call daily.
+    let taskAiRefreshMinIntervalHours = 0;
     if (userId && persistTasks) {
         try {
             logger.info(`Creating tasks for user: ${userId}`);
@@ -1808,11 +1916,23 @@ const analyseData = async (data, userId = null, options = {}) => {
                 profitabilityErrorDetails: profitabilityErrorsData.errorDetails,
                 sponsoredAdsErrorDetails: sponsoredAdsErrorsData.errorDetails,
                 AccountErrors: data.AccountData?.accountHealth || {},
-                TotalProducts: TotalProducts
+                TotalProducts: TotalProducts,
+                forceReconcile: forceTaskReconcile,
+                coverage: buildTaskCoverage(data, {
+                    activeProductSet,
+                    profitabilityRows: profitibilityData,
+                    profitabilityOk: profitabilityErrorsOk,
+                    financeFresh,
+                    // The rows high-ACOS was actually judged on (the PPC page's campaign
+                    // totals when available), so coverage describes the real input.
+                    campaignRows: Array.isArray(data.campaignSpendSales) ? data.campaignSpendSales : campaignWiseTotalSalesAndCost,
+                    sponsoredAdsOk: sponsoredAdsErrorsOk
+                })
             }, country, region);
             // Only a full rebuild changes what the derived AI views summarise; stays
             // false if task creation threw, so a failed build never triggers them.
             tasksRebuilt = taskResult?.tasksRebuilt === true;
+            taskAiRefreshMinIntervalHours = Number(taskResult?.aiRefreshMinIntervalHours) || 0;
             logger.info(`Tasks created successfully for user: ${userId}`, { tasksRebuilt });
         } catch (error) {
             logger.error("Error creating tasks:", {
@@ -1827,11 +1947,12 @@ const analyseData = async (data, userId = null, options = {}) => {
     const totalCalcTime = Date.now() - calcStartTime;
     logger.info(`[PERF] DashboardCalculation TOTAL time: ${totalCalcTime}ms`);
     logger.info("=== DashboardCalculation: Returning dashboard data ===");
-    return { dashboardData, tasksRebuilt };
+    return { dashboardData, tasksRebuilt, taskAiRefreshMinIntervalHours };
 };
 
 module.exports = {
     analyseData,
+    buildTaskCoverage,
     calculateDateWiseTotalCosts,
     calculateCampaignWiseTotalSalesAndCost,
     calculateProfitabilityErrors,

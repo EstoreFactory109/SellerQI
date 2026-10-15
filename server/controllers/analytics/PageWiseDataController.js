@@ -15,6 +15,9 @@ const asyncHandler = require('../../utils/AsyncHandler.js');
 const { AnalyseService } = require('../../Services/main/Analyse.js');
 const { analyseData } = require('../../Services/Calculations/DashboardCalculation.js');
 const CreateTaskService = require('../../Services/Calculations/CreateTasksService.js');
+// One reading of a stored A+ status for every endpoint (string values from several
+// ingest generations; see Conversion.aplusStateOf).
+const { aplusStateOf } = require('../../Services/Calculations/Conversion.js');
 const logger = require('../../utils/Logger.js');
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
@@ -1138,8 +1141,7 @@ const getYourProductsData = asyncHandler(async (req, res) => {
                 
                 aPlusContent.ApiContentDetails.forEach(item => {
                     const asinKey = item.Asins?.toUpperCase() || '';
-                    if (productAsinSet.has(asinKey) && 
-                        (item.status === 'APPROVED' || item.status === 'PUBLISHED')) {
+                    if (productAsinSet.has(asinKey) && aplusStateOf(item.status) === 'present') {
                         productsWithAPlus++;
                     }
                 });
@@ -1297,9 +1299,7 @@ const getYourProductsData = asyncHandler(async (req, res) => {
                 aPlusMap.set(asinKey, item.status);
                 
                 // Count products with A+ (only count if ASIN is in our products)
-                if (productAsinSet.has(asinKey) && 
-                    (item.status === 'APPROVED' || item.status === 'PUBLISHED' || 
-                     item.status === 'true' || item.status === true)) {
+                if (productAsinSet.has(asinKey) && aplusStateOf(item.status) === 'present') {
                     productsWithAPlus++;
                 }
             });
@@ -1324,10 +1324,7 @@ const getYourProductsData = asyncHandler(async (req, res) => {
             const reviewData = reviewsMap.get(asinKey) || {};
             const aPlusStatus = aPlusMap.get(asinKey);
             
-            const hasAPlusContent = aPlusStatus === 'APPROVED' || 
-                                    aPlusStatus === 'PUBLISHED' || 
-                                    aPlusStatus === 'true' ||
-                                    aPlusStatus === true;
+            const hasAPlusContent = aplusStateOf(aPlusStatus) === 'present';
             
             // Check if this ASIN is targeted in ads
             const isTargetedInAds = asinsTargetedInAds.has(asinKey);
@@ -2681,7 +2678,7 @@ const getYourProductsInitialV2 = asyncHandler(async (req, res) => {
         if (aPlusContent?.ApiContentDetails) {
             aPlusContent.ApiContentDetails.forEach(item => {
                 const asinKey = item.Asins?.toUpperCase() || '';
-                const hasAPlus = item.status === 'APPROVED' || item.status === 'PUBLISHED';
+                const hasAPlus = aplusStateOf(item.status) === 'present';
                 aPlusMap.set(asinKey, item.status);
                 if (hasAPlus) productsWithAPlus++;
             });
@@ -2703,7 +2700,7 @@ const getYourProductsInitialV2 = asyncHandler(async (req, res) => {
             const reviewData = reviewsMap.get(asinKey) || {};
             const aPlusStatus = aPlusMap.get(asinKey);
 
-            const hasAPlusContent = aPlusStatus === 'APPROVED' || aPlusStatus === 'PUBLISHED';
+            const hasAPlusContent = aplusStateOf(aPlusStatus) === 'present';
             const isTargetedInAds = asinsTargetedInAds.has(asinKey);
 
             return {
@@ -2902,7 +2899,7 @@ const getYourProductsByStatusV2 = asyncHandler(async (req, res) => {
             const key = product.asin?.toUpperCase() || '';
             const reviewData = reviewsMap.get(key) || {};
             const aPlusStatus = aPlusMap.get(key);
-            const hasAPlus = aPlusStatus === 'APPROVED' || aPlusStatus === 'PUBLISHED';
+            const hasAPlus = aplusStateOf(aPlusStatus) === 'present';
 
             return {
                 asin: product.asin,
@@ -3068,7 +3065,7 @@ const getYourProductsSummaryV3 = asyncHandler(async (req, res) => {
         const asinsWithAPlusSet = new Set();
         if (aPlusData?.ApiContentDetails) {
             aPlusData.ApiContentDetails.forEach(item => {
-                if ((item.status === 'APPROVED' || item.status === 'PUBLISHED') && item.Asins) {
+                if (aplusStateOf(item.status) === 'present' && item.Asins) {
                     asinsWithAPlusSet.add((item.Asins || '').toUpperCase());
                 }
             });
@@ -3749,7 +3746,7 @@ const getYourProductsWithoutAPlusV3 = asyncHandler(async (req, res) => {
         const asinsWithAPlus = new Set();
         if (aPlusDoc?.ApiContentDetails) {
             aPlusDoc.ApiContentDetails.forEach(item => {
-                if (item.status === 'APPROVED' || item.status === 'PUBLISHED') {
+                if (aplusStateOf(item.status) === 'present') {
                     asinsWithAPlus.add(item.Asins?.toUpperCase() || '');
                 }
             });

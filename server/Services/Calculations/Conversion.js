@@ -1,9 +1,21 @@
+// One threshold for every surface: tasks said 7 while the ESF report said 5.
+const MIN_PRODUCT_IMAGES = 5;
+
+// A check that had nothing to judge. Never an issue and never a task: downstream
+// only acts on status "Error", and the Amazon-ready gate only on "Error" too.
+const NO_DATA = "NoData";
+
 const checkNumberOfImages = (imageArr) => {
-    if (imageArr.length < 7) {
+    // Docs written outside the normal ingest (scripts, backfills) can lack the array;
+    // that is missing data, not a listing with no images.
+    if (!Array.isArray(imageArr)) {
+        return { status: NO_DATA, Message: "Image data is not available for this product yet.", HowToSolve: "", MainImage: undefined };
+    }
+    if (imageArr.length < MIN_PRODUCT_IMAGES) {
         return {
             status: "Error",
-            Message: "Your product listing includes fewer than 7 images. Having fewer images may limit potential buyers' ability to fully evaluate the product, which can negatively impact conversion rates.",
-            HowToSolve: "Increase the number of images to the recommended total of 7 or more, ensuring that these cover all angles and important features of your product. Include high-quality images that showcase the product in use, any important details, variations, and packaging. This visual enhancement will help improve customer engagement and confidence in making a purchase.",
+            Message: `Your product listing includes fewer than ${MIN_PRODUCT_IMAGES} images. Having fewer images may limit potential buyers' ability to fully evaluate the product, which can negatively impact conversion rates.`,
+            HowToSolve: `Increase the number of images to the recommended total of ${MIN_PRODUCT_IMAGES} or more, ensuring that these cover all angles and important features of your product. Include high-quality images that showcase the product in use, any important details, variations, and packaging. This visual enhancement will help improve customer engagement and confidence in making a purchase.`,
             MainImage: imageArr[0]
         }
     } else {
@@ -18,7 +30,10 @@ const checkNumberOfImages = (imageArr) => {
 
 
 const checkIfVideoExists = (video) => {
-    if (video.length === 0) {
+    if (!Array.isArray(video)) {
+        return { status: NO_DATA, Message: "Video data is not available for this product yet.", HowToSolve: "" };
+    }
+    if (video.filter(Boolean).length === 0) {
         return {
             status: "Error",
             Message: "Your product listing does not include a video. Missing a video may reduce the opportunity to fully engage potential buyers and demonstrate the product's features effectively, potentially impacting conversion rates.",
@@ -33,8 +48,27 @@ const checkIfVideoExists = (video) => {
     }
 }
 
-const checkStarRating = (product_star_ratings) => {
-    if (Number(product_star_ratings) < 4.3) {
+/**
+ * @param {string|number|null} product_star_ratings
+ * @param {string|number|null} [product_num_ratings]
+ *
+ * A product with no reviews has no rating. Ingest used to store that as "0", which
+ * read as "below 4.3": 33,549 of 44,415 open low-rating tasks in production were for
+ * ASINs with zero reviews. "0", a missing value and zero ratings are all no data.
+ */
+const checkStarRating = (product_star_ratings, product_num_ratings) => {
+    const rating = Number(product_star_ratings);
+    const hasRatingCount = product_num_ratings !== undefined && product_num_ratings !== null && product_num_ratings !== '';
+    const noReviews = hasRatingCount && Number(product_num_ratings) === 0;
+    if (product_star_ratings === null || product_star_ratings === undefined || product_star_ratings === ''
+        || !Number.isFinite(rating) || rating <= 0 || noReviews) {
+        return {
+            status: NO_DATA,
+            Message: "This product has no customer ratings yet.",
+            HowToSolve: ""
+        };
+    }
+    if (rating < 4.3) {
         return {
             status: "Error",
             Message: "Your product rating is below 4.3 stars. A lower rating can deter potential buyers and negatively impact your product's visibility and sales on Amazon.",
@@ -50,10 +84,34 @@ const checkStarRating = (product_star_ratings) => {
 }
 
 
+/**
+ * What a stored A+ status means. The field is a String in the schema, and the values
+ * in production are text written by different ingest generations:
+ *   present  APPROVED / PUBLISHED (current), "true" (pre-2026-01 scraper)
+ *   missing  NOT_AVAILABLE (current), "false" (pre-2026-01), DRAFT (not live)
+ *   unknown  null or anything else: no verdict, no task
+ * Comparing against the boolean false (as checkAPlus did) never matched any of them,
+ * so no A+ task was ever created and every product counted as having A+.
+ * @returns {'present'|'missing'|'unknown'}
+ */
+const aplusStateOf = (status) => {
+    if (status === true) return 'present';
+    if (status === false) return 'missing';
+    if (typeof status !== 'string') return 'unknown';
+    const s = status.trim().toUpperCase();
+    if (s === 'APPROVED' || s === 'PUBLISHED' || s === 'TRUE') return 'present';
+    if (s === 'NOT_AVAILABLE' || s === 'FALSE' || s === 'DRAFT') return 'missing';
+    return 'unknown';
+};
+
 const checkAPlus = (asinList) => {
     let result = [];
-    asinList.forEach(product => {
-        if (product.status === false) {
+    (Array.isArray(asinList) ? asinList : []).forEach(product => {
+        const state = aplusStateOf(product?.status);
+        // No verdict for an unknown status: no task, and description errors stay
+        // visible for it (DashboardCalculation hides them only on A+ Success).
+        if (state === 'unknown') return;
+        if (state === 'missing') {
             result.push({
                 asin: product.Asins,
                 data: {
@@ -143,4 +201,4 @@ const checkBrandStory = (productsList) => {
 };
 
 
-module.exports = { checkNumberOfImages, checkIfVideoExists, checkStarRating, checkAPlus, checkProductWithOutBuyBox, checkBrandStory }
+module.exports = { checkNumberOfImages, checkIfVideoExists, checkStarRating, checkAPlus, checkProductWithOutBuyBox, checkBrandStory, aplusStateOf, MIN_PRODUCT_IMAGES, NO_DATA }

@@ -24,6 +24,7 @@
  * Every builder is run through `settle` so one empty or broken collection
  * degrades a single card rather than failing the page.
  */
+const { aplusStateOf } = require('./Conversion.js');
 const mongoose = require('mongoose');
 
 const RestockInventoryRecommendations = require('../../models/inventory/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model.js');
@@ -52,6 +53,7 @@ const ReviewOrder = require('../../models/review/ReviewOrderModel.js');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
 const logger = require('../../utils/Logger.js');
+const { latestCapturePerBuyBoxDay } = require('./RecoverableAmountUtils.js');
 const { BRAND, printableCurrency, barChartSvg, lineChartSvg } = require('../Reports/reportBrand.js');
 
 /* ------------------------------------------------------------------ helpers */
@@ -339,9 +341,9 @@ const collectSuppressed = (products, fyp, country) => {
  *
  * Both FBA reports below are absent for two very different reasons, and the
  * client deserves to be told which. Amazon answers DONE_NO_DATA when there is
- * nothing to report, and the fetcher then returns before writing any document
+ * nothing to report, and the fetcher then saves an empty snapshot
  * (GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT.js, the DONE_NO_DATA case) — so
- * "no document" means either "no FBA inventory" or "Amazon did not supply it",
+ * "no products" means either "no FBA inventory" or "Amazon did not supply it",
  * never "our sync is behind". Saying "not fetched yet" for either one reads as
  * a platform fault we would be wrong to imply.
  */
@@ -578,7 +580,8 @@ const buildAccountOverview = async (userId, country, region) => {
         V2SellerPerformance.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
         // Counts Amazon reports separately from the policy statuses above.
         V1SellerPerformance.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
-        StrandedInventoryItem.countDocuments({ User: userId, country, region }),
+        // Empty-snapshot marker rows (a clean stranded report) are not items.
+        StrandedInventoryItem.countDocuments({ User: userId, country, region, isEmptyMarker: { $ne: true } }),
         // Written by the existing opportunity engine; keyed by userId as a string.
         TopOpportunities.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
         SuppressedListings.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
@@ -917,13 +920,17 @@ const REPORT_BUYBOX = { key: 'buybox', name: 'Weekly Buybox Report', cadence: 'W
  * cannot see gets no gap at all rather than a misleading one.
  */
 const buildBuyBox = async (userId, country, region) => {
-    const [snapshots, seller, pricing, suppressedReport] = await Promise.all([
-        BuyBoxData.find({ User: userId, country, region }).sort({ createdAt: -1 }).limit(8).lean(),
+    const [rawSnapshots, seller, pricing, suppressedReport] = await Promise.all([
+        // Empty days (totalProducts 0) are "no data", not "everything lost", and a
+        // day captured twice must not count as two snapshots in the losing streak.
+        BuyBoxData.find({ User: userId, country, region, totalProducts: { $gt: 0 } })
+            .sort({ date: -1, createdAt: -1 }).limit(8 * 3).lean(),
         Seller.findOne({ User: userId }).select('sellerAccount').lean(),
         CompetitiveOffers.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
         SuppressedListings.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
     ]);
 
+    const snapshots = latestCapturePerBuyBoxDay(rawSnapshots, 8);
     const latest = snapshots[0];
     if (!latest) {
         return unavailable(REPORT_BUYBOX, 'No Buy Box data has been fetched for this marketplace yet.');
@@ -1416,8 +1423,9 @@ const buildListingsAudit = async (userId, country, region) => {
             description: Boolean(detail?.product_description?.length),
             images: (detail?.product_photos?.length || 0) >= 5,
             video: Boolean(detail?.video_url?.length),
-            // Amazon reports A+ status per ASIN; anything approved counts.
-            aPlus: aplusStatus === 'APPROVED' || aplusStatus === 'ACTIVE' || aplusStatus === 'SUBMITTED',
+            // Same reading as the A+ task check: legacy "true" counts as present,
+            // DRAFT / NOT_AVAILABLE / "false" as missing.
+            aPlus: aplusStateOf(aplusStatus) === 'present',
             brandStory: Boolean(detail?.has_brandstory),
         };
 
@@ -2306,8 +2314,12 @@ const edition = (when, summary, tone = 'neutral', { capturedAt = null, showCaptu
 
 const historyBuilders = {
     [REPORT_BUYBOX.key]: async (userId, country, region) => {
-        const snapshots = await BuyBoxData.find({ User: userId, country, region })
-            .sort({ createdAt: -1 }).limit(HISTORY_LIMIT).lean();
+        // Same as buildBuyBox: skip empty days, one capture per day.
+        const snapshots = latestCapturePerBuyBoxDay(
+            await BuyBoxData.find({ User: userId, country, region, totalProducts: { $gt: 0 } })
+                .sort({ date: -1, createdAt: -1 }).limit(HISTORY_LIMIT * 3).lean(),
+            HISTORY_LIMIT
+        );
         if (!snapshots.length) return null;
 
         const editions = snapshots.map((snapshot) => {

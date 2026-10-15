@@ -315,6 +315,9 @@ export default function Tasks() {
         error: task.error,
         howToSolve: task.solution,
         status: task.status,
+        // Reopened by the server: the seller marked it done more than a week ago
+        // but the latest data still shows the issue.
+        stillDetected: !!task.stillDetected,
         amount: task.amount || 0,
         amountIsEstimated: !!task.amountIsEstimated,
         // Effort/impact come from the server (TaskPrioritizationService) and drive
@@ -325,6 +328,28 @@ export default function Tasks() {
       };
     });
   }, [tasks, productDetailsMap]);
+
+  // Tasks the server closed because the issue stopped being detected. They are in
+  // completedTasks too (see TasksSlice), so progress and filters treat them as done.
+  const resolvedTaskIds = useMemo(
+    () => new Set(transformedTasks.filter(t => t.status === 'resolved').map(t => t.taskId)),
+    [transformedTasks]
+  );
+
+  const statusLabel = (item) => {
+    if (resolvedTaskIds.has(item.taskId)) return 'Resolved automatically';
+    if (completedTasks.has(item.taskId)) return 'Completed';
+    if (item.stillDetected) return 'Still detected';
+    return 'Pending';
+  };
+
+  const statusTitle = (item) => {
+    if (resolvedTaskIds.has(item.taskId)) return 'Our latest data no longer shows this issue.';
+    if (!completedTasks.has(item.taskId) && item.stillDetected) {
+      return 'You marked this done over a week ago, but our latest data still shows the issue.';
+    }
+    return undefined;
+  };
 
   // Real completion progress (over ALL tasks, not just the current filtered/paginated view)
   const totalTasksCount = transformedTasks.length;
@@ -467,7 +492,7 @@ export default function Tasks() {
 
   const markSelectedComplete = () => {
     selectedTaskIds.forEach(taskId => {
-      if (!completedTasks.has(taskId)) {
+      if (!completedTasks.has(taskId) && !resolvedTaskIds.has(taskId)) {
         dispatch(updateTaskStatus({ taskId, status: 'completed' }));
       }
     });
@@ -488,7 +513,7 @@ export default function Tasks() {
         // The on-screen amount carries a '*' when it's an estimate; keep that
         // caveat in the export rather than losing it on download.
         item.amount > 0 && item.amountIsEstimated ? 'Yes' : '',
-        completedTasks.has(item.taskId) ? 'Completed' : 'Pending'
+        statusLabel(item)
       ].join(','))
     ].join('\n');
 
@@ -507,6 +532,8 @@ export default function Tasks() {
   const exportSelectedToCSV = () => exportRowsToCSV(transformedTasks.filter(t => selectedTaskIds.has(t.taskId)), 'selected');
 
   const toggleTaskStatus = async (taskId) => {
+    // Resolved is the server's call (the issue is gone); there is nothing to undo.
+    if (resolvedTaskIds.has(taskId)) return;
     const isCurrentlyCompleted = completedTasks.has(taskId);
     const newStatus = isCurrentlyCompleted ? 'pending' : 'completed';
     
@@ -843,9 +870,10 @@ export default function Tasks() {
                         </button>
                         <button
                           type="button"
-                          title="Mark complete"
+                          title={resolvedTaskIds.has(item.taskId) ? 'Resolved automatically — this issue is no longer detected' : 'Mark complete'}
                           onClick={() => toggleTaskStatus(item.taskId)}
-                          className="w-5 h-5 rounded-md flex-shrink-0 flex items-center justify-center text-xs leading-none cursor-pointer transition-colors"
+                          disabled={resolvedTaskIds.has(item.taskId)}
+                          className={`w-5 h-5 rounded-md flex-shrink-0 flex items-center justify-center text-xs leading-none transition-colors ${resolvedTaskIds.has(item.taskId) ? 'cursor-default' : 'cursor-pointer'}`}
                           style={{
                             border: `1px solid ${completedTasks.has(item.taskId) ? COLORS.good : COLORS.borderStrong}`,
                             background: completedTasks.has(item.taskId) ? 'rgba(34,197,94,.18)' : 'transparent',
@@ -894,11 +922,12 @@ export default function Tasks() {
                         )}
                         <span
                           className="inline-block text-[11px] font-semibold px-2 py-1 rounded-full whitespace-nowrap"
+                          title={statusTitle(item)}
                           style={completedTasks.has(item.taskId)
                             ? { background: 'rgba(34,197,94,.14)', color: COLORS.good }
                             : { background: 'rgba(245,166,35,.14)', color: COLORS.watch }}
                         >
-                          {completedTasks.has(item.taskId) ? 'Completed' : 'Pending'}
+                          {statusLabel(item)}
                         </span>
                       </div>
                     </motion.div>

@@ -267,7 +267,7 @@ const LISTING_FIX_KNOWLEDGE = {
   low_image_count: {
     title: 'How to Add More Product Images',
     steps: [
-      'Aim for at least 7 images: main (white background) plus lifestyle, infographic, size/scale, and detail shots',
+      'Aim for at least 5 images: main (white background) plus lifestyle, infographic, size/scale, and detail shots',
       'Go to Seller Central → Inventory → Manage All Inventory → Edit → Images',
       'Upload to slots PT01-PT08; each at least 1000x1000px for zoom',
       'Show the product in use and call out key features visually',

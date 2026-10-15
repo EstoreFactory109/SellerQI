@@ -6,6 +6,7 @@
  * NegetiveReviewsAlert, and/or APlusMissingAlert as needed.
  */
 
+const { aplusStateOf } = require('../../Calculations/Conversion.js');
 const NumberOfProductReviews = require('../../../models/seller-performance/NumberOfProductReviewsModel.js');
 const APlusContent = require('../../../models/seller-performance/APlusContentModel.js');
 const { ProductContentChangeAlert, NegetiveReviewsAlert, APlusMissingAlert } = require('../../../models/alerts/Alert.js');
@@ -236,9 +237,12 @@ async function runNegativeReviewsCheck(lastDoc, userId, region, country) {
 
   for (const p of lastDoc.Products) {
     const rating = parseFloat(p.product_star_ratings);
-    if (Number.isNaN(rating) || rating >= NEGATIVE_REVIEW_RATING_THRESHOLD) continue;
-
     const reviewCount = parseInt(p.product_num_ratings, 10) || 0;
+    // A product with no reviews has no rating (ingest used to store it as "0"), so it
+    // cannot have a negative one.
+    if (Number.isNaN(rating) || rating <= 0 || reviewCount === 0) continue;
+    if (rating >= NEGATIVE_REVIEW_RATING_THRESHOLD) continue;
+
     allProducts.push({
       asin: p.asin?.trim() || p.asin,
       sku: p.sku ?? undefined,
@@ -323,12 +327,9 @@ async function runAPlusMissingCheck(userId, region, country) {
     const asin = item.Asins || item.asin;
     if (!asin || typeof asin !== 'string') continue;
     const status = item.status;
-    const hasAPlus =
-      status === 'APPROVED' ||
-      status === 'PUBLISHED' ||
-      status === 'true' ||
-      status === true;
-    if (hasAPlus) continue;
+    // Only a status that means "missing" alerts; an unknown one (e.g. null) has no
+    // verdict. Same reading as the A+ task check (Conversion.aplusStateOf).
+    if (aplusStateOf(status) !== 'missing') continue;
     allProducts.push({
       asin: String(asin).trim(),
       sku: undefined,
@@ -520,4 +521,6 @@ module.exports = {
   detectAndStoreAlerts,
   getContentChanges,
   arraysEqual,
+  // Exported for unit tests of the "no reviews is not a negative review" rule.
+  runNegativeReviewsCheck,
 };

@@ -9,16 +9,18 @@ const {
   checkAPlus,
   checkProductWithOutBuyBox,
   checkBrandStory,
+  aplusStateOf,
 } = require('../../../Services/Calculations/Conversion.js');
 
 describe('Conversion Calculations', () => {
   describe('checkNumberOfImages', () => {
-    it('should return error when less than 7 images', () => {
+    // One threshold everywhere: tasks said 7, the ESF report said 5.
+    it('should return error when less than 5 images', () => {
       const images = ['img1.jpg', 'img2.jpg', 'img3.jpg'];
       const result = checkNumberOfImages(images);
 
       expect(result.status).toBe('Error');
-      expect(result.Message).toContain('fewer than 7 images');
+      expect(result.Message).toContain('fewer than 5 images');
       expect(result.MainImage).toBe('img1.jpg');
     });
 
@@ -45,11 +47,14 @@ describe('Conversion Calculations', () => {
       expect(result.MainImage).toBeUndefined();
     });
 
-    it('should handle exactly 6 images as error', () => {
-      const images = Array(6).fill('img.jpg');
-      const result = checkNumberOfImages(images);
+    it('treats exactly 4 images as an error and exactly 5 as enough', () => {
+      expect(checkNumberOfImages(Array(4).fill('img.jpg')).status).toBe('Error');
+      expect(checkNumberOfImages(Array(5).fill('img.jpg')).status).toBe('Success');
+    });
 
-      expect(result.status).toBe('Error');
+    it('treats a missing image array as no data, not as zero images', () => {
+      expect(checkNumberOfImages(undefined).status).toBe('NoData');
+      expect(checkNumberOfImages(null).status).toBe('NoData');
     });
   });
 
@@ -74,6 +79,15 @@ describe('Conversion Calculations', () => {
       const result = checkIfVideoExists(['video1.mp4', 'video2.mp4']);
 
       expect(result.status).toBe('Success');
+    });
+
+    // A video entry with no URL used to be stored as [undefined] and count as a video.
+    it('does not count entries without a URL as videos', () => {
+      expect(checkIfVideoExists([undefined, null]).status).toBe('Error');
+    });
+
+    it('treats a missing video array as no data', () => {
+      expect(checkIfVideoExists(undefined).status).toBe('NoData');
     });
   });
 
@@ -116,6 +130,58 @@ describe('Conversion Calculations', () => {
       const result = checkStarRating(1.0);
 
       expect(result.status).toBe('Error');
+    });
+  });
+
+  // A product with no reviews has no rating. Ingest stored that as "0", and 33,549
+  // of 44,415 open low-rating tasks in production were for such products.
+  describe('checkStarRating with no reviews', () => {
+    it.each([['0', '0'], ['0', undefined], [null, '0'], [undefined, undefined], ['', '12'], [0, 5]])(
+      'rating %p with %p ratings is no data, not a low rating', (rating, count) => {
+        expect(checkStarRating(rating, count).status).toBe('NoData');
+      });
+
+    it('a real rating with no rating count is still judged', () => {
+      expect(checkStarRating('4.1', undefined).status).toBe('Error');
+    });
+
+    it('zero reviews means no data even if a stray rating is present', () => {
+      expect(checkStarRating('3.9', '0').status).toBe('NoData');
+    });
+
+    it('a real low rating with reviews is still an error', () => {
+      expect(checkStarRating('4.2', '37').status).toBe('Error');
+      expect(checkStarRating('4.6', '37').status).toBe('Success');
+    });
+  });
+
+  // Stored A+ statuses are strings from several ingest generations. The check used to
+  // compare against boolean false, so it never fired in production.
+  describe('checkAPlus with the values production actually stores', () => {
+    it.each(['NOT_AVAILABLE', 'false', 'DRAFT', ' not_available '])('%p is missing A+', (status) => {
+      const [r] = checkAPlus([{ Asins: 'B1', status }]);
+      expect(r.data.status).toBe('Error');
+    });
+
+    it.each(['APPROVED', 'PUBLISHED', 'true'])('%p has A+', (status) => {
+      const [r] = checkAPlus([{ Asins: 'B1', status }]);
+      expect(r.data.status).toBe('Success');
+    });
+
+    it('an unknown status (null, or anything else) gives no verdict and no entry', () => {
+      expect(checkAPlus([{ Asins: 'B1', status: null }, { Asins: 'B2', status: 'SUBMITTED' }])).toEqual([]);
+    });
+
+    it('tolerates a non-array input', () => {
+      expect(checkAPlus(undefined)).toEqual([]);
+    });
+  });
+
+  describe('aplusStateOf', () => {
+    it('maps every production value', () => {
+      expect(['APPROVED', 'PUBLISHED', 'true', true].map(aplusStateOf)).toEqual(['present', 'present', 'present', 'present']);
+      expect(['NOT_AVAILABLE', 'false', false, 'DRAFT'].map(aplusStateOf)).toEqual(['missing', 'missing', 'missing', 'missing']);
+      expect([null, undefined, 'SUBMITTED', 7].map(aplusStateOf)).toEqual(['unknown', 'unknown', 'unknown', 'unknown']);
     });
   });
 

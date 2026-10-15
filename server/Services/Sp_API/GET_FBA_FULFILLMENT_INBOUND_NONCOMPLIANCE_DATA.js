@@ -44,6 +44,10 @@ const generateReport = async (accessToken, marketplaceIds,baseuri) => {
     }
 };
 
+// Returned by checkReportStatus for DONE_NO_DATA. Distinct from false (failed)
+// and null (still processing) so the poll loop can save an empty snapshot.
+const NO_DATA = 'DONE_NO_DATA';
+
 const checkReportStatus = async (accessToken, reportId,baseuri) => {
     try {
         const response = await axios.get(
@@ -78,8 +82,10 @@ const checkReportStatus = async (accessToken, reportId,baseuri) => {
                 return null;
 
             case "DONE_NO_DATA":
-                logger.error("Report completed but contains no data.");
-                return false;
+                // Amazon's answer when there are no inbound problems: a result
+                // to save as an empty snapshot, not a failure.
+                logger.info("Report completed with no data (no inbound issues).");
+                return NO_DATA;
 
             case "FAILED":
                 logger.error("Report failed for an unknown reason.");
@@ -140,6 +146,9 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri,country, r
                     message: "Error in generating the report",
                 };
             }
+            if (reportDocumentId === NO_DATA) {
+                return await _saveInboundErrors([], userId, country, region);
+            }
             retries--;
         }
 
@@ -160,7 +169,7 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri,country, r
 };
 
 // Extracted post-poll step (download → parse TSV → save). Shared by inline + P8 async.
-// Returns null when there are no in-window issues (nothing saved).
+// Saves a document even when there are no in-window issues (ErrorData: []).
 async function _processInboundDocument(accessToken, reportDocumentId, baseuri, userId, country, region) {
         const reportUrl = await getReportLink(accessToken, reportDocumentId,baseuri);
 
@@ -198,9 +207,15 @@ async function _processInboundDocument(accessToken, reportDocumentId, baseuri, u
             }
         });
 
+        return await _saveInboundErrors(errorData, userId, country, region);
+}
+
+// Save step shared by a downloaded report and DONE_NO_DATA. An empty errorData
+// is saved too: returning without a write left the last report that HAD issues
+// as the newest document, so readers kept showing problems already resolved.
+async function _saveInboundErrors(errorData, userId, country, region) {
         if (errorData.length === 0) {
-            logger.info("GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA ended with no issues (no document saved)");
-            return null;
+            logger.info("GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA: no issues in the last 30 days; saving an empty snapshot");
         }
 
         const createData = await GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA_Model.create({
@@ -245,7 +260,9 @@ async function convertTSVToJson(tsvBuffer) {
             logger.error('[GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA] Fallback parsing also failed', { 
                 error: fallbackError.message 
             });
-            return [];
+            // Thrown, not `return []`: an empty result is now saved as "no
+            // problems", so an unreadable report must not be mistaken for one.
+            throw new Error(`[GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA] report could not be parsed: ${fallbackError.message}`);
         }
     }
 }
@@ -276,8 +293,15 @@ getReport.spApiAsync = {
         submit: async () => await generateReport(accessToken, marketplaceIds, baseuri),
         checkStatusOnce: (reportId) => checkSpApiStatusOnce(accessToken, reportId, baseuri),
         finalize: async (handle) => {
+            // DONE_NO_DATA arrives here with no document to download. Passing it
+            // to the download threw, so the run was recorded FAILED and nothing
+            // replaced the stale issues.
+            if (!handle?.reportDocumentId) {
+                await _saveInboundErrors([], userId, country, region);
+                return { empty: true };
+            }
             const r = await _processInboundDocument(accessToken, handle.reportDocumentId, baseuri, userId, country, region);
-            return { empty: r === null };
+            return { empty: !!r && Array.isArray(r.ErrorData) && r.ErrorData.length === 0 };
         },
     }]),
     saveFromRows: async () => ({ documentsSaved: 0 }),
