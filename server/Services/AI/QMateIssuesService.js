@@ -14,6 +14,7 @@
  * This service is INDEPENDENT and does not affect any existing flows.
  */
 
+const { MIN_PRODUCT_IMAGES } = require('../Calculations/Conversion.js');
 const logger = require('../../utils/Logger.js');
 const IssueSummary = require('../../models/system/IssueSummaryModel.js');
 const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
@@ -842,7 +843,7 @@ function transformConversionIssues(conversionErrors) {
         const errorData = conversionErrors.imageResultErrorData;
         issues.push({
             type: 'low_image_count',
-            message: errorData.Message || 'Product has fewer than 7 images',
+            message: errorData.Message || `Product has fewer than ${MIN_PRODUCT_IMAGES} images`,
             suggestion: errorData.HowToSolve || 'Add more high-quality product images showing different angles, lifestyle, and infographics',
             mainImage: errorData.MainImage || null
         });
@@ -901,12 +902,12 @@ function transformConversionIssues(conversionErrors) {
     
     // Legacy format fallbacks (for backwards compatibility)
     if (issues.length === 0) {
-        if (conversionErrors.imageCount !== undefined && conversionErrors.imageCount < 7) {
+        if (conversionErrors.imageCount !== undefined && conversionErrors.imageCount < MIN_PRODUCT_IMAGES) {
             issues.push({
                 type: 'low_image_count',
                 currentValue: conversionErrors.imageCount,
                 requiredValue: 7,
-                message: `Product has only ${conversionErrors.imageCount} images (minimum 7 recommended)`,
+                message: `Product has only ${conversionErrors.imageCount} images (minimum ${MIN_PRODUCT_IMAGES} recommended)`,
                 suggestion: 'Add more high-quality product images showing different angles, lifestyle, and infographics'
             });
         }

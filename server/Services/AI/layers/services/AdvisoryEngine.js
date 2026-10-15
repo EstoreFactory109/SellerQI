@@ -198,7 +198,7 @@ const OPERATIONAL_KNOWLEDGE = {
     title: 'How to Improve a Listing',
     steps: [
       'Title: lead with brand + core product + key differentiators; stay under the category limit; no ALL CAPS or special characters',
-      'Images: at least 7 — white-background main, lifestyle, infographic, size/scale, and detail shots (≥1000x1000px)',
+      'Images: at least 5 — white-background main, lifestyle, infographic, size/scale, and detail shots (≥1000x1000px)',
       'Bullets: 5 benefit-led points, each ≤200 chars, leading with a CAPITALIZED benefit keyword',
       'Description / A+ Content: expand on use cases, materials, dimensions, what\'s in the box',
       'Keywords: place top search terms naturally in title, bullets, and backend search terms — do not keyword-stuff',

@@ -1412,7 +1412,7 @@ Your suggestions must align with the **same rules SellerQI uses** so they are er
 SellerQI counts conversion issues based on these exact criteria:
 | Issue Type | Condition | Status |
 |------------|-----------|--------|
-| **Images** | Product has fewer than 7 images | Error |
+| **Images** | Product has fewer than 5 images | Error |
 | **Video** | Product listing has no video | Error |
 | **A+ Content** | Product does not have A+ Content | Error |
 | **Star Rating** | Product rating is below 4.3 stars | Error |

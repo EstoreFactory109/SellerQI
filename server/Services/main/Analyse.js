@@ -1077,11 +1077,13 @@ class AnalyseService {
             if (!DefaulterList.ProductReviews.includes(product.asin)) {
                 const imageResult = checkNumberOfImages(product.product_photos);
                 const videoResult = checkIfVideoExists(product.video_url);
-                const productStarRatingResult = checkStarRating(product.product_star_ratings);
+                const productStarRatingResult = checkStarRating(product.product_star_ratings, product.product_num_ratings);
                 const rankings = getRankings(product);
 
+                // "No data" (no reviews yet, no image data) must not cost a product its
+                // Amazon-ready status: only a real problem does.
                 if (rankings.TotalErrors === 0 && 
-                    [imageResult, videoResult, productStarRatingResult].every(r => r.status === "Success")) {
+                    [imageResult, videoResult, productStarRatingResult].every(r => r.status !== "Error")) {
                     AmazonReadyProductsSet.add(product.asin);
                 }
 
