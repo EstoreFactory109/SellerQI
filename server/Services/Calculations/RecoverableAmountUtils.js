@@ -261,8 +261,79 @@ function sumRecoverableAmounts(amounts = {}) {
         + (amounts.totalConversionRecoverableAmount || 0);
 }
 
+// EconomicsMetrics stopped being written in April 2026, but findLatest still returns
+// the last doc. For big accounts that doc carries a per-ASIN map, so 11 active
+// marketplaces were judged on ~195-day-old finance and the live DailySkuFinance
+// fallback (which only runs on an EMPTY map) never fired. Older than this = stale.
+const ECONOMICS_MAX_AGE_DAYS = 14;
+
+/** True when an EconomicsMetrics doc is recent enough to describe the seller now. */
+function isEconomicsFresh(economicsMetrics, now = new Date(), maxAgeDays = ECONOMICS_MAX_AGE_DAYS) {
+    if (!economicsMetrics) return false;
+    const t = toTime(economicsMetrics.createdAt);
+    if (!Number.isFinite(t)) return false;
+    return t >= toTime(now) - maxAgeDays * 24 * 60 * 60 * 1000;
+}
+
+/**
+ * The single profitability rule, shared by the tasks (DashboardCalculation), the
+ * Profitability page (ProfitabilityService) and the Profitability issues page
+ * (ProfitabilityIssuesService), which used to carry three copies of it.
+ *
+ * A row with no sales has no margin to judge. The old rule read it as "0% margin"
+ * (10,016 open $0 low_margin tasks in production) or as "losing money" on revenue $0.
+ *
+ *   sales > 0                              negative_profit / low_margin, as before
+ *   no sales, ad spend > 0, finance fresh  ad_spend_no_sales (amount = the ad spend)
+ *   no sales otherwise                     no verdict
+ *   finance not fresh, or a 'legacy' row   no verdict (ProductWiseSales has had no
+ *                                          new doc since 2025-12-04)
+ *
+ * @param {Object} row - { sales, ads, amzFee | totalFees, source? }
+ * @param {Object} opts
+ * @param {boolean} opts.financeFresh - the per-ASIN finance behind the rows is current
+ * @returns {null | { errorType, amount, netProfit, profitMargin }}
+ */
+function classifyProfitabilityRow(row, { financeFresh } = {}) {
+    if (!row || !financeFresh) return null;
+    if (row.source === 'legacy') return null;
+
+    const sales = Number(row.sales) || 0;
+    const ads = Number(row.ads) || 0;
+    const fees = Number(row.amzFee) || Number(row.totalFees) || 0;
+    const netProfit = sales - ads - fees;
+
+    if (sales <= 0) {
+        if (ads <= 0) return null;
+        return { errorType: 'ad_spend_no_sales', amount: ads, netProfit, profitMargin: 0 };
+    }
+
+    const profitMargin = (netProfit / sales) * 100;
+    if (netProfit < 0) {
+        return {
+            errorType: 'negative_profit',
+            amount: computeProfitabilityAmount({ netProfit, profitMargin, sales, issueType: 'negative_profit' }),
+            netProfit,
+            profitMargin,
+        };
+    }
+    if (profitMargin < TARGET_PROFIT_MARGIN_PERCENT) {
+        return {
+            errorType: 'low_margin',
+            amount: computeProfitabilityAmount({ netProfit, profitMargin, sales, issueType: 'low_margin' }),
+            netProfit,
+            profitMargin,
+        };
+    }
+    return null;
+}
+
 module.exports = {
     computeProfitabilityAmount,
+    classifyProfitabilityRow,
+    isEconomicsFresh,
+    toTime,
+    ECONOMICS_MAX_AGE_DAYS,
     computeSponsoredAdsAmount,
     capProfitOpportunity,
     computeBuyBoxProfitImpact,

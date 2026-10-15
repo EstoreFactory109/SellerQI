@@ -66,7 +66,8 @@ const ALL_TASK_TYPES = [
     ['account', 'negativeFeedbacks'],
     ['account', 'NCX'],
     ['account', 'a_z_claims'],
-    ['account', 'responseUnder24HoursCount']
+    ['account', 'responseUnder24HoursCount'],
+    ['profitability', 'ad_spend_no_sales']
 ];
 
 describe('normalizeErrorType', () => {

@@ -22,7 +22,7 @@ const AsinWiseSalesRun = require('../../models/finance/AsinWiseSalesRunModel.js'
 const AsinWiseSalesItem = require('../../models/finance/AsinWiseSalesItemModel.js');
 const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
 const DataFetchTracking = require('../../models/system/DataFetchTrackingModel.js');
-const { computeProfitabilityAmount, computeSponsoredAdsAmount, computeBuyBoxBenchmark, computeBuyBoxLostRevenueAmount, computeBuyBoxProfitImpact } = require('./RecoverableAmountUtils.js');
+const { computeProfitabilityAmount, classifyProfitabilityRow, isEconomicsFresh, ECONOMICS_MAX_AGE_DAYS, computeSponsoredAdsAmount, computeBuyBoxBenchmark, computeBuyBoxLostRevenueAmount, computeBuyBoxProfitImpact } = require('./RecoverableAmountUtils.js');
 
 // Chunk size for yielding to event loop during large data processing
 const YIELD_CHUNK_SIZE = 500;
@@ -522,7 +522,7 @@ const calculateCampaignWiseTotalSalesAndCost = (dateWisePPCData) => {
  * @param {Array} totalProducts - Array of all products with names
  * @returns {Object} Total errors and error details
  */
-const calculateProfitabilityErrors = (profitibilityData, totalProducts = []) => {
+const calculateProfitabilityErrors = (profitibilityData, totalProducts = [], { financeFresh = true } = {}) => {
     let totalErrors = 0;
     let totalAmount = 0;
     const errorDetails = [];
@@ -538,28 +538,22 @@ const calculateProfitabilityErrors = (profitibilityData, totalProducts = []) => 
     }
 
     profitibilityData.forEach((item) => {
-        // Calculate net profit (assuming COGS is 0 initially, will be updated when user enters values)
-        const netProfit = (item.sales || 0) - (item.ads || 0) - (item.amzFee || 0);
-
-        // Determine status based on profit margin
-        const profitMargin = item.sales > 0 ? (netProfit / item.sales) * 100 : 0;
-
-        // Count as error if profit margin is below 10% or negative
-        if (profitMargin < 10 || netProfit < 0) {
-            totalErrors++;
-            const errorType = netProfit < 0 ? 'negative_profit' : 'low_margin';
-            const amount = computeProfitabilityAmount({ netProfit, profitMargin, sales: item.sales, issueType: errorType });
-            totalAmount += amount;
-            errorDetails.push({
-                asin: item.asin,
-                productName: productNameMap.get(item.asin) || null,
-                sales: item.sales,
-                netProfit: netProfit,
-                profitMargin: profitMargin,
-                errorType,
-                amount
-            });
-        }
+        // COGS is 0 until the seller enters it. The rule itself is shared with the
+        // Profitability pages (RecoverableAmountUtils.classifyProfitabilityRow).
+        const verdict = classifyProfitabilityRow(item, { financeFresh });
+        if (!verdict) return;
+        totalErrors++;
+        totalAmount += verdict.amount;
+        errorDetails.push({
+            asin: item.asin,
+            productName: productNameMap.get(item.asin) || null,
+            sales: item.sales,
+            ads: item.ads || 0,
+            netProfit: verdict.netProfit,
+            profitMargin: verdict.profitMargin,
+            errorType: verdict.errorType,
+            amount: verdict.amount
+        });
     });
 
     return { totalErrors, errorDetails, totalAmount };
@@ -862,6 +856,19 @@ const analyseData = async (data, userId = null, options = {}) => {
     // Only the per-ASIN map is substituted. Account-level totals (totalSales,
     // totalPpcSpent) keep their existing sources so the dashboard headline figures
     // are not moved by this.
+    // A stale EconomicsMetrics doc is worse than none: its per-ASIN map would be used
+    // as if current. Drop it so the live fallback below takes over.
+    const economicsStale = Object.keys(economicsData.asinPpcSales || {}).length > 0
+        && !isEconomicsFresh(data.EconomicsMetrics);
+    if (economicsStale) {
+        logger.warn('Ignoring stale EconomicsMetrics per-ASIN finance', {
+            userId, country, region,
+            createdAt: data.EconomicsMetrics?.createdAt,
+            maxAgeDays: ECONOMICS_MAX_AGE_DAYS,
+            staleAsins: Object.keys(economicsData.asinPpcSales).length
+        });
+        economicsData.asinPpcSales = {};
+    }
     if (userId && Object.keys(economicsData.asinPpcSales || {}).length === 0) {
         try {
             const { getAsinFinanceForWindow } = require('../Finance/AsinFinanceWindowService.js');
@@ -1672,7 +1679,11 @@ const analyseData = async (data, userId = null, options = {}) => {
     let sponsoredAdsErrorsData = { totalErrors: 0, errorDetails: [] };
     
     try {
-        profitabilityErrorsData = calculateProfitabilityErrors(profitibilityData, TotalProducts);
+        // Fresh = the per-ASIN map is non-empty after the stale doc was dropped, i.e. it
+        // is live DailySkuFinance or a recent EconomicsMetrics doc. Without it no
+        // profitability verdict is trustworthy, so none is made.
+        const financeFresh = Object.keys(economicsData.asinPpcSales || {}).length > 0;
+        profitabilityErrorsData = calculateProfitabilityErrors(profitibilityData, TotalProducts, { financeFresh });
     } catch (error) {
         logger.error("Error calculating profitability errors:", error);
     }

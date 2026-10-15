@@ -65,6 +65,10 @@ const GROUP_COPY = {
         title: 'Products earning below a healthy 10% margin',                // (existing dashboard copy)
         action: 'Review pricing and fees to lift these toward a 10% margin'
     },
+    'profitability:ad_spend_no_sales': {
+        title: 'Products with ad spend but no sales',
+        action: 'Pause the ads on these until the listing converts'
+    },
     'profitability:profitability_issue': {
         title: 'Products with unresolved profitability problems',
         action: 'Review pricing, fees and ad spend on these ASINs'

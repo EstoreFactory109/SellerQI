@@ -108,6 +108,8 @@ const EFFORT_MINUTES = {
     'profitability:negative_profit': 15,
     'profitability:low_margin': 15,
     'profitability:profitability_issue': 15,
+    // Pausing the ads on a product that is not selling is a couple of clicks.
+    'profitability:ad_spend_no_sales': 5,
 
     // ── Sponsored Ads: the richest source of genuine quick wins — pausing a
     //    keyword or adding a negative is a couple of clicks.
@@ -158,6 +160,8 @@ const IMPACT_WEIGHT = {
 
     // Money leaving the account right now.
     'profitability:negative_profit': 85,
+    // Real money leaving with nothing to show for it: weighted like wasted keywords.
+    'profitability:ad_spend_no_sales': 65,
     'sponsoredAds:wasted_spend_keyword': 65,
     'sponsoredAds:search_term_zero_sales': 65,
     'sponsoredAds:no_sales_high_spend': 65,

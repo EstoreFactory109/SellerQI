@@ -14,11 +14,14 @@ const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js')
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const { getAsinWisePL } = require('../Finance/FinanceDashboardReadService.js');
 const { getProductWiseSponsoredAdsData } = require('../amazon-ads/ProductWiseSponsoredAdsService.js');
-const { computeProfitabilityAmount } = require('./RecoverableAmountUtils.js');
+const { classifyProfitabilityRow } = require('./RecoverableAmountUtils.js');
 
 // ── Issue calculation (unchanged logic) ──
 
-const calculateProfitabilityIssues = (profitabilityData) => {
+// `financeFresh` defaults to true: the dated path builds rows from live DailySkuFinance
+// (getAsinWisePL). The rule is shared with the tasks and the Profitability page
+// (RecoverableAmountUtils.classifyProfitabilityRow).
+const calculateProfitabilityIssues = (profitabilityData, { financeFresh = true } = {}) => {
     let totalErrors = 0;
     const issues = [];
     
@@ -26,15 +29,25 @@ const calculateProfitabilityIssues = (profitabilityData) => {
         const sales = item.sales || 0;
         const adsSpend = item.ads || 0;
         const amazonFees = item.amzFee || item.totalFees || 0;
-        const netProfit = sales - adsSpend - amazonFees;
-        const profitMargin = sales > 0 ? (netProfit / sales) * 100 : 0;
+        const verdict = classifyProfitabilityRow(item, { financeFresh });
         
-        if (profitMargin < 10 || netProfit < 0) {
+        if (verdict) {
+            const { netProfit, profitMargin } = verdict;
             totalErrors++;
             
             let issueType, severity, recommendation;
             
-            if (netProfit < 0) {
+            if (verdict.errorType === 'ad_spend_no_sales') {
+                issueType = 'ad_spend_no_sales';
+                severity = 'high';
+                recommendation = {
+                    type: 'no_sales',
+                    title: 'Ad Spend With No Sales',
+                    // The card shows the amount itself ("Losing $X"); no currency is known here.
+                    description: 'This product had ad spend but no sales recorded in this period, so all of that spend is lost.',
+                    action: 'Pause ads for this product and review listing quality, pricing, and inventory status.'
+                };
+            } else if (netProfit < 0) {
                 issueType = 'negative_profit';
                 severity = 'critical';
                 recommendation = getRecommendationForNegativeProfit(item, profitMargin, adsSpend, amazonFees);
@@ -59,7 +72,7 @@ const calculateProfitabilityIssues = (profitabilityData) => {
                 issueType,
                 severity,
                 recommendation,
-                amount: parseFloat(computeProfitabilityAmount({ netProfit, profitMargin, sales, issueType }).toFixed(2))
+                amount: parseFloat(verdict.amount.toFixed(2))
             });
         }
     });
@@ -211,10 +224,11 @@ const getProfitabilityIssues = async (userId, country, region, page = 1, limit =
         const startIndex = (page - 1) * limit;
         const paginatedIssues = issuesData.issues.slice(startIndex, startIndex + limit);
 
-        const issuesSummary = { negative_profit: 0, low_margin: 0, critical: 0, high: 0, medium: 0 };
+        const issuesSummary = { negative_profit: 0, low_margin: 0, ad_spend_no_sales: 0, critical: 0, high: 0, medium: 0 };
         issuesData.issues.forEach(issue => {
             if (issue.issueType === 'negative_profit') issuesSummary.negative_profit++;
             if (issue.issueType === 'low_margin') issuesSummary.low_margin++;
+            if (issue.issueType === 'ad_spend_no_sales') issuesSummary.ad_spend_no_sales++;
             if (issue.severity === 'critical') issuesSummary.critical++;
             if (issue.severity === 'high') issuesSummary.high++;
             if (issue.severity === 'medium') issuesSummary.medium++;
@@ -227,7 +241,7 @@ const getProfitabilityIssues = async (userId, country, region, page = 1, limit =
             issues: paginatedIssues,
             summary: {
                 totalIssues: totalItems,
-                byType: { negativeProfitProducts: issuesSummary.negative_profit, lowMarginProducts: issuesSummary.low_margin },
+                byType: { negativeProfitProducts: issuesSummary.negative_profit, lowMarginProducts: issuesSummary.low_margin, adSpendNoSalesProducts: issuesSummary.ad_spend_no_sales },
                 bySeverity: { critical: issuesSummary.critical, high: issuesSummary.high, medium: issuesSummary.medium },
             },
             pagination: { page, limit, totalItems, totalPages, hasMore: page < totalPages },
@@ -246,10 +260,11 @@ const getProfitabilityIssues = async (userId, country, region, page = 1, limit =
         const startIndex = (page - 1) * limit;
         const paginatedIssues = preComputedIssues.slice(startIndex, startIndex + limit);
         
-        const issuesSummary = { negative_profit: 0, low_margin: 0, critical: 0, high: 0, medium: 0 };
+        const issuesSummary = { negative_profit: 0, low_margin: 0, ad_spend_no_sales: 0, critical: 0, high: 0, medium: 0 };
         preComputedIssues.forEach(issue => {
             if (issue.issueType === 'negative_profit') issuesSummary.negative_profit++;
             if (issue.issueType === 'low_margin') issuesSummary.low_margin++;
+            if (issue.issueType === 'ad_spend_no_sales') issuesSummary.ad_spend_no_sales++;
             if (issue.severity === 'critical') issuesSummary.critical++;
             if (issue.severity === 'high') issuesSummary.high++;
             if (issue.severity === 'medium') issuesSummary.medium++;
@@ -262,7 +277,7 @@ const getProfitabilityIssues = async (userId, country, region, page = 1, limit =
             issues: paginatedIssues,
             summary: {
                 totalIssues: totalItems,
-                byType: { negativeProfitProducts: issuesSummary.negative_profit, lowMarginProducts: issuesSummary.low_margin },
+                byType: { negativeProfitProducts: issuesSummary.negative_profit, lowMarginProducts: issuesSummary.low_margin, adSpendNoSalesProducts: issuesSummary.ad_spend_no_sales },
                 bySeverity: { critical: issuesSummary.critical, high: issuesSummary.high, medium: issuesSummary.medium },
             },
             pagination: { page, limit, totalItems, totalPages, hasMore: page < totalPages },
@@ -288,10 +303,11 @@ const getProfitabilityIssues = async (userId, country, region, page = 1, limit =
     const startIndex = (page - 1) * limit;
     const paginatedIssues = issuesData.issues.slice(startIndex, startIndex + limit);
 
-    const issuesSummary = { negative_profit: 0, low_margin: 0, critical: 0, high: 0, medium: 0 };
+    const issuesSummary = { negative_profit: 0, low_margin: 0, ad_spend_no_sales: 0, critical: 0, high: 0, medium: 0 };
     issuesData.issues.forEach(issue => {
         if (issue.issueType === 'negative_profit') issuesSummary.negative_profit++;
         if (issue.issueType === 'low_margin') issuesSummary.low_margin++;
+        if (issue.issueType === 'ad_spend_no_sales') issuesSummary.ad_spend_no_sales++;
         if (issue.severity === 'critical') issuesSummary.critical++;
         if (issue.severity === 'high') issuesSummary.high++;
         if (issue.severity === 'medium') issuesSummary.medium++;
@@ -304,7 +320,7 @@ const getProfitabilityIssues = async (userId, country, region, page = 1, limit =
         issues: paginatedIssues,
         summary: {
             totalIssues: totalItems,
-            byType: { negativeProfitProducts: issuesSummary.negative_profit, lowMarginProducts: issuesSummary.low_margin },
+            byType: { negativeProfitProducts: issuesSummary.negative_profit, lowMarginProducts: issuesSummary.low_margin, adSpendNoSalesProducts: issuesSummary.ad_spend_no_sales },
             bySeverity: { critical: issuesSummary.critical, high: issuesSummary.high, medium: issuesSummary.medium },
         },
         pagination: { page, limit, totalItems, totalPages, hasMore: page < totalPages },
@@ -330,6 +346,7 @@ const getProfitabilityIssuesSummary = async (userId, country, region, startDate 
             byType: {
                 negativeProfitProducts: issuesData.issues.filter(i => i.issueType === 'negative_profit').length,
                 lowMarginProducts: issuesData.issues.filter(i => i.issueType === 'low_margin').length,
+                adSpendNoSalesProducts: issuesData.issues.filter(i => i.issueType === 'ad_spend_no_sales').length,
             },
             activeProducts: activeProductCount,
             source: 'finance-flow',
@@ -370,6 +387,7 @@ const getProfitabilityIssuesSummary = async (userId, country, region, startDate 
         byType: {
             negativeProfitProducts: issuesData.issues.filter(i => i.issueType === 'negative_profit').length,
             lowMarginProducts: issuesData.issues.filter(i => i.issueType === 'low_margin').length,
+            adSpendNoSalesProducts: issuesData.issues.filter(i => i.issueType === 'ad_spend_no_sales').length,
         },
         activeProducts: activeProductCount,
         source: 'realtime',
