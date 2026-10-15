@@ -63,9 +63,9 @@ const DASHBOARD = { totalErrorInAccount: 7, productWiseError: [{ asin: 'B1' }] }
 /**
  * Run ONLY batch 5, with no API context — the calculators need none.
  *
- * dayOfWeek 0 (Sunday) on purpose: getFunctionsForDay schedules `issueSummary` and `issuesData`
- * ONLY on Sunday, while `productIssues` runs daily. So Sunday is the single day all three are
- * live at once — i.e. the only day the 3x duplication this fix removes actually occurred.
+ * All three calculators now run every day (issueSummary and issuesData used to be Sunday-only,
+ * which left the Issues pages a week behind the tasks); Sunday is kept as the default only
+ * because the compute-once fix was originally verified on it.
  */
 function runBatch5(dayOfWeek = 0) {
     return SI.fetchScheduledApiData({

@@ -1681,7 +1681,10 @@ const analyseData = async (data, userId = null, options = {}) => {
         // Calculate sponsored ads errors using campaign/keyword-level analysis
         // This matches the PPC Dashboard Campaign Analysis logic
         sponsoredAdsErrorsData = calculateSponsoredAdsErrors(
-            campaignWiseTotalSalesAndCost,
+            // High-ACOS is judged on the PPC page's campaign totals when available, so a
+            // task and the page agree on which campaigns are over 40%. The date-wise
+            // spend totals stay as the fallback and still feed the dashboard charts.
+            Array.isArray(data.campaignSpendSales) ? data.campaignSpendSales : campaignWiseTotalSalesAndCost,
             data.adsKeywordsPerformanceData || [],
             data.searchTerms || [],
             data.campaignData || [],

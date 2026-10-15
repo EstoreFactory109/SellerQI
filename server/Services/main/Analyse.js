@@ -397,7 +397,8 @@ class AnalyseService {
             ppcUnitsSoldData,
             cogsData,
             ltsfData,
-            fbaInventoryDetailData
+            fbaInventoryDetailData,
+            campaignSpendSales
         ] = await Promise.all([
             timedQuery('v2Data', () => V2_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
             timedQuery('v1Data', () => V1_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
@@ -449,7 +450,15 @@ class AnalyseService {
             // For threading a dollar `amount` onto Inventory error records (unfulfillable/stranded/LTSF)
             timedQuery('cogsData', () => CogsService.getCogs(userId, country)),
             timedQuery('ltsfData', () => LongTermStorageFeesModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
-            timedQuery('fbaInventoryDetailData', () => FbaInventoryApiDetailModel.find({ User: userId, country, region }).lean())
+            timedQuery('fbaInventoryDetailData', () => FbaInventoryApiDetailModel.find({ User: userId, country, region }).lean()),
+            // The PPC page's campaign totals, so high-ACOS tasks judge the same campaigns
+            // over the same window as the page the seller checks them against.
+            timedQuery('campaignSpendSales', () =>
+                require('../Calculations/PPCCampaignAnalysisService.js').getCampaignSpendSales(userId, country, region)
+                    .catch((error) => {
+                        logger.warn('[Analyse] PPC campaign totals unavailable; high-ACOS tasks fall back to date-wise spend', { error: error.message });
+                        return null;
+                    }))
         ]);
         
         const fetchEndTime = Date.now();
@@ -567,7 +576,8 @@ class AnalyseService {
             ppcUnitsSoldData,
             cogsData,
             ltsfData,
-            fbaInventoryDetailData
+            fbaInventoryDetailData,
+            campaignSpendSales
         };
     }
 
@@ -1020,6 +1030,7 @@ class AnalyseService {
             adsKeywordsPerformanceData: (allData.adsKeywordsPerformanceData || { keywordsData: [] }).keywordsData,
             GetOrderData: (allData.GetOrderData || { RevenueData: [] }).RevenueData,
             GetDateWisePPCspendData: (allData.GetDateWisePPCspendData || { dateWisePPCSpends: [] }).dateWisePPCSpends,
+            campaignSpendSales: allData.campaignSpendSales || null,
             AdsGroupData: (allData.AdsGroupData || { adsGroupData: [] }).adsGroupData,
             keywordTrackingData: (allData.keywordTrackingData || { keywords: [] }).keywords || [],
             DifferenceData: differenceData.percentageDifference,

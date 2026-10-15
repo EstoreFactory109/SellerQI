@@ -67,24 +67,6 @@ const SUNDAY_FUNCTIONS = {
         apiDataKey: 'removalOrdersData',
         isDefaultExport: true
     },
-    // Issue calculation - runs after productReview to update issue counts
-    // This calculates/updates IssueSummary and per-product issueCount
-    'issueSummary': {
-        service: require('../Calculations/IssueSummaryService.js'),
-        functionName: 'calculateAndStoreIssueSummary',
-        description: 'Issue Summary',
-        apiDataKey: 'issueSummary',
-        isCalculationService: true, // Flag to indicate this is a calculation, not API fetch
-        runOrder: 99 // Runs last after all data fetches
-    },
-    'issuesData': {
-        service: require('../Calculations/IssuesDataService.js'),
-        functionName: 'calculateAndStoreIssuesData',
-        description: 'Issues Data (for Issues pages)',
-        apiDataKey: 'issuesData',
-        isCalculationService: true,
-        runOrder: 101 // Runs after productIssues
-    },
     // ── The two AI views are NOT registered here, deliberately ──
     // Both derive from TaskItem, and tasks are refreshed by addNewAccountHistory,
     // which runs AFTER fetchScheduledApiData completes. A batch-5 service would
@@ -320,6 +302,29 @@ const DAILY_FUNCTIONS = {
         apiDataKey: 'productIssues',
         isCalculationService: true
     },
+    // Dashboard issue counts (IssueSummary) and the Issues pages (IssuesDataChunks).
+    // These ran on Sundays only while tasks changed daily, so the Issues page could
+    // show last Sunday's problems next to today's tasks. They store from the same
+    // batch-5 compute-once analyseData as productIssues (ScheduledIntegration
+    // CALCULATION_STORERS), so running daily adds only the store, not a second
+    // calculation.
+    'issueSummary': {
+        service: require('../Calculations/IssueSummaryService.js'),
+        functionName: 'calculateAndStoreIssueSummary',
+        description: 'Issue Summary',
+        apiDataKey: 'issueSummary',
+        isCalculationService: true, // Flag to indicate this is a calculation, not API fetch
+        runOrder: 99 // Runs last after all data fetches
+    },
+    'issuesData': {
+        service: require('../Calculations/IssuesDataService.js'),
+        functionName: 'calculateAndStoreIssuesData',
+        description: 'Issues Data (for Issues pages)',
+        apiDataKey: 'issuesData',
+        isCalculationService: true,
+        runOrder: 101 // Runs after productIssues
+    },
+
     // MCP BuyBox Data - fetches yesterday's traffic data daily
     'mcpBuyBoxData': {
         service: require('../MCP/MCPBuyBoxIntegration.js'),
