@@ -207,12 +207,220 @@ function computeBuyBoxBenchmark(asinBuyBoxData) {
     };
 }
 
+/** The data day a BuyBoxData doc covers: `date`, or dateRange.endDate on old docs. */
+function buyBoxDocDay(doc) {
+    return (doc && (doc.date || doc.dateRange?.endDate)) || null;
+}
+
+/**
+ * Keeps the latest capture of each data day, up to `limit` days.
+ *
+ * BuyBoxData can hold several captures of one day (BuyBoxService saves without an
+ * upsert). Reading them as separate days would let one bad re-capture count as a
+ * second "day" of evidence. Input must already be newest first ({date:-1,
+ * createdAt:-1}), so the first doc seen for a day is its latest capture. A doc with
+ * no day at all is kept as its own day rather than merged with anything.
+ *
+ * @param {Array} docs - newest first
+ * @param {number} [limit=Infinity] - distinct days to keep
+ * @returns {Array} one doc per day, newest first
+ */
+function latestCapturePerBuyBoxDay(docs, limit = Infinity) {
+    if (!Array.isArray(docs)) return [];
+    const seen = new Set();
+    const out = [];
+    for (const doc of docs) {
+        if (!doc) continue;
+        const day = buyBoxDocDay(doc);
+        if (day) {
+            if (seen.has(day)) continue;
+            seen.add(day);
+        }
+        out.push(doc);
+        if (out.length >= limit) break;
+    }
+    return out;
+}
+
+/** A Buy Box % we can reason about; null/undefined/NaN mean "no data", not 0. */
+function readBuyBoxPct(row) {
+    const v = row?.buyBoxPercentage;
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Decides which ASINs have genuinely lost the Buy Box, from several days of data
+ * instead of one, and returns an "effective" doc shaped like a BuyBoxData doc so
+ * every downstream reader (DashboardCalculation, Analyse's conversion checks, the
+ * issues pages) keeps working unchanged.
+ *
+ * WHY
+ * Judging from the newest day alone turned noise into tasks. In the 14 days to
+ * 2026-10-15, 2,463 ASINs flipped between 0% and >0% across days, and 1,082 had
+ * exactly one 0% day out of 3+; each of those became a "No Buy Box" task lasting
+ * a week. There were 12,123 open no_buybox tasks.
+ *
+ * THE RULE: two traffic days in a row at 0%
+ * Per childAsin, only days where it had sessions > 0 count — a 0% on a day nobody
+ * visited the listing says nothing about who holds the Buy Box. The ASIN is
+ * flagged iff its two most recent days-with-traffic were both 0% (the same "2 in
+ * a row" rule account health uses). A single 0% blip is ignored.
+ *
+ * ONLY ONE TRAFFIC DAY -> NOT FLAGGED
+ * With a single day of traffic there is no second observation to confirm it, and
+ * an unconfirmed single day is exactly the blip this rule exists to ignore. This
+ * is the cautious side of the same rule: the ASIN is flagged as soon as a second
+ * traffic day also reads 0%.
+ *
+ * THE EFFECTIVE DOC
+ * Built from the newest day. Flagged ASINs read 0%. A non-flagged ASIN that reads
+ * 0% (or nothing) on the newest day takes its latest observed non-zero % instead,
+ * marked `buyBoxPercentageCarriedForward` so it can be kept out of the conversion
+ * benchmark (that day's sessions did not convert like a Buy Box holder's). One
+ * that never showed a non-zero % in the window (typically zero traffic, or a
+ * single traffic day) has no evidence either way: its % becomes null ("unknown").
+ * Keeping 0% would recreate the false task via DashboardCalculation's `=== 0`
+ * filter; dropping the row would lose its sessions/page views, which the product
+ * performance pages read from this same doc. Every server reader of these rows
+ * already does `buyBoxPercentage || 0` for display. A flagged ASIN absent from
+ * the newest day (no traffic, so no row) is added from its most recent row so it
+ * still gets its task. Every row carries an explicit `buyBoxLost` boolean.
+ *
+ * Each row also carries `zeroDays` / `trafficDays` and averages across the loaded
+ * days (`avgDailySessions`, `avgDailySales`), so the lost-revenue estimate is based
+ * on an average day rather than whichever day happened to be newest. An ASIN
+ * absent from a day contributes 0 sessions to that day.
+ *
+ * @param {Array} days - BuyBoxData docs, one per day, newest first (findRecentDays)
+ * @returns {Object|null} effective doc, or null when there are no days at all
+ *   (= no Buy Box data, so no Buy Box issues — never "every product lost").
+ */
+function classifyBuyBoxLoss(days) {
+    const usable = Array.isArray(days) ? days.filter((d) => d && Array.isArray(d.asinBuyBoxData)) : [];
+    if (usable.length === 0) return null;
+
+    const observedDays = usable.length;
+    const latest = usable[0];
+
+    // childAsin -> per-day observations, newest first.
+    const history = new Map();
+    usable.forEach((day, dayIndex) => {
+        for (const row of day.asinBuyBoxData) {
+            if (!row || !row.childAsin) continue;
+            let h = history.get(row.childAsin);
+            if (!h) {
+                h = { rows: [], totalSessions: 0, totalSales: 0 };
+                history.set(row.childAsin, h);
+            }
+            // A day can list the same ASIN twice only if the doc is malformed;
+            // keep the first so each day counts once.
+            if (h.rows.length && h.rows[h.rows.length - 1].dayIndex === dayIndex) continue;
+            h.rows.push({ dayIndex, row });
+            h.totalSessions += Number(row.sessions) || 0;
+            h.totalSales += Number(row.sales?.amount) || 0;
+        }
+    });
+
+    const verdicts = new Map();
+    for (const [asin, h] of history) {
+        const trafficDays = h.rows.filter(({ row }) => (Number(row.sessions) || 0) > 0 && readBuyBoxPct(row) !== null);
+        const zeroDays = trafficDays.filter(({ row }) => readBuyBoxPct(row) === 0).length;
+        const flagged = trafficDays.length >= 2
+            && readBuyBoxPct(trafficDays[0].row) === 0
+            && readBuyBoxPct(trafficDays[1].row) === 0;
+        const lastNonZero = h.rows.find(({ row }) => (readBuyBoxPct(row) || 0) > 0);
+        verdicts.set(asin, {
+            flagged,
+            zeroDays,
+            trafficDays: trafficDays.length,
+            lastNonZeroPct: lastNonZero ? readBuyBoxPct(lastNonZero.row) : null,
+            avgDailySessions: h.totalSessions / observedDays,
+            avgDailySales: h.totalSales / observedDays,
+            newestRow: h.rows[0].row
+        });
+    }
+
+    const decorate = (row, v, buyBoxPercentage, carriedForward) => ({
+        ...row,
+        buyBoxPercentage,
+        buyBoxLost: v.flagged,
+        ...(carriedForward ? { buyBoxPercentageCarriedForward: true } : {}),
+        zeroDays: v.zeroDays,
+        trafficDays: v.trafficDays,
+        avgDailySessions: v.avgDailySessions,
+        avgDailySales: v.avgDailySales
+    });
+
+    const rows = [];
+    const inLatest = new Set();
+    for (const row of latest.asinBuyBoxData) {
+        if (!row || !row.childAsin || inLatest.has(row.childAsin)) continue;
+        inLatest.add(row.childAsin);
+        const v = verdicts.get(row.childAsin);
+        const pct = readBuyBoxPct(row);
+        if (v.flagged) {
+            rows.push(decorate(row, v, 0, false));
+        } else if (pct !== null && pct > 0) {
+            rows.push(decorate(row, v, pct, false));
+        } else if (v.lastNonZeroPct !== null) {
+            rows.push(decorate(row, v, v.lastNonZeroPct, true));
+        } else {
+            // Never seen with the Buy Box, never confirmed without it (see above).
+            rows.push(decorate(row, v, null, false));
+        }
+    }
+    for (const [asin, v] of verdicts) {
+        if (v.flagged && !inLatest.has(asin)) rows.push(decorate(v.newestRow, v, 0, false));
+    }
+
+    let productsWithBuyBox = 0;
+    let productsWithoutBuyBox = 0;
+    let productsWithLowBuyBox = 0;
+    for (const r of rows) {
+        // Unknown (null) rows count as neither.
+        if (r.buyBoxPercentage > 0) productsWithBuyBox++;
+        else if (r.buyBoxPercentage === 0) productsWithoutBuyBox++;
+        if (r.buyBoxPercentage > 0 && r.buyBoxPercentage < 50) productsWithLowBuyBox++;
+    }
+
+    return {
+        ...latest,
+        totalProducts: rows.length,
+        productsWithBuyBox,
+        productsWithoutBuyBox,
+        productsWithLowBuyBox,
+        asinBuyBoxData: rows,
+        observedDays,
+        observedDates: usable.map(buyBoxDocDay)
+    };
+}
+
+/**
+ * The number of Buy Box tasks the issues pipeline will create: flagged ASINs that
+ * are Active in the catalogue. The dashboard count must be this, not the stored
+ * productsWithoutBuyBox, or the dashboard and the task list disagree.
+ * @param {Object|null} effectiveDoc - from classifyBuyBoxLoss
+ * @param {Set<string>} activeAsinSet
+ * @returns {number}
+ */
+function countActiveBuyBoxLosses(effectiveDoc, activeAsinSet) {
+    if (!effectiveDoc || !Array.isArray(effectiveDoc.asinBuyBoxData) || !activeAsinSet) return 0;
+    return effectiveDoc.asinBuyBoxData.filter(
+        (p) => p && p.buyBoxPercentage === 0 && p.childAsin && activeAsinSet.has(p.childAsin)
+    ).length;
+}
+
 /**
  * Buy Box loss: estimated 30-day lost revenue = the seller's own
  * benchmark conversion rate/price applied to the lost ASIN's sessions,
- * minus what it actually sold, extrapolated from a single-day snapshot.
+ * minus what it actually sold, extrapolated from one day to 30. That day is
+ * the ASIN's AVERAGE day over the loaded Buy Box days (avgDailySessions /
+ * avgDailySales from classifyBuyBoxLoss) when available, so one unusually busy
+ * or quiet day no longer sets the figure.
  * @param {Object} params
- * @param {number} params.sessions
+ * @param {number} params.sessions - daily sessions
  * @param {number} params.actualRevenue
  * @param {number} params.benchmarkCVR
  * @param {number} params.benchmarkPrice
@@ -270,6 +478,9 @@ module.exports = {
     computeInventoryStrandedAmount,
     computeBuyBoxBenchmark,
     computeBuyBoxLostRevenueAmount,
+    latestCapturePerBuyBoxDay,
+    classifyBuyBoxLoss,
+    countActiveBuyBoxLosses,
     buildLtsfAmountMap,
     sumRecoverableAmounts,
     TARGET_PROFIT_MARGIN_PERCENT,
