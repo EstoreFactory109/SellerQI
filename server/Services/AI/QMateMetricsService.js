@@ -815,7 +815,9 @@ async function getBuyBoxData(userId, country, region) {
             ? new mongoose.Types.ObjectId(userId) 
             : userId;
         
-        const buyBoxData = await BuyBoxData.findLatest(userObjectId, region, country);
+        // Newest NON-EMPTY day: an empty Data Kiosk day (totalProducts 0) would
+        // otherwise tell QMate the seller has no Buy Box data at all.
+        const [buyBoxData] = await BuyBoxData.findRecentDays(userObjectId, region, country, 1);
         
         if (!buyBoxData) {
             return {

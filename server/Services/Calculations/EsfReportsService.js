@@ -53,6 +53,7 @@ const ReviewOrder = require('../../models/review/ReviewOrderModel.js');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
 const logger = require('../../utils/Logger.js');
+const { latestCapturePerBuyBoxDay } = require('./RecoverableAmountUtils.js');
 const { BRAND, printableCurrency, barChartSvg, lineChartSvg } = require('../Reports/reportBrand.js');
 
 /* ------------------------------------------------------------------ helpers */
@@ -919,13 +920,17 @@ const REPORT_BUYBOX = { key: 'buybox', name: 'Weekly Buybox Report', cadence: 'W
  * cannot see gets no gap at all rather than a misleading one.
  */
 const buildBuyBox = async (userId, country, region) => {
-    const [snapshots, seller, pricing, suppressedReport] = await Promise.all([
-        BuyBoxData.find({ User: userId, country, region }).sort({ createdAt: -1 }).limit(8).lean(),
+    const [rawSnapshots, seller, pricing, suppressedReport] = await Promise.all([
+        // Empty days (totalProducts 0) are "no data", not "everything lost", and a
+        // day captured twice must not count as two snapshots in the losing streak.
+        BuyBoxData.find({ User: userId, country, region, totalProducts: { $gt: 0 } })
+            .sort({ date: -1, createdAt: -1 }).limit(8 * 3).lean(),
         Seller.findOne({ User: userId }).select('sellerAccount').lean(),
         CompetitiveOffers.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
         SuppressedListings.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
     ]);
 
+    const snapshots = latestCapturePerBuyBoxDay(rawSnapshots, 8);
     const latest = snapshots[0];
     if (!latest) {
         return unavailable(REPORT_BUYBOX, 'No Buy Box data has been fetched for this marketplace yet.');
@@ -2309,8 +2314,12 @@ const edition = (when, summary, tone = 'neutral', { capturedAt = null, showCaptu
 
 const historyBuilders = {
     [REPORT_BUYBOX.key]: async (userId, country, region) => {
-        const snapshots = await BuyBoxData.find({ User: userId, country, region })
-            .sort({ createdAt: -1 }).limit(HISTORY_LIMIT).lean();
+        // Same as buildBuyBox: skip empty days, one capture per day.
+        const snapshots = latestCapturePerBuyBoxDay(
+            await BuyBoxData.find({ User: userId, country, region, totalProducts: { $gt: 0 } })
+                .sort({ date: -1, createdAt: -1 }).limit(HISTORY_LIMIT * 3).lean(),
+            HISTORY_LIMIT
+        );
         if (!snapshots.length) return null;
 
         const editions = snapshots.map((snapshot) => {

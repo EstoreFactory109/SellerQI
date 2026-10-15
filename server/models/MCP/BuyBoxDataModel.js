@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { marketplaceConfig } = require('../../controllers/config/config.js');
+const { latestCapturePerBuyBoxDay } = require('../../Services/Calculations/RecoverableAmountUtils.js');
 
 /**
  * Countries this model accepts, derived from the SP-API marketplace table rather than
@@ -11,6 +12,10 @@ const { marketplaceConfig } = require('../../controllers/config/config.js');
  * seller. `marketplaceConfig` lists 23 countries; this literal listed 15.
  */
 const SUPPORTED_COUNTRIES = Object.keys(marketplaceConfig);
+
+// findRecentDays reads this many docs per wanted day before deduping, because a
+// day can have more than one capture (re-runs save a new doc, not an upsert).
+const RECENT_DAYS_CAPTURE_HEADROOM = 3;
 
 // Schema for ASIN-wise buybox data
 const asinBuyBoxSchema = new mongoose.Schema({
@@ -185,12 +190,56 @@ buyBoxDataSchema.statics.findByDateRange = function(userId, region, startDate, e
 };
 
 // Static method to find latest buybox data
+// Sorted by the DATA day first: a late re-capture of an older day must not
+// outrank the newest day just because it was written later. createdAt breaks
+// ties between several captures of the same day. Lean because every caller
+// only reads it (Analyse.js already assumed it was lean).
 buyBoxDataSchema.statics.findLatest = function(userId, region, country = 'US') {
     return this.findOne({
         User: userId,
         region: region,
         country: country
-    }).sort({ createdAt: -1 });
+    }).sort({ date: -1, createdAt: -1 }).lean();
+};
+
+/**
+ * The newest `n` distinct DATA DAYS of Buy Box data, newest first, lean.
+ *
+ * WHY NOT findLatest
+ * Buy Box issues used to be judged from the single newest document. In the 14
+ * days to 2026-10-15, 539 of 3,279 buyboxdatas docs had totalProducts 0 (an
+ * empty Data Kiosk day), and each one wiped every Buy Box issue for that run;
+ * 2,463 ASINs flipped between 0% and >0% from one day to the next. Callers that
+ * decide "this ASIN lost the Buy Box" need several days, which is what this
+ * returns (see classifyBuyBoxLoss in RecoverableAmountUtils).
+ *
+ * - Empty days (totalProducts 0) are skipped: they mean "no data", not "no Buy Box".
+ * - Several captures of one day are possible (BuyBoxService saves without an
+ *   upsert), so only the latest capture of each day is kept.
+ * - The day is `date`, falling back to dateRange.endDate on old docs that
+ *   predate the `date` field.
+ *
+ * @param {ObjectId|string} userId
+ * @param {string} region
+ * @param {string} country
+ * @param {number} [n=7] - distinct days wanted
+ * @param {string|Object} [select] - optional projection (summary callers do not
+ *   need sales/pageViews for every ASIN on every day)
+ * @returns {Promise<Array>} up to n lean docs, one per day, newest first
+ */
+buyBoxDataSchema.statics.findRecentDays = async function(userId, region, country, n = 7, select) {
+    let query = this.find({
+        User: userId,
+        region: region,
+        country: country,
+        totalProducts: { $gt: 0 }
+    })
+        .sort({ date: -1, createdAt: -1 })
+        // Headroom for duplicate captures of the same day; dedupe happens below.
+        .limit(n * RECENT_DAYS_CAPTURE_HEADROOM);
+    if (select) query = query.select(select);
+    const docs = await query.lean();
+    return latestCapturePerBuyBoxDay(docs, n);
 };
 
 // Static method to find by user, region, and country

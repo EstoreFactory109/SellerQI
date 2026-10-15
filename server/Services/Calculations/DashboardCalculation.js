@@ -1202,7 +1202,12 @@ const analyseData = async (data, userId = null, options = {}) => {
     if (data.BuyBoxData && Array.isArray(data.BuyBoxData.asinBuyBoxData)) {
         // Seller's own conversion rate + price from ASINs that DO have the Buy Box —
         // used to estimate lost revenue for the ones that don't, without an external benchmark.
-        const { benchmarkCVR, benchmarkPrice } = computeBuyBoxBenchmark(data.BuyBoxData.asinBuyBoxData);
+        // Rows whose % was carried forward from an earlier day (classifyBuyBoxLoss)
+        // are left out: on the newest day they read 0%, so their sessions did not
+        // convert like a Buy Box holder's and would drag the benchmark down.
+        const { benchmarkCVR, benchmarkPrice } = computeBuyBoxBenchmark(
+            data.BuyBoxData.asinBuyBoxData.filter((p) => p && !p.buyBoxPercentageCarriedForward)
+        );
 
         // Per-ASIN margin, so lost REVENUE can be converted into the profit it
         // actually represents. profitibilityData is computed earlier in this same
@@ -1221,13 +1226,17 @@ const analyseData = async (data, userId = null, options = {}) => {
             ? (totalGrossProfit / totalSalesForMargin) * 100
             : 0;
 
-        // Use MCP BuyBox data - filter products with buyBoxPercentage = 0
+        // Use MCP BuyBox data - filter products with buyBoxPercentage = 0.
+        // BuyBoxData is the multi-day effective doc from classifyBuyBoxLoss, so 0%
+        // here means "0% on the ASIN's last two days with traffic", not one bad day.
         productsWithOutBuyboxError = data.BuyBoxData.asinBuyBoxData
             .filter((p) => p && p.buyBoxPercentage === 0 && p.childAsin && activeProductSet.has(p.childAsin))
             .map((p) => {
+                // Average day across the observed days when the effective doc
+                // carries it; the newest day's figures otherwise (older callers).
                 const lostRevenueAmount = computeBuyBoxLostRevenueAmount({
-                    sessions: p.sessions,
-                    actualRevenue: p.sales?.amount || 0,
+                    sessions: typeof p.avgDailySessions === 'number' ? p.avgDailySessions : p.sessions,
+                    actualRevenue: typeof p.avgDailySales === 'number' ? p.avgDailySales : (p.sales?.amount || 0),
                     benchmarkCVR,
                     benchmarkPrice
                 });
@@ -1252,7 +1261,10 @@ const analyseData = async (data, userId = null, options = {}) => {
                         // overstated Buy Box roughly tenfold.
                         amount: computeBuyBoxProfitImpact({ lostRevenue: lostRevenueAmount, profitMargin }),
                         amountIsEstimated: true,
-                        estimatedFromSingleDaySnapshot: true
+                        // How many days of Buy Box data the verdict and the estimate
+                        // rest on (was a hard-coded single-day snapshot).
+                        observedDays: data.BuyBoxData.observedDays || 1,
+                        zeroDays: p.zeroDays
                     }
                 };
             });
@@ -1282,11 +1294,10 @@ const analyseData = async (data, userId = null, options = {}) => {
         (sum, p) => sum + (p.data?.amount || 0), 0
     );
 
-    // Override count with MCP data if available (for dashboard display)
-    // Use the stored count from database, which is more accurate than filtering
-    const productsWithoutBuyBoxCount = (data.BuyBoxData && data.BuyBoxData.productsWithoutBuyBox !== undefined && data.BuyBoxData.productsWithoutBuyBox !== null) 
-        ? data.BuyBoxData.productsWithoutBuyBox 
-        : productsWithOutBuyboxError.length;
+    // The count IS the list: one task per entry. The stored productsWithoutBuyBox
+    // counted every ASIN in the report (inactive and zero-traffic ones included),
+    // so the dashboard showed a different number from the tasks it produced.
+    const productsWithoutBuyBoxCount = productsWithOutBuyboxError.length;
     
     logger.info("Final productsWithoutBuyBoxCount", {
         count: productsWithoutBuyBoxCount,

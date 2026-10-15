@@ -26,6 +26,36 @@ const { calculateAccountHealthPercentage, checkAccountHealth } = require('./Acco
 const { loadV2History } = require('./AccountHealthHistory.js');
 const IssueSummary = require('../../models/system/IssueSummaryModel.js');
 const PPCCampaignAnalysisService = require('./PPCCampaignAnalysisService.js');
+const { classifyBuyBoxLoss, countActiveBuyBoxLosses } = require('./RecoverableAmountUtils.js');
+
+// Only what classifyBuyBoxLoss needs to decide and count — not sales/pageViews
+// for every ASIN on every one of the 7 days.
+const BUYBOX_SUMMARY_PROJECTION = 'date dateRange createdAt totalProducts asinBuyBoxData.childAsin asinBuyBoxData.buyBoxPercentage asinBuyBoxData.sessions';
+
+/**
+ * Buy Box summary counts, decided the same way the issues pipeline decides them
+ * (Analyse -> classifyBuyBoxLoss -> DashboardCalculation), so the dashboard's
+ * "without Buy Box" number equals the number of No Buy Box tasks. Reading the
+ * newest doc's stored productsWithoutBuyBox instead counted inactive and
+ * zero-traffic ASINs, judged from one day, and read 0 whenever that day was empty.
+ *
+ * @param {Array} days - findRecentDays result
+ * @param {Array} products - this marketplace's sellerAccount.products
+ * @returns {{totalProducts:number, productsWithBuyBox:number, productsWithoutBuyBox:number}}
+ */
+function summarizeBuyBoxDays(days, products) {
+    const effective = classifyBuyBoxLoss(days);
+    const activeAsinSet = new Set(
+        (Array.isArray(products) ? products : [])
+            .filter((p) => p && p.asin && p.status === 'Active')
+            .map((p) => p.asin)
+    );
+    return {
+        totalProducts: effective?.totalProducts || 0,
+        productsWithBuyBox: effective?.productsWithBuyBox || 0,
+        productsWithoutBuyBox: countActiveBuyBoxLosses(effective, activeAsinSet)
+    };
+}
 
 /**
  * Money wasted in ads — same aggregation as Campaign Audit wasted-spend tab.
@@ -62,7 +92,7 @@ async function getDashboardSummary(userId, country, region) {
         // Run all queries in parallel with projections and .lean()
         const [
             salesOnlyMetrics,
-            buyBoxData,
+            buyBoxDays,
             v2Data,
             v1Data,
             v2History,
@@ -74,11 +104,8 @@ async function getDashboardSummary(userId, country, region) {
         ] = await Promise.all([
             SalesOnlyMetrics.getRecentDays(userId, region, country, 31),
             
-            // BuyBoxData: Only select summary fields, not full asinBuyBoxData array
-            BuyBoxData.findOne({ User: userId, country, region })
-                .sort({ createdAt: -1 })
-                .select('totalProducts productsWithBuyBox productsWithoutBuyBox dateRange')
-                .lean(),
+            // BuyBoxData: last 7 non-empty days, minimal projection (see summarizeBuyBoxDays)
+            BuyBoxData.findRecentDays(userId, region, country, 7, BUYBOX_SUMMARY_PROJECTION),
             
             // V2 Seller Performance: Small doc, get all for account health
             V2_Model.findOne({ User: userId, country, region })
@@ -173,6 +200,7 @@ async function getDashboardSummary(userId, country, region) {
         const totalProductCount = totalProducts.length;
         const activeProducts = totalProducts.filter(p => p.status === 'Active');
         const activeProductCount = activeProducts.length;
+        const buyBoxSummary = summarizeBuyBoxDays(buyBoxDays, totalProducts);
 
         const wastedStart = dataFetchTracking?.dataRange?.startDate || null;
         const wastedEnd = dataFetchTracking?.dataRange?.endDate || null;
@@ -207,7 +235,7 @@ async function getDashboardSummary(userId, country, region) {
         // Try to use precomputed IssueSummary first, fallback to approximations
         const hasIssueSummary = issueSummary && !issueSummary.isStale;
         const accountErrorCount = hasIssueSummary ? issueSummary.totalAccountErrors : (accountErrors?.TotalErrors || 0);
-        const buyBoxErrorCount = buyBoxData?.productsWithoutBuyBox || 0;
+        const buyBoxErrorCount = buyBoxSummary.productsWithoutBuyBox;
         
         // Log whether we're using precomputed or fallback
         if (hasIssueSummary) {
@@ -276,11 +304,7 @@ async function getDashboardSummary(userId, country, region) {
             adsKeywordsPerformanceData: adsKeywordsData?.keywordsData || [],
             
             // BuyBox summary (not full array)
-            buyBoxSummary: {
-                totalProducts: buyBoxData?.totalProducts || 0,
-                productsWithBuyBox: buyBoxData?.productsWithBuyBox || 0,
-                productsWithoutBuyBox: buyBoxData?.productsWithoutBuyBox || 0
-            },
+            buyBoxSummary,
             
             // Date range
             calendarMode,
@@ -537,7 +561,7 @@ async function getDashboardPhase2(userId, country, region) {
     logger.info(`[PERF] Starting getDashboardPhase2 for user ${userId}, country ${country}, region ${region}`);
 
     try {
-        const [salesOnlyMetrics, v2Data, v1Data, buyBoxData, v2HistoryPhase2] = await Promise.all([
+        const [salesOnlyMetrics, v2Data, v1Data, buyBoxDays, sellerData, v2HistoryPhase2] = await Promise.all([
             SalesOnlyMetrics.getRecentDays(userId, region, country, 31),
             V2_Model.findOne({ User: userId, country, region })
                 .sort({ createdAt: -1 })
@@ -545,12 +569,16 @@ async function getDashboardPhase2(userId, country, region) {
             V1_Model.findOne({ User: userId, country, region })
                 .sort({ createdAt: -1 })
                 .lean(),
-            BuyBoxData.findOne({ User: userId, country, region })
-                .sort({ createdAt: -1 })
-                .select('totalProducts productsWithBuyBox productsWithoutBuyBox')
+            BuyBoxData.findRecentDays(userId, region, country, 7, BUYBOX_SUMMARY_PROJECTION),
+            // Needed only to count Active ASINs, so the Buy Box count matches the tasks.
+            Seller.findOne({ User: userId })
+                .select('sellerAccount.country sellerAccount.region sellerAccount.products.asin sellerAccount.products.status')
                 .lean(),
             loadV2History(userId, country, region)
         ]);
+        const phase2Account = (sellerData?.sellerAccount || []).find(
+            (acc) => acc.country === country && acc.region === region
+        );
 
         const ppcRollupPhase2 = await PPCMetrics.rollupLastDays(userId.toString(), country, region, 30);
         const ppcMetrics = ppcRollupPhase2?.found ? { summary: ppcRollupPhase2.summary } : null;
@@ -593,11 +621,7 @@ async function getDashboardPhase2(userId, country, region) {
                 acos: ppcSummary.overallAcos || 0,
                 tacos: 0
             },
-            buyBoxSummary: {
-                totalProducts: buyBoxData?.totalProducts || 0,
-                productsWithBuyBox: buyBoxData?.productsWithBuyBox || 0,
-                productsWithoutBuyBox: buyBoxData?.productsWithoutBuyBox || 0
-            },
+            buyBoxSummary: summarizeBuyBoxDays(buyBoxDays, phase2Account?.products),
             phase: 2
         };
 
@@ -715,5 +739,6 @@ module.exports = {
     getProductCheckerOptimized,
     getDashboardPhase1,
     getDashboardPhase2,
-    getDashboardPhase3
+    getDashboardPhase3,
+    summarizeBuyBoxDays
 };

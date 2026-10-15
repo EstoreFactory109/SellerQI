@@ -54,7 +54,7 @@ const CogsService = require('../Finance/CogsService.js');
 // const FBAFeesModel = require('../../models/finance/FBAFees.js');
 const adsKeywordsPerformanceModel = require('../../models/amazon-ads/adsKeywordsPerformanceModel.js');
 const { loadLatestSnapshotDoc, loadKeywordSnapshot } = require('../../utils/ppcSnapshotLoader.js');
-const { buildLtsfAmountMap } = require('../Calculations/RecoverableAmountUtils.js');
+const { buildLtsfAmountMap, classifyBuyBoxLoss } = require('../Calculations/RecoverableAmountUtils.js');
 const { freshInventoryReportOrNull, filterInboundIssuesToWindow } = require('../Calculations/InventoryReportFreshness.js');
 const GetOrderDataModel = require('../../models/products/OrderAndRevenueModel.js');
 const WeeklyFinanceModel = require('../../models/finance/WeekLyFinanceModel.js');
@@ -409,8 +409,11 @@ class AnalyseService {
             timedQuery('v2History', () => loadV2History(userId, country, region)),
             // Use EconomicsMetrics instead of financeModel and TotalSalesModel
             timedQuery('economicsMetrics', () => EconomicsMetrics.findLatest(userId, region, country)),
-            // Fetch BuyBox data
-            timedQuery('buyBoxData', () => BuyBoxData.findLatest(userId, region, country)),
+            // Fetch BuyBox data: the last 7 non-empty data days, reduced to one
+            // effective doc. Judging from the newest doc alone let an empty day wipe
+            // every Buy Box issue and a one-day 0% blip create a week-long task
+            // (see classifyBuyBoxLoss). null when there are no days = no Buy Box issues.
+            timedQuery('buyBoxData', () => BuyBoxData.findRecentDays(userId, region, country, 7).then(classifyBuyBoxLoss)),
             timedQuery('restockInventory', () => restockInventoryRecommendationsModel.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
             timedQuery('productReviews', () => numberofproductreviews.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
             // Use service layer for ListingItems (handles both old and new formats)
@@ -540,7 +543,7 @@ class AnalyseService {
             console.log('[DEBUG] No KeywordTrackingData found for userId:', userId, 'country:', country, 'region:', region);
         }
 
-        // With .lean(), buyBoxData is already a plain object, no need for toObject()
+        // Plain object: built by classifyBuyBoxLoss from lean docs
         const buyBoxDataPlain = buyBoxData || null;
         
         return {
@@ -1014,7 +1017,10 @@ class AnalyseService {
                 productsWithoutBuyBox: allData.buyBoxData.productsWithoutBuyBox,
                 productsWithLowBuyBox: allData.buyBoxData.productsWithLowBuyBox,
                 asinBuyBoxData: allData.buyBoxData.asinBuyBoxData,
-                dateRange: allData.buyBoxData.dateRange
+                dateRange: allData.buyBoxData.dateRange,
+                // How many days the Buy Box verdicts rest on (classifyBuyBoxLoss)
+                observedDays: allData.buyBoxData.observedDays,
+                observedDates: allData.buyBoxData.observedDates
             } : null,
             ProductWiseSponsoredAds: sponsoredAdsData.mostRecentSponsoredAds,
             ProductWiseSponsoredAdsGraphData: sponsoredAdsData.sponsoredAdsGraphData,
@@ -1055,7 +1061,11 @@ class AnalyseService {
         const asinBuyBoxData = buyBoxData.asinBuyBoxData || [];
         const buyBoxProducts = asinBuyBoxData.map(item => ({
             asin: item.childAsin || item.asin,
-            belongsToRequester: (item.buyBoxPercentage || 0) > 0
+            // buyBoxLost is classifyBuyBoxLoss's verdict; an "unknown" (null %) row
+            // is not a loss. Raw % only for rows without a verdict.
+            belongsToRequester: typeof item.buyBoxLost === 'boolean'
+                ? !item.buyBoxLost
+                : (item.buyBoxPercentage || 0) > 0
         }));
 
         const asinSet = new Set(SellerAccount.products.map(p => p.asin));
