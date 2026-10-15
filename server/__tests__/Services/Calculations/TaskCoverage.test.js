@@ -95,11 +95,19 @@ describe('buildTaskCoverage', () => {
         expect(buildTaskCoverage(data, fullCtx())['sponsoredAds.autoMigration']).toBe(false);
     });
 
-    it('accepts the legacy Buy Box input', () => {
+    it('accepts the legacy Buy Box input when it has rows', () => {
+        const data = fullData();
+        delete data.BuyBoxData;
+        data.ConversionData.ProductWithOutBuybox = [{ asin: 'A1', status: 'Error' }];
+        expect(buildTaskCoverage(data, fullCtx())['conversion.buybox']).toBe(true);
+    });
+
+    // With no Buy Box days at all the legacy list is built empty; that is no data.
+    it('does not cover Buy Box when there is no Buy Box data at all', () => {
         const data = fullData();
         delete data.BuyBoxData;
         data.ConversionData.ProductWithOutBuybox = [];
-        expect(buildTaskCoverage(data, fullCtx())['conversion.buybox']).toBe(true);
+        expect(buildTaskCoverage(data, fullCtx())['conversion.buybox']).toBe(false);
     });
 
     it('does not cover account health when it is missing or empty', () => {

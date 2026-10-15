@@ -831,7 +831,10 @@ const buildTaskCoverage = (data = {}, {
         'conversion.images': products && nonEmpty(conv.imageResult),
         'conversion.video': products && nonEmpty(conv.videoResult),
         'conversion.rating': products && nonEmpty(conv.productStarRatingResult),
-        'conversion.buybox': products && (nonEmpty(data.BuyBoxData?.asinBuyBoxData) || Array.isArray(conv.ProductWithOutBuybox)),
+        // Real Buy Box rows only. With no Buy Box days at all, Analyse still builds an
+        // (empty) legacy ProductWithOutBuybox list; "the list exists" must not read as
+        // "every Buy Box problem was fixed".
+        'conversion.buybox': products && (nonEmpty(data.BuyBoxData?.asinBuyBoxData) || nonEmpty(conv.ProductWithOutBuybox)),
         inventory: products && !!data.InventoryAnalysis && typeof data.InventoryAnalysis === 'object',
         // Rows exist even on stale finance (ads-only / legacy), but no verdict is made on
         // them, so their absence of tasks says nothing about what was fixed.
