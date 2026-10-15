@@ -74,6 +74,13 @@ const userSchema = new mongoose.Schema(
         enum: ["missing", "country_code", null],
         default: null,
       },
+      // Set on a Google signup, whose admin "New User Registered" email is held
+      // back until the real phone number is collected. updateUserPhone clears it
+      // atomically and sends the email, so it goes out exactly once.
+      adminSignupEmailPending: {
+        type: Boolean,
+        default: false,
+      },
       whatsapp: {
         type: String,
         required: [requiredUnlessEsfStaff, "WhatsApp number is required"],
@@ -229,6 +236,26 @@ const userSchema = new mongoose.Schema(
         type: [String],
         default: [],
       },
+      /**
+       * ESF clients this staff member is allocated to, and may therefore see.
+       *
+       * An ALLOW-list, which is the opposite polarity to esfDeniedPages directly above,
+       * and deliberately so. That one is a blocklist because a page added later should
+       * default to VISIBLE. A client added later must default to INVISIBLE — otherwise
+       * every new client silently appears for every member, which is the whole thing
+       * this field exists to stop. The two cannot share a shape.
+       *
+       * Empty always means empty: a member with nothing allocated sees nothing. There is
+       * no "unrestricted" sentinel because exemption is decided by ROLE — owner and
+       * admin skip this field entirely — so there is never a case where an empty array
+       * has to be told apart from an absent one.
+       *
+       * Only meaningful when accessType === 'esfUser'. See Services/User/esfClientScope.js.
+       */
+      esfAllowedClients: {
+        type: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+        default: [],
+      },
       // Stamped on ESF portal login; shown in the portal's team member list.
       lastLoginAt: {
         type: Date,
@@ -369,6 +396,14 @@ const userSchema = new mongoose.Schema(
 
 // Indexes for better query performance
 // Note: email index is automatically created by unique: true in schema
+// A phone number belongs to one account, but ESF staff join with no phone at all.
+// Partial, so only stored numbers are unique: a plain unique index counts every
+// missing phone as null, lets the first phoneless account in and rejects the rest
+// (E11000 dup key { phone: null } on every later ESF invitation).
+userSchema.index(
+  { phone: 1 },
+  { unique: true, name: "phone_1", partialFilterExpression: { phone: { $type: "string" } } }
+);
 userSchema.index({ packageType: 1 });
 userSchema.index({ subscriptionStatus: 1 });
 userSchema.index({ isInTrialPeriod: 1 });
@@ -388,6 +423,9 @@ userSchema.index({ isEsfClient: 1, createdAt: -1 });
 userSchema.index({ 'zohoProject.projectId': 1 });
 // ESF portal: list staff accounts
 userSchema.index({ accessType: 1 });
+// ESF portal: "which members is this client allocated to?" — asked when a client is
+// removed, to clear it from every allocation that still names it.
+userSchema.index({ esfAllowedClients: 1 });
 // Used by the six-month inactivity cleanup cron to scan candidates efficiently
 userSchema.index({ purgedAt: 1 });
 userSchema.index({ sixMonthWarningSentAt: 1 });

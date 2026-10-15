@@ -101,7 +101,7 @@ describe('report table width', () => {
     /** The size dataTable() draws every table at. */
     const WIDTH = minimumTableWidth(columns, rows, 8, 2);
 
-    it('does not fit A4 portrait — the fact the whole rule exists for', () => {
+    it('does not fit A4 portrait - the fact the whole rule exists for', () => {
         // Not a hypothetical. Before the landscape rule this table was drawn
         // past the right margin, off the paper, with the content still present
         // in the file and simply unreadable on the page.

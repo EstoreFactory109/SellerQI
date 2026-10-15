@@ -92,9 +92,21 @@ const runBackfill = async ({ days = 7, limit = MAX_MESSAGES } = {}) => {
                 lastSyncAt: new Date(),
                 lastError: null,
                 lastErrorAt: null,
-                // The old backlog refers to a window that no longer exists; anything
-                // still missing from it has just been re-walked by date.
+                /*
+                 * The old backlog refers to a window that no longer exists; anything
+                 * still missing from it has just been re-walked by date. Both the legacy
+                 * field and its replacement carry that same premise, so both are cleared
+                 * here - this was missed when pendingMessages was introduced, and left
+                 * the live backlog surviving every backfill untouched.
+                 *
+                 * deadLetterMessages is NOT cleared. Those are messages Gmail has already
+                 * told us no longer exist (see PERMANENT_FAILURE in GmailIngestService) -
+                 * re-walking the mailbox cannot bring one back, and the record is the only
+                 * evidence any of them ever existed. Clearing it on every backfill would
+                 * make that evidence as transient as the backlog it was pulled out of.
+                 */
                 pendingMessageIds: [],
+                pendingMessages: [],
             },
         });
     }

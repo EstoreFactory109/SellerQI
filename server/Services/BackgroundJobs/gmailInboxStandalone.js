@@ -46,9 +46,21 @@
  *       The history cursor is older than Gmail's ~1 week window. It cannot be recovered
  *       by retrying and every later run will 404 too. POST /api/gmail/backfill.
  *
- *   lastError mentions "failing to ingest"
- *       The retry backlog passed its cap. That is systemic rather than bad luck — read
- *       the logs for the repeated failure rather than waiting it out.
+ *   lastError mentions "failing to ingest" or "retired after repeated ingest failures"
+ *       Either the backlog passed its 200-entry cap, or something has been retried
+ *       enough times and for long enough (both bounds — see GmailIngestService) that it
+ *       gave up. `pendingStuckCount` and `deadLetterCount` on /api/gmail/status say which.
+ *       Run `node scripts/diagnoseGmailPendingBacklog.js` — it classifies every pending
+ *       id READ-ONLY and names why each one is stuck, rather than guessing from a log
+ *       grep. Never hand-edit pendingMessages or pendingMessageIds directly: every
+ *       completed sync rewrites the whole array, so a manual edit either races the next
+ *       run or is silently overwritten by it.
+ *
+ *   deadLetterCount above zero
+ *       Messages retired, not lost — the Gmail id, attempt count and reason all survive
+ *       on the record. Most often a 404: Gmail says the message no longer exists, and
+ *       there is nothing to recover. If it is anything else, POST
+ *       /api/gmail/pending/requeue can put a specific id back with its counter reset.
  *
  *   watchHealthy: false
  *       Push has lapsed and only polling is delivering, so mail is arriving up to
@@ -230,6 +242,108 @@ async function sweepTempUploads() {
     return { removed };
 }
 
+/** How many times a push may be put back before the poll is left to cover it alone. */
+const MAX_SYNC_REQUEUES = 3;
+/** 15s, 30s, 60s. Comfortably inside one poll bucket — see the risk noted below. */
+const REQUEUE_BASE_MS = 15_000;
+
+/**
+ * Put a push back on the queue, instead of dropping it, when the lock is already held.
+ *
+ * ── WHAT THIS REPLACES, AND WHY IT WAS WRONG ──
+ * The comment this used to carry claimed the running sync "walks history to the present
+ * and will pick up the same message" — true only if the message entered Gmail's history
+ * BEFORE that run called history.list. A notification arriving seconds after the page
+ * was fetched announces a message that run will never see, and the job completed
+ * successfully, so nothing retried it. The reply then waited for the next poll — up to
+ * GMAIL_POLL_MINUTES, 10 by default. `MAX_HISTORY_PAGES_PER_RUN` cutting a run short has
+ * the identical effect. That gap is a real contributor to "replies arrive late."
+ *
+ * ── WHY RE-ENQUEUE, NOT THROW ──
+ * Throwing would spend this job's `attempts: 3` budget (gmailInboxQueue.js) on a benign
+ * "someone else is syncing" — leaving none for a genuine transient Gmail 5xx — and would
+ * fire the worker's 'failed' handler, turning an ordinary condition into error-log noise
+ * and destroying the log as a signal. A fresh job keeps that budget intact for real
+ * failures and puts the delay under our control instead of BullMQ's backoff curve.
+ *
+ * ── WHY NOT COMPARE historyIds TO DECIDE IF THE RUNNING SYNC ALREADY COVERED IT ──
+ * That needs the running sync to publish how far it has got — a second source of truth
+ * about a cursor whose entire safety property is that there is exactly one
+ * (GmailIngestService's header, rules 2 and 4). Pub/Sub also delivers out of order, so
+ * the comparison would be unreliable in both directions. The asymmetry settles it: a
+ * redundant sync costs one history.list that returns nothing; a wrong comparison costs
+ * the message.
+ *
+ * Nothing here touches the cursor, the concurrency or the doorbell rule — a requeued job
+ * is an ordinary job running an ordinary runSync from the persisted cursor, under the
+ * same lock, same as any other push.
+ *
+ * ── A PRE-EXISTING RISK, FOUND HERE, NOT FIXED HERE ──
+ * pollLockKey() buckets on POLL_MINUTES, so the lock key rolls over every poll interval.
+ * A sync running across that boundary could in principle be joined by another acquiring
+ * the NEXT bucket's key — a concurrency-1 violation. BullMQ's `concurrency: 1` does not
+ * help, because the poll is a node-cron callback in the same process, not a queue job.
+ * This exists today and needs a long-running sync to hit; requeueing makes it marginally
+ * more reachable, which is why the total requeue window (3 attempts, ~105s) stays well
+ * inside one bucket. The real fix is a single fixed lock key with a heartbeat-extended
+ * TTL (prior art in __tests__/Services/BackgroundJobs/lockExtension.test.js) — a
+ * separate change, deliberately not folded into this one.
+ */
+async function requeueBlockedSync(job) {
+    const requeueCount = Number(job.data?.requeueCount) || 0;
+    const reason = job.data?.reason || 'push';
+
+    if (requeueCount >= MAX_SYNC_REQUEUES) {
+        logger.warn(
+            `[GmailInbox] push (reason=${reason}) still blocked after ${MAX_SYNC_REQUEUES} requeues — `
+            + 'leaving it to the next poll'
+        );
+        return { skipped: 'sync-already-running', requeued: false };
+    }
+
+    const delayMs = REQUEUE_BASE_MS * (2 ** requeueCount);
+    try {
+        const { enqueueGmailSync } = require('./gmailInboxQueue.js');
+        await enqueueGmailSync({
+            reason,
+            historyId: job.data?.announcedHistoryId || null,
+            delayMs,
+            requeueCount: requeueCount + 1,
+        });
+        // Expected and harmless: logged at info, not warn or error, so a sync lock
+        // held for a moment does not read like a fault the first time two pushes land
+        // together.
+        logger.info(
+            `[GmailInbox] sync locked; requeued in ${delayMs}ms (attempt ${requeueCount + 1}/${MAX_SYNC_REQUEUES})`
+        );
+        return { skipped: 'sync-already-running', requeued: true, delayMs };
+    } catch (error) {
+        // A Redis outage cannot be fixed by retrying; log it and let the poll cover
+        // this notification on its own schedule instead.
+        logger.warn(`[GmailInbox] could not requeue a blocked sync: ${error.message}`);
+        return { skipped: 'sync-already-running', requeued: false };
+    }
+}
+
+/**
+ * One job from the push queue: take the lock, run the sync, release it.
+ *
+ * Exported and called directly by name from the Worker below, rather than inlined,
+ * so it can be tested without constructing a real BullMQ Worker.
+ */
+async function processGmailSyncJob(job) {
+    const lockKey = pollLockKey();
+    if (!await acquireLock(lockKey, POLL_LOCK_TTL_MS)) {
+        return requeueBlockedSync(job);
+    }
+    try {
+        const { runSync } = require('../Gmail/GmailIngestService.js');
+        return await runSync({ reason: job.data?.reason || 'push' });
+    } finally {
+        await releaseLock(lockKey);
+    }
+}
+
 /**
  * The worker behind the push queue.
  *
@@ -238,26 +352,17 @@ async function sweepTempUploads() {
  * failure would. It is a correctness constraint.
  *
  * The distributed lock is shared with the poll for the same reason — a push arriving
- * mid-poll must wait, not run alongside. When it cannot get the lock it returns rather
- * than retrying, because whichever sync holds it walks history to the present and will
- * pick up the same message.
+ * mid-poll must wait, not run alongside it.
  */
 function setupWorker() {
     const { Worker } = require('bullmq');
     const { GMAIL_INBOX_QUEUE_NAME, queueConfig } = require('./gmailInboxQueue.js');
 
-    const worker = new Worker(GMAIL_INBOX_QUEUE_NAME, async (job) => {
-        const lockKey = pollLockKey();
-        if (!await acquireLock(lockKey, POLL_LOCK_TTL_MS)) {
-            return { skipped: 'sync-already-running' };
-        }
-        try {
-            const { runSync } = require('../Gmail/GmailIngestService.js');
-            return await runSync({ reason: job.data?.reason || 'push' });
-        } finally {
-            await releaseLock(lockKey);
-        }
-    }, { connection: queueConfig.connection, prefix: 'bullmq', concurrency: 1 });
+    const worker = new Worker(
+        GMAIL_INBOX_QUEUE_NAME,
+        (job) => processGmailSyncJob(job),
+        { connection: queueConfig.connection, prefix: 'bullmq', concurrency: 1 },
+    );
 
     worker.on('failed', (job, error) => {
         logger.error('[GmailInbox] Sync job failed', { jobId: job?.id, error: error?.message });
@@ -323,6 +428,7 @@ function setupCron() {
 
 module.exports = {
     setupCron, setupWorker, runPollTick, runWatchTick, sweepTempUploads, pollLockKey, watchLockKey,
+    processGmailSyncJob, requeueBlockedSync, MAX_SYNC_REQUEUES, REQUEUE_BASE_MS,
 };
 
 // Standalone: `node gmailInboxStandalone.js`

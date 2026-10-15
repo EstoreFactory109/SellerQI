@@ -166,7 +166,7 @@ describe('formatStat', () => {
         expect(formatStat({ value: 9488, format: 'currency' }, '₹')).toBe('₹9,488');
         expect(formatStat({ value: -17, format: 'money' }, '$')).toBe('-$17.00');
         expect(formatStat({ value: 91.28, format: 'percent' }, '$')).toBe('91.28%');
-        expect(formatStat(null, '$')).toBe('—');
+        expect(formatStat(null, '$')).toBe('-');
     });
 });
 

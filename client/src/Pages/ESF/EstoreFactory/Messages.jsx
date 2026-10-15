@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Search, Send, Check, CheckCheck, Clock, MessageSquare } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import { Search, Send, Check, CheckCheck, Clock, MessageSquare, ChevronDown } from 'lucide-react';
 import axiosInstance from '../../../config/axios.config.js';
+import downloadFile from '../../../utils/downloadFile.js';
 import { PALETTE } from '../../../Components/ESF/estoreFactoryTheme.js';
 import AttachmentPicker from '../../../Components/ESF/AttachmentPicker.jsx';
 import useAutoGrow from '../../../Components/ESF/useAutoGrow.js';
 import useConversationPolling from '../../../Components/ESF/useConversationPolling.js';
+import useConversationScroll from '../../../Components/ESF/useConversationScroll.js';
 
 /**
  * Estore Factory > Messages — the client's own conversations.
@@ -117,7 +119,7 @@ const ClientReceipt = ({ seen, pending = false }) => {
  */
 const initialsOf = (subject = '') => {
     const words = String(subject).replace(/[^\w\s-]/g, ' ').trim().split(/\s+/).filter(Boolean);
-    if (words.length === 0) return '—';
+    if (words.length === 0) return '-';
     return (words[0][0] + (words[1]?.[0] || '')).toUpperCase();
 };
 
@@ -163,6 +165,8 @@ const Messages = () => {
     const [search, setSearch] = useState('');
     const [inboxAddress, setInboxAddress] = useState(null);
     const [openId, setOpenId] = useState(null);
+    /** The thread the reader is actually on, readable from inside an async callback. */
+    const openIdRef = useRef(null);
     const [conversation, setConversation] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -192,12 +196,21 @@ const Messages = () => {
     useEffect(() => { loadThreads(); }, [loadThreads]);
 
     const openThread = useCallback(async (id) => {
+        /*
+         * Written synchronously alongside the state, not derived in an effect, because
+         * the check that matters happens AFTER an await and an effect has not
+         * necessarily run by then.
+         */
+        openIdRef.current = id;
         setOpenId(id);
         setConversation(null);
         setDraft('');
         setFiles([]);
         try {
             const res = await axiosInstance.get(`/api/pagewise/esf/messages/${id}`);
+            // Clicking B while A is still in flight used to let A's response land and
+            // paint B's header over A's messages until the next poll corrected it.
+            if (openIdRef.current !== id) return;
             setConversation(res.data?.data || null);
             // The count goes with the flag — the badge reads unreadCount, so clearing
             // only `unread` would leave a stale "3" behind on the next render that
@@ -292,21 +305,43 @@ const Messages = () => {
         }
     }, [ticketSubject, ticketBody, ticketFiles, raising, loadThreads, openThread]);
 
+    const markOpenThreadRead = useCallback(() => {
+        if (!openId) return;
+        axiosInstance.get(`/api/pagewise/esf/messages/${openId}`).catch(() => {});
+    }, [openId]);
+
+    const { containerRef, newCount, scrollToBottom, isAtBottom } = useConversationScroll({
+        threadId: openId,
+        messages: conversation?.messages,
+        /*
+         * INVERTED against the staff page, and this is the easy thing to get backwards.
+         * On this side of the boundary `inbound` is the CLIENT's own message - the one
+         * they just sent - exactly as toClientMessage documents. Reading it the staff
+         * way makes the pane chase the agency's replies and ignore the reader's own.
+         */
+        isOwn: (message) => message.direction === 'inbound',
+        onReachBottom: markOpenThreadRead,
+    });
+
     // Same reasoning as the staff inbox: a reply from the team arrives by email and
     // lands in the database with nothing telling this page about it.
-    useConversationPolling(async () => {
+    // The mirror of the staff page's reasoning: letting this reject lets the shared
+    // hook count it, rather than an empty catch hiding a session that has quietly died.
+    const { stale: pollStale, lastError: pollError } = useConversationPolling(async () => {
         if (sending || raising) return;
-        try {
-            if (openId) {
-                const res = await axiosInstance.get(`/api/pagewise/esf/messages/${openId}`);
-                setConversation(res.data?.data || null);
-            }
-            const list = await axiosInstance.get('/api/pagewise/esf/messages');
-            setThreads(list.data?.data?.threads || []);
-        } catch {
-            // Transient failures are not worth a banner over a working page.
+        if (openId) {
+            const pollingId = openIdRef.current;
+            const res = await axiosInstance.get(`/api/pagewise/esf/messages/${pollingId}`, {
+                params: { markRead: isAtBottom() ? '1' : '0' },
+            });
+            if (openIdRef.current !== pollingId) return;
+            setConversation(res.data?.data || null);
         }
+        const list = await axiosInstance.get('/api/pagewise/esf/messages');
+        setThreads(list.data?.data?.threads || []);
     }, { enabled: true });
+
+    const pollSessionExpired = [401, 403].includes(pollError?.response?.status);
 
     const open = conversation?.thread;
     const dayGroups = useMemo(() => groupByDay(conversation?.messages || []), [conversation]);
@@ -471,6 +506,12 @@ const Messages = () => {
                         </p>
                     )}
 
+                    {pollSessionExpired && (
+                        <p className="border-b px-5 py-2.5 text-sm" style={{ borderColor: PALETTE.border, color: PALETTE.amberValue }}>
+                            Your session has expired — reload the page to carry on.
+                        </p>
+                    )}
+
                     {!open && (
                         <div className="flex flex-1 items-center justify-center p-10 text-center">
                             <p className="max-w-sm text-sm" style={{ color: PALETTE.textTertiary }}>
@@ -487,7 +528,7 @@ const Messages = () => {
                             >
                                 <button
                                     type="button"
-                                    onClick={() => { setOpenId(null); setConversation(null); }}
+                                    onClick={() => { openIdRef.current = null; setOpenId(null); setConversation(null); }}
                                     className="-ml-1 shrink-0 rounded-lg px-1.5 py-1 text-[16px] leading-none md:hidden"
                                     style={{ color: PALETTE.textTertiary }}
                                     aria-label="Back to conversations"
@@ -510,9 +551,18 @@ const Messages = () => {
                                 >
                                     {open.status}
                                 </span>
+                                {pollStale && !pollSessionExpired && (
+                                    <span className="flex shrink-0 items-center gap-1.5 text-[11px]" style={{ color: PALETTE.textTertiary }}>
+                                        <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: PALETTE.amberValue }} />
+                                        Reconnecting…
+                                    </span>
+                                )}
                             </div>
 
-                            <div className="flex-1 space-y-1 overflow-y-auto px-3 py-4 sm:px-4 md:px-8">
+                            {/* min-h-0: without it this flex child will not shrink and the
+                                pane stops scrolling entirely. */}
+                            <div className="relative flex min-h-0 flex-1 flex-col">
+                            <div ref={containerRef} className="flex-1 space-y-1 overflow-y-auto px-3 py-4 sm:px-4 md:px-8">
                                 {dayGroups.map((group) => (
                                     <div key={group.key} className="space-y-1">
                                         <div className="flex justify-center py-3">
@@ -548,16 +598,15 @@ const Messages = () => {
                                                         {message.attachments?.length > 0 && (
                                                             <div className="mt-2 flex flex-wrap gap-1.5">
                                                                 {message.attachments.map((file, i) => (
-                                                                    <a
+                                                                    <button
                                                                         key={file.id || `${file.name}-${i}`}
-                                                                        href={`/api/pagewise/esf/messages/${open.id}/attachments/${message.id}/${i}`}
-                                                                        target="_blank"
-                                                                        rel="noreferrer"
+                                                                        type="button"
+                                                                        onClick={() => downloadFile(`/api/pagewise/esf/messages/${open.id}/attachments/${message.id}/${i}`, file.name)}
                                                                         className="rounded px-2 py-1 text-[11px] underline-offset-2 hover:underline"
                                                                         style={{ background: 'rgba(0,0,0,.25)', color: PALETTE.textSecondary }}
                                                                     >
                                                                         {file.name || 'Attachment'}
-                                                                    </a>
+                                                                    </button>
                                                                 ))}
                                                             </div>
                                                         )}
@@ -577,6 +626,19 @@ const Messages = () => {
                                         })}
                                     </div>
                                 ))}
+                            </div>
+
+                            {newCount > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={() => scrollToBottom()}
+                                    className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium shadow-lg"
+                                    style={{ background: PALETTE.good, color: PALETTE.bg }}
+                                >
+                                    {newCount} new message{newCount === 1 ? '' : 's'}
+                                    <ChevronDown className="h-3.5 w-3.5" />
+                                </button>
+                            )}
                             </div>
 
                             <div className="border-t px-4 py-3" style={{ borderColor: PALETTE.border }}>

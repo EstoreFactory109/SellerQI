@@ -24,8 +24,33 @@ const resolveMarketplace = async (req) => {
     const country = String(req.query.country || '').toUpperCase();
     const region = String(req.query.region || '').toUpperCase();
     if (country && region && await ownsMarketplace(req.userId, country, region)) return { country, region };
-    return { country: req.country, region: req.region };
+    if (req.country && req.region) return { country: req.country, region: req.region };
+
+    /*
+     * Last resort: the account's own primary marketplace.
+     *
+     * The cookie used to be the end of the line, and getLocation guaranteed it by answering
+     * 401 when it was missing — which is how a client who had not connected Amazon yet got a
+     * dead Reports page instead of an empty one. The route now admits them (see
+     * getLocationOptional), so this has to resolve the marketplace itself.
+     *
+     * Reading it from the Seller record is also more correct than the cookie was: these
+     * reports are account-wide, and the cookie only ever carried whichever marketplace the
+     * app happened to have selected. A client with no marketplace at all gets {} here, and
+     * the callers below answer with the same empty shape the rest of the page uses.
+     */
+    const [primary] = await listMarketplaces(req.userId);
+    return primary ? { country: primary.country, region: primary.region } : {};
 };
+
+/** The payload a per-marketplace route returns when the account has no marketplace yet. */
+const noMarketplace = (reportKey) => ({
+    key: reportKey,
+    available: false,
+    reason: 'No marketplace is connected to this account yet.',
+    rows: [],
+    columns: [],
+});
 
 /**
  * GET /api/pagewise/esf/reports
@@ -62,9 +87,17 @@ const getEsfReportRowsData = asyncHandler(async (req, res) => {
     const userId = req.userId;
     const { country, region } = await resolveMarketplace(req);
 
-    if (!userId || !country || !region) {
-        logger.error('[EsfReports] Missing required parameters', { userId, country, region });
-        return res.status(400).json(new ApiError(400, 'User ID, Country, and Region are required'));
+    if (!userId) {
+        return res.status(400).json(new ApiResponse(400, '', 'User ID is required'));
+    }
+    /*
+     * No marketplace is a legitimate state, not a bad request: a client who has not connected
+     * Amazon yet has none. Answering 400 here is what made the Reports page fail outright on
+     * day one, so this returns the same "nothing to show" shape every other ESF page uses.
+     */
+    if (!country || !region) {
+        return res.status(200).json(new ApiResponse(200, noMarketplace(req.params.reportKey),
+            'No marketplace is connected to this account yet'));
     }
 
     try {
@@ -96,9 +129,17 @@ const getEsfReportHistoryData = asyncHandler(async (req, res) => {
     const userId = req.userId;
     const { country, region } = await resolveMarketplace(req);
 
-    if (!userId || !country || !region) {
-        logger.error('[EsfReports] Missing required parameters', { userId, country, region });
-        return res.status(400).json(new ApiError(400, 'User ID, Country, and Region are required'));
+    if (!userId) {
+        return res.status(400).json(new ApiResponse(400, '', 'User ID is required'));
+    }
+    /*
+     * No marketplace is a legitimate state, not a bad request: a client who has not connected
+     * Amazon yet has none. Answering 400 here is what made the Reports page fail outright on
+     * day one, so this returns the same "nothing to show" shape every other ESF page uses.
+     */
+    if (!country || !region) {
+        return res.status(200).json(new ApiResponse(200, noMarketplace(req.params.reportKey),
+            'No marketplace is connected to this account yet'));
     }
 
     try {
@@ -139,4 +180,36 @@ const getEsfReportDocumentData = asyncHandler(async (req, res) => {
     }
 });
 
-module.exports = { getEsfReportsData, getEsfReportRowsData, getEsfReportHistoryData, getEsfReportDocumentData };
+/**
+ * GET /api/pagewise/esf/reports/next
+ *
+ * Just the "your next reports arrive on ..." block, for the Overview card.
+ *
+ * It is its own endpoint because Overview has no reports fetch of its own, and the
+ * alternatives were both worse. Putting it on /esf/project-status would make a cheap route
+ * fan out across eight collections for one stat card. Having Overview call /esf/reports would
+ * do the same and throw the rest away. This returns the one object both surfaces render, and
+ * the full Reports payload carries an identical copy, so the page and its summary cannot
+ * disagree about what they say.
+ */
+const getEsfNextReport = asyncHandler(async (req, res) => {
+    try {
+        const { nextReport } = await getEsfAccountReports(req.userId);
+        return res.status(200).json(new ApiResponse(200, nextReport, 'Next report fetched successfully'));
+    } catch (error) {
+        logger.error(new ApiError(500, `[EsfReports] next report failed: ${error.message}`));
+        /*
+         * A card is not worth an error state. The client renders nothing for a null answer,
+         * which is the same thing it does while the request is in flight.
+         */
+        return res.status(200).json(new ApiResponse(200, null, 'Next report is unavailable'));
+    }
+});
+
+module.exports = {
+    getEsfReportsData,
+    getEsfReportRowsData,
+    getEsfReportHistoryData,
+    getEsfReportDocumentData,
+    getEsfNextReport,
+};

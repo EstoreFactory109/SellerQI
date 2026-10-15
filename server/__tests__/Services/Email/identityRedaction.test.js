@@ -16,6 +16,7 @@
 const {
     buildIdentityBundle, redactKnown, redactStructural, redactAll, containsIdentity, PLACEHOLDER,
 } = require('../../../Services/Email/identityRedaction.js');
+const F = require('./__emailFixtures.js');
 
 const CLIENT = {
     firstName: 'Nitesh',
@@ -126,6 +127,165 @@ describe('structural identifiers we do not hold', () => {
 
     test('removes a second phone number never stored on the record', () => {
         expect(redactStructural('my other mobile is 0771 234 5678').text).toContain(PLACEHOLDER.phone);
+    });
+});
+
+/**
+ * Numbers we do NOT hold on the client record, written with no separators at all.
+ *
+ * These reached staff untouched, and every guard agreed they were clean: containsIdentity
+ * runs the same patterns, the model is told contact details are "already replaced" and is
+ * only asked about names, and validate() gates the model on containsIdentity. The comment
+ * on the structural pass claimed the rule was "a separator OR a leading +" — the code
+ * required the separator either way, so a "+" on its own bought nothing.
+ */
+describe('phone numbers with no separators at all', () => {
+    test.each([
+        ['an international mobile', '+61424812404'],
+        ['a national number with a leading 0', '0412841105'],
+        ['an international number with a long subscriber part', '+919876543210'],
+    ])('redacts %s', (_label, number) => {
+        const out = redactStructural(`please call ${number} about the pallet`).text;
+
+        expect(out).toBe(`please call ${PLACEHOLDER.phone} about the pallet`);
+        // A leftover "+" tells a reader both that a number was removed and where from.
+        expect(out).not.toMatch(/[+(]\s*\[phone\]/);
+    });
+
+    test('the leak is now visible to our own guard, which said clean before', () => {
+        // This single assertion is the regression test for the whole change: the value of
+        // containsIdentity is that validate() and leaksContact both gate on it.
+        const leaky = 'call our warehouse manager on 0412841105';
+
+        expect(containsIdentity(leaky, bundle).clean).toBe(false);
+        expect(containsIdentity(redactAll(leaky, bundle).text, bundle).clean).toBe(true);
+    });
+
+    test('a bare run with no + and no leading 0 is left alone', () => {
+        // The narrowness is deliberate. Widening this to any 9-15 digit run is what eats
+        // UPCs and case numbers, and no protection list catches every one of those.
+        expect(redactStructural('reference 123456789012 on the carton').text)
+            .toBe('reference 123456789012 on the carton');
+    });
+
+    /**
+     * The exact ambiguity the protection step exists for, and the only place it is
+     * load-bearing.
+     *
+     * The narrow patterns avoid most identifiers for free — a case number has no leading
+     * "+", no leading "0" and no separators, so nothing matches it. What they cannot
+     * avoid is an identifier that happens to START WITH ZERO: "0412841105" is a phone
+     * number and "0412841105" is a plausible SKU, and the two are the same string. Only
+     * the label beside it tells them apart, which is why labelled values are lifted out
+     * of the text before the phone pass runs and put back afterwards.
+     *
+     * Without protection these are destroyed and nothing anywhere reports it.
+     */
+    test.each([
+        ['a SKU that starts with zero', 'SKU 0412841105 needs relabelling'],
+        ['a UPC-A with a leading zero', 'UPC 0850085664426 on the carton'],
+        ['a case number that starts with zero', 'Case 022088339131 is still open'],
+        ['an order reference that starts with zero', 'Order no. 0987654321 was cancelled'],
+    ])('keeps %s, which is indistinguishable from a phone number by shape', (_label, text) => {
+        expect(redactStructural(text).text).toBe(text);
+    });
+
+    test('but the same digits with no label are still treated as a number', () => {
+        // The label is doing the work, and it should be obvious that it is.
+        expect(redactStructural('please call 0412841105').text)
+            .toBe(`please call ${PLACEHOLDER.phone}`);
+    });
+});
+
+/**
+ * Numbers spelled with letters, where the digit floor that protects every SKU cannot help:
+ * "(417) 2-STORES" holds four digits and is perfectly dialable.
+ *
+ * These reach staff the same way any other number does — a supplier's line quoted in
+ * prose, a storefront in a signature — and the nine-digit rule discards them by design.
+ */
+describe('vanity numbers', () => {
+    test.each([
+        ['a bracketed area code', 'call (417) 2-STORES today'],
+        ['the 1-800 form', 'call 1-800-FLOWERS today'],
+        ['a bare area code', 'call 417 2-STORES today'],
+    ])('redacts %s despite holding too few digits', (_label, text) => {
+        expect(redactStructural(text).text).toBe(text.replace(/(?:\(?\d{3}\)?[\s-]|1-\d{3}-)\S+/, PLACEHOLDER.phone));
+    });
+
+    test('does not fire on an ordinary hyphenated identifier', () => {
+        // The letters must follow an area code and a hyphen, so a part code is untouched.
+        [
+            'part MTG-400 is on order',
+            'use code SAVE-20 at checkout',
+            'ASIN B0HKW36R58 is live',
+        ].forEach((text) => expect(redactStructural(text).text).toBe(text));
+    });
+});
+
+describe("Gmail's tel: artifact", () => {
+    test('does not leave a second copy of the number behind', () => {
+        // "<tel:(818)%20308-1444>" begins with a parenthesis, which the scheme-link
+        // pattern excluded — so the visible number was replaced while the artifact beside
+        // it kept the digits. The result was "[phone]<tel:(818)%20308-1444>".
+        const phoneBundle = buildIdentityBundle({ firstName: 'Nitesh', lastName: 'Kumar', phone: '+1 (818) 308-1444' });
+        const out = redactAll('Best regards,\nNitesh\n+1 (818) 308-1444<tel:(818)%20308-1444>', phoneBundle).text;
+
+        expect(out).toBe(`Best regards,\n${PLACEHOLDER.name}\n${PLACEHOLDER.phone}`);
+        expect(out).not.toMatch(/308.?1444/);
+    });
+
+    test('strips the wrapper without taking the identifier in front of it', () => {
+        const out = redactAll(F.GMAIL_TEL_ARTIFACT, bundle).text;
+
+        expect(out).toContain('Item 13100301:');
+        expect(out).not.toContain('tel:');
+        expect(out).not.toContain('308-1444');
+    });
+
+    test.each([
+        ['a tel: link with a bracketed number', 'reach me at tel:(818)%20308-1444 anytime'],
+        ['a mailto: with brackets in the local part', 'see mailto:(weird)@x.com now'],
+    ])('removes %s, which is not wrapped in angle brackets', (_label, text) => {
+        // cleanGmailArtifacts only strips the "<tel:…>" wrapper, so a bare scheme link
+        // falls to the link pattern — whose character class used to exclude "(" and so
+        // matched nothing at all when the value began with one.
+        const out = redactStructural(text).text;
+
+        expect(out).toContain(PLACEHOLDER.link);
+        expect(out).not.toMatch(/308.?1444|weird/);
+    });
+});
+
+describe('the whole inbox, both directions at once', () => {
+    const out = () => redactAll(F.CONTACT_CASES, bundle).text;
+
+    test.each(F.CONTACT_CASES_IDENTIFIERS.map((id) => [id]))(
+        'keeps the business identifier %s',
+        (identifier) => {
+            expect(out()).toContain(identifier);
+        },
+    );
+
+    test.each(F.CONTACT_CASES_CONTACTS.map((c) => [c]))(
+        'removes the contact detail %s',
+        (contact) => {
+            expect(out()).not.toContain(contact);
+        },
+    );
+
+    test('no protection sentinel escapes into the output', () => {
+        // The sentinels are private to the pass. One reaching a staff payload would be
+        // invisible to every other guard — assertNoIdentityLeak does not look for them
+        // and quoteSplitter's tokeniser does not strip them.
+        expect(out()).not.toMatch(/[⟦⟧]/);
+    });
+
+    test('redacting twice changes nothing the second time', () => {
+        // Protect/restore introduces tokens mid-pass; if one survived, a second pass
+        // would behave differently. Also means a re-redaction on a version bump is safe.
+        const once = out();
+        expect(redactAll(once, bundle).text).toBe(once);
     });
 });
 

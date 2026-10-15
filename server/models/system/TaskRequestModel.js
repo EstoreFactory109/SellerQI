@@ -136,6 +136,27 @@ const TaskRequestSchema = new mongoose.Schema({
     // actually created in.
     zohoTaskId: { type: String, default: null },
     zohoProjectId: { type: String, default: null },
+
+    /**
+     * Which tasklist the task was filed under, and how that was decided.
+     *
+     * Stored for the same reason zohoProjectId is: the record should say where the work
+     * actually went, not where it would go if we recomputed it today. It is also the
+     * only audit trail on the router — a queue full of `created` is tasklist sprawl
+     * happening, and nothing else would show it until someone opened Zoho and noticed.
+     *
+     * 'ai'      the model picked an existing list
+     * 'tokens'  the deterministic fallback picked one
+     * 'created' nothing fitted, so a new list was made
+     * 'none'    unfiled — no candidates, no key, or the model was no help
+     */
+    zohoTasklistId: { type: String, default: null },
+    zohoTasklistName: { type: String, default: null },
+    tasklistChosenBy: {
+        type: String,
+        enum: ['ai', 'tokens', 'created', 'none'],
+        default: 'none',
+    },
 }, { timestamps: true });
 
 // The client's own list, newest first.

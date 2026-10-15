@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { MessageSquare, CheckCircle2, RotateCcw, Search, Send, Paperclip, Lock, Check, CheckCheck, ArrowLeft, Clock } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import { MessageSquare, CheckCircle2, RotateCcw, Search, Send, Paperclip, Lock, Check, CheckCheck, ArrowLeft, Clock, ChevronDown } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
+import downloadFile from '../../utils/downloadFile.js';
 import AttachmentPicker from '../../Components/ESF/AttachmentPicker.jsx';
 import useAutoGrow from '../../Components/ESF/useAutoGrow.js';
 import useConversationPolling from '../../Components/ESF/useConversationPolling.js';
+import useConversationScroll from '../../Components/ESF/useConversationScroll.js';
 
 /**
  * "Estore Factory" > Messages — the staff inbox.
@@ -36,7 +38,7 @@ const STATUS_STYLE = {
 /** Initials of the LABEL, never of a person. */
 const initialsOf = (label = '') => {
     const words = String(label).replace(/[^\w\s-]/g, ' ').trim().split(/\s+/).filter(Boolean);
-    if (words.length === 0) return '—';
+    if (words.length === 0) return '-';
     return (words[0][0] + (words[1]?.[0] || '')).toUpperCase();
 };
 
@@ -143,6 +145,8 @@ const groupByDay = (messages) => {
 const EsfMessages = () => {
     const [threads, setThreads] = useState([]);
     const [openId, setOpenId] = useState(null);
+    /** The thread the reader is actually on, readable from inside an async callback. */
+    const openIdRef = useRef(null);
     const [conversation, setConversation] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -172,6 +176,12 @@ const EsfMessages = () => {
     useEffect(() => { loadThreads(); }, [loadThreads]);
 
     const openThread = useCallback(async (id) => {
+        /*
+         * Written synchronously alongside the state, not derived in an effect, because
+         * the check that matters happens AFTER an await and an effect has not
+         * necessarily run by then.
+         */
+        openIdRef.current = id;
         setOpenId(id);
         setConversation(null);
         // Per-conversation, so a half-written reply and its attachments are never
@@ -180,6 +190,9 @@ const EsfMessages = () => {
         setFiles([]);
         try {
             const res = await axiosInstance.get(`/app/esf/messages/${id}`);
+            // Clicking B while A is still in flight used to let A's response land and
+            // paint B's header over A's messages until the next poll corrected it.
+            if (openIdRef.current !== id) return;
             setConversation(res.data?.data || null);
             setThreads((current) => current.map((t) => (t.id === id ? { ...t, unread: false } : t)));
         } catch (err) {
@@ -281,26 +294,54 @@ const EsfMessages = () => {
      * Skipped entirely while a send is in flight: replacing the messages mid-send would
      * wipe the optimistic bubble and make the message flicker out and back.
      */
-    useConversationPolling(async () => {
+    /**
+     * Mark the thread read when reaching the bottom, not when the poll happens to fire.
+     * Being parked at the bottom is already covered by the poll's own markRead flag, so
+     * this only fires on the away -> bottom transition and costs no extra request in the
+     * common case.
+     */
+    const markOpenThreadRead = useCallback(() => {
+        if (!openId) return;
+        axiosInstance.get(`/app/esf/messages/${openId}`).catch(() => {});
+    }, [openId]);
+
+    const { containerRef, newCount, scrollToBottom, isAtBottom } = useConversationScroll({
+        threadId: openId,
+        messages: conversation?.messages,
+        // Outbound is OURS on the staff side. Inverted on the client page.
+        isOwn: (message) => message.direction === 'outbound',
+        onReachBottom: markOpenThreadRead,
+    });
+
+    /*
+     * The catch used to be empty here — "the next poll is 15s away" is true for one
+     * blip and silent forever for an expired session or a revoked Messages permission.
+     * Letting the promise reject lets the hook count it instead, so both pages answer
+     * the same question about a failing poll the same way.
+     */
+    const { stale: pollStale, lastError: pollError } = useConversationPolling(async () => {
         if (sending) return;
-        try {
-            if (openId) {
-                const res = await axiosInstance.get(`/app/esf/messages/${openId}`);
-                setConversation(res.data?.data || null);
-            }
-            const list = await axiosInstance.get('/app/esf/messages', {
-                params: showResolved ? { resolved: 'true' } : {},
+        if (openId) {
+            const pollingId = openIdRef.current;
+            const res = await axiosInstance.get(`/app/esf/messages/${pollingId}`, {
+                // Parked at the bottom means the new message lands on screen, so it
+                // has honestly been read. Scrolled away, it has not.
+                params: { markRead: isAtBottom() ? '1' : '0' },
             });
-            setThreads(list.data?.data?.threads || []);
-        } catch {
-            // A failed poll is not worth an error banner — the next one is 15s away, and
-            // a red message over a working page for a transient blip is worse than
-            // briefly stale data.
+            if (openIdRef.current !== pollingId) return;
+            setConversation(res.data?.data || null);
         }
+        const list = await axiosInstance.get('/app/esf/messages', {
+            params: showResolved ? { resolved: 'true' } : {},
+        });
+        setThreads(list.data?.data?.threads || []);
     }, { enabled: true });
+
+    const pollSessionExpired = [401, 403].includes(pollError?.response?.status);
 
     const open = conversation?.thread;
     const dayGroups = useMemo(() => groupByDay(conversation?.messages || []), [conversation]);
+
 
     return (
         /*
@@ -412,6 +453,15 @@ const EsfMessages = () => {
                         <p className="border-b border-white/10 bg-amber-500/5 px-5 py-2.5 text-sm text-amber-300">{error}</p>
                     )}
 
+                    {pollSessionExpired && (
+                        /* A revoked session reads identically to a dead network from here —
+                           the chip below would just pulse forever with no way out. This is
+                           the one poll failure actionable enough to name outright. */
+                        <p className="border-b border-white/10 bg-red-500/5 px-5 py-2.5 text-sm text-red-300">
+                            Your session has expired — reload the page to carry on.
+                        </p>
+                    )}
+
                     {!open && (
                         <div className="flex flex-1 items-center justify-center p-10 text-center">
                             <div className="max-w-sm">
@@ -431,7 +481,7 @@ const EsfMessages = () => {
                             <div className="flex items-center gap-3 border-b border-white/10 bg-white/[0.03] px-3 py-2.5 md:px-4">
                                 <button
                                     type="button"
-                                    onClick={() => { setOpenId(null); setConversation(null); }}
+                                    onClick={() => { openIdRef.current = null; setOpenId(null); setConversation(null); }}
                                     className="-ml-1 shrink-0 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-white/5 hover:text-gray-200 md:hidden"
                                     aria-label="Back to conversations"
                                 >
@@ -445,6 +495,12 @@ const EsfMessages = () => {
                                 <span className={`shrink-0 rounded-md px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[open.status] || 'bg-white/10 text-gray-400'}`}>
                                     {open.status}
                                 </span>
+                                {pollStale && !pollSessionExpired && (
+                                    <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-gray-500">
+                                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400/70" />
+                                        Reconnecting…
+                                    </span>
+                                )}
                                 <button
                                     type="button"
                                     disabled={busy}
@@ -459,7 +515,11 @@ const EsfMessages = () => {
                             </div>
 
                             {/* Messages */}
-                            <div className="flex-1 space-y-1 overflow-y-auto px-3 py-4 sm:px-4 md:px-8">
+                            {/* min-h-0 is load-bearing: without it this flex child refuses to
+                                shrink, the pane stops scrolling and the composer is pushed off
+                                the bottom of the 100dvh calc. */}
+                            <div className="relative flex min-h-0 flex-1 flex-col">
+                            <div ref={containerRef} className="flex-1 space-y-1 overflow-y-auto px-3 py-4 sm:px-4 md:px-8">
                                 {/* The slot WhatsApp gives its encryption notice, used for the
                                     same kind of statement: what the ticks can actually tell you. */}
                                 <div className="flex justify-center pb-1">
@@ -505,16 +565,15 @@ const EsfMessages = () => {
                                                                         identifies the client — the accepted
                                                                         exception, made concrete here.
                                                                     */
-                                                                    <a
+                                                                    <button
                                                                         key={file.id || `${file.name}-${i}`}
-                                                                        href={`/app/esf/messages/${open.id}/attachments/${message.id}/${i}`}
-                                                                        target="_blank"
-                                                                        rel="noreferrer"
+                                                                        type="button"
+                                                                        onClick={() => downloadFile(`/app/esf/messages/${open.id}/attachments/${message.id}/${i}`, file.name)}
                                                                         className="flex items-center gap-1.5 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-[11px] text-gray-300 transition-colors hover:border-white/25 hover:text-gray-100"
                                                                     >
                                                                         <Paperclip className="h-3 w-3" />
                                                                         {file.name || 'Attachment'}
-                                                                    </a>
+                                                                    </button>
                                                                 ))}
                                                             </div>
                                                         )}
@@ -526,7 +585,7 @@ const EsfMessages = () => {
                                                             title={mine
                                                                 ? (message.seenByClient
                                                                     ? 'Opened in the client portal'
-                                                                    : 'Sent. Not opened in the portal — opens in their own email are not tracked.')
+                                                                    : 'Sent. Not opened in the portal - opens in their own email are not tracked.')
                                                                 : undefined}
                                                         >
                                                             {message.redactedBy === 'deterministic' && (
@@ -547,6 +606,21 @@ const EsfMessages = () => {
                                         Quoted history is trimmed — earlier messages appear above.
                                     </p>
                                 )}
+                            </div>
+
+                            {/* Offered rather than forced: a reply that arrives while someone
+                                is reading back through the history must not yank them to the
+                                bottom mid-sentence. */}
+                            {newCount > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={() => scrollToBottom()}
+                                    className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-medium text-white shadow-lg shadow-blue-950/40 hover:bg-blue-500"
+                                >
+                                    {newCount} new message{newCount === 1 ? '' : 's'}
+                                    <ChevronDown className="h-3.5 w-3.5" />
+                                </button>
+                            )}
                             </div>
 
                             {/* Composer */}

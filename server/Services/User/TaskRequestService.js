@@ -17,11 +17,72 @@ const MAX_TITLE_CHARS = 150;
 const MAX_DESCRIPTION_CHARS = 5000;
 const MAX_REASON_CHARS = 500;
 
+/**
+ * Above this many tasklists, never create another one.
+ *
+ * Not a Zoho limit — a judgement. A project already carrying this many lists has a
+ * navigation problem, and the router adding one more per unusual request is how that
+ * becomes unusable. The live project runs on five.
+ */
+const MAX_TASKLISTS_PER_PROJECT = 25;
+
 /** "Nitesh Kumar brief.pdf" names the client in a label, exactly as a body would. */
 const redactFilename = (filename, bundle) => {
     let out = String(filename || '');
     (bundle?.names || []).forEach((name) => { out = out.split(name).join('[name]'); });
     return out;
+};
+
+/**
+ * Is a client already being helped with this, on an open Zoho task?
+ *
+ * Checked before a request is ever queued, for BOTH entry points — the portal form
+ * (submitTaskRequest) and an AI-detected request read out of a message
+ * (MessageIntentHandler.handleClientMessage) — so neither can duplicate work a staff
+ * member already has open.
+ *
+ * Reuses ZohoOpportunityMatchService's own judgement call rather than inventing a
+ * second, looser one: it already solves exactly this problem for the Dashboard's
+ * opportunities ("is an open task already covering this?"), with the bias this needs
+ * too — when unsure, say NOT covered. A false "already in progress" here silently
+ * drops a client's real, new ask; a duplicate reaching the queue just costs an admin
+ * one glance before merging it away.
+ *
+ * Completed tasks are excluded, same rule refreshSuggestedWork uses: if the team
+ * finished the work and the client is asking again, that is worth raising again, not
+ * suppressing as "already done".
+ */
+const findInProgressMatch = async ({ userId, title, description }) => {
+    const none = { inProgress: false, taskId: null, taskName: null };
+
+    const UserModel = require('../../models/user-auth/userModel.js');
+    const client = await UserModel.findById(userId).select('zohoProject').lean();
+    const projectId = client?.zohoProject?.projectId;
+    if (!projectId) return none;
+
+    const ZohoProjectTask = require('../../models/system/ZohoProjectTaskModel.js');
+    const { classifyTask, SECTIONS } = require('../Zoho/ZohoTaskSync.js');
+
+    const rows = await ZohoProjectTask.find({ projectId })
+        .select('taskId name tasklist isCompleted statusIsClosed startDate')
+        .lean();
+
+    const openTasks = rows
+        .filter((task) => classifyTask(task) !== SECTIONS.COMPLETED)
+        .map((task) => ({ taskId: task.taskId, name: task.name, tasklist: task.tasklist }));
+
+    if (openTasks.length === 0) return none;
+
+    const ZohoOpportunityMatchService = require('../AI/ZohoOpportunityMatchService.js');
+    const result = await ZohoOpportunityMatchService.matchOpportunities({
+        opportunities: [{ candidateId: 'request', title, action: description }],
+        tasks: openTasks,
+    });
+
+    const match = result.matches[0];
+    if (!match?.covered) return none;
+
+    return { inProgress: true, taskId: match.coveredByTaskId, taskName: match.coveredByTaskName };
 };
 
 /**
@@ -58,6 +119,20 @@ const submitTaskRequest = async ({ user, title, description, neededBy, files = [
             409,
             `You already have ${pending} requests awaiting a decision. Please wait for those `
             + 'before adding another.'
+        );
+    }
+
+    /**
+     * Checked before the email goes out, not after — see the header on sending before
+     * writing: once that email is sent, this request exists whether or not a row ever
+     * gets written for it, so a duplicate has to be caught earlier than that.
+     */
+    const duplicate = await findInProgressMatch({ userId: user._id, title: cleanTitle, description: cleanDescription });
+    if (duplicate.inProgress) {
+        throw new ApiError(
+            409,
+            `This already looks like it's in progress${duplicate.taskName ? ` — "${duplicate.taskName}"` : ''}. `
+            + 'Check your Status page for the latest update.'
         );
     }
 
@@ -127,6 +202,7 @@ const acceptTaskRequest = async ({ requestId, staffUserId }) => {
 
     const ZohoProjectsService = require('../Zoho/ZohoProjectsService.js');
     const { buildTaskBrief } = require('../AI/TaskBriefService.js');
+    const TasklistRouter = require('../AI/TasklistRouterService.js');
 
     /**
      * Rewrite the client's words into something the team can work from — and strip their
@@ -176,12 +252,89 @@ const acceptTaskRequest = async ({ requestId, staffUserId }) => {
             : []),
     ].join('\n');
 
+    /**
+     * Which tasklist to file it under.
+     *
+     * Wrapped whole, because every step of it is optional. Reading the lists can fail,
+     * the model can be unavailable, a proposed name can be unusable, creating a list can
+     * be refused — and none of those are reasons to refuse a client's approved work. Any
+     * of them lands on `filing`'s initial value and the task is created unfiled, which is
+     * exactly where every accepted request went before this existed.
+     */
+    let filing = { tasklistId: null, tasklistName: null, chosenBy: 'none' };
+    try {
+        const tasklists = await ZohoProjectsService.listTasklists({
+            projectId,
+            portalId: client?.zohoProject?.portalId || null,
+        });
+
+        if (tasklists.length) {
+            const routed = await TasklistRouter.route({
+                title: brief.title,
+                description: brief.description,
+                tasklists,
+                bundle,
+            });
+
+            if (routed.tasklistId) {
+                filing = {
+                    tasklistId: routed.tasklistId,
+                    tasklistName: routed.tasklistName,
+                    chosenBy: routed.chosenBy,
+                };
+            } else if (routed.newTasklistName) {
+                /**
+                 * Before creating anything, check the name against the real ones.
+                 *
+                 * The model proposing "Graphics" when a "graphics" list already exists is
+                 * the single likeliest way this clutters a project, and it would look
+                 * like two lists that differ only in case. Cheaper to catch here than to
+                 * merge by hand later.
+                 */
+                const existing = tasklists.find(
+                    (l) => l.name.trim().toLowerCase() === routed.newTasklistName.trim().toLowerCase()
+                );
+
+                if (existing) {
+                    filing = { tasklistId: existing.id, tasklistName: existing.name, chosenBy: 'ai' };
+                } else if (tasklists.length >= MAX_TASKLISTS_PER_PROJECT) {
+                    // A project this cluttered does not need another list; the router's
+                    // second choice is better than growing the mess.
+                    logger.warn(
+                        `[TaskRequest] project ${projectId} already has ${tasklists.length} tasklists — `
+                        + `not creating "${routed.newTasklistName}"`
+                    );
+                } else {
+                    const created = await ZohoProjectsService.createTasklist({
+                        projectId,
+                        name: routed.newTasklistName,
+                        portalId: client?.zohoProject?.portalId || null,
+                    });
+                    filing = { tasklistId: created.id, tasklistName: created.name, chosenBy: 'created' };
+                }
+            }
+        }
+    } catch (error) {
+        logger.warn(
+            `[TaskRequest] could not choose a tasklist for request ${requestId} `
+            + `(creating it unfiled): ${error.message}`
+        );
+    }
+
     const task = await ZohoProjectsService.createTask({
         projectId,
         name: brief.title,
         description,
-        // Carried through so ZohoTaskSync.classifyTask files it under "Coming up" rather
-        // than defaulting a dateless task to "In progress".
+        tasklistId: filing.tasklistId,
+        /**
+         * The client's "NEEDED BY", carried through as the task's due date.
+         *
+         * This used to claim it filed the task under "Coming up" instead of leaving a
+         * dateless task in "In progress". It never did: ZohoTaskSync.classifyTask reads
+         * startDate alone, so end_date has no bearing on the column at all. The date is
+         * still worth sending — it is the deadline the client asked for — but createTask
+         * is what pairs it with a start date, because Zoho refuses an end on its own.
+         */
         endDate: request.neededBy ? new Date(request.neededBy).toISOString().slice(0, 10) : null,
     });
 
@@ -190,6 +343,15 @@ const acceptTaskRequest = async ({ requestId, staffUserId }) => {
     request.decidedAt = new Date();
     request.zohoTaskId = task.id;
     request.zohoProjectId = projectId;
+    /**
+     * Read back off the created task where possible, not from what we asked for. If the
+     * create retried without the tasklist — which it does when Zoho refuses the field —
+     * then what we requested and where it landed are different things, and the record
+     * should say the second one.
+     */
+    request.zohoTasklistId = task.tasklistId || (task.tasklistId === null ? null : filing.tasklistId);
+    request.zohoTasklistName = task.tasklist || filing.tasklistName;
+    request.tasklistChosenBy = request.zohoTasklistId ? filing.chosenBy : 'none';
     await request.save();
 
     /**
@@ -246,7 +408,9 @@ module.exports = {
     submitTaskRequest,
     acceptTaskRequest,
     rejectTaskRequest,
+    findInProgressMatch,
     MAX_TITLE_CHARS,
     MAX_DESCRIPTION_CHARS,
     MAX_REASON_CHARS,
+    MAX_TASKLISTS_PER_PROJECT,
 };

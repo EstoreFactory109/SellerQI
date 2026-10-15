@@ -99,7 +99,7 @@ const ensureConfigured = () => {
 
 /** Mirrors formatCell in ReportDocumentPreview.jsx. */
 const formatCell = (value, format, currency) => {
-    if (value === null || value === undefined || value === '') return '—';
+    if (value === null || value === undefined || value === '') return '-';
     if (typeof value !== 'number') return String(value);
     // Per-unit money, to the cent. Distinct from 'currency', which rounds to
     // whole units — right for "Total sales $124,530", wrong for a price gap,

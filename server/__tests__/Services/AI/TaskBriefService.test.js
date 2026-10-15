@@ -127,6 +127,49 @@ describe('the link exception', () => {
     });
 });
 
+/**
+ * stripContacts and identityRedaction.redactStructural used to hold byte-identical copies
+ * of the phone pattern, and that duplication was the hazard — not the pattern.
+ *
+ * leaksContact gates the model's rewrite with containsIdentity, which runs
+ * identityRedaction's patterns. So the moment the copies drifted, stripContacts would
+ * leave a number in safeDescription, the model would faithfully preserve it (its prompt
+ * demands exactly that), leaksContact would reject the rewrite, and the fallback would
+ * send that same un-redacted text on to Zoho. Silently, with one log line — and the AI
+ * layer off for every request that mentions a number.
+ *
+ * They now share redactPhoneShapes. These tests exist to notice if that stops being true.
+ */
+describe('stripContacts and containsIdentity cannot drift apart', () => {
+    test.each([
+        ['an unseparated international number', 'call +61424812404 about the pallet'],
+        ['an unseparated national number', 'call 0412841105 about the pallet'],
+        ['a separated number', 'call 818 350 5302 about the pallet'],
+        ["a colleague's address", 'email reena@othersupplier.com about the pallet'],
+    ])('what stripContacts leaves behind never reads as identity — %s', (_label, text) => {
+        const stripped = stripContacts(text, bundle);
+
+        // Whatever survives stripContacts must pass the gate the rewrite is judged by,
+        // or the brief is rejected for a leak stripContacts itself allowed through.
+        expect(leaksContact(stripped, bundle)).toBe(false);
+    });
+
+    test('it still keeps the product links that are the point of a brief', () => {
+        const stripped = stripContacts('update https://amazon.com/dp/B08XYZ1234 and call 0412841105', bundle);
+
+        expect(stripped).toContain('amazon.com/dp/B08XYZ1234');
+        expect(stripped).not.toContain('0412841105');
+    });
+
+    test('and does not eat the identifiers a brief is about', () => {
+        const stripped = stripContacts('Case 13157354022, UPC 850085664426, order 205-8795220-8289913', bundle);
+
+        expect(stripped).toContain('13157354022');
+        expect(stripped).toContain('850085664426');
+        expect(stripped).toContain('205-8795220-8289913');
+    });
+});
+
 describe('the pieces the guards are built from', () => {
     test.each([
         ['ASINs', 'fix B08XYZ1234 and B07ABC5678', 2],

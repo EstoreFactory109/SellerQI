@@ -42,6 +42,17 @@ jest.mock('../../../models/system/TaskRequestModel.js', () => {
     return model;
 });
 
+/**
+ * The same already-in-progress check the portal form runs, read here from
+ * TaskRequestService directly rather than re-mocking the Zoho/AI layers it wraps —
+ * this suite is about the asymmetry between a client request and an admin decision,
+ * not about how the match itself is computed (that has its own tests).
+ */
+const mockFindInProgressMatch = jest.fn();
+jest.mock('../../../Services/User/TaskRequestService.js', () => ({
+    findInProgressMatch: (...a) => mockFindInProgressMatch(...a),
+}));
+
 const { analyseMessage } = require('../../../Services/User/MessageIntentHandler.js');
 
 const USER = {
@@ -84,6 +95,7 @@ beforeEach(() => {
     mockDetectTaskRequest.mockResolvedValue(detected());
     mockDetectDecision.mockResolvedValue({ intent: null, confidence: 0, actionable: false, reason: '' });
     mockSendAutomatedReply.mockResolvedValue({ id: 'sent-1' });
+    mockFindInProgressMatch.mockResolvedValue({ inProgress: false, taskId: null, taskName: null });
 });
 
 describe('a client request is created; an admin decision is only staged', () => {
@@ -243,6 +255,51 @@ describe('the loops this could create', () => {
         await inbound();
 
         expect(mockSendAutomatedReply).not.toHaveBeenCalled();
+    });
+});
+
+describe('a request for work already in progress is never queued', () => {
+    test('an in-progress match replies to the client instead of creating a request', async () => {
+        mockFindInProgressMatch.mockResolvedValue({ inProgress: true, taskId: 'z1', taskName: 'Content Phase 1' });
+
+        await inbound();
+
+        expect(mockCreate).not.toHaveBeenCalled();
+        expect(mockSendAutomatedReply).toHaveBeenCalled();
+        expect(mockSendAutomatedReply.mock.calls[0][0].body).toMatch(/Content Phase 1/);
+    });
+
+    test('checks AFTER the confidence floor, so a low-confidence read never spends the lookup', async () => {
+        mockDetectTaskRequest.mockResolvedValue(detected({ confidence: 0.4, actionable: false }));
+
+        await inbound();
+
+        expect(mockFindInProgressMatch).not.toHaveBeenCalled();
+    });
+
+    test('a failed lookup leaves the message alone rather than blocking a real request', async () => {
+        // Same non-fatal rule as everywhere else in this file: an automation failing
+        // must never cost the client's message.
+        mockFindInProgressMatch.mockRejectedValue(new Error('Zoho down'));
+
+        await expect(inbound()).resolves.toBeNull();
+        expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    test('a failed "already in progress" reply still leaves nothing queued', async () => {
+        mockFindInProgressMatch.mockResolvedValue({ inProgress: true, taskId: 'z1', taskName: 'Content Phase 1' });
+        mockSendAutomatedReply.mockRejectedValue(new Error('Gmail down'));
+
+        await expect(inbound()).resolves.toBeNull();
+        expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    test('not covered lets the request through as normal', async () => {
+        mockFindInProgressMatch.mockResolvedValue({ inProgress: false, taskId: null, taskName: null });
+
+        await inbound();
+
+        expect(mockCreate).toHaveBeenCalled();
     });
 });
 

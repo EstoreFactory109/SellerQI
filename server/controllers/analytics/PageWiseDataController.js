@@ -801,12 +801,16 @@ const getReimbursementData = asyncHandler(async (req, res) => {
  */
 const getTasksData = asyncHandler(async (req, res) => {
     const userId = req.userId;
+    // Marketplace the seller is currently viewing (set by getLocation). Without
+    // it the page returned every marketplace's tasks in one list.
+    const country = req.country;
+    const region = req.region;
 
     try {
-        logger.info(`Getting tasks data for user ${userId}`);
+        logger.info(`Getting tasks data for user ${userId} [${country}-${region}]`);
 
         // Get tasks from CreateTaskService
-        const tasksDocument = await CreateTaskService.getUserTasks(userId);
+        const tasksDocument = await CreateTaskService.getUserTasks(userId, { country, region });
 
         if (!tasksDocument) {
             return res.status(200).json(

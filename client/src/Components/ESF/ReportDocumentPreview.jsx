@@ -100,7 +100,7 @@ const TruncationNote = ({ total, shown }) => {
 };
 
 const formatCell = (value, format, currency) => {
-    if (value === null || value === undefined || value === '') return '—';
+    if (value === null || value === undefined || value === '') return '-';
     if (typeof value !== 'number') return value;
     // Per-unit money, to the cent — see the note in reportPdf.js formatCell.
     // 'currency' rounds to whole units, which is right for an aggregate and

@@ -25,6 +25,9 @@ const {
     COMMENT_FETCH_CONCURRENCY
 } = require('./config.js');
 
+/** A project with more tasklists than this has a problem no page of ours can render. */
+const MAX_TASKLISTS_FETCHED = 200;
+
 /**
  * Run `fn` over `items` with at most `limit` in flight.
  *
@@ -64,6 +67,44 @@ const asId = (...candidates) => {
 };
 
 /** Zoho date fields vary: ISO string, epoch millis, or a `_long` sibling. Return an ISO string. */
+/**
+ * A calendar date in the form the v3 write API accepts.
+ *
+ * Reads from the live portal come back as `"2026-05-05T13:30:00.000Z"`, and a bare
+ * `YYYY-MM-DD` is refused with INVALID_PARAMETER_VALUE. Midday UTC because a due date
+ * has no time of day and midnight would land on the previous date in any portal west
+ * of UTC. Anything already carrying a time is passed through untouched.
+ */
+const zohoDate = (value) => {
+    if (!value) return value;
+    const text = String(value);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+    return `${text}T12:00:00.000Z`;
+};
+
+/** The same dates in the v2 dialect, for the single retry in createTask. */
+const legacyDates = (body) => {
+    const toLegacy = (value) => {
+        if (!value) return undefined;
+        const [y, m, d] = String(value).slice(0, 10).split('-');
+        return y && m && d ? `${m}-${d}-${y}` : undefined;
+    };
+    const out = {};
+    if (body.start_date) out.start_date = toLegacy(body.start_date);
+    if (body.end_date) out.end_date = toLegacy(body.end_date);
+    return Object.keys(out).length ? out : null;
+};
+
+/**
+ * Whether Zoho refused this specifically because a date was the wrong SHAPE.
+ *
+ * Deliberately narrow. Retrying a rejection that was about anything else — a missing
+ * field, a permission, an unknown project — would just make the same wrong call twice
+ * and bury the real reason under the second failure.
+ */
+const isDateFormatRejection = (error) => error?.statusCode === 400
+    && /input format mismatch|INVALID_PARAMETER_VALUE/i.test(String(error.message || ''));
+
 const asDate = (...candidates) => {
     for (const value of candidates) {
         if (value === undefined || value === null || value === '') {
@@ -140,6 +181,25 @@ const normaliseTask = (task = {}) => ({
             .filter((name) => name && name !== 'Unassigned User')
         : [],
     tasklist: toPlainLabel(task.tasklist && task.tasklist.name),
+    // The id as well as the name, so a created task can say WHICH list it landed in
+    // and a caller can file another task beside it. Dropped until 2026-09-25.
+    tasklistId: (task.tasklist && asId(task.tasklist.id, task.tasklist.id_string)) || null,
+
+    /**
+     * Where this task sits in the subtask tree: 0 is top level, 1 is a subtask of one.
+     *
+     * Kept because subtasks arrive as ordinary rows in this same flat list — there is no
+     * working subtasks endpoint on this connection (v3 answers URL_RULE_NOT_CONFIGURED)
+     * and no scope for the tasklists one, so these two fields are the only way to
+     * reconstruct the tree. The Untapped page is built entirely out of them.
+     *
+     * `parental_info` is what the live v3 API returns today and is absent on top-level
+     * tasks. It is not in Zoho's published schema, so treat a sudden run of nulls here
+     * as the API changing under us rather than as a project with no subtasks.
+     */
+    depth: Number(task.depth) || 0,
+    parentTaskId: (task.parental_info && asId(task.parental_info.parent_task_id)) || null,
+
     // "None" is Zoho's placeholder milestone, not a real one.
     milestone: toPlainLabel((task.milestone && task.milestone.name !== 'None' && task.milestone.name) || null),
     createdByName: (task.created_by && (task.created_by.full_name || task.created_by.name)) || null,
@@ -397,15 +457,33 @@ const getProjectTaskUpdates = async (projectId, { includeComments = true, maxTas
  * omitted when absent rather than sent empty. A rejected create is loud; a create that
  * silently ignores a field is not.
  *
- * Dates go as `end_date` in Zoho's YYYY-MM-DD form. Setting one matters beyond
- * presentation: ZohoTaskSync.classifyTask puts a task with no dates into "In progress",
- * so a request with a needed-by date that failed to carry would land in the wrong column
- * on the client's Status page.
+ * ── end_date IS NOT ACCEPTED ON ITS OWN ──
+ * Zoho's task API documents end_date as requiring start_date to be set, and rejects the
+ * pair when only the end is given. This is why a request carrying a needed-by date could
+ * not be accepted at all while a dateless one could: the write was refused before a task
+ * ever existed. Both dates are therefore sent together or neither is.
+ *
+ * ── A DATE-ONLY STRING IS NOT A DATE TO THIS API ──
+ * `YYYY-MM-DD` is rejected with INVALID_PARAMETER_VALUE / "input format mismatch" naming
+ * end_date. v3 wants a full ISO 8601 datetime: reading tasks back from the live portal
+ * returns `"2026-05-05T13:30:00.000Z"`, and what it emits is what it takes. (The v2
+ * generation wants MM-DD-YYYY — do not copy a v2 example into a v3 call. If this ever
+ * flips, DATE_FORMATS below is the one place to change.)
+ *
+ * A supplied date is pinned to midday UTC, not midnight: a due date carries no time,
+ * and midnight lands on the previous calendar day in any portal west of UTC. Noon is
+ * the same day everywhere anyone runs this.
+ *
+ * ── THE START DATE DECIDES THE CLIENT'S COLUMN ──
+ * ZohoTaskSync.classifyTask reads startDate alone: still in the future is "Coming up",
+ * anything else is "In progress". So an INVENTED start is the current timestamp rather
+ * than a date, which puts an approved task straight into "In progress" where it belongs.
+ * end_date is the due date and has no bearing on the column.
  *
  * Like every write here, this is authored in Zoho by the single org-wide connected
  * account — so the CALLER is responsible for putting attribution in the description.
  */
-const createTask = async ({ projectId, name, description, endDate, portalId }) => {
+const createTask = async ({ projectId, name, description, startDate, endDate, tasklistId, portalId }) => {
     if (!projectId) {
         throw new ApiError(400, 'A project is required to create a task');
     }
@@ -420,17 +498,95 @@ const createTask = async ({ projectId, name, description, endDate, portalId }) =
 
     const body = { name: title };
     if (description) body.description = String(description);
-    if (endDate) body.end_date = endDate;
+    /**
+     * Which list the task is filed under. Omitted when absent rather than sent
+     * empty, per the header — and `tasklist_id` is documented on create for v2
+     * while v3 is unverified, so the retry below drops it if Zoho objects. Where a
+     * task is filed must never be the reason approving work fails.
+     */
+    if (tasklistId) body.tasklist_id = String(tasklistId);
+    /**
+     * Sent as a pair, never end alone — see the header. A caller that supplies only an
+     * end date gets both, starting today, because "due by X" with no start is exactly
+     * the shape Zoho refuses. A start on its own is fine and passes straight through.
+     */
+    if (endDate) {
+        const now = new Date();
+        const todayIso = now.toISOString().slice(0, 10);
+        /**
+         * The invented start is THIS MOMENT, not today at noon — and that detail is
+         * what decides which column the client sees.
+         *
+         * ZohoTaskSync.classifyTask files a task as "Coming up" while its start date is
+         * still in the future and "In progress" otherwise. A start of today-at-noon is
+         * in the future for the whole UTC morning, so a task approved at 09:00 sat under
+         * "Coming up" and then moved itself at 12:00 with nobody touching it. Approving
+         * the work IS the start of it, so the timestamp is now and the task is in
+         * progress from the moment it is created.
+         *
+         * Clamped to the end date when that has already passed, because Zoho refuses a
+         * start after an end — a client asking for something by a date already gone is a
+         * support question, not a reason for the accept to fail.
+         */
+        body.start_date = startDate
+            ? zohoDate(startDate)
+            : (endDate < todayIso ? zohoDate(endDate) : now.toISOString());
+        body.end_date = zohoDate(endDate);
+    } else if (startDate) {
+        body.start_date = zohoDate(startDate);
+    }
 
-    const response = await zohoRequest({
+    /**
+     * One retry in the other dialect, and only on the error that says the format is
+     * wrong.
+     *
+     * Not defensive habit — this exact call has now been refused twice on the shape of a
+     * date, and the cost of being wrong a third time is not a log line: createTask
+     * throws before TaskRequestService sets the status, so the request silently stays in
+     * the admin's queue with no task created. A 400 creates nothing, so replaying it is
+     * safe, and whichever dialect this portal wants, one of the two is it.
+     */
+    const send = (payload) => zohoRequest({
         method: 'POST',
         path: spec.path(resolvedPortal, projectId),
         version: spec.version,
-        data: body,
+        data: payload,
         // v2 requires form-encoded writes; v3 takes JSON. Mirrors createProject.
         form: spec.version === 'v2',
         context: `Creating a Zoho task in project ${projectId}`
     });
+
+    let response;
+    try {
+        response = await send(body);
+    } catch (error) {
+        if (!isDateFormatRejection(error)) throw error;
+
+        /**
+         * Two things in this payload are unverified, and the rejection does not say which
+         * one it means: the date dialect, and `tasklist_id` on v3.
+         *
+         * So the replay drops the tasklist AND switches dialect in one go. Filing is a
+         * nicety; the task existing is not, and a second round trip to narrow down which
+         * field was at fault would be a third failed accept for the admin watching.
+         * Whichever it was, the task lands — unfiled if it has to be, and the log says so.
+         */
+        const alternate = body.end_date || body.start_date ? legacyDates(body) : null;
+        const droppingTasklist = Boolean(body.tasklist_id);
+        if (!alternate && !droppingTasklist) throw error;
+
+        logger.warn(
+            `[ZohoProjects] task create was refused (project ${projectId}) — retrying once`
+            + `${alternate ? ' with MM-DD-YYYY dates' : ''}`
+            + `${droppingTasklist ? ' and without tasklist_id' : ''}`
+        );
+        // Built by deletion, not by spreading `undefined` over it: a v2 retry is
+        // form-encoded, and URLSearchParams turns an undefined value into the literal
+        // string "undefined" rather than omitting the field.
+        const replay = { ...body, ...(alternate || {}) };
+        if (droppingTasklist) delete replay.tasklist_id;
+        response = await send(replay);
+    }
 
     const created = unwrap(response, spec.envelope)[0] || response;
     const task = normaliseTask(created);
@@ -441,8 +597,111 @@ const createTask = async ({ projectId, name, description, endDate, portalId }) =
         throw new ApiError(502, 'Zoho accepted the task but returned no task id');
     }
 
-    logger.info(`[ZohoProjects] Created task ${task.id} in project ${projectId}`);
+    /**
+     * ── THE STATUS IS CHECKED, NOT SET ──
+     * A new task must be open, or the team never picks it up and the client is told
+     * work is underway that nobody can see. But status CANNOT be set at creation:
+     * Zoho's create endpoint takes no status field at all, and `custom_status` exists
+     * only on update. A task is created in the portal's default status, which is its
+     * built-in open one.
+     *
+     * So this asserts rather than assigns. Issuing a second write to set a task to the
+     * status it already has would add a failure mode to the accept path and buy
+     * nothing — but silently creating a CLOSED task would be invisible and wrong, so
+     * that is worth saying out loud.
+     */
+    if (task.statusIsClosed) {
+        logger.warn(
+            `[ZohoProjects] task ${task.id} was created in a CLOSED status ("${task.status}") `
+            + `in project ${projectId} — the project's default status is not an open one, `
+            + 'so approved work will not reach the team'
+        );
+    }
+
+    logger.info(
+        `[ZohoProjects] Created task ${task.id} in project ${projectId} (status: ${task.status || 'unknown'})`
+    );
     return task;
+};
+
+/**
+ * The tasklists in a project, as `{ id, name }`.
+ *
+ * ── WHY IT RETURNS [] INSTEAD OF THROWING ──
+ * Its only caller is the accept path, where this decides which list a task is FILED
+ * under. An empty list means "we could not choose", and the task is created unfiled —
+ * which is exactly what happened before this existed. A throw here would turn a nicety
+ * into a failed approval.
+ */
+const listTasklists = async ({ projectId, portalId } = {}) => {
+    if (!projectId) return [];
+
+    const spec = PATHS.tasklists;
+    const resolvedPortal = await resolvePortalId(portalId);
+    const path = spec.path(resolvedPortal, projectId);
+
+    try {
+        const rows = await paginate({
+            // v2 would want a trailing slash here; v3 refuses one.
+            path,
+            version: spec.version,
+            envelope: spec.envelope,
+            pageSize: PAGE_SIZE.tasklists,
+            maxItems: MAX_TASKLISTS_FETCHED,
+            context: `Listing tasklists for Zoho project ${projectId}`
+        });
+
+        return rows
+            .map((row) => ({ id: asId(row.id, row.id_string), name: toPlainLabel(row.name) }))
+            .filter((row) => row.id && row.name);
+    } catch (error) {
+        logger.warn(
+            `[ZohoProjects] listing tasklists failed for project ${projectId} `
+            + `(continuing without one): ${error.message}`
+        );
+        return [];
+    }
+};
+
+/**
+ * Create a tasklist and return `{ id, name }`.
+ *
+ * Unlike listTasklists this DOES throw, and the difference is deliberate: failing to read
+ * the lists means we file the task nowhere, which is survivable, but failing to create one
+ * we decided to create means the caller must know not to reference it. The caller catches
+ * and falls back to unfiled.
+ *
+ * Nothing here ever deletes a tasklist. A name lives in the agency's shared workspace long
+ * after the request that prompted it, which is why the caller validates the name first.
+ */
+const createTasklist = async ({ projectId, name, portalId } = {}) => {
+    if (!projectId) throw new ApiError(400, 'A project is required to create a tasklist');
+
+    const title = typeof name === 'string' ? name.trim() : '';
+    if (!title) throw new ApiError(400, 'Tasklist name is required');
+
+    const spec = PATHS.tasklists;
+    const resolvedPortal = await resolvePortalId(portalId);
+    const path = spec.path(resolvedPortal, projectId);
+
+    const response = await zohoRequest({
+        method: 'POST',
+        path: spec.version === 'v2' ? `${path}/` : path,
+        version: spec.version,
+        data: { name: title },
+        form: spec.version === 'v2',
+        context: `Creating a Zoho tasklist in project ${projectId}`
+    });
+
+    const created = unwrap(response, spec.envelope)[0] || response;
+    const id = asId(created && (created.id || created.id_string));
+
+    if (!id) {
+        throw new ApiError(502, 'Zoho accepted the tasklist but returned no id');
+    }
+
+    logger.info(`[ZohoProjects] Created tasklist ${id} ("${title}") in project ${projectId}`);
+    return { id, name: toPlainLabel(created.name) || title };
 };
 
 const postTaskComment = async ({ projectId, taskId, comment, portalId }) => {
@@ -535,6 +794,8 @@ module.exports = {
     createProject,
     getProjectTaskUpdates,
     createTask,
+    listTasklists,
+    createTasklist,
     postTaskComment,
     uploadTaskAttachment,
     mapWithConcurrency

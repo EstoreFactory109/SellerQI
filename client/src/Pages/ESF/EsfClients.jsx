@@ -119,7 +119,7 @@ const EsfClients = () => {
   const getPaginationGroup = () => Array.from({ length: totalPages }, (_, i) => i + 1);
 
   const formatDate = (dateString) => {
-    if (!dateString) return '—';
+    if (!dateString) return '-';
     return new Date(dateString).toLocaleDateString('en-GB', {
       day: 'numeric',
       month: 'short',
@@ -137,13 +137,16 @@ const EsfClients = () => {
       const res = await axiosInstance.post('/app/esf/clients/switch', { clientId: client._id });
 
       if (res.data?.statusCode === 200) {
+        // From the switch response, not the list row: a member's list is redacted, so
+        // the row has a label in place of the client's name and email.
+        const opened = res.data.data || {};
         localStorage.setItem(
           'loggedInAsClient',
           JSON.stringify({
-            clientId: client._id,
-            firstName: client.firstName,
-            lastName: client.lastName,
-            email: client.email,
+            clientId: opened.userId || client._id,
+            firstName: opened.firstName,
+            lastName: opened.lastName,
+            email: opened.email,
           })
         );
         localStorage.setItem('isAuth', 'true');
@@ -345,7 +348,7 @@ const EsfClients = () => {
                               {client.identityRedacted ? (
                                 <div className="min-w-0">
                                   <p className="text-sm font-medium text-gray-100 break-words">
-                                    {client.label || '—'}
+                                    {client.label || '-'}
                                   </p>
                                   <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
                                     <Lock className="w-3 h-3 shrink-0" />
@@ -361,13 +364,13 @@ const EsfClients = () => {
                                     <Mail className="w-3 h-3 shrink-0" />
                                     {client.email}
                                   </p>
-                                  <p className="text-xs text-gray-500">{client.phone || '—'}</p>
+                                  <p className="text-xs text-gray-500">{client.phone || '-'}</p>
                                 </div>
                               )}
                             </div>
                           </td>
                           <td className="px-2 py-2.5 text-xs text-gray-400">
-                            <span className="line-clamp-2">{client.brandName || '—'}</span>
+                            <span className="line-clamp-2">{client.brandName || '-'}</span>
                           </td>
                           <td className="px-2 py-2.5 text-xs">
                             {client.zohoProject?.projectId ? (
@@ -392,7 +395,7 @@ const EsfClients = () => {
                           </td>
                           <td className="px-2 py-2.5 text-center">
                             <span className="inline-flex items-center justify-center rounded-full border border-white/10 bg-white/[0.035] px-2 py-1 text-xs font-medium text-gray-400">
-                              {client.addedByName || '—'}
+                              {client.addedByName || '-'}
                             </span>
                           </td>
                           <td className="px-2 py-2.5 text-center text-xs text-gray-500 whitespace-nowrap">

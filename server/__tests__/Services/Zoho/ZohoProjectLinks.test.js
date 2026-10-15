@@ -31,10 +31,17 @@ jest.mock('../../../models/user-auth/sellerCentralModel.js', () => ({
     findOne: jest.fn(),
 }));
 
+// Linking now kicks a first sync. Mocked so these tests never reach Zoho, and so the
+// fire-and-forget contract below can be asserted rather than assumed.
+jest.mock('../../../Services/Zoho/ZohoTaskSync.js', () => ({
+    syncProject: jest.fn(),
+}));
+
 const ZohoProjectsService = require('../../../Services/Zoho/ZohoProjectsService.js');
 const ZohoAuth = require('../../../Services/Zoho/ZohoAuth.js');
 const UserModel = require('../../../models/user-auth/userModel.js');
 const SellerCentralModel = require('../../../models/user-auth/sellerCentralModel.js');
+const ZohoTaskSync = require('../../../Services/Zoho/ZohoTaskSync.js');
 const Links = require('../../../Services/Zoho/ZohoProjectLinks.js');
 
 const CLIENT_ID = '6a9ac3afa1cec42f0bc83988';
@@ -199,6 +206,53 @@ describe('linkProject', () => {
             linkedBy: 'staff-1',
         });
         expect($set.zohoProject.linkedAt).toBeInstanceOf(Date);
+    });
+
+    /**
+     * Linking used to end at the database write, and nothing reads a newly-linked project
+     * until the nightly sweep — so the client's first day in the portal showed an empty
+     * Status page, an empty Untapped page and an empty work list.
+     */
+    test('kicks a first sync for the project it just linked', async () => {
+        ZohoTaskSync.syncProject.mockResolvedValue({});
+
+        await Links.linkProject({ clientId: CLIENT_ID, projectId: '1', staffUserId: 'staff-1' });
+
+        expect(ZohoTaskSync.syncProject).toHaveBeenCalledWith({
+            projectId: '1',
+            projectName: 'Kravox Sports',
+            portalId: '851273093',
+        });
+    });
+
+    test('does not wait for that sync, and a failing one still links', async () => {
+        // A full sync measured ~30s on the live project, which cannot be held on this
+        // response — and a Zoho outage must not stop staff connecting a project at all.
+        let settle;
+        ZohoTaskSync.syncProject.mockReturnValue(new Promise((_, reject) => { settle = reject; }));
+
+        const stored = await Links.linkProject({ clientId: CLIENT_ID, projectId: '1' });
+
+        expect(stored.projectId).toBe('1');
+        expect(UserModel.updateOne).toHaveBeenCalled();
+
+        // Reject only now: the link already resolved without it.
+        settle(new Error('zoho is down'));
+        await new Promise((resolve) => setImmediate(resolve));
+    });
+
+    test.each([
+        ['it throws synchronously', () => { throw new Error('bad require'); }],
+        ['it returns something that is not a promise', () => undefined],
+    ])('still links when the sync misbehaves: %s', async (_label, impl) => {
+        // The link is the staff action; the sync is a convenience. Neither a broken
+        // require nor a mock-shaped return may cost the link.
+        ZohoTaskSync.syncProject.mockImplementation(impl);
+
+        const stored = await Links.linkProject({ clientId: CLIENT_ID, projectId: '1' });
+
+        expect(stored.projectId).toBe('1');
+        expect(UserModel.updateOne).toHaveBeenCalled();
     });
 
     test('re-fetches past the cache before rejecting an unknown id', async () => {

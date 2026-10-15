@@ -69,7 +69,75 @@ const GmailConnectionSchema = new mongoose.Schema({
      * Capped, because an unbounded list here would mean a systemic failure quietly
      * growing a document instead of raising an alarm.
      */
+    /**
+     * LEGACY. Read once by runSync and cleared; see loadBacklog there.
+     *
+     * Kept in the schema on purpose: removing it in the same deploy that adds
+     * pendingMessages would lose whatever backlog existed at the moment of the
+     * restart. Delete it in a LATER release, once /status has shown it empty.
+     */
     pendingMessageIds: { type: [String], default: [] },
+
+    /**
+     * The retry backlog, one entry per message, with enough state to STOP.
+     *
+     * ── WHY THIS IS NO LONGER A BARE LIST OF IDS ──
+     * A set of ids can say "still failing" and nothing else, so nothing in it could ever
+     * expire. That is not theoretical: 37 messages sat in the old field for over a week,
+     * re-fetched on every ten-minute sync, while `lastError` stayed null and
+     * /api/gmail/status reported the connection healthy. The only thing that ever set
+     * lastError was the list passing its 200-entry cap, and a small inbox never gets
+     * there.
+     *
+     * Every one of those 37 was a Gmail 404 - deleted from the mailbox while history.list
+     * still listed it. Unrecoverable by any mechanism, retried forever.
+     *
+     * `attempts` and `firstSeenAt` are both needed to retire an entry, and they are ANDed
+     * rather than ORed. Attempts alone abandons good mail during a long upstream outage,
+     * which at a ten-minute poll is only a few hours of failures. Age alone keeps a
+     * permanently-deleted message in the loop for a full day of pointless API calls.
+     * Giving up means both: many failures AND hours of wall-clock to recover in.
+     *
+     * A message Gmail answers 404 for skips both bounds - see PERMANENT_FAILURE in
+     * GmailIngestService. There is nothing to wait for.
+     */
+    pendingMessages: {
+        type: [new mongoose.Schema({
+            id: { type: String, required: true },
+            attempts: { type: Number, default: 0 },
+            firstSeenAt: { type: Date, default: Date.now },
+            lastAttemptAt: { type: Date, default: null },
+            /** 'throw' | 'deferred' — a thrown error and a deferral are different failures. */
+            lastOutcome: { type: String, enum: ['throw', 'deferred'], default: 'throw' },
+            /** The error message, truncated. NEVER a body, an address or a subject. */
+            lastReason: { type: String, default: null },
+        }, { _id: false })],
+        default: [],
+    },
+
+    /**
+     * Messages we have STOPPED retrying. Retired, not deleted.
+     *
+     * ── WHY THIS IS NOT A SILENT DROP, AND MUST NEVER BECOME ONE ──
+     * The whole backlog exists so the cursor can advance without losing a client's email.
+     * Retiring an entry takes it out of the hot retry loop; it does not remove the ability
+     * to recover it. The Gmail id survives here, the count is on /api/gmail/status, and
+     * POST /api/gmail/pending/requeue puts one back with its counter reset.
+     *
+     * If a later change makes retirement quiet - prunes this list, or drops the status
+     * field - it has reintroduced exactly the bug this was added to end.
+     */
+    deadLetterMessages: {
+        type: [new mongoose.Schema({
+            id: { type: String, required: true },
+            attempts: { type: Number, default: 0 },
+            firstSeenAt: { type: Date, default: null },
+            retiredAt: { type: Date, default: Date.now },
+            lastOutcome: { type: String, default: null },
+            lastReason: { type: String, default: null },
+        }, { _id: false })],
+        default: [],
+    },
 
     /** Gmail expires a watch after ~7 days; the renewal cron reads this. */
     watchExpiration: { type: Date, default: null },

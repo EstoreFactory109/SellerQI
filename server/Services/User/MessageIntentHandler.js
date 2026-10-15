@@ -95,6 +95,23 @@ const handleClientMessage = async ({ rawText, user, thread, message }) => {
         return null;
     }
 
+    /**
+     * Same check the portal form runs before queuing — see TaskRequestService for why.
+     * Here a request is never even staged, so there is nothing for an admin to notice
+     * and merge away; telling the client directly is the only way they learn this.
+     */
+    const { findInProgressMatch } = require('./TaskRequestService.js');
+    const duplicate = await findInProgressMatch({
+        userId: user._id,
+        title: intent.title,
+        description: intent.description || intent.title,
+    });
+    if (duplicate.inProgress) {
+        logger.info(`[MessageIntent] thread ${thread._id} asked for work already in progress (task ${duplicate.taskId})`);
+        await notifyAlreadyInProgress({ thread, taskName: duplicate.taskName });
+        return null;
+    }
+
     const bundle = buildIdentityBundle(user);
 
     const request = await TaskRequest.create({
@@ -197,6 +214,33 @@ const askForMissingDetails = async ({ request, thread }) => {
 };
 
 /**
+ * Tell the client this is already being worked on, since no request is queued for an
+ * admin to see and reply to on their behalf.
+ *
+ * Non-fatal, same reasoning as askForMissingDetails: nothing was ever created for
+ * this message, so a failed reply here just means it goes unanswered on this one
+ * point — exactly how it behaved before this check existed.
+ */
+const notifyAlreadyInProgress = async ({ thread, taskName }) => {
+    try {
+        const { sendAutomatedReply } = require('../Gmail/GmailSendService.js');
+
+        await sendAutomatedReply({
+            threadId: thread._id,
+            body: [
+                'Thanks for the note — this already looks like something your team is '
+                + `working on${taskName ? ` ("${taskName}")` : ''}.`,
+                '',
+                'Check your Status page for the latest update, or let us know if this is '
+                + 'actually something different and we will take another look.',
+            ].join('\n'),
+        });
+    } catch (error) {
+        logger.warn(`[MessageIntent] could not send the already-in-progress reply: ${error.message}`);
+    }
+};
+
+/**
  * Read a staff reply for a decision on the request waiting in this conversation.
  *
  * STAGES it. Nothing here changes a status or touches Zoho — see the file header for
@@ -258,4 +302,6 @@ const analyseMessage = async ({ direction, origin, rawText, user, thread, messag
     }
 };
 
-module.exports = { analyseMessage, handleClientMessage, handleStaffMessage, askForMissingDetails };
+module.exports = {
+    analyseMessage, handleClientMessage, handleStaffMessage, askForMissingDetails, notifyAlreadyInProgress,
+};

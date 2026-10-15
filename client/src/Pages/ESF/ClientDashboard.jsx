@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSelector } from 'react-redux';
-import { Navigate, Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { PALETTE } from '../../Components/ESF/estoreFactoryTheme.js';
 import axiosInstance from '../../config/axios.config.js';
 // Read from the pages these cards summarise, so Overview can never show a number
 // that page disagrees with.
-import { NEXT_REPORT } from './EstoreFactory/Reports.jsx';
+import useNextReport, { formatDueLabel, formatDueTitle } from '../../hooks/useNextReport.js';
 
 /**
  * "Overview" — the landing page of the Estore Factory section on a client's own
@@ -45,9 +45,10 @@ const MARKETPLACE_DOMAIN = {
 
 /** Each card is a doorway to the section it summarises — the mock's cards looked
  *  clickable but swallowed the click, so they now actually navigate. */
-const StatCard = ({ label, value, valueColor, sub, subColor, tone, href }) => (
+const StatCard = ({ label, value, valueColor, sub, subColor, tone, href, title }) => (
     <Link
         to={href}
+        title={title || undefined}
         className="flex flex-col gap-3 rounded-lg p-5 pb-[18px] transition-colors"
         style={{
             background: tone === 'alert' ? PALETTE.amberBg : PALETTE.surface,
@@ -108,17 +109,26 @@ const CLAMP_2 = { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: '
 /**
  * One line of "What we're working on".
  *
- * Carries the AI progress summary, which is the whole point of this section — the
- * task NAME alone ("Details", "Progress update") tells a client nothing, and the
- * summary is what turns it into an update they can actually read.
+ * Carries the newest dated line of the AI progress summary, which is the whole
+ * point of this section — the task NAME alone ("Details", "Progress update")
+ * tells a client nothing, and the update is what turns it into something they
+ * can actually read.
+ *
+ * `latestSummaryLine`, not `summary`. The Status page's own detail panel wants
+ * the full dated history and renders it with white-space: pre-line; this is a
+ * compact "what's happening right now" row with no such handling, so handing
+ * it the whole multi-day text would collapse every "\n" into a plain space —
+ * one run-on sentence, then cut off mid-word by the two-line clamp below.
+ * `latestSummaryLine` is already just the single newest line, computed
+ * server-side in EsfProjectStatusController.js alongside `summary`.
  */
 const WorkItemRow = ({ task, status }) => (
     <div className="flex items-start gap-4 py-[15px]" style={{ borderTop: `1px solid ${PALETTE.divider}` }}>
         <div className="flex-1 min-w-0 flex flex-col gap-[5px]">
             <span className="text-[13.5px]" style={{ color: PALETTE.textBody }}>{task.name}</span>
-            {task.summary && (
+            {task.latestSummaryLine && (
                 <span className="text-[12.5px] leading-[1.55]" style={{ color: PALETTE.textTertiary, ...CLAMP_2 }}>
-                    {task.summary}
+                    {task.latestSummaryLine}
                 </span>
             )}
             {task.team && (
@@ -161,15 +171,25 @@ const ClientDashboard = () => {
     // so the two pages cannot report different numbers for the same work.
     const [board, setBoard] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState('');
 
     const loadBoard = useCallback(async () => {
         try {
             const res = await axiosInstance.get('/api/pagewise/esf/project-status');
             setBoard(res.data?.data || null);
-        } catch {
-            // Fails quiet: the header above still renders, and every section below
-            // degrades to its own empty state rather than the page erroring out.
+            setLoadError('');
+        } catch (err) {
+            /*
+             * Keep the failure, rather than swallowing it.
+             *
+             * This used to set board = null and say nothing, which made `linked` false —
+             * so a 500, a dropped connection or a 403 all rendered "No project is connected
+             * to your account yet". That is a confident, false statement about the client's
+             * own account, and the one thing worse than an error is an error disguised as a
+             * fact. Status.jsx and Untapped.jsx both already do it this way.
+             */
             setBoard(null);
+            setLoadError(err.response?.data?.message || 'Could not load your account right now.');
         } finally {
             setLoading(false);
         }
@@ -177,20 +197,27 @@ const ClientDashboard = () => {
 
     useEffect(() => { loadBoard(); }, [loadBoard]);
 
-    // Same admission rule as the backend's esfClientOnly middleware (server/middlewares/
-    // Auth/esfClientOnly.js): isEsfClient, or a superAdmin servicing the account.
-    // user is null only for an instant on first load (ProtectedRouteWrapper populates
-    // it); undefined here means "not decided yet", not "denied" — only redirect once
-    // we actually know.
-    if (user && user.isEsfClient !== true && user.accessType !== 'superAdmin') {
-        return <Navigate to="/seller-central-checker/dashboard" replace />;
-    }
+    // The admission check used to live here. It now sits on the route
+    // (Layout/EsfClientOnlyRoute.jsx) so the six estore-factory pages get it too, and
+    // so a denied account never mounts this component — the old check ran after the
+    // hooks, which meant loadBoard had already fired its 403 before the redirect.
 
     const marketplaces = (user?.sellerCentral?.sellerAccount || []).filter((acc) => acc.country);
 
     // From the dashboard API, not counted on this page: the Messages page and this
     // card must never disagree by counting differently.
     const openTickets = board?.openMessageCount ?? 0;
+    const nextReport = useNextReport();
+    /*
+     * One report gets named; several get counted. Weekly sends three in one email, so
+     * naming "the first" would be the hardcoded-constant bug again in a smaller font —
+     * and which one came first would change as the client's data changed.
+     */
+    const nextReportSub = nextReport?.status === 'scheduled'
+        ? (nextReport.reportCount === 1
+            ? nextReport.reportNames[0]
+            : `${nextReport.cadenceLabel} - ${nextReport.reportCount} reports`)
+        : (nextReport?.note || '-');
 
     const linked = Boolean(board?.linked);
     const inProgress = board?.inProgress || [];
@@ -218,7 +245,7 @@ const ClientDashboard = () => {
     const activity = [...completed]
         .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
         .slice(0, 6)
-        .map((t) => ({ text: `${t.name} — completed`, time: relativeTime(t.updatedAt) }));
+        .map((t) => ({ text: `${t.name} - completed`, time: relativeTime(t.updatedAt) }));
 
     // The biggest thing nobody has picked up yet, straight from the audit. Already
     // filtered against open Zoho tasks at sync time, so it is never something the
@@ -273,14 +300,14 @@ const ClientDashboard = () => {
                 <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                     <StatCard
                         label="Tasks in progress"
-                        value={loading ? '—' : String(inProgress.length)}
+                        value={loading ? '-' : String(inProgress.length)}
                         valueColor={PALETTE.good}
                         sub="Your team is handling this"
                         href={STATUS_PAGE}
                     />
                     <StatCard
                         label="Waiting on you"
-                        value={loading ? '—' : String(waitingOnYou.length)}
+                        value={loading ? '-' : String(waitingOnYou.length)}
                         valueColor={waitingOnYou.length > 0 ? PALETTE.amberValue : PALETTE.textPrimary}
                         sub={waitingOnYou.length === 0
                             ? 'Nothing needs your reply'
@@ -300,10 +327,11 @@ const ClientDashboard = () => {
                     />
                     <StatCard
                         label="Next report"
-                        value={NEXT_REPORT.due}
+                        value={nextReport?.at ? formatDueLabel(nextReport.at) : '-'}
                         valueColor={PALETTE.textPrimary}
-                        sub={NEXT_REPORT.name}
+                        sub={nextReportSub}
                         href={REPORTS_PAGE}
+                        title={formatDueTitle(nextReport)}
                     />
                 </section>
 
@@ -314,7 +342,9 @@ const ClientDashboard = () => {
                         <h2 className="m-0 mb-3 text-[15px] font-semibold tracking-[-0.01em]">What we&rsquo;re working on</h2>
 
                         {loading && <EmptyLine>Loading…</EmptyLine>}
-                        {!loading && !linked && <EmptyLine>No project is connected to your account yet.</EmptyLine>}
+                        {!loading && loadError && <EmptyLine>{loadError}</EmptyLine>}
+                        {!loading && !loadError && !linked
+                            && <EmptyLine>No project is connected to your account yet.</EmptyLine>}
                         {!loading && linked && workItems.length === 0 && <EmptyLine>Nothing is in progress right now.</EmptyLine>}
 
                         {workItems.map((task) => (

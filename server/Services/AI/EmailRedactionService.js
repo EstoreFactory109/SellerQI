@@ -34,8 +34,21 @@ const { redactAll, containsIdentity, PLACEHOLDER } = require('../Email/identityR
 
 const MODEL = process.env.EMAIL_REDACTION_MODEL || 'gpt-4o-mini';
 
-/** Bumped when the prompt or output contract changes, so stored text is regenerated. */
-const REDACTION_VERSION = 1;
+/**
+ * Bumped when the prompt or output contract changes, so stored text is regenerated.
+ *
+ * 2 — the deterministic pass now catches phone numbers written with no separators at all
+ *     ("+61424812404", "0412841105") and strips Gmail's "<tel:…>" artifact, which had been
+ *     carrying a second copy of a number whose visible twin was already replaced.
+ *
+ * Worth knowing what a bump does and does not do here. It invalidates the reuse gate
+ * below, but ingest never passes the reuse options in the first place, so every message
+ * is redacted from scratch anyway. Nothing re-reads messages already stored, and the
+ * "re-fetch the original from Gmail" recovery the model header describes does not exist
+ * as code — so a body stored under version 1 keeps whatever version 1 missed until it is
+ * re-ingested through the backfill endpoint.
+ */
+const REDACTION_VERSION = 2;
 
 const MAX_INPUT_CHARS = 6000;
 const MAX_OUTPUT_TOKENS = 1200;

@@ -55,10 +55,10 @@ const money = (amount, currencyCode = 'USD') => {
 };
 
 const shortDate = (value) => {
-    if (!value) return '—';
+    if (!value) return '-';
     const d = new Date(value);
     return Number.isNaN(d.getTime())
-        ? '—'
+        ? '-'
         : d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
@@ -175,7 +175,7 @@ const Billing = () => {
                         <span className="text-[11.5px] tracking-[.04em]" style={{ color: PALETTE.textMuted }}>BILLED TO</span>
                         {billedTo ? (
                             <>
-                                <span className="text-[13.5px]" style={{ color: PALETTE.textBody }}>{billedTo.companyName || '—'}</span>
+                                <span className="text-[13.5px]" style={{ color: PALETTE.textBody }}>{billedTo.companyName || '-'}</span>
                                 {billedTo.address && (
                                     <span className="text-[12.5px] leading-[1.55]" style={{ color: PALETTE.textSecondary }}>
                                         {[billedTo.address.street, billedTo.address.street2].filter(Boolean).join(', ')}
@@ -185,7 +185,7 @@ const Billing = () => {
                                 )}
                             </>
                         ) : (
-                            <span className="text-[13px]" style={{ color: PALETTE.textMuted }}>{loading ? 'Loading…' : '—'}</span>
+                            <span className="text-[13px]" style={{ color: PALETTE.textMuted }}>{loading ? 'Loading…' : '-'}</span>
                         )}
                     </div>
 
@@ -290,7 +290,7 @@ const Billing = () => {
                                         <span className="text-[13px] tabular-nums" style={{ color: PALETTE.textBody }}>{inv.number}</span>
                                         <span className="text-[13px]" style={{ color: PALETTE.textTertiary }}>{shortDate(inv.date)}</span>
                                         <span className="text-[13px] min-w-0 truncate" style={{ color: PALETTE.textInputBody }} title={inv.description || ''}>
-                                            {inv.description || '—'}
+                                            {inv.description || '-'}
                                         </span>
                                         <span className="text-[13px] text-right tabular-nums" style={{ color: PALETTE.textBody }}>
                                             {money(inv.total, inv.currencyCode)}

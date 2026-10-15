@@ -109,6 +109,10 @@ const present = (request, meta) => ({
     decidedAt: request.decidedAt,
     rejectionReason: request.rejectionReason,
     zohoTaskId: request.zohoTaskId,
+    // Where it was filed, so a wrong choice is visible on the queue rather than only in
+    // Zoho — and so a run of newly-created lists is noticeable as it happens.
+    zohoTasklistName: request.zohoTasklistName || null,
+    tasklistChosenBy: request.tasklistChosenBy || 'none',
 });
 
 /**

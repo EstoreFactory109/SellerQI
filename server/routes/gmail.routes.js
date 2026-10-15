@@ -15,6 +15,7 @@
  * - DELETE /api/gmail/disconnect     forget the connection (owner/admin)
  * - POST   /api/gmail/watch          start or renew the push watch (owner/admin)
  * - POST   /api/gmail/backfill       recover an expired cursor (owner/admin)
+ * - POST   /api/gmail/pending/requeue  put a retired message back into the backlog (owner/admin)
  * - POST   /api/gmail/pubsub/push    Google's push target (NO auth — OIDC verified)
  */
 
@@ -29,6 +30,7 @@ const {
     startGmailWatch,
     handlePubSubPush,
     runGmailBackfill,
+    requeueGmailPending,
 } = require('../controllers/integration/GmailController.js');
 
 router.get('/status', esfAuth, getGmailStatus);
@@ -41,6 +43,7 @@ router.get('/auth/callback', handleGmailCallback);
 router.delete('/disconnect', esfAuth, disconnectGmail);
 router.post('/watch', esfAuth, startGmailWatch);
 router.post('/backfill', esfAuth, runGmailBackfill);
+router.post('/pending/requeue', esfAuth, requeueGmailPending);
 
 /**
  * Google's push notifications. Unauthenticated by necessity, like the OAuth callback —

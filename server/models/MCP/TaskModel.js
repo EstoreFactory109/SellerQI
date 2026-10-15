@@ -56,6 +56,18 @@ const TaskSchema = new mongoose.Schema({
         ref: 'User',
         required: true
     },
+    // Renewal is per marketplace. With a single document per user, whichever
+    // marketplace rebuilt first set the renewal date for all of them, so the
+    // others were left on the insert-only path and never rebuilt on their own.
+    // Optional so pre-existing documents stay valid until backfilled.
+    country: {
+        type: String,
+        index: true
+    },
+    region: {
+        type: String,
+        index: true
+    },
     // DEPRECATED: Tasks are now stored in TaskItem collection
     // This field is kept for backward compatibility and will be migrated
     tasks: {
@@ -70,8 +82,10 @@ const TaskSchema = new mongoose.Schema({
     timestamps: true
 });
 
-// Ensure only one document per user
-TaskSchema.index({ userId: 1 }, { unique: true });
+// One document per user PER MARKETPLACE. The old unique index was on userId
+// alone; it has to be dropped explicitly, see
+// scripts/migrateScopeTasksToMarketplace.js.
+TaskSchema.index({ userId: 1, country: 1, region: 1 }, { unique: true, name: 'task_meta_marketplace' });
 
 /**
  * Check if this document has legacy embedded tasks that need migration

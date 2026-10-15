@@ -19,10 +19,33 @@ jest.mock('../../../Services/Gmail/GmailSendService.js', () => ({
 }));
 
 const mockCreateTask = jest.fn();
-jest.mock('../../../Services/Zoho/ZohoProjectsService.js', () => ({ createTask: (...a) => mockCreateTask(...a) }));
+const mockListTasklists = jest.fn();
+const mockCreateTasklist = jest.fn();
+jest.mock('../../../Services/Zoho/ZohoProjectsService.js', () => ({
+    createTask: (...a) => mockCreateTask(...a),
+    listTasklists: (...a) => mockListTasklists(...a),
+    createTasklist: (...a) => mockCreateTasklist(...a),
+}));
+
+/**
+ * The tasklist router, stubbed to "no opinion" by default.
+ *
+ * Mocked rather than left to run: the real one degrades deterministically with no
+ * OPENAPI_KEY, so leaving it live would quietly exercise the token fallback in every
+ * unrelated accept test and make those depend on word overlap in their fixtures.
+ */
+const mockRoute = jest.fn();
+jest.mock('../../../Services/AI/TasklistRouterService.js', () => ({
+    route: (...a) => mockRoute(...a),
+}));
 
 const mockSyncProject = jest.fn();
-jest.mock('../../../Services/Zoho/ZohoTaskSync.js', () => ({ syncProject: (...a) => mockSyncProject(...a) }));
+jest.mock('../../../Services/Zoho/ZohoTaskSync.js', () => {
+    // classifyTask/SECTIONS are pure data rules reused as-is — only syncProject (which
+    // reaches Zoho and the DB) is stubbed.
+    const real = jest.requireActual('../../../Services/Zoho/ZohoTaskSync.js');
+    return { ...real, syncProject: (...a) => mockSyncProject(...a) };
+});
 
 const mockCreate = jest.fn();
 const mockCount = jest.fn();
@@ -39,6 +62,21 @@ jest.mock('../../../models/system/TaskRequestModel.js', () => {
 
 const mockUserFindById = jest.fn();
 jest.mock('../../../models/user-auth/userModel.js', () => ({ findById: (...a) => mockUserFindById(...a) }));
+
+/**
+ * The client's open Zoho tasks, read by findInProgressMatch before a request is ever
+ * queued. Empty by default so every existing test below (none of which are about this
+ * check) keeps behaving exactly as it did before the check existed.
+ */
+const mockTaskFind = jest.fn();
+jest.mock('../../../models/system/ZohoProjectTaskModel.js', () => ({
+    find: (...a) => mockTaskFind(...a),
+}));
+
+const mockMatchOpportunities = jest.fn();
+jest.mock('../../../Services/AI/ZohoOpportunityMatchService.js', () => ({
+    matchOpportunities: (...a) => mockMatchOpportunities(...a),
+}));
 
 const TaskRequestService = require('../../../Services/User/TaskRequestService.js');
 
@@ -68,10 +106,19 @@ beforeEach(() => {
     mockSendTaskRequestEmail.mockResolvedValue({ gmailMessageId: 'gm-1' });
     mockCreate.mockImplementation(async (doc) => ({ ...doc, _id: 'tr-1' }));
     mockCreateTask.mockResolvedValue({ id: 'zoho-99' });
+    mockListTasklists.mockResolvedValue([]);
+    mockCreateTasklist.mockResolvedValue({ id: 'tl-new', name: 'New List' });
+    mockRoute.mockResolvedValue({
+        tasklistId: null, tasklistName: null, newTasklistName: null, chosenBy: 'none',
+    });
     mockSyncProject.mockResolvedValue({});
     mockUserFindById.mockReturnValue(chain({
         zohoProject: { projectId: 'p1', projectName: 'Morgan Repellent', portalId: 'portal-1' },
     }));
+    // No open tasks by default — findInProgressMatch short-circuits before ever calling
+    // the AI matcher, so every pre-existing test here is unaffected by this check.
+    mockTaskFind.mockReturnValue(chain([]));
+    mockMatchOpportunities.mockResolvedValue({ matches: [{ candidateId: 'request', covered: false }] });
 });
 
 describe('submitting', () => {
@@ -130,6 +177,76 @@ describe('submitting', () => {
 
         await expect(submit()).rejects.toThrow(/already have 10 requests/);
         expect(mockSendTaskRequestEmail).not.toHaveBeenCalled();
+    });
+});
+
+describe('catching a duplicate before it is ever queued', () => {
+    test('a client with no open Zoho tasks is never checked against the AI matcher', async () => {
+        await submit();
+
+        expect(mockMatchOpportunities).not.toHaveBeenCalled();
+        expect(mockSendTaskRequestEmail).toHaveBeenCalled();
+    });
+
+    test('an open task the AI judges to already cover this refuses the request, before any email or row', async () => {
+        mockTaskFind.mockReturnValue(chain([
+            { taskId: 'z1', name: 'Content Phase 1', tasklist: 'Content', isCompleted: false, statusIsClosed: false, startDate: null },
+        ]));
+        mockMatchOpportunities.mockResolvedValue({
+            matches: [{ candidateId: 'request', covered: true, coveredByTaskId: 'z1', coveredByTaskName: 'Content Phase 1' }],
+        });
+
+        await expect(submit()).rejects.toThrow(/already.*in progress/i);
+        expect(mockSendTaskRequestEmail).not.toHaveBeenCalled();
+        expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    test('names the matched task in the message the client sees', async () => {
+        mockTaskFind.mockReturnValue(chain([
+            { taskId: 'z1', name: 'Content Phase 1', tasklist: 'Content', isCompleted: false, statusIsClosed: false, startDate: null },
+        ]));
+        mockMatchOpportunities.mockResolvedValue({
+            matches: [{ candidateId: 'request', covered: true, coveredByTaskId: 'z1', coveredByTaskName: 'Content Phase 1' }],
+        });
+
+        await expect(submit()).rejects.toThrow(/Content Phase 1/);
+    });
+
+    test('an open task the AI judges UNRELATED still lets the request through', async () => {
+        mockTaskFind.mockReturnValue(chain([
+            { taskId: 'z1', name: 'Reimbursement claims', tasklist: 'Finance', isCompleted: false, statusIsClosed: false, startDate: null },
+        ]));
+        mockMatchOpportunities.mockResolvedValue({
+            matches: [{ candidateId: 'request', covered: false }],
+        });
+
+        await submit();
+
+        expect(mockSendTaskRequestEmail).toHaveBeenCalled();
+    });
+
+    test('a completed task is never treated as still in progress', async () => {
+        // Same rule refreshSuggestedWork uses for the Dashboard: if the team finished the
+        // work and the client asks again, that is worth raising, not suppressing.
+        mockTaskFind.mockReturnValue(chain([
+            { taskId: 'z1', name: 'Add a size chart', tasklist: 'Content', isCompleted: true, statusIsClosed: false, startDate: null },
+        ]));
+
+        await submit();
+
+        // Never even reached the AI matcher: the only task on file was filtered out as
+        // completed before the open-tasks list was built.
+        expect(mockMatchOpportunities).not.toHaveBeenCalled();
+        expect(mockSendTaskRequestEmail).toHaveBeenCalled();
+    });
+
+    test('a client with no linked Zoho project is never checked — nothing to compare against', async () => {
+        mockUserFindById.mockReturnValue(chain({ zohoProject: {} }));
+
+        await submit();
+
+        expect(mockTaskFind).not.toHaveBeenCalled();
+        expect(mockSendTaskRequestEmail).toHaveBeenCalled();
     });
 });
 
@@ -240,5 +357,153 @@ describe('rejecting', () => {
     test('refuses a rejection with no reason', async () => {
         // A client told "no" with no explanation re-submits the same request.
         await expect(reject(pending(), '   ')).rejects.toThrow(/reason/);
+    });
+});
+
+/** Local copies — the accept helpers above are scoped inside their own describe. */
+const filingDoc = (over = {}) => ({
+    _id: 'tr-1',
+    userId: 'u1',
+    status: 'pending',
+    titleRaw: 'Add a size chart',
+    descriptionRaw: 'The mixing bowl listing needs a size chart.',
+    neededBy: null,
+    attachments: [],
+    save: jest.fn().mockResolvedValue(undefined),
+    ...over,
+});
+
+const acceptFiling = () => {
+    mockFindById.mockReturnValue({ select: () => Promise.resolve(filingDoc()) });
+    return TaskRequestService.acceptTaskRequest({ requestId: 'tr-1', staffUserId: 'admin-1' });
+};
+
+describe('filing the new task under a tasklist', () => {
+    const LISTS = [
+        { id: 'tl-1', name: 'Seller Central Task' },
+        { id: 'tl-2', name: 'Walmart' },
+        { id: 'tl-3', name: 'Graphics' },
+    ];
+
+    beforeEach(() => {
+        mockListTasklists.mockResolvedValue(LISTS);
+        mockCreateTask.mockResolvedValue({ id: 'zoho-99', tasklistId: 'tl-2', tasklist: 'Walmart' });
+    });
+
+    test('a chosen list is sent to Zoho and recorded on the request', async () => {
+        mockRoute.mockResolvedValue({
+            tasklistId: 'tl-2', tasklistName: 'Walmart', newTasklistName: null, chosenBy: 'ai',
+        });
+
+        const doc = await acceptFiling();
+
+        expect(mockCreateTask.mock.calls[0][0].tasklistId).toBe('tl-2');
+        expect(doc.zohoTasklistId).toBe('tl-2');
+        expect(doc.zohoTasklistName).toBe('Walmart');
+        expect(doc.tasklistChosenBy).toBe('ai');
+        expect(mockCreateTasklist).not.toHaveBeenCalled();
+    });
+
+    test('a proposed name that already exists reuses that list instead of creating a twin', async () => {
+        // The likeliest way this clutters a project: two lists differing only in case.
+        mockRoute.mockResolvedValue({
+            tasklistId: null, tasklistName: null, newTasklistName: 'graphics', chosenBy: 'ai',
+        });
+        mockCreateTask.mockResolvedValue({ id: 'zoho-99', tasklistId: 'tl-3', tasklist: 'Graphics' });
+
+        const doc = await acceptFiling();
+
+        expect(mockCreateTasklist).not.toHaveBeenCalled();
+        expect(mockCreateTask.mock.calls[0][0].tasklistId).toBe('tl-3');
+        expect(doc.tasklistChosenBy).toBe('ai');
+    });
+
+    test('a genuinely new name creates the list and says so', async () => {
+        mockRoute.mockResolvedValue({
+            tasklistId: null, tasklistName: null, newTasklistName: 'Video Production', chosenBy: 'ai',
+        });
+        mockCreateTasklist.mockResolvedValue({ id: 'tl-9', name: 'Video Production' });
+        mockCreateTask.mockResolvedValue({ id: 'zoho-99', tasklistId: 'tl-9', tasklist: 'Video Production' });
+
+        const doc = await acceptFiling();
+
+        expect(mockCreateTasklist).toHaveBeenCalledWith(expect.objectContaining({ name: 'Video Production' }));
+        expect(doc.tasklistChosenBy).toBe('created');
+        expect(doc.zohoTasklistName).toBe('Video Production');
+    });
+
+    test('a cluttered project never gets another list', async () => {
+        // 25 lists is already a navigation problem; one more per unusual request is how
+        // it becomes unusable.
+        mockListTasklists.mockResolvedValue(
+            Array.from({ length: TaskRequestService.MAX_TASKLISTS_PER_PROJECT }, (_, i) => ({ id: `t${i}`, name: `List ${i}` }))
+        );
+        mockRoute.mockResolvedValue({
+            tasklistId: null, tasklistName: null, newTasklistName: 'Another One', chosenBy: 'ai',
+        });
+        mockCreateTask.mockResolvedValue({ id: 'zoho-99' });
+
+        const doc = await acceptFiling();
+
+        expect(mockCreateTasklist).not.toHaveBeenCalled();
+        expect(doc.zohoTaskId).toBe('zoho-99');
+        expect(doc.tasklistChosenBy).toBe('none');
+    });
+});
+
+describe('filing never blocks an approval', () => {
+    test('a dead tasklists endpoint still creates the task, unfiled', async () => {
+        // Filing is a nicety; approving the work is not. This is exactly the behaviour
+        // that existed before tasklists were considered at all.
+        mockListTasklists.mockRejectedValue(new Error('INVALID_OAUTHSCOPE'));
+        mockCreateTask.mockResolvedValue({ id: 'zoho-99' });
+
+        const doc = await acceptFiling();
+
+        expect(doc.status).toBe('accepted');
+        expect(doc.zohoTaskId).toBe('zoho-99');
+        expect(mockCreateTask.mock.calls[0][0].tasklistId).toBeNull();
+    });
+
+    test('a failure to CREATE the list still creates the task', async () => {
+        mockListTasklists.mockResolvedValue([{ id: 'tl-1', name: 'Graphics' }]);
+        mockRoute.mockResolvedValue({
+            tasklistId: null, tasklistName: null, newTasklistName: 'Video Production', chosenBy: 'ai',
+        });
+        mockCreateTasklist.mockRejectedValue(new Error('Zoho said no'));
+        mockCreateTask.mockResolvedValue({ id: 'zoho-99' });
+
+        const doc = await acceptFiling();
+
+        expect(doc.status).toBe('accepted');
+        expect(doc.tasklistChosenBy).toBe('none');
+    });
+
+    test('a router that throws still creates the task', async () => {
+        mockListTasklists.mockResolvedValue([{ id: 'tl-1', name: 'Graphics' }]);
+        mockRoute.mockRejectedValue(new Error('model exploded'));
+        mockCreateTask.mockResolvedValue({ id: 'zoho-99' });
+
+        const doc = await acceptFiling();
+
+        expect(doc.status).toBe('accepted');
+    });
+
+    test('the record follows where the task LANDED, not what we asked for', async () => {
+        /**
+         * createTask replays without tasklist_id when Zoho refuses the field, so the
+         * requested list and the actual one can differ. Recording the request would
+         * claim a filing that never happened.
+         */
+        mockListTasklists.mockResolvedValue([{ id: 'tl-2', name: 'Walmart' }]);
+        mockRoute.mockResolvedValue({
+            tasklistId: 'tl-2', tasklistName: 'Walmart', newTasklistName: null, chosenBy: 'ai',
+        });
+        mockCreateTask.mockResolvedValue({ id: 'zoho-99', tasklistId: null, tasklist: null });
+
+        const doc = await acceptFiling();
+
+        expect(doc.zohoTasklistId).toBeNull();
+        expect(doc.tasklistChosenBy).toBe('none');
     });
 });

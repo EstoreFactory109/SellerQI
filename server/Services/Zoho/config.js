@@ -45,6 +45,20 @@ const SCOPES = [
     // INVALID_OAUTHSCOPE, which is indistinguishable from a bad token until you read
     // the error body.
     'ZohoProjects.tasks.ALL',
+    /**
+     * ALL, not READ: accepting a client's task request files it under a tasklist, and
+     * creates one when nothing fits.
+     *
+     * Added 2026-09-25. Before this the tasklists endpoint answered 401
+     * INVALID_OAUTHSCOPE on BOTH v2 and v3 — the reason ZohoTaskSync reconstructs the
+     * Untapped tree out of ordinary tasks instead of asking for tasklists directly.
+     *
+     * Adding it cost a reconnect, per the warning above. If tasklist calls still 401
+     * after that reconnect, suspect THIS STRING rather than the code: Zoho's consent URL
+     * accepts any scope name without validating it, so a typo here consents cleanly and
+     * then fails exactly as if the scope were missing.
+     */
+    'ZohoProjects.tasklists.ALL',
     'ZohoProjects.activities.READ',
     'ZohoProjects.status.READ',
 
@@ -112,6 +126,20 @@ const PATHS = {
         version: 'v3',
         path: (portalId, projectId) => `/portal/${portalId}/projects/${projectId}/tasks`,
         envelope: 'tasks'
+    },
+
+    /**
+     * Tasklists — read to choose one, written to create one.
+     *
+     * v3, confirmed against the live portal on 2026-09-25 once the tasklists scope was
+     * granted. Worth recording because it could not be established before then: both
+     * generations answered 401 INVALID_OAUTHSCOPE, and that 401 masks which one actually
+     * serves the resource.
+     */
+    tasklists: {
+        version: 'v3',
+        path: (portalId, projectId) => `/portal/${portalId}/projects/${projectId}/tasklists`,
+        envelope: 'tasklists'
     },
 
     taskComments: {
@@ -198,6 +226,7 @@ const BILLING_PATHS = {
 const PAGE_SIZE = {
     projects: 200,
     tasks: 200,
+    tasklists: 100,
     comments: 100,
     activities: 100,
     statuses: 100

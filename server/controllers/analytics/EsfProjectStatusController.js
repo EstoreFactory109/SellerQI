@@ -16,6 +16,7 @@ const logger = require('../../utils/Logger.js');
 const UserModel = require('../../models/user-auth/userModel.js');
 const ZohoTaskSync = require('../../Services/Zoho/ZohoTaskSync.js');
 const { ATTACHMENTS_ENABLED } = require('../../Services/Zoho/config.js');
+const { latestLine } = require('../../Services/AI/ZohoTaskSummaryService.js');
 
 /**
  * Only what the page renders.
@@ -50,7 +51,14 @@ const toClientTask = (task) => {
         endDate: task.endDate,
         updatedAt: task.taskUpdatedAt,
         hasAttachments: task.hasAttachments,
+        // The full, dated, multi-line history — for the Status page's detail
+        // panel, which renders it with white-space: pre-line.
         summary: task.commentSummary?.text || null,
+        // Just the newest dated line — for a surface with room for one line,
+        // such as the Client Dashboard's "What we're working on" widget. Kept
+        // alongside `summary` rather than replacing it, since the two surfaces
+        // genuinely want different shapes of the same underlying text.
+        latestSummaryLine: latestLine(task.commentSummary?.text),
         updateCount: comments.length,
         lastUpdateAt: latest?.createdAt || null,
         waitingOnYou: task.waitingOnClient?.ask
@@ -109,6 +117,35 @@ const loadTaskRequests = async (userId) => {
     }));
 };
 
+/**
+ * Unresolved conversations for this client, for the Overview page's "Open tickets" card.
+ *
+ * ── WHY IT LIVES ON THIS ROUTE ──
+ * The Overview page reads `board.openMessageCount` but its only fetch is this one, so the
+ * card read 0 for every client no matter how many threads were open. The field does exist —
+ * on /esf/client-dashboard, which nothing calls.
+ *
+ * Moving the page to that endpoint would have been the tidier-looking fix and the wrong one:
+ * its payload carries no task data at all, which is everything else Overview renders, and it
+ * fans out across eight collections for KPIs the page never shows.
+ *
+ * This is the THIRD copy of this count — GmailSendService.js and controllers/esf/esfMessages.js
+ * have the other two, and all three must agree on "open means resolvedAt is null" or the
+ * client's badge and the staff inbox will disagree about the same conversation.
+ *
+ * Degrades to 0 rather than failing the route: a stat card is not worth losing the task board
+ * over. Same intent as the copy on /esf/client-dashboard.
+ */
+const countOpenThreads = async (userId) => {
+    try {
+        const { EmailThread } = require('../../models/system/EmailThreadModels.js');
+        return await EmailThread.countDocuments({ userId, resolvedAt: null });
+    } catch (error) {
+        logger.warn(`[EsfProjectStatus] open message count failed (non-fatal): ${error.message}`);
+        return 0;
+    }
+};
+
 const getEsfProjectStatus = asyncHandler(async (req, res) => {
     const userId = req.userId;
 
@@ -130,6 +167,8 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
                 // client never asked for anything, and hiding their own requests would
                 // make the page look like the submission had failed.
                 taskRequests: await loadTaskRequests(userId),
+                // Same reasoning: no project does not mean no conversations.
+                openMessageCount: await countOpenThreads(userId),
             }, 'No Zoho project is linked to this account'));
         }
 
@@ -162,6 +201,7 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
                 endDate: null,
                 percentComplete: null,
                 summary: null,
+                latestSummaryLine: null,
                 updateCount: 0,
                 lastUpdateAt: null,
                 waitingOnYou: null,
@@ -208,6 +248,7 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
             // an env change, not a release.
             canAttachFiles: ATTACHMENTS_ENABLED,
             taskRequests: await loadTaskRequests(userId),
+            openMessageCount: await countOpenThreads(userId),
         }, 'Project status fetched successfully'));
     } catch (error) {
         logger.error(new ApiError(500, `[EsfProjectStatus] ${error.message}`));
@@ -215,4 +256,4 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
     }
 });
 
-module.exports = { getEsfProjectStatus };
+module.exports = { getEsfProjectStatus, toClientTask };

@@ -78,6 +78,11 @@ const PhoneRequiredModal = ({ forceShow = false, onDone }) => {
   const reason = user?.phoneUpdateReason;
   const isMissing = reason !== 'country_code'; // default to the stricter "no number at all" copy
 
+  // A Google signup has no real number at all, so there is nothing to fall back
+  // on - the modal cannot be skipped. Only the legacy "confirm your country code"
+  // prompt keeps its Later button.
+  const isMandatory = forceShow || reason === 'missing';
+
   // A super admin inspecting someone else's account must not be asked for a
   // phone number - it would be saved onto the account they are viewing.
   const isSuperAdminViewing = user?.isSuperAdminSession === true || user?.accessType === 'superAdmin';
@@ -92,7 +97,7 @@ const PhoneRequiredModal = ({ forceShow = false, onDone }) => {
       !isSuperAdminViewing &&
       // A member can't change the owner's phone (the server refuses), so asking would trap them.
       user.isMemberSession !== true &&
-      !dismissed &&
+      (isMandatory || !dismissed) &&
       !isExcludedPath(location.pathname);
 
   // Prefill: for a number that only lacks its country code, keep the digits the
@@ -122,6 +127,7 @@ const PhoneRequiredModal = ({ forceShow = false, onDone }) => {
   }, [shouldShow]);
 
   const handleLater = () => {
+    if (isMandatory) return;
     writeDismissed();
     setDismissed(true);
     if (onDone) onDone();
@@ -182,14 +188,16 @@ const PhoneRequiredModal = ({ forceShow = false, onDone }) => {
             >
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-[#60a5fa] via-[#a78bfa] to-[#22d3ee]" />
 
-              <button
-                type="button"
-                onClick={handleLater}
-                aria-label="Close"
-                className="absolute top-4 right-4 text-gray-500 hover:text-gray-300 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              {!isMandatory && (
+                <button
+                  type="button"
+                  onClick={handleLater}
+                  aria-label="Close"
+                  className="absolute top-4 right-4 text-gray-500 hover:text-gray-300 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
 
               <div className="w-14 h-14 bg-[#21262d] border border-[#30363d] rounded-full flex items-center justify-center mb-5">
                 <Phone className="w-7 h-7 text-[#60a5fa]" />
@@ -239,14 +247,16 @@ const PhoneRequiredModal = ({ forceShow = false, onDone }) => {
               </div>
 
               <div className="flex gap-3 mt-6">
-                <button
-                  type="button"
-                  onClick={handleLater}
-                  disabled={saving}
-                  className="flex-1 px-4 py-2.5 rounded-lg border border-[#30363d] text-sm font-medium text-[#9ca3af] hover:text-[#e6edf3] hover:border-gray-500 transition-colors disabled:opacity-50"
-                >
-                  Later
-                </button>
+                {!isMandatory && (
+                  <button
+                    type="button"
+                    onClick={handleLater}
+                    disabled={saving}
+                    className="flex-1 px-4 py-2.5 rounded-lg border border-[#30363d] text-sm font-medium text-[#9ca3af] hover:text-[#e6edf3] hover:border-gray-500 transition-colors disabled:opacity-50"
+                  >
+                    Later
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={handleSave}

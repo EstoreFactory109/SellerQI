@@ -1809,7 +1809,7 @@ const analyseData = async (data, userId = null, options = {}) => {
                 sponsoredAdsErrorDetails: sponsoredAdsErrorsData.errorDetails,
                 AccountErrors: data.AccountData?.accountHealth || {},
                 TotalProducts: TotalProducts
-            });
+            }, country, region);
             // Only a full rebuild changes what the derived AI views summarise; stays
             // false if task creation threw, so a failed build never triggers them.
             tasksRebuilt = taskResult?.tasksRebuilt === true;

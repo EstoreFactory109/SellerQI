@@ -468,3 +468,320 @@ describe('uploadTaskAttachment', () => {
         expect(axios).not.toHaveBeenCalled();
     });
 });
+
+describe('createTask — the body Zoho actually receives', () => {
+    /**
+     * These assert the REQUEST, not the response. TaskRequestService's own suite mocks
+     * ZohoProjectsService wholesale, so nothing anywhere exercised the payload — which
+     * is how a task create that Zoho refuses outright reached production.
+     */
+    const okTask = { tasks: [{ id: 'task-9', id_string: 'task-9', name: 'Redo search terms' }] };
+    const bodyOf = () => axios.mock.calls[0][0].data;
+
+    beforeEach(() => {
+        axios.mockReset();
+        axios.mockResolvedValue({ data: okTask });
+        ZohoAuth.getAccessToken.mockResolvedValue('access-token-1');
+        ZohoAuth.getConnection.mockResolvedValue({
+            apiDomain: 'https://projectsapi.zoho.com', portalId: 'portal-1',
+        });
+    });
+
+    test('an end date is never sent on its own — Zoho refuses the pair', async () => {
+        // The whole bug: a request carrying a needed-by date could not be accepted,
+        // while a dateless one could.
+        await ZohoProjectsService.createTask({
+            projectId: 'p1', name: 'Redo search terms', endDate: '2099-12-31',
+        });
+
+        const body = bodyOf();
+        expect(body.end_date).toBe('2099-12-31T12:00:00.000Z');
+        expect(body.start_date).toBeTruthy();
+    });
+
+    test('the invented start is a full ISO datetime, not a bare date', async () => {
+        await ZohoProjectsService.createTask({
+            projectId: 'p1', name: 'Redo search terms', endDate: '2099-12-31',
+        });
+
+        // v3 refuses the date-only form with INVALID_PARAMETER_VALUE.
+        expect(bodyOf().start_date).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    });
+
+    test('the invented start is never in the future, so the task is In progress', async () => {
+        /**
+         * The property that decides the client's column. classifyTask calls a task
+         * "Coming up" while its start is still ahead, so a start of today-at-noon put
+         * an approved task in the wrong list for the whole UTC morning and then moved
+         * it at midday with nobody touching it.
+         *
+         * The clock is pinned to 06:00 UTC deliberately. Without that this test passes
+         * against the old midday behaviour whenever the suite happens to run after
+         * noon — it would have caught the bug in the morning and waved it through in
+         * the afternoon, which is worse than not testing it.
+         *
+         * Resolved to a number BEFORE the timers are faked: building a Date afterwards
+         * hands sinon an object its own patched Date does not recognise.
+         */
+        const morning = new Date('2026-09-25T06:00:00.000Z').getTime();
+        jest.useFakeTimers({ now: morning, doNotFake: ['nextTick', 'setImmediate'] });
+
+        try {
+            await ZohoProjectsService.createTask({
+                projectId: 'p1', name: 'Redo search terms', endDate: '2099-12-31',
+            });
+
+            const start = new Date(bodyOf().start_date).getTime();
+            expect(start).toBeLessThanOrEqual(morning);
+            // Explicitly not noon, which is what it used to be and is 6 hours ahead here.
+            expect(bodyOf().start_date).not.toMatch(/T12:00:00\.000Z$/);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('a needed-by date already in the past does not fail the accept', async () => {
+        // start must not sit after end, which Zoho also refuses. A client asking for
+        // something by a date that has passed is a support question, not a 400.
+        await ZohoProjectsService.createTask({
+            projectId: 'p1', name: 'Overdue thing', endDate: '2020-01-01',
+        });
+
+        const body = bodyOf();
+        expect(body.start_date).toBe('2020-01-01T12:00:00.000Z');
+        expect(new Date(body.start_date) <= new Date(body.end_date)).toBe(true);
+    });
+
+    test('an explicit start date is passed through untouched', async () => {
+        await ZohoProjectsService.createTask({
+            projectId: 'p1', name: 'Scheduled', startDate: '2099-01-01', endDate: '2099-12-31',
+        });
+
+        expect(bodyOf().start_date).toBe('2099-01-01T12:00:00.000Z');
+    });
+
+    test('no dates at all means no date fields, not empty ones', async () => {
+        // Every optional field is omitted when absent rather than sent empty — a create
+        // that silently ignores a field is harder to spot than one that is rejected.
+        await ZohoProjectsService.createTask({ projectId: 'p1', name: 'Dateless' });
+
+        const body = bodyOf();
+        expect(body).not.toHaveProperty('start_date');
+        expect(body).not.toHaveProperty('end_date');
+        expect(body.name).toBe('Dateless');
+    });
+
+    test('the title goes as `name`, and v3 takes it as JSON', async () => {
+        await ZohoProjectsService.createTask({ projectId: 'p1', name: '  Trim me  ' });
+
+        expect(bodyOf().name).toBe('Trim me');
+        expect(axios.mock.calls[0][0].headers['Content-Type']).toBe('application/json');
+    });
+});
+
+describe('createTask — the one retry in the other date dialect', () => {
+    const okTask = { tasks: [{ id: 'task-9', id_string: 'task-9', name: 'Redo search terms' }] };
+    const formatRejection = () => httpError(400, {
+        error: {
+            status_code: '400',
+            title: 'INVALID_PARAMETER_VALUE',
+            error_type: 'FIELDS_VALIDATION_ERROR',
+            details: [{ message: 'input format mismatch. Kindly pass correct format.', field_name: 'end_date' }],
+        },
+    });
+
+    beforeEach(() => {
+        axios.mockReset();
+        ZohoAuth.getAccessToken.mockResolvedValue('access-token-1');
+        ZohoAuth.getConnection.mockResolvedValue({
+            apiDomain: 'https://projectsapi.zoho.com', portalId: 'portal-1',
+        });
+    });
+
+    test('a format rejection is retried once as MM-DD-YYYY and succeeds', async () => {
+        axios.mockRejectedValueOnce(formatRejection()).mockResolvedValueOnce({ data: okTask });
+
+        const task = await ZohoProjectsService.createTask({
+            projectId: 'p1', name: 'Redo search terms', endDate: '2099-12-31',
+        });
+
+        expect(axios).toHaveBeenCalledTimes(2);
+        expect(axios.mock.calls[0][0].data.end_date).toBe('2099-12-31T12:00:00.000Z');
+        expect(axios.mock.calls[1][0].data.end_date).toBe('12-31-2099');
+        expect(task.id).toBe('task-9');
+    });
+
+    test('the retry happens once, not in a loop', async () => {
+        axios.mockRejectedValue(formatRejection());
+
+        await expect(ZohoProjectsService.createTask({
+            projectId: 'p1', name: 'Redo search terms', endDate: '2099-12-31',
+        })).rejects.toThrow();
+
+        expect(axios).toHaveBeenCalledTimes(2);
+    });
+
+    test('a rejection about anything else is NOT retried', async () => {
+        // Replaying a permission or missing-field error would make the same wrong call
+        // twice and bury the real reason under the second failure.
+        axios.mockRejectedValue(httpError(400, {
+            error: { title: 'FIELD_REQUIRED', details: [{ message: 'name is required' }] },
+        }));
+
+        await expect(ZohoProjectsService.createTask({
+            projectId: 'p1', name: 'Redo search terms', endDate: '2099-12-31',
+        })).rejects.toThrow();
+
+        expect(axios).toHaveBeenCalledTimes(1);
+    });
+
+    test('a dateless task is never retried — there is no date to blame', async () => {
+        axios.mockRejectedValue(formatRejection());
+
+        await expect(ZohoProjectsService.createTask({
+            projectId: 'p1', name: 'Dateless',
+        })).rejects.toThrow();
+
+        expect(axios).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('createTask — the status a new task lands in', () => {
+    const logger = require('../../../utils/Logger.js');
+
+    beforeEach(() => {
+        axios.mockReset();
+        ZohoAuth.getAccessToken.mockResolvedValue('access-token-1');
+        ZohoAuth.getConnection.mockResolvedValue({
+            apiDomain: 'https://projectsapi.zoho.com', portalId: 'portal-1',
+        });
+    });
+
+    test('no status is sent, because creation does not accept one', async () => {
+        /**
+         * Zoho's create endpoint has no status field at all — `custom_status` exists
+         * only on update. Sending one would be a FIELDS_VALIDATION_ERROR, which is how
+         * this call has already failed twice over a guessed field.
+         */
+        axios.mockResolvedValue({ data: { tasks: [{ id: 't1', status: { name: 'Open' } }] } });
+
+        await ZohoProjectsService.createTask({ projectId: 'p1', name: 'Thing' });
+
+        const body = axios.mock.calls[0][0].data;
+        expect(body).not.toHaveProperty('status');
+        expect(body).not.toHaveProperty('custom_status');
+    });
+
+    test('a task created in a CLOSED status is called out', async () => {
+        // Silent and wrong otherwise: approved work that the team never sees, while the
+        // client is told it is underway.
+        axios.mockResolvedValue({
+            data: { tasks: [{ id: 't1', status: { name: 'Closed', is_closed_type: true } }] },
+        });
+
+        await ZohoProjectsService.createTask({ projectId: 'p1', name: 'Thing' });
+
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/created in a CLOSED status/));
+    });
+
+    test('an open status passes without a warning', async () => {
+        axios.mockResolvedValue({
+            data: { tasks: [{ id: 't1', status: { name: 'Open', is_closed_type: false } }] },
+        });
+
+        await ZohoProjectsService.createTask({ projectId: 'p1', name: 'Thing' });
+
+        expect(logger.warn).not.toHaveBeenCalledWith(expect.stringMatching(/CLOSED status/));
+    });
+});
+
+describe('listTasklists', () => {
+    beforeEach(() => {
+        axios.mockReset();
+        ZohoAuth.getAccessToken.mockResolvedValue('access-token-1');
+        ZohoAuth.getConnection.mockResolvedValue({
+            apiDomain: 'https://projectsapi.zoho.com', portalId: 'portal-1',
+        });
+    });
+
+    test('returns id and name, dropping rows missing either', async () => {
+        axios.mockResolvedValue({ data: { tasklists: [
+            { id: '1', name: 'Walmart' },
+            { id: '2', name: null },
+            { name: 'No id' },
+        ] } });
+
+        const lists = await ZohoProjectsService.listTasklists({ projectId: 'p1' });
+
+        expect(lists).toEqual([{ id: '1', name: 'Walmart' }]);
+    });
+
+    test('a failure returns [] rather than throwing', async () => {
+        /**
+         * Load-bearing. The only caller is the accept path, where this decides where a
+         * task is FILED — a throw would turn a nicety into a failed approval. This is
+         * the exact shape seen live while the tasklists scope was still missing.
+         */
+        axios.mockRejectedValue(httpError(401, {
+            error: { title: 'INVALID_OAUTHSCOPE', details: [{ message: 'Invalid OAuth scope.' }] },
+        }));
+
+        await expect(ZohoProjectsService.listTasklists({ projectId: 'p1' })).resolves.toEqual([]);
+    });
+
+    test('no project means no call at all', async () => {
+        await expect(ZohoProjectsService.listTasklists({})).resolves.toEqual([]);
+        expect(axios).not.toHaveBeenCalled();
+    });
+
+    test('it reads v3, the generation confirmed against the live portal', async () => {
+        axios.mockResolvedValue({ data: { tasklists: [] } });
+
+        await ZohoProjectsService.listTasklists({ projectId: 'p1' });
+
+        const { url } = axios.mock.calls[0][0];
+        expect(url).toContain('/api/v3/');
+        // v2 would need a trailing slash; v3 refuses one.
+        expect(url).toMatch(/\/tasklists$/);
+    });
+});
+
+describe('createTasklist', () => {
+    beforeEach(() => {
+        axios.mockReset();
+        ZohoAuth.getAccessToken.mockResolvedValue('access-token-1');
+        ZohoAuth.getConnection.mockResolvedValue({
+            apiDomain: 'https://projectsapi.zoho.com', portalId: 'portal-1',
+        });
+    });
+
+    test('creates and returns the new list', async () => {
+        axios.mockResolvedValue({ data: { tasklists: [{ id: 'tl-9', name: 'Video Production' }] } });
+
+        const created = await ZohoProjectsService.createTasklist({ projectId: 'p1', name: '  Video Production  ' });
+
+        expect(axios.mock.calls[0][0].data).toEqual({ name: 'Video Production' });
+        expect(created).toEqual({ id: 'tl-9', name: 'Video Production' });
+    });
+
+    test('it DOES throw, unlike listTasklists', async () => {
+        // The asymmetry is deliberate: failing to read the lists means filing nowhere,
+        // which is survivable. Failing to create one we decided to create means the
+        // caller must not go on to reference it.
+        axios.mockRejectedValue(httpError(400, { error: { title: 'FIELDS_VALIDATION_ERROR' } }));
+
+        await expect(ZohoProjectsService.createTasklist({ projectId: 'p1', name: 'X' })).rejects.toThrow();
+    });
+
+    test('a 2xx with no id is refused rather than returned', async () => {
+        axios.mockResolvedValue({ data: { tasklists: [{ name: 'No id' }] } });
+
+        await expect(ZohoProjectsService.createTasklist({ projectId: 'p1', name: 'X' }))
+            .rejects.toThrow(/returned no id/);
+    });
+
+    test('an empty name never reaches Zoho', async () => {
+        await expect(ZohoProjectsService.createTasklist({ projectId: 'p1', name: '   ' })).rejects.toThrow();
+        expect(axios).not.toHaveBeenCalled();
+    });
+});

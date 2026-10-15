@@ -166,6 +166,43 @@ describe('validate', () => {
         expect(svc.validate('', input, bundle).ok).toBe(false);
         expect(svc.validate(null, input, bundle).ok).toBe(false);
     });
+
+    /**
+     * The invariant that catches the worst way a redaction change can ship.
+     *
+     * `validate` gates the model's output with `containsIdentity`, and the model is
+     * explicitly told to preserve every order number, ASIN and SKU exactly. So if the
+     * deterministic pass ever leaves a number that `containsIdentity` then counts as
+     * identity, the model's faithful copy is rejected on every message containing one,
+     * the text falls back to blunt deterministic output, and the only evidence is a
+     * logger.warn. Nothing throws and nothing looks broken.
+     *
+     * Asserting the deterministic output validates against ITSELF is the cheapest way to
+     * pin that, because it fails the moment the two passes disagree.
+     */
+    test('the deterministic output always validates against itself', () => {
+        const svc = load('key');
+        const { redactAll } = require('../../../Services/Email/identityRedaction.js');
+
+        [
+            'Case 13157354022 is still open and the carton shows UPC 850085664426.',
+            'Order 205-8795220-8289913 shipped, 2,500 sets at 4.5 oz.',
+            'Please call 0412841105 about ASIN B0HKW36R58.',
+            'Ref: Cases 13157354022 and 13186582392, tracking FBA19NDZ4D3Z.',
+        ].forEach((raw) => {
+            const safe = redactAll(raw, bundle).text;
+            expect(svc.validate(safe, safe, bundle)).toEqual({ ok: true });
+        });
+    });
+
+    test('a case number is not mistaken for a phone number', () => {
+        // The direct form of the same trap: if this ever reads as identity, every brief
+        // and every AI repair quoting a case number silently stops happening.
+        const svc = load('key');
+        const text = 'Case 13157354022 is still open.';
+
+        expect(svc.validate(text, text, bundle).ok).toBe(true);
+    });
 });
 
 describe('reuse', () => {

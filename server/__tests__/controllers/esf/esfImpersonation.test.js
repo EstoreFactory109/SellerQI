@@ -2,12 +2,9 @@
  * Opening a client account from the ESF portal.
  *
  * Impersonation mints a real client session, and inside it the client's OWN Settings
- * page shows their name, email and phone. So this endpoint is the open window next to
- * the locked door: redacting the Clients list means nothing while any staff member can
- * switch into any client and read every field directly, for every client, in two clicks.
- *
- * That is the whole test. The rest is making sure the gate did not also lock out the
- * people who need it.
+ * page shows their name, email and phone. A member may open the clients allocated to
+ * them — that is the work they were assigned — and no other: opening an unallocated
+ * client would expose every identity the Clients list redacts.
  */
 
 jest.mock('../../../utils/Logger.js', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }));
@@ -66,37 +63,61 @@ beforeEach(() => {
     });
 });
 
-describe('impersonation is closed to members', () => {
-    test('a member cannot open a client account', async () => {
-        const { status } = await run(switchToEsfClient, request({ esfRole: ESF_ROLES.MEMBER }));
+const OTHER_CLIENT_ID = '507f1f77bcf86cd799439022';
+const member = (allocated) => ({ accessType: 'esfUser', esfRole: ESF_ROLES.MEMBER, esfAllowedClients: allocated });
+
+describe('a member can open only the clients allocated to them', () => {
+    test('an allocated client opens', async () => {
+        const { status, res } = await run(switchToEsfClient, request(member([CLIENT_ID])));
+
+        expect(status).toBe(200);
+        expect(mockIssueClientSession).toHaveBeenCalledWith(CLIENT_ID);
+        expect(res.cookie).toHaveBeenCalled();
+    });
+
+    test('the lookup is the asked-for client AND the allocation, not the allocation alone', async () => {
+        // The old spread replaced the asked-for _id with the allocation, so findOne
+        // returned whichever allocated client came first.
+        await run(switchToEsfClient, request(member([CLIENT_ID, OTHER_CLIENT_ID])));
+
+        const query = mockUserFindOne.mock.calls[0][0];
+        expect(query.$and).toEqual(expect.arrayContaining([
+            expect.objectContaining({ _id: CLIENT_ID }),
+            { _id: { $in: [CLIENT_ID, OTHER_CLIENT_ID] } },
+        ]));
+    });
+
+    test('an unallocated client is refused, and no session or cookie is minted', async () => {
+        const { status, res } = await run(switchToEsfClient, request(member([OTHER_CLIENT_ID])));
 
         expect(status).toBe(403);
         expect(mockIssueClientSession).not.toHaveBeenCalled();
-    });
-
-    test('no session is minted, so no cookie can leak out', async () => {
-        const { res } = await run(switchToEsfClient, request({ esfRole: ESF_ROLES.MEMBER }));
-
         expect(res.cookie).not.toHaveBeenCalled();
     });
 
-    test('a staff member with no role set is refused', async () => {
+    test('a member with nothing allocated is refused', async () => {
+        const { status } = await run(switchToEsfClient, request(member([])));
+
+        expect(status).toBe(403);
+    });
+
+    test('a staff member with no role and no allocation is refused', async () => {
         // resolveEsfRole defaults to 'member', and the default has to be the closed one.
         const { status } = await run(switchToEsfClient, request({}));
 
         expect(status).toBe(403);
     });
 
-    test('the attempt is logged, since it is a boundary someone tried to cross', async () => {
+    test('a refused attempt is logged, since it is a boundary someone tried to cross', async () => {
         const logger = require('../../../utils/Logger.js');
 
-        await run(switchToEsfClient, request({ esfRole: ESF_ROLES.MEMBER }));
+        await run(switchToEsfClient, request(member([])));
 
-        expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/impersonate/i));
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/unallocated client/i));
     });
 });
 
-describe('and still open to those who need it', () => {
+describe('owner and admin open any client', () => {
     test.each([ESF_ROLES.OWNER, ESF_ROLES.ADMIN])('%s can open a client account', async (esfRole) => {
         const { status } = await run(switchToEsfClient, request({ esfRole }));
 
