@@ -73,7 +73,8 @@ const ALL_TASK_TYPES = [
     ['account', 'validTrackingRateStatus_unstable'],
     ['account', 'orderWithDefectsStatus_unstable'],
     ['account', 'lateShipmentRateStatus_unstable'],
-    ['account', 'CancellationRate_unstable']
+    ['account', 'CancellationRate_unstable'],
+    ['profitability', 'ad_spend_no_sales']
 ];
 
 describe('normalizeErrorType', () => {

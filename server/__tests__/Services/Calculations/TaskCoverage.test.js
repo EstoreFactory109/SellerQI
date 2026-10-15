@@ -27,6 +27,7 @@ const fullCtx = () => ({
     activeProductSet: new Set(['A1', 'A2']),
     profitabilityRows: [{ asin: 'A1' }],
     profitabilityOk: true,
+    financeFresh: true,
     campaignRows: [{ campaignId: 'c' }],
     sponsoredAdsOk: true
 });
@@ -64,6 +65,12 @@ describe('buildTaskCoverage', () => {
     it('lists active products the ranking loop never visited', () => {
         const c = buildTaskCoverage(fullData(), { ...fullCtx(), activeProductSet: new Set(['A1', 'A2', 'A3']) });
         expect(c.uncoveredProductAsins).toEqual(['A3']);
+    });
+
+    // Stale finance yields no verdicts at all; reconcile must not read that as
+    // "every profitability problem was fixed".
+    it('does not cover profitability when the finance behind it is stale', () => {
+        expect(buildTaskCoverage(fullData(), { ...fullCtx(), financeFresh: false }).profitability).toBe(false);
     });
 
     it('does not cover a source whose calculation threw', () => {

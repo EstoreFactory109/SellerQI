@@ -22,6 +22,7 @@ const GetDateWisePPCspendModel = require('../../models/amazon-ads/GetDateWisePPC
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 const { getProductWiseSponsoredAdsData, getAdsSpendByAsin } = require('../amazon-ads/ProductWiseSponsoredAdsService.js');
 const Profitability = require('./ProfitabilityCalculation.js');
+const { classifyProfitabilityRow, isEconomicsFresh } = require('./RecoverableAmountUtils.js');
 const { calculateSponsoredAdsMetrics } = require('./SponsoredAdsCalculation.js');
 const { getRedisClient } = require('../../config/redisConn.js');
 
@@ -381,7 +382,7 @@ const convertToTotalSales = (economicsMetrics) => {
  * Calculate profitability errors
  * (Same logic as DashboardCalculation.calculateProfitabilityErrors)
  */
-const calculateProfitabilityErrors = (profitibilityData, totalProducts = []) => {
+const calculateProfitabilityErrors = (profitibilityData, totalProducts = [], { financeFresh = true } = {}) => {
     let totalErrors = 0;
     const errorDetails = [];
     
@@ -395,20 +396,21 @@ const calculateProfitabilityErrors = (profitibilityData, totalProducts = []) => 
     }
     
     profitibilityData.forEach((item) => {
-        const netProfit = (item.sales || 0) - (item.ads || 0) - (item.amzFee || 0);
-        const profitMargin = item.sales > 0 ? (netProfit / item.sales) * 100 : 0;
-        
-        if (profitMargin < 10 || netProfit < 0) {
-            totalErrors++;
-            errorDetails.push({
-                asin: item.asin,
-                productName: productNameMap.get(item.asin) || null,
-                sales: item.sales,
-                netProfit: netProfit,
-                profitMargin: profitMargin,
-                errorType: netProfit < 0 ? 'negative_profit' : 'low_margin'
-            });
-        }
+        // Same rule as the tasks (RecoverableAmountUtils.classifyProfitabilityRow): no
+        // verdict on a row with no sales unless it is fresh ad spend, and none at all
+        // on stale finance.
+        const verdict = classifyProfitabilityRow(item, { financeFresh });
+        if (!verdict) return;
+        totalErrors++;
+        errorDetails.push({
+            asin: item.asin,
+            productName: productNameMap.get(item.asin) || null,
+            sales: item.sales,
+            ads: item.ads || 0,
+            netProfit: verdict.netProfit,
+            profitMargin: verdict.profitMargin,
+            errorType: verdict.errorType
+        });
     });
     
     return { totalErrors, errorDetails };
@@ -501,7 +503,12 @@ const calculateProfitabilityDashboard = async (rawData) => {
         : 0;
 
     // Calculate profitability errors
-    const profitabilityErrorsData = calculateProfitabilityErrors(profitibilityData, TotalProducts);
+    // EconomicsMetrics stopped being written in April 2026. Issues from an old doc
+    // would describe April, so they are only judged when the doc is recent.
+    // (The table itself still reads this doc: see the follow-up in the PR.)
+    const profitabilityErrorsData = calculateProfitabilityErrors(profitibilityData, TotalProducts, {
+        financeFresh: isEconomicsFresh(economicsMetricsData) && Object.keys(economicsData.asinPpcSales || {}).length > 0
+    });
 
     // Convert to legacy formats
     const accountFinance = convertToAccountFinance(economicsMetricsData, adsPPCSpend);
@@ -1049,7 +1056,9 @@ const computeFullProfitabilityTableData = async (userId, country, region) => {
             flatDataForErrors.push(...parent.children);
         }
     });
-    const profitabilityErrorsData = calculateProfitabilityErrors(flatDataForErrors, products);
+    const profitabilityErrorsData = calculateProfitabilityErrors(flatDataForErrors, products, {
+        financeFresh: isEconomicsFresh(processedEconomicsMetrics) && Object.keys(economicsData.asinPpcSales || {}).length > 0
+    });
 
     const totalParents = allProfitabilityData.length;
     const totalProducts = totalParents + totalChildCount;

@@ -152,6 +152,13 @@ const renderProfitabilityTaskText = (errorType, renderData = {}) => {
             solution: `Review and optimize your cost structure immediately: 1) Analyze your pricing strategy - consider increasing price if market allows. 2) Review fulfillment costs - consider FBA vs FBM options. 3) Reduce advertising spend or optimize for better ROAS. 4) Negotiate with suppliers for better COGS. 5) Consider discontinuing this product if profitability cannot be achieved.`
         };
     }
+    if (errorType === 'ad_spend_no_sales') {
+        const ads = typeof renderData.ads === 'number' ? renderData.ads : Math.abs(netProfit);
+        return {
+            error: `Profitability | Ad Spend With No Sales: This product spent $${ads.toFixed(2)} on ads in the last 30 days with no sales recorded. Every dollar of that spend is currently lost.`,
+            solution: `Stop the spend first, then fix the cause: 1) Pause or cut bids on the campaigns advertising this product. 2) Check the listing is live, in stock and Buy Box-eligible — ads on an unbuyable listing cannot convert. 3) Review price against competitors. 4) Check the search terms the ads matched for relevance. 5) Restart ads only once the listing converts organically.`
+        };
+    }
     if (errorType === 'low_margin') {
         return {
             error: `Profitability | Low Margin: This product has a profit margin of only ${profitMargin.toFixed(1)}% (Net Profit: $${netProfit.toFixed(2)}). Low margins leave little room for market fluctuations or unexpected costs.`,
@@ -914,8 +921,8 @@ class CreateTaskService {
             // Final fallback - just use ASIN but make it clear
             productName = productName ? productName.substring(0, 100) : error.asin;
             
-            const errorType = error.errorType === 'negative_profit' ? 'negative_profit'
-                : error.errorType === 'low_margin' ? 'low_margin'
+            const errorType = ['negative_profit', 'low_margin', 'ad_spend_no_sales'].includes(error.errorType)
+                ? error.errorType
                 : 'profitability_issue';
 
             tasks.push({
@@ -927,6 +934,7 @@ class CreateTaskService {
                 renderData: {
                     netProfit: error.netProfit,
                     sales: error.sales,
+                    ads: error.ads,
                     profitMargin: error.profitMargin,
                     message: error.message
                 },

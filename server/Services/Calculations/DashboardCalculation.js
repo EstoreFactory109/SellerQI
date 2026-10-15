@@ -22,9 +22,8 @@ const AsinWiseSalesRun = require('../../models/finance/AsinWiseSalesRunModel.js'
 const AsinWiseSalesItem = require('../../models/finance/AsinWiseSalesItemModel.js');
 const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
 const DataFetchTracking = require('../../models/system/DataFetchTrackingModel.js');
-const { computeProfitabilityAmount, computeSponsoredAdsAmount, computeBuyBoxBenchmark, computeBuyBoxLostRevenueAmount, computeBuyBoxProfitImpact } = require('./RecoverableAmountUtils.js');
+const { computeProfitabilityAmount, classifyProfitabilityRow, isEconomicsFresh, ECONOMICS_MAX_AGE_DAYS, computeSponsoredAdsAmount, computeBuyBoxBenchmark, computeBuyBoxLostRevenueAmount, computeBuyBoxProfitImpact } = require('./RecoverableAmountUtils.js');
 const {
-    TARGET_PROFIT_MARGIN_PERCENT,
     TARGET_ACOS_PERCENT,
     SEARCH_TERM_MIN_CLICKS,
     AUTO_MIGRATION_MIN_SALES
@@ -528,7 +527,7 @@ const calculateCampaignWiseTotalSalesAndCost = (dateWisePPCData) => {
  * @param {Array} totalProducts - Array of all products with names
  * @returns {Object} Total errors and error details
  */
-const calculateProfitabilityErrors = (profitibilityData, totalProducts = []) => {
+const calculateProfitabilityErrors = (profitibilityData, totalProducts = [], { financeFresh = true } = {}) => {
     let totalErrors = 0;
     let totalAmount = 0;
     const errorDetails = [];
@@ -544,28 +543,22 @@ const calculateProfitabilityErrors = (profitibilityData, totalProducts = []) => 
     }
 
     profitibilityData.forEach((item) => {
-        // Calculate net profit (assuming COGS is 0 initially, will be updated when user enters values)
-        const netProfit = (item.sales || 0) - (item.ads || 0) - (item.amzFee || 0);
-
-        // Determine status based on profit margin
-        const profitMargin = item.sales > 0 ? (netProfit / item.sales) * 100 : 0;
-
-        // Count as error if profit margin is below 10% or negative
-        if (profitMargin < TARGET_PROFIT_MARGIN_PERCENT || netProfit < 0) {
-            totalErrors++;
-            const errorType = netProfit < 0 ? 'negative_profit' : 'low_margin';
-            const amount = computeProfitabilityAmount({ netProfit, profitMargin, sales: item.sales, issueType: errorType });
-            totalAmount += amount;
-            errorDetails.push({
-                asin: item.asin,
-                productName: productNameMap.get(item.asin) || null,
-                sales: item.sales,
-                netProfit: netProfit,
-                profitMargin: profitMargin,
-                errorType,
-                amount
-            });
-        }
+        // COGS is 0 until the seller enters it. The rule itself is shared with the
+        // Profitability pages (RecoverableAmountUtils.classifyProfitabilityRow).
+        const verdict = classifyProfitabilityRow(item, { financeFresh });
+        if (!verdict) return;
+        totalErrors++;
+        totalAmount += verdict.amount;
+        errorDetails.push({
+            asin: item.asin,
+            productName: productNameMap.get(item.asin) || null,
+            sales: item.sales,
+            ads: item.ads || 0,
+            netProfit: verdict.netProfit,
+            profitMargin: verdict.profitMargin,
+            errorType: verdict.errorType,
+            amount: verdict.amount
+        });
     });
 
     return { totalErrors, errorDetails, totalAmount };
@@ -814,6 +807,7 @@ const buildTaskCoverage = (data = {}, {
     activeProductSet = new Set(),
     profitabilityRows = [],
     profitabilityOk = false,
+    financeFresh = false,
     campaignRows = [],
     sponsoredAdsOk = false
 } = {}) => {
@@ -839,7 +833,9 @@ const buildTaskCoverage = (data = {}, {
         'conversion.rating': products && nonEmpty(conv.productStarRatingResult),
         'conversion.buybox': products && (nonEmpty(data.BuyBoxData?.asinBuyBoxData) || Array.isArray(conv.ProductWithOutBuybox)),
         inventory: products && !!data.InventoryAnalysis && typeof data.InventoryAnalysis === 'object',
-        profitability: profitabilityOk && nonEmpty(profitabilityRows),
+        // Rows exist even on stale finance (ads-only / legacy), but no verdict is made on
+        // them, so their absence of tasks says nothing about what was fixed.
+        profitability: profitabilityOk && financeFresh && nonEmpty(profitabilityRows),
         sponsoredAds: sponsoredAdsOk && (keywords || searchTerms || campaigns),
         'sponsoredAds.campaigns': sponsoredAdsOk && campaigns,
         'sponsoredAds.keywords': sponsoredAdsOk && keywords,
@@ -930,6 +926,19 @@ const analyseData = async (data, userId = null, options = {}) => {
     // Only the per-ASIN map is substituted. Account-level totals (totalSales,
     // totalPpcSpent) keep their existing sources so the dashboard headline figures
     // are not moved by this.
+    // A stale EconomicsMetrics doc is worse than none: its per-ASIN map would be used
+    // as if current. Drop it so the live fallback below takes over.
+    const economicsStale = Object.keys(economicsData.asinPpcSales || {}).length > 0
+        && !isEconomicsFresh(data.EconomicsMetrics);
+    if (economicsStale) {
+        logger.warn('Ignoring stale EconomicsMetrics per-ASIN finance', {
+            userId, country, region,
+            createdAt: data.EconomicsMetrics?.createdAt,
+            maxAgeDays: ECONOMICS_MAX_AGE_DAYS,
+            staleAsins: Object.keys(economicsData.asinPpcSales).length
+        });
+        economicsData.asinPpcSales = {};
+    }
     if (userId && Object.keys(economicsData.asinPpcSales || {}).length === 0) {
         try {
             const { getAsinFinanceForWindow } = require('../Finance/AsinFinanceWindowService.js');
@@ -1742,9 +1751,14 @@ const analyseData = async (data, userId = null, options = {}) => {
     // is indistinguishable from "no issues", so task reconcile must not trust it.
     let profitabilityErrorsOk = false;
     let sponsoredAdsErrorsOk = false;
+    // Fresh = the per-ASIN map is non-empty after a stale EconomicsMetrics doc was
+    // dropped, i.e. it is live DailySkuFinance or a recent doc. Without it no
+    // profitability verdict is trustworthy, so none is made — and task reconcile must
+    // not read "no verdicts" as "every profitability problem was fixed".
+    const financeFresh = Object.keys(economicsData.asinPpcSales || {}).length > 0;
     
     try {
-        profitabilityErrorsData = calculateProfitabilityErrors(profitibilityData, TotalProducts);
+        profitabilityErrorsData = calculateProfitabilityErrors(profitibilityData, TotalProducts, { financeFresh });
         profitabilityErrorsOk = true;
     } catch (error) {
         logger.error("Error calculating profitability errors:", error);
@@ -1891,6 +1905,7 @@ const analyseData = async (data, userId = null, options = {}) => {
                     activeProductSet,
                     profitabilityRows: profitibilityData,
                     profitabilityOk: profitabilityErrorsOk,
+                    financeFresh,
                     campaignRows: campaignWiseTotalSalesAndCost,
                     sponsoredAdsOk: sponsoredAdsErrorsOk
                 })
