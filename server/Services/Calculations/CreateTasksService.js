@@ -11,14 +11,60 @@
  * to avoid the 16MB MongoDB document limit. The Task model only stores metadata (taskRenewalDate).
  */
 
+const crypto = require('crypto');
+const mongoose = require('mongoose');
 const Task = require('../../models/MCP/TaskModel.js');
 const TaskItem = require('../../models/MCP/TaskItemModel.js');
 const logger = require('../../utils/Logger.js');
 const { getTaskPriorityMeta } = require('./TaskPrioritizationService.js');
 const { buildGroupsFromTasks } = require('./TaskOpportunityGroupsService.js');
+const { planReconcile } = require('./TaskReconcilePlanner.js');
+const { taskReconcileModeFor, MODES: RECONCILE_MODES } = require('../../utils/taskReconcileGate.js');
+const { acquireLock } = require('../../utils/mongoLock.js');
 
 // Chunk size for bulk insert operations
 const TASK_INSERT_CHUNK_SIZE = 500;
+
+// Long enough for the largest account's reconcile (one read + one bulkWrite), short
+// enough that a crashed holder does not block the next scheduled run.
+const RECONCILE_LOCK_TTL_MS = 15 * 60 * 1000;
+
+// Callers outside the scheduled pipeline (page loads, QMate, the issue services)
+// reconcile only when the last reconcile is older than this. They stay writers so an
+// account whose scheduled cycle never finishes still gets fresh tasks, without every
+// page view re-reading and re-writing a 25k-task list.
+const RECONCILE_MIN_INTERVAL_HOURS = 6;
+
+// Minimum age of the AI views before a material (non-first) task change regenerates
+// them. The first build always regenerates.
+const AI_REFRESH_MIN_HOURS_ON_CHANGE = 24;
+
+// Fields reconcile needs from stored tasks. Text and renderData are included because
+// they are compared, so a stale baked-in error/solution gets replaced.
+const RECONCILE_FIELDS = '_id asin errorCategory errorType status productName error solution renderData amount amountIsEstimated capitalAmount firstSeenAt lastSeenAt completedAt resolvedAt createdAt updatedAt';
+
+/**
+ * Deterministic task id: the same issue in the same marketplace always gets the
+ * same id, so links to a task survive every rebuild. Random ids (generateTaskId)
+ * changed weekly at renewal.
+ */
+// Dry-run logging, throttled per process the same way non-forced reconciles are,
+// so page loads don't flood the log with identical plans.
+const lastDryRunAt = new Map();
+const dryRunDue = (userId, country, region, now = Date.now()) => {
+    const key = `${userId}|${country}|${region}`;
+    const last = lastDryRunAt.get(key) || 0;
+    if (now - last < RECONCILE_MIN_INTERVAL_HOURS * 60 * 60 * 1000) return false;
+    lastDryRunAt.set(key, now);
+    return true;
+};
+
+const stableTaskId = (userId, country, region, task) =>
+    'task_' + crypto
+        .createHash('sha1')
+        .update([String(userId), country || '', region || '', task.asin, task.errorCategory, task.errorType].join('|'))
+        .digest('hex')
+        .slice(0, 24);
 
 /**
  * Generate a unique ID for tasks (alternative to uuid)
@@ -258,6 +304,22 @@ class CreateTaskService {
             if (data.AccountErrors) {
                 tasks.push(...this.generateAccountTasks(data.AccountErrors));
             }
+
+            for (const task of tasks) {
+                task.taskId = stableTaskId(userId, country, region, task);
+            }
+
+            // Reconcile needs a marketplace: user-wide it would resolve one
+            // marketplace's tasks because another marketplace didn't detect them.
+            const mode = country && region ? taskReconcileModeFor(userId) : RECONCILE_MODES.OFF;
+            if (mode === RECONCILE_MODES.ON) {
+                return await this.reconcileTasks({
+                    userId, country, region, tasks, coverage: data.coverage, force: data.forceReconcile === true
+                });
+            }
+            if (mode === RECONCILE_MODES.DRY_RUN && (data.forceReconcile === true || dryRunDue(userId, country, region))) {
+                await this.logReconcilePlan({ userId, country, region, tasks, coverage: data.coverage });
+            }
             
             // Check if user metadata document exists
             const metaFilter = { userId };
@@ -338,6 +400,7 @@ class CreateTaskService {
             return {
                 userId,
                 tasksRebuilt,
+                aiRefreshMinIntervalHours: 0,
                 taskRenewalDate: userTaskDocument.taskRenewalDate,
                 taskCount: taskCounts.total,
                 pendingCount: taskCounts.pending,
@@ -350,6 +413,149 @@ class CreateTaskService {
         }
     }
     
+    /**
+     * Bring one marketplace's stored tasks in line with what was just detected.
+     * See TaskReconcilePlanner for the rules. Runs under a per-marketplace lock;
+     * a run that loses the lock skips, and the next run reconciles.
+     *
+     * @param {Object} params
+     * @param {string} params.userId
+     * @param {string} params.country
+     * @param {string} params.region
+     * @param {Array} params.tasks - generated tasks, with stable taskIds
+     * @param {Object} [params.coverage] - { [source]: boolean }; absent = nothing resolves
+     * @param {Date} [params.now]
+     */
+    async reconcileTasks({ userId, country, region, tasks, coverage = {}, force = false, now = new Date() }) {
+        const scope = ` [${country}-${region}]`;
+
+        if (!force) {
+            const recent = await Task.findOne({ userId, country, region }).select('lastReconciledAt').lean();
+            const ageMs = recent?.lastReconciledAt ? now - new Date(recent.lastReconciledAt) : Infinity;
+            if (ageMs < RECONCILE_MIN_INTERVAL_HOURS * 60 * 60 * 1000) {
+                return this.skippedReconcileResult(userId, country, region, 'recently reconciled');
+            }
+        }
+
+        const release = await acquireLock(`tasks:${userId}:${country}:${region}`, RECONCILE_LOCK_TTL_MS, 'task-reconcile');
+        if (!release) {
+            logger.info(`Task reconcile skipped for user ${userId}${scope}: another run holds the lock`);
+            return this.skippedReconcileResult(userId, country, region, 'locked');
+        }
+
+        try {
+            let meta = await Task.findOne({ userId, country, region });
+            const firstBuild = !meta;
+
+            const existing = await TaskItem.find(TaskItem.scopeFilter(userId, country, region))
+                .select(RECONCILE_FIELDS)
+                .lean();
+
+            const { ops, summary, railTrips } = planReconcile({
+                existing,
+                desired: tasks,
+                coverage: coverage || {},
+                priorRailTrips: meta?.resolveRailTrips || {},
+                scope: {
+                    userId: typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId,
+                    country,
+                    region
+                },
+                now
+            });
+
+            const write = await TaskItem.reconcileWrite(ops);
+
+            if (!meta) {
+                const renewalDate = new Date(now);
+                renewalDate.setDate(renewalDate.getDate() + 7);
+                meta = new Task({ userId, country, region, tasks: [], taskRenewalDate: renewalDate });
+            }
+            meta.lastReconciledAt = now;
+            meta.resolveRailTrips = railTrips;
+            if (meta.tasks && meta.tasks.length > 0) meta.tasks = [];
+            await meta.save();
+
+            const logPayload = { userId, country, region, firstBuild, ...summary, write };
+            if (summary.uncoveredSources.length > 0 || Object.keys(summary.railHeld).length > 0) {
+                logger.warn('[TaskReconcile] Some resolutions were held back', logPayload);
+            } else {
+                logger.info('[TaskReconcile] Reconciled tasks', logPayload);
+            }
+
+            const counts = await TaskItem.countByStatus(userId, country, region);
+            return {
+                userId,
+                // Callers key the AI-view refresh off this; reconcile reports only
+                // material change so a one-keyword drift doesn't buy an LLM call.
+                tasksRebuilt: firstBuild || summary.material,
+                aiRefreshMinIntervalHours: firstBuild ? 0 : AI_REFRESH_MIN_HOURS_ON_CHANGE,
+                reconcile: summary,
+                taskRenewalDate: meta.taskRenewalDate,
+                taskCount: counts.total,
+                pendingCount: counts.pending,
+                completedCount: counts.completed,
+                inProgressCount: counts.in_progress,
+                resolvedCount: counts.resolved
+            };
+        } finally {
+            await release();
+        }
+    }
+
+    async skippedReconcileResult(userId, country, region, reason) {
+        const counts = await TaskItem.countByStatus(userId, country, region);
+        return {
+            userId,
+            skipped: reason,
+            tasksRebuilt: false,
+            taskCount: counts.total,
+            pendingCount: counts.pending,
+            completedCount: counts.completed,
+            inProgressCount: counts.in_progress,
+            resolvedCount: counts.resolved
+        };
+    }
+
+    /**
+     * Dry-run mode: compute and log what reconcile WOULD do, write nothing.
+     * Never throws; a dry run must not affect the legacy path it rides along with.
+     */
+    async logReconcilePlan({ userId, country, region, tasks, coverage = {}, now = new Date() }) {
+        try {
+            const meta = await Task.findOne({ userId, country, region }).lean();
+            const existing = await TaskItem.find(TaskItem.scopeFilter(userId, country, region))
+                .select(RECONCILE_FIELDS)
+                .lean();
+            const { ops, summary } = planReconcile({
+                existing,
+                desired: tasks,
+                coverage: coverage || {},
+                priorRailTrips: meta?.resolveRailTrips || {},
+                scope: { userId, country, region },
+                now
+            });
+
+            // A few concrete resolutions, so a reader can check them against the
+            // seller's account rather than trusting the counts.
+            const byId = new Map(existing.map(t => [String(t._id), t]));
+            const sampleResolved = ops
+                .filter(op => op.updateOne?.update?.$set?.status === 'resolved')
+                .slice(0, 5)
+                .map(op => {
+                    const t = byId.get(String(op.updateOne.filter._id));
+                    return t ? `${t.errorCategory}:${t.errorType}:${t.asin}` : null;
+                })
+                .filter(Boolean);
+
+            logger.info('[TaskReconcile] DRY RUN plan (nothing written)', {
+                userId, country, region, ops: ops.length, ...summary, sampleResolved
+            });
+        } catch (error) {
+            logger.warn('[TaskReconcile] DRY RUN failed', { userId, country, region, error: error.message });
+        }
+    }
+
     /**
      * Generate tasks from ranking errors
      * Each sub-error (Title | Restricted Words, Bullet Points | Special Characters, etc.) 
@@ -480,92 +686,71 @@ class CreateTaskService {
      */
     generateConversionTasks(conversionErrors) {
         const tasks = [];
-        
+
+        // The text-carrying checks, in the order their tasks are emitted. Each uses
+        // the source's own Message/HowToSolve, falling back to the copy here.
+        // Upstream only populates a key for products whose status is 'Error', so
+        // presence alone is the condition.
+        const textChecks = [
+            {
+                key: 'aplusErrorData',
+                errorType: 'missing_aplus_content',
+                label: 'A+ Content | Missing',
+                fallbackMessage: 'Your product listing lacks A+ Content. Not utilizing A+ Content leads to missed opportunities for enhanced visual storytelling and detailed product explanations.',
+                fallbackSolution: 'Create A+ Content for your product listing to provide a richer buying experience. Include detailed descriptions, high-quality images, comparison charts, and more to effectively showcase your product. Consider hiring agencies like eStore Factory for professional A+ page creation.'
+            },
+            {
+                // Was counted on the Issues pages (RecommendationService,
+                // IssuesPaginationService) but generated no task, so the seller saw the
+                // issue in one place and had nothing to act on in another.
+                key: 'brandStoryErrorData',
+                errorType: 'missing_brand_story',
+                label: 'Brand Story | Missing',
+                fallbackMessage: 'Your product listing has no Brand Story module. Without it you lose a prime placement for brand narrative and cross-selling your other products.',
+                fallbackSolution: 'Add a Brand Story module to your A+ Content. Use it to tell your brand\'s story, build trust, and cross-sell your catalogue — it appears above the A+ description on every enrolled listing and is available to Brand Registered sellers at no cost.'
+            },
+            {
+                key: 'imageResultErrorData',
+                errorType: 'insufficient_images',
+                label: 'Images | Insufficient',
+                fallbackMessage: 'Your product listing has fewer than the recommended 7 images, limiting buyers\' ability to fully evaluate the product.',
+                fallbackSolution: 'Increase the number of images to at least 7, covering all angles and important features of your product. Include high-quality images that showcase the product in use, important details, variations, and packaging.'
+            },
+            {
+                key: 'videoResultErrorData',
+                errorType: 'missing_video',
+                label: 'Video | Missing',
+                fallbackMessage: 'Your product listing does not include a video, missing an opportunity to demonstrate product features and benefits.',
+                fallbackSolution: 'Add a professional product demonstration video to your listing. Videos help customers understand your product better and can significantly improve conversion rates.'
+            },
+            {
+                key: 'productStarRatingResultErrorData',
+                errorType: 'low_star_rating',
+                label: 'Rating | Low',
+                fallbackMessage: 'Your product\'s star rating is below the optimal threshold, which can deter potential buyers.',
+                fallbackSolution: 'Focus on improving product quality and addressing common customer complaints. Respond promptly to negative reviews and consider product improvements based on feedback.'
+            }
+        ];
+
         conversionErrors.forEach(error => {
             const productName = error.Title?.substring(0, 100) || 'Unknown Product';
             const asin = error.asin;
-            
-            // A+ Content error - use actual error data
-            if (error.aplusErrorData) {
-                const errorData = error.aplusErrorData;
-                tasks.push({
-                    taskId: generateTaskId(),
-                    productName,
-                    asin,
-                    errorCategory: 'conversion',
-                    errorType: 'missing_aplus_content',
-                    error: `A+ Content | Missing: ${errorData.Message || 'Your product listing lacks A+ Content. Not utilizing A+ Content leads to missed opportunities for enhanced visual storytelling and detailed product explanations.'}`,
-                    solution: errorData.HowToSolve || errorData.HowTOSolve || 'Create A+ Content for your product listing to provide a richer buying experience. Include detailed descriptions, high-quality images, comparison charts, and more to effectively showcase your product. Consider hiring agencies like eStore Factory for professional A+ page creation.',
-                    status: TaskStatus.PENDING
-                });
-            }
 
-            // Brand Story error - use actual error data.
-            // This was counted on the Issues pages (RecommendationService,
-            // IssuesPaginationService) but generated no task, so the seller saw the
-            // issue in one place and had nothing to act on in another. Upstream only
-            // populates this key for products whose status is 'Error' (see
-            // brandStoryErrorMap in DashboardCalculation), same as its A+ sibling
-            // above, so presence alone is the right condition.
-            if (error.brandStoryErrorData) {
-                const errorData = error.brandStoryErrorData;
+            textChecks.forEach(({ key, errorType, label, fallbackMessage, fallbackSolution }) => {
+                const errorData = error[key];
+                if (!errorData) return;
                 tasks.push({
                     taskId: generateTaskId(),
                     productName,
                     asin,
                     errorCategory: 'conversion',
-                    errorType: 'missing_brand_story',
-                    error: `Brand Story | Missing: ${errorData.Message || 'Your product listing has no Brand Story module. Without it you lose a prime placement for brand narrative and cross-selling your other products.'}`,
-                    solution: errorData.HowToSolve || errorData.HowTOSolve || 'Add a Brand Story module to your A+ Content. Use it to tell your brand\'s story, build trust, and cross-sell your catalogue — it appears above the A+ description on every enrolled listing and is available to Brand Registered sellers at no cost.',
+                    errorType,
+                    error: `${label}: ${errorData.Message || fallbackMessage}`,
+                    solution: errorData.HowToSolve || errorData.HowTOSolve || fallbackSolution,
                     status: TaskStatus.PENDING
                 });
-            }
+            });
 
-            // Image error - use actual error data
-            if (error.imageResultErrorData) {
-                const errorData = error.imageResultErrorData;
-                tasks.push({
-                    taskId: generateTaskId(),
-                    productName,
-                    asin,
-                    errorCategory: 'conversion',
-                    errorType: 'insufficient_images',
-                    error: `Images | Insufficient: ${errorData.Message || 'Your product listing has fewer than the recommended 7 images, limiting buyers\' ability to fully evaluate the product.'}`,
-                    solution: errorData.HowToSolve || errorData.HowTOSolve || 'Increase the number of images to at least 7, covering all angles and important features of your product. Include high-quality images that showcase the product in use, important details, variations, and packaging.',
-                    status: TaskStatus.PENDING
-                });
-            }
-            
-            // Video error - use actual error data
-            if (error.videoResultErrorData) {
-                const errorData = error.videoResultErrorData;
-                tasks.push({
-                    taskId: generateTaskId(),
-                    productName,
-                    asin,
-                    errorCategory: 'conversion',
-                    errorType: 'missing_video',
-                    error: `Video | Missing: ${errorData.Message || 'Your product listing does not include a video, missing an opportunity to demonstrate product features and benefits.'}`,
-                    solution: errorData.HowToSolve || errorData.HowTOSolve || 'Add a professional product demonstration video to your listing. Videos help customers understand your product better and can significantly improve conversion rates.',
-                    status: TaskStatus.PENDING
-                });
-            }
-            
-            // Star rating error - use actual error data
-            if (error.productStarRatingResultErrorData) {
-                const errorData = error.productStarRatingResultErrorData;
-                tasks.push({
-                    taskId: generateTaskId(),
-                    productName,
-                    asin,
-                    errorCategory: 'conversion',
-                    errorType: 'low_star_rating',
-                    error: `Rating | Low: ${errorData.Message || 'Your product\'s star rating is below the optimal threshold, which can deter potential buyers.'}`,
-                    solution: errorData.HowToSolve || errorData.HowTOSolve || 'Focus on improving product quality and addressing common customer complaints. Respond promptly to negative reviews and consider product improvements based on feedback.',
-                    status: TaskStatus.PENDING
-                });
-            }
-            
             // Buy Box error - store the raw numbers, render text on read (see renderBuyBoxTaskText)
             if (error.productsWithOutBuyboxErrorData) {
                 const errorData = error.productsWithOutBuyboxErrorData;
@@ -980,7 +1165,12 @@ class CreateTaskService {
             // sent once rather than per task. Lets a task row state its standing
             // ("1 of 93 wasted keywords, $187.41 total") so a small per-item figure
             // reads as a slice of the dashboard's number, not a contradiction.
-            const { groups } = buildGroupsFromTasks(tasks, { maxGroups: Infinity });
+            // Open work only: a group total is "what is left to fix", so completed and
+            // auto-resolved tasks must not count toward it.
+            const { groups } = buildGroupsFromTasks(
+                tasks.filter(t => TaskItem.OPEN_STATUSES.includes(t.status)),
+                { maxGroups: Infinity }
+            );
 
             // Intern the rendered text before it goes over the wire.
             //
@@ -1029,7 +1219,8 @@ class CreateTaskService {
                 taskCount: taskCounts.total,
                 pendingCount: taskCounts.pending,
                 completedCount: taskCounts.completed,
-                inProgressCount: taskCounts.in_progress
+                inProgressCount: taskCounts.in_progress,
+                resolvedCount: taskCounts.resolved
             };
         } catch (error) {
             logger.error('Error fetching user tasks:', error);
@@ -1049,9 +1240,14 @@ class CreateTaskService {
      */
     async updateTaskStatus(userId, taskId, status) {
         try {
+            // completedAt starts the grace period before a still-detected issue is
+            // reopened (TaskReconcilePlanner); any seller action clears stillDetected.
+            const update = status === 'completed'
+                ? { $set: { status, completedAt: new Date(), stillDetected: false } }
+                : { $set: { status, stillDetected: false }, $unset: { completedAt: '' } };
             const task = await TaskItem.findOneAndUpdate(
                 { userId, taskId },
-                { status },
+                update,
                 { new: true }
             ).lean();
             

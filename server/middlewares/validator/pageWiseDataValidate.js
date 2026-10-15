@@ -14,8 +14,11 @@ const validateAsinParam = [
 const validateTaskStatusBody = [
     body('taskId')
         .notEmpty().withMessage('taskId is required'),
+    // `resolved` is excluded: only task reconciliation sets it, when the issue
+    // stops being detected. A seller-set "resolved" would skip the grace period.
     body('status')
-        .notEmpty().withMessage('status is required'),
+        .notEmpty().withMessage('status is required')
+        .isIn(['pending', 'in_progress', 'completed']).withMessage('status must be pending, in_progress or completed'),
     handleValidationResult
 ];
 

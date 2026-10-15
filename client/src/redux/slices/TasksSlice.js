@@ -118,10 +118,12 @@ const TasksSlice = createSlice({
         state.lastFetched = Date.now();
         state.error = null;
         
-        // Initialize completedTasks based on task status
+        // Initialize completedTasks based on task status. `resolved` (the issue
+        // stopped being detected on its own) counts as done everywhere the seller
+        // sees progress, but only the server ever sets it.
         const completedTaskIds = [];
         tasks.forEach(task => {
-          if (task.status === 'completed') {
+          if (task.status === 'completed' || task.status === 'resolved') {
             completedTaskIds.push(task.taskId);
           }
         });
@@ -155,6 +157,8 @@ const TasksSlice = createSlice({
         const task = state.tasks.find(t => t.taskId === taskId);
         if (task) {
           task.status = status;
+          // The server clears this on any seller action (CreateTasksService.updateTaskStatus).
+          task.stillDetected = false;
         }
       })
       .addCase(updateTaskStatus.rejected, (state, action) => {

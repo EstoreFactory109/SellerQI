@@ -74,9 +74,22 @@ const TaskSchema = new mongoose.Schema({
         type: [LegacyTaskItemSchema],
         default: []
     },
+    // Only the legacy wipe-and-rebuild path reads this. Reconcile mode (see
+    // CreateTasksService.reconcileTasks) keeps it populated so a rollback to the
+    // legacy path finds a valid date, but never acts on it.
     taskRenewalDate: {
         type: Date,
         required: true
+    },
+    // When reconcile last brought this marketplace's tasks in line with the data.
+    lastReconciledAt: {
+        type: Date
+    },
+    // { [coverageSource]: consecutive runs the mass-resolve rail held it back }.
+    // See TaskReconcilePlanner.RAIL_MAX_CONSECUTIVE.
+    resolveRailTrips: {
+        type: mongoose.Schema.Types.Mixed,
+        default: {}
     }
 }, {
     timestamps: true

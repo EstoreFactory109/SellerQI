@@ -94,6 +94,15 @@ describe('ScheduledIntegration.refreshAiViews', () => {
             expect(windowOf(mockTopProducts)).toBe(0);
         });
 
+        // Task reconcile reports a material change with a floor, so routine daily
+        // drift regenerates the views at most that often instead of on every run.
+        it('passes through the floor a reconcile change asks for', async () => {
+            await call({ tasksRebuilt: true, rebuildMinIntervalHours: 24, dayOfWeek: WEDNESDAY });
+
+            expect(windowOf(mockTopOpportunities)).toBe(24);
+            expect(windowOf(mockTopProducts)).toBe(24);
+        });
+
         it('uses a window wider than 144h for the Sunday net', async () => {
             await call({ tasksRebuilt: false, dayOfWeek: SUNDAY });
 

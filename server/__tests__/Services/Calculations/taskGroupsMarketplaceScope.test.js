@@ -19,6 +19,7 @@ jest.mock('../../../models/MCP/TaskItemModel.js', () => {
     };
     return {
         scopeFilter,
+        OPEN_STATUSES: ['pending', 'in_progress'],
         find: (filter) => {
             capturedFilter = filter;
             return { select: () => ({ lean: async () => [] }) };
@@ -36,19 +37,21 @@ const {
     getTopProductsToFix,
 } = require('../../../Services/Calculations/TaskOpportunityGroupsService.js');
 
+const OPEN = { $in: ['pending', 'in_progress'] };
+
 describe('AI views read one marketplace', () => {
     beforeEach(() => { capturedFilter = null; });
 
     it('getTaskOpportunityGroups filters by the marketplace it was asked about', async () => {
         await getTaskOpportunityGroups('u1', 'US', 'NA');
 
-        expect(capturedFilter).toEqual({ userId: 'u1', country: 'US', region: 'NA' });
+        expect(capturedFilter).toEqual({ userId: 'u1', country: 'US', region: 'NA', status: OPEN });
     });
 
     it('getTopProductsToFix filters by the marketplace it was asked about', async () => {
         await getTopProductsToFix('u1', 'UK', 'EU');
 
-        expect(capturedFilter).toEqual({ userId: 'u1', country: 'UK', region: 'EU' });
+        expect(capturedFilter).toEqual({ userId: 'u1', country: 'UK', region: 'EU', status: OPEN });
     });
 
     it('two marketplaces of the same seller issue different queries', async () => {
@@ -63,6 +66,15 @@ describe('AI views read one marketplace', () => {
     it('stays user-wide when no marketplace is given, rather than matching nothing', async () => {
         await getTaskOpportunityGroups('u1');
 
-        expect(capturedFilter).toEqual({ userId: 'u1' });
+        expect(capturedFilter).toEqual({ userId: 'u1', status: OPEN });
+    });
+
+    // Completed and auto-resolved work is not "left to fix"; counting it inflated
+    // the dashboard total with tasks the seller had already ticked off.
+    it('reads open tasks only, for both views', async () => {
+        await getTaskOpportunityGroups('u1', 'US', 'NA');
+        expect(capturedFilter.status).toEqual({ $in: ['pending', 'in_progress'] });
+        await getTopProductsToFix('u1', 'US', 'NA');
+        expect(capturedFilter.status).toEqual({ $in: ['pending', 'in_progress'] });
     });
 });

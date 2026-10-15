@@ -298,6 +298,7 @@ class ScheduledIntegration {
                 const historyResult = await this.addNewAccountHistory(userId, Country, Region);
                 await this.refreshAiViews(userId, Country, Region, {
                     tasksRebuilt: historyResult?.tasksRebuilt === true,
+                    rebuildMinIntervalHours: historyResult?.taskAiRefreshMinIntervalHours || 0,
                     dayOfWeek
                 });
             } catch (historyError) {
@@ -1077,7 +1078,7 @@ class ScheduledIntegration {
                     if (!analyse || analyse.status !== 200 || !analyse.message) {
                         throw new Error(`Failed to get analyse data: status ${analyse?.status}`);
                     }
-                    const calculationResult = await analyseData(analyse.message, userId);
+                    const calculationResult = await analyseData(analyse.message, userId, { forceTaskReconcile: true });
                     if (!calculationResult?.dashboardData) {
                         throw new Error('Failed to calculate dashboard data');
                     }
@@ -2286,12 +2287,13 @@ class ScheduledIntegration {
      *
      * Never throws: an AI failure must not fail the scheduled run.
      */
-    static async refreshAiViews(userId, Country, Region, { tasksRebuilt, dayOfWeek }) {
+    static async refreshAiViews(userId, Country, Region, { tasksRebuilt, rebuildMinIntervalHours = 0, dayOfWeek }) {
         if (!tasksRebuilt && dayOfWeek !== 0) return;
 
         // 0 waives the service-level throttle, whose premise — nothing changed since
-        // the last run — is exactly false at renewal.
-        const minIntervalHours = tasksRebuilt ? 0 : STALE_AI_VIEW_HOURS;
+        // the last run — is exactly false at renewal. Task reconcile reports a material
+        // change with a non-zero floor instead, so views regenerate at most that often.
+        const minIntervalHours = tasksRebuilt ? rebuildMinIntervalHours : STALE_AI_VIEW_HOURS;
         logger.info('Refreshing AI views (scheduled)', {
             userId, country: Country, region: Region,
             reason: tasksRebuilt ? 'tasks rebuilt' : 'sunday stale-view check',
@@ -2360,7 +2362,7 @@ class ScheduledIntegration {
 
             // Use local calculation service instead of external server
             const { analyseData } = require('../Calculations/DashboardCalculation.js');
-            const calculationResult = await analyseData(getAnalyseData.message, userId);
+            const calculationResult = await analyseData(getAnalyseData.message, userId, { forceTaskReconcile: true });
 
             if (!calculationResult?.dashboardData) {
                 logger.error("addNewAccountHistory: Failed to calculate dashboard data", {
@@ -2429,7 +2431,11 @@ class ScheduledIntegration {
             // task set (weekly renewal) rather than only appending new tasks — the
             // signal the AI views key off. Wrapped rather than returned bare so the
             // history document stays available.
-            return { history: addAccountHistoryData, tasksRebuilt: calculationResult.tasksRebuilt === true };
+            return {
+                history: addAccountHistoryData,
+                tasksRebuilt: calculationResult.tasksRebuilt === true,
+                taskAiRefreshMinIntervalHours: calculationResult.taskAiRefreshMinIntervalHours || 0
+            };
 
         } catch (error) {
             logger.error("Error in addNewAccountHistory (scheduled)", {
@@ -4355,12 +4361,13 @@ class ScheduledIntegration {
                 const { addAccountHistory } = require('../History/addAccountHistory.js');
                 const { analyseData } = require('../Calculations/DashboardCalculation.js');
                 if (analysisResult.status === 200 && analysisResult.message) {
-                    const calcResult = await analyseData(analysisResult.message, userId);
+                    const calcResult = await analyseData(analysisResult.message, userId, { forceTaskReconcile: true });
                     // analyseData is what rebuilds tasks, so this is where the derived AI
                     // views have to be refreshed — this phased path, not the legacy
                     // monolithic run, is what production actually executes.
                     await this.refreshAiViews(userId, Country, Region, {
                         tasksRebuilt: calcResult?.tasksRebuilt === true,
+                        rebuildMinIntervalHours: calcResult?.taskAiRefreshMinIntervalHours || 0,
                         dayOfWeek: phaseData.dayOfWeek !== undefined ? phaseData.dayOfWeek : new Date().getDay()
                     });
                     if (calcResult?.dashboardData) {

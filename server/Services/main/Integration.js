@@ -2226,7 +2226,7 @@ class Integration {
 
             // Use local calculation service instead of external server
             const { analyseData } = require('../Calculations/DashboardCalculation.js');
-            const calculationResult = await analyseData(getAnalyseData.message, userId);
+            const calculationResult = await analyseData(getAnalyseData.message, userId, { forceTaskReconcile: true });
 
             if (!calculationResult?.dashboardData) {
                 logger.error("addNewAccountHistory: Failed to calculate dashboard data", {
