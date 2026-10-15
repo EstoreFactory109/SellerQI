@@ -340,9 +340,9 @@ const collectSuppressed = (products, fyp, country) => {
  *
  * Both FBA reports below are absent for two very different reasons, and the
  * client deserves to be told which. Amazon answers DONE_NO_DATA when there is
- * nothing to report, and the fetcher then returns before writing any document
+ * nothing to report, and the fetcher then saves an empty snapshot
  * (GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT.js, the DONE_NO_DATA case) — so
- * "no document" means either "no FBA inventory" or "Amazon did not supply it",
+ * "no products" means either "no FBA inventory" or "Amazon did not supply it",
  * never "our sync is behind". Saying "not fetched yet" for either one reads as
  * a platform fault we would be wrong to imply.
  */
@@ -579,7 +579,8 @@ const buildAccountOverview = async (userId, country, region) => {
         V2SellerPerformance.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
         // Counts Amazon reports separately from the policy statuses above.
         V1SellerPerformance.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),
-        StrandedInventoryItem.countDocuments({ User: userId, country, region }),
+        // Empty-snapshot marker rows (a clean stranded report) are not items.
+        StrandedInventoryItem.countDocuments({ User: userId, country, region, isEmptyMarker: { $ne: true } }),
         // Written by the existing opportunity engine; keyed by userId as a string.
         TopOpportunities.findOne({ userId, country, region }).sort({ createdAt: -1 }).lean(),
         SuppressedListings.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean(),

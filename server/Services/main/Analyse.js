@@ -55,6 +55,7 @@ const CogsService = require('../Finance/CogsService.js');
 const adsKeywordsPerformanceModel = require('../../models/amazon-ads/adsKeywordsPerformanceModel.js');
 const { loadLatestSnapshotDoc, loadKeywordSnapshot } = require('../../utils/ppcSnapshotLoader.js');
 const { buildLtsfAmountMap } = require('../Calculations/RecoverableAmountUtils.js');
+const { freshInventoryReportOrNull, filterInboundIssuesToWindow } = require('../Calculations/InventoryReportFreshness.js');
 const GetOrderDataModel = require('../../models/products/OrderAndRevenueModel.js');
 const WeeklyFinanceModel = require('../../models/finance/WeekLyFinanceModel.js');
 const userModel = require('../../models/user-auth/userModel.js');
@@ -163,7 +164,7 @@ class AnalyseService {
 
         // Process inventory analysis
         stepStart = Date.now();
-        const inventoryAnalysis = this.processInventoryAnalysis(allData);
+        const inventoryAnalysis = this.processInventoryAnalysis(allData, { userId, country, region });
         result.InventoryAnalysis = inventoryAnalysis.analysis;
         logger.info(`[PERF] processInventoryAnalysis completed in ${Date.now() - stepStart}ms`);
         
@@ -1137,7 +1138,7 @@ class AnalyseService {
     /**
      * Process inventory analysis
      */
-    static processInventoryAnalysis(allData) {
+    static processInventoryAnalysis(allData, context = {}) {
         const inventoryAnalysis = {
             inventoryPlanning: [],
             strandedInventory: [],
@@ -1145,11 +1146,24 @@ class AnalyseService {
             replenishment: []
         };
 
+        // These three daily reports are read as "newest document wins", so a
+        // document older than a week is treated as absent rather than shown as
+        // today's position — see InventoryReportFreshness.js for how stale ones
+        // arose. Stranded is dated by its batch's createdAt.
+        const strandedDoc = freshInventoryReportOrNull(allData.inventoryStrandedData, 'Stranded inventory', context);
+        const inboundDoc = freshInventoryReportOrNull(allData.inboundNonComplianceData, 'Inbound non-compliance', context);
+        const restockDoc = freshInventoryReportOrNull(allData.restockInventoryRecommendationsData, 'Restock recommendations', context);
+
         // Create safe defaults for inventory data
         const safeInventoryPlanningData = allData.inventoryPlanningData || { data: [] };
-        const safeInventoryStrandedData = allData.inventoryStrandedData || { strandedUIData: [] };
-        const safeInboundNonComplianceData = allData.inboundNonComplianceData || { ErrorData: [] };
-        const safeRestockData = allData.restockInventoryRecommendationsData || { Products: [] };
+        const safeInventoryStrandedData = strandedDoc || { strandedUIData: [] };
+        // The writer keeps only issues reported in the last 30 days, but that
+        // window was applied on the day it ran; re-apply it now so a document
+        // from earlier in the week cannot surface issues that have aged out.
+        const safeInboundNonComplianceData = {
+            ErrorData: filterInboundIssuesToWindow(inboundDoc?.ErrorData)
+        };
+        const safeRestockData = restockDoc || { Products: [] };
 
         // Per-unit COGS, keyed by ASIN — used to turn unfulfillable/stranded
         // quantities into a dollar amount. Empty map (amount = 0) for accounts

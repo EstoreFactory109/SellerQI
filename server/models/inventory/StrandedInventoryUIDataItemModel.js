@@ -33,19 +33,26 @@ const strandedInventoryUIDataItemSchema = new Schema({
         type: Schema.Types.ObjectId,
         index: true
     },
+    // A batch consisting of this one row means "Amazon reported no stranded
+    // inventory". Without it a clean report wrote nothing, so the readers kept
+    // serving the last batch that DID have problems as current — for months.
+    // A marker carries no item fields, hence the conditional `required` below.
+    isEmptyMarker: {
+        type: Boolean
+    },
     // Stranded inventory item data
     asin: {
         type: String,
-        required: true,
+        required: function () { return !this.isEmptyMarker; },
         index: true
     },
     status_primary: {
         type: String,
-        required: true
+        required: function () { return !this.isEmptyMarker; }
     },
     stranded_reason: {
         type: String,
-        required: true
+        required: function () { return !this.isEmptyMarker; }
     }
 }, {
     timestamps: true
@@ -65,21 +72,24 @@ strandedInventoryUIDataItemSchema.statics.findLatestByUserCountryRegion = async 
         .lean();
     
     if (!latestItem || !latestItem.batchId) {
-        return { items: [], createdAt: null, batchId: null };
+        return { items: [], createdAt: null, batchId: null, isEmpty: false };
     }
-    
-    // Then fetch all items with that batchId
-    const items = await this.find({ batchId: latestItem.batchId }).lean();
-    return { 
-        items, 
-        createdAt: latestItem.createdAt, 
-        batchId: latestItem.batchId 
+
+    // Then fetch all items with that batchId. The marker row is excluded so it
+    // never reaches a caller as an item; `isEmpty` is how a caller tells "the
+    // latest report was clean" from "there has never been a report".
+    const items = await this.find({ batchId: latestItem.batchId, isEmptyMarker: { $ne: true } }).lean();
+    return {
+        items,
+        createdAt: latestItem.createdAt,
+        batchId: latestItem.batchId,
+        isEmpty: items.length === 0
     };
 };
 
 // Static method to find items by batchId
 strandedInventoryUIDataItemSchema.statics.findByBatchId = function(batchId) {
-    return this.find({ batchId }).lean();
+    return this.find({ batchId, isEmptyMarker: { $ne: true } }).lean();
 };
 
 // Static method to delete items by batchId
