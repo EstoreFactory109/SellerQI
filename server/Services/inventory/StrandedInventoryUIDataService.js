@@ -53,27 +53,25 @@ async function saveStrandedInventoryUIData(userId, country, region, strandedUIDa
         // Generate a batch ID to group all items from this save operation
         const batchId = new mongoose.Types.ObjectId();
 
-        // If no data, just return success with 0 count
-        if (itemCount === 0) {
-            logger.info('No stranded inventory data to save');
-            return {
-                success: true,
-                message: 'No data to save',
-                itemCount: 0,
-                batchId: batchId.toString()
-            };
-        }
+        // No stranded inventory is a result, not an absence of one. Writing
+        // nothing here left the previous (problem-filled) batch as the newest,
+        // so readers kept reporting issues the seller had already fixed. A
+        // single marker row makes the clean report the latest batch instead.
+        const itemsToInsert = itemCount === 0
+            ? [{ User: userObjectId, country, region, batchId, isEmptyMarker: true }]
+            : strandedUIDataArray.map(item => ({
+                User: userObjectId,
+                country,
+                region,
+                batchId,
+                asin: item.asin || '',
+                status_primary: item.status_primary || '',
+                stranded_reason: item.stranded_reason || ''
+            }));
 
-        // Save items to separate collection
-        const itemsToInsert = strandedUIDataArray.map(item => ({
-            User: userObjectId,
-            country,
-            region,
-            batchId,
-            asin: item.asin || '',
-            status_primary: item.status_primary || '',
-            stranded_reason: item.stranded_reason || ''
-        }));
+        if (itemCount === 0) {
+            logger.info('No stranded inventory reported; saving an empty snapshot marker');
+        }
 
         // Use insertMany with ordered:false for better performance
         await StrandedInventoryUIDataItem.insertMany(itemsToInsert, { ordered: false });
@@ -105,7 +103,7 @@ async function saveStrandedInventoryUIData(userId, country, region, strandedUIDa
 
         return {
             success: true,
-            message: 'Data saved successfully',
+            message: itemCount === 0 ? 'Empty snapshot saved' : 'Data saved successfully',
             itemCount,
             batchId: batchId.toString(),
             userId: userObjectId.toString(),
@@ -149,11 +147,33 @@ async function getStrandedInventoryUIData(userId, country, region) {
         }
 
         // First, try to get data from the new format (separate collection)
-        const { items: newFormatItems, createdAt, batchId } = await StrandedInventoryUIDataItem.findLatestByUserCountryRegion(
+        const { items: newFormatItems, createdAt, batchId, isEmpty } = await StrandedInventoryUIDataItem.findLatestByUserCountryRegion(
             userObjectId,
             country,
             region
         );
+
+        // The latest new-format batch is a clean report. Return it as an empty
+        // result — never fall through to the legacy collection below, whose
+        // documents predate it and would resurrect long-fixed problems.
+        // Same envelope as a populated batch (strandedUIData: [[]]) so callers
+        // that flatten the nested array, and the createdAt age checks, work as-is.
+        if (batchId && isEmpty) {
+            logger.debug('Latest Stranded Inventory batch is an empty snapshot', {
+                userId: userObjectId.toString(),
+                country,
+                region
+            });
+            return {
+                _id: batchId,
+                User: userObjectId,
+                country,
+                region,
+                strandedUIData: [[]],
+                createdAt,
+                updatedAt: createdAt
+            };
+        }
 
         if (newFormatItems && newFormatItems.length > 0) {
             logger.debug('Found Stranded Inventory data in new format (separate collection)', {

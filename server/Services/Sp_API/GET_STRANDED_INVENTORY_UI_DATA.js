@@ -44,6 +44,10 @@ const generateReport = async (accessToken, marketplaceIds,baseuri) => {
     }
 };
 
+// Returned by checkReportStatus for DONE_NO_DATA. Distinct from false (failed)
+// and null (still processing) so the poll loop can save an empty snapshot.
+const NO_DATA = 'DONE_NO_DATA';
+
 const checkReportStatus = async (accessToken, reportId,baseuri) => {
     try {
         const response = await axios.get(
@@ -78,8 +82,10 @@ const checkReportStatus = async (accessToken, reportId,baseuri) => {
                 return null;
 
             case "DONE_NO_DATA":
-                logger.error("Report completed but contains no data.");
-                return false;
+                // Amazon's answer when nothing is stranded: a result to save as
+                // an empty snapshot, not a failure.
+                logger.info("Report completed with no data (nothing stranded).");
+                return NO_DATA;
 
             case "FAILED":
                 logger.error("Report failed for an unknown reason.");
@@ -140,6 +146,9 @@ const getReport = async (accessToken, marketplaceIds, userId,baseuri,country,reg
                     message: "Error in generating the report",
                 };
             }
+            if (reportDocumentId === NO_DATA) {
+                return await _saveStrandedItems([], userId, country, region);
+            }
             retries--;
         }
 
@@ -188,6 +197,12 @@ async function _processStrandedDocument(accessToken, reportDocumentId, baseuri, 
             strandedUIdata.push(data)
         })
 
+        return await _saveStrandedItems(strandedUIdata, userId, country, region);
+}
+
+// Save step shared by a downloaded report and DONE_NO_DATA. An empty array is
+// saved too (as an empty-snapshot marker) — see saveStrandedInventoryUIData.
+async function _saveStrandedItems(strandedUIdata, userId, country, region) {
         // Save to database using service layer (handles 16MB limit with separate collection)
         const saveResult = await saveStrandedInventoryUIData(userId, country, region, strandedUIdata);
 
@@ -232,7 +247,9 @@ async function convertTSVToJson(tsvBuffer) {
             logger.error('[GET_STRANDED_INVENTORY_UI_DATA] Fallback parsing also failed', { 
                 error: fallbackError.message 
             });
-            return [];
+            // Thrown, not `return []`: an empty result is now saved as "no
+            // problems", so an unreadable report must not be mistaken for one.
+            throw new Error(`[GET_STRANDED_INVENTORY_UI_DATA] report could not be parsed: ${fallbackError.message}`);
         }
     }
 }
@@ -263,8 +280,15 @@ getReport.spApiAsync = {
         submit: async () => await generateReport(accessToken, marketplaceIds, baseuri),
         checkStatusOnce: (reportId) => checkSpApiStatusOnce(accessToken, reportId, baseuri),
         finalize: async (handle) => {
-            await _processStrandedDocument(accessToken, handle.reportDocumentId, baseuri, userId, country, region);
-            return { empty: false };
+            // DONE_NO_DATA arrives here with no document to download. It used to
+            // be passed straight to the download, which threw and recorded the
+            // run as FAILED — and saved nothing, so stale stranded rows lived on.
+            if (!handle?.reportDocumentId) {
+                await _saveStrandedItems([], userId, country, region);
+                return { empty: true };
+            }
+            const r = await _processStrandedDocument(accessToken, handle.reportDocumentId, baseuri, userId, country, region);
+            return { empty: !!r && r.itemCount === 0 };
         },
     }]),
     saveFromRows: async () => ({ documentsSaved: 0 }),
