@@ -1,19 +1,22 @@
+// Same threshold as the server's task check (server Conversion.MIN_PRODUCT_IMAGES).
+const MIN_PRODUCT_IMAGES = 5;
+
 const checkNumberOfImages=(imageArr)=>{
     // Handle null, undefined, or non-array inputs
     if (!imageArr || !Array.isArray(imageArr)) {
         return {
             status:"Error",
             Message:"No images found for this product. Having no images will severely limit potential buyers' ability to evaluate the product.",
-            HowToSolve:"Add at least 7 high-quality images that showcase your product from different angles, including close-ups of important features, the product in use, and packaging.",
+            HowToSolve:"Add at least 5 high-quality images that showcase your product from different angles, including close-ups of important features, the product in use, and packaging.",
             MainImage: null
         }
     }
 
-    if(imageArr.length<7){
+    if(imageArr.length<MIN_PRODUCT_IMAGES){
         return {
             status:"Error",
-            Message:"Your product listing includes fewer than 7 images. Having fewer images may limit potential buyers' ability to fully evaluate the product, which can negatively impact conversion rates.",
-            HowToSolve:"Increase the number of images to the recommended total of 7 or more, ensuring that these cover all angles and important features of your product. Include high-quality images that showcase the product in use, any important details, variations, and packaging. This visual enhancement will help improve customer engagement and confidence in making a purchase.",
+            Message:`Your product listing includes fewer than ${MIN_PRODUCT_IMAGES} images. Having fewer images may limit potential buyers' ability to fully evaluate the product, which can negatively impact conversion rates.`,
+            HowToSolve:`Increase the number of images to the recommended total of ${MIN_PRODUCT_IMAGES} or more, ensuring that these cover all angles and important features of your product. Include high-quality images that showcase the product in use, any important details, variations, and packaging. This visual enhancement will help improve customer engagement and confidence in making a purchase.`,
             MainImage:imageArr[0] || null
         }
     }else{
@@ -53,9 +56,19 @@ const checkIfVideoExists=(video)=>{
 }
 
 const checkStarRating=(product_star_ratings)=>{
-    // Handle null, undefined, or non-numeric inputs
-    const starRating = Number(product_star_ratings) || 0;
-    
+    const starRating = Number(product_star_ratings);
+
+    // No rating means no reviews yet, not a rating of 0: it used to read as
+    // "Your product rating is 0 stars". The caller only acts on "Error".
+    if (product_star_ratings === null || product_star_ratings === undefined || product_star_ratings === ''
+        || !Number.isFinite(starRating) || starRating <= 0) {
+        return {
+            status:"NoData",
+            Message:"This product has no customer ratings yet.",
+            HowToSolve:""
+        }
+    }
+
     if(starRating<4.3){
         return {
             status:"Error",

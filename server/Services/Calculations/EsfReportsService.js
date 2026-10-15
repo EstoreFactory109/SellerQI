@@ -24,6 +24,7 @@
  * Every builder is run through `settle` so one empty or broken collection
  * degrades a single card rather than failing the page.
  */
+const { aplusStateOf } = require('./Conversion.js');
 const mongoose = require('mongoose');
 
 const RestockInventoryRecommendations = require('../../models/inventory/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model.js');
@@ -1416,8 +1417,9 @@ const buildListingsAudit = async (userId, country, region) => {
             description: Boolean(detail?.product_description?.length),
             images: (detail?.product_photos?.length || 0) >= 5,
             video: Boolean(detail?.video_url?.length),
-            // Amazon reports A+ status per ASIN; anything approved counts.
-            aPlus: aplusStatus === 'APPROVED' || aplusStatus === 'ACTIVE' || aplusStatus === 'SUBMITTED',
+            // Same reading as the A+ task check: legacy "true" counts as present,
+            // DRAFT / NOT_AVAILABLE / "false" as missing.
+            aPlus: aplusStateOf(aplusStatus) === 'present',
             brandStory: Boolean(detail?.has_brandstory),
         };
 

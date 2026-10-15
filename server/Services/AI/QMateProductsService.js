@@ -14,6 +14,7 @@
  * This service is INDEPENDENT and does not affect any existing flows.
  */
 
+const { aplusStateOf } = require('../Calculations/Conversion.js');
 const logger = require('../../utils/Logger.js');
 const NumberOfProductReviews = require('../../models/seller-performance/NumberOfProductReviewsModel.js');
 const ProductWiseSales = require('../../models/products/ProductWiseSalesModel.js');
@@ -733,9 +734,11 @@ async function getProductCategorization(userId, country, region, limit = 20) {
         const aPlusAsins = new Set();
         if (aPlusData?.ApiContentDetails) {
             aPlusData.ApiContentDetails.forEach(item => {
-                if (item.status === 'APPROVED' || item.status === 'PUBLISHED') {
-                    // A+ content is linked to ASINs in the item
-                    if (item.asin) aPlusAsins.add(item.asin.toUpperCase());
+                if (aplusStateOf(item.status) === 'present') {
+                    // A+ content is linked to ASINs in the item. The stored field is
+                    // `Asins`; reading `item.asin` alone left this set always empty.
+                    const asinField = item.Asins || item.asin;
+                    if (typeof asinField === 'string') aPlusAsins.add(asinField.toUpperCase());
                     if (item.contentReferenceKey) {
                         // Some structures have ASINs in different fields
                         const asins = item.includedDataTypes?.ASIN || [];

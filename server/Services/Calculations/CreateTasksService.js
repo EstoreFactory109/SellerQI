@@ -713,8 +713,8 @@ class CreateTaskService {
                 key: 'imageResultErrorData',
                 errorType: 'insufficient_images',
                 label: 'Images | Insufficient',
-                fallbackMessage: 'Your product listing has fewer than the recommended 7 images, limiting buyers\' ability to fully evaluate the product.',
-                fallbackSolution: 'Increase the number of images to at least 7, covering all angles and important features of your product. Include high-quality images that showcase the product in use, important details, variations, and packaging.'
+                fallbackMessage: 'Your product listing has fewer than the recommended 5 images, limiting buyers\' ability to fully evaluate the product.',
+                fallbackSolution: 'Increase the number of images to at least 5, covering all angles and important features of your product. Include high-quality images that showcase the product in use, important details, variations, and packaging.'
             },
             {
                 key: 'videoResultErrorData',
