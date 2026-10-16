@@ -418,7 +418,7 @@ async function getPPCSpendsDateWise(accessToken, profileId, userId, country, reg
             // console.log(`Getting PPC spends by ASIN/SKU for region: ${region}`);
 
     try {
-        const { startDate, endDate, isCustom } = resolveReportDateRange(options);
+        const { startDate, endDate, isCustom } = resolveReportDateRange({ ...options, country });
         logger.info(`📡 [GetDateWiseSpendKeywords] PPC spends date-wise for region: ${region}, country: ${country}, userId: ${userId}, window: ${startDate} → ${endDate}, customDateRange: ${isCustom}`);
 
         // Add a small delay to prevent rapid successive requests
@@ -522,7 +522,7 @@ async function checkDateWiseStatusOnce(reportId, accessToken, profileId, region)
 }
 
 function buildDateWiseSpecs({ userId, country, region, accessToken, profileId, marketplaceId = '', startDate: sd = null, endDate: ed = null }) {
-    const { startDate, endDate } = resolveReportDateRange(sd && ed ? { startDate: sd, endDate: ed } : {});
+    const { startDate, endDate } = resolveReportDateRange(sd && ed ? { startDate: sd, endDate: ed } : { country });
     return [{
         service: 'ppcSpendsDateWise',
         paramsKey: 'default',

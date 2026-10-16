@@ -1,8 +1,13 @@
 const mongoose = require("mongoose");
+const { marketplaceYesterdayStr, addDaysToDateStr } = require("../../utils/marketplaceTimezone.js");
 
-// Schema for campaign type breakdown (SP, SB, SD) — aligns with GetPPCMetrics CAMPAIGN_TYPES (sales1d vs sales, purchases1d vs purchases)
+// Schema for campaign type breakdown (SP, SB, SD, ST) — aligns with GetPPCMetrics CAMPAIGN_TYPES.
+// `sales` is the Seller Central default window (SP sales7d; SB/SD/ST `sales`, their only figure).
+// `sales14d` is the 14-day figure (SP sales14d; equal to `sales` for SB/SD/ST), stored so a
+// 7-day / 14-day attribution toggle can be offered later without re-fetching history.
 const campaignTypeMetricsSchema = new mongoose.Schema({
     sales: { type: Number, default: 0 },
+    sales14d: { type: Number, default: 0 },
     spend: { type: Number, default: 0 },
     impressions: { type: Number, default: 0 },
     clicks: { type: Number, default: 0 },
@@ -17,6 +22,7 @@ const campaignSummaryRowSchema = new mongoose.Schema({
     campaignName: { type: String, default: "" },
     campaignStatus: { type: String, default: "" },
     sales: { type: Number, default: 0 },
+    sales14d: { type: Number, default: 0 },
     spend: { type: Number, default: 0 },
     impressions: { type: Number, default: 0 },
     clicks: { type: Number, default: 0 },
@@ -62,6 +68,8 @@ const ppcMetricsSchema = new mongoose.Schema({
     },
     summary: {
         totalSales: { type: Number, default: 0 },
+        /** 14-day attributed sales (SP sales14d + SB/SD/ST sales) — see campaignTypeMetricsSchema */
+        totalSales14d: { type: Number, default: 0 },
         totalSpend: { type: Number, default: 0 },
         totalImpressions: { type: Number, default: 0 },
         totalClicks: { type: Number, default: 0 },
@@ -70,13 +78,14 @@ const ppcMetricsSchema = new mongoose.Schema({
         ctr: { type: Number, default: 0 },
         cpc: { type: Number, default: 0 },
         totalUnitsSoldClicks1d: { type: Number, default: 0 },
-        /** Order count from report (purchases1d for SP, purchases for SB/SD) */
+        /** Order count from report (purchases7d for SP, purchases for SB/SD/ST) */
         totalPurchases: { type: Number, default: 0 }
     },
     campaignTypeBreakdown: {
         sponsoredProducts: { type: campaignTypeMetricsSchema, default: () => ({}) },
         sponsoredBrands: { type: campaignTypeMetricsSchema, default: () => ({}) },
-        sponsoredDisplay: { type: campaignTypeMetricsSchema, default: () => ({}) }
+        sponsoredDisplay: { type: campaignTypeMetricsSchema, default: () => ({}) },
+        sponsoredTelevision: { type: campaignTypeMetricsSchema, default: () => ({}) }
     },
     /** Deprecated on per-day docs (empty). Kept for legacy reads / compatibility */
     dateWiseMetrics: {
@@ -90,7 +99,8 @@ const ppcMetricsSchema = new mongoose.Schema({
     campaignSummaries: {
         sponsoredProducts: { type: [campaignSummaryRowSchema], default: [] },
         sponsoredBrands: { type: [campaignSummaryRowSchema], default: [] },
-        sponsoredDisplay: { type: [campaignSummaryRowSchema], default: [] }
+        sponsoredDisplay: { type: [campaignSummaryRowSchema], default: [] },
+        sponsoredTelevision: { type: [campaignSummaryRowSchema], default: [] }
     }
 }, { timestamps: true });
 
@@ -388,16 +398,18 @@ ppcMetricsSchema.statics.calculateMetricsForDateRange = async function(userId, c
 };
 
 /**
- * Roll up per-day documents for the last N calendar days (inclusive of ~31 days when days=30).
- * Matches default GetPPCMetrics sync window (yesterday back through yesterday−30).
+ * Roll up per-day documents for exactly the last N calendar days, ending on the marketplace's
+ * yesterday (yesterday−(N−1) … yesterday). With days=30 this is the same window the default
+ * GetPPCMetrics sync fetches.
+ *
+ * "Yesterday" is the marketplace's (Pacific for NA, DST-aware — utils/marketplaceTimezone.js),
+ * the same day key the ads pipeline writes. It used to be the server's local clock and
+ * yesterday−N, i.e. N+1 days in whatever timezone the server happened to run in.
  */
-ppcMetricsSchema.statics.rollupLastDays = async function(userId, country, region, days = 30) {
+ppcMetricsSchema.statics.rollupLastDays = async function(userId, country, region, days = 30, now = new Date()) {
     const userIdStr = userId?.toString() || userId;
-    const now = new Date();
-    const fmt = (d) =>
-        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    const endDate = fmt(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
-    const startDate = fmt(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1 - days));
+    const endDate = marketplaceYesterdayStr(country, now);
+    const startDate = addDaysToDateStr(endDate, -(days - 1));
     return this.calculateMetricsForDateRange(userIdStr, country, region, startDate, endDate);
 };
 

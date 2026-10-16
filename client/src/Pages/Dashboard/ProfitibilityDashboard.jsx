@@ -446,11 +446,20 @@ const ProfitabilityDashboard = () => {
       financeDashOverhead.forEach((item) => pushExpense(item.category, item.amount));
     }
 
-    // Advertising / PPC — shown as negative (outflow) in breakdown
+    // Advertising / PPC — shown as negative (outflow) in breakdown.
+    // The finance SP/SD split comes from per-product ads data, which has no Sponsored Brands
+    // (Amazon has no ASIN-level SB report) or Sponsored TV. When the account-wide spend is higher,
+    // the difference is shown as its own line so the lines still add up to the header ad spend.
+    const spSdSpend = t ? Math.abs(Number(t.adsSpendSP || 0)) + Math.abs(Number(t.adsSpendSD || 0)) : 0;
+    const otherAdTypesSpend = displayAdSpend - spSdSpend;
     if (displayAdSpend > 0) {
-      if (useFinanceAdsBreakdown && t && (Number(t.adsSpendSP) > 0 || Number(t.adsSpendSD) > 0)) {
+      if (useFinanceAdsBreakdown && t && spSdSpend > 0) {
         pushExpense('Sponsored Products (SP)', -Math.abs(t.adsSpendSP || 0));
         pushExpense('Sponsored Display (SD)', -Math.abs(t.adsSpendSD || 0));
+      } else if (t && spSdSpend > 0 && otherAdTypesSpend >= 0.01) {
+        pushExpense('Sponsored Products (SP)', -Math.abs(t.adsSpendSP || 0));
+        pushExpense('Sponsored Display (SD)', -Math.abs(t.adsSpendSD || 0));
+        pushExpense('Sponsored Brands / TV (not per-product)', -otherAdTypesSpend);
       } else {
         pushExpense('Advertising / PPC', -displayAdSpend);
       }

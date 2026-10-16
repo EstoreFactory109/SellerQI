@@ -58,6 +58,33 @@ function summarizeBuyBoxDays(days, products) {
 }
 
 /**
+ * TACoS for the dashboard: PPC spend ÷ total (organic + PPC) sales over the SAME days.
+ *
+ * The denominator is aggregated over the rollup's exact window rather than taken from
+ * SalesOnlyMetrics.getRecentDays / totalWeeklySale, which is "the newest 31 stored docs" and so
+ * covers different days than the 30-day PPC rollup. Same formula and source as the Campaign
+ * Audit KPI summary (PPCCampaignAnalysisService.getPPCKPISummary). Non-fatal: 0 on any error.
+ */
+async function resolveDashboardTacos(userId, country, region, ppcRollup) {
+    if (!ppcRollup?.found || !ppcRollup.dateRange?.startDate || !ppcRollup.dateRange?.endDate) return 0;
+    try {
+        const { totalSales } = await PPCCampaignAnalysisService.aggregateTotalSales(
+            userId.toString(),
+            country,
+            region,
+            ppcRollup.dateRange.startDate,
+            ppcRollup.dateRange.endDate
+        );
+        const spend = Number(ppcRollup.summary?.totalSpend || 0);
+        const total = Number(totalSales || 0);
+        return total > 0 ? Math.round((spend / total) * 100 * 100) / 100 : 0;
+    } catch (err) {
+        logger.warn('[DashboardSummary] resolveDashboardTacos failed', { error: err.message });
+        return 0;
+    }
+}
+
+/**
  * Money wasted in ads — same aggregation as Campaign Audit wasted-spend tab.
  */
 async function resolveMoneyWastedInAds(userId, country, region, startDate, endDate) {
@@ -152,6 +179,7 @@ async function getDashboardSummary(userId, country, region) {
         logger.info(`[PERF] getDashboardSummary queries completed in ${queryTime}ms`);
 
         const ppcRollup = await PPCMetrics.rollupLastDays(userId.toString(), country, region, 30);
+        const tacos = await resolveDashboardTacos(userId, country, region, ppcRollup);
         const ppcMetrics = ppcRollup?.found
             ? {
                   summary: ppcRollup.summary,
@@ -290,7 +318,7 @@ async function getDashboardSummary(userId, country, region) {
                 totalCost: ppcSummary.totalSpend,
                 totalSalesIn30Days: ppcSummary.totalSales,
                 acos: ppcSummary.overallAcos || 0,
-                tacos: 0 // TACOS requires total sales which we have, but keeping simple for now
+                tacos
             },
             ppcDateWiseMetrics: ppcMetrics?.dateWiseMetrics || [],
             // dateWiseTotalCosts - derived from ppcDateWiseMetrics for TotalSales component fallback
@@ -582,6 +610,7 @@ async function getDashboardPhase2(userId, country, region) {
 
         const ppcRollupPhase2 = await PPCMetrics.rollupLastDays(userId.toString(), country, region, 30);
         const ppcMetrics = ppcRollupPhase2?.found ? { summary: ppcRollupPhase2.summary } : null;
+        const tacos = await resolveDashboardTacos(userId, country, region, ppcRollupPhase2);
 
         const accountHealthPercentage = calculateAccountHealthPercentage(v2Data);
         const accountErrors = checkAccountHealth(v2Data, v1Data, v2HistoryPhase2);
@@ -619,7 +648,7 @@ async function getDashboardPhase2(userId, country, region) {
                 totalCost: ppcSummary.totalSpend,
                 totalSalesIn30Days: ppcSummary.totalSales,
                 acos: ppcSummary.overallAcos || 0,
-                tacos: 0
+                tacos
             },
             buyBoxSummary: summarizeBuyBoxDays(buyBoxDays, phase2Account?.products),
             phase: 2
@@ -740,5 +769,7 @@ module.exports = {
     getDashboardPhase1,
     getDashboardPhase2,
     getDashboardPhase3,
-    summarizeBuyBoxDays
+    summarizeBuyBoxDays,
+    // Exported for tests: the dashboard's TACoS must divide by total sales over the PPC window.
+    resolveDashboardTacos
 };

@@ -2535,6 +2535,11 @@ const PPCDashboard = () => {
                   {selectedTab === 0 && (
                     <>
                       <h2 className="text-sm font-semibold mb-1" style={{ color: COLORS.textPrimary }}>High ACOS Campaigns</h2>
+                      {/* Built from per-product ads data (SP + SD), so SB campaigns can't appear here
+                          and the tab's spend won't sum to the KPI spend above, which includes SB. */}
+                      <p className="text-xs mb-1" style={{ color: COLORS.textSecondary }}>
+                        Covers Sponsored Products and Sponsored Display campaigns. Sponsored Brands campaigns aren't listed here because Amazon doesn't report them per product.
+                      </p>
                       <OptimizationTip
                         tip="Reduce bids or add negatives to lower ACoS."
                         icon="📉"

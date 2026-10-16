@@ -31,9 +31,17 @@ const adsKeywordsPerformanceSchema = new mongoose.Schema({
             type: Number,
             required: true
         },
+        // LEGACY NAME: despite "30d", this holds Amazon's 7-day attributed sales (`sales7d`) — see
+        // mapKeywordPerformanceRow in Services/AmazonAds/GetWastedSpendKeywords.js. Kept because many
+        // readers use it; new code should read `sales7d`, which holds the same value.
         attributedSales30d: {
             type: Number,
             required: true
+        },
+        // Correctly named copy of the 7-day attributed sales. Absent on rows written before it existed.
+        sales7d: {
+            type: Number,
+            required: false
         },
         cost: {
             type: Number,

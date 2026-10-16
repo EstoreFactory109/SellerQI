@@ -37,7 +37,11 @@ const { runFbaInventorySyncForMarketplace } = require('../Sp_API/FbaInventorySto
 // Incremental dashboard slice writes — additive, non-fatal (see DashboardSliceService).
 const dashboardSliceService = require('../dashboard/DashboardSliceService.js');
 const { financeAsyncEnabledFor, adsAsyncEnabledFor } = require('../../utils/asyncFinanceGate.js');
-const { marketplaceTodayStr, marketplaceYesterdayStr } = require('../../utils/marketplaceTimezone.js');
+const { marketplaceTodayStr, marketplaceYesterdayStr, addDaysToDateStr } = require('../../utils/marketplaceTimezone.js');
+
+// How many days (ending yesterday) the daily ads phase re-fetches. Amazon attributes SB/SD
+// conversions for 14 days after the click; the 15th day is margin. See fetchScheduledApiData.
+const ADS_RESYNC_DAYS = 15;
 const { SLICE_KEYS } = dashboardSliceService;
 
 class ScheduledIntegration {
@@ -950,18 +954,18 @@ class ScheduledIntegration {
 
         const apiData = {};
 
-        // Daily schedules fetch only yesterday's data (Pacific time, consistent with reportDateRange.js).
-        // ADS ONLY — used at the serviceFunction call sites below. Ads report ROWS are already
-        // grouped marketplace-locally by Amazon; this only picks which dates to request, so it
-        // stays Pacific. Finance day keys are marketplace-local (utils/marketplaceTimezone.js) —
-        // do not reuse this for anything finance.
-        const PACIFIC_OFFSET_MS = 7 * 60 * 60 * 1000;
-        const _nowPacific = new Date(Date.now() - PACIFIC_OFFSET_MS);
-        const _yesterdayPacific = new Date(Date.UTC(
-            _nowPacific.getUTCFullYear(), _nowPacific.getUTCMonth(), _nowPacific.getUTCDate() - 1
-        ));
-        const scheduleYesterday = _yesterdayPacific.toISOString().split('T')[0];
-        logger.info(`ScheduledIntegration: Daily date window = ${scheduleYesterday} (yesterday Pacific)`);
+        // Ads date window. ADS ONLY — used at the serviceFunction call sites below. Amazon Ads
+        // buckets report rows by the marketplace's local day (Pacific for NA), so "yesterday"
+        // is the marketplace's yesterday, resolved DST-correctly by utils/marketplaceTimezone.js
+        // (the old fixed UTC-7 offset was an hour off all winter).
+        //
+        // The window re-fetches ADS_RESYNC_DAYS days ending yesterday so attributed sales can
+        // settle: Amazon attributes SB/SD conversions for 14 days after the click, so a date is
+        // not final until 14 days later. 15 gives one day of margin — at 14 the oldest date got
+        // its last refresh on the very day its attribution window closed.
+        const scheduleYesterday = marketplaceYesterdayStr(Country);
+        const adsResyncStartDate = addDaysToDateStr(scheduleYesterday, -(ADS_RESYNC_DAYS - 1));
+        logger.info(`ScheduledIntegration: Daily ads window = ${adsResyncStartDate} … ${scheduleYesterday} (${ADS_RESYNC_DAYS} days, marketplace-local)`);
         
         // Get functions scheduled for today
         const scheduledFunctions = getFunctionsForDay(dayOfWeek);
@@ -1389,17 +1393,14 @@ class ScheduledIntegration {
                             return { success: false, error: error.message || 'MCP SalesOnly fetch failed', data: null };
                         });
                 } else if (functionKey === 'ppcMetricsAggregated') {
-                    // PPC Metrics Aggregated — daily schedule fetches the last 14 days
-                    // to capture the full attribution window across all campaign types:
+                    // PPC Metrics Aggregated — daily schedule fetches the last ADS_RESYNC_DAYS (15)
+                    // days to capture the full attribution window across all campaign types:
                     //   SP uses sales7d (7-day window)
                     //   SB/SD use sales which is 14-day attribution
-                    // Re-fetching 14 days ensures every campaign type's metrics converge
+                    // Re-fetching 15 days ensures every campaign type's metrics converge
                     // to their final values. Uses upsertMetricsForDate (findOneAndUpdate)
                     // so re-fetched days are cleanly overwritten with the latest data.
                     // getPPCMetrics(accessToken, profileId, userId, country, region, refreshToken, startDate, endDate, saveToDatabase)
-                    const _adsResyncStart = new Date(_yesterdayPacific);
-                    _adsResyncStart.setUTCDate(_adsResyncStart.getUTCDate() - 13);
-                    const adsResyncStartDate = _adsResyncStart.toISOString().split('T')[0];
                     promise = serviceFunction(AdsAccessToken, ProfileId, userId, Country, Region, AdsRefreshToken, adsResyncStartDate, scheduleYesterday, true)
                         .then(result => {
                             if (result && result.success !== false) {
@@ -1519,14 +1520,11 @@ class ScheduledIntegration {
                             return { success: false, error: error.message || 'Finance Sync failed', data: null };
                         });
                 } else if (requiresAdsToken) {
-                    // Daily report services — fetch last 14 days to capture the full
+                    // Daily report services — fetch last ADS_RESYNC_DAYS (15) days to capture the full
                     // attribution window (SP=7d, SB/SD=14d). A click on Day N can
                     // generate an attributed sale up to 14 days later; re-fetching
                     // ensures each day's metrics converge to their final values.
-                    const _adsResyncStartForOpts = new Date(_yesterdayPacific);
-                    _adsResyncStartForOpts.setUTCDate(_adsResyncStartForOpts.getUTCDate() - 13);
-                    const adsResyncStartForOpts = _adsResyncStartForOpts.toISOString().split('T')[0];
-                    const dailyDateOpts = { startDate: adsResyncStartForOpts, endDate: scheduleYesterday };
+                    const dailyDateOpts = { startDate: adsResyncStartDate, endDate: scheduleYesterday };
 
                     if (functionKey === 'ppcSpendsBySKU' || functionKey === 'adsKeywordsPerformanceData' || functionKey === 'ppcSpendsDateWise') {
                         // fn(accessToken, profileId, userId, country, region, refreshToken, options)
@@ -2999,19 +2997,21 @@ class ScheduledIntegration {
             // whether any ads service actually returned data. Finalize uses
             // these flags to decide whether to stamp lastDailyUpdate (A.3).
             //
-            // We treat the phase as failed only when EVERY ads service either
-            // didn't run or returned success: false. A single successful service
-            // is enough to count the phase as a (partial) success.
+            // The phase counts as a (partial) success when at least one ads service
+            // returned data AND, if it ran, ppcMetricsAggregated succeeded — see
+            // _adsOutcomeOk for why that one service is required.
             const adsServiceKeys = ['ppcSpendsBySKU', 'adsKeywordsPerformanceData', 'ppcSpendsDateWise', 'ppcMetricsAggregated'];
             const adsResults = adsServiceKeys
                 .map(k => phaseApiResults[k])
                 .filter(r => r && typeof r === 'object');
             const anyAdsSucceeded = adsResults.some(r => r.success === true);
             const adsRan = adsResults.length > 0;
-            const phaseSucceeded = !adsRan || anyAdsSucceeded;
+            const phaseSucceeded = !adsRan || this._adsOutcomeOk(phaseApiResults);
             const phaseError = phaseSucceeded
                 ? null
-                : (adsResults.find(r => r.error)?.error || 'No ads services returned data');
+                : (anyAdsSucceeded
+                    ? `PPC metrics failed: ${phaseApiResults.ppcMetricsAggregated?.error || 'unknown error'}`
+                    : (adsResults.find(r => r.error)?.error || 'No ads services returned data'));
 
             logger.info(`[ScheduledIntegration:AdsPhase] Completed for user ${userId}`, {
                 servicesRun: Object.keys(phaseApiResults).length,
@@ -3222,9 +3222,12 @@ class ScheduledIntegration {
             }
 
             const anySucceeded = Object.values(apiResults).some(r => r && r.success === true);
+            const outcomeOk = this._adsOutcomeOk(apiResults);
             return {
-                success: anySucceeded || Object.keys(apiResults).length === 0,
-                error: anySucceeded ? null : 'No ads services returned data',
+                success: outcomeOk || Object.keys(apiResults).length === 0,
+                error: outcomeOk ? null
+                    : (anySucceeded ? `PPC metrics failed: ${apiResults.ppcMetricsAggregated?.error || 'unknown error'}`
+                        : 'No ads services returned data'),
                 dataForNextPhase: { apiResults },
             };
         } catch (error) {
@@ -4237,6 +4240,8 @@ class ScheduledIntegration {
      *
      * `anyAdsOk` deliberately stays `some`, not `every`: one permanently-broken ads service must not
      * starve the other three — the same starvation pattern already fixed twice on the finance side.
+     * The one exception is ppcMetricsAggregated (see _adsOutcomeOk): it is the source of every
+     * headline ad spend / ad sales / ACOS / TACoS figure, so a day where it failed is not complete.
      *
      * `adsDataLoss` is a different kind of signal and DOES block. It means a service fetched real data
      * and then failed to WRITE it. Stamping over that hides a hole no later run will fill, because the
@@ -4249,6 +4254,27 @@ class ScheduledIntegration {
      *
      * @param {object} apiResults  merged per-service `{success, error, dataLoss?}` map
      */
+    /**
+     * Whether the ads services that ran produced a usable outcome.
+     *
+     * At least one ads service must have succeeded, AND ppcMetricsAggregated must have succeeded
+     * whenever it ran. PPC metrics is the only source of the account-level ad spend / ad sales the
+     * dashboard, ACOS and TACoS read. Before, any single service (e.g. the keyword report)
+     * succeeding was enough, so a day whose PPC metrics fetch failed was stamped complete and the
+     * missing spend was only noticed — if at all — by the freshness sweeper days later.
+     *
+     * Retries this triggers are bounded by UserSchedulingService's per-account daily attempt cap.
+     *
+     * @param {object} results  per-service `{success, error}` map
+     */
+    static _adsOutcomeOk(results) {
+        const adsServiceKeys = ['ppcSpendsBySKU', 'adsKeywordsPerformanceData', 'ppcSpendsDateWise', 'ppcMetricsAggregated'];
+        const anyAdsOk = adsServiceKeys.some(k => results?.[k]?.success === true);
+        const ppc = results?.ppcMetricsAggregated;
+        const ppcRan = !!(ppc && typeof ppc === 'object' && 'success' in ppc);
+        return anyAdsOk && (!ppcRan || ppc.success === true);
+    }
+
     static _canMarkDailyComplete(apiResults) {
         const financeOk = !!(apiResults?.financeSync?.success);
         const adsServiceKeys = ['ppcSpendsBySKU', 'adsKeywordsPerformanceData', 'ppcSpendsDateWise', 'ppcMetricsAggregated'];
@@ -4257,7 +4283,7 @@ class ScheduledIntegration {
         const adsDataLoss = adsServiceKeys.some(k => apiResults?.[k]?.dataLoss === true);
         // Treat ads as "ok" when no ads service ran at all (e.g. user has no ads connection) — we only
         // block on ads failures that actually surfaced from an attempted fetch.
-        const adsOk = !adsRan || anyAdsOk;
+        const adsOk = !adsRan || this._adsOutcomeOk(apiResults);
         return {
             canMarkComplete: financeOk && adsOk && !adsDataLoss,
             financeOk, anyAdsOk, adsRan, adsDataLoss,

@@ -4,39 +4,31 @@
  *
  * - If a caller (e.g. a test controller) provides explicit dates we validate
  *   and pass those through to Amazon unchanged.
- * - Otherwise we fall back to the standard "yesterday - 30 days … yesterday"
- *   Pacific-time window that the production ingest paths have always used.
+ * - Otherwise we fall back to the standard 30-day window ending on the
+ *   marketplace's yesterday (Pacific for NA) that the production ingest paths use.
  *
  * Date strings are always YYYY-MM-DD (Amazon Ads expects this format).
  */
 
 const { toYyyyMmDd } = require("./metricDateKey.js");
+const { marketplaceYesterdayStr, addDaysToDateStr } = require("./marketplaceTimezone.js");
 
 const DEFAULT_LOOKBACK_DAYS = 30;
-const PACIFIC_OFFSET_MS = 7 * 60 * 60 * 1000;
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
-/** Compute the production default window (Pacific yesterday-30 … Pacific yesterday). */
-function getDefaultReportDateRange(lookbackDays = DEFAULT_LOOKBACK_DAYS) {
-    const now = new Date();
-    const nowPacific = new Date(now.getTime() - PACIFIC_OFFSET_MS);
-    const endDateObj = new Date(
-        Date.UTC(
-            nowPacific.getUTCFullYear(),
-            nowPacific.getUTCMonth(),
-            nowPacific.getUTCDate() - 1
-        )
-    );
-    const startDateObj = new Date(
-        Date.UTC(
-            nowPacific.getUTCFullYear(),
-            nowPacific.getUTCMonth(),
-            nowPacific.getUTCDate() - lookbackDays
-        )
-    );
+/**
+ * Compute the production default window: `lookbackDays` days ending on the marketplace's
+ * yesterday (yesterday-(lookbackDays-1) … yesterday, both inclusive).
+ *
+ * `country` picks the marketplace timezone (utils/marketplaceTimezone.js — DST-aware). It
+ * defaults to US, i.e. America/Los_Angeles: the same Pacific day the old fixed UTC-7 offset
+ * produced in summer, but now also correct in winter (PST, UTC-8).
+ */
+function getDefaultReportDateRange(lookbackDays = DEFAULT_LOOKBACK_DAYS, country = "US", now = new Date()) {
+    const endDate = marketplaceYesterdayStr(country || "US", now);
     return {
-        startDate: startDateObj.toISOString().split("T")[0],
-        endDate: endDateObj.toISOString().split("T")[0],
+        startDate: addDaysToDateStr(endDate, -(lookbackDays - 1)),
+        endDate,
     };
 }
 
@@ -47,20 +39,21 @@ function getDefaultReportDateRange(lookbackDays = DEFAULT_LOOKBACK_DAYS) {
  * @param {string} [options.startDate] YYYY-MM-DD
  * @param {string} [options.endDate]   YYYY-MM-DD
  * @param {number} [options.lookbackDays=30] Only used when both dates omitted.
+ * @param {string} [options.country]   Marketplace country for the default window (defaults to US).
  *
  * Behaviour:
- * - If BOTH dates are omitted → returns the default Pacific window.
+ * - If BOTH dates are omitted → returns the default marketplace-local window.
  * - If ONLY ONE is provided → throws (force the caller to be explicit).
  * - If BOTH are provided → validated, normalised, returned as-is.
  */
 function resolveReportDateRange(options = {}) {
-    const { startDate, endDate, lookbackDays = DEFAULT_LOOKBACK_DAYS } = options || {};
+    const { startDate, endDate, lookbackDays = DEFAULT_LOOKBACK_DAYS, country } = options || {};
 
     const hasStart = startDate != null && String(startDate).trim() !== "";
     const hasEnd = endDate != null && String(endDate).trim() !== "";
 
     if (!hasStart && !hasEnd) {
-        const { startDate: s, endDate: e } = getDefaultReportDateRange(lookbackDays);
+        const { startDate: s, endDate: e } = getDefaultReportDateRange(lookbackDays, country);
         return { startDate: s, endDate: e, isCustom: false };
     }
 

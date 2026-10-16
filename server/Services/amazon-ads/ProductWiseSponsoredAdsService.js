@@ -132,19 +132,45 @@ async function saveProductWiseSponsoredAdsData(userId, country, region, sponsore
         }
 
         const distinctDates = [...new Set(itemsToInsert.map((r) => r.date))];
+
+        // INSERT FIRST, THEN DELETE. This used to delete the dates' rows and then insert, so an insert
+        // that failed (validation, a dropped connection, a worker killed mid-chunk) left those dates
+        // with NO ad spend until the next successful run. Now the old rows are only removed once the
+        // new batch is fully written; if the insert fails, the partial new batch is removed instead
+        // and the old data stands. A crash between the two steps leaves the old and new rows side by
+        // side — the next run's delete (batchId != its own) clears that.
+        //
+        // Not a Mongo transaction on purpose: a large account inserts tens of thousands of rows in
+        // chunks, which risks the transaction size/lifetime limits, and transactions need a
+        // replica set.
+        let insertedCountFromChunks;
+        try {
+            // Chunked to bound peak memory. Every document is still hydrated, so what lands in Mongo
+            // is byte-identical — see utils/chunkedInsert.js for why this is NOT `{ lean: true }`.
+            insertedCountFromChunks = await insertManyChunked(ProductWiseSponsoredAdsItem, itemsToInsert, { ordered: false });
+        } catch (insertError) {
+            await ProductWiseSponsoredAdsItem.deleteMany({ userId: userObjectId, country, region, batchId })
+                .catch((cleanupError) => logger.warn('[ProductWiseSponsoredAds] Failed to remove partial batch after insert error', {
+                    batchId: batchId.toString(), error: cleanupError.message,
+                }));
+            throw insertError;
+        }
+
+        if (insertedCountFromChunks === 0) {
+            throw new Error('insertMany returned 0 documents — check schema validation');
+        }
+
         await ProductWiseSponsoredAdsItem.deleteMany({
             userId: userObjectId,
             country,
             region,
+            // Only the rows this batch replaces: never the batch itself.
+            batchId: { $ne: batchId },
             // Scoped to what we measured — see usableAdTypes above. There is already an index on
             // (userId, country, region, date, adType) so this costs nothing.
             adType: { $in: usableAdTypes },
             date: { $in: distinctDates },
         });
-
-        // Chunked to bound peak memory. Every document is still hydrated, so what lands in Mongo is
-        // byte-identical — see utils/chunkedInsert.js for why this is NOT `{ lean: true }`.
-        const insertedCountFromChunks = await insertManyChunked(ProductWiseSponsoredAdsItem, itemsToInsert, { ordered: false });
 
         // Scoping the delete is necessary but NOT sufficient, and this is the subtle half.
         // `findLatestByUserCountryRegion` reads only the NEWEST batchId
@@ -178,10 +204,6 @@ async function saveProductWiseSponsoredAdsData(userId, country, region, sponsore
             );
         }
         const insertedCount = insertedCountFromChunks;
-
-        if (insertedCount === 0) {
-            throw new Error('insertMany returned 0 documents — check schema validation');
-        }
 
         logger.info('Product-wise Sponsored Ads data saved successfully', {
             userId: userObjectId.toString(),
