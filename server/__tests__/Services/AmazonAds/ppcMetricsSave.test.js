@@ -33,6 +33,8 @@ const {
     summariseBreakdown,
     savePpcMetricsFromRows,
     savePpcMetricsFromResults,
+    buildDailyMetricsDocuments,
+    fillZeroSpendDays,
     CAMPAIGN_TYPES,
 } = require('../../../Services/AmazonAds/GetPPCMetrics.js');
 
@@ -194,7 +196,10 @@ describe('savePpcMetricsFromRows — zeroes measured-but-empty types, never fail
         campaignSummaries: { sponsoredDisplay: ['sd-previously-stored'] },
         processedCampaignTypes: ALL_TYPES,
     });
-    const findReturns = (docs) => mockFind.mockReturnValue({ lean: async () => docs });
+    const findReturns = (docs) => mockFind.mockReturnValue({
+        select() { return this; },
+        lean: async () => docs,
+    });
 
     test('a NO_DATA type is zeroed on the days that already have a document', async () => {
         findReturns([storedDay()]);
@@ -234,17 +239,37 @@ describe('savePpcMetricsFromRows — zeroes measured-but-empty types, never fail
         expect(mockUpsert).not.toHaveBeenCalled();
     });
 
-    // Every type succeeded, so all three already saved themselves in finalize. Touching anything
-    // here would rewrite documents that are already correct.
+    // Every type succeeded, so all of them already saved themselves in finalize. Touching anything
+    // here would rewrite documents that are already correct. (Every day of the window has a document,
+    // so the zero-spend fill has nothing to add either.)
     test('all types DONE writes nothing — finalize already saved them', async () => {
-        findReturns([storedDay()]);
-        await savePpcMetricsFromRows(USER, 'US', 'NA', 'p1', [
-            row('SPONSORED_PRODUCTS', 'DONE'),
-            row('SPONSORED_BRANDS', 'DONE'),
-            row('SPONSORED_DISPLAY', 'DONE'),
-        ]);
+        const everyDay = [];
+        for (let d = 1; d <= 31; d++) everyDay.push({ ...storedDay(), metricDate: `2026-07-${String(d).padStart(2, '0')}` });
+        findReturns(everyDay);
+        await savePpcMetricsFromRows(USER, 'US', 'NA', 'p1', ALL_TYPES.map((t) => row(t, 'DONE')));
         expect(mockUpsert).not.toHaveBeenCalled();
-        expect(mockFind).not.toHaveBeenCalled();
+    });
+
+    test('every type measured -> days in the window with no document get a zero document', async () => {
+        findReturns([storedDay()]);   // only 2026-07-20 exists
+        await savePpcMetricsFromRows(USER, 'US', 'NA', 'p1', ALL_TYPES.map((t) => row(t, 'DONE')));
+        const writtenDates = mockUpsert.mock.calls.map((c) => c[3]);
+        expect(writtenDates).toHaveLength(30);
+        expect(writtenDates).not.toContain(DATE);
+        expect(writtenDates).toContain('2026-07-01');
+        expect(writtenDates).toContain('2026-07-31');
+        const written = mockUpsert.mock.calls[0][4];
+        expect(written.summary.totalSpend).toBe(0);
+        expect(Object.keys(written.campaignTypeBreakdown)).toEqual(
+            expect.arrayContaining(['sponsoredProducts', 'sponsoredBrands', 'sponsoredDisplay', 'sponsoredTelevision'])
+        );
+    });
+
+    test('one FAILED type -> no zero-spend days are invented', async () => {
+        findReturns([storedDay()]);
+        await savePpcMetricsFromRows(USER, 'US', 'NA', 'p1',
+            ALL_TYPES.map((t) => row(t, t === 'SPONSORED_TELEVISION' ? 'FAILED' : 'DONE')));
+        expect(mockUpsert).not.toHaveBeenCalled();
     });
 
     test('a type already at zero is not rewritten', async () => {
@@ -308,5 +333,72 @@ describe('savePpcMetricsFromResults — a single type composes via the merge', (
         expect(written.campaignTypeBreakdown.sponsoredDisplay.spend).toBe(40);
         // Recomputed from the merged breakdown, so the preserved types are included.
         expect(written.summary.totalSpend).toBe(70);
+    });
+});
+
+/**
+ * Sponsored TV, 14-day sales and orders: the per-day document carries all of them.
+ * Before, `summary.totalPurchases` was never written (the PPC "orders" KPI always read 0), 14-day
+ * sales were computed and thrown away, and Sponsored TV spend was never fetched.
+ */
+describe('buildDailyMetricsDocuments — ST, sales14d, purchases', () => {
+    const day = (o) => ({ sales: 0, sales14d: 0, spend: 0, impressions: 0, clicks: 0, unitsSoldClicks1d: 0, purchases: 0, ...o });
+    const result = (campaignType, d) => ({ campaignType, skipped: false, metrics: { dateWiseData: { [DATE]: day(d) }, campaigns: [] } });
+
+    test('every CAMPAIGN_TYPES key maps to a breakdown key (an unmapped type is silently dropped)', () => {
+        const docs = buildDailyMetricsDocuments(
+            ALL_TYPES.map((t) => result(t, { spend: 1, sales: 2 })), 'p1'
+        );
+        expect(docs).toHaveLength(1);
+        expect(docs[0].processedCampaignTypes.sort()).toEqual([...ALL_TYPES].sort());
+        expect(docs[0].summary.totalSpend).toBe(ALL_TYPES.length);
+    });
+
+    test('Sponsored TV spend lands in its own breakdown and in the totals', () => {
+        const [doc] = buildDailyMetricsDocuments([
+            result('SPONSORED_PRODUCTS', { spend: 10, sales: 100 }),
+            result('SPONSORED_TELEVISION', { spend: 5, sales: 20 }),
+        ], 'p1');
+        expect(doc.campaignTypeBreakdown.sponsoredTelevision.spend).toBe(5);
+        expect(doc.summary.totalSpend).toBe(15);
+        expect(doc.summary.totalSales).toBe(120);
+    });
+
+    test('14-day sales and purchases are stored per type and summed', () => {
+        const [doc] = buildDailyMetricsDocuments([
+            result('SPONSORED_PRODUCTS', { spend: 10, sales: 100, sales14d: 110, purchases: 4 }),
+            result('SPONSORED_BRANDS', { spend: 20, sales: 200, sales14d: 200, purchases: 3 }),
+        ], 'p1');
+        expect(doc.campaignTypeBreakdown.sponsoredProducts.sales14d).toBe(110);
+        expect(doc.campaignTypeBreakdown.sponsoredProducts.purchases).toBe(4);
+        expect(doc.summary.totalSales).toBe(300);       // default window unchanged
+        expect(doc.summary.totalSales14d).toBe(310);
+        expect(doc.summary.totalPurchases).toBe(7);
+    });
+});
+
+describe('fillZeroSpendDays', () => {
+    const findReturns = (docs) => mockFind.mockReturnValue({ select() { return this; }, lean: async () => docs });
+    const W = { startDate: '2026-07-18', endDate: '2026-07-21' };
+
+    test('writes a zero document only for the missing days', async () => {
+        findReturns([{ metricDate: '2026-07-19' }, { metricDate: '2026-07-20' }]);
+        const { documentsSaved } = await fillZeroSpendDays(USER, 'US', 'NA', 'p1', W);
+        expect(documentsSaved).toBe(2);
+        expect(mockUpsert.mock.calls.map((c) => c[3])).toEqual(['2026-07-18', '2026-07-21']);
+        expect(mockUpsert.mock.calls[0][4].summary.totalPurchases).toBe(0);
+    });
+
+    test('an account with no ads documents in the window is left alone', async () => {
+        findReturns([]);
+        const { documentsSaved } = await fillZeroSpendDays(USER, 'US', 'NA', 'p1', W);
+        expect(documentsSaved).toBe(0);
+        expect(mockUpsert).not.toHaveBeenCalled();
+    });
+
+    test('no window -> nothing', async () => {
+        const { documentsSaved } = await fillZeroSpendDays(USER, 'US', 'NA', 'p1', null);
+        expect(documentsSaved).toBe(0);
+        expect(mockFind).not.toHaveBeenCalled();
     });
 });

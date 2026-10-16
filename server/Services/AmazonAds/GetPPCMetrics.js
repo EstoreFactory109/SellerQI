@@ -4,6 +4,8 @@ const { promisify } = require('util');
 const { generateAdsAccessToken } = require('./GenerateToken');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel');
 const logger = require('../../utils/Logger');
+const { getDefaultReportDateRange } = require('../../utils/reportDateRange');
+const { addDaysToDateStr } = require('../../utils/marketplaceTimezone');
 
 const gunzip = promisify(zlib.gunzip);
 
@@ -22,8 +24,8 @@ const BASE_URIS = {
 };
 
 // Report types for different campaign types
-// SP: columns use sales1d / purchases1d / unitsSoldClicks1d (single-window daily rows)
-// SB/SD: sales / purchases / units (Amazon naming per report type)
+// SP: explicit attribution windows (sales7d / purchases7d / unitsSoldClicks7d, plus 1d/14d/30d)
+// SB/SD/ST: one window — sales / purchases / unitsSoldClicks (Amazon naming per report type)
 const CAMPAIGN_TYPES = {
     SPONSORED_PRODUCTS: {
         adProduct: 'SPONSORED_PRODUCTS',
@@ -70,6 +72,8 @@ const CAMPAIGN_TYPES = {
     SPONSORED_BRANDS: {
         adProduct: 'SPONSORED_BRANDS',
         reportTypeId: 'sbCampaigns',
+        // v3 sbCampaigns covers every SB ad format — product collection, store spotlight AND video —
+        // so Sponsored Brands Video spend is already included here (no separate SBV report needed).
         // SB Seller Central default = 14-day attribution
         // SB uses 'sales' (not sales14d), 'purchases' (not purchases14d), 'unitsSoldClicks' (not unitsSoldClicks14d)
         defaultSalesMetric: 'sales',
@@ -117,8 +121,56 @@ const CAMPAIGN_TYPES = {
             "newToBrandUnitsSold",
             "detailPageViews"
         ]
+    },
+    SPONSORED_TELEVISION: {
+        adProduct: 'SPONSORED_TELEVISION',
+        reportTypeId: 'stCampaigns',
+        // ST reports one attribution figure, like SB/SD: 'sales', 'purchases', 'unitsSoldClicks'.
+        // Accounts not running Sponsored TV get a 400/404 from createReport, which is the documented
+        // "not available for this seller" skip — a measured zero, not a failure.
+        // Column names match the stCampaigns set BidBison runs in production (ts_pipeline advApi.ts).
+        defaultSalesMetric: 'sales',
+        columns: [
+            "date",
+            "campaignId",
+            "campaignName",
+            "campaignStatus",
+            "cost",
+            "impressions",
+            "clicks",
+            "sales",
+            "salesClicks",
+            "purchases",
+            "purchasesClicks",
+            "unitsSold",
+            "unitsSoldClicks"
+        ]
     }
 };
+
+// CAMPAIGN_TYPES key -> PPCMetrics breakdown/summary key. Every CAMPAIGN_TYPES entry MUST be here:
+// a type without a mapping has its rows silently dropped by buildDailyMetricsDocuments.
+const CAMPAIGN_TYPE_MAP = {
+    SPONSORED_PRODUCTS: 'sponsoredProducts',
+    SPONSORED_BRANDS: 'sponsoredBrands',
+    SPONSORED_DISPLAY: 'sponsoredDisplay',
+    SPONSORED_TELEVISION: 'sponsoredTelevision'
+};
+
+/** A zeroed breakdown entry for one campaign type (the shape PPCMetrics stores). */
+const emptyTypeBreakdown = () => ({
+    sales: 0, sales14d: 0, spend: 0, impressions: 0, clicks: 0, acos: 0, unitsSoldClicks1d: 0, purchases: 0
+});
+
+/** A zeroed breakdown for every campaign type. */
+const emptyBreakdown = () => Object.fromEntries(
+    Object.values(CAMPAIGN_TYPE_MAP).map((mapped) => [mapped, emptyTypeBreakdown()])
+);
+
+/** Empty campaign-summary lists for every campaign type. */
+const emptySummaries = () => Object.fromEntries(
+    Object.values(CAMPAIGN_TYPE_MAP).map((mapped) => [mapped, []])
+);
 
 /**
  * Create a report request for a specific campaign type
@@ -490,7 +542,7 @@ async function processReportData(reportData, campaignType) {
 
             // Extract all attribution windows
             // SP has explicit windows: sales1d, sales7d, sales14d, sales30d
-            // SB/SD use: sales (=14d default), purchases, unitsSoldClicks
+            // SB/SD/ST use: sales (their only window), purchases, unitsSoldClicks
             const sales1d = parseFloat(row.sales1d || 0);
             const sales7d = parseFloat(row.sales7d || 0);
             const sales14d = parseFloat(row.sales14d || row.sales || 0);
@@ -506,7 +558,7 @@ async function processReportData(reportData, campaignType) {
 
             // Default metrics use the Seller Central default attribution window:
             //   SP: 7d — sales7d ALREADY includes halo (all products purchased after click)
-            //   SB/SD: 14d — 'sales' column IS the 14d default
+            //   SB/SD/ST: 'sales' column is their only (default) window
             const defaultSales = parseFloat(row[defaultSalesMetric] || row.sales || 0);
             const defaultPurchases = campaignType === 'SPONSORED_PRODUCTS'
                 ? purchases7d : purchases14d;
@@ -542,7 +594,9 @@ async function processReportData(reportData, campaignType) {
                         sales1d: 0, sales7d: 0, sales14d: 0, sales30d: 0,
                         purchases1d: 0, purchases7d: 0, purchases14d: 0, purchases30d: 0,
                         units1d: 0, units7d: 0, units14d: 0, units30d: 0,
-                        unitsSoldClicks1d: 0
+                        unitsSoldClicks1d: 0,
+                        // Orders on the default window (SP purchases7d, others purchases)
+                        purchases: 0
                     };
                 }
                 const d = metrics.dateWiseData[date];
@@ -551,6 +605,7 @@ async function processReportData(reportData, campaignType) {
                 d.impressions += impressions;
                 d.clicks += clicks;
                 d.unitsSoldClicks1d += defaultUnits;
+                d.purchases += defaultPurchases;
                 d.sales1d += sales1d;
                 d.sales7d += sales7d;
                 d.sales14d += sales14d;
@@ -609,14 +664,18 @@ function aggregateCampaignRows(rows) {
                 campaignName: row.campaignName || '',
                 campaignStatus: row.campaignStatus || '',
                 sales: 0,
+                sales14d: 0,
                 spend: 0,
                 impressions: 0,
                 clicks: 0,
-                unitsSoldClicks1d: 0
+                unitsSoldClicks1d: 0,
+                purchases: 0
             });
         }
         const agg = map.get(id);
         agg.sales += Number(row.sales) || 0;
+        agg.sales14d += Number(row.sales14d) || 0;
+        agg.purchases += Number(row.purchases) || 0;
         agg.spend += Number(row.spend) || 0;
         agg.impressions += Number(row.impressions) || 0;
         agg.clicks += Number(row.clicks) || 0;
@@ -647,21 +706,19 @@ function combineMetrics(reportResults, startDate, endDate) {
         campaignTypeBreakdown: {
             sponsoredProducts: { sales: 0, spend: 0, impressions: 0, clicks: 0, acos: 0, unitsSoldClicks1d: 0 },
             sponsoredBrands: { sales: 0, spend: 0, impressions: 0, clicks: 0, acos: 0, unitsSoldClicks1d: 0 },
-            sponsoredDisplay: { sales: 0, spend: 0, impressions: 0, clicks: 0, acos: 0, unitsSoldClicks1d: 0 }
+            sponsoredDisplay: { sales: 0, spend: 0, impressions: 0, clicks: 0, acos: 0, unitsSoldClicks1d: 0 },
+            sponsoredTelevision: { sales: 0, spend: 0, impressions: 0, clicks: 0, acos: 0, unitsSoldClicks1d: 0 }
         },
         processedCampaignTypes: [],
         campaignSummaries: {
             sponsoredProducts: [],
             sponsoredBrands: [],
-            sponsoredDisplay: []
+            sponsoredDisplay: [],
+            sponsoredTelevision: []
         }
     };
 
-    const campaignTypeMap = {
-        'SPONSORED_PRODUCTS': 'sponsoredProducts',
-        'SPONSORED_BRANDS': 'sponsoredBrands',
-        'SPONSORED_DISPLAY': 'sponsoredDisplay'
-    };
+    const campaignTypeMap = CAMPAIGN_TYPE_MAP;
 
     reportResults.forEach(({ campaignType, metrics, skipped, authRevoked }) => {
         if (skipped) {
@@ -763,22 +820,10 @@ function combineMetrics(reportResults, startDate, endDate) {
     return combined;
 }
 
-const CAMPAIGN_TYPE_MAP = {
-    SPONSORED_PRODUCTS: 'sponsoredProducts',
-    SPONSORED_BRANDS: 'sponsoredBrands',
-    SPONSORED_DISPLAY: 'sponsoredDisplay'
-};
-
 /**
  * Build one metrics payload per calendar day for DB storage (one document per metricDate).
  */
 function buildDailyMetricsDocuments(reportResults, profileId) {
-    const emptyBreakdown = () => ({
-        sponsoredProducts: { sales: 0, spend: 0, impressions: 0, clicks: 0, acos: 0, unitsSoldClicks1d: 0 },
-        sponsoredBrands: { sales: 0, spend: 0, impressions: 0, clicks: 0, acos: 0, unitsSoldClicks1d: 0 },
-        sponsoredDisplay: { sales: 0, spend: 0, impressions: 0, clicks: 0, acos: 0, unitsSoldClicks1d: 0 }
-    });
-
     const allDates = new Set();
     reportResults.forEach(({ metrics }) => {
         if (metrics?.dateWiseData && typeof metrics.dateWiseData === 'object') {
@@ -791,17 +836,8 @@ function buildDailyMetricsDocuments(reportResults, profileId) {
 
     for (const d of sortedDates) {
         const breakdown = emptyBreakdown();
-        let totalSales = 0;
-        let totalSpend = 0;
-        let totalImpressions = 0;
-        let totalClicks = 0;
-        let totalUnits = 0;
         const processedSet = new Set();
-        const summaries = {
-            sponsoredProducts: [],
-            sponsoredBrands: [],
-            sponsoredDisplay: []
-        };
+        const summaries = emptySummaries();
 
         reportResults.forEach(({ campaignType, metrics, skipped }) => {
             if (skipped || !metrics) return;
@@ -814,52 +850,30 @@ function buildDailyMetricsDocuments(reportResults, profileId) {
             processedSet.add(campaignType);
             breakdown[mapped] = {
                 sales: day.sales || 0,
+                // 14-day attributed sales: SP's sales14d; for SB/SD/ST processReportData already
+                // falls back to their single `sales` figure.
+                sales14d: day.sales14d || 0,
                 spend: day.spend || 0,
                 impressions: day.impressions || 0,
                 clicks: day.clicks || 0,
                 unitsSoldClicks1d: day.unitsSoldClicks1d || 0,
+                purchases: day.purchases || 0,
                 acos:
                     day.sales > 0
                         ? parseFloat(((day.spend / day.sales) * 100).toFixed(2))
                         : 0
             };
 
-            totalSales += day.sales || 0;
-            totalSpend += day.spend || 0;
-            totalImpressions += day.impressions || 0;
-            totalClicks += day.clicks || 0;
-            totalUnits += day.unitsSoldClicks1d || 0;
-
             const rowsForDay = (metrics.campaigns || []).filter((c) => c.date === d);
             summaries[mapped] = aggregateCampaignRows(rowsForDay);
         });
-
-        const overallAcos =
-            totalSales > 0 ? parseFloat(((totalSpend / totalSales) * 100).toFixed(2)) : 0;
-        const overallRoas =
-            totalSpend > 0 ? parseFloat((totalSales / totalSpend).toFixed(2)) : 0;
-        const ctr =
-            totalImpressions > 0
-                ? parseFloat(((totalClicks / totalImpressions) * 100).toFixed(2))
-                : 0;
-        const cpc =
-            totalClicks > 0 ? parseFloat((totalSpend / totalClicks).toFixed(2)) : 0;
 
         dailyDocs.push({
             metricDate: d,
             profileId,
             dateRange: { startDate: d, endDate: d },
-            summary: {
-                totalSales,
-                totalSpend,
-                totalImpressions,
-                totalClicks,
-                totalUnitsSoldClicks1d: totalUnits,
-                overallAcos,
-                overallRoas,
-                ctr,
-                cpc
-            },
+            // One formula for the fresh and the merged path — see summariseBreakdown.
+            summary: summariseBreakdown(breakdown),
             campaignTypeBreakdown: breakdown,
             processedCampaignTypes: Array.from(processedSet),
             campaignSummaries: summaries,
@@ -876,9 +890,8 @@ const ALL_CAMPAIGN_TYPE_KEYS = Object.keys(CAMPAIGN_TYPES);
 /**
  * Recompute a day's `summary` from its (possibly merged) breakdown.
  *
- * Byte-identical formulas to the ones inside buildDailyMetricsDocuments above — factored out so the
- * fresh path and the merged path can never disagree by a rounding step. If you change one, you are
- * changing both, which is the point.
+ * Used by buildDailyMetricsDocuments above AND by the merge/zeroing paths, so the fresh path and the
+ * merged path can never disagree by a rounding step.
  */
 function summariseBreakdown(breakdown) {
     const parts = Object.values(breakdown || {});
@@ -887,12 +900,17 @@ function summariseBreakdown(breakdown) {
     const totalImpressions = parts.reduce((s, p) => s + (p?.impressions || 0), 0);
     const totalClicks = parts.reduce((s, p) => s + (p?.clicks || 0), 0);
     const totalUnits = parts.reduce((s, p) => s + (p?.unitsSoldClicks1d || 0), 0);
+    const totalSales14d = parts.reduce((s, p) => s + (p?.sales14d || 0), 0);
+    const totalPurchases = parts.reduce((s, p) => s + (p?.purchases || 0), 0);
     return {
         totalSales,
+        totalSales14d,
         totalSpend,
         totalImpressions,
         totalClicks,
         totalUnitsSoldClicks1d: totalUnits,
+        // Orders on the default window. Never written before, so the PPC "orders" KPI read 0.
+        totalPurchases,
         overallAcos: totalSales > 0 ? parseFloat(((totalSpend / totalSales) * 100).toFixed(2)) : 0,
         overallRoas: totalSpend > 0 ? parseFloat((totalSales / totalSpend).toFixed(2)) : 0,
         ctr: totalImpressions > 0 ? parseFloat(((totalClicks / totalImpressions) * 100).toFixed(2)) : 0,
@@ -993,6 +1011,57 @@ async function upsertDailyMetricsDocs(userIdStr, country, region, dailyDocs, usa
 }
 
 /**
+ * Write an all-zero document for each day in `window` that has no PPCMetrics document yet.
+ *
+ * WHY. buildDailyMetricsDocuments only creates documents for dates Amazon returned rows for, so a
+ * genuine zero-spend day never got a document. The freshness sweeper treats "no document" as
+ * "missing day" and re-enqueued a catch-up for it every tick until the BullMQ job dedup gave up.
+ *
+ * ONLY call this when every campaign type was MEASURED (succeeded or legitimately not available).
+ * If any type FAILED we do not know the day was zero, and a zero document would hide a real gap.
+ *
+ * Accounts with no ads documents at all in the window are left alone, so an account that has never
+ * advertised keeps showing "no data" instead of a wall of $0 days. Existing documents are never
+ * touched — `$setOnInsert` semantics via the find-then-insert below.
+ */
+async function fillZeroSpendDays(userIdStr, country, region, profileId, window) {
+    if (!window?.startDate || !window?.endDate || window.startDate > window.endDate) return { documentsSaved: 0 };
+
+    const existing = await PPCMetrics.find({
+        userId: String(userIdStr),
+        country,
+        region,
+        metricDate: { $gte: window.startDate, $lte: window.endDate },
+    }).select({ metricDate: 1, _id: 0 }).lean();
+    if (!existing.length) return { documentsSaved: 0 };
+
+    const present = new Set(existing.map((d) => d.metricDate));
+    let documentsSaved = 0;
+    for (let d = window.startDate; d <= window.endDate; d = addDaysToDateStr(d, 1)) {
+        if (present.has(d)) continue;
+        const breakdown = emptyBreakdown();
+        await PPCMetrics.upsertMetricsForDate(String(userIdStr), country, region, d, {
+            profileId,
+            dateRange: { startDate: d, endDate: d },
+            summary: summariseBreakdown(breakdown),
+            campaignTypeBreakdown: breakdown,
+            campaignSummaries: emptySummaries(),
+            processedCampaignTypes: [],
+            dateWiseMetrics: [],
+        });
+        documentsSaved += 1;
+    }
+
+    if (documentsSaved > 0) {
+        logger.info(
+            `[GetPPCMetrics] Wrote ${documentsSaved} zero-spend day(s) for ${country}-${region} ` +
+            `in ${window.startDate}…${window.endDate}: every campaign type was measured and returned no rows.`
+        );
+    }
+    return { documentsSaved };
+}
+
+/**
  * Main function to get PPC metrics
  * @param {string} accessToken - Amazon Ads access token
  * @param {string} profileId - Amazon Ads profile ID
@@ -1028,25 +1097,12 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
             }
         } : null;
 
-        // Calculate dates if not provided
-        // Amazon Ads reports use the marketplace's timezone for date grouping.
-        // For NA (US), this is Pacific Time. We compute "yesterday" in Pacific
-        // to match the Finance API's Pacific-time convention.
-        const PACIFIC_OFFSET_MS = 7 * 60 * 60 * 1000; // UTC-7 (PDT)
-        const nowUtc = Date.now();
-        const nowPacific = new Date(nowUtc - PACIFIC_OFFSET_MS);
-        const fmtDate = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
-        
-        // Yesterday in Pacific time
-        const yesterdayPacific = new Date(nowPacific);
-        yesterdayPacific.setUTCDate(yesterdayPacific.getUTCDate() - 1);
-        
-        const calculatedEndDate = endDate || fmtDate(yesterdayPacific);
-        
-        // 30 days total: yesterday back to yesterday-29
-        const startPacific = new Date(yesterdayPacific);
-        startPacific.setUTCDate(startPacific.getUTCDate() - 29);
-        const calculatedStartDate = startDate || fmtDate(startPacific);
+        // Calculate dates if not provided: 30 days ending on the marketplace's yesterday.
+        // Amazon Ads buckets report dates in the marketplace's timezone (Pacific for NA);
+        // getDefaultReportDateRange resolves it DST-correctly via utils/marketplaceTimezone.
+        const defaultRange = getDefaultReportDateRange(30, country);
+        const calculatedEndDate = endDate || defaultRange.endDate;
+        const calculatedStartDate = startDate || defaultRange.startDate;
 
         logger.info(`📅 [GetPPCMetrics] Date range: ${calculatedStartDate} to ${calculatedEndDate}`);
 
@@ -1215,6 +1271,15 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
 
                 ({ documentsSaved, savedRecord } = await upsertDailyMetricsDocs(userIdStr, country, region, dailyDocs, usableTypes));
 
+                // Every type measured -> any day still without a document was a real zero-spend day.
+                if (ALL_CAMPAIGN_TYPE_KEYS.every((t) => usableTypes.includes(t))) {
+                    const filled = await fillZeroSpendDays(userIdStr, country, region, profileId, {
+                        startDate: calculatedStartDate,
+                        endDate: calculatedEndDate,
+                    });
+                    documentsSaved += filled.documentsSaved;
+                }
+
                 logger.info(
                     `✅ [GetPPCMetrics] Saved ${documentsSaved} daily PPC metric document(s). Last ID: ${savedRecord?._id}`
                 );
@@ -1270,16 +1335,9 @@ async function getPPCMetrics(accessToken, profileId, userId, country, region, re
 
 const ZERO_METRICS = { totalSales: 0, totalSpend: 0, totalImpressions: 0, totalClicks: 0, totalUnitsSoldClicks1d: 0, dateWiseData: {}, campaigns: [] };
 
-// Default Pacific-time 30-day range (identical logic to getPPCMetrics).
-function _ppcDefaultDateRange() {
-    const PACIFIC_OFFSET_MS = 7 * 60 * 60 * 1000;
-    const nowPacific = new Date(Date.now() - PACIFIC_OFFSET_MS);
-    const fmtDate = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
-    const yesterdayPacific = new Date(nowPacific);
-    yesterdayPacific.setUTCDate(yesterdayPacific.getUTCDate() - 1);
-    const startPacific = new Date(yesterdayPacific);
-    startPacific.setUTCDate(startPacific.getUTCDate() - 29);
-    return { startDate: fmtDate(startPacific), endDate: fmtDate(yesterdayPacific) };
+// Default 30-day marketplace-local range (identical logic to getPPCMetrics).
+function _ppcDefaultDateRange(country) {
+    return getDefaultReportDateRange(30, country);
 }
 
 // Single-shot status check (no polling loop). Returns:
@@ -1360,7 +1418,6 @@ async function zeroUnmeasuredTypesForWindow(userIdStr, country, region, campaign
     }).lean();
     if (!existing.length) return { documentsSaved: 0 };
 
-    const ZERO_BREAKDOWN = { sales: 0, spend: 0, impressions: 0, clicks: 0, acos: 0, unitsSoldClicks1d: 0 };
     const mappedTypes = campaignTypes.map((t) => CAMPAIGN_TYPE_MAP[t]).filter(Boolean);
     let documentsSaved = 0;
 
@@ -1371,7 +1428,7 @@ async function zeroUnmeasuredTypesForWindow(userIdStr, country, region, campaign
             const prior = breakdown[mapped];
             // Already zero => nothing to write. Avoids rewriting every day on every run.
             if (prior && (prior.sales || prior.spend || prior.impressions || prior.clicks || prior.unitsSoldClicks1d)) {
-                breakdown[mapped] = { ...ZERO_BREAKDOWN };
+                breakdown[mapped] = emptyTypeBreakdown();
                 changed = true;
             }
         }
@@ -1405,7 +1462,7 @@ async function zeroUnmeasuredTypesForWindow(userIdStr, country, region, campaign
 // Build one asyncReportEngine spec per campaign type. Each spec is a closure that
 // binds the fresh per-tick access token (so no in-process token-refresh loop needed).
 function buildPpcMetricsSpecs({ userId, country, accessToken, profileId, region, marketplaceId = '', startDate = null, endDate = null }) {
-    const range = (startDate && endDate) ? { startDate, endDate } : _ppcDefaultDateRange();
+    const range = (startDate && endDate) ? { startDate, endDate } : _ppcDefaultDateRange(country);
     return Object.keys(CAMPAIGN_TYPES).map((campaignType) => ({
         service: 'ppcMetricsAggregated',
         paramsKey: campaignType,
@@ -1476,20 +1533,33 @@ async function savePpcMetricsFromResults(userId, country, region, profileId, per
  * the tracking row any more.
  */
 async function savePpcMetricsFromRows(userId, country, region, profileId, rows) {
-    const noDataTypes = (rows || [])
-        .filter((r) => r.status === 'NO_DATA')
-        .map((r) => r.params?.campaignType)
-        .filter(Boolean);
-
-    if (noDataTypes.length === 0) return { documentsSaved: 0 };
-
     // Every row of a run carries the same window; take it from the first row that has one.
     const withWindow = (rows || []).find((r) => r.params?.startDate && r.params?.endDate);
     const window = withWindow
         ? { startDate: withWindow.params.startDate, endDate: withWindow.params.endDate }
         : null;
 
-    return zeroUnmeasuredTypesForWindow(userId, country, region, noDataTypes, window);
+    const noDataTypes = (rows || [])
+        .filter((r) => r.status === 'NO_DATA')
+        .map((r) => r.params?.campaignType)
+        .filter(Boolean);
+
+    let documentsSaved = 0;
+    if (noDataTypes.length > 0) {
+        ({ documentsSaved } = await zeroUnmeasuredTypesForWindow(userId, country, region, noDataTypes, window));
+    }
+
+    // Every campaign type measured (DONE or NO_DATA, none FAILED) -> fill real zero-spend days.
+    const measuredTypes = new Set((rows || [])
+        .filter((r) => r.status === 'DONE' || r.status === 'NO_DATA')
+        .map((r) => r.params?.campaignType)
+        .filter(Boolean));
+    if (ALL_CAMPAIGN_TYPE_KEYS.every((t) => measuredTypes.has(t))) {
+        const filled = await fillZeroSpendDays(userId?.toString() || userId, country, region, profileId, window);
+        documentsSaved += filled.documentsSaved;
+    }
+
+    return { documentsSaved };
 }
 
 module.exports = {
@@ -1500,6 +1570,7 @@ module.exports = {
     buildPpcMetricsSpecs,
     savePpcMetricsFromResults,
     zeroUnmeasuredTypesForWindow,
+    fillZeroSpendDays,
     // The async path's only route to Mongo for this service, so it is worth driving directly in tests
     // rather than only through the adsAsync registry object below.
     savePpcMetricsFromRows,

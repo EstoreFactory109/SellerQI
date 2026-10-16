@@ -232,36 +232,31 @@ const CATCHUP_JOB_OPTS = {
     removeOnFail: { age: 7 * 24 * 3600, count: 1000 }
 };
 
-const PACIFIC_OFFSET_MS = 7 * 60 * 60 * 1000;
-
 /**
- * UTC yesterday in Pacific (matches what the daily ADS phase fetches).
+ * The ads "yesterday" for an account: the marketplace's yesterday (Pacific for NA), which is
+ * exactly what the daily ADS phase fetches (ScheduledIntegration.fetchScheduledApiData uses
+ * marketplaceYesterdayStr too). It used to be a fixed UTC-7 offset, which was an hour off all
+ * winter and a day off for EU/FE marketplaces late in their evening.
  *
- * ⚠️ ADS ONLY. The finance sweeps below deliberately do NOT use this — finance day keys are
- * MARKETPLACE-LOCAL (see utils/marketplaceTimezone.js), and if this sweeper's notion of
- * "yesterday" disagreed with the day keys FinanceService writes, it would look for a day that
- * finance has not produced yet and re-enqueue that phantom missing day on every tick. AU is
- * 17 hours ahead of Pacific, so that loop would start immediately.
+ * Finance sweeps below use the same marketplace-local convention (see utils/marketplaceTimezone.js);
+ * the two must agree with the day keys their writers produce, or the sweeper looks for a day
+ * that has not been produced yet and re-enqueues that phantom missing day on every tick.
  */
-function pacificYesterdayISO() {
-    const ms = Date.now() - PACIFIC_OFFSET_MS - 24 * 60 * 60 * 1000;
-    return new Date(ms).toISOString().substring(0, 10);
+function adsYesterdayISO(country) {
+    return marketplaceYesterdayStr(country);
 }
 
 /**
- * Array of YYYY-MM-DD strings for the last `lookbackDays` ending at
- * yesterday-Pacific (exclusive of today). Yesterday itself is INCLUDED here
+ * Array of YYYY-MM-DD strings for the last `lookbackDays` ending at the
+ * marketplace's yesterday (exclusive of today). Yesterday itself is INCLUDED here
  * because the sweeper may run before the daily ads phase has fired for the
  * day. The "exclude yesterday if it just synced" check happens later.
  */
-function lastNDates(lookbackDays) {
-    const end = pacificYesterdayISO();
+function lastNDates(lookbackDays, country) {
+    const end = adsYesterdayISO(country);
     const out = [];
-    const endDate = new Date(`${end}T00:00:00.000Z`);
     for (let i = 0; i < lookbackDays; i++) {
-        const d = new Date(endDate);
-        d.setUTCDate(d.getUTCDate() - i);
-        out.push(d.toISOString().substring(0, 10));
+        out.push(addDaysToDateStr(end, -i));
     }
     return out;
 }
@@ -281,7 +276,7 @@ function buildCatchupJobId(userId, country, region, date) {
  * today (no useful info yet — we just rely on existing job dedup).
  */
 async function findMissingDatesForAccount(userId, country, region) {
-    const lookback = lastNDates(ADS_LOOKBACK_DAYS);
+    const lookback = lastNDates(ADS_LOOKBACK_DAYS, country);
     const userIdStr = userId.toString();
 
     const present = await PPCMetrics.find({
@@ -292,7 +287,7 @@ async function findMissingDatesForAccount(userId, country, region) {
     }).select({ metricDate: 1, _id: 0 }).lean();
 
     const presentSet = new Set(present.map(p => p.metricDate));
-    const yesterday = pacificYesterdayISO();
+    const yesterday = adsYesterdayISO(country);
 
     // Exclude yesterday from catch-up — that's the daily phase's job.
     return lookback.filter(d => d !== yesterday && !presentSet.has(d));

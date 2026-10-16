@@ -19,7 +19,10 @@ function mapKeywordPerformanceRow(row) {
     return {
         date: metricDay,
         keywordId: Number(row.keywordId) || 0,
+        // Legacy field name — the value is 7-day attributed sales. `sales7d` is the same value under
+        // its real name; new readers should use it (see adsKeywordsPerformanceModel).
         attributedSales30d: parseFloat(row.sales7d) || 0,
+        sales7d: parseFloat(row.sales7d) || 0,
         cost: parseFloat(row.cost) || 0,
         adGroupName: String(row.adGroupName || ''),
         matchType: String(row.matchType || ''),
@@ -319,7 +322,7 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
 // "yesterday-30 … yesterday" Pacific window. Used by the test controller so a
 // caller can request a specific date range from Amazon.
 async function getKeywordPerformanceReport(accessToken, profileId, userId, country, region, refreshToken = null, options = {}) {
-    const { startDate, endDate, isCustom } = resolveReportDateRange(options);
+    const { startDate, endDate, isCustom } = resolveReportDateRange({ ...options, country });
 
     logger.info('🚀 Starting keyword performance report generation', {
         profileId,
@@ -479,7 +482,7 @@ async function checkWastedStatusOnce(reportId, accessToken, profileId, region) {
 }
 
 function buildWastedSpendSpecs({ userId, country, region, accessToken, profileId, marketplaceId = '', startDate: sd = null, endDate: ed = null }) {
-    const { startDate, endDate } = resolveReportDateRange(sd && ed ? { startDate: sd, endDate: ed } : {});
+    const { startDate, endDate } = resolveReportDateRange(sd && ed ? { startDate: sd, endDate: ed } : { country });
     return [{
         service: 'adsKeywordsPerformanceData',
         paramsKey: 'default',

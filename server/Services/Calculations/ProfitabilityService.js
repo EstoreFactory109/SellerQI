@@ -25,6 +25,30 @@ const Profitability = require('./ProfitabilityCalculation.js');
 const { classifyProfitabilityRow, isEconomicsFresh } = require('./RecoverableAmountUtils.js');
 const { calculateSponsoredAdsMetrics } = require('./SponsoredAdsCalculation.js');
 const { getRedisClient } = require('../../config/redisConn.js');
+const PPCMetricsModel = require('../../models/amazon-ads/PPCMetricsModel.js');
+
+/**
+ * Account-wide ad spend (SP + SB + SD + ST) from PPCMetrics over `dateRange`, or null when there is
+ * no range or no PPC data for it.
+ *
+ * WHY. Product-wise spend (ProductWiseSponsoredAdsItem) only covers SP + SD — Amazon has no
+ * ASIN-level Sponsored Brands report — so TACoS computed from it left all SB spend out. TACoS is an
+ * account-level ratio, so its numerator must be the account's whole ad spend, over the same days as
+ * the total-sales denominator. Product-wise spend stays the source for per-ASIN figures and ACOS
+ * (SP+SD spend ÷ SP+SD sales is a consistent pair).
+ */
+async function getAccountAdSpendForRange(userId, country, region, dateRange) {
+    if (!dateRange?.startDate || !dateRange?.endDate) return null;
+    try {
+        const r = await PPCMetricsModel.calculateMetricsForDateRange(
+            userId?.toString() || userId, country, region, dateRange.startDate, dateRange.endDate
+        );
+        return r?.found ? Number(r.summary?.totalSpend || 0) : null;
+    } catch (err) {
+        logger.warn('[ProfitabilityService] getAccountAdSpendForRange failed', { error: err.message });
+        return null;
+    }
+}
 
 // Cache TTL for full profitability table data (10 minutes)
 const PROFITABILITY_TABLE_CACHE_TTL = 600;
@@ -108,6 +132,10 @@ const fetchProfitabilityData = async (userId, country, region) => {
         adsPPCSpend = parseFloat(adsPPCSpend.toFixed(2));
     }
 
+    const accountAdSpend = await getAccountAdSpendForRange(
+        userId, country, region, processedEconomicsMetricsData?.dateRange
+    );
+
     return {
         economicsMetricsData: processedEconomicsMetricsData,
         products,
@@ -119,6 +147,8 @@ const fetchProfitabilityData = async (userId, country, region) => {
         // directly, so this is just a pass-through.
         dateWisePPCspendData: Array.isArray(dateWisePPCspendData) ? dateWisePPCspendData : [],
         adsPPCSpend,
+        // All ad types (incl. Sponsored Brands) over the economics window — the TACoS numerator.
+        accountAdSpend,
         country,
         region
     };
@@ -433,6 +463,7 @@ const calculateProfitabilityDashboard = async (rawData) => {
         ProductWiseSponsoredAds,
         dateWisePPCspendData,
         adsPPCSpend,
+        accountAdSpend,
         country,
         region
     } = rawData;
@@ -492,14 +523,16 @@ const calculateProfitabilityDashboard = async (rawData) => {
     // Calculate sponsored ads metrics
     const sponsoredAdsMetrics = calculateSponsoredAdsMetrics(activeProductWiseSponsoredAds);
     
-    // Calculate ACOS and TACOS
+    // Calculate ACOS and TACOS. ACOS pairs product-wise (SP+SD) spend with SP+SD sales; TACoS uses
+    // the account's whole ad spend incl. Sponsored Brands (see getAccountAdSpendForRange).
     const totalPpcSpent = sponsoredAdsMetrics.totalCost || 0;
     const totalSales = economicsData.totalSales || 0;
+    const tacosSpend = accountAdSpend != null ? accountAdSpend : totalPpcSpent;
     sponsoredAdsMetrics.acos = sponsoredAdsMetrics.totalSalesIn30Days > 0 
         ? Math.round((totalPpcSpent / sponsoredAdsMetrics.totalSalesIn30Days) * 100 * 100) / 100 
         : 0;
     sponsoredAdsMetrics.tacos = totalSales > 0 
-        ? Math.round((totalPpcSpent / totalSales) * 100 * 100) / 100 
+        ? Math.round((tacosSpend / totalSales) * 100 * 100) / 100 
         : 0;
 
     // Calculate profitability errors
@@ -630,11 +663,16 @@ const getProfitabilitySummary = async (userId, country, region) => {
 
     // Calculate sponsored ads metrics
     const sponsoredAdsMetrics = calculateSponsoredAdsMetrics(sponsoredAdsArray);
+    // TACoS numerator: all ad types incl. Sponsored Brands (see getAccountAdSpendForRange).
+    const accountAdSpend = await getAccountAdSpendForRange(
+        userId, country, region, processedEconomicsMetrics?.dateRange
+    );
+    const tacosSpend = accountAdSpend != null ? accountAdSpend : adsPPCSpend;
     sponsoredAdsMetrics.acos = sponsoredAdsMetrics.totalSalesIn30Days > 0 
         ? Math.round((adsPPCSpend / sponsoredAdsMetrics.totalSalesIn30Days) * 100 * 100) / 100 
         : 0;
     sponsoredAdsMetrics.tacos = totalSales > 0 
-        ? Math.round((adsPPCSpend / totalSales) * 100 * 100) / 100 
+        ? Math.round((tacosSpend / totalSales) * 100 * 100) / 100 
         : 0;
 
     const fetchTime = Date.now() - startTime;

@@ -19,6 +19,7 @@ const ProductWiseSponsoredAdsItem = require('../../models/amazon-ads/ProductWise
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel');
 const logger = require('../../utils/Logger');
+const { getDefaultReportDateRange } = require('../../utils/reportDateRange');
 const { loadLatestSnapshotDoc, loadKeywordSnapshot } = require('../../utils/ppcSnapshotLoader');
 
 /**
@@ -127,20 +128,22 @@ const resolveDailyOrLegacyMatch = async (Model, baseMatch, startStr, endStr) => 
     return { ...baseMatch, _id: legacy._id };
 };
 
-/** Default ~31-day string window (UTC) for product-wise / report-style data when no range passed. */
-const defaultReportWindowStrings = () => {
-    const now = new Date();
-    const endD = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
-    const startD = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1 - 30));
-    return { startStr: startD.toISOString().split('T')[0], endStr: endD.toISOString().split('T')[0] };
+/**
+ * Default 30-day string window (marketplace's yesterday−29 … yesterday) when no range is passed.
+ * Same window the ads pipeline fetches and PPCMetrics.rollupLastDays reads — it used to be a
+ * 31-day UTC window, so KPI boxes and the dashboard disagreed by a day at either end.
+ */
+const defaultReportWindowStrings = (country) => {
+    const { startDate, endDate } = getDefaultReportDateRange(30, country);
+    return { startStr: startDate, endStr: endDate };
 };
 
 /**
  * Resolve the (startDate, endDate) window for the KPI summary.
  * - If both dates are provided (YYYY-MM-DD), they're used as-is.
- * - Otherwise we fall back to the production default: yesterday-30 … yesterday (UTC).
+ * - Otherwise we fall back to the production default: 30 days ending on the marketplace's yesterday.
  */
-const resolveKpiDateRange = (startDate, endDate) => {
+const resolveKpiDateRange = (startDate, endDate, country) => {
     const norm = (v) => toYyyyMmDd(v);
     const s = norm(startDate);
     const e = norm(endDate);
@@ -152,7 +155,7 @@ const resolveKpiDateRange = (startDate, endDate) => {
         }
         return { startDate: s, endDate: e, isCustom: true };
     }
-    const { startStr, endStr } = defaultReportWindowStrings();
+    const { startStr, endStr } = defaultReportWindowStrings(country);
     return { startDate: startStr, endDate: endStr, isCustom: false };
 };
 
@@ -321,7 +324,7 @@ const aggregateTotalSales = async (userId, country, region, startDate, endDate) 
 const getPPCKPISummary = async (userId, country, region, startDate = null, endDate = null) => {
     const startTime = Date.now();
 
-    const window = resolveKpiDateRange(startDate, endDate);
+    const window = resolveKpiDateRange(startDate, endDate, country);
     logger.info(
         `[PPCCampaignAnalysis] KPI summary user=${userId} country=${country} region=${region} ` +
             `window=${window.startDate}→${window.endDate} custom=${window.isCustom}`
@@ -407,7 +410,7 @@ const resolveCampaignWindowMatch = async (userIdObj, country, region, startDate 
     if (startStr && endStr) {
         matchStage.date = { $gte: startStr, $lte: endStr };
     } else {
-        const w = defaultReportWindowStrings();
+        const w = defaultReportWindowStrings(country);
         matchStage.date = { $gte: w.startStr, $lte: w.endStr };
     }
 
@@ -574,7 +577,7 @@ const getWastedSpendKeywords = async (userId, country, region, page = 1, limit =
 
         const startStr = startDate && endDate ? toYyyyMmDd(startDate) : null;
         const endStr = startDate && endDate ? toYyyyMmDd(endDate) : null;
-        const window = startStr && endStr ? { startStr, endStr } : defaultReportWindowStrings();
+        const window = startStr && endStr ? { startStr, endStr } : defaultReportWindowStrings(country);
 
         const match = await resolveDailyOrLegacyMatch(
             adsKeywordsPerformanceModel,
@@ -768,7 +771,7 @@ const getTopPerformingKeywords = async (userId, country, region, page = 1, limit
 
         const startStr = startDate && endDate ? toYyyyMmDd(startDate) : null;
         const endStr = startDate && endDate ? toYyyyMmDd(endDate) : null;
-        const window = startStr && endStr ? { startStr, endStr } : defaultReportWindowStrings();
+        const window = startStr && endStr ? { startStr, endStr } : defaultReportWindowStrings(country);
 
         const match = await resolveDailyOrLegacyMatch(
             adsKeywordsPerformanceModel,
@@ -888,7 +891,7 @@ const getSearchTermsZeroSales = async (userId, country, region, page = 1, limit 
 
         const startStr = startDate && endDate ? toYyyyMmDd(startDate) : null;
         const endStr = startDate && endDate ? toYyyyMmDd(endDate) : null;
-        const window = startStr && endStr ? { startStr, endStr } : defaultReportWindowStrings();
+        const window = startStr && endStr ? { startStr, endStr } : defaultReportWindowStrings(country);
 
         const match = await resolveDailyOrLegacyMatch(
             SearchTerms,
@@ -1020,7 +1023,7 @@ const getAutoCampaignInsights = async (userId, country, region, page = 1, limit 
 
         const startStr = startDate && endDate ? toYyyyMmDd(startDate) : null;
         const endStr = startDate && endDate ? toYyyyMmDd(endDate) : null;
-        const window = startStr && endStr ? { startStr, endStr } : defaultReportWindowStrings();
+        const window = startStr && endStr ? { startStr, endStr } : defaultReportWindowStrings(country);
 
         const match = await resolveDailyOrLegacyMatch(
             SearchTerms,
@@ -1188,6 +1191,9 @@ const getTotalWastedSpend = async (userId, country, region, startDate = null, en
 
 module.exports = {
     getPPCKPISummary,
+    // TACoS denominator over an exact window — DashboardSummaryService reuses it so its TACoS
+    // covers the same days as the PPC spend it divides.
+    aggregateTotalSales,
     getHighAcosCampaigns,
     getCampaignSpendSales,
     resolveCampaignWindowMatch,

@@ -147,12 +147,27 @@ describe('_runAsyncAdsPhase — a failed save is reported, not swallowed', () =>
         // Advance-on-failure is preserved: the phase still reports success overall, but the failing
         // service carries dataLoss so the finalize gate can act on it.
         mockEngineRows = [row('ppcMetricsAggregated', 'DONE'), row('ppcSpendsBySKU', 'DONE')];
+        const bad = svc('ppcSpendsBySKU', async () => { throw new Error('nope'); });
+        const good = svc('ppcMetricsAggregated');
+
+        const res = await runPhase([bad, good]);
+
+        expect(res.success).toBe(true);
+        expect(res.dataForNextPhase.apiResults.ppcMetricsAggregated.success).toBe(true);
+        expect(res.dataForNextPhase.apiResults.ppcSpendsBySKU.dataLoss).toBe(true);
+    });
+
+    test('PPC metrics failing fails the phase even when a sibling worked', async () => {
+        // ppcMetricsAggregated is the source of every headline ad spend / sales figure, so the
+        // phase is not a success without it (see ScheduledIntegration._adsOutcomeOk).
+        mockEngineRows = [row('ppcMetricsAggregated', 'DONE'), row('ppcSpendsBySKU', 'DONE')];
         const bad = svc('ppcMetricsAggregated', async () => { throw new Error('nope'); });
         const good = svc('ppcSpendsBySKU');
 
         const res = await runPhase([bad, good]);
 
-        expect(res.success).toBe(true);
+        expect(res.success).toBe(false);
+        expect(res.error).toMatch(/PPC metrics failed/);
         expect(res.dataForNextPhase.apiResults.ppcSpendsBySKU.success).toBe(true);
         expect(res.dataForNextPhase.apiResults.ppcMetricsAggregated.dataLoss).toBe(true);
     });
@@ -199,8 +214,24 @@ describe('_canMarkDailyComplete', () => {
         // starvation pattern already fixed twice on the finance side.
         expect(SI._canMarkDailyComplete({
             financeSync: ok,
+            ppcSpendsBySKU: { success: false },
+            ppcMetricsAggregated: ok,
+        }).canMarkComplete).toBe(true);
+    });
+
+    test('PPC metrics failing blocks even when another ads service succeeded', () => {
+        // The one exception to `some`: ppcMetricsAggregated carries the account's ad spend / sales.
+        expect(SI._canMarkDailyComplete({
+            financeSync: ok,
             ppcSpendsBySKU: ok,
             ppcMetricsAggregated: { success: false },
+        }).canMarkComplete).toBe(false);
+    });
+
+    test('PPC metrics not run at all does not block when another ads service succeeded', () => {
+        expect(SI._canMarkDailyComplete({
+            financeSync: ok,
+            ppcSpendsBySKU: ok,
         }).canMarkComplete).toBe(true);
     });
 

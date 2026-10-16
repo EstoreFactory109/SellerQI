@@ -346,7 +346,7 @@ async function downloadReportData(location, accessToken, profileId, tokenRefresh
 // the rows we ingest.
 async function getSearchKeywords(accessToken, profileId, userId, country, region, refreshToken = null, options = {}) {
     try {
-        const { startDate, endDate, isCustom } = resolveReportDateRange(options);
+        const { startDate, endDate, isCustom } = resolveReportDateRange({ ...options, country });
         // ===== INPUT VALIDATION =====
         if (!accessToken) {
             throw new Error('Access token is required');
@@ -533,7 +533,7 @@ async function checkSearchStatusOnce(reportId, accessToken, profileId, region) {
 }
 
 function buildSearchKeywordsSpecs({ userId, country, region, accessToken, profileId, marketplaceId = '', startDate: sd = null, endDate: ed = null }) {
-    const { startDate, endDate } = resolveReportDateRange(sd && ed ? { startDate: sd, endDate: ed } : {});
+    const { startDate, endDate } = resolveReportDateRange(sd && ed ? { startDate: sd, endDate: ed } : { country });
     return [{
         service: 'searchKeywords',
         paramsKey: 'default',

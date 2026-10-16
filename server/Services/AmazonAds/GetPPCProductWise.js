@@ -411,7 +411,7 @@ async function fetchReportForAdType(adType, accessToken, profileId, region, star
  */
 async function getPPCSpendsBySKU(accessToken, profileId, userId, country, region, refreshToken = null, options = {}) {
     try {
-        const { startDate, endDate, isCustom } = resolveReportDateRange(options);
+        const { startDate, endDate, isCustom } = resolveReportDateRange({ ...options, country });
         logger.info(`📡 [GetPPCProductWise] PPC spends by SKU for region: ${region}, country: ${country}, userId: ${userId}, window: ${startDate} → ${endDate}, customDateRange: ${isCustom}`);
 
         // Small delay to prevent rapid successive requests
@@ -534,7 +534,7 @@ async function checkProductWiseStatusOnce(reportId, accessToken, profileId, regi
 }
 
 function buildProductWiseSpecs({ userId, country, accessToken, profileId, region, marketplaceId = '', startDate: sd = null, endDate: ed = null }) {
-    const { startDate, endDate } = resolveReportDateRange(sd && ed ? { startDate: sd, endDate: ed } : {});
+    const { startDate, endDate } = resolveReportDateRange(sd && ed ? { startDate: sd, endDate: ed } : { country });
     return ['SP', 'SD'].map((adType) => {
         const config = REPORT_CONFIGS[adType];
         return {

@@ -229,3 +229,42 @@ describe('saveProductWiseFromRows — clears measured-but-empty ad types', () =>
         expect(mockInsertMany).not.toHaveBeenCalled();
     });
 });
+
+/**
+ * Insert-then-delete. The save used to delete the dates' rows first and insert after, so a failed
+ * insert left those dates with no product-level ad spend until the next successful run.
+ */
+describe('saveProductWiseSponsoredAdsData — a failed insert never empties the dates', () => {
+    test('the new batch is inserted BEFORE the old rows are deleted', async () => {
+        const order = [];
+        mockInsertMany.mockImplementation(async (rows) => { order.push('insert'); return rows; });
+        mockDeleteMany.mockImplementation(async () => { order.push('delete'); return { deletedCount: 1 }; });
+
+        await saveProductWiseSponsoredAdsData(USER, 'US', 'NA', [item('SP', '2026-07-20')]);
+
+        expect(order).toEqual(['insert', 'delete']);
+    });
+
+    test('the replacing delete never removes the batch it just wrote', async () => {
+        await saveProductWiseSponsoredAdsData(USER, 'US', 'NA', [item('SP', '2026-07-20')]);
+        const insertedBatchId = mockInsertMany.mock.calls[0][0][0].batchId;
+        const filter = mockDeleteMany.mock.calls[0][0];
+        expect(String(filter.batchId.$ne)).toBe(String(insertedBatchId));
+    });
+
+    test('insert failure: old rows are untouched, the partial new batch is removed, the error propagates', async () => {
+        mockInsertMany.mockRejectedValue(new Error('connection reset'));
+
+        const res = await saveProductWiseSponsoredAdsData(USER, 'US', 'NA', [item('SP', '2026-07-20')])
+            .catch((e) => ({ thrown: e }));
+
+        // The service either rethrows or reports failure — either way it must not claim success.
+        expect(res.success).not.toBe(true);
+        // Exactly one delete: the cleanup of the partial NEW batch, scoped by its batchId alone.
+        expect(mockDeleteMany).toHaveBeenCalledTimes(1);
+        const filter = mockDeleteMany.mock.calls[0][0];
+        expect(filter.batchId).toBeDefined();
+        expect(filter.batchId.$ne).toBeUndefined();
+        expect(filter.date).toBeUndefined();
+    });
+});
