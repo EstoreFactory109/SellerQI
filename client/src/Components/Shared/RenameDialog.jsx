@@ -8,14 +8,30 @@ const TONES = {
   esf: { panel: 'bg-[#101722] border-white/10', input: 'bg-white/[0.04] border-white/10', button: 'border-white/10' },
 };
 
+// Default rule: a name may be empty (it clears the name), otherwise 2+ characters.
+const validateName = (value) => (value && value.length < 2 ? 'Name must be at least 2 characters' : '');
+
 /**
- * In-page "set name" dialog, replacing window.prompt for renaming a member.
- * An empty name is allowed (it clears the name); otherwise at least 2 characters.
+ * In-page single-field dialog, replacing window.prompt. Built for renaming a
+ * member; `inputType`, `validate` and `helperText` let it take an email too.
  *
- * onSave(name) should return a promise; reject it with an Error to show its
+ * onSave(value) should return a promise; reject it with an Error to show its
  * message in the dialog, resolve it to close.
  */
-const RenameDialog = ({ open, title, description, initialValue = '', placeholder = 'Name', tone = 'seller', onCancel, onSave }) => {
+const RenameDialog = ({
+  open,
+  title,
+  description,
+  initialValue = '',
+  placeholder = 'Name',
+  tone = 'seller',
+  inputType = 'text',
+  validate = validateName,
+  helperText = 'Leave empty to show their email address instead.',
+  saveLabel = 'Save',
+  onCancel,
+  onSave,
+}) => {
   const [value, setValue] = useState(initialValue);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -42,15 +58,16 @@ const RenameDialog = ({ open, title, description, initialValue = '', placeholder
 
   const submit = async (e) => {
     e.preventDefault();
-    const name = value.trim();
-    if (name && name.length < 2) {
-      setError('Name must be at least 2 characters');
+    const next = value.trim();
+    const problem = validate(next);
+    if (problem) {
+      setError(problem);
       return;
     }
     setSaving(true);
     setError('');
     try {
-      await onSave(name);
+      await onSave(next);
     } catch (err) {
       setError(err?.message || 'Could not update the name');
       setSaving(false);
@@ -93,9 +110,9 @@ const RenameDialog = ({ open, title, description, initialValue = '', placeholder
 
         <input
           ref={inputRef}
-          type="text"
+          type={inputType}
           value={value}
-          maxLength={50}
+          maxLength={inputType === 'email' ? 254 : 50}
           onChange={(e) => { setValue(e.target.value); setError(''); }}
           placeholder={placeholder}
           className={`w-full px-3 py-2.5 rounded-lg border text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition ${theme.input} ${error ? 'border-red-500' : ''}`}
@@ -103,7 +120,7 @@ const RenameDialog = ({ open, title, description, initialValue = '', placeholder
         {error ? (
           <p className="text-xs text-red-400 mt-1.5">{error}</p>
         ) : (
-          <p className="text-xs text-gray-500 mt-1.5">Leave empty to show their email address instead.</p>
+          helperText && <p className="text-xs text-gray-500 mt-1.5">{helperText}</p>
         )}
 
         <div className="flex gap-2 mt-5">
@@ -121,7 +138,7 @@ const RenameDialog = ({ open, title, description, initialValue = '', placeholder
             className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-500 transition-colors disabled:opacity-50"
           >
             {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-            Save
+            {saveLabel}
           </button>
         </div>
       </form>

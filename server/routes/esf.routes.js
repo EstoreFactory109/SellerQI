@@ -21,6 +21,7 @@ const {
     updateEsfUserClients,
     getEsfSessionPermissions,
     updateEsfUserName,
+    updateEsfClientEmail,
 } = require('../controllers/esf/esf.js');
 const {
     listInvites,
@@ -53,6 +54,7 @@ const {
     downloadTaskRequestAttachment,
 } = require('../controllers/esf/esfTaskRequests.js');
 const esfAuth = require('../middlewares/Auth/esfAuth.js');
+const { getEsfActivityList, getEsfClientActivity } = require('../controllers/system/ActivityController.js');
 const { refuseIfOtherSession } = require('../middlewares/Auth/singleSession.js');
 const gmailUpload = require('../middlewares/multer/gmailUpload.js');
 const { authRateLimiter, registerRateLimiter } = require('../middlewares/rateLimiting.js');
@@ -93,12 +95,17 @@ router.put('/update-password', esfAuth, updateEsfPassword);
 
 // Clients
 router.get('/clients', esfAuth, getEsfClients);
+// Client activity: how each ESF client uses the app (owner/admin only).
+router.get('/activity', esfAuth, getEsfActivityList);
+router.get('/activity/:userId', esfAuth, getEsfClientActivity);
 router.post('/clients', esfAuth, registerRateLimiter, validateEsfClient, createEsfClient);
 router.post('/clients/switch', esfAuth, switchToEsfClient);
 // Adopting existing SellerQI sellers instead of creating a new account.
 router.get('/linkable-users', esfAuth, listLinkableUsers);
 router.post('/clients/link', esfAuth, linkExistingUsers);
 router.post('/clients/:clientId/set-password', esfAuth, setEsfClientPassword);
+// Owner/admin change a client's primary email directly (no verification).
+router.patch('/clients/:clientId/email', esfAuth, updateEsfClientEmail);
 router.delete('/clients/:clientId', esfAuth, removeEsfClient);
 
 // Connecting a client to an existing Zoho project. Projects are created in
