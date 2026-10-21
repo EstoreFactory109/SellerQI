@@ -24,9 +24,28 @@ const SEARCH_TERM_MIN_CLICKS = 10;
 // should move to a manual campaign.
 const AUTO_MIGRATION_MIN_SALES = 30;
 
+// A keyword needs this many clicks with no sales before its spend counts as wasted.
+// There was no floor: 3,123 of 4,584 flagged keywords in production had 2 clicks or
+// fewer and 1,547 had spent under $1 — noise, not waste. Same floor as search terms.
+const KEYWORD_MIN_CLICKS = 10;
+
+// Ads sales are 7-day attributed (the reports' `sales7d`, stored as
+// attributedSales30d). A click from the last 7 days can still pick up its sale, so
+// spend that recent cannot yet be called wasted. 761 flagged keywords had ALL their
+// spend inside that window.
+const ATTRIBUTION_SETTLE_DAYS = 7;
+
+// Ads rows whose newest day is older than this (vs the marketplace's yesterday) are
+// stale: a stopped sync would otherwise keep re-issuing the last 30 stored days as
+// current problems.
+const ADS_DATA_MAX_AGE_DAYS = 7;
+
 module.exports = {
     TARGET_PROFIT_MARGIN_PERCENT,
     TARGET_ACOS_PERCENT,
     SEARCH_TERM_MIN_CLICKS,
-    AUTO_MIGRATION_MIN_SALES
+    AUTO_MIGRATION_MIN_SALES,
+    KEYWORD_MIN_CLICKS,
+    ATTRIBUTION_SETTLE_DAYS,
+    ADS_DATA_MAX_AGE_DAYS
 };

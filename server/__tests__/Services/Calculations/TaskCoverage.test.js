@@ -6,6 +6,8 @@
  */
 const { buildTaskCoverage } = require('../../../Services/Calculations/DashboardCalculation.js');
 
+const RECENT_DAY = new Date(Date.now() - 2 * 864e5).toISOString().slice(0, 10);
+
 const fullData = () => ({
     RankingsData: {
         RankingResultArray: [{ asin: 'A1' }, { asin: 'A2' }],
@@ -17,8 +19,9 @@ const fullData = () => ({
     },
     BuyBoxData: { asinBuyBoxData: [{ asin: 'A1' }] },
     InventoryAnalysis: { inventoryPlanning: [], strandedInventory: [] },
-    adsKeywordsPerformanceData: [{ keyword: 'k' }],
-    searchTerms: [{ searchTerm: 's' }],
+    // Dated recently: undated or old ads rows are stale and not covered.
+    adsKeywordsPerformanceData: [{ keyword: 'k', date: RECENT_DAY }],
+    searchTerms: [{ searchTerm: 's', date: RECENT_DAY }],
     campaignData: [{ campaignId: 'c' }],
     AccountData: { accountHealth: { accountStatus: { status: 'Healthy' } } }
 });
@@ -87,6 +90,16 @@ describe('buildTaskCoverage', () => {
         expect(c['sponsoredAds.keywords']).toBe(true);
         expect(c['sponsoredAds.searchTerms']).toBe(false);
         expect(c['sponsoredAds.autoMigration']).toBe(false);
+    });
+
+    // A stopped ads sync must not read as "every keyword problem was fixed".
+    it('does not cover ads keywords or search terms whose newest day is stale', () => {
+        const data = fullData();
+        data.adsKeywordsPerformanceData = [{ keyword: 'k', date: '2026-01-01' }];
+        data.searchTerms = [{ searchTerm: 's' }]; // undated legacy row
+        const c = buildTaskCoverage(data, fullCtx());
+        expect(c['sponsoredAds.keywords']).toBe(false);
+        expect(c['sponsoredAds.searchTerms']).toBe(false);
     });
 
     it('needs campaign metadata to judge auto-campaign migration', () => {
