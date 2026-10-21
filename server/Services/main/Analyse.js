@@ -1019,6 +1019,9 @@ class AnalyseService {
                 isBig: economicsMetrics.isBig || false,
                 // 'daily_sku_finance' when built live; absent on a stored EconomicsMetrics doc
                 source: economicsMetrics.source,
+                // Readers judge freshness by it (isEconomicsFresh); without it every
+                // doc, even a fresh one, read as stale downstream.
+                createdAt: economicsMetrics.createdAt,
                 // Metrics document ID needed for fetching ASIN data from separate collection
                 _id: economicsMetrics._id,
                 // When this data was fetched (from DataFetchTracking)

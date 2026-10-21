@@ -6,12 +6,12 @@
  * 
  * Uses existing data from:
  * - BuyBoxData: sessions, pageViews, conversion, buy box %
- * - EconomicsMetrics: sales, units, gross profit
+ * - Economics (LiveEconomicsService, live DailySkuFinance windows): sales, units, gross profit
  * - ProductWiseSponsoredAds: PPC spend, sales, impressions, clicks
  */
 
 const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
-const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
+const { buildEconomicsFromDailyFinance } = require('../Finance/LiveEconomicsService.js');
 const logger = require('../../utils/Logger.js');
 
 /**
@@ -148,63 +148,36 @@ async function fetchPreviousBuyBoxData(userId, region, country, comparisonType, 
 
 /**
  * Fetch previous period Economics data for comparison
+ *
+ * The previous window is the one calculatePreviousPeriod gives for the current
+ * window, built live from DailySkuFinance (LiveEconomicsService). It used to pick
+ * the EconomicsMetrics doc created ~7/30 days before the newest one; with that
+ * collection stopped since March 2026 it compared two stale months.
+ *
  * @param {string} userId - User ID
  * @param {string} region - Region
  * @param {string} country - Country
  * @param {string} comparisonType - 'wow' or 'mom'
- * @param {Object} currentEconomicsData - Current period Economics data
- * @returns {Promise<Object|null>} Previous period Economics data or null
+ * @param {Object} currentEconomicsData - Current period economics (needs dateRange)
+ * @returns {Promise<Object|null>} Previous period economics (EconomicsMetrics shape) or null = no data
  */
 async function fetchPreviousEconomicsData(userId, region, country, comparisonType, currentEconomicsData) {
-    if (!currentEconomicsData?.dateRange || comparisonType === COMPARISON_TYPES.NONE) {
+    const range = currentEconomicsData?.dateRange;
+    if (!range?.startDate || !range?.endDate || comparisonType === COMPARISON_TYPES.NONE) {
         logger.info('fetchPreviousEconomicsData: Skipping - no dateRange or comparison is NONE', { 
-            hasDateRange: !!currentEconomicsData?.dateRange, 
+            hasDateRange: !!range, 
             comparisonType 
         });
         return null;
     }
-    
+
+    const prev = calculatePreviousPeriod(range.startDate, range.endDate, comparisonType);
+    if (!prev) return null;
+
     try {
-        logger.info('fetchPreviousEconomicsData: Querying EconomicsMetrics', { userId, region, country, comparisonType });
-        const allDocs = await EconomicsMetrics.find({
-            User: userId,
-            region: region,
-            country: country
-        }).sort({ createdAt: -1 }).lean();
-        
-        logger.info('fetchPreviousEconomicsData: Found documents', { 
-            count: allDocs.length,
-            dates: allDocs.slice(0, 3).map(d => ({ createdAt: d.createdAt, dateRange: d.dateRange }))
+        return await buildEconomicsFromDailyFinance({
+            userId, country, region, startDate: prev.prevStartDate, endDate: prev.prevEndDate
         });
-        
-        if (allDocs.length < 2) {
-            logger.info('No previous Economics data for comparison - need at least 2 docs', { userId, region, country, docsFound: allDocs.length });
-            return null;
-        }
-        
-        const currentCreatedAt = new Date(allDocs[0].createdAt);
-        const targetDaysBack = comparisonType === COMPARISON_TYPES.WOW ? 7 : 30;
-        const targetDate = new Date(currentCreatedAt);
-        targetDate.setDate(targetDate.getDate() - targetDaysBack);
-        
-        let closestDoc = null;
-        let closestDiff = Infinity;
-        
-        for (let i = 1; i < allDocs.length; i++) {
-            const docDate = new Date(allDocs[i].createdAt);
-            const diff = Math.abs(docDate - targetDate);
-            if (diff < closestDiff) {
-                closestDiff = diff;
-                closestDoc = allDocs[i];
-            }
-        }
-        
-        const maxDiffDays = comparisonType === COMPARISON_TYPES.WOW ? 3 : 7;
-        if (closestDoc && closestDiff <= maxDiffDays * 24 * 60 * 60 * 1000) {
-            return closestDoc;
-        }
-        
-        return allDocs[1];
     } catch (error) {
         logger.error('Error fetching previous Economics data', { userId, error: error.message });
         return null;

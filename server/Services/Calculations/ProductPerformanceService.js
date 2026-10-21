@@ -3,7 +3,7 @@
  * 
  * Aggregates product-level performance metrics from multiple data sources:
  * - BuyBoxData: sessions, pageViews, unitSessionPercentage (conversion)
- * - EconomicsMetrics/asinWiseSales: sales, units, grossProfit
+ * - Economics (LiveEconomicsService: fresh EconomicsMetrics or live DailySkuFinance): sales, units, grossProfit
  * - ProductWiseSponsoredAds: PPC spend, attributed sales, impressions, clicks
  * 
  * Used to enrich product lists with performance data for the "issues by product" page.
@@ -11,7 +11,7 @@
 
 const mongoose = require('mongoose');
 const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
-const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
+const { loadLiveEconomics, loadEconomicsComparison, lastNDaysWindow, isStoredEconomicsDoc } = require('../Finance/LiveEconomicsService.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 const ProductWiseSponsoredAdsItem = require('../../models/amazon-ads/ProductWiseSponsoredAdsItemModel.js');
 const logger = require('../../utils/Logger.js');
@@ -210,8 +210,14 @@ function enrichProductsWithPerformance(products, performanceMap) {
 
 /**
  * Get performance metrics for a single ASIN with optional comparison
- * OPTIMIZED: Fetches current and comparison data in PARALLEL when comparison is requested
- * 
+ *
+ * Sales, units and gross profit come from the shared economics loader
+ * (LiveEconomicsService): a fresh EconomicsMetrics doc, else live DailySkuFinance
+ * for the 30 days ending yesterday. A comparison is two LIVE windows of equal
+ * length (wow: last 7 days vs the 7 before; mom: last 30 vs the 30 before) — it
+ * used to hop back 1 or 4 EconomicsMetrics docs, which since March 2026 compared
+ * one stale month with another.
+ *
  * @param {Object} params - Parameters
  * @param {string} params.userId - User ID
  * @param {string} params.region - Region (NA, EU, FE)
@@ -227,23 +233,22 @@ async function getProductPerformanceByAsin({ userId, region, country, asin, comp
 
     const normalizedAsin = asin.trim().toUpperCase();
     const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
-    const needsComparison = comparison !== 'none' && (comparison === 'wow' || comparison === 'mom');
+    const needsComparison = comparison === 'wow' || comparison === 'mom';
 
     logger.info('[ProductPerformanceService] Fetching performance for ASIN', { 
         userId, region, country, asin: normalizedAsin, comparison 
     });
 
     try {
-        // Build parallel fetch array - always fetch current period
         const fetchPromises = [
             BuyBoxData.findLatest(userObjectId, region, country),
-            EconomicsMetrics.findLatest(userObjectId, region, country),
+            loadLiveEconomics(userObjectId, region, country, { asin: normalizedAsin }),
             fetchPPCDataForAsin(userObjectId, country, region, normalizedAsin)
         ];
-        
-        // If comparison requested, also fetch previous period docs in PARALLEL
-        // This eliminates the sequential wait for current period to complete
+
         if (needsComparison) {
+            // Traffic (sessions, page views) only exists per BuyBox report, so the
+            // previous side of traffic is still the report before; money is windowed.
             const skipCount = comparison === 'wow' ? 1 : 4;
             fetchPromises.push(
                 BuyBoxData.find({
@@ -251,111 +256,40 @@ async function getProductPerformanceByAsin({ userId, region, country, asin, comp
                     region: region,
                     country: country
                 }).sort({ createdAt: -1 }).skip(skipCount).limit(1).lean(),
-                
-                EconomicsMetrics.find({
-                    User: userObjectId,
-                    region: region,
-                    country: country
-                }).sort({ createdAt: -1 }).skip(skipCount).limit(1).lean()
+                loadEconomicsComparison(userObjectId, region, country, {
+                    ...lastNDaysWindow(comparison === 'wow' ? 7 : 30),
+                    asin: normalizedAsin
+                })
             );
         }
 
-        // Execute all fetches in parallel
         const results = await Promise.all(fetchPromises);
         
         const buyBoxDoc = results[0];
         const economicsDoc = results[1];
         const ppcResult = results[2];
         const previousBuyBoxDoc = needsComparison ? (results[3]?.[0] || null) : null;
-        const previousEconomicsDoc = needsComparison ? (results[4]?.[0] || null) : null;
-        
-        // Detect big accounts that need separate aggregation queries
-        // and batch them together for parallel execution
-        const bigAccountQueries = [];
-        const bigAccountQueryMap = {}; // Maps index to 'current' or 'previous'
-        
-        const currentIsBigAccount = economicsDoc && (economicsDoc.isBig === true || !economicsDoc.asinWiseSales?.length);
-        const previousIsBigAccount = previousEconomicsDoc && (previousEconomicsDoc.isBig === true || !previousEconomicsDoc.asinWiseSales?.length);
-        
-        if (currentIsBigAccount && economicsDoc._id) {
-            bigAccountQueryMap[bigAccountQueries.length] = 'current';
-            bigAccountQueries.push(
-                AsinWiseSalesForBigAccounts.aggregate([
-                    { $match: { metricsId: economicsDoc._id } },
-                    { $unwind: '$asinSales' },
-                    { $match: { 'asinSales.asin': normalizedAsin } },
-                    {
-                        $group: {
-                            _id: '$asinSales.asin',
-                            sales: { $sum: '$asinSales.sales.amount' },
-                            grossProfit: { $sum: '$asinSales.grossProfit.amount' },
-                            unitsSold: { $sum: '$asinSales.unitsSold' }
-                        }
-                    }
-                ])
-            );
-        }
-        
-        if (previousIsBigAccount && previousEconomicsDoc._id) {
-            bigAccountQueryMap[bigAccountQueries.length] = 'previous';
-            bigAccountQueries.push(
-                AsinWiseSalesForBigAccounts.aggregate([
-                    { $match: { metricsId: previousEconomicsDoc._id } },
-                    { $unwind: '$asinSales' },
-                    { $match: { 'asinSales.asin': normalizedAsin } },
-                    {
-                        $group: {
-                            _id: '$asinSales.asin',
-                            sales: { $sum: '$asinSales.sales.amount' },
-                            grossProfit: { $sum: '$asinSales.grossProfit.amount' },
-                            unitsSold: { $sum: '$asinSales.unitsSold' }
-                        }
-                    }
-                ])
-            );
-        }
-        
-        // Execute big account queries in parallel
-        let currentBigAccountData = null;
-        let previousBigAccountData = null;
-        
-        if (bigAccountQueries.length > 0) {
-            const bigAccountResults = await Promise.all(bigAccountQueries);
-            
-            for (let i = 0; i < bigAccountResults.length; i++) {
-                const data = bigAccountResults[i]?.[0] || null;
-                if (bigAccountQueryMap[i] === 'current') {
-                    currentBigAccountData = data;
-                } else if (bigAccountQueryMap[i] === 'previous') {
-                    previousBigAccountData = data;
-                }
-            }
-        }
-        
-        // Extract current performance (pass pre-fetched big account data)
+        const economicsComparison = needsComparison ? (results[4] || null) : null;
+
         const currentPerformance = await extractPerformanceFromDocs(
-            buyBoxDoc, economicsDoc, ppcResult, normalizedAsin, userObjectId, currentBigAccountData
+            buyBoxDoc, economicsDoc, ppcResult, normalizedAsin, userObjectId
         );
 
-        // Build response
         const result = {
             performance: currentPerformance,
             comparison: null
         };
 
-        // If comparison requested, extract previous period performance
-        if (needsComparison && (previousBuyBoxDoc || previousEconomicsDoc)) {
-            const previousPerformance = await extractPerformanceFromDocs(
-                previousBuyBoxDoc, previousEconomicsDoc, null, normalizedAsin, userObjectId, previousBigAccountData
-            );
-            
-            if (previousPerformance) {
-                result.comparison = buildComparisonResult(
-                    currentPerformance, 
-                    previousPerformance, 
-                    comparison
-                );
-            }
+        // Both windows need live finance: a missing side is "no data", and comparing
+        // against it would read as a 100% change.
+        if (economicsComparison?.current && economicsComparison?.previous) {
+            const [currentWindowPerf, previousWindowPerf] = await Promise.all([
+                extractPerformanceFromDocs(buyBoxDoc, economicsComparison.current, null, normalizedAsin, userObjectId),
+                extractPerformanceFromDocs(previousBuyBoxDoc, economicsComparison.previous, null, normalizedAsin, userObjectId)
+            ]);
+            result.comparison = buildComparisonResult(currentWindowPerf, previousWindowPerf, comparison);
+            result.comparison.currentWindow = economicsComparison.currentWindow;
+            result.comparison.previousWindow = economicsComparison.previousWindow;
         }
 
         logger.info('[ProductPerformanceService] Performance fetched successfully', {
@@ -447,7 +381,8 @@ async function extractPerformanceFromDocs(buyBoxDoc, economicsDoc, ppcResult, as
         const isBigAccount = economicsDoc.isBig === true;
         const hasEmptyAsinData = !economicsDoc.asinWiseSales || economicsDoc.asinWiseSales.length === 0;
 
-        if ((isBigAccount || hasEmptyAsinData) && economicsDoc._id) {
+        // Big-account rows are keyed by a stored doc's _id; a live-built doc has them inline.
+        if ((isBigAccount || hasEmptyAsinData) && isStoredEconomicsDoc(economicsDoc)) {
             // Use pre-fetched data if available, otherwise fetch
             let asinSalesData = bigAccountData;
             
@@ -511,52 +446,6 @@ async function extractPerformanceFromDocs(buyBoxDoc, economicsDoc, ppcResult, as
         hasPPC: ppcSpend > 0,
         hasTraffic: sessions > 0
     };
-}
-
-/**
- * Fetch previous period performance for comparison
- * OPTIMIZED: Runs BuyBox and Economics queries in parallel
- */
-async function fetchPreviousPeriodPerformance(userId, region, country, asin, comparison) {
-    try {
-        // Determine how many docs to skip based on comparison type
-        const skipCount = comparison === 'wow' ? 1 : 4; // WoW = 1 week back, MoM = ~4 weeks back
-
-        // Run both queries in PARALLEL instead of sequential
-        const [previousBuyBoxDocs, previousEconomicsDocs] = await Promise.all([
-            BuyBoxData.find({
-                User: userId,
-                region: region,
-                country: country
-            }).sort({ createdAt: -1 }).skip(skipCount).limit(1).lean(),
-            
-            EconomicsMetrics.find({
-                User: userId,
-                region: region,
-                country: country
-            }).sort({ createdAt: -1 }).skip(skipCount).limit(1).lean()
-        ]);
-
-        const previousBuyBoxDoc = previousBuyBoxDocs[0] || null;
-        const previousEconomicsDoc = previousEconomicsDocs[0] || null;
-
-        if (!previousBuyBoxDoc && !previousEconomicsDoc) {
-            return null;
-        }
-
-        // Extract performance from previous docs (no PPC for previous period for now)
-        return await extractPerformanceFromDocs(
-            previousBuyBoxDoc, previousEconomicsDoc, null, asin, userId
-        );
-
-    } catch (error) {
-        logger.error('[ProductPerformanceService] Error fetching previous period', { 
-            error: error.message, 
-            asin, 
-            comparison 
-        });
-        return null;
-    }
 }
 
 /**

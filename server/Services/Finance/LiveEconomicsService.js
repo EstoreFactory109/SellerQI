@@ -229,13 +229,17 @@ function assembleEconomicsDoc({ userId, country, region, startStr, endStr, byDat
 /**
  * EconomicsMetrics-shaped doc for [startDate, endDate] from DailySkuFinance.
  *
+ * @param {string} [args.asin] - limit the doc to one product (served by the
+ *        { User, country, region, asin, date } index); totals are then that ASIN's.
  * @returns {Promise<Object|null>} null when the window has no rows (or the read fails)
  */
-async function buildEconomicsFromDailyFinance({ userId, country, region, startDate = null, endDate = null } = {}) {
+async function buildEconomicsFromDailyFinance({ userId, country, region, startDate = null, endDate = null, asin = null } = {}) {
     const userObjectId = toUserObjectId(userId);
     if (!userObjectId || !country || !region) return null;
     const { startStr, endStr } = resolveWindow(startDate, endDate);
     const match = { User: userObjectId, country, region, date: { $gte: startStr, $lte: endStr } };
+    const onlyAsin = asin ? String(asin).trim().toUpperCase() : null;
+    if (onlyAsin) match.asin = onlyAsin;
 
     try {
         const [byDate, byAsin, adsRows] = await Promise.all([
@@ -246,7 +250,8 @@ async function buildEconomicsFromDailyFinance({ userId, country, region, startDa
                 .catch(() => []),
         ]);
         return assembleEconomicsDoc({
-            userId: userObjectId, country, region, startStr, endStr, byDate, byAsin, adsRows,
+            userId: userObjectId, country, region, startStr, endStr, byDate, byAsin,
+            adsRows: onlyAsin ? (adsRows || []).filter((r) => String(r?.asin || '').toUpperCase() === onlyAsin) : adsRows,
         });
     } catch (error) {
         // A finance read must never fail a page; no rows read = no data.
@@ -284,10 +289,11 @@ function docCoversWindow(doc, startStr, endStr) {
  * @param {string} region
  * @param {string} country
  * @param {Object} [window] - { startDate, endDate } inclusive. When given, a fresh
- *        stored doc is only used if its dateRange covers the window.
+ *        stored doc is only used if its dateRange covers the window. `asin` limits a
+ *        live-built doc to that product (a stored doc is returned whole).
  * @returns {Promise<Object|null>} plain object (lean), EconomicsMetrics shape
  */
-async function loadLiveEconomics(userId, region, country, { startDate = null, endDate = null } = {}) {
+async function loadLiveEconomics(userId, region, country, { startDate = null, endDate = null, asin = null } = {}) {
     const explicitWindow = !!(toYyyyMmDd(startDate) && toYyyyMmDd(endDate));
     const { startStr, endStr } = resolveWindow(startDate, endDate);
 
@@ -307,7 +313,16 @@ async function loadLiveEconomics(userId, region, country, { startDate = null, en
         });
     }
 
-    return buildEconomicsFromDailyFinance({ userId, country, region, startDate: startStr, endDate: endStr });
+    return buildEconomicsFromDailyFinance({ userId, country, region, startDate: startStr, endDate: endStr, asin });
+}
+
+/** The N days ending yesterday (UTC), as 'YYYY-MM-DD' strings. */
+function lastNDaysWindow(days) {
+    const n = Math.max(1, Math.floor(Number(days) || 1));
+    const now = new Date();
+    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
+    const start = new Date(end.getTime() - (n - 1) * 86400000);
+    return { startDate: start.toISOString().slice(0, 10), endDate: end.toISOString().slice(0, 10) };
 }
 
 /** The window of the same length immediately before [startStr, endStr]. */
@@ -328,12 +343,12 @@ function previousWindow(startDate, endDate) {
  *
  * @returns {Promise<{current:Object|null, previous:Object|null, currentWindow:Object, previousWindow:Object}>}
  */
-async function loadEconomicsComparison(userId, region, country, { startDate = null, endDate = null } = {}) {
+async function loadEconomicsComparison(userId, region, country, { startDate = null, endDate = null, asin = null } = {}) {
     const cur = resolveWindow(startDate, endDate);
     const prev = previousWindow(cur.startStr, cur.endStr);
     const [current, previous] = await Promise.all([
-        buildEconomicsFromDailyFinance({ userId, country, region, startDate: cur.startStr, endDate: cur.endStr }),
-        buildEconomicsFromDailyFinance({ userId, country, region, startDate: prev.startStr, endDate: prev.endStr }),
+        buildEconomicsFromDailyFinance({ userId, country, region, startDate: cur.startStr, endDate: cur.endStr, asin }),
+        buildEconomicsFromDailyFinance({ userId, country, region, startDate: prev.startStr, endDate: prev.endStr, asin }),
     ]);
     return {
         current,
@@ -348,6 +363,7 @@ module.exports = {
     buildEconomicsFromDailyFinance,
     loadEconomicsComparison,
     previousWindow,
+    lastNDaysWindow,
     isLiveEconomicsDoc,
     isStoredEconomicsDoc,
     LIVE_ECONOMICS_SOURCE,
