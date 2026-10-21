@@ -346,6 +346,12 @@ const checkTitle = (str) => {
     return result;
 };
 
+// ─── Bullet points, description, getRankings ─────────────────────────────────
+// COPY of checkBulletPoints, checkDescription and getRankings in server/Services/
+// Calculations/Rankings.js (source of truth), so this analyzer and the tasks agree.
+// The one deliberate difference: getRankings returns finalResult itself rather
+// than { finalResult }, because AnalyseProduct.js reads it that way.
+
 // Special characters are restricted in titles only; the key is kept (always
 // Success) because the result pages read it unconditionally.
 const notCheckedOutsideTitle = (where) => ({
@@ -354,69 +360,24 @@ const notCheckedOutsideTitle = (where) => ({
     HowTOSolve: ""
 });
 
+// The scrape stores [] both when a listing has no bullet points and when it could
+// not read them, so an empty array is NO DATA, not a failure: it produces no error
+// and no task. (A non-array is treated the same way.)
 const checkBulletPoints = (arr) => {
     let result = {};
-    
-    // Check for null or undefined array
-    if (arr === null || arr === undefined || !Array.isArray(arr)) {
-        result.nullCheck = {
-            status: "Error",
-            Message: "Bullet points array is null, undefined, or not an array. Valid bullet points are required.",
-            HowTOSolve: "Ensure that a valid array of bullet points is provided before processing."
-        }
-        result.NumberOfErrors = 1;
-        return result;
-    }
+    const bullets = Array.isArray(arr) ? arr.filter((str) => typeof str === 'string') : [];
 
-    // Check if array is empty
-    if (arr.length === 0) {
-        result.emptyArray = {
-            status: "Error",
-            Message: "Bullet points array is empty. At least one bullet point is required.",
-            HowTOSolve: "Add at least one bullet point to describe your product."
-        }
-        result.NumberOfErrors = 1;
-        return result;
-    }
-    
-    let charLimErrCount=0;
+    let charLimErrCount = 0;
     const claims = new Set();
-    let nullItemCount = 0;
 
-
-    arr.forEach((str, index) => {
-        // Check for null items in array
-        if (str === null || str === undefined) {
-            nullItemCount++;
-            return; // Skip this iteration
-        }
-
+    bullets.forEach((str) => {
         if (str.length < 150) {
             charLimErrCount++;
-        } 
+        }
         // Bullets are checked for prohibited claims only; promotional terms are
-        // a title rule (same as the server).
+        // a title rule.
         findProhibitedClaims(str).forEach((word) => claims.add(word));
     });
-
-    // Add null item error if any were found
-    if (nullItemCount > 0) {
-        result.nullItems = {
-            status: "Error",
-            Message: `${nullItemCount} bullet point(s) are null or undefined.`,
-            HowTOSolve: "Ensure all bullet points contain valid text content."
-        }
-    }
-
-    // Calculate total number of error types
-    let errorTypes = 0;
-    if (charLimErrCount > 0) errorTypes++;
-    if (claims.size > 0) errorTypes++;
-    if (nullItemCount > 0) errorTypes++;
-    
-    result.NumberOfErrors = errorTypes;
-
-    
 
     if(charLimErrCount>0){
         result.charLim={
@@ -444,62 +405,30 @@ const checkBulletPoints = (arr) => {
             HowTOSolve:""
         }
     }
-    // Special characters are a title-only rule (same as the server).
     result.checkSpecialCharacters = notCheckedOutsideTitle('bullet points');
+
+    // One per failing check.
+    result.NumberOfErrors = [result.charLim, result.RestictedWords]
+        .filter((check) => check.status === "Error").length;
     return result;
 }
 
-const checkDescription = (input) => {
+// Same no-data rule as bullets: an empty or missing description, a non-array, or
+// one made only of blank paragraphs produces no result keys and no error. Each
+// check runs once over the whole description and counts once.
+const checkDescription = (arr) => {
     let result = {};
-    let errorCount = 0;
+    const paragraphs = Array.isArray(arr)
+        ? arr.filter((str) => typeof str === 'string' && str.trim())
+        : [];
 
-    // Check for null or undefined input
-    if (input === null || input === undefined) {
-        errorCount++;
-        result.nullCheck = {
-            status: "Error",
-            Message: "Product description is null or undefined. A valid product description is required.",
-            HowTOSolve: "Ensure that a valid product description is provided before processing."
-        }
-        result.NumberOfErrors = errorCount;
+    if (paragraphs.length === 0) {
+        result.NumberOfErrors = 0;
         return result;
     }
 
-    // Convert input to string
-    let descriptionString = "";
-    
-    if (Array.isArray(input)) {
-        // If it's an array, filter out null/undefined values and join them
-        const validItems = input.filter(item => item !== null && item !== undefined);
-        
-        if (validItems.length === 0) {
-            errorCount++;
-            result.emptyArray = {
-                status: "Error",
-                Message: "Product description array contains no valid content. At least one valid description paragraph is required.",
-                HowTOSolve: "Add at least one valid paragraph to describe your product."
-            }
-            result.NumberOfErrors = errorCount;
-            return result;
-        }
-        
-        descriptionString = validItems.join(" ");
-    } else if (typeof input === 'string') {
-        descriptionString = input;
-    } else {
-        errorCount++;
-        result.invalidType = {
-            status: "Error",
-            Message: "Product description must be a string or an array of strings.",
-            HowTOSolve: "Provide a valid string or array of strings for the product description."
-        }
-        result.NumberOfErrors = errorCount;
-        return result;
-    }
-
-    // Check character length
-    if (descriptionString.length < 1700) {
-        errorCount++;
+    const length = paragraphs.reduce((sum, str) => sum + str.length, 0);
+    if (length < 1700) {
         result.charLim = {
             status: "Error",
             Message: "Your product description is under 1700 characters. This may not provide enough information to fully educate potential buyers.",
@@ -513,10 +442,9 @@ const checkDescription = (input) => {
         }
     }
 
-    // Prohibited claims only; promotional terms are a title rule (same as the server).
-    const claims = findProhibitedClaims(descriptionString);
+    // Prohibited claims only; promotional terms are a title rule.
+    const claims = [...new Set(paragraphs.flatMap((str) => findProhibitedClaims(str)))];
     if (claims.length > 0) {
-        errorCount++;
         result.RestictedWords = {
             status: "Error",
             Message: `Your product description contains medical, drug, or pesticide claims that Amazon prohibits on product detail pages. The words used are: ${claims.join(', ')}`,
@@ -530,53 +458,33 @@ const checkDescription = (input) => {
         }
     }
 
-    // Special characters are a title-only rule (same as the server).
     result.checkSpecialCharacters = notCheckedOutsideTitle('product descriptions');
 
-    result.NumberOfErrors = errorCount;
+    result.NumberOfErrors = [result.charLim, result.RestictedWords]
+        .filter((check) => check.status === "Error").length;
     return result;
 }
 
 const getRankings = (ProductDetails) => {
-    // Check if ProductDetails is null or undefined
-    if (ProductDetails === null || ProductDetails === undefined) {
+    // A product the scrape returned nothing for is no data, not three failures.
+    // This used to report TotalErrors: 3, wrapped in { finalResult }, which
+    // AnalyseProduct.js does not unwrap.
+    if (!ProductDetails) {
         return {
-            finalResult: {
-                Title: null,
-                TitleResult: {
-                    nullCheck: {
-                        status: "Error",
-                        Message: "ProductDetails parameter is null or undefined. Valid product details are required.",
-                        HowTOSolve: "Ensure that valid product details are provided before processing."
-                    },
-                    NumberOfErrors: 1
-                },
-                BulletPoints: {
-                    nullCheck: {
-                        status: "Error",
-                        Message: "Cannot process bullet points - ProductDetails is null.",
-                        HowTOSolve: "Provide valid product details."
-                    },
-                    NumberOfErrors: 1
-                },
-                Description: {
-                    nullCheck: {
-                        status: "Error",
-                        Message: "Cannot process description - ProductDetails is null.",
-                        HowTOSolve: "Provide valid product details."
-                    },
-                    NumberOfErrors: 1
-                },
-                TotalErrors: 3,
-                TotalPossibleErrors: 9
-            }
+            Title: null,
+            TitleResult: { NumberOfErrors: 0 },
+            BulletPoints: { NumberOfErrors: 0 },
+            Description: { NumberOfErrors: 0 },
+            TotalErrors: 0,
+            TotalPossibleErrors: 9
         };
     }
 
     const titleResult = checkTitle(ProductDetails.product_title);
+    // Empty (or missing) bullets and description are NO DATA, not failures: both
+    // checks return zero errors for them, as on the server.
     const bulletPointsResult = checkBulletPoints(ProductDetails.about_product);
     const descriptionResult = checkDescription(ProductDetails.product_description);
-    
 
     const totalErrorNumbers = titleResult.NumberOfErrors + bulletPointsResult.NumberOfErrors + descriptionResult.NumberOfErrors;
 

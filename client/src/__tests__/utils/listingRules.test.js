@@ -75,6 +75,66 @@ describe('Rankingsj restricted wording', () => {
   });
 });
 
+describe('Rankingsj treats missing bullets and description as no data', () => {
+  // The server (Rankings.js) raises no error and no task for these; the analyzer
+  // used to count each one as a failure.
+  it.each([
+    ['empty', []],
+    ['null', null],
+    ['undefined', undefined],
+    ['not an array', 'a string'],
+  ])('%s bullets produce no errors', (_, bullets) => {
+    expect(checkBulletPoints(bullets).NumberOfErrors).toBe(0);
+  });
+
+  it('skips non-string bullet entries rather than erroring on them', () => {
+    const result = checkBulletPoints([null, undefined]);
+    expect(result.NumberOfErrors).toBe(0);
+    expect(result.nullItems).toBeUndefined();
+  });
+
+  it.each([
+    ['empty', []],
+    ['null', null],
+    ['undefined', undefined],
+    ['a blank paragraph', ['']],
+    ['whitespace and nulls', ['   ', null]],
+    ['not an array', 'a string'],
+    ['a number', 42],
+  ])('%s description produces no errors', (_, description) => {
+    const result = checkDescription(description);
+    expect(result.NumberOfErrors).toBe(0);
+    expect(result.charLim).toBeUndefined();
+  });
+
+  it('counts a null product as no data, not three failures', () => {
+    const result = getRankings(null);
+    expect(result.TotalErrors).toBe(0);
+    expect(result.finalResult).toBeUndefined();
+  });
+
+  it('counts only the title for a product with no bullets or description', () => {
+    const result = getRankings({ product_title: 'Acme Ceramic Coffee Mug', about_product: [], product_description: [''] });
+    expect(result.TotalErrors).toBe(0);
+  });
+
+  it('still flags real short and overlong content', () => {
+    expect(checkBulletPoints(['Too short']).charLim.status).toBe('Error');
+    expect(checkBulletPoints(['x'.repeat(150)]).NumberOfErrors).toBe(0);
+    expect(checkDescription(['Too short']).charLim.status).toBe('Error');
+    expect(checkDescription(['x'.repeat(1700)]).NumberOfErrors).toBe(0);
+
+    const result = getRankings({
+      product_title: 'Acme Ceramic Coffee Mug with Lid, Dishwasher Safe, Microwave Safe, Large 16 oz Size',
+      about_product: ['Too short'],
+      product_description: ['Too short'],
+    });
+    expect(result.TitleResult.charLim.status).toBe('Error');
+    expect(result.BulletPoints.NumberOfErrors).toBe(1);
+    expect(result.Description.NumberOfErrors).toBe(1);
+  });
+});
+
 describe('client checkIfVideoExists matches the server', () => {
   it('treats a missing list as no data, not a missing video', () => {
     expect(checkIfVideoExists(undefined).status).toBe('NoData');

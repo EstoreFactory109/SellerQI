@@ -110,6 +110,20 @@ describe('dashboard ranking count == ranking tasks', () => {
         expect(dashboardData.TotalRankingerrors).toBe(tasks.length);
     });
 
+    it('counts a backend keyword error once in the top-4 products', async () => {
+        // productWiseError already includes backend keyword errors; a later
+        // block added 1 more to any top-4 slot with one.
+        const { dashboardData, tasks } = await run({
+            active: ['A1'],
+            ranking: [product('A1', { about_product: ['Short bullet'] })],
+            backend: [['A1', `${goodKeywords} kw001`]],
+        });
+        const row = dashboardData.productWiseError.find((p) => p.asin === 'A1');
+        expect(tasks).toHaveLength(2);
+        expect(row.errors).toBe(2);
+        expect(dashboardData.first).toMatchObject({ asin: 'A1', errors: 2 });
+    });
+
     it('labels the duplicate-words task as backend keywords, not title', async () => {
         const { tasks } = await run({
             active: ['A1'],
