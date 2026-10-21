@@ -2,7 +2,7 @@
  * ProductHistoryService.js
  * 
  * Provides historical performance data for a single ASIN.
- * Aggregates data from BuyBoxData and EconomicsMetrics over time
+ * Aggregates data from BuyBoxData and DailySkuFinance (plus the AsinWiseSalesRun overlay) over time
  * to show trends for sessions, sales, conversion, etc.
  * 
  * Supports different granularities:
@@ -12,11 +12,16 @@
  */
 
 const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
-const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
-const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
+const { getAsinDateWise } = require('../Finance/FinanceDashboardReadService.js');
+const { lastNDaysWindow } = require('../Finance/LiveEconomicsService.js');
 const AsinWiseSalesRun = require('../../models/finance/AsinWiseSalesRunModel.js');
 const AsinWiseSalesDateItem = require('../../models/finance/AsinWiseSalesDateItemModel.js');
 const logger = require('../../utils/Logger.js');
+
+// Days of per-day finance one data point covers, per granularity; capped so a
+// large `limit` cannot turn into a multi-year scan.
+const GRANULARITY_DAYS = { daily: 1, weekly: 7, monthly: 31 };
+const HISTORY_MAX_DAYS = 400;
 
 /**
  * Get historical performance data for a specific ASIN
@@ -41,27 +46,36 @@ async function getProductHistory({ userId, region, country, asin, limit = 30, gr
     logger.info('Fetching product history', { userId, region, country, asin: normalizedAsin, limit, granularity: effectiveGranularity });
 
     try {
-        // Fetch all BuyBoxData documents for this user, sorted by date (oldest first for charts)
+        // The newest BuyBox reports (an ascending sort returned the OLDEST ones, so
+        // the chart stopped at whatever date the account started on).
         const buyBoxDocs = await BuyBoxData.find({
             User: userId,
             region: region,
             country: country
-        }).sort({ createdAt: 1 }).limit(limit * 4).lean(); // Fetch more for aggregation
+        }).sort({ createdAt: -1 }).limit(limit * 4).lean(); // Fetch more for aggregation
 
-        // Fetch all EconomicsMetrics documents
-        const economicsDocs = await EconomicsMetrics.find({
-            User: userId,
-            region: region,
-            country: country
-        }).sort({ createdAt: 1 }).limit(limit * 4).lean();
+        // Fallback sales series: live per-day DailySkuFinance for this ASIN. It used to
+        // read EconomicsMetrics docs (oldest first), which stopped in March 2026.
+        const salesWindow = lastNDaysWindow(Math.min(HISTORY_MAX_DAYS, limit * (GRANULARITY_DAYS[effectiveGranularity] || 1)));
+        let asinDateWise = [];
+        try {
+            asinDateWise = await getAsinDateWise({
+                userId, country, region, asin: normalizedAsin,
+                startDate: salesWindow.startDate, endDate: salesWindow.endDate
+            });
+        } catch (error) {
+            logger.error('Error fetching DailySkuFinance history in ProductHistoryService', {
+                userId, asin: normalizedAsin, error: error.message
+            });
+        }
 
         // Build a map of date -> metrics for this ASIN
         const historyMap = new Map();
 
         // Process BuyBoxData - extract traffic metrics for this specific ASIN
         // NOTE: Only use BuyBoxData for sessions, pageViews, conversionRate, buyBoxPercentage.
-        // Sales and unitsSold come from EconomicsMetrics (the authoritative financial source)
-        // to stay consistent with the profitability table and Total Sales card.
+        // Sales and unitsSold come from the finance sources below (DailySkuFinance, then
+        // the AsinWiseSalesRun overlay) to stay consistent with the profitability table.
         buyBoxDocs.forEach(doc => {
             const dateKey = doc.dateRange?.endDate || doc.createdAt?.toISOString()?.split('T')[0] || 'unknown';
             const asinData = doc.asinBuyBoxData?.find(item => {
@@ -90,92 +104,21 @@ async function getProductHistory({ userId, region, country, asin, limit = 30, gr
             }
         });
 
-        // Process EconomicsMetrics - add/update sales data (fallback path)
-        // Handle both regular accounts (asinWiseSales in main doc) and big accounts (separate collection)
-        for (const doc of economicsDocs) {
-            const dateKey = doc.dateRange?.endDate || doc.createdAt?.toISOString()?.split('T')[0] || 'unknown';
-            
-            const isBigAccount = doc.isBig === true;
-            const hasEmptyAsinData = !doc.asinWiseSales || doc.asinWiseSales.length === 0;
-            
-            if ((isBigAccount || hasEmptyAsinData) && doc._id) {
-                // Big account - use aggregation to get per-date sales for this ASIN
-                // Each AsinWiseSalesForBigAccounts document represents one date,
-                // so we extract per-date data points instead of aggregating into one
-                try {
-                    const asinDateSales = await AsinWiseSalesForBigAccounts.aggregate([
-                        { $match: { metricsId: doc._id } },
-                        { $unwind: '$asinSales' },
-                        { $match: { 'asinSales.asin': normalizedAsin } },
-                        {
-                            $project: {
-                                _id: 0,
-                                date: '$date',
-                                sales: '$asinSales.sales.amount',
-                                unitsSold: '$asinSales.unitsSold'
-                            }
-                        },
-                        { $sort: { date: 1 } }
-                    ]);
-                    
-                    if (asinDateSales && asinDateSales.length > 0) {
-                        for (const entry of asinDateSales) {
-                            const entryDateKey = entry.date || dateKey;
-                            const existing = historyMap.get(entryDateKey) || {
-                                date: entryDateKey,
-                                sessions: 0,
-                                pageViews: 0,
-                                conversionRate: 0,
-                                buyBoxPercentage: 0,
-                                sales: 0,
-                                unitsSold: 0
-                            };
-                            
-                            if (entry.sales) {
-                                existing.sales = entry.sales;
-                            }
-                            if (entry.unitsSold) {
-                                existing.unitsSold = entry.unitsSold;
-                            }
-                            
-                            historyMap.set(entryDateKey, existing);
-                        }
-                    }
-                } catch (error) {
-                    logger.error('Error fetching ASIN data for big account in ProductHistoryService', {
-                        metricsId: doc._id,
-                        asin: normalizedAsin,
-                        error: error.message
-                    });
-                }
-            } else {
-                // Regular account - use asinWiseSales from main document
-                const asinData = doc.asinWiseSales?.find(item => {
-                    const itemAsin = (item.asin || '').trim().toUpperCase();
-                    return itemAsin === normalizedAsin;
-                });
-
-                if (asinData) {
-                    const existing = historyMap.get(dateKey) || {
-                        date: dateKey,
-                        sessions: 0,
-                        pageViews: 0,
-                        conversionRate: 0,
-                        buyBoxPercentage: 0,
-                        sales: 0,
-                        unitsSold: 0
-                    };
-
-                    if (asinData.sales?.amount) {
-                        existing.sales = asinData.sales.amount;
-                    }
-                    if (asinData.unitsSold) {
-                        existing.unitsSold = asinData.unitsSold;
-                    }
-
-                    historyMap.set(dateKey, existing);
-                }
-            }
+        for (const row of asinDateWise || []) {
+            const dateKey = row.date;
+            if (!dateKey) continue;
+            const existing = historyMap.get(dateKey) || {
+                date: dateKey,
+                sessions: 0,
+                pageViews: 0,
+                conversionRate: 0,
+                buyBoxPercentage: 0,
+                sales: 0,
+                unitsSold: 0
+            };
+            existing.sales = Number(row.productSales) || 0;
+            existing.unitsSold = Number(row.units) || 0;
+            historyMap.set(dateKey, existing);
         }
 
         // Prefer the same date-wise ASIN sales source used by profitability endpoints.
