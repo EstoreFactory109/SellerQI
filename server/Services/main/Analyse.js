@@ -1106,7 +1106,10 @@ class AnalyseService {
         // keyword string counted as ready whatever else was wrong with it.
         // Inventory errors are removed afterwards (updateAmazonReadyProducts).
         const notReady = new Set();
-        const imageResultArray = [], videoResultArray = [], 
+        // ASINs whose listing was actually scraped. An Active ASIN missing from the
+        // scrape is "not known", not "ready" - missing data must not earn the badge.
+        const scraped = new Set();
+        const imageResultArray = [], videoResultArray = [],
               productStarRatingResultArray = [], RankingResultArray = [], BackendKeywordResultArray = [];
 
         safeProductReviews.Products.forEach(product => {
@@ -1115,6 +1118,7 @@ class AnalyseService {
                 const videoResult = checkIfVideoExists(product.video_url);
                 const productStarRatingResult = checkStarRating(product.product_star_ratings, product.product_num_ratings);
                 const rankings = getRankings(product);
+                if (product.asin) scraped.add(product.asin);
 
                 // "No data" (no reviews yet, no image data) must not cost a product its
                 // Amazon-ready status: only a real problem does.
@@ -1157,7 +1161,7 @@ class AnalyseService {
         });
 
         const AmazonReadyProducts = SellerAccount.products
-            .filter(p => p && p.status === 'Active' && p.asin && !notReady.has(p.asin))
+            .filter(p => p && p.status === 'Active' && p.asin && scraped.has(p.asin) && !notReady.has(p.asin))
             .map(p => p.asin);
         
         // Check Brand Story status from NumberOfProductReviews data. Empty when no

@@ -266,7 +266,7 @@ const ASINAnalyzer = () => {
         label: 'Product Images',
         score: calculatePercentageScore(imageCount, 7),
         current: `${imageCount} images`,
-        recommended: '7+ high-quality images',
+        recommended: '5+ high-quality images',
         max: 100
       },
       // Product Video

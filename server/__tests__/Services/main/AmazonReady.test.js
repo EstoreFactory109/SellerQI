@@ -80,6 +80,14 @@ describe('Amazon-ready products', () => {
         expect(r.conversionData.AmazonReadyproducts).toEqual(['A']);
     });
 
+    it('does not count an Active ASIN with no scrape data as ready', () => {
+        const r = run({
+            products: [{ asin: 'A', status: 'Active' }, { asin: 'UNSCRAPED', status: 'Active' }],
+            reviews: [cleanProduct('A')],
+        });
+        expect(r.conversionData.AmazonReadyproducts).toEqual(['A']);
+    });
+
     it('lists an ASIN once even when it has several SKUs', () => {
         const r = run({
             products: [{ asin: 'A', status: 'Active' }, { asin: 'A', status: 'Active' }],
