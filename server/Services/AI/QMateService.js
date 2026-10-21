@@ -2096,6 +2096,7 @@ You can answer questions about product categorization. The data is in \`dashboar
 - \`targetedInAdsCount\`, \`notTargetedInAdsCount\`
 - \`withVideoCount\`, \`withoutVideoCount\`
 - \`withBrandStoryCount\`, \`withoutBrandStoryCount\`
+- \`brandStoryStatusKnown\` – false when no product in the marketplace shows a Brand Story: Brand Story status is then UNKNOWN (the seller may lack Brand Registry, or the scrape cannot see it). Both brand-story counts are 0 and \`hasBrandStory\` is null; never call these products "without brand story".
 
 **Each product in category arrays has:**
 - \`asin\`, \`sku\`, \`itemName\`, \`status\`, \`price\`, \`quantity\`

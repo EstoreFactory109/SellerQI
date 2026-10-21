@@ -269,8 +269,10 @@ function getGroupCopy(category, normalizedType) {
         if (normalizedType === 'backend_keywords_char_limit') {
             return { title: 'Backend keywords over Amazon\'s byte limit', action: 'Trim backend search terms to fit the limit' };
         }
-        if (normalizedType === 'duplicate_words') {
-            return { title: 'Titles repeating the same word', action: 'Remove duplicate words from these titles' };
+        if (normalizedType === 'backend_keywords_duplicate_words' || normalizedType === 'duplicate_words') {
+            // Backend search terms, not titles: title repetition is
+            // titleresult_word_repetition.
+            return { title: 'Backend keywords repeating the same word', action: 'Remove repeated words from backend search terms' };
         }
         const [section, ...rest] = normalizedType.split('_');
         const sectionCopy = RANKING_SECTION_COPY[section];

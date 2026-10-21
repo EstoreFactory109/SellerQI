@@ -1,62 +1,83 @@
-const checkSpecialCharacters = (str) => {
-    // Check for null or undefined
-    if (str === null || str === undefined) {
-        return ['NULL_INPUT'];
-    }
-    const regex = /[!$?_{}^¬¦~#<>*]/g; // added 'g' for global matching
-    const matches = str.match(regex);
-    return matches ? [...new Set(matches)] : []; // return unique matched characters
-  };
-  
-  const containsRestrictedWords = (str) => {
-    // Check for null or undefined
-    if (str === null || str === undefined) {
-        return ['NULL_INPUT'];
-    }
-    const restrictedWords = [
-      "cure", "treat", "diagnose", "prevent", "mitigate", "covid-19", "coronavirus", "pandemic",
-      "cancer", "diabetes", "hiv", "arthritis", "asthma", "alzheimer's", "fda-approved", "clinically proven",
-      "doctor recommended", "anti-bacterial", "anti-fungal", "antimicrobial", "antiviral", "infection",
-      "virus", "germs", "bacteria", "detoxify", "detox", "cleanse", "sanitizes", "disinfects", "sterilizes",
-      "kills germs", "cbd", "cannabinoid", "thc", "hemp oil", "marijuana", "full spectrum", "delta-8",
-      "delta-9", "cocaine", "opioid", "methamphetamine", "bong", "one hitter", "dab rig", "weed",
-      "picamilon", "phenibut", "dmt", "ayahuasca", "clenbuterol", "ephedrine", "minoxidil",
-      "guarantee", "guaranteed", "100% guaranteed", "best seller", "amazon's choice", "amazon's favorite",
-      "works better than", "fastest shipping", "instant fix", "magic solution", "free shipping",
-      "100% quality guaranteed", "sale", "discount", "promo", "deal", "today only", "limited time",
-      "last chance", "buy with confidence", "unlike other brands", "certified", "tested", "approved",
-      "validated", "epa registered", "non-toxic", "hypoallergenic", "kills 99.9% of germs", "bpa-free",
-      "lead-free", "eco-friendly", "biodegradable", "fda-registered facility", "kills", "eliminates",
-      "destroys", "repels", "repellent", "pesticide", "insecticide", "fungicide", "mold", "mildew remover",
-      "germ-free", "brightening", "whitening", "lightening", "anti-aging", "wrinkle-free", "removes wrinkles",
-      "permanent results", "antimicrobial", "antibacterial", "antifungal", "sanitize", "disinfect",
-      "sterilizes", "heal", "antiseptic", "germ", "fungal", "insecticide", "pesticides", "repel",
-      "repelling", "viruses", "detoxification", "treatment", "fungus", "contaminants", "compostable",
-      "decomposable", "proven", "recommended", "viruses", "fungicides", "toxin", "toxins", "viral",
-      "remedy", "remedies", "diseases", "fda approved", "covid", "toxic", "mildew", "mould", "spores",
-      "n95", "kn95", "cystic fibrosis", "sanitize", "weight loss", "chlamydia", "hepatitis", "hiv",
-      "aids", "mononucleosis", "mono", "pelvic inflammatory", "scabies", "trichomoniasis", "liver",
-      "multiple sclerosis", "kidney", "alzheimer's", "dementia", "stroke", "parkinson's", "parkinson",
-      "flu", "influenza", "meningitis", "glaucoma", "cataract", "adhd", "concussion", "tumor",
-      "depression", "lupus", "muscular dystrophy", "als", "anxiety", "stress", "clenbuterol",
-      "ephedrine", "kratom", "psilocybin", "syphilis", "gonorrhea", "gout", "crohn's", "celiac",
-      "epilepsy", "seizures", "seizure", "obesity", "autism",
-      "covid19", "covid 19", "delta8", "delta 8", "delta9", "delta 9",
-      "nontoxic", "non toxic", "bpafree", "bpa free", "leadfree", "lead free",
-      "ecofriendly", "eco friendly", "germfree", "germ free", "antiaging", "anti aging",
-      "wrinklefree", "wrinkle free", "fda registered facility", "anti microbial", "anti fungal", "anti bacterial"
-    ];
-  
-    const matchedWords = restrictedWords.filter(word => {
-      const regex = new RegExp(`\\b${word}\\b`, 'i');
-      return regex.test(str);
-    });
-  
-    return matchedWords.length > 0 ? matchedWords : [];
-  };
+// ─── Restricted wording ──────────────────────────────────────────────────────
+// COPY of server/Services/Calculations/Rankings.js, which is the source of truth.
+// The same copy lives in client/src/helpers/Rankingsj.js, client/src/Pages/
+// Products/PreAnalysis.jsx and client/src/Pages/DemoSellerCentralChecker/
+// DemoPreAnalysis.jsx. Change the server first, then paste it into all three.
+//
+// One flat list used to be applied to titles, bullets and descriptions alike, and
+// it mixed three different things. Production had 8,264 open restricted-words
+// tasks, and the hits were mostly ordinary product words: prevent, eco-friendly,
+// recommended, certified, treat, stress, non-toxic (which also hit "toxic",
+// because \b splits on the hyphen), bpa-free, mold, stroke, mono, weed, repellent,
+// eliminates, biodegradable, tested, approved, guarantee. The list is now split:
+//
+// PROMOTIONAL_TERMS - offers, rankings and guarantees. Amazon's title policy bars
+// them from titles; in bullets and descriptions they are ordinary selling copy
+// ("backed by our 1-year guarantee"), so they are checked in the TITLE ONLY.
+const PROMOTIONAL_TERMS = [
+  "sale", "deal", "discount", "promo", "cheap", "bargain",
+  "guarantee", "guaranteed", "100% guaranteed", "100% quality guaranteed",
+  "best seller", "amazon's choice", "amazon's favorite",
+  "free shipping", "fastest shipping", "today only", "limited time", "last chance",
+  "buy with confidence", "unlike other brands", "works better than",
+  "instant fix", "magic solution", "permanent results"
+];
 
+// PROHIBITED_CLAIMS - disease, drug and pesticide claims, and prohibited drug
+// products. These are not allowed anywhere on a detail page, so they are checked
+// in the title, bullets AND description.
+const PROHIBITED_CLAIMS = [
+  // disease / medical claims
+  "cure", "cures", "heal", "remedy", "remedies", "diseases", "infection",
+  "covid", "covid-19", "coronavirus", "pandemic", "virus", "viruses", "flu", "influenza",
+  "cancer", "tumor", "diabetes", "obesity", "weight loss", "hiv", "hepatitis",
+  "chlamydia", "gonorrhea", "syphilis", "trichomoniasis", "scabies", "mononucleosis",
+  "pelvic inflammatory", "arthritis", "gout", "asthma", "cystic fibrosis",
+  "alzheimer's", "dementia", "parkinson", "parkinson's", "multiple sclerosis",
+  "muscular dystrophy", "lupus", "epilepsy", "seizure", "seizures", "meningitis",
+  "glaucoma", "cataract", "concussion", "adhd", "autism", "anxiety", "depression",
+  "crohn's", "celiac",
+  // regulatory endorsements a listing cannot claim
+  "fda approved", "fda-registered facility", "clinically proven", "doctor recommended",
+  "epa registered", "n95", "kn95",
+  // pesticide / antimicrobial claims
+  "antibacterial", "anti-bacterial", "antimicrobial", "anti-microbial", "antifungal",
+  "anti-fungal", "antiviral", "antiseptic", "germs", "germ-free", "kills germs",
+  "kills 99.9% of germs", "bacteria", "fungal", "fungus", "sanitize", "sanitizes",
+  "disinfect", "disinfects", "sterilizes", "pesticide", "pesticides", "insecticide",
+  "fungicide", "fungicides",
+  // detox claims
+  "detox", "detoxify", "detoxification",
+  // drugs and drug paraphernalia
+  "cbd", "cannabinoid", "thc", "hemp oil", "marijuana", "delta-8", "delta-9",
+  "cocaine", "opioid", "methamphetamine", "kratom", "psilocybin", "dmt", "ayahuasca",
+  "picamilon", "phenibut", "clenbuterol", "ephedrine", "minoxidil",
+  "bong", "one hitter", "dab rig"
+];
 
+const escapeTermForRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// A term matches only as whole tokens, where a hyphen joins a token rather than
+// splitting it: "toxic" must not match inside "non-toxic", nor "germ" inside
+// "germ-free". Inside a multi-word term a space or hyphen is optional, so
+// "fda approved" also finds "FDA-approved" and "covid-19" finds "covid 19" and
+// "covid19". Straight and curly apostrophes are interchangeable. No lookbehind,
+// so the identical client copies run in older Safari too.
+const TERM_EDGE = "[^\\p{L}\\p{N}_'’-]";
+const termPattern = (term) => {
+  const body = term.split(/[\s-]+/).map((part) =>
+    escapeTermForRegex(part).replace(/'/g, "['’]")
+  ).join('[\\s-]?');
+  return new RegExp(`(?:^|${TERM_EDGE})${body}(?=$|${TERM_EDGE})`, 'iu');
+};
+
+const matchTerms = (str, terms) => {
+  if (typeof str !== 'string' || !str) return [];
+  return terms.filter((term) => termPattern(term).test(str));
+};
+
+const findPromotionalTerms = (str) => matchTerms(str, PROMOTIONAL_TERMS);
+const findProhibitedClaims = (str) => matchTerms(str, PROHIBITED_CLAIMS);
 
 
 // ─── Amazon product title requirements ────────────────────────────────────────
@@ -93,8 +114,8 @@ const TITLE_REPETITION_EXEMPT_WORDS = new Set([
 ]);
 
 // Promotional phrases, subjective commentary, and restricted claims that Amazon
-// does not allow in titles. The medical/claim wording lives in
-// containsRestrictedWords() and is checked alongside these.
+// does not allow in titles. PROMOTIONAL_TERMS and PROHIBITED_CLAIMS (above) are
+// checked alongside these.
 const TITLE_RESTRICTED_PHRASES = [
   'fsa eligible', 'hsa eligible', 'fsa/hsa eligible', 'hsa/fsa eligible',
   'hot item', 'hot deal', 'top rated', 'top seller', 'best selling', 'bestseller',
@@ -216,7 +237,8 @@ const checkTitle = (str) => {
 
     // 2. Restricted, promotional, and subjective wording.
     let RestictedWords = [...new Set([
-        ...containsRestrictedWords(title),
+        ...findPromotionalTerms(title),
+        ...findProhibitedClaims(title),
         ...matchPhrases(title, TITLE_RESTRICTED_PHRASES)
     ])];
 
@@ -324,6 +346,14 @@ const checkTitle = (str) => {
     return result;
 };
 
+// Special characters are restricted in titles only; the key is kept (always
+// Success) because the result pages read it unconditionally.
+const notCheckedOutsideTitle = (where) => ({
+    status: "Success",
+    Message: `Special characters are only restricted in product titles; Amazon applies no such rule to ${where}.`,
+    HowTOSolve: ""
+});
+
 const checkBulletPoints = (arr) => {
     let result = {};
     
@@ -350,10 +380,7 @@ const checkBulletPoints = (arr) => {
     }
     
     let charLimErrCount=0;
-    let RestictedWordsErrCount=0;
-    let SpecialCharactersErrCount=0;
-    let AllRestrictedWords=[];
-    let AllSpecialCharacters=[];
+    const claims = new Set();
     let nullItemCount = 0;
 
 
@@ -367,18 +394,9 @@ const checkBulletPoints = (arr) => {
         if (str.length < 150) {
             charLimErrCount++;
         } 
-        let RestictedWords=containsRestrictedWords(str)
-        
-        if (RestictedWords.length>0) {
-           RestictedWordsErrCount++; 
-           AllRestrictedWords.push(RestictedWords[0]);
-        } 
-
-        const SpecialCharacters=checkSpecialCharacters(str)
-        if (SpecialCharacters.length>0) {
-          SpecialCharactersErrCount++; 
-          AllSpecialCharacters.push(SpecialCharacters[0]);
-        } 
+        // Bullets are checked for prohibited claims only; promotional terms are
+        // a title rule (same as the server).
+        findProhibitedClaims(str).forEach((word) => claims.add(word));
     });
 
     // Add null item error if any were found
@@ -393,14 +411,10 @@ const checkBulletPoints = (arr) => {
     // Calculate total number of error types
     let errorTypes = 0;
     if (charLimErrCount > 0) errorTypes++;
-    if (RestictedWordsErrCount > 0) errorTypes++;
-    if (SpecialCharactersErrCount > 0) errorTypes++;
+    if (claims.size > 0) errorTypes++;
     if (nullItemCount > 0) errorTypes++;
     
     result.NumberOfErrors = errorTypes;
-    
-    let FinalRestrictedWords=[...new Set(AllRestrictedWords)];
-    let FinalSpecialCharacters=[...new Set(AllSpecialCharacters)];
 
     
 
@@ -417,32 +431,21 @@ const checkBulletPoints = (arr) => {
             HowTOSolve:""
         }
     }
-    if(RestictedWordsErrCount>0){
+    if(claims.size>0){
         result.RestictedWords={
             status:"Error",
-            Message:`Your bullet points contain words that are restricted or banned by Amazon's guidelines. Using such words can lead to your product being blocked or your listing being suppressed. The words Used are: ${FinalRestrictedWords.join(', ')}`,
-            HowTOSolve:"Review the bullet points and remove all restricted or banned words. Consult the most current Amazon selling policies and style guides to ensure your listing complies with all content regulations. Updating your bullet points accordingly will help avoid suppression or blocking of your listing."
+            Message:`Your bullet points contain medical, drug, or pesticide claims that Amazon prohibits on product detail pages. Such claims can get your listing suppressed or removed. The words used are: ${[...claims].join(', ')}`,
+            HowTOSolve:"Remove these claims from your bullet points. Describe what the product is and does without claiming it cures, treats, or prevents a disease, kills germs or pests, or contains a restricted substance - unless the product is registered for that claim and Amazon has approved it."
         }
     }else{
         result.RestictedWords={
             status:"Success",
-            Message:"Excellent! Your bullet points are in full compliance with Amazon's guidelines, free of any restricted or banned words, ensuring your listing stays active and visible.",
+            Message:"Excellent! Your bullet points contain no prohibited medical, drug, or pesticide claims.",
             HowTOSolve:""
         }
     }
-    if(SpecialCharactersErrCount>0){
-        result.checkSpecialCharacters={
-            status:"Error",
-            Message:`Your bullet points contain special characters that are restricted by Amazon's guidelines. Using these characters can lead to issues with listing compliance and may prevent your listing from being properly displayed. The special characters used are: ${FinalSpecialCharacters.join(', ')}`,
-            HowTOSolve:"Review your bullet points and remove all restricted special characters. Refer to Amazon's official style guide to ensure your content adheres to their formatting requirements. This will help maintain your listing's visibility and prevent potential suppression."
-        }
-    }else{
-        result.checkSpecialCharacters={
-            status:"Success",
-            Message:"Well done! Your bullet points comply with Amazon's guidelines, avoiding any restricted special characters, ensuring your listing remains clear and effective.",
-            HowTOSolve:""
-        }
-    }
+    // Special characters are a title-only rule (same as the server).
+    result.checkSpecialCharacters = notCheckedOutsideTitle('bullet points');
     return result;
 }
 
@@ -510,39 +513,25 @@ const checkDescription = (input) => {
         }
     }
 
-    // Check for restricted words
-    let RestictedWords = containsRestrictedWords(descriptionString);
-    if (RestictedWords.length > 0) {
+    // Prohibited claims only; promotional terms are a title rule (same as the server).
+    const claims = findProhibitedClaims(descriptionString);
+    if (claims.length > 0) {
         errorCount++;
         result.RestictedWords = {
             status: "Error",
-            Message: `Your product description contains restricted or banned words according to Amazon's guidelines. The words used are: ${RestictedWords.join(', ')}`,
-            HowTOSolve: "Review and remove restricted words from the description. Ensure full compliance with Amazon's guidelines."
+            Message: `Your product description contains medical, drug, or pesticide claims that Amazon prohibits on product detail pages. The words used are: ${claims.join(', ')}`,
+            HowTOSolve: "Remove these claims from the description. Describe the product factually without claiming it cures, treats, or prevents a disease, kills germs or pests, or contains a restricted substance."
         }
     } else {
         result.RestictedWords = {
             status: "Success",
-            Message: "Excellent! Your product description avoids all restricted words.",
+            Message: "Excellent! Your product description contains no prohibited medical, drug, or pesticide claims.",
             HowTOSolve: ""
         }
     }
 
-    // Check for special characters
-    const SpecialCharacters = checkSpecialCharacters(descriptionString);
-    if (SpecialCharacters.length > 0) {
-        errorCount++;
-        result.checkSpecialCharacters = {
-            status: "Error",
-            Message: `Your product description includes restricted special characters. The special characters used are: ${SpecialCharacters.join(', ')}`,
-            HowTOSolve: "Remove all restricted characters from your product description to meet Amazon's formatting guidelines."
-        }
-    } else {
-        result.checkSpecialCharacters = {
-            status: "Success",
-            Message: "Your product description is clean and free of restricted characters.",
-            HowTOSolve: ""
-        }
-    }
+    // Special characters are a title-only rule (same as the server).
+    result.checkSpecialCharacters = notCheckedOutsideTitle('product descriptions');
 
     result.NumberOfErrors = errorCount;
     return result;
@@ -579,7 +568,7 @@ const getRankings = (ProductDetails) => {
                     NumberOfErrors: 1
                 },
                 TotalErrors: 3,
-                TotalPossibleErrors: 11
+                TotalPossibleErrors: 9
             }
         };
     }
@@ -597,12 +586,12 @@ const getRankings = (ProductDetails) => {
         BulletPoints: bulletPointsResult,
         Description: descriptionResult,
         TotalErrors: totalErrorNumbers,
-        TotalPossibleErrors: 11
+        TotalPossibleErrors: 9
     };
     return finalResult;
 }
 
-export { getRankings };
+export { getRankings, checkTitle, checkBulletPoints, checkDescription, findPromotionalTerms, findProhibitedClaims, PROMOTIONAL_TERMS, PROHIBITED_CLAIMS };
 
 
 

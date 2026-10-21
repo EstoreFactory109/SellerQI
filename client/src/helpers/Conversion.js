@@ -30,17 +30,19 @@ const checkNumberOfImages=(imageArr)=>{
 }
 
 
+// Expects video URLs (callers map product_videos to video_url), like the server's
+// checkIfVideoExists. A non-array is missing data, not a listing without a video:
+// "NoData", which callers never count as an error.
 const checkIfVideoExists=(video)=>{
-    // Handle null, undefined, or non-array inputs
-    if (!video || !Array.isArray(video)) {
+    if (!Array.isArray(video)) {
         return {
-            status:"Error",
-            Message:"Your product listing does not include a video. Missing a video may reduce the opportunity to fully engage potential buyers and demonstrate the product's features effectively, potentially impacting conversion rates.",
-            HowToSolve:"Add a product video that demonstrates key features, usage instructions, and benefits. Videos help customers better understand your product and can significantly improve conversion rates."
+            status:"NoData",
+            Message:"Video data is not available for this product yet.",
+            HowToSolve:""
         }
     }
     
-    if(video.length===0){
+    if(video.filter(Boolean).length===0){
         return {
             status:"Error",
             Message:"Your product listing does not include a video. Missing a video may reduce the opportunity to fully engage potential buyers and demonstrate the product's features effectively, potentially impacting conversion rates.",

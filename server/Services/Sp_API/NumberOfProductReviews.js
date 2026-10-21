@@ -44,7 +44,9 @@ const getNumberOfProductReviews = async (asin, country) => {
       url: process.env.NUMBER_OF_REVIEWS_URI,
       params: { asin, country },
       headers: {
-        "x-rapidapi-key": "da4f9c009emsh1155c6b317494b6p13e477jsn370565189fee",
+        // From the environment only: the key used to be hard-coded here, and a
+        // literal fallback would put it back in the repository.
+        "x-rapidapi-key": process.env.RAPIDAPI_KEY,
         "x-rapidapi-host": "real-time-amazon-data.p.rapidapi.com"
       },
       timeout: REQUEST_TIMEOUT_MS
@@ -108,6 +110,13 @@ const addReviewDataTODatabase = async (asinArray, country, userId, region) => {
   if (!country || !userId) {
     logger.error("NumberOfProductReviews: Missing required parameters", { userId, country, region });
     return { success: false, error: "Missing required parameters" };
+  }
+
+  // Fail before any request: without a key every call is rejected, and a run of
+  // empty results would be saved as a snapshot in which no listing has content.
+  if (!process.env.RAPIDAPI_KEY) {
+    logger.error("NumberOfProductReviews: RAPIDAPI_KEY is not set - listing content (reviews, bullets, images, video, Brand Story) cannot be fetched. Set RAPIDAPI_KEY in the server environment.", { userId, country, region });
+    return { success: false, error: "RAPIDAPI_KEY is not set" };
   }
 
   const limit = promiseLimit(REVIEWS_CONCURRENCY);

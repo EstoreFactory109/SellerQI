@@ -119,7 +119,7 @@ function getShortIssueLabels(productWiseErrorEntry) {
         if (d?.charLim?.status === 'Error' || d?.RestictedWords?.status === 'Error' || d?.checkSpecialCharacters?.status === 'Error') {
             labels.push('Ranking: Description');
         }
-        if (ranking.charLim?.status === 'Error' || ranking.dublicateWords === 'Error') {
+        if (ranking.charLim?.status === 'Error' || ranking.dublicateWords?.status === 'Error') {
             labels.push('Ranking: Backend Search Terms');
         }
     }

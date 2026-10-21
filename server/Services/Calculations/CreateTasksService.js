@@ -666,16 +666,21 @@ class CreateTaskService {
                 });
             }
             
-            // Check duplicate words error
-            if (error.data.dublicateWords === 'Error') {
+            // Duplicate words in the backend search terms (dublicateWords sits at
+            // the root, beside the backend charLim; title repetition is the
+            // TitleResult wordRepetition check above). This compared the check
+            // object to the string 'Error', so it never fired, and its label said
+            // "Title". The errorType is new because no 'duplicate_words' task was
+            // ever created under the old one.
+            if (error.data.dublicateWords?.status === 'Error') {
                 tasks.push({
                     taskId: generateTaskId(),
                     productName,
                     asin,
                     errorCategory: 'ranking',
-                    errorType: 'duplicate_words',
-                    error: 'Title | Duplicate Words: Your product title contains repeated words which can negatively impact search ranking and customer experience.',
-                    solution: 'Review and remove duplicate words from your product title. Each word should appear only once for optimal search performance.',
+                    errorType: 'backend_keywords_duplicate_words',
+                    error: `${sectionLabels.charLim} | Duplicate Words: ${error.data.dublicateWords.Message || 'Your backend keywords repeat words, wasting part of the 250-byte limit.'}`,
+                    solution: error.data.dublicateWords.HowTOSolve || 'Remove repeated words from your backend search terms; Amazon indexes each word once, so repeats only use up bytes.',
                     status: TaskStatus.PENDING
                 });
             }

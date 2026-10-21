@@ -9,6 +9,7 @@ const {
   checkAPlus,
   checkProductWithOutBuyBox,
   checkBrandStory,
+  marketplaceShowsBrandStory,
   aplusStateOf,
 } = require('../../../Services/Calculations/Conversion.js');
 
@@ -274,21 +275,47 @@ describe('Conversion Calculations', () => {
   });
 
   describe('checkBrandStory', () => {
+    // A sibling that shows a Brand Story opens the gate: the seller can add one
+    // and the scrape can see one, so "missing" on the others is a real finding.
+    const withShowcase = (...products) => [{ asin: 'B0SHOWCASE', has_brandstory: true }, ...products];
+
     it('should return error for products without brand story', () => {
-      const productsList = [{ asin: 'B000ABC123', has_brandstory: false }];
+      const productsList = withShowcase({ asin: 'B000ABC123', has_brandstory: false });
       const result = checkBrandStory(productsList);
 
-      expect(result).toHaveLength(1);
-      expect(result[0].asin).toBe('B000ABC123');
-      expect(result[0].data.status).toBe('Error');
-      expect(result[0].data.Message).toContain('lacks a brand story');
+      expect(result).toHaveLength(2);
+      expect(result[1].asin).toBe('B000ABC123');
+      expect(result[1].data.status).toBe('Error');
+      expect(result[1].data.Message).toContain('lacks a brand story');
     });
 
     it('should return error when has_brandstory is undefined', () => {
-      const productsList = [{ asin: 'B000ABC123' }];
+      const productsList = withShowcase({ asin: 'B000ABC123' });
       const result = checkBrandStory(productsList);
 
-      expect(result[0].data.status).toBe('Error');
+      expect(result[1].data.status).toBe('Error');
+    });
+
+    // Gate closed: 36 of 76 production marketplaces had no product showing a Brand
+    // Story (11,543 open tasks) - no Brand Registry or a scrape blind spot. These
+    // tests used to expect an Error per product; no verdict is made now.
+    it('makes no verdict when no product in the marketplace shows a Brand Story', () => {
+      expect(checkBrandStory([
+        { asin: 'B000ABC123', has_brandstory: false },
+        { asin: 'B000DEF456' },
+      ])).toEqual([]);
+    });
+
+    it('is gated on a strict true, not a truthy value', () => {
+      expect(checkBrandStory([{ asin: 'A', has_brandstory: 'true' }, { asin: 'B', has_brandstory: false }])).toEqual([]);
+      expect(checkBrandStory([])).toEqual([]);
+      expect(checkBrandStory(undefined)).toEqual([]);
+    });
+
+    it('marketplaceShowsBrandStory reports whether the gate is open', () => {
+      expect(marketplaceShowsBrandStory([{ has_brandstory: false }, { has_brandstory: true }])).toBe(true);
+      expect(marketplaceShowsBrandStory([{ has_brandstory: false }])).toBe(false);
+      expect(marketplaceShowsBrandStory(null)).toBe(false);
     });
 
     it('should return success for products with brand story', () => {

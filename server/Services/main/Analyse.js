@@ -1097,7 +1097,15 @@ class AnalyseService {
             ProductwithOutBuyBox: ProductwithoutBuyboxDefaulters
         };
 
-        const AmazonReadyProductsSet = new Set();
+        // "Amazon ready" = an Active ASIN with no Error in any listing check. Built as
+        // an intersection: start from every Active ASIN and remove each one any check
+        // flags. It used to be built by adding ASINs instead - from
+        // rankings.TotalErrors, which does not exist (getRankings returns
+        // { finalResult }), so that loop never added anything - and the keyword loop
+        // then added or removed on backend keywords alone, so an ASIN with a clean
+        // keyword string counted as ready whatever else was wrong with it.
+        // Inventory errors are removed afterwards (updateAmazonReadyProducts).
+        const notReady = new Set();
         const imageResultArray = [], videoResultArray = [], 
               productStarRatingResultArray = [], RankingResultArray = [], BackendKeywordResultArray = [];
 
@@ -1110,9 +1118,9 @@ class AnalyseService {
 
                 // "No data" (no reviews yet, no image data) must not cost a product its
                 // Amazon-ready status: only a real problem does.
-                if (rankings.TotalErrors === 0 && 
-                    [imageResult, videoResult, productStarRatingResult].every(r => r.status !== "Error")) {
-                    AmazonReadyProductsSet.add(product.asin);
+                if ((rankings.finalResult?.TotalErrors || 0) > 0 ||
+                    [imageResult, videoResult, productStarRatingResult].some(r => r.status === "Error")) {
+                    notReady.add(product.asin);
                 }
 
                 imageResultArray.push({ asin: product.asin, data: imageResult });
@@ -1126,17 +1134,40 @@ class AnalyseService {
             const asin = item.asin;
             if (!DefaulterList.ListingAllItems.includes(asin)) {
                 const keywordStatus = BackendKeyWordOrAttributesStatus(item.value);
-                if (keywordStatus.NumberOfErrors === 0) AmazonReadyProductsSet.add(asin);
-                else AmazonReadyProductsSet.delete(asin);
+                // Errors only (a short-keywords Warning is not counted in
+                // NumberOfErrors), and never re-adds: one SKU's clean keywords
+                // must not undo another check's verdict.
+                if (keywordStatus.NumberOfErrors > 0) notReady.add(asin);
                 BackendKeywordResultArray.push({ asin, data: keywordStatus });
             }
         });
 
         const aplusProducts = safeAplusResponse.ApiContentDetails;
         const aPlusArray = checkAPlus(aplusProducts);
+        aPlusArray.forEach(item => {
+            if (item?.data?.status === "Error") notReady.add(item.asin);
+        });
+
+        // buyboxResult is Error exactly where the effective Buy Box row says
+        // buyBoxLost (raw % only for rows without a verdict) - the same rows that
+        // become no_buybox tasks.
+        const buyboxResult = checkProductWithOutBuyBox(buyBoxProducts).buyboxResult;
+        buyboxResult.forEach(item => {
+            if (item?.status === "Error") notReady.add(item.asin);
+        });
+
+        const AmazonReadyProducts = SellerAccount.products
+            .filter(p => p && p.status === 'Active' && p.asin && !notReady.has(p.asin))
+            .map(p => p.asin);
         
-        // Check Brand Story status from NumberOfProductReviews data
+        // Check Brand Story status from NumberOfProductReviews data. Empty when no
+        // product in this marketplace shows a Brand Story (see checkBrandStory).
         const brandStoryArray = checkBrandStory(safeProductReviews.Products);
+        // Task reconcile's coverage for brand story is "the scrape arrived", not "the
+        // result list is non-empty": in a gated marketplace the list is empty on
+        // purpose, and the existing missing_brand_story tasks there must resolve.
+        const brandStoryScrapePresent = Array.isArray(safeProductReviews.Products)
+            && safeProductReviews.Products.length > 0;
 
         return {
             rankingsData: {
@@ -1149,8 +1180,10 @@ class AnalyseService {
                 productStarRatingResult: productStarRatingResultArray,
                 aPlusResult: aPlusArray,
                 brandStoryResult: brandStoryArray,
-                ProductWithOutBuybox: checkProductWithOutBuyBox(buyBoxProducts).buyboxResult,
-                AmazonReadyproducts: Array.from(AmazonReadyProductsSet)
+                brandStoryScrapePresent,
+                ProductWithOutBuybox: buyboxResult,
+                // Unique: an ASIN listed under several SKUs is one product.
+                AmazonReadyproducts: [...new Set(AmazonReadyProducts)]
             },
             defaulters: DefaulterList
         };
@@ -1348,7 +1381,9 @@ class AnalyseService {
             ...conversionData.conversionData.imageResult.filter(item => item && item.data && item.data.status === "Error"),
             ...conversionData.conversionData.videoResult.filter(item => item && item.data && item.data.status === "Error"),
             ...conversionData.conversionData.productStarRatingResult.filter(item => item && item.data && item.data.status === "Error"),
-            ...conversionData.conversionData.aPlusResult.filter(item => item && item.status === "Error")
+            // checkAPlus returns { asin, data: { status } }; item.status never existed,
+            // so missing A+ was never counted here.
+            ...conversionData.conversionData.aPlusResult.filter(item => item && item.data && item.data.status === "Error")
         ];
         totalErrorsAllCategories += conversionErrors.length;
 
@@ -1365,7 +1400,9 @@ class AnalyseService {
         totalErrorsAllCategories += keywordErrors;
 
         // Count buybox errors
-        const buyboxErrors = conversionData.conversionData.ProductWithOutBuybox.filter(item => item && item.data && item.data.status === "Error").length;
+        // checkProductWithOutBuyBox returns flat { asin, status }; item.data never
+        // existed, so Buy Box losses were never counted here.
+        const buyboxErrors = conversionData.conversionData.ProductWithOutBuybox.filter(item => item && item.status === "Error").length;
         totalErrorsAllCategories += buyboxErrors;
 
         // Count inventory errors

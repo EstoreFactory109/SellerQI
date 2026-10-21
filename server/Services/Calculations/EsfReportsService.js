@@ -24,7 +24,7 @@
  * Every builder is run through `settle` so one empty or broken collection
  * degrades a single card rather than failing the page.
  */
-const { aplusStateOf } = require('./Conversion.js');
+const { aplusStateOf, marketplaceShowsBrandStory } = require('./Conversion.js');
 const mongoose = require('mongoose');
 
 const RestockInventoryRecommendations = require('../../models/inventory/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model.js');
@@ -1385,6 +1385,36 @@ const AUDIT_CHECKS = [
  * are declared out of scope rather than scored as failures, which would
  * understate the audit.
  */
+/**
+ * One listing's content checks: true (passes), false (a real gap) or null (no
+ * data to judge - shown as "Not available" and left out of the score).
+ *
+ * The rules match what becomes a task, so the report and the task list cannot
+ * disagree:
+ * - Bullets/description: the scrape returns [] both for "the listing has none" and
+ *   for "the scrape could not read them", and getRankings raises no task on [].
+ *   Empty is therefore no data, never "Missing".
+ * - Images/video: a non-array is no data (checkNumberOfImages/checkIfVideoExists).
+ * - A+: an unknown status raises no task (aplusStateOf).
+ * - Brand Story: no verdict in a marketplace where no product shows one (36 of 76
+ *   in production) - see marketplaceShowsBrandStory.
+ * A listing missing from the scrape altogether has no data for any of these.
+ */
+const listingAuditChecks = (detail, aplusStatus, brandStoryKnown) => {
+    const aplusState = aplusStateOf(aplusStatus);
+    return {
+        bullets: detail?.about_product?.length ? true : null,
+        description: detail?.product_description?.length ? true : null,
+        images: Array.isArray(detail?.product_photos) ? detail.product_photos.length >= 5 : null,
+        video: Array.isArray(detail?.video_url) ? detail.video_url.length > 0 : null,
+        aPlus: aplusState === 'unknown' ? null : aplusState === 'present',
+        brandStory: detail && brandStoryKnown ? detail.has_brandstory === true : null,
+    };
+};
+
+const NOT_AVAILABLE = 'Not available';
+const yesNo = (value) => (value === null ? NOT_AVAILABLE : value ? 'Yes' : 'No');
+
 const buildListingsAudit = async (userId, country, region) => {
     const [seller, content, aplus, premium] = await Promise.all([
         Seller.findOne({ User: userId }).select('sellerAccount').lean(),
@@ -1394,9 +1424,14 @@ const buildListingsAudit = async (userId, country, region) => {
     ]);
 
     const account = (seller?.sellerAccount || []).find((acc) => acc.region === region && acc.country === country);
-    const products = account?.products || [];
+    // Active listings only, like the task list: an inactive listing's content
+    // gaps are not work the seller is asked to do, so scoring them understated
+    // the catalogue.
+    const products = (account?.products || []).filter((product) => product.status === 'Active');
     if (!products.length) {
-        return unavailable(REPORT_AUDIT, 'No listings have been synced for this marketplace yet.');
+        return unavailable(REPORT_AUDIT, account?.products?.length
+            ? 'No active listings in this marketplace to audit.'
+            : 'No listings have been synced for this marketplace yet.');
     }
 
     const contentByAsin = new Map((content?.Products || []).map((item) => [item.asin, item]));
@@ -1409,34 +1444,41 @@ const buildListingsAudit = async (userId, country, region) => {
     const premiumByAsin = new Map((premium?.documents || []).map((doc) => [doc.asin, doc.isPremium]));
     const premiumCaptured = Boolean(premium);
 
+    const brandStoryKnown = marketplaceShowsBrandStory(content?.Products);
+
     const passCount = Object.fromEntries(AUDIT_CHECKS.map((check) => [check.key, 0]));
+    const failCount = Object.fromEntries(AUDIT_CHECKS.map((check) => [check.key, 0]));
 
     let passed = 0;
+    let scored = 0;
+    let anyNotAvailable = false;
     const rows = [];
 
     for (const product of products) {
         const detail = contentByAsin.get(product.asin);
         const aplusStatus = aplusByAsin.get(product.asin) || '';
 
-        const checks = {
-            bullets: Boolean(detail?.about_product?.length),
-            description: Boolean(detail?.product_description?.length),
-            images: (detail?.product_photos?.length || 0) >= 5,
-            video: Boolean(detail?.video_url?.length),
-            // Same reading as the A+ task check: legacy "true" counts as present,
-            // DRAFT / NOT_AVAILABLE / "false" as missing.
-            aPlus: aplusStateOf(aplusStatus) === 'present',
-            brandStory: Boolean(detail?.has_brandstory),
-        };
+        const checks = listingAuditChecks(detail, aplusStatus, brandStoryKnown);
 
         let listingPassed = 0;
+        let listingScored = 0;
         for (const check of AUDIT_CHECKS) {
-            if (checks[check.key]) {
+            const value = checks[check.key];
+            if (value === null) {
+                anyNotAvailable = true;
+                continue;
+            }
+            listingScored += 1;
+            if (value) {
                 passCount[check.key] += 1;
                 listingPassed += 1;
+            } else {
+                failCount[check.key] += 1;
             }
         }
         passed += listingPassed;
+        scored += listingScored;
+        const gaps = listingScored - listingPassed;
 
         rows.push({
             asin: product.asin,
@@ -1446,24 +1488,28 @@ const buildListingsAudit = async (userId, country, region) => {
             // The actual counts and flags, rather than a pass/fail that hides
             // whether a listing has three images or nine.
             images: detail?.product_photos?.length || 0,
-            video: checks.video ? 'Yes' : 'No',
-            brandStory: checks.brandStory ? 'Yes' : 'No',
-            aPlus: checks.aPlus ? 'Yes' : 'No',
+            video: yesNo(checks.video),
+            brandStory: yesNo(checks.brandStory),
+            aPlus: yesNo(checks.aPlus),
             bullets: detail?.about_product?.length || 0,
             // Em dash, not "No", until the A+ Content API has run at least once:
             // "not captured" and "not Premium" are different statements.
             aPlusPremium: premiumCaptured ? (premiumByAsin.get(product.asin) ? 'Yes' : 'No') : '-',
             price: num(product.price),
             detailPage: detailPageUrl(product.asin, country),
-            // Listing Quality Score: the share of checks passed, on a 1-10 scale.
-            lqs: round((listingPassed / AUDIT_CHECKS.length) * 10, 1),
-            score: `${listingPassed}/${AUDIT_CHECKS.length}`,
-            missing: AUDIT_CHECKS.filter((check) => !checks[check.key]).map((check) => check.label).join(', ') || '-',
-            gaps: AUDIT_CHECKS.length - listingPassed,
+            // Listing Quality Score: the share of the checks we could judge that
+            // pass, on a 1-10 scale. A listing with nothing to judge has no score.
+            lqs: listingScored ? round((listingPassed / listingScored) * 10, 1) : null,
+            score: listingScored ? `${listingPassed}/${listingScored}` : '-',
+            // Only real gaps: "Not available" is a gap in our data, not the listing.
+            missing: AUDIT_CHECKS.filter((check) => checks[check.key] === false).map((check) => check.label).join(', ') || '-',
+            gaps,
         });
     }
 
-    const completion = Math.round((passed / (products.length * AUDIT_CHECKS.length)) * 100);
+    // Null when nothing could be judged (no capture yet): the rows still carry
+    // A+ Premium and the "Not available" cells, but there is no score to state.
+    const completion = scored ? Math.round((passed / scored) * 100) : null;
     rows.sort((a, b) => b.gaps - a.gaps);
 
     return {
@@ -1471,21 +1517,27 @@ const buildListingsAudit = async (userId, country, region) => {
         available: true,
         date: formatDate(content?.createdAt || new Date()),
         generatedAt: content?.createdAt || new Date(),
-        tone: completion >= 80 ? 'good' : 'neutral',
+        tone: completion !== null && completion >= 80 ? 'good' : 'neutral',
         // This marketplace's own listings. It used to say "across N
         // marketplaces", counting every connected one, while the figure only
         // ever covered this one — wrong as soon as reports became account-wide.
-        insight: `${completion}% completion across ${plural(products.length, 'listing')}`,
+        insight: completion === null
+            ? `No listing content captured yet for ${plural(products.length, 'listing')}`
+            : `${completion}% completion across ${plural(products.length, 'listing')}`,
         summary: {
             headline: `${products.length} listings reviewed against ${AUDIT_CHECKS.length} content checks`,
             stats: [
-                { label: 'Completion', value: completion, format: 'percent', tone: completion >= 80 ? 'good' : 'watch' },
+                { label: 'Completion', value: completion, format: 'percent', tone: completion === null ? 'neutral' : completion >= 80 ? 'good' : 'watch' },
                 { label: 'Listings reviewed', value: products.length },
-                ...AUDIT_CHECKS.map((check) => ({
-                    label: check.label,
-                    value: passCount[check.key],
-                    tone: passCount[check.key] === products.length ? 'good' : 'watch',
-                })),
+                // A check no listing could be judged on (e.g. Brand Story in a
+                // gated marketplace) shows a dash, not "0 listings have it".
+                ...AUDIT_CHECKS.map((check) => (passCount[check.key] + failCount[check.key] === 0
+                    ? { label: check.label, value: null, tone: 'neutral' }
+                    : {
+                        label: check.label,
+                        value: passCount[check.key],
+                        tone: failCount[check.key] === 0 ? 'good' : 'watch',
+                    })),
                 ...(premiumCaptured
                     ? [{
                         label: 'A+ Premium',
@@ -1508,27 +1560,36 @@ const buildListingsAudit = async (userId, country, region) => {
             rows,
         },
         highlights: [
-            highlight(
-                `Catalogue is ${completion}% complete against the ${AUDIT_CHECKS.length} content checks.`,
-                completion >= 80 ? 'good' : 'watch'
-            ),
+            ...(completion === null
+                ? [highlight('No listing content has been captured for these listings yet, so no check could be scored.')]
+                : [highlight(
+                    `Catalogue is ${completion}% complete against the content checks we could judge.`,
+                    completion >= 80 ? 'good' : 'watch'
+                )]),
             // The check that fails most often is the single most useful line here.
-            ...(() => {
+            ...(completion === null ? [] : (() => {
                 const worst = [...AUDIT_CHECKS]
-                    .map((check) => ({ check, missing: products.length - passCount[check.key] }))
+                    .map((check) => ({ check, missing: failCount[check.key] }))
                     .sort((a, b) => b.missing - a.missing)[0];
                 return worst && worst.missing > 0
                     ? [highlight(`${worst.check.label} is the widest gap - missing on ${worst.missing} of ${products.length} listings.`, 'watch')]
-                    : [highlight('Every listing passes all content checks.', 'good')];
-            })(),
+                    : [highlight('Every listing passes all content checks we could judge.', 'good')];
+            })()),
             ...(rows[0]?.gaps
-                ? [highlight(`${rows[0].sku || rows[0].asin} needs the most work, failing ${rows[0].gaps} of ${AUDIT_CHECKS.length} checks.`, 'watch')]
+                ? [highlight(`${rows[0].sku || rows[0].asin} needs the most work, failing ${rows[0].gaps} of ${rows[0].score.split('/')[1]} checks.`, 'watch')]
                 : []),
         ],
         caveats: [
             ...(premiumCaptured
                 ? ['Storefront presence and content language are not audited - neither is available from the data we hold.']
                 : ['Premium A+ is captured from the next A+ Content sync onwards; this edition shows it as not captured. Storefront presence and content language are not audited - neither is available from the data we hold.']),
+            'Only active listings are audited.',
+            ...(anyNotAvailable
+                ? ['"Not available" means the listing content we captured could not answer that check (for example, no bullet points or description were read); it is left out of the score rather than counted as missing.']
+                : []),
+            ...(!brandStoryKnown
+                ? ['Brand Story is not scored: none of the listings we captured shows one, which usually means the brand is not in Amazon Brand Registry (required for Brand Story) or the capture cannot see it.']
+                : []),
         ],
     };
 };
@@ -2442,22 +2503,31 @@ const historyBuilders = {
             .sort({ createdAt: -1 }).limit(HISTORY_LIMIT).lean();
         if (!snapshots.length) return null;
 
-        // Scored against the five checks each snapshot carries on its own. A+ is
-        // in a separate collection with no history of its own, so it is left out
-        // here rather than scored as absent, which would understate every edition.
-        const SNAPSHOT_CHECKS = 5;
+        // Scored against the five checks each snapshot carries on its own, with the
+        // same rules as the audit itself (listingAuditChecks): empty bullets or
+        // description and a gated Brand Story are no data, not a gap. A+ is in a
+        // separate collection with no history of its own, so it is left out here
+        // rather than scored as absent, which would understate every edition.
+        // Snapshots carry no listing status, so today's active ASINs stand in.
+        const seller = await Seller.findOne({ User: userId }).select('sellerAccount').lean();
+        const account = (seller?.sellerAccount || []).find((acc) => acc.region === region && acc.country === country);
+        const activeAsins = account
+            ? new Set((account.products || []).filter((p) => p.status === 'Active').map((p) => p.asin))
+            : null;
         const completionOf = (snapshot) => {
-            const products = snapshot.Products || [];
-            if (!products.length) return 0;
+            const products = (snapshot.Products || []).filter((p) => !activeAsins || activeAsins.has(p.asin));
+            const brandStoryKnown = marketplaceShowsBrandStory(snapshot.Products);
             let passed = 0;
+            let scored = 0;
             for (const p of products) {
-                if (p.about_product?.length) passed += 1;
-                if (p.product_description?.length) passed += 1;
-                if ((p.product_photos?.length || 0) >= 5) passed += 1;
-                if (p.video_url?.length) passed += 1;
-                if (p.has_brandstory) passed += 1;
+                const { aPlus, ...checks } = listingAuditChecks(p, null, brandStoryKnown);
+                for (const value of Object.values(checks)) {
+                    if (value === null) continue;
+                    scored += 1;
+                    if (value) passed += 1;
+                }
             }
-            return Math.round((passed / (products.length * SNAPSHOT_CHECKS)) * 100);
+            return scored ? Math.round((passed / scored) * 100) : 0;
         };
 
         const editions = snapshots.map((snapshot) => edition(
@@ -2473,7 +2543,7 @@ const historyBuilders = {
                 { label: 'Listings captured', value: (snapshots[0].Products || []).length },
                 { label: 'Editions on file', value: snapshots.length },
             ],
-            note: 'Completion here covers the five checks each capture carries (bullets, description, images, video, Brand Story). A+ Content is stored separately with no history of its own, so it is not scored in these editions.',
+            note: 'Completion here covers the five checks each capture carries (bullets, description, images, video, Brand Story), for today\'s active listings, leaving out checks a capture could not answer. A+ Content is stored separately with no history of its own, so it is not scored in these editions.',
         };
     },
 

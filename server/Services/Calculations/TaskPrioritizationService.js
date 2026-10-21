@@ -74,7 +74,8 @@ const EFFORT_MINUTES = {
     'ranking:titleresult_char_limit': 5,
     'ranking:titleresult_restricted_words': 5,
     'ranking:titleresult_word_repetition': 5,
-    'ranking:duplicate_words': 5,
+    'ranking:backend_keywords_duplicate_words': 3,
+    'ranking:duplicate_words': 5, // retired errorType (never generated: see CreateTasksService)
     'ranking:bulletpoints_special_characters': 5,
     'ranking:bulletpoints_capitalization': 10,
     'ranking:bulletpoints_char_limit': 10,
@@ -219,8 +220,9 @@ const IMPACT_WEIGHT = {
     'ranking:titleresult_word_repetition': 50,
     'ranking:titleresult_special_characters': 50,
     'ranking:titleresult_capitalization': 50,
-    'ranking:duplicate_words': 45,
+    'ranking:duplicate_words': 45, // retired errorType
     'ranking:backend_keywords_char_limit': 36,
+    'ranking:backend_keywords_duplicate_words': 36,
     'ranking:bulletpoints_char_limit': 35,
     'ranking:bulletpoints_restricted_words': 35,
     'ranking:bulletpoints_special_characters': 35,
