@@ -2,7 +2,11 @@
  * SalesDropAlertService.js
  *
  * Detects sales velocity drops within a date range using datewise sales from the
- * Economics Metrics model (no API fetch).
+ * shared economics loader (LiveEconomicsService: a fresh EconomicsMetrics doc, else
+ * live DailySkuFinance) — no API fetch. EconomicsMetrics alone stopped in March 2026.
+ *
+ * No data is never a drop: no economics -> no alert; a day with no rows is absent,
+ * not $0, and only consecutive calendar days are compared.
  *
  * Date range: end date = yesterday, start date = 7 days before yesterday (8 days total).
  * Detection logic: day-over-day comparison of revenue (and units when available); a day is
@@ -12,7 +16,7 @@
  * Call detectSalesDrop(userId, region, country, options) when needed.
  */
 
-const { getLatestEconomicsMetrics } = require('../../MCP/EconomicsMetricsService.js');
+const { loadLiveEconomics } = require('../../Finance/LiveEconomicsService.js');
 const logger = require('../../../utils/Logger.js');
 
 /** Default drop threshold (percent): flag a day when units or revenue drops by this much vs previous day */
@@ -38,6 +42,13 @@ function getDateRange() {
     startDate: `${startDate.getUTCFullYear()}-${pad(startDate.getUTCMonth() + 1)}-${pad(startDate.getUTCDate())}`,
     endDate: `${endDate.getUTCFullYear()}-${pad(endDate.getUTCMonth() + 1)}-${pad(endDate.getUTCDate())}`,
   };
+}
+
+/** True when `b` is the calendar day after `a` (both 'YYYY-MM-DD'). */
+function areConsecutiveDays(a, b) {
+  const ta = Date.parse(`${String(a || '').slice(0, 10)}T00:00:00Z`);
+  const tb = Date.parse(`${String(b || '').slice(0, 10)}T00:00:00Z`);
+  return Number.isFinite(ta) && Number.isFinite(tb) && tb - ta === 24 * 60 * 60 * 1000;
 }
 
 /**
@@ -69,6 +80,10 @@ function detectSalesDrops(datewiseSales, options = {}) {
   for (let i = 1; i < sorted.length; i++) {
     const prev = sorted[i - 1];
     const curr = sorted[i];
+
+    // A gap means the days between have no data; comparing across it would read
+    // missing data as a drop.
+    if (!areConsecutiveDays(prev.date, curr.date)) continue;
 
     const prevDate = prev.date;
     const currDate = curr.date;
@@ -116,7 +131,7 @@ function detectSalesDrops(datewiseSales, options = {}) {
  * Economics datewiseSales has { date, sales: { amount, currencyCode }, grossProfit }; no unitsOrdered.
  * Maps to shape expected by detectSalesDrops: { date, sales, unitsOrdered } (unitsOrdered = 0 so only revenue drop is used).
  *
- * @param {Object} metrics - Latest economics metrics from getLatestEconomicsMetrics
+ * @param {Object} metrics - Economics from loadLiveEconomics (EconomicsMetrics shape)
  * @param {string} startDate - YYYY-MM-DD inclusive
  * @param {string} endDate - YYYY-MM-DD inclusive
  * @returns {Array<{ date: string, sales: { amount: number, currencyCode: string }, unitsOrdered: number }>}
@@ -126,12 +141,13 @@ function getDatewiseSalesForRange(metrics, startDate, endDate) {
   return raw
     .filter((row) => {
       const d = row.date || '';
-      return d >= startDate && d <= endDate;
+      // A row without a sales figure is no data, not a $0 day.
+      return d >= startDate && d <= endDate && row.sales && Number.isFinite(Number(row.sales.amount));
     })
     .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
     .map((row) => ({
       date: row.date,
-      sales: row.sales ? { amount: Number(row.sales.amount) || 0, currencyCode: row.sales.currencyCode || 'USD' } : { amount: 0, currencyCode: 'USD' },
+      sales: { amount: Number(row.sales.amount), currencyCode: row.sales.currencyCode || 'USD' },
       unitsOrdered: 0, // Economics datewiseSales does not store daily units; only revenue drop is evaluated
     }));
 }
@@ -168,7 +184,7 @@ async function detectSalesDrop(userId, region, country, options = {}) {
       };
     }
 
-    logger.info('[SalesDropAlertService] Loading datewise sales from Economics Metrics for drop detection', {
+    logger.info('[SalesDropAlertService] Loading datewise sales (live economics) for drop detection', {
       userId: userId?.toString?.() || userId,
       region,
       country,
@@ -176,15 +192,18 @@ async function detectSalesDrop(userId, region, country, options = {}) {
       endDate: dateRange.endDate,
     });
 
-    const metrics = await getLatestEconomicsMetrics(userId, region, country);
+    const metrics = await loadLiveEconomics(userId, region, country, {
+      startDate: dateRange.startDate,
+      endDate: dateRange.endDate,
+    });
     if (!metrics) {
-      logger.warn('[SalesDropAlertService] No economics metrics found for user', { userId: userId?.toString?.() || userId, region, country });
+      logger.warn('[SalesDropAlertService] No economics for user (no fresh EconomicsMetrics, no DailySkuFinance rows)', { userId: userId?.toString?.() || userId, region, country });
       return {
         detected: false,
         drops: [],
         dateRange,
         marketplace: country,
-        error: 'No economics metrics found for this user/region/country. Run economics sync first.',
+        error: 'No sales data for this user/region/country in the alert window.',
       };
     }
 
@@ -243,6 +262,7 @@ module.exports = {
   detectSalesDrops,
   getDateRange,
   getDatewiseSalesForRange,
+  areConsecutiveDays,
   DEFAULT_UNITS_DROP_THRESHOLD_PCT,
   DEFAULT_REVENUE_DROP_THRESHOLD_PCT,
 };
