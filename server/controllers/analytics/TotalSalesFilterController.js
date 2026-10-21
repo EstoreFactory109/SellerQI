@@ -1,7 +1,8 @@
 /**
  * TotalSalesFilterController.js
  * 
- * Controller for filtering total sales component values from SalesOnlyMetrics model
+ * Controller for filtering total sales component values from SalesOnlyMetrics model,
+ * with fees, refunds, gross profit and per-ASIN rows from live DailySkuFinance
  * Supports:
  * - Last 30 days: Returns total values from latest document
  * - Last 7 days: Gets datewise values from latest document, sums them
@@ -13,7 +14,7 @@ const { ApiError } = require('../../utils/ApiError.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
 const logger = require('../../utils/Logger.js');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
-const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
+const { buildEconomicsFromDailyFinance, lastNDaysWindow } = require('../../Services/Finance/LiveEconomicsService.js');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
 
 /**
@@ -94,8 +95,10 @@ async function getLast31DaysData(userId, country, region) {
     const recentData = await SalesOnlyMetrics.getRecentDays(userId, region, country, 31);
 
     if (!recentData || recentData.datewiseSales.length === 0) {
-        logger.warn('No sales-only metrics found for last 31 days', { userId, country, region });
-        return createEmptyResult();
+        // Most marketplaces have no SalesOnlyMetrics; read live finance for the
+        // 30 days ending yesterday (empty result if that has no rows either).
+        const { startDate, endDate } = lastNDaysWindow(30);
+        return await getCustomRangeData(userId, country, region, startDate, endDate);
     }
 
     const { startDate, endDate } = recentData.dateRange;
@@ -189,8 +192,12 @@ async function getTotalSalesFilteredData(userId, country, region, { periodType =
 }
 
 /**
- * Get custom range data - use aggregation on per-day documents.
- * Each SalesOnlyMetrics document represents a single day.
+ * Get custom range data.
+ *
+ * Sales: SalesOnlyMetrics per-day documents when the account has them (kept so the
+ * headline does not move), else live DailySkuFinance. Gross profit, FBA/Amazon fees,
+ * refunds and per-ASIN rows: live DailySkuFinance for the range (LiveEconomicsService)
+ * — these were hard-coded 0 / []. With neither source the result is the empty one.
  */
 async function getCustomRangeData(userId, country, region, startDateStr, endDateStr) {
     const startDate = new Date(startDateStr);
@@ -198,57 +205,76 @@ async function getCustomRangeData(userId, country, region, startDateStr, endDate
     const endDate = new Date(endDateStr);
     endDate.setHours(23, 59, 59, 999);
 
-    const salesData = await SalesOnlyMetrics.getSalesForDateRange(
-        userId,
-        region,
-        country,
-        startDateStr,
-        endDateStr
-    );
+    const [salesData, live] = await Promise.all([
+        SalesOnlyMetrics.getSalesForDateRange(
+            userId,
+            region,
+            country,
+            startDateStr,
+            endDateStr
+        ),
+        buildEconomicsFromDailyFinance({ userId, country, region, startDate: startDateStr, endDate: endDateStr })
+    ]);
 
-    if (!salesData || salesData.datewiseSales.length === 0) {
-        logger.warn('No sales-only metrics found for custom range', { userId, country, region, startDateStr, endDateStr });
+    const hasSalesOnly = !!(salesData && Array.isArray(salesData.datewiseSales) && salesData.datewiseSales.length > 0);
+
+    if (!hasSalesOnly && !live) {
+        logger.warn('No sales-only metrics or DailySkuFinance rows for custom range', { userId, country, region, startDateStr, endDateStr });
         return createEmptyResult();
     }
 
-    logger.info('Processing custom date range from per-day documents', {
+    logger.info('Processing custom date range', {
         userId,
         country,
         region,
         requestedRange: { startDate: startDateStr, endDate: endDateStr },
-        daysFound: salesData.datewiseSales.length
+        salesSource: hasSalesOnly ? 'salesOnlyMetrics' : 'dailySkuFinance',
+        salesOnlyDays: hasSalesOnly ? salesData.datewiseSales.length : 0,
+        financeDays: live?.datewiseSales?.length || 0
     });
 
-    const totalSales = salesData.totalSales?.amount || 0;
-    const currencyCode = salesData.totalSales?.currencyCode || 'USD';
+    const currencyCode = (hasSalesOnly ? salesData.totalSales?.currencyCode : live?.totalSales?.currencyCode) || 'USD';
+    const totalSales = hasSalesOnly ? (salesData.totalSales?.amount || 0) : (live.totalSales?.amount || 0);
 
     let totalPpcSpent = await getDatewisePPCSpend(userId, country, region, startDateStr, endDateStr);
 
-    const datewiseChartData = salesData.datewiseSales.map((item) => {
+    // Per-day gross profit from live finance (SalesOnlyMetrics has none).
+    const liveGrossProfitByDate = new Map(
+        (live?.datewiseGrossProfit || []).map((d) => [d.date, d.grossProfit?.amount || 0])
+    );
+    const chartSource = hasSalesOnly ? salesData.datewiseSales : live.datewiseSales;
+    const datewiseChartData = chartSource.map((item) => {
         const itemDate = new Date(item.date);
         const displayDate = itemDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         return {
             date: displayDate,
             totalSales: item.sales?.amount || 0,
-            grossProfit: item.grossProfit?.amount || 0,
+            grossProfit: liveGrossProfitByDate.has(item.date)
+                ? liveGrossProfitByDate.get(item.date)
+                : (item.grossProfit?.amount || 0),
             originalDate: item.date
         };
     }).sort((a, b) => new Date(a.originalDate) - new Date(b.originalDate));
 
+    // Fee/profit fields: live finance for the range; without it they stay 0 as before.
+    const fbaFees = live?.fbaFees?.amount || 0;
+    const amazonFees = live?.amazonFees?.amount || 0;
+    const otherAmazonFees = Math.max(0, amazonFees - fbaFees);
+
     return {
         totalSales: { amount: parseFloat(totalSales.toFixed(2)), currencyCode },
-        grossProfit: { amount: 0, currencyCode },
+        grossProfit: { amount: parseFloat((live?.grossProfit?.amount || 0).toFixed(2)), currencyCode },
         ppcSpent: { amount: parseFloat(totalPpcSpent.toFixed(2)), currencyCode },
-        fbaFees: { amount: 0, currencyCode },
-        amazonFees: { amount: 0, currencyCode },
-        otherAmazonFees: { amount: 0, currencyCode },
-        refunds: { amount: 0, currencyCode },
+        fbaFees: { amount: parseFloat(fbaFees.toFixed(2)), currencyCode },
+        amazonFees: { amount: parseFloat(amazonFees.toFixed(2)), currencyCode },
+        otherAmazonFees: { amount: parseFloat(otherAmazonFees.toFixed(2)), currencyCode },
+        refunds: { amount: parseFloat((live?.refunds?.amount || 0).toFixed(2)), currencyCode },
         dateRange: {
             startDate: formatDate(startDate),
             endDate: formatDate(endDate)
         },
         datewiseChartData: datewiseChartData,
-        asinWiseSales: [],
+        asinWiseSales: live?.asinWiseSales || [],
         currencyCode
     };
 }
