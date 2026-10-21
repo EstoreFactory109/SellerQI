@@ -28,6 +28,15 @@ const {
     SEARCH_TERM_MIN_CLICKS,
     AUTO_MIGRATION_MIN_SALES
 } = require('./TaskRules.js');
+const {
+    rowDay,
+    newestRowDay,
+    settleCutoffDay,
+    isAdsDataStale,
+    isWastedKeyword,
+    buildNegatedIndex,
+    isNegated
+} = require('./AdsSignals.js');
 
 // Chunk size for yielding to event loop during large data processing
 const YIELD_CHUNK_SIZE = 500;
@@ -585,11 +594,28 @@ const calculateSponsoredAdsErrors = (
     adsKeywordsPerformanceData = [],
     searchTerms = [],
     campaignData = [],
-    keywords = []
+    keywords = [],
+    { negativeKeywords = [], country = null, now = new Date() } = {}
 ) => {
     let totalErrors = 0;
     let totalAmount = 0;
     const errorDetails = [];
+
+    // Keyword and search-term rows are judged only when they describe the account
+    // now (see AdsSignals.isAdsDataStale). A stale window produces no keyword or
+    // search-term issues rather than re-issuing the last stored 30 days as current.
+    const keywordNewestDay = newestRowDay(adsKeywordsPerformanceData);
+    const searchTermNewestDay = newestRowDay(searchTerms);
+    const keywordsStale = Array.isArray(adsKeywordsPerformanceData) && adsKeywordsPerformanceData.length > 0
+        && isAdsDataStale(keywordNewestDay, country, now);
+    const searchTermsStale = Array.isArray(searchTerms) && searchTerms.length > 0
+        && isAdsDataStale(searchTermNewestDay, country, now);
+    if (keywordsStale || searchTermsStale) {
+        logger.warn('Ads keyword/search-term data is stale; not judging it', {
+            country, keywordNewestDay, searchTermNewestDay, keywordsStale, searchTermsStale
+        });
+    }
+    const keywordSettleCutoff = settleCutoffDay(country, now);
 
     // 1. High ACOS Campaigns (ACOS > 40% and sales > 0)
     if (Array.isArray(campaignWiseTotalSalesAndCost)) {
@@ -625,8 +651,17 @@ const calculateSponsoredAdsErrors = (
         adsKeywordsPerformanceData.forEach((keyword) => {
             const uniqueKey = `${keyword.keyword || ''}|${keyword.campaignId || ''}|${keyword.adGroupId || keyword.adGroupName || ''}`;
             
+            const day = rowDay(keyword);
+            const cost = parseFloat(keyword.cost) || 0;
+            const settled = keywordSettleCutoff && day && day < keywordSettleCutoff ? cost : 0;
             if (aggregatedKeywordsMap.has(uniqueKey)) {
                 const existing = aggregatedKeywordsMap.get(uniqueKey);
+                existing.settledSpend += settled;
+                // Latest status wins: a keyword paused today is not wasting money now.
+                if (keyword.adKeywordStatus && (!existing.statusDay || (day && day >= existing.statusDay))) {
+                    existing.status = keyword.adKeywordStatus;
+                    existing.statusDay = day;
+                }
                 existing.cost += parseFloat(keyword.cost) || 0;
                 existing.attributedSales30d += parseFloat(keyword.attributedSales30d) || 0;
                 // clicks/impressions are aggregated too, so the task text can state
@@ -641,7 +676,10 @@ const calculateSponsoredAdsErrors = (
                     campaignId: keyword.campaignId,
                     adGroupName: keyword.adGroupName,
                     adGroupId: keyword.adGroupId,
-                    cost: parseFloat(keyword.cost) || 0,
+                    cost,
+                    settledSpend: settled,
+                    status: keyword.adKeywordStatus || null,
+                    statusDay: day,
                     attributedSales30d: parseFloat(keyword.attributedSales30d) || 0,
                     clicks: parseInt(keyword.clicks, 10) || 0,
                     impressions: parseInt(keyword.impressions, 10) || 0
@@ -650,11 +688,20 @@ const calculateSponsoredAdsErrors = (
         });
     }
     
-    const aggregatedKeywords = Array.from(aggregatedKeywordsMap.values());
+    const aggregatedKeywords = keywordsStale ? [] : Array.from(aggregatedKeywordsMap.values());
+    // Keywords flagged as wasted, so a zero-sale search term under one of them does not
+    // count the same spend twice in recoverable $.
+    const wastedKeywordKeys = new Set();
     
     aggregatedKeywords.forEach((keyword) => {
-        // Count as error if cost > 0 and sales < 0.01 (wasted spend)
-        if (keyword.cost > 0 && keyword.attributedSales30d < 0.01) {
+        // Shared with the PPC page's wasted-spend tab (AdsSignals.isWastedKeyword).
+        if (isWastedKeyword({
+            clicks: keyword.clicks,
+            sales: keyword.attributedSales30d,
+            settledSpend: keyword.settledSpend,
+            status: keyword.status
+        })) {
+            wastedKeywordKeys.add(`${String(keyword.keyword || '').toLowerCase()}|${keyword.campaignId || ''}|${keyword.adGroupId || keyword.adGroupName || ''}`);
             totalErrors++;
             const amount = computeSponsoredAdsAmount({ errorType: 'wasted_spend_keyword', spend: keyword.cost, sales: keyword.attributedSales30d });
             totalAmount += amount;
@@ -704,13 +751,23 @@ const calculateSponsoredAdsErrors = (
         });
     }
     
-    const aggregatedSearchTerms = Array.from(aggregatedSearchTermsMap.values());
+    const aggregatedSearchTerms = searchTermsStale ? [] : Array.from(aggregatedSearchTermsMap.values());
+    // A term the seller already added as a negative is fixed, even though its past
+    // clicks stay in the 30-day window. Negatives were loaded but never used.
+    const negatedIndex = buildNegatedIndex(negativeKeywords);
     
     aggregatedSearchTerms.forEach((term) => {
         // Count as error if clicks >= 10 and sales < 0.01
-        if (term.clicks >= SEARCH_TERM_MIN_CLICKS && term.sales < 0.01) {
+        if (term.clicks >= SEARCH_TERM_MIN_CLICKS && term.sales < 0.01 && !isNegated(negatedIndex, term)) {
             totalErrors++;
-            const amount = computeSponsoredAdsAmount({ errorType: 'search_term_zero_sales', spend: term.spend, sales: term.sales });
+            // Its spend is already inside its keyword's amount when that keyword is
+            // itself flagged as wasted: count it once.
+            const underWastedKeyword = wastedKeywordKeys.has(
+                `${String(term.keyword || '').toLowerCase()}|${term.campaignId || ''}|${term.adGroupId || term.adGroupName || ''}`
+            );
+            const amount = underWastedKeyword
+                ? 0
+                : computeSponsoredAdsAmount({ errorType: 'search_term_zero_sales', spend: term.spend, sales: term.sales });
             totalAmount += amount;
             errorDetails.push({
                 searchTerm: term.searchTerm,
@@ -741,10 +798,12 @@ const calculateSponsoredAdsErrors = (
         : [];
     const manualCampaignIds = manualCampaigns.map(campaign => campaign.campaignId);
     
-    // Get keywords from manual campaigns
+    // EXACT keywords in manual campaigns. The task advises adding the term "as an
+    // exact match keyword", so a broad/phrase keyword does not count as migrated.
     const manualKeywords = Array.isArray(keywords)
         ? keywords
             .filter(keyword => manualCampaignIds.includes(keyword.campaignId))
+            .filter(keyword => !keyword.matchType || String(keyword.matchType).toUpperCase() === 'EXACT')
             .map(keyword => keyword.keywordText?.toLowerCase() || '')
         : [];
     
@@ -809,13 +868,19 @@ const buildTaskCoverage = (data = {}, {
     profitabilityOk = false,
     financeFresh = false,
     campaignRows = [],
-    sponsoredAdsOk = false
+    sponsoredAdsOk = false,
+    country = null,
+    now = new Date()
 } = {}) => {
     const rankingRows = data.RankingsData?.RankingResultArray;
     const products = activeProductSet.size > 0 && nonEmpty(rankingRows);
     const conv = data.ConversionData || {};
-    const keywords = nonEmpty(data.adsKeywordsPerformanceData);
-    const searchTerms = nonEmpty(data.searchTerms);
+    // Stale ads rows produce no keyword/search-term verdicts (calculateSponsoredAdsErrors),
+    // so they must not count as arrived either, or reconcile would resolve real tasks.
+    const keywords = nonEmpty(data.adsKeywordsPerformanceData)
+        && !isAdsDataStale(newestRowDay(data.adsKeywordsPerformanceData), country, now);
+    const searchTerms = nonEmpty(data.searchTerms)
+        && !isAdsDataStale(newestRowDay(data.searchTerms), country, now);
     const campaigns = nonEmpty(campaignRows);
     const accountHealth = data.AccountData?.accountHealth;
 
@@ -1789,7 +1854,8 @@ const analyseData = async (data, userId = null, options = {}) => {
             data.adsKeywordsPerformanceData || [],
             data.searchTerms || [],
             data.campaignData || [],
-            data.keywords || []
+            data.keywords || [],
+            { negativeKeywords: data.negetiveKeywords || [], country }
         );
         sponsoredAdsErrorsOk = true;
     } catch (error) {
@@ -1926,7 +1992,8 @@ const analyseData = async (data, userId = null, options = {}) => {
                     // The rows high-ACOS was actually judged on (the PPC page's campaign
                     // totals when available), so coverage describes the real input.
                     campaignRows: Array.isArray(data.campaignSpendSales) ? data.campaignSpendSales : campaignWiseTotalSalesAndCost,
-                    sponsoredAdsOk: sponsoredAdsErrorsOk
+                    sponsoredAdsOk: sponsoredAdsErrorsOk,
+                    country
                 })
             }, country, region);
             // Only a full rebuild changes what the derived AI views summarise; stays

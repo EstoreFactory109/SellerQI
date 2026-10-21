@@ -21,6 +21,9 @@ const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel');
 const logger = require('../../utils/Logger');
 const { getDefaultReportDateRange } = require('../../utils/reportDateRange');
 const { loadLatestSnapshotDoc, loadKeywordSnapshot } = require('../../utils/ppcSnapshotLoader');
+// One rule for the wasted-keyword / zero-sale-term / migration tabs and the tasks.
+const { settleCutoffDay, buildNegatedIndex } = require('./AdsSignals.js');
+const { KEYWORD_MIN_CLICKS, SEARCH_TERM_MIN_CLICKS } = require('./TaskRules.js');
 
 /**
  * Parse YYYY-MM-DD-like input as a local date range.
@@ -589,11 +592,20 @@ const getWastedSpendKeywords = async (userId, country, region, page = 1, limit =
             return { data: [], pagination: createPaginationMeta(page, limit, 0) };
         }
 
+        // Same rule as the wasted-spend task (AdsSignals.isWastedKeyword): the keyword's
+        // LATEST status is ENABLED, it has KEYWORD_MIN_CLICKS clicks, some of its spend
+        // is older than the attribution window, and it has no sales. Filtering each
+        // daily row by status (as before) summed only the pre-pause rows of a keyword
+        // paused mid-window, and judged spend whose sales could still be credited.
+        // Legacy single docs (no metricDate) carry undated rows: nothing in them can be
+        // called settled, exactly as the task treats them.
+        const settleCutoff = match.metricDate ? settleCutoffDay(country) : null;
+
         const skip = (page - 1) * limit;
         const aggregationResult = await adsKeywordsPerformanceModel.aggregate([
             { $match: match },
             { $unwind: '$keywordsData' },
-            { $match: { 'keywordsData.adKeywordStatus': 'ENABLED' } },
+            { $sort: { 'keywordsData.date': 1 } },
             {
                 $group: {
                     _id: {
@@ -610,12 +622,28 @@ const getWastedSpendKeywords = async (userId, country, region, page = 1, limit =
                     matchType: { $first: '$keywordsData.matchType' },
                     status: { $last: '$keywordsData.adKeywordStatus' },
                     spend: { $sum: { $ifNull: ['$keywordsData.cost', 0] } },
+                    settledSpend: {
+                        $sum: {
+                            $cond: [
+                                { $and: [{ $ne: [settleCutoff, null] }, { $lt: ['$keywordsData.date', settleCutoff] }] },
+                                { $ifNull: ['$keywordsData.cost', 0] },
+                                0,
+                            ],
+                        },
+                    },
                     sales: { $sum: { $ifNull: ['$keywordsData.attributedSales30d', 0] } },
                     impressions: { $sum: { $ifNull: ['$keywordsData.impressions', 0] } },
                     clicks: { $sum: { $ifNull: ['$keywordsData.clicks', 0] } },
                 },
             },
-            { $match: { spend: { $gt: 0 }, sales: { $lt: 0.01 } } },
+            {
+                $match: {
+                    status: 'ENABLED',
+                    clicks: { $gte: KEYWORD_MIN_CLICKS },
+                    settledSpend: { $gt: 0 },
+                    sales: { $lt: 0.01 },
+                },
+            },
             {
                 $addFields: {
                     ctr: {
@@ -903,6 +931,12 @@ const getSearchTermsZeroSales = async (userId, country, region, page = 1, limit 
             return { data: [], pagination: createPaginationMeta(page, limit, 0) };
         }
 
+        // Terms the seller already added as a negative are fixed, even though their past
+        // clicks stay in the window. Same rule as the zero-sale task (AdsSignals.isNegated):
+        // ad-group-level or campaign-level negative, same campaign, case-insensitive.
+        const negativesDoc = await loadLatestSnapshotDoc(NegativeKeywords, userIdStr, country, region);
+        const negatedKeys = [...buildNegatedIndex(negativesDoc?.negativeKeywordsData || [])];
+
         const skip = (page - 1) * limit;
         const aggregationResult = await SearchTerms.aggregate([
             { $match: match },
@@ -926,7 +960,25 @@ const getSearchTermsZeroSales = async (userId, country, region, page = 1, limit 
                     impressions: { $sum: { $ifNull: ['$searchTermData.impressions', 0] } },
                 },
             },
-            { $match: { clicks: { $gte: 10 }, sales: { $lt: 0.01 } } },
+            { $match: { clicks: { $gte: SEARCH_TERM_MIN_CLICKS }, sales: { $lt: 0.01 } } },
+            {
+                $addFields: {
+                    _negAdGroupKey: {
+                        $concat: [
+                            { $toString: { $ifNull: ['$campaignId', ''] } }, '|',
+                            { $toString: { $ifNull: ['$adGroupId', ''] } }, '|',
+                            { $toLower: { $trim: { input: { $ifNull: ['$searchTerm', ''] } } } },
+                        ],
+                    },
+                    _negCampaignKey: {
+                        $concat: [
+                            { $toString: { $ifNull: ['$campaignId', ''] } }, '||',
+                            { $toLower: { $trim: { input: { $ifNull: ['$searchTerm', ''] } } } },
+                        ],
+                    },
+                },
+            },
+            { $match: { _negAdGroupKey: { $nin: negatedKeys }, _negCampaignKey: { $nin: negatedKeys } } },
             {
                 $addFields: {
                     ctr: {
@@ -1017,6 +1069,9 @@ const getAutoCampaignInsights = async (userId, country, region, page = 1, limit 
         const manualKeywordsLower = Array.from(new Set(
             keywords
                 .filter((k) => manualCampaignIds.has(k.campaignId))
+                // EXACT only, matching the task: the advice is to add the term "as an
+                // exact match keyword", so broad/phrase does not count as migrated.
+                .filter((k) => !k.matchType || String(k.matchType).toUpperCase() === 'EXACT')
                 .map((k) => (k.keywordText || '').toLowerCase())
                 .filter(Boolean)
         ));
