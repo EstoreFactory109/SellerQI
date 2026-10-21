@@ -6,7 +6,7 @@
  * and parent-child ASIN aggregation.
  * 
  * Data Sources:
- * - EconomicsMetrics: Sales, profit, fees data
+ * - Economics (LiveEconomicsService: fresh EconomicsMetrics or live DailySkuFinance): Sales, profit, fees data
  * - CogsModel: Cost of goods sold per ASIN
  * - ProductWiseFinancial: Detailed product-wise financials
  * - AsinWiseSalesForBigAccounts: Big account data
@@ -16,7 +16,9 @@
  */
 
 const logger = require('../../utils/Logger.js');
-const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
+// Fresh EconomicsMetrics, else live DailySkuFinance, else null. The big-account side
+// collection is only read for a stored doc (its rows are keyed by that doc's _id).
+const { loadLiveEconomics, isStoredEconomicsDoc } = require('../Finance/LiveEconomicsService.js');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 const CogsModel = require('../../models/finance/CogsModel.js');
@@ -114,7 +116,7 @@ async function getProfitMarginCategories(userId, country, region) {
         
         // Get economics metrics and COGS
         const [economicsMetrics, cogsDoc] = await Promise.all([
-            EconomicsMetrics.findLatest(userObjectId, region, country),
+            loadLiveEconomics(userObjectId, region, country),
             CogsModel.findOne({ userId: userObjectId, countryCode: country }).lean()
         ]);
         
@@ -138,7 +140,7 @@ async function getProfitMarginCategories(userId, country, region) {
         let profitabilityData = [];
         const isBigAccount = economicsMetrics.isBig === true;
         
-        if (isBigAccount || (!economicsMetrics.asinWiseSales?.length && economicsMetrics.totalSales?.amount > 5000)) {
+        if (isStoredEconomicsDoc(economicsMetrics) && (isBigAccount || (!economicsMetrics.asinWiseSales?.length && economicsMetrics.totalSales?.amount > 5000))) {
             const profitMap = await AsinWiseSalesForBigAccounts.getProfitabilityMapByMetricsId(economicsMetrics._id);
             profitabilityData = Array.from(profitMap.values());
         } else if (Array.isArray(economicsMetrics.asinWiseSales)) {
@@ -270,7 +272,7 @@ async function getParentChildAggregation(userId, country, region) {
             ? new mongoose.Types.ObjectId(userId) 
             : userId;
         
-        const economicsMetrics = await EconomicsMetrics.findLatest(userObjectId, region, country);
+        const economicsMetrics = await loadLiveEconomics(userObjectId, region, country);
         
         if (!economicsMetrics) {
             return {
@@ -284,7 +286,7 @@ async function getParentChildAggregation(userId, country, region) {
         let asinData = [];
         const isBigAccount = economicsMetrics.isBig === true;
         
-        if (isBigAccount || (!economicsMetrics.asinWiseSales?.length && economicsMetrics.totalSales?.amount > 5000)) {
+        if (isStoredEconomicsDoc(economicsMetrics) && (isBigAccount || (!economicsMetrics.asinWiseSales?.length && economicsMetrics.totalSales?.amount > 5000))) {
             const profitMap = await AsinWiseSalesForBigAccounts.getProfitabilityMapByMetricsId(economicsMetrics._id);
             asinData = Array.from(profitMap.values());
         } else if (Array.isArray(economicsMetrics.asinWiseSales)) {
@@ -576,7 +578,7 @@ async function getDatewiseProfitability(userId, country, region) {
         const userIdStr = userId?.toString() || userId;
         
         const [economicsMetrics, ppcRollupPb] = await Promise.all([
-            EconomicsMetrics.findLatest(userObjectId, region, country),
+            loadLiveEconomics(userObjectId, region, country),
             PPCMetrics.rollupLastDays(userIdStr, country, region, 30)
         ]);
         const ppcMetrics =
@@ -729,7 +731,7 @@ async function getAsinWiseProfitability(userId, country, region, limit = 100) {
             : userId;
         
         const [economicsMetrics, cogsDoc, sellerData, adsSpendByAsin] = await Promise.all([
-            EconomicsMetrics.findLatest(userObjectId, region, country),
+            loadLiveEconomics(userObjectId, region, country),
             CogsModel.findOne({ userId: userObjectId, countryCode: country }).lean(),
             Seller.findOne(
                 { User: userId },
@@ -772,7 +774,7 @@ async function getAsinWiseProfitability(userId, country, region, limit = 100) {
         let asinData = [];
         const isBigAccount = economicsMetrics.isBig === true;
         
-        if (isBigAccount || (!economicsMetrics.asinWiseSales?.length && economicsMetrics.totalSales?.amount > 5000)) {
+        if (isStoredEconomicsDoc(economicsMetrics) && (isBigAccount || (!economicsMetrics.asinWiseSales?.length && economicsMetrics.totalSales?.amount > 5000))) {
             const profitMap = await AsinWiseSalesForBigAccounts.getProfitabilityMapByMetricsId(economicsMetrics._id);
             asinData = Array.from(profitMap.values());
         } else if (Array.isArray(economicsMetrics.asinWiseSales)) {
