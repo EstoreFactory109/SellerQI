@@ -17,7 +17,7 @@ const logger = require('../../utils/Logger.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const mongoose = require('mongoose');
 const { aggregateProductPerformance, enrichProductsWithPerformance } = require('./ProductPerformanceService.js');
-const ProfitabilityService = require('./ProfitabilityService.js');
+const { resolveAsinFinance } = require('../Finance/AsinFinanceWindowService.js');
 const { evaluateScenarios, buildMetrics } = require('./ScenarioRecommendationService.js');
 const { fetchAndEnrichWithComparison } = require('./ProductPerformanceComparisonService.js');
 
@@ -73,6 +73,37 @@ const buildProfitabilityMap = async (economicsData) => {
         }
     });
     
+    return profitabilityMap;
+};
+
+/**
+ * Profitability map (same keys as buildProfitabilityMap) from a resolved per-ASIN
+ * finance map (resolveAsinFinance, DailySkuFinance source).
+ *
+ * `ads` is deliberately ABSENT: DailySkuFinance has no per-ASIN ad spend, and
+ * ScenarioRecommendationService.buildMetrics reads `profitability.ads ?? performance.ppcSpend`,
+ * so leaving it out makes the scenarios use Ads API spend instead of a fake $0.
+ *
+ * @param {Object} asinPpcSales - { asin: { sales, unitsSold, totalFees, amazonFees, fbaFees, storageFees, grossProfit } }
+ * @returns {Map}
+ */
+const buildProfitabilityMapFromFinance = (asinPpcSales) => {
+    const profitabilityMap = new Map();
+    Object.entries(asinPpcSales || {}).forEach(([rawAsin, d]) => {
+        const asin = (rawAsin || '').trim();
+        if (!asin || !d) return;
+        profitabilityMap.set(asin, {
+            asin,
+            sales: d.sales || 0,
+            grossProfit: d.grossProfit || 0,
+            amzFee: d.amazonFees || 0,
+            fbaFees: d.fbaFees || 0,
+            storageFees: d.storageFees || 0,
+            totalFees: d.totalFees || 0,
+            unitsSold: d.unitsSold || 0,
+            refunds: 0
+        });
+    });
     return profitabilityMap;
 };
 
@@ -152,8 +183,11 @@ const getOptimizationProducts = async (userId, region, country, options = {}) =>
         sponsoredAdsArray = sponsoredAdsData;
     }
     
-    // Step 3: ASIN-wise sales/units from the same source as the profitability table
-    const { asinPpcSales: economicsAsinSalesOverride } = await ProfitabilityService.getAsinPpcSalesFromEconomics(economicsData);
+    // Step 3: ASIN-wise sales/units via the shared rule (resolveAsinFinance): a stale
+    // EconomicsMetrics map is dropped and live DailySkuFinance takes over, so the
+    // scenarios are judged on current sales, the same figures the dashboard uses.
+    const resolvedFinance = await resolveAsinFinance({ economicsMetrics: economicsData, userId, country, region });
+    const economicsAsinSalesOverride = resolvedFinance.asinPpcSales;
 
     // Step 3b: Use ProductPerformanceService for consistent performance data format
     // Pass economics override so sales/units match profitability (including big accounts).
@@ -166,7 +200,11 @@ const getOptimizationProducts = async (userId, region, country, options = {}) =>
     });
     
     // Step 4: Build profitability map (for detailed profitability metrics beyond basic sales)
-    const profitabilityMap = await buildProfitabilityMap(economicsData);
+    // Only a FRESH EconomicsMetrics doc is read directly; otherwise the map comes from
+    // the resolved live finance (buildProfitabilityMap would re-read the stale doc).
+    const profitabilityMap = resolvedFinance.source === 'economicsMetrics'
+        ? await buildProfitabilityMap(economicsData)
+        : buildProfitabilityMapFromFinance(resolvedFinance.asinPpcSales);
     
     logger.info(`[OptimizationService] Built maps - performance: ${performanceMap.size} ASINs, profitability: ${profitabilityMap.size} ASINs`);
     
@@ -269,4 +307,5 @@ const getOptimizationProducts = async (userId, region, country, options = {}) =>
 module.exports = {
     getOptimizationProducts,
     buildProfitabilityMap,
+    buildProfitabilityMapFromFinance,
 };

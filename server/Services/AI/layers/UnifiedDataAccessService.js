@@ -24,7 +24,8 @@ const {
     enrichProductsWithRecommendations,
 } = require('../../Calculations/RecommendationService.js');
 const { fetchAndEnrichWithComparison } = require('../../Calculations/ProductPerformanceComparisonService.js');
-const ProfitabilityService = require('../../Calculations/ProfitabilityService.js');
+const { resolveAsinFinance } = require('../../Finance/AsinFinanceWindowService.js');
+const { summarizeBuyBoxCounts, activeAsinSetOf } = require('../../Calculations/RecoverableAmountUtils.js');
 const ExpenseReadService = require('../../Finance/ExpenseReadService.js');
 const { buildExpenseReportResponseFromDB } = require('../../Sp_API/FinanceService.js');
 const { pickSnapshotFeeTotalsForCalendar } = require('../../../utils/expenseSnapshotCalendar.js');
@@ -387,8 +388,15 @@ async function fetchIssuesByProductParity({ userId, country, region, question })
     const calculatedData = await analyseData(rawData, userId);
     const dashboardData = calculatedData?.dashboardData || {};
     const productList = dashboardData.productWiseError || [];
-    const { asinPpcSales: economicsAsinSalesOverride } =
-        await ProfitabilityService.getAsinPpcSalesFromEconomics(rawData?.EconomicsMetrics);
+    // Same per-ASIN rule as the Issues-by-Product page this mirrors (resolveAsinFinance):
+    // a stale EconomicsMetrics map is dropped for live DailySkuFinance, so QMate
+    // never quotes April-2026 sales as current.
+    const { asinPpcSales: economicsAsinSalesOverride } = await resolveAsinFinance({
+        economicsMetrics: rawData?.EconomicsMetrics,
+        userId,
+        country,
+        region,
+    });
     const performanceMap = aggregateProductPerformance({
         productList,
         buyBoxData: rawData?.BuyBoxData,
@@ -434,11 +442,11 @@ async function fetchIssuesByProductParity({ userId, country, region, question })
             InventoryAnalysis: dashboardData.InventoryAnalysis || {},
             Country: dashboardData.Country,
             profitibilityData: dashboardData.profitibilityData || [],
+            // Active ASINs only, same rule as the dashboard and Issues-by-Product
+            // (summarizeBuyBoxCounts), so productsWithoutBuyBox = the No Buy Box task count.
             buyBoxSummary: rawData?.BuyBoxData
                 ? {
-                      totalProducts: rawData.BuyBoxData.totalProducts,
-                      productsWithBuyBox: rawData.BuyBoxData.productsWithBuyBox,
-                      productsWithoutBuyBox: rawData.BuyBoxData.productsWithoutBuyBox,
+                      ...summarizeBuyBoxCounts(rawData.BuyBoxData, activeAsinSetOf(rawData.TotalProducts)),
                       dateRange: rawData.BuyBoxData.dateRange,
                   }
                 : null,

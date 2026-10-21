@@ -35,6 +35,7 @@ const ExpenseReadService = require('../Finance/ExpenseReadService.js');
 const { buildExpenseReportResponseFromDB } = require('../Sp_API/FinanceService.js');
 const { pickSnapshotFeeTotalsForCalendar } = require('../../utils/expenseSnapshotCalendar.js');
 const mongoose = require('mongoose');
+const { classifyBuyBoxLoss, summarizeBuyBoxCounts, activeAsinSetOf } = require('../Calculations/RecoverableAmountUtils.js');
 
 function pickDateRangeStrings(dateRange) {
     const from = dateRange?.startDate || dateRange?.from || dateRange?.start || null;
@@ -815,10 +816,20 @@ async function getBuyBoxData(userId, country, region) {
             ? new mongoose.Types.ObjectId(userId) 
             : userId;
         
-        // Newest NON-EMPTY day: an empty Data Kiosk day (totalProducts 0) would
-        // otherwise tell QMate the seller has no Buy Box data at all.
-        const [buyBoxData] = await BuyBoxData.findRecentDays(userObjectId, region, country, 1);
-        
+        // The same 7-day effective doc the dashboard and the task list use
+        // (findRecentDays(..., 7) -> classifyBuyBoxLoss), counted over ACTIVE ASINs
+        // (summarizeBuyBoxCounts). QMate used to quote the newest single day's raw
+        // stored counts — all ASINs, one day — so it disagreed with the dashboard
+        // and treated a one-day 0% blip as a lost Buy Box.
+        const [days, sellerDoc] = await Promise.all([
+            BuyBoxData.findRecentDays(userObjectId, region, country, 7),
+            Seller.findOne(
+                { User: userObjectId },
+                { sellerAccount: { $elemMatch: { region, country } } }
+            ).lean()
+        ]);
+        const buyBoxData = classifyBuyBoxLoss(days);
+
         if (!buyBoxData) {
             return {
                 success: false,
@@ -827,26 +838,34 @@ async function getBuyBoxData(userId, country, region) {
                 data: null
             };
         }
-        
+
+        const activeAsinSet = activeAsinSetOf(sellerDoc?.sellerAccount?.[0]?.products);
+        const counts = summarizeBuyBoxCounts(buyBoxData, activeAsinSet);
         const summary = {
-            totalProducts: buyBoxData.totalProducts || 0,
-            productsWithBuyBox: buyBoxData.productsWithBuyBox || 0,
-            productsWithoutBuyBox: buyBoxData.productsWithoutBuyBox || 0,
-            buyBoxPercentage: buyBoxData.totalProducts > 0 
-                ? parseFloat(((buyBoxData.productsWithBuyBox / buyBoxData.totalProducts) * 100).toFixed(2))
+            ...counts,
+            buyBoxPercentage: counts.totalProducts > 0
+                ? parseFloat(((counts.productsWithBuyBox / counts.totalProducts) * 100).toFixed(2))
                 : 0,
             dateRange: buyBoxData.dateRange
         };
-        
-        // Get top products without buybox (for recommendations)
+
+        // Active products that lost the Buy Box (0%) or hold it below 50% on their
+        // own newest reading. Unknown (null) and carried-forward percentages are
+        // NOT "low": null < 50 is true in JS, which used to list never-measured
+        // products here.
         const productsWithoutBuyBox = (buyBoxData.asinBuyBoxData || [])
-            .filter(p => p.buyBoxPercentage < 50)
+            .filter(p => p && p.childAsin && activeAsinSet.has(p.childAsin))
+            .filter(p => typeof p.buyBoxPercentage === 'number' && (
+                p.buyBoxPercentage === 0
+                || (p.buyBoxPercentage < 50 && !p.buyBoxPercentageCarriedForward)
+            ))
             .sort((a, b) => (b.sales?.amount || 0) - (a.sales?.amount || 0))
             .slice(0, 20)
             .map(p => ({
                 asin: p.childAsin,
                 parentAsin: p.parentAsin,
                 buyBoxPercentage: p.buyBoxPercentage,
+                buyBoxLost: p.buyBoxLost === true,
                 sales: p.sales?.amount || 0,
                 pageViews: p.pageViews || 0,
                 sessions: p.sessions || 0

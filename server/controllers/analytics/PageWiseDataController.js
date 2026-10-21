@@ -28,6 +28,7 @@ const AccountHistory = require('../../models/user-auth/AccountHistory.js');
 const User = require('../../models/user-auth/userModel.js');
 const { getProductWiseSponsoredAdsData } = require('../../Services/amazon-ads/ProductWiseSponsoredAdsService.js');
 const ProfitabilityService = require('../../Services/Calculations/ProfitabilityService.js');
+const { summarizeBuyBoxCounts, activeAsinSetOf } = require('../../Services/Calculations/RecoverableAmountUtils.js');
 const { enrichProductsWithFbaInventory } = require('../../Services/inventory/AmazonInventoryDisplayMapper.js');
 
 /**
@@ -600,7 +601,15 @@ const getIssuesByProductData = asyncHandler(async (req, res) => {
         
         // Aggregate performance metrics per ASIN (sales/units same source as profitability table)
         const productList = dashboardData.productWiseError || [];
-        const { asinPpcSales: economicsAsinSalesOverride } = await ProfitabilityService.getAsinPpcSalesFromEconomics(rawData.EconomicsMetrics);
+        // Shared per-ASIN rule: a stale EconomicsMetrics map is dropped and live
+        // DailySkuFinance takes over, so these figures match the dashboard.
+        const { resolveAsinFinance } = require('../../Services/Finance/AsinFinanceWindowService.js');
+        const { asinPpcSales: economicsAsinSalesOverride } = await resolveAsinFinance({
+            economicsMetrics: rawData.EconomicsMetrics,
+            userId,
+            country: Country,
+            region: Region
+        });
         const performanceMap = aggregateProductPerformance({
             productList,
             buyBoxData: rawData.BuyBoxData,
@@ -672,11 +681,12 @@ const getIssuesByProductData = asyncHandler(async (req, res) => {
             Country: dashboardData.Country,
             // Include profitability data for Product Details page (grossProfit per ASIN)
             profitibilityData: dashboardData.profitibilityData || [],
-            // Include BuyBox summary for reference
+            // Include BuyBox summary for reference. Counted over ACTIVE ASINs by the
+            // same rule as the dashboard (summarizeBuyBoxCounts), so "without Buy
+            // Box" here equals the No Buy Box task count rather than the effective
+            // doc's all-ASIN figure.
             buyBoxSummary: rawData.BuyBoxData ? {
-                totalProducts: rawData.BuyBoxData.totalProducts,
-                productsWithBuyBox: rawData.BuyBoxData.productsWithBuyBox,
-                productsWithoutBuyBox: rawData.BuyBoxData.productsWithoutBuyBox,
+                ...summarizeBuyBoxCounts(rawData.BuyBoxData, activeAsinSetOf(rawData.TotalProducts)),
                 dateRange: rawData.BuyBoxData.dateRange
             } : null,
             // Comparison metadata (if comparison was requested)
@@ -928,6 +938,8 @@ const getInventoryData = asyncHandler(async (req, res) => {
  * 
  * For normal accounts: Returns asinWiseSales from EconomicsMetrics
  * For big accounts (isBig=true): Returns asinWiseSales from AsinWiseSalesForBigAccounts collection
+ * Stale (> ECONOMICS_MAX_AGE_DAYS), missing or empty EconomicsMetrics: live
+ * DailySkuFinance via resolveAsinFinance, as aggregated rows (`source: 'dailySkuFinance'`).
  */
 const getAsinWiseSalesData = asyncHandler(async (req, res) => {
     const userId = req.userId;
@@ -944,11 +956,58 @@ const getAsinWiseSalesData = asyncHandler(async (req, res) => {
             region: region
         }).sort({ createdAt: -1 }).lean();
 
-        if (!economicsMetrics) {
-            logger.warn('No economics metrics found for ASIN-wise sales', { userId, country, region });
+        // EconomicsMetrics stopped being written in April 2026 but this query still
+        // returns its last doc, so Product Details and the Profitability table were
+        // showing ~6-month-old per-ASIN sales as current. Resolve with the shared
+        // rule first: only a FRESH doc is read below exactly as before; a stale or
+        // missing doc is served from live DailySkuFinance (30 days to yesterday).
+        const { resolveAsinFinance, resolveWindow } = require('../../Services/Finance/AsinFinanceWindowService.js');
+        const { isEconomicsFresh } = require('../../Services/Calculations/RecoverableAmountUtils.js');
+
+        // Live fallback, shared by "no/stale doc" and "fresh doc with no per-ASIN rows".
+        const respondFromLiveFinance = async () => {
+            // Passing the doc lets the resolver log a stale drop with its age.
+            const resolved = await resolveAsinFinance({ economicsMetrics, userId, country, region });
+            if (resolved.source !== 'dailySkuFinance') {
+                logger.warn('No current per-ASIN finance for ASIN-wise sales', {
+                    userId, country, region, hasEconomicsMetrics: !!economicsMetrics
+                });
+                return res.status(200).json(
+                    new ApiResponse(200, { asinWiseSales: [], isBig: false }, "No economics metrics data found")
+                );
+            }
+            // Same aggregated row shape the big-account branch below returns
+            // ({ amount } money fields, date: null), which both clients already read.
+            const liveRows = Object.entries(resolved.asinPpcSales).map(([asin, d]) => ({
+                asin,
+                parentAsin: d.parentAsin || asin,
+                sales: { amount: d.sales || 0 },
+                grossProfit: { amount: d.grossProfit || 0 },
+                unitsSold: d.unitsSold || 0,
+                refunds: { amount: 0 },
+                // Per-ASIN ad spend is not in DailySkuFinance; clients fall back to Ads API spend.
+                ppcSpent: { amount: 0 },
+                fbaFees: { amount: d.fbaFees || 0 },
+                storageFees: { amount: d.storageFees || 0 },
+                amazonFees: { amount: d.amazonFees || 0 },
+                totalFees: { amount: d.totalFees || 0 },
+                date: null
+            }));
+            const { startStr, endStr } = resolveWindow(null, null);
             return res.status(200).json(
-                new ApiResponse(200, { asinWiseSales: [], isBig: false }, "No economics metrics data found")
+                new ApiResponse(200, {
+                    asinWiseSales: liveRows,
+                    isBig: false,
+                    isAggregated: true,
+                    dateRange: { startDate: startStr, endDate: endStr },
+                    metricsId: null,
+                    source: 'dailySkuFinance'
+                }, "ASIN-wise sales data retrieved successfully")
             );
+        };
+
+        if (!economicsMetrics || !isEconomicsFresh(economicsMetrics)) {
+            return respondFromLiveFinance();
         }
 
         let asinWiseSales = [];
@@ -1020,6 +1079,11 @@ const getAsinWiseSalesData = asyncHandler(async (req, res) => {
                 region,
                 totalRecords: asinWiseSales.length
             });
+        }
+
+        // A fresh doc with no per-ASIN rows: same rule as resolveAsinFinance (empty -> live).
+        if (asinWiseSales.length === 0) {
+            return respondFromLiveFinance();
         }
 
         return res.status(200).json(

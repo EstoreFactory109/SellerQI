@@ -23,7 +23,10 @@ const logger = require('../../utils/Logger.js');
  * @param {Object} params.buyBoxData - BuyBox data with asinBuyBoxData array
  * @param {Object} params.economicsMetrics - Economics metrics with asinWiseSales
  * @param {Object|null} params.economicsAsinSalesOverride - Optional ASIN -> sales row object from
- *   ProfitabilityService.getAsinPpcSalesFromEconomics (same source as profitability table; includes big accounts).
+ *   AsinFinanceWindowService.resolveAsinFinance (fresh EconomicsMetrics, else live DailySkuFinance —
+ *   the same per-ASIN source as the dashboard). Every live caller passes it; an empty object means
+ *   "no current per-ASIN finance" and deliberately does NOT fall through to the raw
+ *   economicsMetrics.asinWiseSales below, which may be a stale April-2026 doc.
  * @returns {Map<string, Object>} Map of ASIN -> performance metrics
  */
 function aggregateProductPerformance({
@@ -79,7 +82,7 @@ function aggregateProductPerformance({
         });
     }
     
-    // 3. Economics ASIN-wise sales (same semantics as profitability table / getAsinPpcSalesFromEconomics)
+    // 3. Per-ASIN sales (resolveAsinFinance: fresh EconomicsMetrics or live DailySkuFinance)
     const economicsMap = new Map();
     if (economicsAsinSalesOverride && typeof economicsAsinSalesOverride === 'object') {
         Object.entries(economicsAsinSalesOverride).forEach(([asin, data]) => {
@@ -132,7 +135,7 @@ function aggregateProductPerformance({
         // CTR = (clicks / impressions) * 100
         const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
         
-        // Sales / units: align with profitability table — Economics (getAsinPpcSalesFromEconomics) wins when present
+        // Sales / units: align with the dashboard — the resolved per-ASIN finance (resolveAsinFinance) wins when present
         const sales = hasEconomicsRow
             ? (Number(economics.totalSales) || 0)
             : (buyBox.sales || economics.totalSales || 0);

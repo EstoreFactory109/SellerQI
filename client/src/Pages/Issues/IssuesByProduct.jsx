@@ -9,6 +9,7 @@ import { IssuesByProductPageSkeleton, IssuesProductCardSkeleton } from '../../Co
 import { formatCurrencyWithLocale } from '../../utils/currencyUtils.js';
 import axiosInstance from '../../config/axios.config.js';
 import { fetchProductsWithIssues, fetchIssuesSummary } from '../../redux/slices/PageDataSlice.js';
+import { classifyBuyBoxIssue } from '../../utils/buyBoxIssue.js';
 
 // Helper function to format messages with important details highlighted on separate line
 const formatMessageWithHighlight = (message) => {
@@ -887,9 +888,11 @@ const ConversionIssuesTable = ({ product }) => {
         }
         
         // Extract buybox errors from product.buyBoxDetails (enriched from backend)
+        // classifyBuyBoxIssue: null / carried-forward percentages are never "Low".
         const productBuyBox = product.buyBoxDetails;
-        if (productBuyBox && (productBuyBox.buyBoxPercentage === 0 || productBuyBox.buyBoxPercentage < 50)) {
-            if (productBuyBox.buyBoxPercentage === 0) {
+        const buyBoxIssue = classifyBuyBoxIssue(productBuyBox);
+        if (buyBoxIssue) {
+            if (buyBoxIssue === 'noBuyBox') {
                 errorRows.push({
                     issueHeading: 'Buy Box | No Buy Box',
                     message: `This product has 0% Buy Box ownership. With ${productBuyBox.pageViews || 0} page views and ${productBuyBox.sessions || 0} sessions, you're losing potential sales to competitors who own the Buy Box.`,
@@ -1311,9 +1314,7 @@ const IssuesByProduct = () => {
     
     // Check if product has any buybox issues - O(1) lookup
     const hasAnyBuyboxIssues = useCallback((product) => {
-        const productBuyBox = lookupMaps.buyboxMap.get(product.asin);
-        if (!productBuyBox) return false;
-        return productBuyBox.buyBoxPercentage === 0 || productBuyBox.buyBoxPercentage < 50;
+        return classifyBuyBoxIssue(lookupMaps.buyboxMap.get(product.asin)) !== null;
     }, [lookupMaps.buyboxMap]);
     
     // Count ranking issues - O(1) lookup
@@ -1366,8 +1367,7 @@ const IssuesByProduct = () => {
         }
         
         // Also count buybox issues - O(1) lookup
-        const productBuyBox = lookupMaps.buyboxMap.get(product.asin);
-        if (productBuyBox && (productBuyBox.buyBoxPercentage === 0 || productBuyBox.buyBoxPercentage < 50)) {
+        if (classifyBuyBoxIssue(lookupMaps.buyboxMap.get(product.asin))) {
             count++;
         }
         
@@ -1966,5 +1966,8 @@ const IssuesByProduct = () => {
         </div>
     );
 };
+
+// Named export for tests (Buy Box issue rendering).
+export { ConversionIssuesTable };
 
 export default IssuesByProduct;

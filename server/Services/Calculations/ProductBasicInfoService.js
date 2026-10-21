@@ -10,7 +10,7 @@ const mongoose = require('mongoose');
 const NumberOfProductReviews = require('../../models/seller-performance/NumberOfProductReviewsModel.js');
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 const ProductWiseSponsoredAdsItem = require('../../models/amazon-ads/ProductWiseSponsoredAdsItemModel.js');
-const ProfitabilityService = require('./ProfitabilityService.js');
+const { resolveAsinFinance } = require('../Finance/AsinFinanceWindowService.js');
 const logger = require('../../utils/Logger.js');
 const { marketplaceShowsBrandStory } = require('./Conversion.js');
 
@@ -134,18 +134,22 @@ async function fetchCatalogData(userId, country, region, asin) {
 }
 
 /**
- * Fetch economics data (sales, profit, fees) using the same ASIN aggregation as the profitability table
- * (ProfitabilityService.getAsinPpcSalesFromEconomics — normal + big accounts + duplicate ASIN rows).
+ * Fetch economics data (sales, profit, fees) via the shared per-ASIN rule
+ * (AsinFinanceWindowService.resolveAsinFinance): a FRESH EconomicsMetrics doc is
+ * aggregated as before (normal + big accounts + duplicate ASIN rows); a stale or
+ * missing one is replaced by live DailySkuFinance, so product details stop showing
+ * April-2026 sales as current.
  */
 async function fetchEconomicsData(userId, country, region, asin) {
     try {
         const doc = await EconomicsMetrics.findLatest(userId, region, country);
 
-        if (!doc) {
-            return {};
-        }
-
-        const { asinPpcSales } = await ProfitabilityService.getAsinPpcSalesFromEconomics(doc);
+        const { asinPpcSales } = await resolveAsinFinance({
+            economicsMetrics: doc || null,
+            userId,
+            country,
+            region
+        });
         const normalized = (asin || '').trim().toUpperCase();
         let row = null;
         if (asinPpcSales && typeof asinPpcSales === 'object') {
