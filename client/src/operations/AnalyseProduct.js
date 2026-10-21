@@ -100,6 +100,9 @@ const AnalyseProduct = async (asin,country) => {
                 conversionErrors: conversionErrors,
                 actualImageCount: productPhotos.length,
                 actualVideoCount: productVideos?.length || 0,
+                actualBulletCount: Array.isArray(data["about_product"])
+                    ? data["about_product"].filter(b => typeof b === 'string').length
+                    : 0,
             }
         }
       } catch (error) {

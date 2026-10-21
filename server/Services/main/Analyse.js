@@ -1404,10 +1404,16 @@ class AnalyseService {
         }, 0);
         totalErrorsAllCategories += rankingErrors;
 
-        // Count backend keyword errors
-        const keywordErrors = conversionData.rankingsData.BackendKeywordResultArray.reduce((count, item) => {
-            return count + ((item && item.data && item.data.NumberOfErrors) || 0);
-        }, 0);
+        // Count backend keyword errors. Rows are per SKU, so an ASIN sold under
+        // several SKUs arrives several times; count it once, keeping its worst row,
+        // as DashboardCalculation does (tasks are one per ASIN and error type).
+        const keywordErrorsByAsin = new Map();
+        conversionData.rankingsData.BackendKeywordResultArray.forEach((item) => {
+            if (!item || !item.asin || !item.data) return;
+            const errors = item.data.NumberOfErrors || 0;
+            keywordErrorsByAsin.set(item.asin, Math.max(keywordErrorsByAsin.get(item.asin) || 0, errors));
+        });
+        const keywordErrors = [...keywordErrorsByAsin.values()].reduce((count, errors) => count + errors, 0);
         totalErrorsAllCategories += keywordErrors;
 
         // Count buybox errors

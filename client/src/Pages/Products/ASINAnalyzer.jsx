@@ -196,18 +196,11 @@ const ASINAnalyzer = () => {
     // Helper function to get bullet points info
     const getBulletPointsInfo = () => {
       const bulletResult = analysisResult.rankingResult?.BulletPoints;
-      
-      // No bullet points at all
-      if (bulletResult?.nullCheck?.status === 'Error' || bulletResult?.emptyArray?.status === 'Error') {
+
+      // No bullets is no data, so the check passes; only the count tells it apart
+      // from good bullets.
+      if (analysisResult.actualBulletCount === 0) {
         return { count: 0, avgLength: 0 };
-      }
-      
-      // Has bullet points but issues with null items
-      if (bulletResult?.nullItems?.status === 'Error') {
-        const message = bulletResult.nullItems.Message || '';
-        const match = message.match(/(\d+)\s*bullet/);
-        const nullCount = match ? parseInt(match[1]) : 1;
-        return { count: Math.max(5 - nullCount, 1), avgLength: 100 }; // Some are null
       }
       
       // Character limit issues - has bullets but too short
@@ -227,9 +220,9 @@ const ASINAnalyzer = () => {
     // Helper function to get description length
     const getDescriptionLength = () => {
       const descResult = analysisResult.rankingResult?.Description;
-      
-      // No description
-      if (descResult?.nullCheck?.status === 'Error' || descResult?.emptyArray?.status === 'Error') {
+
+      // No description: the check returns no charLim for it (no data, no error).
+      if (descResult && !descResult.charLim) {
         return 0;
       }
       
@@ -427,27 +420,6 @@ const ASINAnalyzer = () => {
     }
 
     // Bullet Points checks
-    if (analysisResult.rankingResult?.BulletPoints?.nullCheck?.status === 'Error') {
-      rankingIssues.push({
-        id: 'bullets-null',
-        label: 'Bullet Points Null Check',
-        message: analysisResult.rankingResult.BulletPoints.nullCheck.Message
-      });
-    }
-    if (analysisResult.rankingResult?.BulletPoints?.emptyArray?.status === 'Error') {
-      rankingIssues.push({
-        id: 'bullets-empty',
-        label: 'Bullet Points Empty Array',
-        message: analysisResult.rankingResult.BulletPoints.emptyArray.Message
-      });
-    }
-    if (analysisResult.rankingResult?.BulletPoints?.nullItems?.status === 'Error') {
-      rankingIssues.push({
-        id: 'bullets-null-items',
-        label: 'Bullet Points Null Items',
-        message: analysisResult.rankingResult.BulletPoints.nullItems.Message
-      });
-    }
     if (analysisResult.rankingResult?.BulletPoints?.charLim?.status === 'Error') {
       rankingIssues.push({
         id: 'bullets-charlim',
@@ -471,20 +443,6 @@ const ASINAnalyzer = () => {
     }
 
     // Description checks
-    if (analysisResult.rankingResult?.Description?.nullCheck?.status === 'Error') {
-      rankingIssues.push({
-        id: 'description-null',
-        label: 'Description Null Check',
-        message: analysisResult.rankingResult.Description.nullCheck.Message
-      });
-    }
-    if (analysisResult.rankingResult?.Description?.emptyArray?.status === 'Error') {
-      rankingIssues.push({
-        id: 'description-empty',
-        label: 'Description Empty Array',
-        message: analysisResult.rankingResult.Description.emptyArray.Message
-      });
-    }
     if (analysisResult.rankingResult?.Description?.charLim?.status === 'Error') {
       rankingIssues.push({
         id: 'description-charlim',

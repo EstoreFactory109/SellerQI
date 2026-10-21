@@ -120,4 +120,19 @@ describe('calculateErrorSummary', () => {
         expect(summary.conversionErrors).toBe(1); // A+ on A
         expect(summary.buyboxErrors).toBe(1);     // Buy Box on A
     });
+
+    it('counts backend keyword errors once per ASIN, not once per SKU', () => {
+        const conversion = run({
+            products: [{ asin: 'A', status: 'Active' }],
+            reviews: [cleanProduct('A')],
+            // Two SKUs of one ASIN, each with duplicate words.
+            keywords: [
+                { asin: 'A', value: `${goodKeywords} kw000` },
+                { asin: 'A', value: `${goodKeywords} kw001` },
+            ],
+        });
+        expect(conversion.rankingsData.BackendKeywordResultArray).toHaveLength(2);
+        const summary = AnalyseService.calculateErrorSummary(conversion, { errorsByAsin: new Map() });
+        expect(summary.keywordErrors).toBe(1);
+    });
 });

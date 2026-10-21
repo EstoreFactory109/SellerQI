@@ -1816,21 +1816,11 @@ const analyseData = async (data, userId = null, options = {}) => {
         fourth = getTopErrorProduct(UniqueProductWisError, 3);
     }
 
-    // Add backend keyword errors to top 4 if applicable (only for active products) with safe data access
-    const uniqueBackendKeywordData = Array.isArray(backendKeywordResultArray) ? 
-        Array.from(
-            new Map(backendKeywordResultArray.filter((obj) => obj && obj.asin && activeProductSet.has(obj.asin)).map(obj => [obj.asin, obj])).values()
-        ) : [];
-
-    uniqueBackendKeywordData.forEach((elm) => {
-        if (elm.data?.NumberOfErrors === 1) {
-            [first, second, third, fourth].forEach(slot => {
-                if (slot && slot.asin === elm.asin) {
-                    slot.errors++;
-                }
-            });
-        }
-    });
+    // Backend keyword errors are already in both top-4 sources: productWiseError
+    // .errors (added above) and the Seller issueCount the optimized query reads,
+    // which ProductIssuesService copies from productWiseError. A block here used to
+    // add 1 more per backend-keyword error, so a top-4 product showed one error
+    // more than its own count and its task list.
 
     // Calculate profitability and sponsored ads errors (already filtered for active products) with error handling
     let profitabilityErrorsData = { totalErrors: 0, errorDetails: [] };
