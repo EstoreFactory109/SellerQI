@@ -22,7 +22,8 @@ const AsinWiseSalesRun = require('../../models/finance/AsinWiseSalesRunModel.js'
 const AsinWiseSalesItem = require('../../models/finance/AsinWiseSalesItemModel.js');
 const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
 const DataFetchTracking = require('../../models/system/DataFetchTrackingModel.js');
-const { computeProfitabilityAmount, classifyProfitabilityRow, isEconomicsFresh, ECONOMICS_MAX_AGE_DAYS, computeSponsoredAdsAmount, computeBuyBoxBenchmark, computeBuyBoxLostRevenueAmount, computeBuyBoxProfitImpact } = require('./RecoverableAmountUtils.js');
+const { resolveAsinFinance } = require('../Finance/AsinFinanceWindowService.js');
+const { computeProfitabilityAmount, classifyProfitabilityRow, computeSponsoredAdsAmount, computeBuyBoxBenchmark, computeBuyBoxLostRevenueAmount, computeBuyBoxProfitImpact } = require('./RecoverableAmountUtils.js');
 const {
     TARGET_ACOS_PERCENT,
     SEARCH_TERM_MIN_CLICKS,
@@ -920,48 +921,31 @@ const analyseData = async (data, userId = null, options = {}) => {
     ]);
     logger.info(`[PERF] getPpcSalesFromEconomics + getTop4ProductsByIssuesOptimized completed in ${Date.now() - stepStart}ms`);
 
-    // Per-ASIN sales/fees from the LIVE finance collection when EconomicsMetrics has
-    // none. EconomicsMetrics stopped being written in April 2026, so for almost every
-    // account the map above is empty — which made profitability read `sales: 0` for
-    // every product and report profitable products as "losing money on every sale,
-    // Revenue: $0.00". DailySkuFinance is what the Profitability page already reads.
-    //
+    // Per-ASIN sales/fees: resolved by the shared rule in
+    // AsinFinanceWindowService.resolveAsinFinance — the same rule every other
+    // per-ASIN reader (product details, Issues-by-Product, Optimization, QMate,
+    // legacy profitability) now uses, so they cannot disagree with the dashboard.
+    //   - a STALE EconomicsMetrics map (the collection stopped being written in
+    //     April 2026, findLatest still returns the last doc) is dropped, loudly;
+    //   - an empty map falls back to live DailySkuFinance for this window.
     // Only the per-ASIN map is substituted. Account-level totals (totalSales,
     // totalPpcSpent) keep their existing sources so the dashboard headline figures
-    // are not moved by this.
-    // A stale EconomicsMetrics doc is worse than none: its per-ASIN map would be used
-    // as if current. Drop it so the live fallback below takes over.
-    const economicsStale = Object.keys(economicsData.asinPpcSales || {}).length > 0
-        && !isEconomicsFresh(data.EconomicsMetrics);
-    if (economicsStale) {
-        logger.warn('Ignoring stale EconomicsMetrics per-ASIN finance', {
-            userId, country, region,
-            createdAt: data.EconomicsMetrics?.createdAt,
-            maxAgeDays: ECONOMICS_MAX_AGE_DAYS,
-            staleAsins: Object.keys(economicsData.asinPpcSales).length
+    // are not moved by this. The map built above is passed in so it is not rebuilt.
+    const resolvedAsinFinance = await resolveAsinFinance({
+        economicsMetrics: data.EconomicsMetrics,
+        economicsAsinPpcSales: economicsData.asinPpcSales || {},
+        // No userId -> no live fallback (unchanged: the old inline block required it too).
+        userId,
+        country,
+        region,
+        startDate: data.startDate,
+        endDate: data.endDate
+    });
+    economicsData.asinPpcSales = resolvedAsinFinance.asinPpcSales;
+    if (resolvedAsinFinance.source === 'dailySkuFinance') {
+        logger.info('Per-ASIN finance sourced from DailySkuFinance (EconomicsMetrics empty or stale)', {
+            userId, country, region, asins: Object.keys(economicsData.asinPpcSales).length
         });
-        economicsData.asinPpcSales = {};
-    }
-    if (userId && Object.keys(economicsData.asinPpcSales || {}).length === 0) {
-        try {
-            const { getAsinFinanceForWindow } = require('../Finance/AsinFinanceWindowService.js');
-            const liveAsinFinance = await getAsinFinanceForWindow(
-                userId, country, region, data.startDate, data.endDate
-            );
-            const liveCount = Object.keys(liveAsinFinance).length;
-            if (liveCount > 0) {
-                economicsData.asinPpcSales = liveAsinFinance;
-                logger.info('Per-ASIN finance sourced from DailySkuFinance (EconomicsMetrics empty)', {
-                    userId, country, region, asins: liveCount
-                });
-            }
-        } catch (financeError) {
-            // Leave the empty map rather than failing the dashboard; downstream
-            // already tolerates it (it is today's behaviour for every account).
-            logger.error('Could not source per-ASIN finance from DailySkuFinance', {
-                error: financeError.message, userId, country, region
-            });
-        }
     }
     logger.info("EconomicsMetrics data extracted", {
         totalPpcSpent: economicsData.totalPpcSpent,
@@ -1766,10 +1750,11 @@ const analyseData = async (data, userId = null, options = {}) => {
     let profitabilityErrorsOk = false;
     let sponsoredAdsErrorsOk = false;
     // Fresh = the per-ASIN map is non-empty after a stale EconomicsMetrics doc was
-    // dropped, i.e. it is live DailySkuFinance or a recent doc. Without it no
-    // profitability verdict is trustworthy, so none is made — and task reconcile must
-    // not read "no verdicts" as "every profitability problem was fixed".
-    const financeFresh = Object.keys(economicsData.asinPpcSales || {}).length > 0;
+    // dropped, i.e. it is live DailySkuFinance or a recent doc (resolveAsinFinance's
+    // financeFresh, by definition). Without it no profitability verdict is
+    // trustworthy, so none is made — and task reconcile must not read "no
+    // verdicts" as "every profitability problem was fixed".
+    const financeFresh = resolvedAsinFinance.financeFresh;
     
     try {
         profitabilityErrorsData = calculateProfitabilityErrors(profitibilityData, TotalProducts, { financeFresh });

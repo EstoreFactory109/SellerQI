@@ -42,6 +42,7 @@
 const mongoose = require('mongoose');
 const logger = require('../../utils/Logger.js');
 const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
+const { isEconomicsFresh, ECONOMICS_MAX_AGE_DAYS, toTime } = require('../Calculations/RecoverableAmountUtils.js');
 
 /** Default window: the 30 days ending yesterday (UTC), matching the report-style defaults elsewhere. */
 const DEFAULT_WINDOW_DAYS = 30;
@@ -163,12 +164,125 @@ async function getAsinFinanceForWindow(userId, country, region, startDate = null
     return map;
 }
 
+/**
+ * The ONE answer to "what per-ASIN sales/fees should this reader show?".
+ *
+ * WHY. EconomicsMetrics stopped being written in April 2026, but `findLatest`
+ * still returns its last doc, and for big accounts that doc carries a full
+ * per-ASIN map. Every reader that took `getAsinPpcSalesFromEconomics(doc)` at
+ * face value showed ~6-month-old sales as if current, and the live
+ * DailySkuFinance fallback (which only ran on an EMPTY map, and only in
+ * DashboardCalculation) never fired for exactly the accounts that had a map.
+ * Product details, Issues-by-Product, Optimization, QMate and the legacy
+ * profitability endpoint each made that call on their own, so they disagreed
+ * with the dashboard and the Profitability page. They now all come here.
+ *
+ * Rule (identical to the block DashboardCalculation used to carry inline):
+ *   1. Per-ASIN map from EconomicsMetrics (the existing ProfitabilityService
+ *      logic: normal + big accounts + duplicate rows).
+ *   2. Doc older than ECONOMICS_MAX_AGE_DAYS -> the map is DROPPED, loudly.
+ *      A stale map is worse than none: it is used as if current.
+ *   3. Map empty -> live DailySkuFinance for [startDate, endDate]
+ *      (default: the 30 days ending yesterday).
+ *
+ * Only the per-ASIN map is resolved. Account-level totals (totalSales,
+ * totalGrossProfit) are passed through from EconomicsMetrics unchanged so
+ * headline figures are not moved by this.
+ *
+ * @param {Object}  args
+ * @param {Object}  [args.economicsMetrics]      - latest EconomicsMetrics doc (lean or hydrated), may be null
+ * @param {string|ObjectId} [args.userId]        - required for the live fallback
+ * @param {string}  [args.country]
+ * @param {string}  [args.region]
+ * @param {string|Date} [args.startDate]         - live-fallback window (inclusive)
+ * @param {string|Date} [args.endDate]
+ * @param {Object}  [args.economicsAsinPpcSales] - a per-ASIN map the caller already built
+ *        from `economicsMetrics` (DashboardCalculation builds it in parallel with other
+ *        work); skips rebuilding it. The stale rule still applies to it.
+ * @returns {Promise<{asinPpcSales:Object, financeFresh:boolean, source:'economicsMetrics'|'dailySkuFinance'|'none', totalSales?:number, totalGrossProfit?:number}>}
+ *   `financeFresh` = the map is non-empty after the stale drop, i.e. it is a recent
+ *   EconomicsMetrics map or live DailySkuFinance. Profitability verdicts and task
+ *   reconcile key off it: no fresh finance -> no verdict.
+ */
+async function resolveAsinFinance({
+    economicsMetrics = null,
+    userId = null,
+    country = null,
+    region = null,
+    startDate = null,
+    endDate = null,
+    economicsAsinPpcSales = null
+} = {}) {
+    let asinPpcSales = {};
+    let totals = {};
+
+    if (economicsAsinPpcSales && typeof economicsAsinPpcSales === 'object') {
+        asinPpcSales = economicsAsinPpcSales;
+    } else if (economicsMetrics) {
+        // Lazy: ProfitabilityService requires this module at load time, so a
+        // top-level require here would hand one side a half-built exports object.
+        const { getAsinPpcSalesFromEconomics } = require('../Calculations/ProfitabilityService.js');
+        const fromEconomics = await getAsinPpcSalesFromEconomics(economicsMetrics);
+        asinPpcSales = fromEconomics.asinPpcSales || {};
+        totals = { totalSales: fromEconomics.totalSales, totalGrossProfit: fromEconomics.totalGrossProfit };
+    }
+
+    let source = Object.keys(asinPpcSales).length > 0 ? 'economicsMetrics' : 'none';
+
+    if (source === 'economicsMetrics' && !isEconomicsFresh(economicsMetrics)) {
+        const createdAtMs = toTime(economicsMetrics?.createdAt);
+        logger.warn('[AsinFinanceWindow] Ignoring STALE EconomicsMetrics per-ASIN finance; falling back to DailySkuFinance', {
+            userId: userId != null ? String(userId) : null, country, region,
+            createdAt: economicsMetrics?.createdAt,
+            ageDays: Number.isFinite(createdAtMs) ? Math.floor((Date.now() - createdAtMs) / 86400000) : null,
+            maxAgeDays: ECONOMICS_MAX_AGE_DAYS,
+            staleAsins: Object.keys(asinPpcSales).length
+        });
+        asinPpcSales = {};
+        source = 'none';
+    }
+
+    // getAsinFinanceForWindow would mint a random ObjectId from a missing userId,
+    // so the fallback only runs with a real account key.
+    if (source === 'none' && userId && country && region) {
+        try {
+            const live = await getAsinFinanceForWindow(userId, country, region, startDate, endDate);
+            if (Object.keys(live).length > 0) {
+                // grossProfit is not stored per ASIN in DailySkuFinance; give readers
+                // that display it the Profitability page's definition
+                // (FinanceDashboardReadService: productSales - |expenses|, before ads)
+                // instead of a silent $0. ProfitabilityCalculation ignores this field
+                // and recomputes with Ads API spend, so the dashboard is unaffected.
+                for (const row of Object.values(live)) {
+                    row.grossProfit = round2((row.sales || 0) - (row.totalFees || 0));
+                }
+                asinPpcSales = live;
+                source = 'dailySkuFinance';
+            }
+        } catch (error) {
+            // getAsinFinanceForWindow already swallows DB errors; this is belt and
+            // braces so a finance read can never fail a page.
+            logger.error('[AsinFinanceWindow] live per-ASIN fallback failed', {
+                error: error.message, userId: String(userId), country, region
+            });
+        }
+    }
+
+    return {
+        asinPpcSales,
+        financeFresh: Object.keys(asinPpcSales).length > 0,
+        source,
+        ...totals
+    };
+}
+
 function round2(n) {
     return Math.round((Number(n) || 0) * 100) / 100;
 }
 
 module.exports = {
     getAsinFinanceForWindow,
+    resolveAsinFinance,
     // exported for tests
     resolveWindow,
     toYyyyMmDd,

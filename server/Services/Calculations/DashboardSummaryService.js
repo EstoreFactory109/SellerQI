@@ -26,7 +26,7 @@ const { calculateAccountHealthPercentage, checkAccountHealth } = require('./Acco
 const { loadV2History } = require('./AccountHealthHistory.js');
 const IssueSummary = require('../../models/system/IssueSummaryModel.js');
 const PPCCampaignAnalysisService = require('./PPCCampaignAnalysisService.js');
-const { classifyBuyBoxLoss, countActiveBuyBoxLosses } = require('./RecoverableAmountUtils.js');
+const { classifyBuyBoxLoss, summarizeBuyBoxCounts, activeAsinSetOf } = require('./RecoverableAmountUtils.js');
 
 // Only what classifyBuyBoxLoss needs to decide and count — not sales/pageViews
 // for every ASIN on every one of the 7 days.
@@ -39,22 +39,16 @@ const BUYBOX_SUMMARY_PROJECTION = 'date dateRange createdAt totalProducts asinBu
  * newest doc's stored productsWithoutBuyBox instead counted inactive and
  * zero-traffic ASINs, judged from one day, and read 0 whenever that day was empty.
  *
+ * All counts are over ACTIVE ASINs (summarizeBuyBoxCounts), so with + without +
+ * unknown = total; this used to mix an all-ASIN total with an active-only
+ * "without" and drop productsWithLowBuyBox, which the client expects.
+ *
  * @param {Array} days - findRecentDays result
  * @param {Array} products - this marketplace's sellerAccount.products
- * @returns {{totalProducts:number, productsWithBuyBox:number, productsWithoutBuyBox:number}}
+ * @returns {{totalProducts:number, productsWithBuyBox:number, productsWithoutBuyBox:number, productsWithLowBuyBox:number, productsWithUnknownBuyBox:number}}
  */
 function summarizeBuyBoxDays(days, products) {
-    const effective = classifyBuyBoxLoss(days);
-    const activeAsinSet = new Set(
-        (Array.isArray(products) ? products : [])
-            .filter((p) => p && p.asin && p.status === 'Active')
-            .map((p) => p.asin)
-    );
-    return {
-        totalProducts: effective?.totalProducts || 0,
-        productsWithBuyBox: effective?.productsWithBuyBox || 0,
-        productsWithoutBuyBox: countActiveBuyBoxLosses(effective, activeAsinSet)
-    };
+    return summarizeBuyBoxCounts(classifyBuyBoxLoss(days), activeAsinSetOf(products));
 }
 
 /**

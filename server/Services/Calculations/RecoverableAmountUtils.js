@@ -413,6 +413,69 @@ function countActiveBuyBoxLosses(effectiveDoc, activeAsinSet) {
 }
 
 /**
+ * Active ASINs of a marketplace's catalogue (sellerAccount.products), the set the
+ * Buy Box counts and tasks are judged over.
+ * @param {Array} products
+ * @returns {Set<string>}
+ */
+function activeAsinSetOf(products) {
+    return new Set(
+        (Array.isArray(products) ? products : [])
+            .filter((p) => p && p.asin && p.status === 'Active')
+            .map((p) => p.asin)
+    );
+}
+
+/**
+ * Buy Box summary counts over ACTIVE ASINs of the effective doc (classifyBuyBoxLoss).
+ *
+ * WHY. The dashboard used to mix populations: totalProducts / productsWithBuyBox
+ * came from the effective doc (every ASIN, inactive included) while
+ * productsWithoutBuyBox was active-only, and rows with an unknown (null)
+ * percentage counted in neither — so with + without never added up to the total,
+ * and productsWithLowBuyBox (which the client expects) was dropped. Every count
+ * here is over the same active set, and:
+ *
+ *   with     pct > 0
+ *   without  pct === 0            (= countActiveBuyBoxLosses = the No Buy Box task count)
+ *   low      0 < pct < 50         (a subset of `with`)
+ *   unknown  pct === null         (never seen with the Buy Box, never confirmed without)
+ *   total    with + without + unknown
+ *
+ * @param {Object|null} effectiveDoc - from classifyBuyBoxLoss
+ * @param {Set<string>} activeAsinSet - see activeAsinSetOf
+ * @returns {{totalProducts:number, productsWithBuyBox:number, productsWithoutBuyBox:number, productsWithLowBuyBox:number, productsWithUnknownBuyBox:number}}
+ */
+function summarizeBuyBoxCounts(effectiveDoc, activeAsinSet) {
+    const counts = {
+        totalProducts: 0,
+        productsWithBuyBox: 0,
+        productsWithoutBuyBox: 0,
+        productsWithLowBuyBox: 0,
+        productsWithUnknownBuyBox: 0
+    };
+    if (!effectiveDoc || !Array.isArray(effectiveDoc.asinBuyBoxData) || !activeAsinSet) return counts;
+
+    // Same row filter as countActiveBuyBoxLosses (no de-dupe: classifyBuyBoxLoss
+    // already emits one row per childAsin), so `without` equals it exactly.
+    for (const row of effectiveDoc.asinBuyBoxData) {
+        if (!row || !row.childAsin || !activeAsinSet.has(row.childAsin)) continue;
+        const pct = row.buyBoxPercentage;
+        if (typeof pct !== 'number' || Number.isNaN(pct)) {
+            counts.productsWithUnknownBuyBox++;
+        } else if (pct === 0) {
+            counts.productsWithoutBuyBox++;
+        } else if (pct > 0) {
+            counts.productsWithBuyBox++;
+            if (pct < 50) counts.productsWithLowBuyBox++;
+        }
+        // A negative percentage cannot come out of classifyBuyBoxLoss; it counts nowhere.
+    }
+    counts.totalProducts = counts.productsWithBuyBox + counts.productsWithoutBuyBox + counts.productsWithUnknownBuyBox;
+    return counts;
+}
+
+/**
  * Buy Box loss: estimated 30-day lost revenue = the seller's own
  * benchmark conversion rate/price applied to the lost ASIN's sessions,
  * minus what it actually sold, extrapolated from one day to 30. That day is
@@ -540,6 +603,8 @@ module.exports = {
     computeProfitabilityAmount,
     classifyProfitabilityRow,
     isEconomicsFresh,
+    summarizeBuyBoxCounts,
+    activeAsinSetOf,
     toTime,
     ECONOMICS_MAX_AGE_DAYS,
     computeSponsoredAdsAmount,

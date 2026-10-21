@@ -104,6 +104,11 @@ const ProfitTable = ({
     // We need to fetch it from a separate endpoint
     // Also check if totalSales > 5000 and asinWiseSales is empty (for legacy data before isBig was added)
     useEffect(() => {
+        // The finance-only table renders DailySkuFinance rows from /api/finance-dashboard
+        // and never reads asinWiseSalesData, so this request was pure waste on every
+        // mount of the Profitability page (and, for big accounts, a heavy aggregation).
+        if (useFinanceTableOnly) return;
+
         const fetchAsinWiseSalesForBigAccount = async () => {
             // If economicsMetrics is not available yet, try to fetch from endpoint anyway
             if (!economicsMetrics) {
@@ -177,7 +182,7 @@ const ProfitTable = ({
         };
         
         fetchAsinWiseSalesForBigAccount();
-    }, [economicsMetrics, economicsMetrics?.isBig, economicsMetrics?.asinWiseSales?.length, economicsMetrics?.totalSales?.amount]);
+    }, [useFinanceTableOnly, economicsMetrics, economicsMetrics?.isBig, economicsMetrics?.asinWiseSales?.length, economicsMetrics?.totalSales?.amount]);
     
     // Calculate total active products
     const totalActiveProducts = totalProducts.filter(product => product.status === "Active").length;
