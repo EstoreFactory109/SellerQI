@@ -4,6 +4,10 @@ const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const { getLedgerSummaryViewData } = require('../Finance/LedgerSummaryViewService.js');
 // Use service layer to get ProductWiseFBAData (handles both old and new formats)
 const { getProductWiseFBAData } = require('../inventory/ProductWiseFBADataService.js');
+// Lost inventory subtracts units Amazon already reimbursed; damaged/disposed read the
+// ledger detail report. Both moved to item collections behind these services (ddfe038).
+const { getFBAReimbursementsData } = require('../Finance/FBAReimbursementsService.js');
+const { getLedgerDetailViewData } = require('../Finance/LedgerDetailViewService.js');
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 const { calculateFees } = require('./ActualFeesCalculations.js');
@@ -616,7 +620,7 @@ const calculateLostInventoryReimbursement = async (userId, country, region) => {
         };
 
     } catch (error) {
-        logger.error(`[Lost Inventory] Error calculating reimbursement: ${error.message}`);
+        logger.error(`[Lost Inventory] calculateLostInventoryReimbursement failed for userId: ${userId}, country: ${country}, region: ${region}: ${error.message}`, { stack: error.stack });
         return {
             success: false,
             message: `Error calculating lost inventory reimbursement: ${error.message}`,
@@ -822,7 +826,7 @@ const calculateDamagedInventoryReimbursement = async (userId, country, region) =
         };
 
     } catch (error) {
-        logger.error(`[Damaged Inventory] Error calculating reimbursement: ${error.message}`);
+        logger.error(`[Damaged Inventory] calculateDamagedInventoryReimbursement failed for userId: ${userId}, country: ${country}, region: ${region}: ${error.message}`, { stack: error.stack });
         return {
             success: false,
             message: `Error calculating damaged inventory reimbursement: ${error.message}`,
@@ -1164,7 +1168,7 @@ const calculateDisposedInventoryReimbursement = async (userId, country, region) 
         };
 
     } catch (error) {
-        logger.error(`[Disposed Inventory] Error calculating reimbursement: ${error.message}`);
+        logger.error(`[Disposed Inventory] calculateDisposedInventoryReimbursement failed for userId: ${userId}, country: ${country}, region: ${region}: ${error.message}`, { stack: error.stack });
         return {
             success: false,
             message: `Error calculating disposed inventory reimbursement: ${error.message}`,
