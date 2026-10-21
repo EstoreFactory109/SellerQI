@@ -25,9 +25,24 @@ const day = (date, amount) => ({ date, sales: { amount, currencyCode: 'USD' }, g
 const RANGE = { startDate: '2026-10-01', endDate: '2026-10-08' };
 
 describe('SalesDropAlertService', () => {
+    const savedFlag = process.env.SALES_DROP_ALERTS;
     beforeEach(() => {
         mockEconomics = null;
         mockLoadArgs = null;
+        process.env.SALES_DROP_ALERTS = 'on';
+    });
+    afterAll(() => {
+        if (savedFlag === undefined) delete process.env.SALES_DROP_ALERTS;
+        else process.env.SALES_DROP_ALERTS = savedFlag;
+    });
+
+    it('is off unless SALES_DROP_ALERTS=on: no load, no alert', async () => {
+        delete process.env.SALES_DROP_ALERTS;
+        mockEconomics = { source: 'daily_sku_finance', datewiseSales: [day('2026-10-01', 100), day('2026-10-02', 10)] };
+        const r = await detectSalesDrop('u1', 'NA', 'US', RANGE);
+
+        expect(r).toMatchObject({ detected: false, drops: [], disabled: true });
+        expect(mockLoadArgs).toBeNull();
     });
 
     it('no economics at all -> no alert', async () => {

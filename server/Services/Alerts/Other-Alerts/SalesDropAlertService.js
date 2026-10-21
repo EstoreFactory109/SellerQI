@@ -23,6 +23,13 @@ const logger = require('../../../utils/Logger.js');
 const DEFAULT_UNITS_DROP_THRESHOLD_PCT = 40;
 const DEFAULT_REVENUE_DROP_THRESHOLD_PCT = 40;
 
+// Off unless SALES_DROP_ALERTS=on. On frozen EconomicsMetrics this check never
+// fired; on live DailySkuFinance the day-over-day 40% rule flagged 36 of 67
+// marketplaces in one week (2026-10-21 replay) - ordinary daily swing, and each
+// drop repeats in the next six runs' 7-day window. It needs a better rule before
+// it emails sellers.
+const salesDropAlertsEnabled = () => process.env.SALES_DROP_ALERTS === 'on';
+
 /**
  * Get start and end date for the alert window.
  * End date = yesterday (inclusive), start date = 7 days before yesterday (inclusive).
@@ -182,6 +189,10 @@ async function detectSalesDrop(userId, region, country, options = {}) {
         marketplace: country,
         error: 'User ID is required',
       };
+    }
+
+    if (!salesDropAlertsEnabled()) {
+      return { detected: false, drops: [], dateRange, marketplace: country, disabled: true };
     }
 
     logger.info('[SalesDropAlertService] Loading datewise sales (live economics) for drop detection', {
