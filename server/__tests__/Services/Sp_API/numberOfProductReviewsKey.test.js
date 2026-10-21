@@ -1,7 +1,8 @@
 /**
- * The RapidAPI key comes from RAPIDAPI_KEY only. It used to be hard-coded in
- * NumberOfProductReviews.js; without the variable the run stops before any request
- * rather than saving a snapshot in which no listing has content.
+ * The RapidAPI key comes from the environment: X-RAPIDAPI-KEY (the name already in
+ * .env), or RAPIDAPI_KEY. It used to be hard-coded in NumberOfProductReviews.js;
+ * without either variable the run stops before any request rather than saving a
+ * snapshot in which no listing has content.
  */
 
 jest.mock('axios', () => {
@@ -29,23 +30,26 @@ const logger = require('../../../utils/Logger.js');
 const { addReviewDataTODatabase } = require('../../../Services/Sp_API/NumberOfProductReviews.js');
 
 describe('NumberOfProductReviews RapidAPI key', () => {
-    const saved = process.env.RAPIDAPI_KEY;
+    const NAMES = ['X-RAPIDAPI-KEY', 'RAPIDAPI_KEY'];
+    const saved = Object.fromEntries(NAMES.map((n) => [n, process.env[n]]));
     afterEach(() => {
-        if (saved === undefined) delete process.env.RAPIDAPI_KEY;
-        else process.env.RAPIDAPI_KEY = saved;
+        for (const n of NAMES) {
+            if (saved[n] === undefined) delete process.env[n];
+            else process.env[n] = saved[n];
+        }
     });
 
-    it('stops with a clear error and makes no request when RAPIDAPI_KEY is missing', async () => {
-        delete process.env.RAPIDAPI_KEY;
+    it('stops with a clear error and makes no request when no key is set', async () => {
+        for (const n of NAMES) delete process.env[n];
         const result = await addReviewDataTODatabase(['B000000001'], 'US', 'user1', 'NA');
-        expect(result).toEqual({ success: false, error: 'RAPIDAPI_KEY is not set' });
+        expect(result).toEqual({ success: false, error: 'X-RAPIDAPI-KEY is not set' });
         expect(axios.request).not.toHaveBeenCalled();
-        expect(logger.error.mock.calls[0][0]).toMatch(/RAPIDAPI_KEY is not set/);
+        expect(logger.error.mock.calls[0][0]).toMatch(/X-RAPIDAPI-KEY is not set/);
     });
 
     it('has no key literal in the source', () => {
         const source = fs.readFileSync(path.join(__dirname, '../../../Services/Sp_API/NumberOfProductReviews.js'), 'utf8');
-        expect(source).toMatch(/"x-rapidapi-key": process\.env\.RAPIDAPI_KEY,/);
+        expect(source).toMatch(/process\.env\["X-RAPIDAPI-KEY"\] \|\| process\.env\.RAPIDAPI_KEY/);
         expect(source).not.toMatch(/msh[0-9a-f]{10,}/);
     });
 });

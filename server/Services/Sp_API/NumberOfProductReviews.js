@@ -46,8 +46,8 @@ const getNumberOfProductReviews = async (asin, country) => {
       headers: {
         // From the environment only: the key used to be hard-coded here, and a
         // literal fallback would put it back in the repository.
-        "x-rapidapi-key": process.env.RAPIDAPI_KEY,
-        "x-rapidapi-host": "real-time-amazon-data.p.rapidapi.com"
+        "x-rapidapi-key": rapidApiKey(),
+        "x-rapidapi-host": process.env["X-RAPIDAPI-HOST"] || "real-time-amazon-data.p.rapidapi.com"
       },
       timeout: REQUEST_TIMEOUT_MS
     };
@@ -80,6 +80,9 @@ const getNumberOfProductReviews = async (asin, country) => {
 /**
  * Split array into chunks of specified size
  */
+/** The RapidAPI key: X-RAPIDAPI-KEY (the name in .env), or RAPIDAPI_KEY. */
+const rapidApiKey = () => process.env["X-RAPIDAPI-KEY"] || process.env.RAPIDAPI_KEY;
+
 function chunkArray(array, chunkSize) {
   const chunks = [];
   for (let i = 0; i < array.length; i += chunkSize) {
@@ -114,9 +117,9 @@ const addReviewDataTODatabase = async (asinArray, country, userId, region) => {
 
   // Fail before any request: without a key every call is rejected, and a run of
   // empty results would be saved as a snapshot in which no listing has content.
-  if (!process.env.RAPIDAPI_KEY) {
-    logger.error("NumberOfProductReviews: RAPIDAPI_KEY is not set - listing content (reviews, bullets, images, video, Brand Story) cannot be fetched. Set RAPIDAPI_KEY in the server environment.", { userId, country, region });
-    return { success: false, error: "RAPIDAPI_KEY is not set" };
+  if (!rapidApiKey()) {
+    logger.error("NumberOfProductReviews: X-RAPIDAPI-KEY is not set - listing content (reviews, bullets, images, video, Brand Story) cannot be fetched. Set X-RAPIDAPI-KEY in the server environment.", { userId, country, region });
+    return { success: false, error: "X-RAPIDAPI-KEY is not set" };
   }
 
   const limit = promiseLimit(REVIEWS_CONCURRENCY);
