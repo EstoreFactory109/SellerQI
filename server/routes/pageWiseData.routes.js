@@ -37,7 +37,6 @@ const {
     getNavbarData,
     getAccountHistoryData,
     getProductHistory,
-    getComparisonDebugInfo,
     // Per-ASIN product details endpoints
     getProductBasicInfo,
     getProductPerformance,
@@ -490,10 +489,6 @@ router.get('/product/:asin/ppc-zero-sales-search-terms', auth, getLocation, vali
 // GET /product/:asin/ppc-keyword-tab-counts - Tab counts for product PPC keyword tables
 // Returns: counts for wastedSpend, topPerforming, searchTermsZeroSales
 router.get('/product/:asin/ppc-keyword-tab-counts', auth, getLocation, validateAsinParam, getProductPPCKeywordTabCounts);
-
-// ===== COMPARISON DEBUG (for checking WoW/MoM data availability) =====
-// Returns counts of BuyBoxData and EconomicsMetrics documents
-router.get('/comparison-debug', auth, getLocation, getComparisonDebugInfo);
 
 // ===== KEYWORD ANALYSIS PAGE =====
 // Returns keyword analysis data

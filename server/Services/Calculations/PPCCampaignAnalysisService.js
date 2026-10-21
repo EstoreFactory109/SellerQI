@@ -16,7 +16,6 @@ const NegativeKeywords = require('../../models/amazon-ads/NegetiveKeywords');
 const AdsGroup = require('../../models/amazon-ads/adsgroupModel');
 const Keyword = require('../../models/amazon-ads/keywordModel');
 const ProductWiseSponsoredAdsItem = require('../../models/amazon-ads/ProductWiseSponsoredAdsItemModel');
-const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel');
 const logger = require('../../utils/Logger');
 const { getDefaultReportDateRange } = require('../../utils/reportDateRange');

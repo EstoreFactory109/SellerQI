@@ -218,36 +218,6 @@ async function saveMetricsWithSeparateAsinData(userObjectId, region, country, me
 }
 
 /**
- * Get economics metrics by date range
- * @param {string} userId - User ID
- * @param {string} region - Region
- * @param {string} startDate - Start date
- * @param {string} endDate - End date
- * @returns {Promise<Array>} Array of metrics documents
- */
-async function getEconomicsMetricsByDateRange(userId, region, startDate, endDate) {
-    try {
-        const metricsList = await EconomicsMetrics.findByDateRange(userId, region, startDate, endDate);
-        
-        // Combine ASIN data for big accounts
-        const result = await Promise.all(metricsList.map(async (metrics) => {
-            return await combineAsinDataIfBigAccount(metrics);
-        }));
-        
-        return result;
-    } catch (error) {
-        logger.error('Error fetching economics metrics by date range', {
-            userId,
-            region,
-            startDate,
-            endDate,
-            error: error.message
-        });
-        throw error;
-    }
-}
-
-/**
  * Get latest economics metrics
  * @param {string} userId - User ID
  * @param {string} region - Region
@@ -401,7 +371,6 @@ async function deleteEconomicsMetrics(metricsId, userId) {
 
 module.exports = {
     saveEconomicsMetrics,
-    getEconomicsMetricsByDateRange,
     getLatestEconomicsMetrics,
     deleteEconomicsMetrics,
     combineAsinDataIfBigAccount // Export for use by other services that access EconomicsMetrics directly

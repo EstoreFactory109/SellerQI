@@ -15,7 +15,6 @@ const { createDefaultDashboardData, mergeWithDefaults } = require('./DefaultData
 const CreateTaskService = require('./CreateTasksService.js');
 const logger = require('../../utils/Logger.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
-const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const mongoose = require('mongoose');
 const AsinWiseSalesRun = require('../../models/finance/AsinWiseSalesRunModel.js');
@@ -23,6 +22,7 @@ const AsinWiseSalesItem = require('../../models/finance/AsinWiseSalesItemModel.j
 const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
 const DataFetchTracking = require('../../models/system/DataFetchTrackingModel.js');
 const { resolveAsinFinance } = require('../Finance/AsinFinanceWindowService.js');
+const { isStoredEconomicsDoc } = require('../Finance/LiveEconomicsService.js');
 const { computeProfitabilityAmount, classifyProfitabilityRow, computeSponsoredAdsAmount, computeBuyBoxBenchmark, computeBuyBoxLostRevenueAmount, computeBuyBoxProfitImpact } = require('./RecoverableAmountUtils.js');
 const {
     TARGET_ACOS_PERCENT,
@@ -67,7 +67,8 @@ async function yieldToEventLoop() {
  */
 const getPpcSalesFromEconomics = async (economicsMetrics) => {
     if (!economicsMetrics) {
-        return { totalPpcSales: 0, asinPpcSales: {}, totalSales: 0, totalGrossProfit: 0 };
+        // No fresh doc and no live DailySkuFinance rows: "no data", not $0.
+        return { totalPpcSales: 0, asinPpcSales: {}, totalSales: null, totalGrossProfit: null };
     }
     
     // Get total PPC spent from economics (this is used for ACOS/TACOS)
@@ -112,7 +113,9 @@ const getPpcSalesFromEconomics = async (economicsMetrics) => {
     const hasEmptyAsinData = !economicsMetrics.asinWiseSales || economicsMetrics.asinWiseSales.length === 0;
     const isLegacyBigAccount = hasEmptyAsinData && (economicsMetrics.totalSales?.amount > 5000);
     
-    if ((isBigAccount || isLegacyBigAccount) && hasEmptyAsinData) {
+    // Only a stored EconomicsMetrics doc has big-account rows keyed by its _id; a doc
+    // built from DailySkuFinance carries its per-ASIN rows inline.
+    if ((isBigAccount || isLegacyBigAccount) && hasEmptyAsinData && isStoredEconomicsDoc(economicsMetrics)) {
         try {
             // OPTIMIZED: Use MongoDB aggregation pipeline to aggregate ASIN data directly in the database
             // This prevents loading all date documents (potentially 163k+ ASIN records) into Node.js memory
@@ -1890,8 +1893,8 @@ const analyseData = async (data, userId = null, options = {}) => {
         amazonReadyProducts,
         TotalProduct: TotalProducts,
         ActiveProducts: activeProducts,
-        // Use EconomicsMetrics total sales if available, fallback to legacy
-        TotalWeeklySale: economicsData.totalSales || data.FinanceData?.Total_Sales || 0,
+        // Live economics (fresh EconomicsMetrics or DailySkuFinance); null = no data.
+        TotalWeeklySale: economicsData.totalSales ?? data.FinanceData?.Total_Sales ?? null,
         TotalSales: data.TotalSales || [],
         reimbustment: data.Reimburstment || { totalReimbursement: 0 },
         productWiseError: productWiseError,

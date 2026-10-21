@@ -12,7 +12,6 @@
  * - PPCMetrics: Overall PPC performance summary and dateWiseMetrics
  * - PPCUnitsSold: Units sold from PPC
  * - PPCCampaignAnalysisService: All 6 dashboard tabs + KPI summary
- * - EconomicsMetrics: Total sales for TACOS calculation
  * - IssuesDataChunks: PPC-related issues and recommendations
  * 
  * This service is INDEPENDENT and does not affect any existing flows.
@@ -21,7 +20,6 @@
 const logger = require('../../utils/Logger.js');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
 const PPCUnitsSold = require('../../models/amazon-ads/PPCUnitsSoldModel.js');
-const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
 const PPCCampaignAnalysisService = require('../Calculations/PPCCampaignAnalysisService.js');
 const mongoose = require('mongoose');

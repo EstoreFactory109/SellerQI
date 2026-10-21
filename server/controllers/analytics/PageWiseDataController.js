@@ -1523,7 +1523,7 @@ const getNavbarData = asyncHandler(async (req, res) => {
         
         let allSellerAccounts = [];
         let brandName = '';
-        let accountHealthPercentage = 0;
+        let accountHealthPercentage = null;
 
         if (seller) {
             // Brand is stored at root level of seller document
@@ -1547,18 +1547,14 @@ const getNavbarData = asyncHandler(async (req, res) => {
             }
         }
 
-        // Get account health percentage (lightweight query)
-        // This is a simplified calculation - just checking if we have health data
+        // Account health: the same { Percentage, status } the dashboard and Issues
+        // pages show (IssuesDataChunks metadata, one small doc). It used to read
+        // EconomicsMetrics, which has no such field, so the navbar always sent 0.
+        // null = not computed yet.
         try {
-            const economicsMetrics = await EconomicsMetrics.findOne({
-                User: userId,
-                country: Country,
-                region: Region
-            }).sort({ createdAt: -1 }).select('accountHealthPercentage').lean();
-
-            if (economicsMetrics && economicsMetrics.accountHealthPercentage) {
-                accountHealthPercentage = economicsMetrics.accountHealthPercentage;
-            }
+            const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
+            const metadata = await IssuesDataChunks.getMetadata(userId, Country, Region);
+            accountHealthPercentage = metadata?.accountHealthPercentage || null;
         } catch (healthError) {
             logger.warn('Could not fetch account health for navbar:', healthError.message);
         }
@@ -2058,71 +2054,6 @@ const getProductPPCKeywordTabCounts = asyncHandler(async (req, res) => {
         logger.error("[getProductPPCKeywordTabCounts] Error:", error);
         return res.status(500).json(
             new ApiError(500, `Error getting tab counts: ${error.message}`)
-        );
-    }
-});
-
-/**
- * Debug endpoint: Check historical data availability for WoW/MoM comparison
- * Returns counts of BuyBoxData and EconomicsMetrics documents for the user
- */
-const getComparisonDebugInfo = asyncHandler(async (req, res) => {
-    const userId = req.userId;
-    const Region = req.region;
-    const Country = req.country;
-
-    try {
-        const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
-        
-        // Get counts
-        const buyBoxDocs = await BuyBoxData.find({
-            User: userId,
-            region: Region,
-            country: Country
-        }).sort({ createdAt: -1 }).select('createdAt dateRange').lean();
-        
-        const economicsDocs = await EconomicsMetrics.find({
-            User: userId,
-            region: Region,
-            country: Country
-        }).sort({ createdAt: -1 }).select('createdAt dateRange').lean();
-        
-        const debugInfo = {
-            userId,
-            region: Region,
-            country: Country,
-            buyBoxData: {
-                count: buyBoxDocs.length,
-                canCompare: buyBoxDocs.length >= 2,
-                documents: buyBoxDocs.slice(0, 5).map(d => ({
-                    createdAt: d.createdAt,
-                    dateRange: d.dateRange
-                }))
-            },
-            economicsMetrics: {
-                count: economicsDocs.length,
-                canCompare: economicsDocs.length >= 2,
-                documents: economicsDocs.slice(0, 5).map(d => ({
-                    createdAt: d.createdAt,
-                    dateRange: d.dateRange
-                }))
-            },
-            comparisonAvailable: buyBoxDocs.length >= 2 || economicsDocs.length >= 2,
-            message: (buyBoxDocs.length >= 2 || economicsDocs.length >= 2) 
-                ? 'WoW/MoM comparison is available' 
-                : 'Need at least 2 data snapshots for comparison. Run analysis multiple times to build history.'
-        };
-        
-        logger.info('[getComparisonDebugInfo] Debug info:', debugInfo);
-
-        return res.status(200).json(
-            new ApiResponse(200, debugInfo, "Comparison debug info retrieved")
-        );
-
-    } catch (error) {
-        logger.error("Error in getComparisonDebugInfo:", error);
-        return res.status(500).json(
-            new ApiError(500, `Error getting comparison debug info: ${error.message}`)
         );
     }
 });
@@ -3203,10 +3134,9 @@ const getYourProductsSummaryV3 = asyncHandler(async (req, res) => {
  *  1. DailySkuFinance — the live per-SKU finance collection, summed over the
  *     window. This is the only source that is both current and window-correct,
  *     and it is what the Profitability page reports from, so the two agree.
- *  2. EconomicsMetrics — the historical source. Kept ahead of BuyBox for the
- *     handful of accounts that still have rows, but it stopped being written in
- *     April 2026, so for most accounts it contributes nothing.
- *  3. BuyBoxData — last resort. IMPORTANT: a BuyBox snapshot covers a SINGLE
+ *     (EconomicsMetrics used to fill gaps here; it stopped being written in
+ *     March 2026, so a gap-fill from it was a months-old figure shown as current.)
+ *  2. BuyBoxData — last resort. IMPORTANT: a BuyBox snapshot covers a SINGLE
  *     DAY, so a figure from here is not comparable to the 30-day figures above.
  *     It is returned tagged (see `windowDays`) so the caller can label it rather
  *     than silently mixing a one-day number into a monthly column, which is what
@@ -3217,7 +3147,7 @@ const getYourProductsSummaryV3 = asyncHandler(async (req, res) => {
  *
  * @returns {Promise<Map<string, {amount: number, windowDays: number|null, source: string}>>}
  */
-async function buildAsinSalesMap(userId, Region, Country, economicsData) {
+async function buildAsinSalesMap(userId, Region, Country) {
     const salesMap = new Map();
     const set = (asin, amount, source, windowDays) => {
         const key = (asin || '').trim().toUpperCase();
@@ -3240,14 +3170,7 @@ async function buildAsinSalesMap(userId, Region, Country, economicsData) {
         });
     }
 
-    // 2. Historical economics, for the accounts that still have it.
-    const { asinPpcSales } = await ProfitabilityService.getAsinPpcSalesFromEconomics(economicsData);
-    let fromEconomics = 0;
-    Object.entries(asinPpcSales || {}).forEach(([asin, data]) => {
-        if (set(asin, data.sales, 'economicsMetrics', 30)) fromEconomics++;
-    });
-
-    // 3. BuyBox — single-day, so tagged as such rather than passed off as monthly.
+    // 2. BuyBox — single-day, so tagged as such rather than passed off as monthly.
     try {
         const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
         const buyBoxDoc = await BuyBoxData
@@ -3265,7 +3188,7 @@ async function buildAsinSalesMap(userId, Region, Country, economicsData) {
 
         logger.info('[v3-sales] per-ASIN sales sources', {
             userId, country: Country, region: Region,
-            fromFinance, fromEconomics, fromBuyBox, total: salesMap.size
+            fromFinance, fromBuyBox, total: salesMap.size
         });
     } catch (buyBoxError) {
         // Sales is one column — never fail the whole product list over it.
@@ -3383,10 +3306,9 @@ const getYourProductsActiveV3 = asyncHandler(async (req, res) => {
             });
         }
 
-        // Real sales data, with the same economics-then-BuyBox precedence the
-        // Optimization tab uses (see buildAsinSalesMap).
-        const economicsData = await EconomicsMetrics.findLatest(userId, Region, Country);
-        const salesMap = await buildAsinSalesMap(userId, Region, Country, economicsData);
+        // Real sales data: live finance, then a tagged one-day BuyBox figure
+        // (see buildAsinSalesMap).
+        const salesMap = await buildAsinSalesMap(userId, Region, Country);
 
         // Fetch precomputed short issue labels (cheap chunked read, not a live recompute -
         // Active products never get real text in sellerAccount.products.issues, only Inactive/
@@ -3893,10 +3815,9 @@ const getYourProductsWithoutAPlusV3 = asyncHandler(async (req, res) => {
             });
         }
 
-        // Real sales data, with the same economics-then-BuyBox precedence the
-        // Optimization tab uses (see buildAsinSalesMap).
-        const economicsData = await EconomicsMetrics.findLatest(userId, Region, Country);
-        const salesMap = await buildAsinSalesMap(userId, Region, Country, economicsData);
+        // Real sales data: live finance, then a tagged one-day BuyBox figure
+        // (see buildAsinSalesMap).
+        const salesMap = await buildAsinSalesMap(userId, Region, Country);
 
         // Fetch precomputed short issue labels (cheap chunked read, not a live recompute -
         // these are Active products, so sellerAccount.products.issues is never populated for
@@ -4072,10 +3993,9 @@ const getYourProductsNotTargetedInAdsV3 = asyncHandler(async (req, res) => {
             });
         }
 
-        // Real sales data, with the same economics-then-BuyBox precedence the
-        // Optimization tab uses (see buildAsinSalesMap).
-        const economicsData = await EconomicsMetrics.findLatest(userId, Region, Country);
-        const salesMap = await buildAsinSalesMap(userId, Region, Country, economicsData);
+        // Real sales data: live finance, then a tagged one-day BuyBox figure
+        // (see buildAsinSalesMap).
+        const salesMap = await buildAsinSalesMap(userId, Region, Country);
 
         // Fetch precomputed short issue labels (cheap chunked read, not a live recompute -
         // these are Active products, so sellerAccount.products.issues is never populated for
@@ -4310,7 +4230,6 @@ module.exports = {
     getNavbarData,
     getAccountHistoryData,
     getProductHistory,
-    getComparisonDebugInfo,
     // Per-ASIN product details endpoints
     getProductBasicInfo,
     getProductPerformance,

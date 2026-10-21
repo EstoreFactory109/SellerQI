@@ -15,7 +15,6 @@
  */
 
 const logger = require('../../utils/Logger.js');
-const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const GetDateWisePPCspendModel = require('../../models/amazon-ads/GetDateWisePPCspendModel.js');
@@ -27,6 +26,8 @@ const { calculateSponsoredAdsMetrics } = require('./SponsoredAdsCalculation.js')
 // AsinFinanceWindowService requires this module back, but only lazily inside
 // resolveAsinFinance, so loading it here at the top is cycle-safe.
 const { resolveAsinFinance } = require('../Finance/AsinFinanceWindowService.js');
+// Fresh EconomicsMetrics, else live DailySkuFinance, else null (the collection stopped being written).
+const { loadLiveEconomics, isStoredEconomicsDoc } = require('../Finance/LiveEconomicsService.js');
 const PPCMetricsModel = require('../../models/amazon-ads/PPCMetricsModel.js');
 
 /**
@@ -91,7 +92,7 @@ const fetchProfitabilityData = async (userId, country, region) => {
         productWiseSponsoredAds,
         dateWisePPCspendData
     ] = await Promise.all([
-        EconomicsMetrics.findLatest(userId, region, country),
+        loadLiveEconomics(userId, region, country),
         Seller.findOne(
             { User: userId },
             { 
@@ -165,7 +166,8 @@ const fetchProfitabilityData = async (userId, country, region) => {
  */
 const getAsinPpcSalesFromEconomics = async (economicsMetrics) => {
     if (!economicsMetrics) {
-        return { asinPpcSales: {}, totalSales: 0, totalGrossProfit: 0 };
+        // No economics = no data, not $0.
+        return { asinPpcSales: {}, totalSales: null, totalGrossProfit: null };
     }
 
     // Calculate totals from datewiseSales for consistency
@@ -191,7 +193,8 @@ const getAsinPpcSalesFromEconomics = async (economicsMetrics) => {
     const hasEmptyAsinData = !economicsMetrics.asinWiseSales || economicsMetrics.asinWiseSales.length === 0;
     const isLegacyBigAccount = hasEmptyAsinData && (economicsMetrics.totalSales?.amount > 5000);
 
-    if ((isBigAccount || isLegacyBigAccount) && hasEmptyAsinData) {
+    // Big-account rows are keyed by a stored doc's _id; a live-built doc has its rows inline.
+    if ((isBigAccount || isLegacyBigAccount) && hasEmptyAsinData && isStoredEconomicsDoc(economicsMetrics)) {
         try {
             // OPTIMIZED: Use MongoDB aggregation instead of loading all docs into memory
             // getProfitabilityMapByMetricsId aggregates in DB and returns a Map
@@ -308,17 +311,18 @@ const calculateDateWiseTotalCosts = (dateWisePPCData) => {
  */
 const convertToAccountFinance = (economicsMetrics, adsPPCSpend = 0) => {
     if (!economicsMetrics) {
+        // No economics = no data (null), not $0.
         return {
             createdAt: new Date(),
-            Gross_Profit: 0,
-            Total_Sales: 0,
+            Gross_Profit: null,
+            Total_Sales: null,
             ProductAdsPayment: adsPPCSpend,
-            FBA_Fees: 0,
-            Storage: 0,
-            Amazon_Charges: 0,
-            Amazon_Fees: 0,
-            Other_Amazon_Fees: 0,
-            Refunds: 0
+            FBA_Fees: null,
+            Storage: null,
+            Amazon_Charges: null,
+            Amazon_Fees: null,
+            Other_Amazon_Fees: null,
+            Refunds: null
         };
     }
 
@@ -475,7 +479,7 @@ const calculateProfitabilityDashboard = async (rawData) => {
     // EconomicsMetrics map is dropped and live DailySkuFinance (default 30-day
     // window) takes over, so this legacy endpoint agrees with the dashboard and
     // the Profitability page instead of showing April-2026 numbers as current.
-    // totalSales stays the account-level EconomicsMetrics figure, as before.
+    // totalSales is the account-level figure of the same loaded economics; null = no data.
     const resolvedFinance = await resolveAsinFinance({
         economicsMetrics: economicsMetricsData,
         userId,
@@ -484,8 +488,8 @@ const calculateProfitabilityDashboard = async (rawData) => {
     });
     const economicsData = {
         asinPpcSales: resolvedFinance.asinPpcSales,
-        totalSales: resolvedFinance.totalSales || 0,
-        totalGrossProfit: resolvedFinance.totalGrossProfit || 0
+        totalSales: resolvedFinance.totalSales ?? null,
+        totalGrossProfit: resolvedFinance.totalGrossProfit ?? null
     };
 
     // Prepare TotalProducts array from seller data
@@ -642,16 +646,14 @@ const getProfitabilitySummary = async (userId, country, region) => {
     const startTime = Date.now();
     logger.info(`[PERF] ProfitabilityService.getProfitabilitySummary starting for user ${userId}`);
 
-    // Fetch minimal data (EconomicsMetrics + PPC spend only)
-    // OPTIMIZED: Only select fields needed for summary
+    // Fetch minimal data (economics + PPC spend only). Economics is fresh
+    // EconomicsMetrics, else live DailySkuFinance, else null.
     const [economicsMetricsData, productWiseSponsoredAds] = await Promise.all([
-        EconomicsMetrics.findLatest(userId, region, country)
-            .select('datewiseSales totalSales grossProfit fbaFees storageFees refunds dateRange')
-            .lean(),
+        loadLiveEconomics(userId, region, country),
         getProductWiseSponsoredAdsData(userId, country, region)
     ]);
 
-    // With .lean(), economicsMetricsData is already a plain object
+    // The loader returns plain objects
     const processedEconomicsMetrics = economicsMetricsData;
 
     // Calculate PPC spend from Amazon Ads API
@@ -697,7 +699,8 @@ const getProfitabilitySummary = async (userId, country, region) => {
 
     return {
         accountFinance,
-        TotalWeeklySale: parseFloat(totalSales.toFixed(2)),
+        // null = no economics for the account (not $0)
+        TotalWeeklySale: processedEconomicsMetrics ? parseFloat(totalSales.toFixed(2)) : null,
         TotalSales,
         sponsoredAdsMetrics,
         economicsMetrics: processedEconomicsMetrics ? {

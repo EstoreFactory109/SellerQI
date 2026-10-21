@@ -156,7 +156,6 @@ describe('esfPageGuard', () => {
     describe('shared infrastructure is never blocked', () => {
         it.each([
             '/api/pagewise/navbar',
-            '/api/pagewise/comparison-debug',
         ])('%s falls through without even loading the staff record', async (path) => {
             // Blocking these would break the entire app for that member rather than
             // one page — and the early return means no database round-trip either.

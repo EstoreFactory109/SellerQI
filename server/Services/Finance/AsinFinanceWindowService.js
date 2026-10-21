@@ -186,8 +186,8 @@ async function getAsinFinanceForWindow(userId, country, region, startDate = null
  *      (default: the 30 days ending yesterday).
  *
  * Only the per-ASIN map is resolved. Account-level totals (totalSales,
- * totalGrossProfit) are passed through from EconomicsMetrics unchanged so
- * headline figures are not moved by this.
+ * totalGrossProfit) are passed through from EconomicsMetrics only when that doc
+ * is fresh; a stale doc's totals are omitted (callers treat them as no data).
  *
  * @param {Object}  args
  * @param {Object}  [args.economicsMetrics]      - latest EconomicsMetrics doc (lean or hydrated), may be null
@@ -240,6 +240,11 @@ async function resolveAsinFinance({
         });
         asinPpcSales = {};
         source = 'none';
+    }
+    // The account totals come from the same doc: when it is stale (even with an
+    // empty per-ASIN map) drop them, so a caller reads "no data", not April figures.
+    if (economicsMetrics && !isEconomicsFresh(economicsMetrics)) {
+        totals = {};
     }
 
     // getAsinFinanceForWindow would mint a random ObjectId from a missing userId,
