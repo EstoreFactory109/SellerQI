@@ -804,6 +804,11 @@ async function getBSRAnalysis(userContext, dateRange) {
 // getListingQualityAnalysis productsWithBrandStory / brandStoryAdoption).
 // ════════════════════════════════════════════════════════════════════════════
 
+// 36 of 76 active marketplaces in production had no product showing a Brand Story:
+// for those the scrape cannot distinguish "missing" from "seller has no Brand
+// Registry" or "scrape blind spot", so tasks are gated and QMate says unknown.
+const BRAND_STORY_UNKNOWN_MESSAGE = 'Brand Story status is unknown for this marketplace: none of your products shows a Brand Story, which usually means the brand is not enrolled in Amazon Brand Registry (required for Brand Story) or the listing scrape cannot see it.';
+
 /** Brand Story status + fix steps when missing. */
 async function getBrandStoryStatus(userContext, asin) {
   const fix = LISTING_FIX_KNOWLEDGE.brand_story;
@@ -820,6 +825,20 @@ async function getBrandStoryStatus(userContext, asin) {
     }
     const bs = d.conversionErrors && d.conversionErrors.brandStoryErrorData;
     const present = !(bs && bs.status === 'Error');
+    // No error can also mean the marketplace is gated (no product shows a Brand
+    // Story, so no verdict was made) - that is "unknown", not "present".
+    if (present) {
+      const q = await QMateProductsService.getListingQualityAnalysis(
+        userContext.userId, userContext.country, userContext.region
+      );
+      if (q && q.success && q.data && q.data.summary && q.data.summary.brandStoryStatusKnown === false) {
+        return {
+          type: 'brand_story', scope: 'asin', asin: normalizedAsin, productName: d.name,
+          present: null, statusKnown: false, message: BRAND_STORY_UNKNOWN_MESSAGE,
+          title: fix.title, steps: fix.steps,
+        };
+      }
+    }
     return {
       type: 'brand_story',
       scope: 'asin',
@@ -840,6 +859,14 @@ async function getBrandStoryStatus(userContext, asin) {
   }
   const s = q.data.summary || {};
   const total = s.totalProducts || 0;
+  if (s.brandStoryStatusKnown === false) {
+    return {
+      type: 'brand_story', scope: 'account', totalProducts: total,
+      productsWithBrandStory: null, productsWithoutBrandStory: null, adoptionPercent: null,
+      present: null, statusKnown: false, message: BRAND_STORY_UNKNOWN_MESSAGE,
+      title: fix.title, steps: fix.steps,
+    };
+  }
   const withBrandStory = s.productsWithBrandStory || 0;
   const without = Math.max(0, total - withBrandStory);
   const adoptionPercent = q.data.qualityMetrics && q.data.qualityMetrics.brandStoryAdoption != null
@@ -1015,6 +1042,9 @@ function buildSellerOpsFallback(r) {
       return r.message || 'BSR is not currently tracked in SellerQI.';
     case 'brand_story': {
       const steps = (r.steps || []).map((s, i) => `${i + 1}. ${s}`).join('\n');
+      if (r.statusKnown === false) {
+        return `${r.message} ${r.title}:\n${steps}`;
+      }
       if (r.scope === 'asin') {
         if (r.notFound) return `I couldn't find data for ${r.asin}. To add a Brand Story:\n${steps}`;
         return r.present

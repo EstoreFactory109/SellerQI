@@ -280,9 +280,12 @@ const ASINAnalyzer = () => {
       // Product Title
       {
         label: 'Product Title',
-        score: calculatePercentageScore(titleLength, 80),
+        // Amazon caps titles at 75 characters (server Rankings TITLE_MAX_LENGTH):
+        // within the cap scores full marks, and longer titles lose marks in
+        // proportion. This used to reward "80+ characters", i.e. breaking the rule.
+        score: titleLength === 0 ? 0 : titleLength <= 75 ? 100 : Math.round((75 / titleLength) * 100),
         current: `${titleLength} characters`,
-        recommended: '80+ characters',
+        recommended: 'Up to 75 characters',
         max: 100
       },
       // Bullet Points

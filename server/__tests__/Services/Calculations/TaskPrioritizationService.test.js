@@ -26,7 +26,8 @@ const RANKING_CHECKS = ['restricted_words', 'special_characters', 'char_limit', 
 const ALL_TASK_TYPES = [
     ...RANKING_SECTIONS.flatMap(s => RANKING_CHECKS.map(c => ['ranking', `${s}_${c}`])),
     ['ranking', 'backend_keywords_char_limit'],
-    ['ranking', 'duplicate_words'],
+    ['ranking', 'backend_keywords_duplicate_words'],
+    ['ranking', 'duplicate_words'], // retired: replaced by backend_keywords_duplicate_words
 
     ['conversion', 'missing_aplus_content'],
     ['conversion', 'missing_brand_story'],

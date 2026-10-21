@@ -1,51 +1,83 @@
-const checkSpecialCharacters = (str) => {
-    const regex = /[!$?_{}^¬¦~#<>*]/g; // added 'g' for global matching
-    const matches = str.match(regex);
-    return matches ? [...new Set(matches)] : []; // return unique matched characters
-  };
-  
-  const containsRestrictedWords = (str) => {
-    const restrictedWords = [
-      "cure", "treat", "diagnose", "prevent", "mitigate", "covid-19", "coronavirus", "pandemic",
-      "cancer", "diabetes", "hiv", "arthritis", "asthma", "alzheimer's", "fda-approved", "clinically proven",
-      "doctor recommended", "anti-bacterial", "anti-fungal", "antimicrobial", "antiviral", "infection",
-      "virus", "germs", "bacteria", "detoxify", "detox", "cleanse", "sanitizes", "disinfects", "sterilizes",
-      "kills germs", "cbd", "cannabinoid", "thc", "hemp oil", "marijuana", "full spectrum", "delta-8",
-      "delta-9", "cocaine", "opioid", "methamphetamine", "bong", "one hitter", "dab rig", "weed",
-      "picamilon", "phenibut", "dmt", "ayahuasca", "clenbuterol", "ephedrine", "minoxidil",
-      "guarantee", "guaranteed", "100% guaranteed", "best seller", "amazon's choice", "amazon's favorite",
-      "works better than", "fastest shipping", "instant fix", "magic solution", "free shipping",
-      "100% quality guaranteed", "sale", "discount", "promo", "deal", "today only", "limited time",
-      "last chance", "buy with confidence", "unlike other brands", "certified", "tested", "approved",
-      "validated", "epa registered", "non-toxic", "hypoallergenic", "kills 99.9% of germs", "bpa-free",
-      "lead-free", "eco-friendly", "biodegradable", "fda-registered facility", "kills", "eliminates",
-      "destroys", "repels", "repellent", "pesticide", "insecticide", "fungicide", "mold", "mildew remover",
-      "germ-free", "brightening", "whitening", "lightening", "anti-aging", "wrinkle-free", "removes wrinkles",
-      "permanent results", "antimicrobial", "antibacterial", "antifungal", "sanitize", "disinfect",
-      "sterilizes", "heal", "antiseptic", "germ", "fungal", "insecticide", "pesticides", "repel",
-      "repelling", "viruses", "detoxification", "treatment", "fungus", "contaminants", "compostable",
-      "decomposable", "proven", "recommended", "viruses", "fungicides", "toxin", "toxins", "viral",
-      "remedy", "remedies", "diseases", "fda approved", "covid", "toxic", "mildew", "mould", "spores",
-      "n95", "kn95", "cystic fibrosis", "sanitize", "weight loss", "chlamydia", "hepatitis", "hiv",
-      "aids", "mononucleosis", "mono", "pelvic inflammatory", "scabies", "trichomoniasis", "liver",
-      "multiple sclerosis", "kidney", "alzheimer's", "dementia", "stroke", "parkinson's", "parkinson",
-      "flu", "influenza", "meningitis", "glaucoma", "cataract", "adhd", "concussion", "tumor",
-      "depression", "lupus", "muscular dystrophy", "als", "anxiety", "stress", "clenbuterol",
-      "ephedrine", "kratom", "psilocybin", "syphilis", "gonorrhea", "gout", "crohn's", "celiac",
-      "epilepsy", "seizures", "seizure", "obesity", "autism",
-      "covid19", "covid 19", "delta8", "delta 8", "delta9", "delta 9",
-      "nontoxic", "non toxic", "bpafree", "bpa free", "leadfree", "lead free",
-      "ecofriendly", "eco friendly", "germfree", "germ free", "antiaging", "anti aging",
-      "wrinklefree", "wrinkle free", "fda registered facility", "anti microbial", "anti fungal", "anti bacterial"
-    ];
-  
-    const matchedWords = restrictedWords.filter(word => {
-      const regex = new RegExp(`\\b${word}\\b`, 'i');
-      return regex.test(str);
-    });
-  
-    return matchedWords.length > 0 ? matchedWords : [];
-  };
+// ─── Restricted wording ──────────────────────────────────────────────────────
+// SOURCE OF TRUTH. client/src/helpers/Rankingsj.js, client/src/Pages/Products/
+// PreAnalysis.jsx and client/src/Pages/DemoSellerCentralChecker/DemoPreAnalysis.jsx
+// carry identical copies of these two lists and of termPattern(); change them
+// together.
+//
+// One flat list used to be applied to titles, bullets and descriptions alike, and
+// it mixed three different things. Production had 8,264 open restricted-words
+// tasks, and the hits were mostly ordinary product words: prevent, eco-friendly,
+// recommended, certified, treat, stress, non-toxic (which also hit "toxic",
+// because \b splits on the hyphen), bpa-free, mold, stroke, mono, weed, repellent,
+// eliminates, biodegradable, tested, approved, guarantee. The list is now split:
+//
+// PROMOTIONAL_TERMS - offers, rankings and guarantees. Amazon's title policy bars
+// them from titles; in bullets and descriptions they are ordinary selling copy
+// ("backed by our 1-year guarantee"), so they are checked in the TITLE ONLY.
+const PROMOTIONAL_TERMS = [
+  "sale", "deal", "discount", "promo", "cheap", "bargain",
+  "guarantee", "guaranteed", "100% guaranteed", "100% quality guaranteed",
+  "best seller", "amazon's choice", "amazon's favorite",
+  "free shipping", "fastest shipping", "today only", "limited time", "last chance",
+  "buy with confidence", "unlike other brands", "works better than",
+  "instant fix", "magic solution", "permanent results"
+];
+
+// PROHIBITED_CLAIMS - disease, drug and pesticide claims, and prohibited drug
+// products. These are not allowed anywhere on a detail page, so they are checked
+// in the title, bullets AND description.
+const PROHIBITED_CLAIMS = [
+  // disease / medical claims
+  "cure", "cures", "heal", "remedy", "remedies", "diseases", "infection",
+  "covid", "covid-19", "coronavirus", "pandemic", "virus", "viruses", "flu", "influenza",
+  "cancer", "tumor", "diabetes", "obesity", "weight loss", "hiv", "hepatitis",
+  "chlamydia", "gonorrhea", "syphilis", "trichomoniasis", "scabies", "mononucleosis",
+  "pelvic inflammatory", "arthritis", "gout", "asthma", "cystic fibrosis",
+  "alzheimer's", "dementia", "parkinson", "parkinson's", "multiple sclerosis",
+  "muscular dystrophy", "lupus", "epilepsy", "seizure", "seizures", "meningitis",
+  "glaucoma", "cataract", "concussion", "adhd", "autism", "anxiety", "depression",
+  "crohn's", "celiac",
+  // regulatory endorsements a listing cannot claim
+  "fda approved", "fda-registered facility", "clinically proven", "doctor recommended",
+  "epa registered", "n95", "kn95",
+  // pesticide / antimicrobial claims
+  "antibacterial", "anti-bacterial", "antimicrobial", "anti-microbial", "antifungal",
+  "anti-fungal", "antiviral", "antiseptic", "germs", "germ-free", "kills germs",
+  "kills 99.9% of germs", "bacteria", "fungal", "fungus", "sanitize", "sanitizes",
+  "disinfect", "disinfects", "sterilizes", "pesticide", "pesticides", "insecticide",
+  "fungicide", "fungicides",
+  // detox claims
+  "detox", "detoxify", "detoxification",
+  // drugs and drug paraphernalia
+  "cbd", "cannabinoid", "thc", "hemp oil", "marijuana", "delta-8", "delta-9",
+  "cocaine", "opioid", "methamphetamine", "kratom", "psilocybin", "dmt", "ayahuasca",
+  "picamilon", "phenibut", "clenbuterol", "ephedrine", "minoxidil",
+  "bong", "one hitter", "dab rig"
+];
+
+const escapeTermForRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// A term matches only as whole tokens, where a hyphen joins a token rather than
+// splitting it: "toxic" must not match inside "non-toxic", nor "germ" inside
+// "germ-free". Inside a multi-word term a space or hyphen is optional, so
+// "fda approved" also finds "FDA-approved" and "covid-19" finds "covid 19" and
+// "covid19". Straight and curly apostrophes are interchangeable. No lookbehind,
+// so the identical client copies run in older Safari too.
+const TERM_EDGE = "[^\\p{L}\\p{N}_'’-]";
+const termPattern = (term) => {
+  const body = term.split(/[\s-]+/).map((part) =>
+    escapeTermForRegex(part).replace(/'/g, "['’]")
+  ).join('[\\s-]?');
+  return new RegExp(`(?:^|${TERM_EDGE})${body}(?=$|${TERM_EDGE})`, 'iu');
+};
+
+const matchTerms = (str, terms) => {
+  if (typeof str !== 'string' || !str) return [];
+  return terms.filter((term) => termPattern(term).test(str));
+};
+
+const findPromotionalTerms = (str) => matchTerms(str, PROMOTIONAL_TERMS);
+const findProhibitedClaims = (str) => matchTerms(str, PROHIBITED_CLAIMS);
 
 
 // ─── Amazon product title requirements ────────────────────────────────────────
@@ -82,8 +114,8 @@ const TITLE_REPETITION_EXEMPT_WORDS = new Set([
 ]);
 
 // Promotional phrases, subjective commentary, and restricted claims that Amazon
-// does not allow in titles. The medical/claim wording lives in
-// containsRestrictedWords() and is checked alongside these.
+// does not allow in titles. PROMOTIONAL_TERMS and PROHIBITED_CLAIMS (above) are
+// checked alongside these.
 const TITLE_RESTRICTED_PHRASES = [
   'fsa eligible', 'hsa eligible', 'fsa/hsa eligible', 'hsa/fsa eligible',
   'hot item', 'hot deal', 'top rated', 'top seller', 'best selling', 'bestseller',
@@ -194,7 +226,8 @@ const checkTitle = (str) => {
 
     // 2. Restricted, promotional, and subjective wording.
     let RestictedWords = [...new Set([
-        ...containsRestrictedWords(title),
+        ...findPromotionalTerms(title),
+        ...findProhibitedClaims(title),
         ...matchPhrases(title, TITLE_RESTRICTED_PHRASES)
     ])];
 
@@ -302,50 +335,33 @@ const checkTitle = (str) => {
     return result;
 }
 
+// Special characters are restricted in TITLES only (checkTitle, rule 3). Amazon
+// has no such rule for bullets or descriptions, where "#1", "<10 lb" and "100%!"
+// are ordinary copy. The key is kept, always Success, because the ProductDetails
+// and Issues pages read it unconditionally.
+const notCheckedOutsideTitle = (where) => ({
+    status: "Success",
+    Message: `Special characters are only restricted in product titles; Amazon applies no such rule to ${where}.`,
+    HowTOSolve: ""
+});
+
+// The scrape stores [] both when a listing has no bullet points and when it could
+// not read them, so an empty array is NO DATA, not a failure: it produces no error
+// and no task. (A non-array is treated the same way.)
 const checkBulletPoints = (arr) => {
     let result = {};
-    
-    let charLimErrCount=0;
-    let RestictedWordsErrCount=0;
-    let SpecialCharactersErrCount=0;
-    let AllRestrictedWords=[];
-    let AllSpecialCharacters=[];
+    const bullets = Array.isArray(arr) ? arr.filter((str) => typeof str === 'string') : [];
 
+    let charLimErrCount = 0;
+    const claims = new Set();
 
-    arr.forEach((str) => {
-        
-
+    bullets.forEach((str) => {
         if (str.length < 150) {
             charLimErrCount++;
-        } 
-        let RestictedWords=containsRestrictedWords(str)
-        
-        if (RestictedWords.length>0) {
-           RestictedWordsErrCount++; 
-           AllRestrictedWords.push(RestictedWords[0]);
-        } 
-
-        const SpecialCharacters=checkSpecialCharacters(str)
-        if (SpecialCharacters.length>0) {
-          SpecialCharactersErrCount++; 
-          AllSpecialCharacters.push(SpecialCharacters[0]);
-        } 
+        }
+        // Every claim found, not only the first per bullet.
+        findProhibitedClaims(str).forEach((word) => claims.add(word));
     });
-
-    if(charLimErrCount>0||RestictedWordsErrCount>0||SpecialCharactersErrCount>0){
-        result.NumberOfErrors=1;
-    }else if((charLimErrCount>0&&RestictedWordsErrCount>0)||(charLimErrCount>0&&SpecialCharactersErrCount>0)||(RestictedWordsErrCount>0&&SpecialCharactersErrCount>0)){
-        result.NumberOfErrors=2; 
-    }else if((charLimErrCount>0&&RestictedWordsErrCount>0&&SpecialCharactersErrCount>0)){
-        result.NumberOfErrors=3;
-    }else{
-        result.NumberOfErrors=0;
-    }
-    
-    let FinalRestrictedWords=[...new Set(AllRestrictedWords)];
-    let FinalSpecialCharacters=[...new Set(AllSpecialCharacters)];
-
-    
 
     if(charLimErrCount>0){
         result.charLim={
@@ -360,113 +376,107 @@ const checkBulletPoints = (arr) => {
             HowTOSolve:""
         }
     }
-    if(RestictedWordsErrCount>0){
+    if(claims.size>0){
         result.RestictedWords={
             status:"Error",
-            Message:`Your bullet points contain words that are restricted or banned by Amazon's guidelines. Using such words can lead to your product being blocked or your listing being suppressed. The words Used are: ${FinalRestrictedWords.join(', ')}`,
-            HowTOSolve:"Review the bullet points and remove all restricted or banned words. Consult the most current Amazon selling policies and style guides to ensure your listing complies with all content regulations. Updating your bullet points accordingly will help avoid suppression or blocking of your listing."
+            Message:`Your bullet points contain medical, drug, or pesticide claims that Amazon prohibits on product detail pages. Such claims can get your listing suppressed or removed. The words used are: ${[...claims].join(', ')}`,
+            HowTOSolve:"Remove these claims from your bullet points. Describe what the product is and does without claiming it cures, treats, or prevents a disease, kills germs or pests, or contains a restricted substance - unless the product is registered for that claim and Amazon has approved it."
         }
     }else{
         result.RestictedWords={
             status:"Success",
-            Message:"Excellent! Your bullet points are in full compliance with Amazon's guidelines, free of any restricted or banned words, ensuring your listing stays active and visible.",
+            Message:"Excellent! Your bullet points contain no prohibited medical, drug, or pesticide claims.",
             HowTOSolve:""
         }
     }
-    if(SpecialCharactersErrCount>0){
-        result.checkSpecialCharacters={
-            status:"Error",
-            Message:`Your bullet points contain special characters that are restricted by Amazon's guidelines. Using these characters can lead to issues with listing compliance and may prevent your listing from being properly displayed. The special characters used are: ${FinalSpecialCharacters.join(', ')}`,
-            HowTOSolve:"Review your bullet points and remove all restricted special characters. Refer to Amazon's official style guide to ensure your content adheres to their formatting requirements. This will help maintain your listing's visibility and prevent potential suppression."
-        }
-    }else{
-        result.checkSpecialCharacters={
-            status:"Success",
-            Message:"Well done! Your bullet points comply with Amazon's guidelines, avoiding any restricted special characters, ensuring your listing remains clear and effective.",
-            HowTOSolve:""
-        }
-    }
+    result.checkSpecialCharacters = notCheckedOutsideTitle('bullet points');
+
+    // One per failing check. This used to be an if/else chain whose first branch
+    // caught every case, so the count was stuck at 1 however many checks failed,
+    // while each failing check still became its own task.
+    result.NumberOfErrors = [result.charLim, result.RestictedWords]
+        .filter((check) => check.status === "Error").length;
     return result;
 }
 
+// Same no-data rule as bullets: an empty or missing description produces no
+// result keys and no error.
+//
+// The scrape splits one description into paragraphs. Each check used to run per
+// paragraph, overwriting its status each time (the last paragraph won) while the
+// error count added up across all of them - so the header could say 4 errors for
+// a description with one visible failing check. Each check now runs once over the
+// whole description and counts once.
 const checkDescription = (arr) => {
     let result = {};
-    let errorCount = 0;
-    let pointCounter = 0;
+    const paragraphs = Array.isArray(arr)
+        ? arr.filter((str) => typeof str === 'string' && str.trim())
+        : [];
 
-    arr.forEach((str) => {
-        pointCounter++;
+    if (paragraphs.length === 0) {
+        result.NumberOfErrors = 0;
+        return result;
+    }
 
-        if (str.length < 1700) {
-            errorCount++;
-            result.charLim = {
-                status: "Error",
-                Message: "Your product description is under 1700 characters. This may not provide enough information to fully educate potential buyers.",
-                HowTOSolve: "Expand your product description to at least 1700 characters. Include benefits, use cases, and unique features, using proper formatting and keywords.",
-                PointNumber: pointCounter
-            }
-        } else {
-            result.charLim = {
-                status: "Success",
-                Message: "Great job! Your product description is sufficiently detailed.",
-                HowTOSolve: "",
-                PointNumber: pointCounter
-            }
+    const length = paragraphs.reduce((sum, str) => sum + str.length, 0);
+    if (length < 1700) {
+        result.charLim = {
+            status: "Error",
+            Message: "Your product description is under 1700 characters. This may not provide enough information to fully educate potential buyers.",
+            HowTOSolve: "Expand your product description to at least 1700 characters. Include benefits, use cases, and unique features, using proper formatting and keywords."
         }
-        let RestictedWords=containsRestrictedWords(str)
-        if (RestictedWords.length>0) {
-            errorCount++;
-            result.RestictedWords = {
-                status: "Error",
-                Message: `Your product description contains restricted or banned words according to Amazon's guidelines. The words used are: ${RestictedWords.join(', ')}`,
-                HowTOSolve: "Review and remove restricted words from the description. Ensure full compliance with Amazon's guidelines.",
-                PointNumber: pointCounter
-            }
-        } else {
-            result.RestictedWords = {
-                status: "Success",
-                Message: "Excellent! Your product description avoids all restricted words.",
-                HowTOSolve: "",
-                PointNumber: pointCounter
-            }
+    } else {
+        result.charLim = {
+            status: "Success",
+            Message: "Great job! Your product description is sufficiently detailed.",
+            HowTOSolve: ""
         }
+    }
 
-        const SpecialCharacters=checkSpecialCharacters(str)
-        if (SpecialCharacters.length>0) {
-            errorCount++;
-            result.checkSpecialCharacters = {
-                status: "Error",
-                Message: `Your product description includes restricted special characters. The special characters used are: ${SpecialCharacters.join(', ')}`,
-                HowTOSolve: "Remove all restricted characters from your product description to meet Amazon's formatting guidelines.",
-                PointNumber: pointCounter
-            }
-        } else {
-            result.checkSpecialCharacters = {
-                status: "Success",
-                Message: "Your product description is clean and free of restricted characters.",
-                HowTOSolve: "",
-                PointNumber: pointCounter
-            }
+    const claims = [...new Set(paragraphs.flatMap((str) => findProhibitedClaims(str)))];
+    if (claims.length > 0) {
+        result.RestictedWords = {
+            status: "Error",
+            Message: `Your product description contains medical, drug, or pesticide claims that Amazon prohibits on product detail pages. The words used are: ${claims.join(', ')}`,
+            HowTOSolve: "Remove these claims from the description. Describe the product factually without claiming it cures, treats, or prevents a disease, kills germs or pests, or contains a restricted substance."
         }
-    });
+    } else {
+        result.RestictedWords = {
+            status: "Success",
+            Message: "Excellent! Your product description contains no prohibited medical, drug, or pesticide claims.",
+            HowTOSolve: ""
+        }
+    }
 
-    result.NumberOfErrors = errorCount;
+    result.checkSpecialCharacters = notCheckedOutsideTitle('product descriptions');
+
+    result.NumberOfErrors = [result.charLim, result.RestictedWords]
+        .filter((check) => check.status === "Error").length;
     return result;
 }
 
-const findDuplicateWords = (str) => {
-    const words = str.toLowerCase().match(/\b\w+\b/g);
-    const wordSet = new Set();
+// Function words repeat by necessity and Amazon ignores them in search terms, so
+// repeating them wastes nothing worth flagging.
+const BACKEND_KEYWORD_STOP_WORDS = new Set(['for', 'and', 'the', 'with', 'of', 'in', 'to', 'a', 'an', 'or']);
 
-    if (!words) return false;
+/**
+ * Words repeated in a backend search-terms string. Tokens keep inner apostrophes
+ * ("men's" is one word): splitting on \b\w+\b turned "men's ... women's" into a
+ * duplicate "s". Tokens under 2 characters and stop-words are ignored.
+ * @returns {string[]} each repeated word once, in first-seen order
+ */
+const findDuplicateWords = (str) => {
+    if (typeof str !== 'string') return [];
+    const words = str.toLowerCase().match(/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu) || [];
+    const seen = new Set();
+    const duplicates = new Set();
 
     for (const word of words) {
-        if (wordSet.has(word)) {
-            return true;
-        }
-        wordSet.add(word);
+        if (word.length < 2 || BACKEND_KEYWORD_STOP_WORDS.has(word)) continue;
+        if (seen.has(word)) duplicates.add(word);
+        seen.add(word);
     }
-    return false;
+    return [...duplicates];
 }
 
 const BackendKeyWordOrAttributesStatus = (str) => {
@@ -497,7 +507,9 @@ const BackendKeyWordOrAttributesStatus = (str) => {
             HowTOSolve: "Reduce your keywords to 249 bytes or less. Remove unnecessary words, avoid repetition, and prioritize high-value search terms."
         }
     } else if (byteLength < 200) {
-        errorCount++;
+        // A warning, not an error: it is not counted in NumberOfErrors and never
+        // becomes a task (tasks are raised on "Error" only). Counting it made the
+        // header error total exceed the task list for most products.
         result.charLim = {
             status: "Warning",
             Message: `Your backend keywords use only ${byteLength} of 250 available bytes. You may be missing valuable search terms.`,
@@ -511,11 +523,12 @@ const BackendKeyWordOrAttributesStatus = (str) => {
         }
     }
 
-    if (findDuplicateWords(str)) {
+    const duplicates = findDuplicateWords(str);
+    if (duplicates.length > 0) {
         errorCount++;
         result.dublicateWords = {
             status: "Error",
-            Message: "Your backend keywords contain duplicate words, wasting space and reducing effectiveness.",
+            Message: `Your backend keywords contain duplicate words, wasting space and reducing effectiveness. The repeated words are: ${duplicates.join(', ')}`,
             HowTOSolve: "Remove duplicate words. Use synonyms, alternate terms, and other relevant keywords to increase reach."
         }
     } else {
@@ -533,6 +546,11 @@ const BackendKeyWordOrAttributesStatus = (str) => {
 const getRankings = (ProductDetails) => {
     // console.log(ProductDetails.product_title)
     const titleResult = checkTitle(ProductDetails.product_title);
+    // Empty (or missing) bullets and description are NO DATA, not failures: the
+    // scrape stores [] both when a listing has none and when it could not read
+    // them. Both checks return zero errors for [], so no task is raised; the ESF
+    // Listings Audit shows the same products as "Not available" rather than
+    // "Missing" (EsfReportsService listingAuditChecks).
     const bulletPointsResult = checkBulletPoints(ProductDetails.about_product);
     const descriptionResult = checkDescription(ProductDetails.product_description);
 
@@ -551,7 +569,12 @@ const getRankings = (ProductDetails) => {
 
 module.exports = {
     getRankings,
+    PROMOTIONAL_TERMS,
+    PROHIBITED_CLAIMS,
+    findPromotionalTerms,
+    findProhibitedClaims,
     BackendKeyWordOrAttributesStatus,
+    findDuplicateWords,
     checkTitle,
     checkBulletPoints,
     checkDescription,

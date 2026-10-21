@@ -892,7 +892,12 @@ const buildTaskCoverage = (data = {}, {
         'ranking.backend': products && nonEmpty(data.RankingsData?.BackendKeywordResultArray),
         conversion: products && Object.keys(conv).length > 0,
         'conversion.aplus': products && nonEmpty(conv.aPlusResult),
-        'conversion.brandStory': products && nonEmpty(conv.brandStoryResult),
+        // "The scrape arrived", not "results exist": checkBrandStory returns nothing
+        // for a marketplace where no product shows a Brand Story (36 of 76 in
+        // production), and those marketplaces' open tasks must resolve, not linger.
+        // Older messages without the flag fall back to the result list.
+        'conversion.brandStory': products && (conv.brandStoryScrapePresent === true
+            || (conv.brandStoryScrapePresent === undefined && nonEmpty(conv.brandStoryResult))),
         'conversion.images': products && nonEmpty(conv.imageResult),
         'conversion.video': products && nonEmpty(conv.videoResult),
         'conversion.rating': products && nonEmpty(conv.productStarRatingResult),
@@ -1660,8 +1665,22 @@ const analyseData = async (data, userId = null, options = {}) => {
         }
     });
 
-    // Backend keyword errors (only for active products) with safe data access
-    const backendKeywordResultArray = data.RankingsData?.BackendKeywordResultArray || [];
+    // Backend keyword errors (only for active products) with safe data access.
+    // Listing items are per SKU, so an ASIN sold under several SKUs arrives as
+    // several rows; each was counted, while tasks are one per ASIN and error type.
+    // Keep one row per ASIN, preferring one that has an Error, so the header
+    // count equals the tasks created.
+    const backendKeywordRowsByAsin = new Map();
+    const backendRowErrors = (row) => row.data.NumberOfErrors || 0;
+    (Array.isArray(data.RankingsData?.BackendKeywordResultArray) ? data.RankingsData.BackendKeywordResultArray : [])
+        .forEach((row) => {
+            if (!row || !row.asin || !row.data) return;
+            const kept = backendKeywordRowsByAsin.get(row.asin);
+            if (!kept || backendRowErrors(row) > backendRowErrors(kept)) {
+                backendKeywordRowsByAsin.set(row.asin, row);
+            }
+        });
+    const backendKeywordResultArray = [...backendKeywordRowsByAsin.values()];
     if (Array.isArray(backendKeywordResultArray)) {
         backendKeywordResultArray.forEach((elm) => {
             if (!elm || !elm.asin || !elm.data) return;
@@ -1754,7 +1773,10 @@ const analyseData = async (data, userId = null, options = {}) => {
                 if (elm.data.charLim?.status === "Error") {
                     rankingErrors.data.charLim = elm.data.charLim;
                 }
-                if (elm.data.dublicateWords === "Error") {
+                // BackendKeyWordOrAttributesStatus returns a check object; comparing
+                // it to the string "Error" never matched, so no duplicate-words task
+                // was ever created although NumberOfErrors counted it.
+                if (elm.data.dublicateWords?.status === "Error") {
                     rankingErrors.data.dublicateWords = elm.data.dublicateWords;
                 }
             }

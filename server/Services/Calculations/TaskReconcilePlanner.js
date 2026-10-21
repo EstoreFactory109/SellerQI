@@ -61,6 +61,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const SOURCE_BY_TYPE = {
     // Backend keywords come from BackendKeywordResultArray, not the main ranking array.
     'ranking:backend_keywords_char_limit': 'ranking.backend',
+    'ranking:backend_keywords_duplicate_words': 'ranking.backend',
 
     'conversion:missing_aplus_content': 'conversion.aplus',
     'conversion:missing_brand_story': 'conversion.brandStory',

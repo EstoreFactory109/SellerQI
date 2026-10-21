@@ -12,6 +12,7 @@ const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 const ProductWiseSponsoredAdsItem = require('../../models/amazon-ads/ProductWiseSponsoredAdsItemModel.js');
 const ProfitabilityService = require('./ProfitabilityService.js');
 const logger = require('../../utils/Logger.js');
+const { marketplaceShowsBrandStory } = require('./Conversion.js');
 
 /**
  * Get basic product info for a single ASIN
@@ -57,7 +58,7 @@ async function getProductBasicInfo({ userId, region, country, asin }) {
             refunds: economicsData.refunds || 0,
             adsSpend: ppcSpendData.totalSpend || 0,
             hasAPlus: catalogData.hasAPlus || false,
-            hasBrandStory: catalogData.hasBrandStory || false,
+            hasBrandStory: catalogData.hasBrandStory === undefined ? false : catalogData.hasBrandStory,
             starRating: catalogData.starRating || 0,
             numRatings: catalogData.numRatings || 0,
             bulletPoints: catalogData.bulletPoints || [],
@@ -120,7 +121,10 @@ async function fetchCatalogData(userId, country, region, asin) {
             description: product.product_description || [],
             starRating: parseFloat(product.product_star_ratings) || 0,
             numRatings: parseInt(product.product_num_ratings?.replace(/,/g, '')) || 0,
-            hasBrandStory: product.has_brandstory || false,
+            // null (unknown) where no product in the marketplace shows a Brand
+            // Story: the scrape cannot tell "missing" from "no Brand Registry"
+            // there, the same gate that keeps missing_brand_story tasks out.
+            hasBrandStory: marketplaceShowsBrandStory(doc.Products) ? product.has_brandstory === true : null,
             hasAPlus: (product.product_description?.length > 0) || false
         };
     } catch (error) {

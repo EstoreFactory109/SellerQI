@@ -556,11 +556,70 @@ describe('getEsfReports', () => {
 
             expect(rows.FULL.score).toBe('6/6');
             expect(rows.FULL.missing).toBe('-');
-            expect(rows.BARE.score).toBe('0/6');
-            // Worst listing first, so the audit opens on what needs work.
-            expect(report.summary.rows[0].sku).toBe('BARE');
-            // 6 of 12 possible checks passed.
-            expect(report.summary.stats.find((item) => item.label === 'Completion').value).toBe(50);
+            // BARE was never captured by the scrape and has no A+ record, so no
+            // check can be judged. It used to score 0/6 with everything "Missing",
+            // a finding about our data rather than the listing; now it is
+            // "Not available" and stays out of the completion figure.
+            expect(rows.BARE.score).toBe('-');
+            expect(rows.BARE.missing).toBe('-');
+            expect(rows.BARE.video).toBe('Not available');
+            expect(rows.BARE.brandStory).toBe('Not available');
+            expect(report.summary.stats.find((item) => item.label === 'Completion').value).toBe(100);
+            expect(report.caveats.join(' ')).toMatch(/Not available/);
+        });
+
+        it('scores real gaps, treats empty bullets/description as not available, and skips inactive listings', async () => {
+            Seller.findOne.mockReturnValue(mockFindOne({
+                sellerAccount: [{
+                    region: 'NA',
+                    country: 'US',
+                    products: [
+                        { asin: 'B1', sku: 'FULL', status: 'Active' },
+                        { asin: 'B2', sku: 'GAPS', status: 'Active' },
+                        { asin: 'B3', sku: 'OFF', status: 'Inactive' },
+                    ],
+                }],
+            }));
+            Content.findOne.mockReturnValue(mockFindOne({
+                createdAt: new Date('2026-09-17T00:00:00Z'),
+                Products: [
+                    { asin: 'B1', about_product: ['a'], product_description: ['d'], product_photos: ['1', '2', '3', '4', '5'], video_url: ['v'], has_brandstory: true },
+                    { asin: 'B2', about_product: [], product_description: [], product_photos: ['1'], video_url: [], has_brandstory: false },
+                    { asin: 'B3', about_product: [], product_description: [], product_photos: [], video_url: [], has_brandstory: false },
+                ],
+            }));
+            APlus.findOne.mockReturnValue(mockFindOne({ ApiContentDetails: [
+                { Asins: 'B1', status: 'APPROVED' },
+                { Asins: 'B2', status: 'NOT_AVAILABLE' },
+            ] }));
+
+            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'listings-audit');
+            const rows = Object.fromEntries(report.summary.rows.map((row) => [row.sku, row]));
+
+            expect(rows.OFF).toBeUndefined();
+            expect(report.summary.stats.find((item) => item.label === 'Listings reviewed').value).toBe(2);
+            // Images, video, A+ and Brand Story are judged; bullets/description are not.
+            expect(rows.GAPS.score).toBe('0/4');
+            expect(rows.GAPS.missing).toBe('5+ images, Video, A+ Content, Brand Story');
+            expect(rows.GAPS.missing).not.toMatch(/Bullet|Description/);
+            // 6 passed of 10 judged checks.
+            expect(report.summary.stats.find((item) => item.label === 'Completion').value).toBe(60);
+        });
+
+        it('does not score Brand Story in a marketplace where no listing shows one', async () => {
+            Seller.findOne.mockReturnValue(mockFindOne({
+                sellerAccount: [{ region: 'NA', country: 'US', products: [{ asin: 'B1', sku: 'S', status: 'Active' }] }],
+            }));
+            Content.findOne.mockReturnValue(mockFindOne({
+                createdAt: new Date('2026-09-17T00:00:00Z'),
+                Products: [{ asin: 'B1', about_product: ['a'], product_description: ['d'], product_photos: ['1', '2', '3', '4', '5'], video_url: ['v'], has_brandstory: false }],
+            }));
+
+            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'listings-audit');
+            expect(report.summary.rows[0].brandStory).toBe('Not available');
+            expect(report.summary.rows[0].missing).not.toMatch(/Brand Story/);
+            expect(report.summary.stats.find((item) => item.label === 'Brand Story').value).toBeNull();
+            expect(report.caveats.join(' ')).toMatch(/Brand Registry/);
         });
 
         it('declares the fields it cannot audit', async () => {

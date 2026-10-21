@@ -49,6 +49,38 @@ describe('buildTaskCoverage', () => {
         expect(c.uncoveredProductAsins).toEqual([]);
     });
 
+    describe('conversion.brandStory', () => {
+        // checkBrandStory returns nothing for a marketplace where no product shows a
+        // Brand Story. Coverage must still be true there, or the 11,543 open
+        // missing_brand_story tasks in gated marketplaces would never resolve.
+        it('is covered by the scrape arriving, even with no brand-story results (gated marketplace)', () => {
+            const data = fullData();
+            data.ConversionData.brandStoryResult = [];
+            data.ConversionData.brandStoryScrapePresent = true;
+            expect(buildTaskCoverage(data, fullCtx())['conversion.brandStory']).toBe(true);
+        });
+
+        it('is not covered when the scrape did not arrive', () => {
+            const data = fullData();
+            data.ConversionData.brandStoryResult = [];
+            data.ConversionData.brandStoryScrapePresent = false;
+            expect(buildTaskCoverage(data, fullCtx())['conversion.brandStory']).toBe(false);
+        });
+
+        it('falls back to the result list for messages without the flag', () => {
+            const data = fullData();
+            expect(buildTaskCoverage(data, fullCtx())['conversion.brandStory']).toBe(true);
+            data.ConversionData.brandStoryResult = [];
+            expect(buildTaskCoverage(data, fullCtx())['conversion.brandStory']).toBe(false);
+        });
+
+        it('still needs active products', () => {
+            const data = fullData();
+            data.ConversionData.brandStoryScrapePresent = true;
+            expect(buildTaskCoverage(data, { ...fullCtx(), activeProductSet: new Set() })['conversion.brandStory']).toBe(false);
+        });
+    });
+
     it('covers nothing product-level when there are no active products', () => {
         const c = buildTaskCoverage(fullData(), { ...fullCtx(), activeProductSet: new Set() });
         expect(c.ranking).toBe(false);

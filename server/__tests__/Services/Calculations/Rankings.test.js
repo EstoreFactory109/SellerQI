@@ -2,7 +2,17 @@
  * Tests for Rankings calculation service
  */
 
-const { getRankings, BackendKeyWordOrAttributesStatus } = require('../../../Services/Calculations/Rankings.js');
+const {
+  getRankings,
+  BackendKeyWordOrAttributesStatus,
+  checkTitle,
+  checkBulletPoints,
+  checkDescription,
+  findPromotionalTerms,
+  findProhibitedClaims,
+  PROMOTIONAL_TERMS,
+  PROHIBITED_CLAIMS,
+} = require('../../../Services/Calculations/Rankings.js');
 
 describe('Rankings Calculations', () => {
   describe('getRankings', () => {
@@ -227,7 +237,9 @@ describe('Rankings Calculations', () => {
       expect(result.finalResult.BulletPoints.RestictedWords.status).toBe('Error');
     });
 
-    it('should detect special characters in bullet points', () => {
+    // This used to expect an Error: the title-only character rule was applied to
+    // bullets too. Amazon restricts these characters in titles only.
+    it('should not apply the title character rule to bullet points', () => {
       const productDetails = {
         product_title: 'A'.repeat(100),
         about_product: ['This bullet has special chars! #hashtag <tag> $money'],
@@ -236,7 +248,23 @@ describe('Rankings Calculations', () => {
 
       const result = getRankings(productDetails);
 
-      expect(result.finalResult.BulletPoints.checkSpecialCharacters.status).toBe('Error');
+      expect(result.finalResult.BulletPoints.checkSpecialCharacters.status).toBe('Success');
+    });
+
+    it('should report every claim found, not only the first per bullet', () => {
+      const result = checkBulletPoints(['Relieves anxiety and depression with CBD', 'Kills germs']);
+      expect(result.RestictedWords.Message).toMatch(/anxiety, depression, cbd, germs, kills germs/);
+    });
+
+    it('should count every failing check (used to be stuck at 1)', () => {
+      expect(checkBulletPoints(['Short bullet that relieves anxiety']).NumberOfErrors).toBe(2);
+      expect(checkBulletPoints(['Short bullet']).NumberOfErrors).toBe(1);
+      expect(checkBulletPoints(['A'.repeat(150)]).NumberOfErrors).toBe(0);
+    });
+
+    it('should treat missing bullets as no data, not an error', () => {
+      expect(checkBulletPoints([]).NumberOfErrors).toBe(0);
+      expect(checkBulletPoints(undefined).NumberOfErrors).toBe(0);
     });
   });
 
@@ -276,6 +304,88 @@ describe('Rankings Calculations', () => {
       const result = getRankings(productDetails);
 
       expect(result.finalResult.Description.RestictedWords.status).toBe('Error');
+    });
+  });
+
+  describe('Description checks across paragraphs', () => {
+    it('should judge length once over the whole description', () => {
+      const result = checkDescription(['A'.repeat(1000), 'B'.repeat(800)]);
+      expect(result.charLim.status).toBe('Success');
+      expect(result.NumberOfErrors).toBe(0);
+    });
+
+    // Used to overwrite each status per paragraph (the last one won) while the
+    // count added up across paragraphs: 3 short paragraphs counted 3 errors and
+    // showed 1, and an early claim could be hidden by a clean last paragraph.
+    it('should count each failing check once, however many paragraphs fail it', () => {
+      const result = checkDescription(['Short one with antibacterial claims', 'Short two', 'Short three']);
+      expect(result.charLim.status).toBe('Error');
+      expect(result.RestictedWords.status).toBe('Error');
+      expect(result.RestictedWords.Message).toContain('antibacterial');
+      expect(result.NumberOfErrors).toBe(2);
+    });
+
+    it('should not apply the title character rule to descriptions', () => {
+      expect(checkDescription(['Wow! #1 <choice> ' + 'A'.repeat(1700)]).checkSpecialCharacters.status).toBe('Success');
+    });
+
+    it('should treat a missing description as no data', () => {
+      expect(checkDescription([])).toEqual({ NumberOfErrors: 0 });
+      expect(checkDescription(['   ']).NumberOfErrors).toBe(0);
+      expect(checkDescription(null).NumberOfErrors).toBe(0);
+    });
+  });
+
+  describe('Restricted wording by section', () => {
+    it('should flag promotional terms in the title only', () => {
+      expect(checkTitle('Cotton Towel Set, Free Shipping').RestictedWords.status).toBe('Error');
+      expect(checkTitle('Cheap Cotton Towel Bargain').RestictedWords.Message).toMatch(/cheap, bargain/);
+      expect(checkBulletPoints(['Backed by our lifetime guarantee - free shipping on every order, plus a discount']).RestictedWords.status).toBe('Success');
+      expect(checkDescription(['Every order ships free and is guaranteed. Limited time deal on sale now.']).RestictedWords.status).toBe('Success');
+    });
+
+    it('should flag prohibited claims in title, bullets and description', () => {
+      expect(checkTitle('Joint Cream for Arthritis').RestictedWords.status).toBe('Error');
+      expect(checkBulletPoints(['Antimicrobial coating']).RestictedWords.status).toBe('Error');
+      expect(checkDescription(['Helps cure insomnia and anxiety']).RestictedWords.status).toBe('Error');
+    });
+
+    it('should no longer flag ordinary product words', () => {
+      const ordinary = [
+        'prevent', 'eco-friendly', 'recommended', 'certified', 'treat', 'stress', 'non-toxic',
+        'bpa-free', 'mold', 'stroke', 'mono', 'weed', 'repellent', 'eliminates', 'biodegradable',
+        'tested', 'approved', 'kidney', 'liver', 'hypoallergenic', 'whitening', 'proven',
+        'contaminants', 'compostable', 'aids', 'als', 'toxic', 'mildew', 'wrinkle-free',
+      ];
+      for (const word of ordinary) {
+        expect([word, findProhibitedClaims(`Our ${word} product`)]).toEqual([word, []]);
+        expect([word, findPromotionalTerms(`Our ${word} product`)]).toEqual([word, []]);
+      }
+    });
+
+    it('should match whole hyphenated tokens only', () => {
+      // "germ-free" is a claim; "germs" must not be found inside it, nor "virus" in "antivirus".
+      expect(findProhibitedClaims('Germ-free surface')).toEqual(['germ-free']);
+      expect(findProhibitedClaims('Antivirus software license')).toEqual([]);
+      expect(findProhibitedClaims('Anti-viral? no: anti-bacterial wipes')).toEqual(['anti-bacterial']);
+      expect(findPromotionalTerms('Salesforce compatible, wholesale pack')).toEqual([]);
+    });
+
+    it('should match multi-word terms with a space, a hyphen or nothing between words', () => {
+      expect(findProhibitedClaims('FDA-approved formula')).toEqual(['fda approved']);
+      expect(findProhibitedClaims('Covid19 test')).toEqual(['covid-19']);
+      expect(findProhibitedClaims('covid 19 test')).toContain('covid-19');
+      expect(findProhibitedClaims('Kills germs fast')).toEqual(['germs', 'kills germs']);
+      expect(findPromotionalTerms('Bestseller edition')).toEqual(['best seller']);
+    });
+
+    it('should be case-insensitive and accept curly apostrophes', () => {
+      expect(findProhibitedClaims('CANCER')).toEqual(['cancer']);
+      expect(findProhibitedClaims('Alzheimer’s support')).toEqual(["alzheimer's"]);
+    });
+
+    it('should keep the promotional and claim lists disjoint', () => {
+      expect(PROMOTIONAL_TERMS.filter((t) => PROHIBITED_CLAIMS.includes(t))).toEqual([]);
     });
   });
 
@@ -329,16 +439,18 @@ describe('Rankings Calculations', () => {
       expect(result.dublicateWords.status).toBe('Success');
     });
 
-    it('should count errors correctly', () => {
+    // These expected 1 and 2: the under-200-byte Warning used to be counted as an
+    // error although it never becomes a task. Warnings are not errors.
+    it('should not count the under-200-byte warning as an error', () => {
       const result = BackendKeyWordOrAttributesStatus('short');
 
-      expect(result.NumberOfErrors).toBe(1); // Only char limit error
+      expect(result.NumberOfErrors).toBe(0);
     });
 
-    it('should count multiple errors', () => {
+    it('should count only real errors', () => {
       const result = BackendKeyWordOrAttributesStatus('duplicate duplicate');
 
-      expect(result.NumberOfErrors).toBe(2); // Char limit + duplicates
+      expect(result.NumberOfErrors).toBe(1); // duplicates; the short length is a warning
     });
   });
 

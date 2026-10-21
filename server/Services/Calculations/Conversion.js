@@ -168,14 +168,36 @@ const checkProductWithOutBuyBox = (asinList) => {
 };
 
 /**
+ * Whether a marketplace's latest scrape can be trusted to say "no Brand Story".
+ *
+ * Brand Story needs Brand Registry, and nothing in SellerQI stores Brand Registry
+ * status. Ingest writes `has_brandstory: data.has_brandstory || false`, so "the
+ * scraper did not see one" and "this seller cannot have one" both arrive as false.
+ * In production 36 of 76 active marketplaces had no product at all showing a Brand
+ * Story, behind 11,543 open missing_brand_story tasks: for those sellers the task
+ * is either impossible (no Brand Registry) or a scrape blind spot. One product that
+ * does show a Brand Story proves both that the seller can add one and that the
+ * scrape sees it, so only then is "missing" on the others a real finding.
+ *
+ * @param {Array} productsList - numberofproductreviews Products for one marketplace
+ * @returns {boolean}
+ */
+const marketplaceShowsBrandStory = (productsList) =>
+    Array.isArray(productsList) && productsList.some(p => p && p.has_brandstory === true);
+
+/**
  * Check if product has Brand Story
  * @param {Array} productsList - Array of products with has_brandstory field from NumberOfProductReviews
- * @returns {Array} Array of results with status and messages
+ * @returns {Array} Array of results with status and messages; empty when the
+ *   marketplace is gated (see marketplaceShowsBrandStory) - no verdict either way.
  */
 const checkBrandStory = (productsList) => {
     let result = [];
-    
+
+    if (!marketplaceShowsBrandStory(productsList)) return result;
+
     productsList.forEach(product => {
+        if (!product) return;
         if (product.has_brandstory === false || product.has_brandstory === undefined) {
             result.push({
                 asin: product.asin,
@@ -201,4 +223,4 @@ const checkBrandStory = (productsList) => {
 };
 
 
-module.exports = { checkNumberOfImages, checkIfVideoExists, checkStarRating, checkAPlus, checkProductWithOutBuyBox, checkBrandStory, aplusStateOf, MIN_PRODUCT_IMAGES, NO_DATA }
+module.exports = { checkNumberOfImages, checkIfVideoExists, checkStarRating, checkAPlus, checkProductWithOutBuyBox, checkBrandStory, marketplaceShowsBrandStory, aplusStateOf, MIN_PRODUCT_IMAGES, NO_DATA }
