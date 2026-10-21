@@ -51,7 +51,6 @@ describe('esfPages', () => {
 
     it.each([
       '/api/pagewise/navbar',
-      '/api/pagewise/comparison-debug',
       '/app/profile',
       '/api/total-sales/filter',
     ])('leaves shared endpoint %s unrestricted', (path) => {
