@@ -226,6 +226,9 @@ describe('AsinFinanceWindowService', () => {
             }));
             // The caller's window is honoured.
             expect(capturedPipeline[0].$match.date).toEqual({ $gte: '2026-09-01', $lte: '2026-09-30' });
+            // The stale doc's account totals are not passed off as current.
+            expect(r.totalSales).toBeUndefined();
+            expect(r.totalGrossProfit).toBeUndefined();
         });
 
         it('stale EconomicsMetrics and no live rows -> empty, not fresh, source none', async () => {
