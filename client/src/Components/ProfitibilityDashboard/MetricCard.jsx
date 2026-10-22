@@ -2,12 +2,13 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { DollarSign, Percent, List, TrendingUp, TrendingDown, Zap, Target, ChevronDown, ChevronUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { COLORS } from '../Shared/index.js';
+import { COLORS, STATUS, StatusPill } from '../Shared/index.js';
 
 const EXPENSES_LABEL = 'Expenses';
 const EXPENSES_DROPDOWN_WIDTH = 340;
 
-const MetricCard = ({ label, value, icon, breakdown, isExpandable, currency = '$', caption, tintColor }) => {
+// noData: no finance data behind this card — value is '—' and the card shows the "Set up" pill instead of a caption.
+const MetricCard = ({ label, value, icon, breakdown, isExpandable, currency = '$', caption, tintColor, noData = false }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [dropdownPos, setDropdownPos] = useState(null);
     const cardRef = useRef(null);
@@ -27,7 +28,7 @@ const MetricCard = ({ label, value, icon, breakdown, isExpandable, currency = '$
 
     const IconComponent = getIconComponent(icon);
     const hasBreakdown = Array.isArray(breakdown) && breakdown.length > 0;
-    const canExpand = isExpandable && hasBreakdown;
+    const canExpand = !noData && isExpandable && hasBreakdown;
 
     const updateDropdownPosition = useCallback(() => {
       if (!cardRef.current) return;
@@ -132,7 +133,11 @@ const MetricCard = ({ label, value, icon, breakdown, isExpandable, currency = '$
           <div className="text-[21px] font-bold transition-colors duration-200 truncate" style={{ color: COLORS.textPrimary }}>
             {value}
           </div>
-          {caption && (
+          {noData ? (
+            <div className="mt-1.5">
+              <StatusPill status={STATUS.SETUP} compact />
+            </div>
+          ) : caption && (
             <div className="text-[12px] mt-1.5 truncate" style={{ color: tintColor || COLORS.textMuted }}>
               {caption}
             </div>

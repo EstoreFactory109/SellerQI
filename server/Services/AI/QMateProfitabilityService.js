@@ -6,7 +6,7 @@
  * and parent-child ASIN aggregation.
  * 
  * Data Sources:
- * - EconomicsMetrics: Sales, profit, fees data
+ * - Economics (LiveEconomicsService: fresh EconomicsMetrics or live DailySkuFinance): Sales, profit, fees data
  * - CogsModel: Cost of goods sold per ASIN
  * - ProductWiseFinancial: Detailed product-wise financials
  * - AsinWiseSalesForBigAccounts: Big account data
@@ -16,8 +16,11 @@
  */
 
 const logger = require('../../utils/Logger.js');
-const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
+// Fresh EconomicsMetrics, else live DailySkuFinance, else null. The big-account side
+// collection is only read for a stored doc (its rows are keyed by that doc's _id).
+const { loadLiveEconomics, isStoredEconomicsDoc } = require('../Finance/LiveEconomicsService.js');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
+const { hasSalesOnlyRows } = require('../../models/MCP/SalesOnlyMetricsModel.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 const CogsModel = require('../../models/finance/CogsModel.js');
 const ProductWiseFinancial = require('../../models/finance/ProductWiseFinancialModel.js');
@@ -114,7 +117,7 @@ async function getProfitMarginCategories(userId, country, region) {
         
         // Get economics metrics and COGS
         const [economicsMetrics, cogsDoc] = await Promise.all([
-            EconomicsMetrics.findLatest(userObjectId, region, country),
+            loadLiveEconomics(userObjectId, region, country),
             CogsModel.findOne({ userId: userObjectId, countryCode: country }).lean()
         ]);
         
@@ -138,7 +141,7 @@ async function getProfitMarginCategories(userId, country, region) {
         let profitabilityData = [];
         const isBigAccount = economicsMetrics.isBig === true;
         
-        if (isBigAccount || (!economicsMetrics.asinWiseSales?.length && economicsMetrics.totalSales?.amount > 5000)) {
+        if (isStoredEconomicsDoc(economicsMetrics) && (isBigAccount || (!economicsMetrics.asinWiseSales?.length && economicsMetrics.totalSales?.amount > 5000))) {
             const profitMap = await AsinWiseSalesForBigAccounts.getProfitabilityMapByMetricsId(economicsMetrics._id);
             profitabilityData = Array.from(profitMap.values());
         } else if (Array.isArray(economicsMetrics.asinWiseSales)) {
@@ -270,7 +273,7 @@ async function getParentChildAggregation(userId, country, region) {
             ? new mongoose.Types.ObjectId(userId) 
             : userId;
         
-        const economicsMetrics = await EconomicsMetrics.findLatest(userObjectId, region, country);
+        const economicsMetrics = await loadLiveEconomics(userObjectId, region, country);
         
         if (!economicsMetrics) {
             return {
@@ -284,7 +287,7 @@ async function getParentChildAggregation(userId, country, region) {
         let asinData = [];
         const isBigAccount = economicsMetrics.isBig === true;
         
-        if (isBigAccount || (!economicsMetrics.asinWiseSales?.length && economicsMetrics.totalSales?.amount > 5000)) {
+        if (isStoredEconomicsDoc(economicsMetrics) && (isBigAccount || (!economicsMetrics.asinWiseSales?.length && economicsMetrics.totalSales?.amount > 5000))) {
             const profitMap = await AsinWiseSalesForBigAccounts.getProfitabilityMapByMetricsId(economicsMetrics._id);
             asinData = Array.from(profitMap.values());
         } else if (Array.isArray(economicsMetrics.asinWiseSales)) {
@@ -576,7 +579,7 @@ async function getDatewiseProfitability(userId, country, region) {
         const userIdStr = userId?.toString() || userId;
         
         const [economicsMetrics, ppcRollupPb] = await Promise.all([
-            EconomicsMetrics.findLatest(userObjectId, region, country),
+            loadLiveEconomics(userObjectId, region, country),
             PPCMetrics.rollupLastDays(userIdStr, country, region, 30)
         ]);
         const ppcMetrics =
@@ -729,7 +732,7 @@ async function getAsinWiseProfitability(userId, country, region, limit = 100) {
             : userId;
         
         const [economicsMetrics, cogsDoc, sellerData, adsSpendByAsin] = await Promise.all([
-            EconomicsMetrics.findLatest(userObjectId, region, country),
+            loadLiveEconomics(userObjectId, region, country),
             CogsModel.findOne({ userId: userObjectId, countryCode: country }).lean(),
             Seller.findOne(
                 { User: userId },
@@ -772,7 +775,7 @@ async function getAsinWiseProfitability(userId, country, region, limit = 100) {
         let asinData = [];
         const isBigAccount = economicsMetrics.isBig === true;
         
-        if (isBigAccount || (!economicsMetrics.asinWiseSales?.length && economicsMetrics.totalSales?.amount > 5000)) {
+        if (isStoredEconomicsDoc(economicsMetrics) && (isBigAccount || (!economicsMetrics.asinWiseSales?.length && economicsMetrics.totalSales?.amount > 5000))) {
             const profitMap = await AsinWiseSalesForBigAccounts.getProfitabilityMapByMetricsId(economicsMetrics._id);
             asinData = Array.from(profitMap.values());
         } else if (Array.isArray(economicsMetrics.asinWiseSales)) {
@@ -964,12 +967,32 @@ async function getQMateProfitabilityContext(userId, country, region, options = {
     const { asinLimit = 100 } = options;
     
     try {
-        // Sales-only mode: prioritize `SalesOnlyMetrics` so we don't depend on grossProfit/fees/refunds.
-        // If sales-only data exists, return a minimal profitability context with grossProfit forced to 0.
-        // Per-day model: findLatest aggregates recent 31 days into { totalSales, datewiseSales, dateRange }
-        const salesOnlyMetrics = await SalesOnlyMetrics.findLatest(userId, region, country);
+        // Live finance first (fresh EconomicsMetrics, else DailySkuFinance). The
+        // helpers below each read the same loader, so live → the full path.
+        const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+        const liveEconomics = await loadLiveEconomics(userObjectId, region, country);
 
-        if (salesOnlyMetrics) {
+        // Sales-only fallback, ONLY without live finance and with real
+        // SalesOnlyMetrics day rows. findLatest never returns null (a
+        // zero-filled doc instead), so `if (doc)` used to win for every account.
+        // Per-day model: findLatest aggregates recent 31 days into { totalSales, datewiseSales, dateRange }
+        const salesOnlyMetrics = liveEconomics ? null : await SalesOnlyMetrics.findLatest(userId, region, country);
+
+        if (!liveEconomics && !hasSalesOnlyRows(salesOnlyMetrics)) {
+            // Neither source: profitability is unknown, never a page of $0s.
+            logger.info('[QMateProfitabilityService] No finance data for profitability context', { userId, country, region });
+            return {
+                success: true,
+                source: 'no_finance_data',
+                data: null,
+                noData: {
+                    type: 'no_finance_data',
+                    message: 'SellerQI has no sales or finance data for this marketplace yet, so profitability is unknown.',
+                },
+            };
+        }
+
+        if (!liveEconomics) {
             const currencyCode = salesOnlyMetrics?.totalSales?.currencyCode || 'USD';
             const totalSalesAmount = salesOnlyMetrics?.totalSales?.amount || 0;
             const datewiseSales = Array.isArray(salesOnlyMetrics?.datewiseSales) ? salesOnlyMetrics.datewiseSales : [];

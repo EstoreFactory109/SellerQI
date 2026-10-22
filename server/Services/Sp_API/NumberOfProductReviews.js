@@ -44,8 +44,10 @@ const getNumberOfProductReviews = async (asin, country) => {
       url: process.env.NUMBER_OF_REVIEWS_URI,
       params: { asin, country },
       headers: {
-        "x-rapidapi-key": "da4f9c009emsh1155c6b317494b6p13e477jsn370565189fee",
-        "x-rapidapi-host": "real-time-amazon-data.p.rapidapi.com"
+        // From the environment only: the key used to be hard-coded here, and a
+        // literal fallback would put it back in the repository.
+        "x-rapidapi-key": rapidApiKey(),
+        "x-rapidapi-host": process.env["X-RAPIDAPI-HOST"] || "real-time-amazon-data.p.rapidapi.com"
       },
       timeout: REQUEST_TIMEOUT_MS
     };
@@ -78,6 +80,9 @@ const getNumberOfProductReviews = async (asin, country) => {
 /**
  * Split array into chunks of specified size
  */
+/** The RapidAPI key: X-RAPIDAPI-KEY (the name in .env), or RAPIDAPI_KEY. */
+const rapidApiKey = () => process.env["X-RAPIDAPI-KEY"] || process.env.RAPIDAPI_KEY;
+
 function chunkArray(array, chunkSize) {
   const chunks = [];
   for (let i = 0; i < array.length; i += chunkSize) {
@@ -108,6 +113,13 @@ const addReviewDataTODatabase = async (asinArray, country, userId, region) => {
   if (!country || !userId) {
     logger.error("NumberOfProductReviews: Missing required parameters", { userId, country, region });
     return { success: false, error: "Missing required parameters" };
+  }
+
+  // Fail before any request: without a key every call is rejected, and a run of
+  // empty results would be saved as a snapshot in which no listing has content.
+  if (!rapidApiKey()) {
+    logger.error("NumberOfProductReviews: X-RAPIDAPI-KEY is not set - listing content (reviews, bullets, images, video, Brand Story) cannot be fetched. Set X-RAPIDAPI-KEY in the server environment.", { userId, country, region });
+    return { success: false, error: "X-RAPIDAPI-KEY is not set" };
   }
 
   const limit = promiseLimit(REVIEWS_CONCURRENCY);

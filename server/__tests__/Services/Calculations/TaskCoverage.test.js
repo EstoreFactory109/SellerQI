@@ -6,6 +6,8 @@
  */
 const { buildTaskCoverage } = require('../../../Services/Calculations/DashboardCalculation.js');
 
+const RECENT_DAY = new Date(Date.now() - 2 * 864e5).toISOString().slice(0, 10);
+
 const fullData = () => ({
     RankingsData: {
         RankingResultArray: [{ asin: 'A1' }, { asin: 'A2' }],
@@ -17,8 +19,9 @@ const fullData = () => ({
     },
     BuyBoxData: { asinBuyBoxData: [{ asin: 'A1' }] },
     InventoryAnalysis: { inventoryPlanning: [], strandedInventory: [] },
-    adsKeywordsPerformanceData: [{ keyword: 'k' }],
-    searchTerms: [{ searchTerm: 's' }],
+    // Dated recently: undated or old ads rows are stale and not covered.
+    adsKeywordsPerformanceData: [{ keyword: 'k', date: RECENT_DAY }],
+    searchTerms: [{ searchTerm: 's', date: RECENT_DAY }],
     campaignData: [{ campaignId: 'c' }],
     AccountData: { accountHealth: { accountStatus: { status: 'Healthy' } } }
 });
@@ -44,6 +47,38 @@ describe('buildTaskCoverage', () => {
             expect([key, c[key]]).toEqual([key, true]);
         }
         expect(c.uncoveredProductAsins).toEqual([]);
+    });
+
+    describe('conversion.brandStory', () => {
+        // checkBrandStory returns nothing for a marketplace where no product shows a
+        // Brand Story. Coverage must still be true there, or the 11,543 open
+        // missing_brand_story tasks in gated marketplaces would never resolve.
+        it('is covered by the scrape arriving, even with no brand-story results (gated marketplace)', () => {
+            const data = fullData();
+            data.ConversionData.brandStoryResult = [];
+            data.ConversionData.brandStoryScrapePresent = true;
+            expect(buildTaskCoverage(data, fullCtx())['conversion.brandStory']).toBe(true);
+        });
+
+        it('is not covered when the scrape did not arrive', () => {
+            const data = fullData();
+            data.ConversionData.brandStoryResult = [];
+            data.ConversionData.brandStoryScrapePresent = false;
+            expect(buildTaskCoverage(data, fullCtx())['conversion.brandStory']).toBe(false);
+        });
+
+        it('falls back to the result list for messages without the flag', () => {
+            const data = fullData();
+            expect(buildTaskCoverage(data, fullCtx())['conversion.brandStory']).toBe(true);
+            data.ConversionData.brandStoryResult = [];
+            expect(buildTaskCoverage(data, fullCtx())['conversion.brandStory']).toBe(false);
+        });
+
+        it('still needs active products', () => {
+            const data = fullData();
+            data.ConversionData.brandStoryScrapePresent = true;
+            expect(buildTaskCoverage(data, { ...fullCtx(), activeProductSet: new Set() })['conversion.brandStory']).toBe(false);
+        });
     });
 
     it('covers nothing product-level when there are no active products', () => {
@@ -87,6 +122,16 @@ describe('buildTaskCoverage', () => {
         expect(c['sponsoredAds.keywords']).toBe(true);
         expect(c['sponsoredAds.searchTerms']).toBe(false);
         expect(c['sponsoredAds.autoMigration']).toBe(false);
+    });
+
+    // A stopped ads sync must not read as "every keyword problem was fixed".
+    it('does not cover ads keywords or search terms whose newest day is stale', () => {
+        const data = fullData();
+        data.adsKeywordsPerformanceData = [{ keyword: 'k', date: '2026-01-01' }];
+        data.searchTerms = [{ searchTerm: 's' }]; // undated legacy row
+        const c = buildTaskCoverage(data, fullCtx());
+        expect(c['sponsoredAds.keywords']).toBe(false);
+        expect(c['sponsoredAds.searchTerms']).toBe(false);
     });
 
     it('needs campaign metadata to judge auto-campaign migration', () => {

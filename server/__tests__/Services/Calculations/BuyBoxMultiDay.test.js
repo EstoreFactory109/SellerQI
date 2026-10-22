@@ -12,7 +12,9 @@ const mongoose = require('mongoose');
 const {
     classifyBuyBoxLoss,
     latestCapturePerBuyBoxDay,
-    countActiveBuyBoxLosses
+    countActiveBuyBoxLosses,
+    summarizeBuyBoxCounts,
+    activeAsinSetOf
 } = require('../../../Services/Calculations/RecoverableAmountUtils.js');
 const BuyBoxData = require('../../../models/MCP/BuyBoxDataModel.js');
 const { analyseData } = require('../../../Services/Calculations/DashboardCalculation.js');
@@ -273,13 +275,62 @@ describe('dashboard count equals the active Buy Box task list', () => {
     });
 
     it('DashboardSummaryService reports the same count as the task list', () => {
+        // Active only (B is inactive): A lost, C carried forward at 100%, D holds it.
         expect(summarizeBuyBoxDays(days(), products)).toEqual({
-            totalProducts: 4,
+            totalProducts: 3,
             productsWithBuyBox: 2,
-            productsWithoutBuyBox: 1
+            productsWithoutBuyBox: 1,
+            productsWithLowBuyBox: 0,
+            productsWithUnknownBuyBox: 0
         });
         expect(summarizeBuyBoxDays([], products)).toEqual({
-            totalProducts: 0, productsWithBuyBox: 0, productsWithoutBuyBox: 0
+            totalProducts: 0, productsWithBuyBox: 0, productsWithoutBuyBox: 0,
+            productsWithLowBuyBox: 0, productsWithUnknownBuyBox: 0
+        });
+    });
+
+    describe('summarizeBuyBoxCounts', () => {
+        // A lost; L low (30%); N never seen with it (null); H holds it;
+        // X lost but inactive; Y low but inactive.
+        const eff = () => ({
+            asinBuyBoxData: [
+                { childAsin: 'A', buyBoxPercentage: 0 },
+                { childAsin: 'L', buyBoxPercentage: 30 },
+                { childAsin: 'N', buyBoxPercentage: null },
+                { childAsin: 'H', buyBoxPercentage: 100 },
+                { childAsin: 'X', buyBoxPercentage: 0 },
+                { childAsin: 'Y', buyBoxPercentage: 10 }
+            ]
+        });
+        const active = activeAsinSetOf([
+            { asin: 'A', status: 'Active' }, { asin: 'L', status: 'Active' },
+            { asin: 'N', status: 'Active' }, { asin: 'H', status: 'Active' },
+            { asin: 'X', status: 'Inactive' }, { asin: 'Y', status: 'Incomplete' }
+        ]);
+
+        it('counts active ASINs only, and the parts add up to the total', () => {
+            const c = summarizeBuyBoxCounts(eff(), active);
+            expect(c).toEqual({
+                totalProducts: 4,
+                productsWithBuyBox: 2,
+                productsWithoutBuyBox: 1,
+                productsWithLowBuyBox: 1,
+                productsWithUnknownBuyBox: 1
+            });
+            expect(c.productsWithBuyBox + c.productsWithoutBuyBox + c.productsWithUnknownBuyBox).toBe(c.totalProducts);
+        });
+
+        it('productsWithoutBuyBox equals the task count (countActiveBuyBoxLosses)', () => {
+            expect(summarizeBuyBoxCounts(eff(), active).productsWithoutBuyBox)
+                .toBe(countActiveBuyBoxLosses(eff(), active));
+            const real = classifyBuyBoxLoss(days());
+            const realActive = activeAsinSetOf(products);
+            expect(summarizeBuyBoxCounts(real, realActive).productsWithoutBuyBox)
+                .toBe(countActiveBuyBoxLosses(real, realActive));
+        });
+
+        it('no effective doc -> all zeros', () => {
+            expect(summarizeBuyBoxCounts(null, active).totalProducts).toBe(0);
         });
     });
 

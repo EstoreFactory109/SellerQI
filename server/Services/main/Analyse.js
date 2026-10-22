@@ -14,8 +14,9 @@ const restockInventoryRecommendationsModel = require('../../models/inventory/GET
 // const TotalSalesModel = require('../../models/products/TotalSalesModel.js');
 const ShipmentModel = require('../../models/inventory/ShipmentModel.js');
 const ProductWiseSalesModel = require('../../models/products/ProductWiseSalesModel.js');
-// New: EconomicsMetrics model for sales, finance and profitability data
-const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
+// Economics (sales, fees, gross profit): fresh EconomicsMetrics, else live DailySkuFinance, else null
+const { loadLiveEconomics } = require('../Finance/LiveEconomicsService.js');
+const { convertEconomicsToFinanceFormat } = require('../Finance/EconomicsFinanceFormat.js');
 // New: BuyBoxData model for buybox metrics
 const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
 // New: DataFetchTracking for getting actual calendar dates from database
@@ -408,8 +409,9 @@ class AnalyseService {
             // Last 7 days of reports, so a status Amazon flips day to day is judged
             // over the week rather than on whichever report came last.
             timedQuery('v2History', () => loadV2History(userId, country, region)),
-            // Use EconomicsMetrics instead of financeModel and TotalSalesModel
-            timedQuery('economicsMetrics', () => EconomicsMetrics.findLatest(userId, region, country)),
+            // Fresh EconomicsMetrics, else built from DailySkuFinance (30 days ending
+            // yesterday), else null. Never the last stale doc.
+            timedQuery('economicsMetrics', () => loadLiveEconomics(userId, region, country)),
             // Fetch BuyBox data: the last 7 non-empty data days, reduced to one
             // effective doc. Judging from the newest doc alone let an empty day wipe
             // every Buy Box issue and a one-day 0% blip create a week-long task
@@ -616,123 +618,15 @@ class AnalyseService {
     }
 
     /**
-     * Convert EconomicsMetrics data to legacy financeData format
-     * Uses EconomicsMetrics for sales, fees, refunds but Amazon Ads API for PPC spend
+     * Convert EconomicsMetrics data to legacy financeData format.
+     * The rule lives in Finance/EconomicsFinanceFormat.js so the lightweight
+     * dashboard endpoints apply it without loading this module's graph.
      * @param {Object} economicsMetrics - EconomicsMetrics document
      * @param {number} adsPPCSpend - Total PPC spend from Amazon Ads API (primary source)
      * @returns {Object} Finance data in legacy format
      */
     static convertEconomicsToFinanceFormat(economicsMetrics, adsPPCSpend = 0) {
-        if (!economicsMetrics) {
-            return {
-                createdAt: new Date(),
-                Gross_Profit: 0,
-                Total_Sales: 0,
-                ProductAdsPayment: adsPPCSpend, // Use Ads API PPC spend even if no economics data
-                FBA_Fees: 0,
-                Storage: 0,
-                Amazon_Charges: 0,
-                Amazon_Fees: 0,
-                Other_Amazon_Fees: 0, // Amazon fees excluding FBA fees (for Total Sales component)
-                Refunds: 0
-            };
-        }
-
-        // Use Amazon Ads API PPC spend as PRIMARY source for ProductAdsPayment
-        const ppcSpend = adsPPCSpend || 0;
-        
-        // CRITICAL: Calculate totalSales by summing datewiseSales for consistency
-        // This ensures page load shows same value as custom filter for same dates
-        let totalSales = 0;
-        let totalGrossProfit = 0;
-        let fbaFees = 0;
-        let storageFees = 0;
-        let refunds = 0;
-        
-        if (Array.isArray(economicsMetrics.datewiseSales) && economicsMetrics.datewiseSales.length > 0) {
-            economicsMetrics.datewiseSales.forEach(item => {
-                totalSales += item.sales?.amount || 0;
-                totalGrossProfit += item.grossProfit?.amount || 0;
-            });
-            // Round to 2 decimal places for consistency
-            totalSales = parseFloat(totalSales.toFixed(2));
-            totalGrossProfit = parseFloat(totalGrossProfit.toFixed(2));
-        } else {
-            // Fallback to stored value if datewiseSales not available
-            totalSales = economicsMetrics.totalSales?.amount || 0;
-            totalGrossProfit = economicsMetrics.grossProfit?.amount || 0;
-        }
-        
-        // Calculate fees from datewise data for consistency
-        if (Array.isArray(economicsMetrics.datewiseFeesAndRefunds) && economicsMetrics.datewiseFeesAndRefunds.length > 0) {
-            economicsMetrics.datewiseFeesAndRefunds.forEach(item => {
-                fbaFees += item.fbaFulfillmentFee?.amount || 0;
-                storageFees += item.storageFee?.amount || 0;
-                refunds += item.refunds?.amount || 0;
-            });
-            fbaFees = parseFloat(fbaFees.toFixed(2));
-            storageFees = parseFloat(storageFees.toFixed(2));
-            refunds = parseFloat(refunds.toFixed(2));
-        } else {
-            // Fallback to stored values
-            fbaFees = economicsMetrics.fbaFees?.amount || 0;
-            storageFees = economicsMetrics.storageFees?.amount || 0;
-            refunds = economicsMetrics.refunds?.amount || 0;
-        }
-        
-        // Get Amazon fees - calculate from datewiseAmazonFees for consistency
-        let amazonFees = 0;
-        if (Array.isArray(economicsMetrics.datewiseAmazonFees) && economicsMetrics.datewiseAmazonFees.length > 0) {
-            // PRIMARY: Calculate from datewiseAmazonFees (most accurate)
-            economicsMetrics.datewiseAmazonFees.forEach(item => {
-                amazonFees += item.totalAmount?.amount || 0;
-            });
-            amazonFees = parseFloat(amazonFees.toFixed(2));
-            logger.info('Calculated amazonFees from datewiseAmazonFees', {
-                amazonFees,
-                dateCount: economicsMetrics.datewiseAmazonFees.length
-            });
-        } else {
-            // Fallback 1: Get from summary level
-            amazonFees = economicsMetrics.amazonFees?.amount || 0;
-            
-            // Fallback 2: Calculate from ASIN-wise data if still 0
-            if (amazonFees === 0 && Array.isArray(economicsMetrics.asinWiseSales) && economicsMetrics.asinWiseSales.length > 0) {
-                economicsMetrics.asinWiseSales.forEach(item => {
-                    amazonFees += item.amazonFees?.amount || item.totalFees?.amount || 0;
-                });
-                amazonFees = parseFloat(amazonFees.toFixed(2));
-                logger.info('Calculated amazonFees from ASIN-wise data', {
-                    amazonFees,
-                    asinCount: economicsMetrics.asinWiseSales.length
-                });
-            }
-            
-            // Final fallback: use fbaFees + storageFees if still 0
-            if (amazonFees === 0) {
-                amazonFees = fbaFees + storageFees;
-            }
-        }
-        
-        // Calculate gross profit: Sales - Amazon Fees - Refunds
-        // Note: PPC is subtracted in frontend for display, not in backend calculation
-        const grossProfit = totalSales - amazonFees - refunds;
-        
-        // Calculate Other Amazon Fees = Total Amazon Fees - FBA Fees (for Total Sales component)
-        const otherAmazonFees = Math.max(0, amazonFees - fbaFees);
-
-        return {
-            createdAt: economicsMetrics.createdAt || new Date(),
-            Gross_Profit: parseFloat(grossProfit.toFixed(2)),
-            Total_Sales: totalSales,
-            ProductAdsPayment: ppcSpend, // PRIMARY: Amazon Ads API PPC spend
-            FBA_Fees: fbaFees,
-            Storage: storageFees,
-            Amazon_Charges: amazonFees, // Total Amazon fees (for Profitability page)
-            Amazon_Fees: amazonFees, // Total Amazon fees (FBA, storage, referral, etc.)
-            Other_Amazon_Fees: parseFloat(otherAmazonFees.toFixed(2)), // Amazon fees excluding FBA (for Total Sales component)
-            Refunds: refunds
-        };
+        return convertEconomicsToFinanceFormat(economicsMetrics, adsPPCSpend);
     }
 
     /**
@@ -909,13 +803,13 @@ class AnalyseService {
 
         const safeFinanceData = allData.financeData || {
             createdAt: new Date(),
-            Gross_Profit: 0,
-            Total_Sales: 0,
+            Gross_Profit: null,
+            Total_Sales: null,
             ProductAdsPayment: 0,
-            FBA_Fees: 0,
-            Storage: 0,
-            Amazon_Charges: 0,
-            Refunds: 0
+            FBA_Fees: null,
+            Storage: null,
+            Amazon_Charges: null,
+            Refunds: null
         };
 
         const financeCreatedDate = safeFinanceData.createdAt;
@@ -1015,6 +909,11 @@ class AnalyseService {
                 dateRange: economicsMetrics.dateRange,
                 // Flag for big accounts (totalSales > 10000) - asinWiseSales stored in separate collection
                 isBig: economicsMetrics.isBig || false,
+                // 'daily_sku_finance' when built live; absent on a stored EconomicsMetrics doc
+                source: economicsMetrics.source,
+                // Readers judge freshness by it (isEconomicsFresh); without it every
+                // doc, even a fresh one, read as stale downstream.
+                createdAt: economicsMetrics.createdAt,
                 // Metrics document ID needed for fetching ASIN data from separate collection
                 _id: economicsMetrics._id,
                 // When this data was fetched (from DataFetchTracking)
@@ -1097,8 +996,19 @@ class AnalyseService {
             ProductwithOutBuyBox: ProductwithoutBuyboxDefaulters
         };
 
-        const AmazonReadyProductsSet = new Set();
-        const imageResultArray = [], videoResultArray = [], 
+        // "Amazon ready" = an Active ASIN with no Error in any listing check. Built as
+        // an intersection: start from every Active ASIN and remove each one any check
+        // flags. It used to be built by adding ASINs instead - from
+        // rankings.TotalErrors, which does not exist (getRankings returns
+        // { finalResult }), so that loop never added anything - and the keyword loop
+        // then added or removed on backend keywords alone, so an ASIN with a clean
+        // keyword string counted as ready whatever else was wrong with it.
+        // Inventory errors are removed afterwards (updateAmazonReadyProducts).
+        const notReady = new Set();
+        // ASINs whose listing was actually scraped. An Active ASIN missing from the
+        // scrape is "not known", not "ready" - missing data must not earn the badge.
+        const scraped = new Set();
+        const imageResultArray = [], videoResultArray = [],
               productStarRatingResultArray = [], RankingResultArray = [], BackendKeywordResultArray = [];
 
         safeProductReviews.Products.forEach(product => {
@@ -1107,12 +1017,13 @@ class AnalyseService {
                 const videoResult = checkIfVideoExists(product.video_url);
                 const productStarRatingResult = checkStarRating(product.product_star_ratings, product.product_num_ratings);
                 const rankings = getRankings(product);
+                if (product.asin) scraped.add(product.asin);
 
                 // "No data" (no reviews yet, no image data) must not cost a product its
                 // Amazon-ready status: only a real problem does.
-                if (rankings.TotalErrors === 0 && 
-                    [imageResult, videoResult, productStarRatingResult].every(r => r.status !== "Error")) {
-                    AmazonReadyProductsSet.add(product.asin);
+                if ((rankings.finalResult?.TotalErrors || 0) > 0 ||
+                    [imageResult, videoResult, productStarRatingResult].some(r => r.status === "Error")) {
+                    notReady.add(product.asin);
                 }
 
                 imageResultArray.push({ asin: product.asin, data: imageResult });
@@ -1126,17 +1037,40 @@ class AnalyseService {
             const asin = item.asin;
             if (!DefaulterList.ListingAllItems.includes(asin)) {
                 const keywordStatus = BackendKeyWordOrAttributesStatus(item.value);
-                if (keywordStatus.NumberOfErrors === 0) AmazonReadyProductsSet.add(asin);
-                else AmazonReadyProductsSet.delete(asin);
+                // Errors only (a short-keywords Warning is not counted in
+                // NumberOfErrors), and never re-adds: one SKU's clean keywords
+                // must not undo another check's verdict.
+                if (keywordStatus.NumberOfErrors > 0) notReady.add(asin);
                 BackendKeywordResultArray.push({ asin, data: keywordStatus });
             }
         });
 
         const aplusProducts = safeAplusResponse.ApiContentDetails;
         const aPlusArray = checkAPlus(aplusProducts);
+        aPlusArray.forEach(item => {
+            if (item?.data?.status === "Error") notReady.add(item.asin);
+        });
+
+        // buyboxResult is Error exactly where the effective Buy Box row says
+        // buyBoxLost (raw % only for rows without a verdict) - the same rows that
+        // become no_buybox tasks.
+        const buyboxResult = checkProductWithOutBuyBox(buyBoxProducts).buyboxResult;
+        buyboxResult.forEach(item => {
+            if (item?.status === "Error") notReady.add(item.asin);
+        });
+
+        const AmazonReadyProducts = SellerAccount.products
+            .filter(p => p && p.status === 'Active' && p.asin && scraped.has(p.asin) && !notReady.has(p.asin))
+            .map(p => p.asin);
         
-        // Check Brand Story status from NumberOfProductReviews data
+        // Check Brand Story status from NumberOfProductReviews data. Empty when no
+        // product in this marketplace shows a Brand Story (see checkBrandStory).
         const brandStoryArray = checkBrandStory(safeProductReviews.Products);
+        // Task reconcile's coverage for brand story is "the scrape arrived", not "the
+        // result list is non-empty": in a gated marketplace the list is empty on
+        // purpose, and the existing missing_brand_story tasks there must resolve.
+        const brandStoryScrapePresent = Array.isArray(safeProductReviews.Products)
+            && safeProductReviews.Products.length > 0;
 
         return {
             rankingsData: {
@@ -1149,8 +1083,10 @@ class AnalyseService {
                 productStarRatingResult: productStarRatingResultArray,
                 aPlusResult: aPlusArray,
                 brandStoryResult: brandStoryArray,
-                ProductWithOutBuybox: checkProductWithOutBuyBox(buyBoxProducts).buyboxResult,
-                AmazonReadyproducts: Array.from(AmazonReadyProductsSet)
+                brandStoryScrapePresent,
+                ProductWithOutBuybox: buyboxResult,
+                // Unique: an ASIN listed under several SKUs is one product.
+                AmazonReadyproducts: [...new Set(AmazonReadyProducts)]
             },
             defaulters: DefaulterList
         };
@@ -1348,7 +1284,9 @@ class AnalyseService {
             ...conversionData.conversionData.imageResult.filter(item => item && item.data && item.data.status === "Error"),
             ...conversionData.conversionData.videoResult.filter(item => item && item.data && item.data.status === "Error"),
             ...conversionData.conversionData.productStarRatingResult.filter(item => item && item.data && item.data.status === "Error"),
-            ...conversionData.conversionData.aPlusResult.filter(item => item && item.status === "Error")
+            // checkAPlus returns { asin, data: { status } }; item.status never existed,
+            // so missing A+ was never counted here.
+            ...conversionData.conversionData.aPlusResult.filter(item => item && item.data && item.data.status === "Error")
         ];
         totalErrorsAllCategories += conversionErrors.length;
 
@@ -1358,14 +1296,22 @@ class AnalyseService {
         }, 0);
         totalErrorsAllCategories += rankingErrors;
 
-        // Count backend keyword errors
-        const keywordErrors = conversionData.rankingsData.BackendKeywordResultArray.reduce((count, item) => {
-            return count + ((item && item.data && item.data.NumberOfErrors) || 0);
-        }, 0);
+        // Count backend keyword errors. Rows are per SKU, so an ASIN sold under
+        // several SKUs arrives several times; count it once, keeping its worst row,
+        // as DashboardCalculation does (tasks are one per ASIN and error type).
+        const keywordErrorsByAsin = new Map();
+        conversionData.rankingsData.BackendKeywordResultArray.forEach((item) => {
+            if (!item || !item.asin || !item.data) return;
+            const errors = item.data.NumberOfErrors || 0;
+            keywordErrorsByAsin.set(item.asin, Math.max(keywordErrorsByAsin.get(item.asin) || 0, errors));
+        });
+        const keywordErrors = [...keywordErrorsByAsin.values()].reduce((count, errors) => count + errors, 0);
         totalErrorsAllCategories += keywordErrors;
 
         // Count buybox errors
-        const buyboxErrors = conversionData.conversionData.ProductWithOutBuybox.filter(item => item && item.data && item.data.status === "Error").length;
+        // checkProductWithOutBuyBox returns flat { asin, status }; item.data never
+        // existed, so Buy Box losses were never counted here.
+        const buyboxErrors = conversionData.conversionData.ProductWithOutBuybox.filter(item => item && item.status === "Error").length;
         totalErrorsAllCategories += buyboxErrors;
 
         // Count inventory errors
@@ -1485,366 +1431,130 @@ class AnalyseService {
 
     /**
      * Process custom date range
-     * Uses EconomicsMetrics for accurate fee and gross profit data
-     * 
-     * IMPORTANT: If the custom date range exactly matches the stored date range in the latest document,
-     * we return the pre-aggregated totals to ensure consistency with the default "Last 30 Days" view.
-     * This prevents discrepancies between default and custom views for the same date range.
+     *
+     * Totals come from the shared loader (loadLiveEconomics) for the picked range:
+     * a fresh EconomicsMetrics doc that covers it, else live DailySkuFinance for
+     * exactly that range. No data -> null totals; never an older doc's numbers and
+     * never an estimate (the old order-data fallback guessed profit as 70% of sales).
      */
     static async processCustomDateRange(userId, country, region, start, end, daysDifference) {
         try {
             logger.info(`Processing custom date range: ${daysDifference} days from ${start.toISOString()} to ${end.toISOString()}`);
 
-            // Format dates for comparison with EconomicsMetrics data
-            const formatDateStr = (date) => {
-                const year = date.getFullYear();
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                const day = String(date.getDate()).padStart(2, '0');
-                return `${year}-${month}-${day}`;
-            };
+            const startStr = this.formatDate(start);
+            const endStr = this.formatDate(end);
 
-            // Get EconomicsMetrics data (primary source for fees and gross profit)
-            const allMetrics = await EconomicsMetrics.find({
-                User: userId,
-                country: country,
-                region: region
-            }).sort({ createdAt: -1 });
+            const metrics = await loadLiveEconomics(userId, region, country, { startDate: startStr, endDate: endStr });
 
-            // If no metrics found, return empty result early
-            if (!allMetrics || allMetrics.length === 0) {
-                logger.warn('No EconomicsMetrics found for custom date range', { userId, country, region });
+            if (!metrics) {
+                logger.warn('No economics for custom date range (no fresh EconomicsMetrics, no DailySkuFinance rows)', {
+                    userId, country, region, startDate: startStr, endDate: endStr
+                });
                 return {
                     status: 200,
                     message: {
-                        startDate: formatDateStr(start),
-                        endDate: formatDateStr(end),
+                        startDate: startStr,
+                        endDate: endStr,
                         Country: country,
                         FinanceData: {
-                            Gross_Profit: 0,
-                            ProductAdsPayment: 0,
-                            FBA_Fees: 0,
-                            Storage: 0,
-                            Amazon_Charges: 0,
-                            Refunds: 0
+                            Gross_Profit: null,
+                            ProductAdsPayment: null,
+                            FBA_Fees: null,
+                            Storage: null,
+                            Amazon_Charges: null,
+                            Refunds: null
                         },
                         reimburstmentData: 0,
                         TotalSales: {
-                            totalSales: 0,
+                            totalSales: null,
                             dateWiseSales: []
                         }
                     }
                 };
             }
 
-            // Get the latest metrics document
-            const latestMetrics = allMetrics[0];
-            
-            // Check if the custom date range exactly matches the stored date range in the latest document
-            // If it does, return the pre-aggregated totals for consistency with default view
-            const storedStartDate = latestMetrics.dateRange?.startDate;
-            const storedEndDate = latestMetrics.dateRange?.endDate;
-            
-            if (storedStartDate && storedEndDate) {
-                const storedStart = new Date(storedStartDate);
-                storedStart.setHours(0, 0, 0, 0);
-                const storedEnd = new Date(storedEndDate);
-                storedEnd.setHours(0, 0, 0, 0);
-                
-                const requestedStart = new Date(start);
-                requestedStart.setHours(0, 0, 0, 0);
-                const requestedEnd = new Date(end);
-                requestedEnd.setHours(0, 0, 0, 0);
-                
-                // Compare dates (ignoring time)
-                const datesMatch = storedStart.getTime() === requestedStart.getTime() && 
-                                  storedEnd.getTime() === requestedEnd.getTime();
-                
-                if (datesMatch) {
-                    logger.info('Custom date range matches stored date range - using pre-aggregated totals for consistency', {
-                        userId,
-                        country,
-                        region,
-                        requestedRange: { startDate: formatDateStr(start), endDate: formatDateStr(end) },
-                        storedRange: { startDate: storedStartDate, endDate: storedEndDate }
-                    });
-                    
-                    // Get currency code
-                    const currencyCode = latestMetrics.totalSales?.currencyCode || 'USD';
-                    
-                    // Build dateWiseSales from datewiseSales array for chart display
-                    const datewiseSalesArr = latestMetrics.datewiseSales || [];
-                    const dateWiseSales = datewiseSalesArr.map(item => {
-                        const itemDate = new Date(item.date);
-                        return {
-                            interval: itemDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-                            TotalAmount: item.sales?.amount || 0,
-                            Profit: parseFloat((item.grossProfit?.amount || 0).toFixed(2)),
-                            date: item.date
-                        };
-                    }).sort((a, b) => new Date(a.date) - new Date(b.date));
-                    
-                    // Return pre-aggregated totals from the latest document (same as default view)
-                    return {
-                        status: 200,
-                        message: {
-                            startDate: storedStartDate,
-                            endDate: storedEndDate,
-                            Country: country,
-                            FinanceData: {
-                                Gross_Profit: parseFloat((latestMetrics.grossProfit?.amount || 0).toFixed(2)),
-                                ProductAdsPayment: parseFloat((latestMetrics.ppcSpent?.amount || 0).toFixed(2)),
-                                FBA_Fees: parseFloat((latestMetrics.fbaFees?.amount || 0).toFixed(2)),
-                                Storage: parseFloat((latestMetrics.storageFees?.amount || 0).toFixed(2)),
-                                Amazon_Charges: parseFloat(((latestMetrics.fbaFees?.amount || 0) + (latestMetrics.storageFees?.amount || 0)).toFixed(2)),
-                                Refunds: parseFloat((latestMetrics.refunds?.amount || 0).toFixed(2))
-                            },
-                            reimburstmentData: 0, // Not calculated for custom periods
-                            TotalSales: {
-                                totalSales: parseFloat((latestMetrics.totalSales?.amount || 0).toFixed(2)),
-                                dateWiseSales: dateWiseSales
-                            },
-                            GetOrderData: [] // Will be populated separately if needed
-                        }
-                    };
-                }
-            }
-            
-            // Date range doesn't match - proceed with datewise aggregation
-            logger.info('Custom date range differs from stored range - calculating from datewise data', {
-                userId,
-                country,
-                region,
-                requestedRange: { startDate: formatDateStr(start), endDate: formatDateStr(end) },
-                storedRange: { startDate: storedStartDate, endDate: storedEndDate }
-            });
-
-            // Initialize financial data
-            let financialEvents = {
-                ProductAdsPayment: 0,
-                FBA_Fees: 0,
-                Amazon_Charges: 0,
-                Refunds: 0,
-                Storage: 0
+            // A built doc is exactly the range; a fresh stored doc covers it and is
+            // filtered down to it. Dates are 'YYYY-MM-DD' strings, compared as such.
+            const inRange = (date) => {
+                const d = typeof date === 'string' ? date.slice(0, 10) : this.formatDate(date);
+                return d >= startStr && d <= endStr;
             };
 
-            let totalSales = 0;
-            let totalGrossProfit = 0;
-            let currencyCode = latestMetrics.totalSales?.currencyCode || 'USD';
-            const processedDates = new Set();
-            const dateWiseSales = [];
-
-            // Process EconomicsMetrics data - build a map of date -> grossProfit from datewiseGrossProfit array
             const grossProfitByDate = new Map();
-            const processedGrossProfitDates = new Set();
+            let totalGrossProfit = 0;
+            for (const item of metrics.datewiseGrossProfit || []) {
+                if (!inRange(item.date)) continue;
+                const amount = item.grossProfit?.amount || 0;
+                grossProfitByDate.set(String(item.date).slice(0, 10), amount);
+                totalGrossProfit += amount;
+            }
 
-            for (const metrics of allMetrics) {
-                    // Get currency code
-                    if (metrics.totalSales?.currencyCode) {
-                        currencyCode = metrics.totalSales.currencyCode;
-                    }
+            let totalSales = 0;
+            const dateWiseSales = [];
+            for (const item of metrics.datewiseSales || []) {
+                if (!inRange(item.date)) continue;
+                const dateKey = String(item.date).slice(0, 10);
+                const salesAmount = item.sales?.amount || 0;
+                totalSales += salesAmount;
+                dateWiseSales.push({
+                    interval: new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                    TotalAmount: salesAmount,
+                    Profit: parseFloat((grossProfitByDate.get(dateKey) || 0).toFixed(2)),
+                    date: item.date
+                });
+            }
+            dateWiseSales.sort((a, b) => String(a.date).localeCompare(String(b.date)));
 
-                    // First, build gross profit map from datewiseGrossProfit (the dedicated array)
-                    const datewiseGrossProfitArr = metrics.datewiseGrossProfit || [];
-                    datewiseGrossProfitArr.forEach(item => {
-                        const itemDate = new Date(item.date);
-                        const dateKey = itemDate.toISOString().split('T')[0];
+            const financialEvents = { ProductAdsPayment: 0, FBA_Fees: 0, Storage: 0, Refunds: 0 };
+            for (const item of metrics.datewiseFeesAndRefunds || []) {
+                if (!inRange(item.date)) continue;
+                financialEvents.FBA_Fees += item.fbaFulfillmentFee?.amount || 0;
+                financialEvents.Storage += item.storageFee?.amount || 0;
+                financialEvents.Refunds += item.refunds?.amount || 0;
+            }
 
-                        // Only process if within range and not already processed
-                        if (itemDate >= start && itemDate <= end && !processedGrossProfitDates.has(dateKey)) {
-                            const profitAmount = item.grossProfit?.amount || 0;
-                            grossProfitByDate.set(dateKey, profitAmount);
-                            totalGrossProfit += profitAmount;
-                            processedGrossProfitDates.add(dateKey);
-                        }
-                    });
-
-                    // Process datewise sales (for sales amounts)
-                    const datewiseSalesArr = metrics.datewiseSales || [];
-                    datewiseSalesArr.forEach(item => {
-                        const itemDate = new Date(item.date);
-                        const dateKey = itemDate.toISOString().split('T')[0];
-
-                        // Only process if within range and not already processed
-                        if (itemDate >= start && itemDate <= end && !processedDates.has(dateKey)) {
-                            const salesAmount = item.sales?.amount || 0;
-                            totalSales += salesAmount;
-                            processedDates.add(dateKey);
-
-                            // Get gross profit from the dedicated datewiseGrossProfit map
-                            const grossProfitAmount = grossProfitByDate.get(dateKey) || 0;
-
-                            // Add to dateWiseSales array for chart
-                            dateWiseSales.push({
-                                date: itemDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-                                totalSales: salesAmount,
-                                grossProfit: grossProfitAmount,
-                                originalDate: item.date
-                            });
-                        }
-                    });
-
-                    // Process datewise fees and refunds
-                    const datewiseFeesAndRefunds = metrics.datewiseFeesAndRefunds || [];
-                    const processedFeeDates = new Set();
-                    datewiseFeesAndRefunds.forEach(item => {
-                        const itemDate = new Date(item.date);
-                        const dateKey = itemDate.toISOString().split('T')[0];
-
-                        // Only process if within range and not already processed for fees
-                        if (itemDate >= start && itemDate <= end && !processedFeeDates.has(dateKey)) {
-                            financialEvents.FBA_Fees += item.fbaFulfillmentFee?.amount || 0;
-                            financialEvents.Storage += item.storageFee?.amount || 0;
-                            financialEvents.Refunds += item.refunds?.amount || 0;
-                            processedFeeDates.add(dateKey);
-                        }
-                    });
-
-                    // Calculate proportional PPC spent based on date range overlap
-                    if (metrics.dateRange?.startDate && metrics.dateRange?.endDate) {
-                        const docStartDate = new Date(metrics.dateRange.startDate);
-                        const docEndDate = new Date(metrics.dateRange.endDate);
-                        docStartDate.setHours(0, 0, 0, 0);
-                        docEndDate.setHours(23, 59, 59, 999);
-
-                        // Check for overlap
-                        if (start <= docEndDate && end >= docStartDate) {
-                            const overlapStart = new Date(Math.max(start.getTime(), docStartDate.getTime()));
-                            const overlapEnd = new Date(Math.min(end.getTime(), docEndDate.getTime()));
-                            const overlapDays = Math.ceil((overlapEnd - overlapStart + 1) / (1000 * 60 * 60 * 24));
-                            const docTotalDays = Math.ceil((docEndDate - docStartDate + 1) / (1000 * 60 * 60 * 24));
-                            
-                            if (docTotalDays > 0) {
-                                const proportion = Math.min(overlapDays / docTotalDays, 1);
-                                financialEvents.ProductAdsPayment += (metrics.ppcSpent?.amount || 0) * proportion;
-                            }
-                        }
-                    }
+            // ppcSpent is a window total; take the share of the doc window the range overlaps
+            // (1 for a doc built for exactly this range).
+            const docStart = metrics.dateRange?.startDate;
+            const docEnd = metrics.dateRange?.endDate;
+            if (docStart && docEnd) {
+                const dayMs = 1000 * 60 * 60 * 24;
+                const toUtc = (s) => Date.parse(`${String(s).slice(0, 10)}T00:00:00Z`);
+                const overlapStart = Math.max(toUtc(startStr), toUtc(docStart));
+                const overlapEnd = Math.min(toUtc(endStr), toUtc(docEnd));
+                const docDays = Math.round((toUtc(docEnd) - toUtc(docStart)) / dayMs) + 1;
+                const overlapDays = Math.round((overlapEnd - overlapStart) / dayMs) + 1;
+                if (docDays > 0 && overlapDays > 0) {
+                    financialEvents.ProductAdsPayment = (metrics.ppcSpent?.amount || 0) * Math.min(overlapDays / docDays, 1);
+                }
             }
 
             // Amazon_Charges is the sum of FBA fees and storage fees
-            financialEvents.Amazon_Charges = financialEvents.FBA_Fees + financialEvents.Storage;
+            const amazonCharges = financialEvents.FBA_Fees + financialEvents.Storage;
 
-            logger.info(`Processed EconomicsMetrics: Sales dates: ${processedDates.size}, GrossProfit dates: ${processedGrossProfitDates.size}`);
+            logger.info(`Custom date range economics: source=${metrics.source || 'EconomicsMetrics'}, days=${dateWiseSales.length}, sales=${totalSales}, grossProfit=${totalGrossProfit}`);
 
-            // Sort dateWiseSales by date
-            dateWiseSales.sort((a, b) => new Date(a.originalDate) - new Date(b.originalDate));
-
-            // If we don't have EconomicsMetrics data, fall back to order data
-            if (processedDates.size === 0) {
-                logger.info('No EconomicsMetrics data found, falling back to order data');
-                
-                // Get all order data documents from OrderAndRevenue model
-                const orderDataDocuments = await GetOrderDataModel.find({
-                    User: userId,
-                    country,
-                    region
-                }).sort({ createdAt: -1 });
-
-                if (orderDataDocuments && orderDataDocuments.length > 0) {
-                    const validOrderStatuses = ["Shipped", "Unshipped", "Pending"];
-                    let allOrders = [];
-
-                    orderDataDocuments.forEach(orderData => {
-                        if (orderData && orderData.RevenueData && Array.isArray(orderData.RevenueData)) {
-                            allOrders = allOrders.concat(orderData.RevenueData);
-                        }
-                    });
-
-                    const filteredOrders = allOrders.filter(order => {
-                        const orderDate = new Date(order.orderDate);
-                        orderDate.setHours(0, 0, 0, 0);
-                        const hasValidStatus = validOrderStatuses.includes(order.orderStatus);
-                        const isInDateRange = orderDate >= start && orderDate <= end;
-                        return hasValidStatus && isInDateRange;
-                    });
-
-                    logger.info(`Found ${filteredOrders.length} valid orders in the date range (fallback)`);
-
-                    let grossSales = 0;
-                    let totalDiscounts = 0;
-                    const processedOrderIds = new Set();
-                    const dateToSales = new Map();
-
-                    filteredOrders.forEach((order) => {
-                        if (processedOrderIds.has(order.amazonOrderId)) return;
-                        processedOrderIds.add(order.amazonOrderId);
-
-                        const itemPrice = Number(order.itemPrice || 0);
-                        const itemDiscount = Number(order.itemPromotionDiscount || 0);
-                        const shippingDiscount = Number(order.shippingPromotionDiscount || 0);
-
-                        grossSales += itemPrice;
-                        totalDiscounts += (itemDiscount + shippingDiscount);
-
-                        // Group by date
-                        const orderDate = new Date(order.orderDate);
-                        orderDate.setHours(0, 0, 0, 0);
-                        const dateKey = orderDate.toDateString();
-
-                        if (!dateToSales.has(dateKey)) {
-                            dateToSales.set(dateKey, { total: 0, discounts: 0 });
-                        }
-                        const dayData = dateToSales.get(dateKey);
-                        dayData.total += itemPrice;
-                        dayData.discounts += (itemDiscount + shippingDiscount);
-                    });
-
-                    totalSales = grossSales - totalDiscounts;
-                    // For fallback, we can't calculate accurate gross profit without fee data
-                    // Set a warning that this is estimated
-                    totalGrossProfit = totalSales * 0.7; // Rough estimate: 70% of sales as profit
-
-                    // Create dateWiseSales from order data
-                    dateToSales.forEach((dayData, dateKey) => {
-                        const date = new Date(dateKey);
-                        const dailySales = dayData.total - dayData.discounts;
-                        dateWiseSales.push({
-                            date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-                            totalSales: dailySales,
-                            grossProfit: dailySales * 0.7, // Estimated
-                            originalDate: date.toISOString().split('T')[0]
-                        });
-                    });
-
-                    dateWiseSales.sort((a, b) => new Date(a.originalDate) - new Date(b.originalDate));
-                }
-            }
-
-            logger.info(`Final Total Sales: ${totalSales}, Gross Profit: ${totalGrossProfit}, FBA Fees: ${financialEvents.FBA_Fees}, Storage: ${financialEvents.Storage}, Refunds: ${financialEvents.Refunds}`);
-
-            // Convert dateWiseSales to expected format with interval, TotalAmount, Profit
-            const formattedDateWiseSales = dateWiseSales.map(item => ({
-                interval: item.date,
-                TotalAmount: item.totalSales,
-                Profit: parseFloat(item.grossProfit.toFixed(2)),
-                date: item.originalDate
-            }));
-
-            const result = {
-                startDate: this.formatDate(start),
-                endDate: this.formatDate(end),
-                Country: country,
-                FinanceData: {
-                    Gross_Profit: parseFloat(totalGrossProfit.toFixed(2)),
-                    ProductAdsPayment: parseFloat(financialEvents.ProductAdsPayment.toFixed(2)),
-                    FBA_Fees: parseFloat(financialEvents.FBA_Fees.toFixed(2)),
-                    Storage: parseFloat(financialEvents.Storage.toFixed(2)),
-                    Amazon_Charges: parseFloat(financialEvents.Amazon_Charges.toFixed(2)),
-                    Refunds: parseFloat(financialEvents.Refunds.toFixed(2))
-                },
-                reimburstmentData: 0, // Not calculated for custom periods
-                TotalSales: {
-                    totalSales: parseFloat(totalSales.toFixed(2)),
-                    dateWiseSales: formattedDateWiseSales
-                }
-            };
-
-            logger.info(`Custom date range calculation completed successfully`);
             return {
                 status: 200,
-                message: result
+                message: {
+                    startDate: startStr,
+                    endDate: endStr,
+                    Country: country,
+                    FinanceData: {
+                        Gross_Profit: parseFloat(totalGrossProfit.toFixed(2)),
+                        ProductAdsPayment: parseFloat(financialEvents.ProductAdsPayment.toFixed(2)),
+                        FBA_Fees: parseFloat(financialEvents.FBA_Fees.toFixed(2)),
+                        Storage: parseFloat(financialEvents.Storage.toFixed(2)),
+                        Amazon_Charges: parseFloat(amazonCharges.toFixed(2)),
+                        Refunds: parseFloat(financialEvents.Refunds.toFixed(2))
+                    },
+                    reimburstmentData: 0, // Not calculated for custom periods
+                    TotalSales: {
+                        totalSales: parseFloat(totalSales.toFixed(2)),
+                        dateWiseSales
+                    }
+                }
             };
-
         } catch (error) {
             logger.error(`Error in custom date range calculation: ${error.message}`);
             logger.error(error.stack);

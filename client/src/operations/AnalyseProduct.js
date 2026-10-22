@@ -24,12 +24,18 @@ const AnalyseProduct = async (asin,country) => {
           
             const data=response.data.data;
             const rankingResult=getRankings(data);
-            // 11 ranking checks (5 title, 3 bullet point, 3 description) + 3 conversion checks
-            const totalPossibleErrors=14
+            // 9 ranking checks (5 title, 2 bullet point, 2 description - special
+            // characters are a title-only rule) + 3 conversion checks
+            const totalPossibleErrors=12
             
             // Safe null checks for arrays
             const productPhotos = data["product_photos"] || [];
-            const productVideos = data["product_videos"] || [];
+            // Same reading as the server ingest (NumberOfProductReviews.js): a video
+            // is an entry with a video_url. Passing the raw objects counted any
+            // entry, even one without a URL. A missing list is no data, not "no video".
+            const productVideos = Array.isArray(data["product_videos"])
+                ? data["product_videos"].map(v => v?.video_url).filter(Boolean)
+                : undefined;
             const productNumRatings = data["product_num_ratings"] || 0;
             const productStarRating = data["product_star_rating"] || 0;
 
@@ -93,7 +99,10 @@ const AnalyseProduct = async (asin,country) => {
                 rankingErrors: rankingResult.TotalErrors || 0,
                 conversionErrors: conversionErrors,
                 actualImageCount: productPhotos.length,
-                actualVideoCount: productVideos.length,
+                actualVideoCount: productVideos?.length || 0,
+                actualBulletCount: Array.isArray(data["about_product"])
+                    ? data["about_product"].filter(b => typeof b === 'string').length
+                    : 0,
             }
         }
       } catch (error) {

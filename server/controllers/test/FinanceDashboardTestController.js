@@ -243,8 +243,9 @@ async function testFinanceDashboardRead(req, res) {
     return res.status(200).json({
       success: true,
       dateRange: { startDate, endDate },
-      totalSales: r2(totals.productSales),
-      totalExpenses: buildExpenseBreakdown(totals),
+      // null totals = no DailySkuFinance rows in the window: report "no data", not $0.
+      totalSales: totals ? r2(totals.productSales) : null,
+      totalExpenses: totals ? buildExpenseBreakdown(totals) : null,
       asinWise: {
         count: asinWiseResults.length,
         rows: asinWiseResults,

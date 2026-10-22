@@ -14,7 +14,7 @@
  * This service is INDEPENDENT and does not affect any existing flows.
  */
 
-const { aplusStateOf } = require('../Calculations/Conversion.js');
+const { aplusStateOf, marketplaceShowsBrandStory } = require('../Calculations/Conversion.js');
 const logger = require('../../utils/Logger.js');
 const NumberOfProductReviews = require('../../models/seller-performance/NumberOfProductReviewsModel.js');
 const ProductWiseSales = require('../../models/products/ProductWiseSalesModel.js');
@@ -59,6 +59,12 @@ async function getProductReviewsData(userId, country, region) {
         let productsWithRatings = 0;
         let totalReviews = 0;
         
+        // has_brandstory is false both for "no Brand Story" and for "the scrape cannot
+        // see one / the seller has no Brand Registry". Only a marketplace where some
+        // product shows one can tell them apart; elsewhere the status is unknown (null),
+        // matching the gate on missing_brand_story tasks (see marketplaceShowsBrandStory).
+        const brandStoryKnown = marketplaceShowsBrandStory(reviewsData.Products);
+
         const products = reviewsData.Products.map(p => {
             const rating = parseFloat(p.product_star_ratings) || 0;
             const numRatings = parseInt(p.product_num_ratings) || 0;
@@ -77,7 +83,7 @@ async function getProductReviewsData(userId, country, region) {
                 hasPhotos: (p.product_photos?.length || 0) > 0,
                 photoCount: p.product_photos?.length || 0,
                 hasVideo: (p.video_url?.length || 0) > 0,
-                hasBrandStory: p.has_brandstory || false,
+                hasBrandStory: brandStoryKnown ? p.has_brandstory === true : null,
                 bulletPoints: p.about_product?.length || 0
             };
         });
@@ -118,7 +124,8 @@ async function getProductReviewsData(userId, country, region) {
                     averageRating,
                     totalReviews,
                     lowRatedCount: lowRatedProducts.length,
-                    noReviewsCount: noReviewsProducts.length
+                    noReviewsCount: noReviewsProducts.length,
+                    brandStoryStatusKnown: brandStoryKnown
                 },
                 lowRatedProducts,
                 topRatedProducts,
@@ -490,13 +497,16 @@ async function getListingQualityAnalysis(userId, country, region) {
         const reviewsData = await NumberOfProductReviews.findOne({ User: userObjectId, country, region })
             .sort({ createdAt: -1 }).lean();
         
+        // Same gate as missing_brand_story tasks: with no product showing a Brand Story
+        // the scrape cannot say who lacks one, so adoption is reported as unknown.
+        const brandStoryKnown = marketplaceShowsBrandStory(reviewsData?.Products);
         const reviewsMap = {};
         if (reviewsData?.Products) {
             reviewsData.Products.forEach(p => {
                 reviewsMap[p.asin] = {
                     photoCount: p.product_photos?.length || 0,
                     hasVideo: (p.video_url?.length || 0) > 0,
-                    hasBrandStory: p.has_brandstory || false,
+                    hasBrandStory: brandStoryKnown ? p.has_brandstory === true : null,
                     bulletCount: p.about_product?.length || 0
                 };
             });
@@ -536,7 +546,8 @@ async function getListingQualityAnalysis(userId, country, region) {
                     inactiveProducts: products.length - activeCount,
                     productsWithImages: withImages,
                     productsWithVideo: withVideo,
-                    productsWithBrandStory: withBrandStory
+                    productsWithBrandStory: brandStoryKnown ? withBrandStory : null,
+                    brandStoryStatusKnown: brandStoryKnown
                 },
                 qualityMetrics: {
                     imageCompliance: products.length > 0 
@@ -545,9 +556,11 @@ async function getListingQualityAnalysis(userId, country, region) {
                     videoAdoption: products.length > 0
                         ? parseFloat(((withVideo / products.length) * 100).toFixed(2))
                         : 0,
-                    brandStoryAdoption: products.length > 0
-                        ? parseFloat(((withBrandStory / products.length) * 100).toFixed(2))
-                        : 0
+                    brandStoryAdoption: !brandStoryKnown
+                        ? null
+                        : products.length > 0
+                            ? parseFloat(((withBrandStory / products.length) * 100).toFixed(2))
+                            : 0
                 }
             }
         };
@@ -748,14 +761,17 @@ async function getProductCategorization(userId, country, region, limit = 20) {
             });
         }
         
-        // Build reviews/brand story map
+        // Build reviews/brand story map. Brand Story is unknown (null) - neither
+        // "with" nor "without" - in a marketplace where no product shows one; see
+        // marketplaceShowsBrandStory for why that is not evidence of a missing one.
+        const brandStoryKnown = marketplaceShowsBrandStory(reviewsData?.Products);
         const reviewsMap = {};
         if (reviewsData?.Products) {
             reviewsData.Products.forEach(p => {
                 if (p.asin) {
                     reviewsMap[p.asin.toUpperCase()] = {
                         hasVideo: (p.video_url?.length || 0) > 0,
-                        hasBrandStory: p.has_brandstory || false,
+                        hasBrandStory: brandStoryKnown ? p.has_brandstory === true : null,
                         photoCount: p.product_photos?.length || 0,
                         rating: parseFloat(p.product_star_ratings) || 0,
                         numRatings: parseInt(p.product_num_ratings) || 0
@@ -806,7 +822,7 @@ async function getProductCategorization(userId, country, region, limit = 20) {
                 hasB2BPricing: p.has_b2b_pricing || false,
                 isTargetedInAds: targetedAsins.has(asinUpper),
                 hasVideo: reviewInfo.hasVideo || false,
-                hasBrandStory: reviewInfo.hasBrandStory || false,
+                hasBrandStory: brandStoryKnown ? reviewInfo.hasBrandStory === true : null,
                 rating: reviewInfo.rating || 0,
                 numRatings: reviewInfo.numRatings || 0
             };
@@ -854,10 +870,10 @@ async function getProductCategorization(userId, country, region, limit = 20) {
                 withoutVideo.push(productInfo);
             }
             
-            // Categorize by brand story
-            if (productInfo.hasBrandStory) {
+            // Categorize by brand story (unknown status goes in neither list)
+            if (productInfo.hasBrandStory === true) {
                 withBrandStory.push(productInfo);
-            } else {
+            } else if (productInfo.hasBrandStory === false) {
                 withoutBrandStory.push(productInfo);
             }
         });
@@ -886,7 +902,8 @@ async function getProductCategorization(userId, country, region, limit = 20) {
                     withVideoCount: withVideo.length,
                     withoutVideoCount: withoutVideo.length,
                     withBrandStoryCount: withBrandStory.length,
-                    withoutBrandStoryCount: withoutBrandStory.length
+                    withoutBrandStoryCount: withoutBrandStory.length,
+                    brandStoryStatusKnown: brandStoryKnown
                 },
                 // Return sliced lists for context (full lists could be too large)
                 sellableProducts: sellableProducts.slice(0, limit),

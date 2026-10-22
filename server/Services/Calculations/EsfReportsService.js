@@ -24,7 +24,7 @@
  * Every builder is run through `settle` so one empty or broken collection
  * degrades a single card rather than failing the page.
  */
-const { aplusStateOf } = require('./Conversion.js');
+const { aplusStateOf, marketplaceShowsBrandStory } = require('./Conversion.js');
 const mongoose = require('mongoose');
 
 const RestockInventoryRecommendations = require('../../models/inventory/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model.js');
@@ -51,6 +51,8 @@ const SuppressedListings = require('../../models/products/SuppressedListingsMode
 const RemovalOrders = require('../../models/inventory/RemovalOrdersModel.js');
 const ReviewOrder = require('../../models/review/ReviewOrderModel.js');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
+const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
+const { getTotals: getFinanceTotals } = require('../Finance/FinanceDashboardReadService.js');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
 const logger = require('../../utils/Logger.js');
 const { latestCapturePerBuyBoxDay } = require('./RecoverableAmountUtils.js');
@@ -360,6 +362,9 @@ const hasFbaStock = async (userId, country, region) => {
 
 /** Percent change guarding a zero baseline. null = "no baseline to compare". */
 const pctChange = (current, previous) => {
+    // Unknown on either side is no change we can state — never "-100%" or
+    // "no change" against a figure we do not hold.
+    if (current === null || current === undefined || previous === null || previous === undefined) return null;
     if (!previous) return current ? null : 0;
     // A change against a negative baseline has no meaning — organic sales of
     // -17 (ad sales above total) turned 1,297 into "-7733%".
@@ -1385,6 +1390,36 @@ const AUDIT_CHECKS = [
  * are declared out of scope rather than scored as failures, which would
  * understate the audit.
  */
+/**
+ * One listing's content checks: true (passes), false (a real gap) or null (no
+ * data to judge - shown as "Not available" and left out of the score).
+ *
+ * The rules match what becomes a task, so the report and the task list cannot
+ * disagree:
+ * - Bullets/description: the scrape returns [] both for "the listing has none" and
+ *   for "the scrape could not read them", and getRankings raises no task on [].
+ *   Empty is therefore no data, never "Missing".
+ * - Images/video: a non-array is no data (checkNumberOfImages/checkIfVideoExists).
+ * - A+: an unknown status raises no task (aplusStateOf).
+ * - Brand Story: no verdict in a marketplace where no product shows one (36 of 76
+ *   in production) - see marketplaceShowsBrandStory.
+ * A listing missing from the scrape altogether has no data for any of these.
+ */
+const listingAuditChecks = (detail, aplusStatus, brandStoryKnown) => {
+    const aplusState = aplusStateOf(aplusStatus);
+    return {
+        bullets: detail?.about_product?.length ? true : null,
+        description: detail?.product_description?.length ? true : null,
+        images: Array.isArray(detail?.product_photos) ? detail.product_photos.length >= 5 : null,
+        video: Array.isArray(detail?.video_url) ? detail.video_url.length > 0 : null,
+        aPlus: aplusState === 'unknown' ? null : aplusState === 'present',
+        brandStory: detail && brandStoryKnown ? detail.has_brandstory === true : null,
+    };
+};
+
+const NOT_AVAILABLE = 'Not available';
+const yesNo = (value) => (value === null ? NOT_AVAILABLE : value ? 'Yes' : 'No');
+
 const buildListingsAudit = async (userId, country, region) => {
     const [seller, content, aplus, premium] = await Promise.all([
         Seller.findOne({ User: userId }).select('sellerAccount').lean(),
@@ -1394,9 +1429,14 @@ const buildListingsAudit = async (userId, country, region) => {
     ]);
 
     const account = (seller?.sellerAccount || []).find((acc) => acc.region === region && acc.country === country);
-    const products = account?.products || [];
+    // Active listings only, like the task list: an inactive listing's content
+    // gaps are not work the seller is asked to do, so scoring them understated
+    // the catalogue.
+    const products = (account?.products || []).filter((product) => product.status === 'Active');
     if (!products.length) {
-        return unavailable(REPORT_AUDIT, 'No listings have been synced for this marketplace yet.');
+        return unavailable(REPORT_AUDIT, account?.products?.length
+            ? 'No active listings in this marketplace to audit.'
+            : 'No listings have been synced for this marketplace yet.');
     }
 
     const contentByAsin = new Map((content?.Products || []).map((item) => [item.asin, item]));
@@ -1409,34 +1449,41 @@ const buildListingsAudit = async (userId, country, region) => {
     const premiumByAsin = new Map((premium?.documents || []).map((doc) => [doc.asin, doc.isPremium]));
     const premiumCaptured = Boolean(premium);
 
+    const brandStoryKnown = marketplaceShowsBrandStory(content?.Products);
+
     const passCount = Object.fromEntries(AUDIT_CHECKS.map((check) => [check.key, 0]));
+    const failCount = Object.fromEntries(AUDIT_CHECKS.map((check) => [check.key, 0]));
 
     let passed = 0;
+    let scored = 0;
+    let anyNotAvailable = false;
     const rows = [];
 
     for (const product of products) {
         const detail = contentByAsin.get(product.asin);
         const aplusStatus = aplusByAsin.get(product.asin) || '';
 
-        const checks = {
-            bullets: Boolean(detail?.about_product?.length),
-            description: Boolean(detail?.product_description?.length),
-            images: (detail?.product_photos?.length || 0) >= 5,
-            video: Boolean(detail?.video_url?.length),
-            // Same reading as the A+ task check: legacy "true" counts as present,
-            // DRAFT / NOT_AVAILABLE / "false" as missing.
-            aPlus: aplusStateOf(aplusStatus) === 'present',
-            brandStory: Boolean(detail?.has_brandstory),
-        };
+        const checks = listingAuditChecks(detail, aplusStatus, brandStoryKnown);
 
         let listingPassed = 0;
+        let listingScored = 0;
         for (const check of AUDIT_CHECKS) {
-            if (checks[check.key]) {
+            const value = checks[check.key];
+            if (value === null) {
+                anyNotAvailable = true;
+                continue;
+            }
+            listingScored += 1;
+            if (value) {
                 passCount[check.key] += 1;
                 listingPassed += 1;
+            } else {
+                failCount[check.key] += 1;
             }
         }
         passed += listingPassed;
+        scored += listingScored;
+        const gaps = listingScored - listingPassed;
 
         rows.push({
             asin: product.asin,
@@ -1446,24 +1493,28 @@ const buildListingsAudit = async (userId, country, region) => {
             // The actual counts and flags, rather than a pass/fail that hides
             // whether a listing has three images or nine.
             images: detail?.product_photos?.length || 0,
-            video: checks.video ? 'Yes' : 'No',
-            brandStory: checks.brandStory ? 'Yes' : 'No',
-            aPlus: checks.aPlus ? 'Yes' : 'No',
+            video: yesNo(checks.video),
+            brandStory: yesNo(checks.brandStory),
+            aPlus: yesNo(checks.aPlus),
             bullets: detail?.about_product?.length || 0,
             // Em dash, not "No", until the A+ Content API has run at least once:
             // "not captured" and "not Premium" are different statements.
             aPlusPremium: premiumCaptured ? (premiumByAsin.get(product.asin) ? 'Yes' : 'No') : '-',
             price: num(product.price),
             detailPage: detailPageUrl(product.asin, country),
-            // Listing Quality Score: the share of checks passed, on a 1-10 scale.
-            lqs: round((listingPassed / AUDIT_CHECKS.length) * 10, 1),
-            score: `${listingPassed}/${AUDIT_CHECKS.length}`,
-            missing: AUDIT_CHECKS.filter((check) => !checks[check.key]).map((check) => check.label).join(', ') || '-',
-            gaps: AUDIT_CHECKS.length - listingPassed,
+            // Listing Quality Score: the share of the checks we could judge that
+            // pass, on a 1-10 scale. A listing with nothing to judge has no score.
+            lqs: listingScored ? round((listingPassed / listingScored) * 10, 1) : null,
+            score: listingScored ? `${listingPassed}/${listingScored}` : '-',
+            // Only real gaps: "Not available" is a gap in our data, not the listing.
+            missing: AUDIT_CHECKS.filter((check) => checks[check.key] === false).map((check) => check.label).join(', ') || '-',
+            gaps,
         });
     }
 
-    const completion = Math.round((passed / (products.length * AUDIT_CHECKS.length)) * 100);
+    // Null when nothing could be judged (no capture yet): the rows still carry
+    // A+ Premium and the "Not available" cells, but there is no score to state.
+    const completion = scored ? Math.round((passed / scored) * 100) : null;
     rows.sort((a, b) => b.gaps - a.gaps);
 
     return {
@@ -1471,21 +1522,27 @@ const buildListingsAudit = async (userId, country, region) => {
         available: true,
         date: formatDate(content?.createdAt || new Date()),
         generatedAt: content?.createdAt || new Date(),
-        tone: completion >= 80 ? 'good' : 'neutral',
+        tone: completion !== null && completion >= 80 ? 'good' : 'neutral',
         // This marketplace's own listings. It used to say "across N
         // marketplaces", counting every connected one, while the figure only
         // ever covered this one — wrong as soon as reports became account-wide.
-        insight: `${completion}% completion across ${plural(products.length, 'listing')}`,
+        insight: completion === null
+            ? `No listing content captured yet for ${plural(products.length, 'listing')}`
+            : `${completion}% completion across ${plural(products.length, 'listing')}`,
         summary: {
             headline: `${products.length} listings reviewed against ${AUDIT_CHECKS.length} content checks`,
             stats: [
-                { label: 'Completion', value: completion, format: 'percent', tone: completion >= 80 ? 'good' : 'watch' },
+                { label: 'Completion', value: completion, format: 'percent', tone: completion === null ? 'neutral' : completion >= 80 ? 'good' : 'watch' },
                 { label: 'Listings reviewed', value: products.length },
-                ...AUDIT_CHECKS.map((check) => ({
-                    label: check.label,
-                    value: passCount[check.key],
-                    tone: passCount[check.key] === products.length ? 'good' : 'watch',
-                })),
+                // A check no listing could be judged on (e.g. Brand Story in a
+                // gated marketplace) shows a dash, not "0 listings have it".
+                ...AUDIT_CHECKS.map((check) => (passCount[check.key] + failCount[check.key] === 0
+                    ? { label: check.label, value: null, tone: 'neutral' }
+                    : {
+                        label: check.label,
+                        value: passCount[check.key],
+                        tone: failCount[check.key] === 0 ? 'good' : 'watch',
+                    })),
                 ...(premiumCaptured
                     ? [{
                         label: 'A+ Premium',
@@ -1508,27 +1565,36 @@ const buildListingsAudit = async (userId, country, region) => {
             rows,
         },
         highlights: [
-            highlight(
-                `Catalogue is ${completion}% complete against the ${AUDIT_CHECKS.length} content checks.`,
-                completion >= 80 ? 'good' : 'watch'
-            ),
+            ...(completion === null
+                ? [highlight('No listing content has been captured for these listings yet, so no check could be scored.')]
+                : [highlight(
+                    `Catalogue is ${completion}% complete against the content checks we could judge.`,
+                    completion >= 80 ? 'good' : 'watch'
+                )]),
             // The check that fails most often is the single most useful line here.
-            ...(() => {
+            ...(completion === null ? [] : (() => {
                 const worst = [...AUDIT_CHECKS]
-                    .map((check) => ({ check, missing: products.length - passCount[check.key] }))
+                    .map((check) => ({ check, missing: failCount[check.key] }))
                     .sort((a, b) => b.missing - a.missing)[0];
                 return worst && worst.missing > 0
                     ? [highlight(`${worst.check.label} is the widest gap - missing on ${worst.missing} of ${products.length} listings.`, 'watch')]
-                    : [highlight('Every listing passes all content checks.', 'good')];
-            })(),
+                    : [highlight('Every listing passes all content checks we could judge.', 'good')];
+            })()),
             ...(rows[0]?.gaps
-                ? [highlight(`${rows[0].sku || rows[0].asin} needs the most work, failing ${rows[0].gaps} of ${AUDIT_CHECKS.length} checks.`, 'watch')]
+                ? [highlight(`${rows[0].sku || rows[0].asin} needs the most work, failing ${rows[0].gaps} of ${rows[0].score.split('/')[1]} checks.`, 'watch')]
                 : []),
         ],
         caveats: [
             ...(premiumCaptured
                 ? ['Storefront presence and content language are not audited - neither is available from the data we hold.']
                 : ['Premium A+ is captured from the next A+ Content sync onwards; this edition shows it as not captured. Storefront presence and content language are not audited - neither is available from the data we hold.']),
+            'Only active listings are audited.',
+            ...(anyNotAvailable
+                ? ['"Not available" means the listing content we captured could not answer that check (for example, no bullet points or description were read); it is left out of the score rather than counted as missing.']
+                : []),
+            ...(!brandStoryKnown
+                ? ['Brand Story is not scored: none of the listings we captured shows one, which usually means the brand is not in Amazon Brand Registry (required for Brand Story) or the capture cannot see it.']
+                : []),
         ],
     };
 };
@@ -1645,13 +1711,13 @@ const REPORT_MONTHLY = { key: 'monthly-performance', name: 'Monthly Performance 
 const presentFlag = (field) => ({ $cond: [{ $ne: [{ $ifNull: [field, null] }, null] }, 1, 0] });
 
 /**
- * Sum sales and units over a date window, plus the regular vs B2B split.
+ * The regular vs B2B split (and SalesOnlyMetrics' own sales) over a window.
  *
  * The split only counts days where Amazon actually reported a B2B figure, and
  * takes that day's all-channel total from the same row — so regular is always
  * total minus B2B from one source, never a subtraction across two.
  */
-const sumSales = async (userId, country, region, startDate, endDate) => {
+const sumSalesOnly = async (userId, country, region, startDate, endDate) => {
     const b2bReported = presentFlag('$b2b.unitsOrderedB2B');
     const [result] = await SalesOnlyMetrics.aggregate([
         { $match: { User: toObjectId(userId), country, region, date: { $gte: startDate, $lte: endDate } } },
@@ -1671,21 +1737,60 @@ const sumSales = async (userId, country, region, startDate, endDate) => {
             },
         },
     ]);
+    // A $group over no rows returns no document: no result = no rows, the
+    // aggregate's equivalent of hasSalesOnlyRows.
+    return result || null;
+};
 
-    const reportedDays = result?.b2bReportedDays || 0;
+/**
+ * Sum sales and units over a date window, plus the regular vs B2B split.
+ *
+ * Sales and units come from DailySkuFinance — written daily for every
+ * marketplace, and what the Profitability page reads. SalesOnlyMetrics exists
+ * for only a handful of marketplaces, so its sales are used only when the
+ * window has no finance rows. B2B exists ONLY in SalesOnlyMetrics, so the
+ * split is read from it whenever it has rows for the window.
+ *
+ * totalSales / unitsSold are null when neither source holds the window:
+ * "not available", never a fabricated 0.
+ */
+const sumSales = async (userId, country, region, startDate, endDate) => {
+    const [live, salesOnly] = await Promise.all([
+        getFinanceTotals({ userId: toObjectId(userId), country, region, startDate, endDate }).catch((error) => {
+            // A finance read must not sink the report; treat it as no rows.
+            logger.warn(`[EsfReports] DailySkuFinance totals failed: ${error.message}`);
+            return null;
+        }),
+        sumSalesOnly(userId, country, region, startDate, endDate),
+    ]);
+
+    const source = live ? 'live' : salesOnly ? 'sales_only' : null;
+    let totalSales = null;
+    let unitsSold = null;
+    if (live) {
+        totalSales = round(live.productSales || 0);
+        unitsSold = Math.round(live.units || 0);
+    } else if (salesOnly) {
+        totalSales = round(salesOnly.totalSales || 0);
+        unitsSold = salesOnly.unitsSold || 0;
+    }
+
+    const reportedDays = salesOnly?.b2bReportedDays || 0;
     return {
-        totalSales: round(result?.totalSales || 0),
-        unitsSold: result?.unitsSold || 0,
-        b2bCapturedDays: result?.b2bCapturedDays || 0,
+        source,
+        totalSales,
+        unitsSold,
+        salesOnlyRows: Boolean(salesOnly),
+        b2bCapturedDays: salesOnly?.b2bCapturedDays || 0,
         b2b: reportedDays
             ? {
                 days: reportedDays,
-                units: result.b2bUnits || 0,
+                units: salesOnly.b2bUnits || 0,
                 // Floored at zero: a B2B figure revised after the day's total
                 // was captured must not produce negative regular units.
-                regularUnits: Math.max((result.splitTotalUnits || 0) - (result.b2bUnits || 0), 0),
-                orderItems: result.b2bOrderItems || 0,
-                share: result.splitTotalUnits ? round(((result.b2bUnits || 0) / result.splitTotalUnits) * 100, 1) : null,
+                regularUnits: Math.max((salesOnly.splitTotalUnits || 0) - (salesOnly.b2bUnits || 0), 0),
+                orderItems: salesOnly.b2bOrderItems || 0,
+                share: salesOnly.splitTotalUnits ? round(((salesOnly.b2bUnits || 0) / salesOnly.splitTotalUnits) * 100, 1) : null,
             }
             : null,
     };
@@ -1843,10 +1948,15 @@ const buildMonthlyPerformance = async (userId, country, region) => {
     // calendar month. Metric backfills run on a schedule and lag by weeks, so
     // asking for "last month" reported nothing for accounts holding months of
     // sales — the data was simply older than the window.
-    const [latestSales, latestPpc] = await Promise.all([
-        SalesOnlyMetrics.findOne({ User: userId, country, region }).sort({ date: -1 }).select('date').lean(),
+    //
+    // The sales anchor is the newest DailySkuFinance day; SalesOnlyMetrics is
+    // consulted only for a marketplace with no finance rows at all.
+    const [latestLive, latestPpc] = await Promise.all([
+        DailySkuFinance.findOne({ User: userId, country, region }).sort({ date: -1 }).select('date').lean(),
         PPCMetrics.findOne({ userId: String(userId), country, region }).sort({ metricDate: -1 }).select('metricDate').lean(),
     ]);
+    const latestSales = latestLive
+        || await SalesOnlyMetrics.findOne({ User: userId, country, region }).sort({ date: -1 }).select('date').lean();
 
     // Both are YYYY-MM-DD, so a plain string compare picks the later day.
     const latestYmd = [latestSales?.date, latestPpc?.metricDate].filter(Boolean).sort().pop();
@@ -1881,23 +1991,39 @@ const buildMonthlyPerformance = async (userId, country, region) => {
         sumTraffic(userId, country, region, toYmd(previousStart), toYmd(previousEnd)),
     ]);
 
-    // Data Kiosk is the unit source; the sales collection's own unitsSold is 0
-    // across every account and is only used if Data Kiosk has nothing to say.
-    const units = trafficCurrent.unitsSold || current.unitsSold;
-    const unitsPrev = trafficPrevious.unitsSold || previous.unitsSold;
+    // Data Kiosk (BuyBox unitsOrdered) is the unit source; the sales
+    // collections' units are used only if Data Kiosk has nothing to say.
+    // Data Kiosk days with no units are a real 0; no source at all is unknown.
+    const unitsOf = (traffic, sales) => traffic.unitsSold || (sales.unitsSold ?? (traffic.days ? 0 : null));
+    const units = unitsOf(trafficCurrent, current);
+    const unitsPrev = unitsOf(trafficPrevious, previous);
+    const salesKnown = current.totalSales !== null;
 
     // Everything below is derived, and each one is defined once here so the
-    // tiles, the table and the bullets cannot disagree about it.
-    const organic = round(current.totalSales - ppcCurrent.adSales);
-    const organicPrev = round(previous.totalSales - ppcPrevious.adSales);
+    // tiles, the table and the bullets cannot disagree about it. Every figure
+    // built on total sales is null ("not available") when total sales are.
+    // Organic is clamped at 0: attribution timing can make ad sales exceed
+    // booked sales for a window, and negative organic sales mean nothing.
+    const organicOf = (sales, ppc) => (sales.totalSales === null ? null : round(Math.max(sales.totalSales - ppc.adSales, 0)));
+    const organic = organicOf(current, ppcCurrent);
+    const organicPrev = organicOf(previous, ppcPrevious);
     // TACOS is ad spend against TOTAL sales, unlike ACOS which is against ad sales.
     const tacos = current.totalSales ? round((ppcCurrent.adSpend / current.totalSales) * 100) : null;
     const tacosPrev = previous.totalSales ? round((ppcPrevious.adSpend / previous.totalSales) * 100) : null;
-    const conversion = trafficCurrent.sessions ? round((units / trafficCurrent.sessions) * 100) : null;
-    const conversionPrev = trafficPrevious.sessions ? round((unitsPrev / trafficPrevious.sessions) * 100) : null;
+    const conversion = trafficCurrent.sessions && units !== null ? round((units / trafficCurrent.sessions) * 100) : null;
+    const conversionPrev = trafficPrevious.sessions && unitsPrev !== null ? round((unitsPrev / trafficPrevious.sessions) * 100) : null;
     // Average selling price.
-    const asp = units ? round(current.totalSales / units) : null;
-    const aspPrev = unitsPrev ? round(previous.totalSales / unitsPrev) : null;
+    const asp = units && salesKnown ? round(current.totalSales / units) : null;
+    const aspPrev = unitsPrev && previous.totalSales !== null ? round(previous.totalSales / unitsPrev) : null;
+
+    if (!salesKnown && !ppcCurrent.adSales) {
+        // Neither finance source holds the month and there were no ad sales:
+        // nothing to report, and "dormant" would be a claim we cannot make.
+        return unavailable(
+            REPORT_MONTHLY,
+            `Sales data is not available for ${formatMonth(currentStart)} yet, and no ad sales were recorded.`
+        );
+    }
 
     if (!current.totalSales && !ppcCurrent.adSales) {
         // We got past the guard above, so metric days DO exist — they just sum
@@ -2107,17 +2233,23 @@ const buildMonthlyPerformance = async (userId, country, region) => {
                 : []),
         ],
         caveats: [
+            ...(!salesKnown
+                ? [`Total sales are not available for ${periodLabel} - no finance data has been recorded for it yet - so total and organic sales, TACOS and average selling price are not shown.`]
+                : []),
             ...(partial
                 ? [`${formatMonth(currentStart)} is still incomplete - this covers the ${spanDays + 1} days to ${formatDate(currentEnd)}, compared against the same ${spanDays + 1} days of ${formatMonth(previousStart)} so the two are like for like.`]
                 : []),
-            // Three different reasons the split can be missing or partial.
-            ...(!current.b2bCapturedDays
-                ? ['The regular vs B2B split is captured from the next sales sync onwards, so this edition does not show it.']
-                : !current.b2b
-                    ? ['Amazon returned no B2B figures for this marketplace. It fills them only for sellers enrolled in Amazon Business.']
-                    : current.b2b.days < spanDays + 1
-                        ? [`The regular vs B2B split covers ${current.b2b.days} of the ${spanDays + 1} days in this period.`]
-                        : []),
+            // Four different reasons the split can be missing or partial.
+            // B2B lives only in SalesOnlyMetrics, which most marketplaces never had.
+            ...(!current.salesOnlyRows
+                ? ['The regular vs B2B split is not available for this marketplace in this period.']
+                : !current.b2bCapturedDays
+                    ? ['The regular vs B2B split is captured from the next sales sync onwards, so this edition does not show it.']
+                    : !current.b2b
+                        ? ['Amazon returned no B2B figures for this marketplace. It fills them only for sellers enrolled in Amazon Business.']
+                        : current.b2b.days < spanDays + 1
+                            ? [`The regular vs B2B split covers ${current.b2b.days} of the ${spanDays + 1} days in this period.`]
+                            : []),
             // Full coverage only: on a partial one the totals differ for the
             // reason the caveat above already gives.
             ...(current.b2b && current.b2b.days === spanDays + 1 && current.b2b.units + current.b2b.regularUnits !== units
@@ -2442,22 +2574,31 @@ const historyBuilders = {
             .sort({ createdAt: -1 }).limit(HISTORY_LIMIT).lean();
         if (!snapshots.length) return null;
 
-        // Scored against the five checks each snapshot carries on its own. A+ is
-        // in a separate collection with no history of its own, so it is left out
-        // here rather than scored as absent, which would understate every edition.
-        const SNAPSHOT_CHECKS = 5;
+        // Scored against the five checks each snapshot carries on its own, with the
+        // same rules as the audit itself (listingAuditChecks): empty bullets or
+        // description and a gated Brand Story are no data, not a gap. A+ is in a
+        // separate collection with no history of its own, so it is left out here
+        // rather than scored as absent, which would understate every edition.
+        // Snapshots carry no listing status, so today's active ASINs stand in.
+        const seller = await Seller.findOne({ User: userId }).select('sellerAccount').lean();
+        const account = (seller?.sellerAccount || []).find((acc) => acc.region === region && acc.country === country);
+        const activeAsins = account
+            ? new Set((account.products || []).filter((p) => p.status === 'Active').map((p) => p.asin))
+            : null;
         const completionOf = (snapshot) => {
-            const products = snapshot.Products || [];
-            if (!products.length) return 0;
+            const products = (snapshot.Products || []).filter((p) => !activeAsins || activeAsins.has(p.asin));
+            const brandStoryKnown = marketplaceShowsBrandStory(snapshot.Products);
             let passed = 0;
+            let scored = 0;
             for (const p of products) {
-                if (p.about_product?.length) passed += 1;
-                if (p.product_description?.length) passed += 1;
-                if ((p.product_photos?.length || 0) >= 5) passed += 1;
-                if (p.video_url?.length) passed += 1;
-                if (p.has_brandstory) passed += 1;
+                const { aPlus, ...checks } = listingAuditChecks(p, null, brandStoryKnown);
+                for (const value of Object.values(checks)) {
+                    if (value === null) continue;
+                    scored += 1;
+                    if (value) passed += 1;
+                }
             }
-            return Math.round((passed / (products.length * SNAPSHOT_CHECKS)) * 100);
+            return scored ? Math.round((passed / scored) * 100) : 0;
         };
 
         const editions = snapshots.map((snapshot) => edition(
@@ -2473,7 +2614,7 @@ const historyBuilders = {
                 { label: 'Listings captured', value: (snapshots[0].Products || []).length },
                 { label: 'Editions on file', value: snapshots.length },
             ],
-            note: 'Completion here covers the five checks each capture carries (bullets, description, images, video, Brand Story). A+ Content is stored separately with no history of its own, so it is not scored in these editions.',
+            note: 'Completion here covers the five checks each capture carries (bullets, description, images, video, Brand Story), for today\'s active listings, leaving out checks a capture could not answer. A+ Content is stored separately with no history of its own, so it is not scored in these editions.',
         };
     },
 
@@ -2512,19 +2653,44 @@ const historyBuilders = {
     },
 
     [REPORT_MONTHLY.key]: async (userId, country, region) => {
-        const rows = await SalesOnlyMetrics.aggregate([
-            { $match: { User: toObjectId(userId), country, region } },
-            {
-                $group: {
-                    _id: { $substr: ['$date', 0, 7] },
-                    sales: { $sum: { $ifNull: ['$sales.amount', 0] } },
-                    units: { $sum: { $ifNull: ['$unitsSold', 0] } },
-                    days: { $sum: 1 },
+        // Same rule as the report itself: DailySkuFinance per month, and
+        // SalesOnlyMetrics only for a month with no finance rows.
+        const match = { User: toObjectId(userId), country, region };
+        const [liveRows, salesOnlyRows] = await Promise.all([
+            DailySkuFinance.aggregate([
+                { $match: match },
+                {
+                    $group: {
+                        _id: { $substr: ['$date', 0, 7] },
+                        sales: { $sum: { $ifNull: ['$productSales', 0] } },
+                        units: { $sum: { $ifNull: ['$units', 0] } },
+                        // One row per SKU per day, so days are counted distinct.
+                        dates: { $addToSet: '$date' },
+                    },
                 },
-            },
-            { $sort: { _id: -1 } },
-            { $limit: HISTORY_LIMIT },
+                { $project: { sales: 1, units: 1, days: { $size: '$dates' } } },
+                { $sort: { _id: -1 } },
+                { $limit: HISTORY_LIMIT },
+            ]),
+            SalesOnlyMetrics.aggregate([
+                { $match: match },
+                {
+                    $group: {
+                        _id: { $substr: ['$date', 0, 7] },
+                        sales: { $sum: { $ifNull: ['$sales.amount', 0] } },
+                        units: { $sum: { $ifNull: ['$unitsSold', 0] } },
+                        days: { $sum: 1 },
+                    },
+                },
+                { $sort: { _id: -1 } },
+                { $limit: HISTORY_LIMIT },
+            ]),
         ]);
+        const byMonth = new Map((salesOnlyRows || []).map((row) => [row._id, row]));
+        for (const row of liveRows || []) byMonth.set(row._id, row);
+        const rows = [...byMonth.values()]
+            .sort((a, b) => String(b._id).localeCompare(String(a._id)))
+            .slice(0, HISTORY_LIMIT);
         if (!rows.length) return null;
 
         const editions = rows.map((row, index) => {

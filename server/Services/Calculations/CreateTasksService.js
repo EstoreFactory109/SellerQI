@@ -11,6 +11,7 @@
  * to avoid the 16MB MongoDB document limit. The Task model only stores metadata (taskRenewalDate).
  */
 
+const { isAsinSearchTerm } = require('./AdsSignals.js');
 const crypto = require('crypto');
 const mongoose = require('mongoose');
 const Task = require('../../models/MCP/TaskModel.js');
@@ -205,6 +206,14 @@ const renderSponsoredAdsTaskText = (errorType, renderData = {}) => {
         }
         case 'search_term_zero_sales': {
             const searchTermName = searchTerm || 'Unknown';
+            // Product-page matches report the ASIN as the "search term". A negative
+            // keyword cannot block it; it needs a negative product target.
+            if (isAsinSearchTerm(searchTermName)) {
+                return {
+                    error: `PPC | Product Target with Zero Sales: Ads shown on the product page of ${searchTermName} have generated ${clicks} clicks and spent $${spend} but no sales.`,
+                    solution: `Stop showing on ${searchTermName}: 1) Add ${searchTermName} as a negative product target in this campaign or ad group. 2) If the product is a close competitor you do want to win against, review your price, reviews and main image against it before re-targeting it.`
+                };
+            }
             return {
                 error: `PPC | Search Term with Zero Sales: The search term "${searchTermName}" has generated ${clicks} clicks and spent $${spend} but no sales. Consider adding this as a negative keyword.`,
                 solution: `Address zero-sale search term: 1) Add "${searchTermName}" as a negative keyword to prevent future wasted spend. 2) Review if the search term is relevant to your product - if not, definitely add as negative. 3) If relevant, check your product listing for conversion issues. 4) Analyze competitor listings for this search term.`
@@ -212,6 +221,12 @@ const renderSponsoredAdsTaskText = (errorType, renderData = {}) => {
         }
         case 'auto_campaign_migration_needed': {
             const autoSearchTerm = searchTerm || 'Unknown';
+            if (isAsinSearchTerm(autoSearchTerm)) {
+                return {
+                    error: `PPC | Auto Campaign Migration: Ads shown on the product page of ${autoSearchTerm} in auto campaign "${campaignName || 'Unknown'}" have generated $${sales} in sales. Consider targeting this product directly in a manual campaign.`,
+                    solution: `Target the product directly: 1) Create or use a manual product-targeting campaign. 2) Add ${autoSearchTerm} as a product (ASIN) target. 3) Set a bid based on current performance. 4) Monitor it, and add it as a negative product target in the auto campaign once the manual target performs.`
+                };
+            }
             return {
                 error: `PPC | Auto Campaign Migration: The search term "${autoSearchTerm}" in auto campaign "${campaignName || 'Unknown'}" has generated $${sales} in sales. Consider migrating this to a manual campaign for better control.`,
                 solution: `Migrate to manual campaign: 1) Create a new manual campaign or add to existing manual campaign. 2) Add "${autoSearchTerm}" as an exact match keyword. 3) Set an appropriate bid based on current performance. 4) Monitor performance in the manual campaign. 5) Consider pausing the auto campaign if manual campaign performs better.`
@@ -666,16 +681,21 @@ class CreateTaskService {
                 });
             }
             
-            // Check duplicate words error
-            if (error.data.dublicateWords === 'Error') {
+            // Duplicate words in the backend search terms (dublicateWords sits at
+            // the root, beside the backend charLim; title repetition is the
+            // TitleResult wordRepetition check above). This compared the check
+            // object to the string 'Error', so it never fired, and its label said
+            // "Title". The errorType is new because no 'duplicate_words' task was
+            // ever created under the old one.
+            if (error.data.dublicateWords?.status === 'Error') {
                 tasks.push({
                     taskId: generateTaskId(),
                     productName,
                     asin,
                     errorCategory: 'ranking',
-                    errorType: 'duplicate_words',
-                    error: 'Title | Duplicate Words: Your product title contains repeated words which can negatively impact search ranking and customer experience.',
-                    solution: 'Review and remove duplicate words from your product title. Each word should appear only once for optimal search performance.',
+                    errorType: 'backend_keywords_duplicate_words',
+                    error: `${sectionLabels.charLim} | Duplicate Words: ${error.data.dublicateWords.Message || 'Your backend keywords repeat words, wasting part of the 250-byte limit.'}`,
+                    solution: error.data.dublicateWords.HowTOSolve || 'Remove repeated words from your backend search terms; Amazon indexes each word once, so repeats only use up bytes.',
                     status: TaskStatus.PENDING
                 });
             }

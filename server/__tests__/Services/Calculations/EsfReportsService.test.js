@@ -37,6 +37,8 @@ jest.mock('../../../models/inventory/RemovalOrdersModel.js', () => ({ findOne: j
 jest.mock('../../../models/review/ReviewOrderModel.js', () => ({ aggregate: jest.fn(), countDocuments: jest.fn(), findOne: jest.fn() }));
 jest.mock('../../../models/MCP/SalesOnlyMetricsModel.js', () => ({ aggregate: jest.fn(), findOne: jest.fn() }));
 jest.mock('../../../models/amazon-ads/PPCMetricsModel.js', () => ({ aggregate: jest.fn(), findOne: jest.fn() }));
+jest.mock('../../../models/finance/DailySkuFinanceModel.js', () => ({ aggregate: jest.fn(), findOne: jest.fn() }));
+jest.mock('../../../Services/Finance/FinanceDashboardReadService.js', () => ({ getTotals: jest.fn() }));
 jest.mock('../../../utils/Logger.js', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }));
 
 const Restock = require('../../../models/inventory/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model.js');
@@ -59,6 +61,8 @@ const RemovalOrders = require('../../../models/inventory/RemovalOrdersModel.js')
 const ReviewOrder = require('../../../models/review/ReviewOrderModel.js');
 const SalesOnlyMetrics = require('../../../models/MCP/SalesOnlyMetricsModel.js');
 const PPCMetrics = require('../../../models/amazon-ads/PPCMetricsModel.js');
+const DailySkuFinance = require('../../../models/finance/DailySkuFinanceModel.js');
+const { getTotals: getFinanceTotals } = require('../../../Services/Finance/FinanceDashboardReadService.js');
 
 const {
     getEsfReports,
@@ -103,10 +107,15 @@ const stubEmpty = () => {
     SalesOnlyMetrics.findOne.mockReturnValue({ sort: () => ({ select: () => ({ lean: () => Promise.resolve(null) }) }) });
     PPCMetrics.aggregate.mockResolvedValue([]);
     PPCMetrics.findOne.mockReturnValue({ sort: () => ({ select: () => ({ lean: () => Promise.resolve(null) }) }) });
+    DailySkuFinance.aggregate.mockResolvedValue([]);
+    DailySkuFinance.findOne.mockReturnValue({ sort: () => ({ select: () => ({ lean: () => Promise.resolve(null) }) }) });
+    // getTotals is null for a window with no DailySkuFinance rows.
+    getFinanceTotals.mockResolvedValue(null);
 };
 
 /** The newest metric day each collection holds — what anchors the month. */
-const latestMetricDays = ({ sales = null, ppc = null }) => {
+const latestMetricDays = ({ sales = null, ppc = null, live = null }) => {
+    DailySkuFinance.findOne.mockReturnValue({ sort: () => ({ select: () => ({ lean: () => Promise.resolve(live ? { date: live } : null) }) }) });
     SalesOnlyMetrics.findOne.mockReturnValue({ sort: () => ({ select: () => ({ lean: () => Promise.resolve(sales ? { date: sales } : null) }) }) });
     PPCMetrics.findOne.mockReturnValue({ sort: () => ({ select: () => ({ lean: () => Promise.resolve(ppc ? { metricDate: ppc } : null) }) }) });
 };
@@ -556,11 +565,70 @@ describe('getEsfReports', () => {
 
             expect(rows.FULL.score).toBe('6/6');
             expect(rows.FULL.missing).toBe('-');
-            expect(rows.BARE.score).toBe('0/6');
-            // Worst listing first, so the audit opens on what needs work.
-            expect(report.summary.rows[0].sku).toBe('BARE');
-            // 6 of 12 possible checks passed.
-            expect(report.summary.stats.find((item) => item.label === 'Completion').value).toBe(50);
+            // BARE was never captured by the scrape and has no A+ record, so no
+            // check can be judged. It used to score 0/6 with everything "Missing",
+            // a finding about our data rather than the listing; now it is
+            // "Not available" and stays out of the completion figure.
+            expect(rows.BARE.score).toBe('-');
+            expect(rows.BARE.missing).toBe('-');
+            expect(rows.BARE.video).toBe('Not available');
+            expect(rows.BARE.brandStory).toBe('Not available');
+            expect(report.summary.stats.find((item) => item.label === 'Completion').value).toBe(100);
+            expect(report.caveats.join(' ')).toMatch(/Not available/);
+        });
+
+        it('scores real gaps, treats empty bullets/description as not available, and skips inactive listings', async () => {
+            Seller.findOne.mockReturnValue(mockFindOne({
+                sellerAccount: [{
+                    region: 'NA',
+                    country: 'US',
+                    products: [
+                        { asin: 'B1', sku: 'FULL', status: 'Active' },
+                        { asin: 'B2', sku: 'GAPS', status: 'Active' },
+                        { asin: 'B3', sku: 'OFF', status: 'Inactive' },
+                    ],
+                }],
+            }));
+            Content.findOne.mockReturnValue(mockFindOne({
+                createdAt: new Date('2026-09-17T00:00:00Z'),
+                Products: [
+                    { asin: 'B1', about_product: ['a'], product_description: ['d'], product_photos: ['1', '2', '3', '4', '5'], video_url: ['v'], has_brandstory: true },
+                    { asin: 'B2', about_product: [], product_description: [], product_photos: ['1'], video_url: [], has_brandstory: false },
+                    { asin: 'B3', about_product: [], product_description: [], product_photos: [], video_url: [], has_brandstory: false },
+                ],
+            }));
+            APlus.findOne.mockReturnValue(mockFindOne({ ApiContentDetails: [
+                { Asins: 'B1', status: 'APPROVED' },
+                { Asins: 'B2', status: 'NOT_AVAILABLE' },
+            ] }));
+
+            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'listings-audit');
+            const rows = Object.fromEntries(report.summary.rows.map((row) => [row.sku, row]));
+
+            expect(rows.OFF).toBeUndefined();
+            expect(report.summary.stats.find((item) => item.label === 'Listings reviewed').value).toBe(2);
+            // Images, video, A+ and Brand Story are judged; bullets/description are not.
+            expect(rows.GAPS.score).toBe('0/4');
+            expect(rows.GAPS.missing).toBe('5+ images, Video, A+ Content, Brand Story');
+            expect(rows.GAPS.missing).not.toMatch(/Bullet|Description/);
+            // 6 passed of 10 judged checks.
+            expect(report.summary.stats.find((item) => item.label === 'Completion').value).toBe(60);
+        });
+
+        it('does not score Brand Story in a marketplace where no listing shows one', async () => {
+            Seller.findOne.mockReturnValue(mockFindOne({
+                sellerAccount: [{ region: 'NA', country: 'US', products: [{ asin: 'B1', sku: 'S', status: 'Active' }] }],
+            }));
+            Content.findOne.mockReturnValue(mockFindOne({
+                createdAt: new Date('2026-09-17T00:00:00Z'),
+                Products: [{ asin: 'B1', about_product: ['a'], product_description: ['d'], product_photos: ['1', '2', '3', '4', '5'], video_url: ['v'], has_brandstory: false }],
+            }));
+
+            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'listings-audit');
+            expect(report.summary.rows[0].brandStory).toBe('Not available');
+            expect(report.summary.rows[0].missing).not.toMatch(/Brand Story/);
+            expect(report.summary.stats.find((item) => item.label === 'Brand Story').value).toBeNull();
+            expect(report.caveats.join(' ')).toMatch(/Brand Registry/);
         });
 
         it('declares the fields it cannot audit', async () => {
@@ -776,6 +844,133 @@ describe('getEsfReports', () => {
             expect(stat('Ad spend').deltaGoodWhen).toBe('down');
         });
 
+        describe('sales from live finance (DailySkuFinance)', () => {
+            const stat = (report, label) => report.summary.stats.find((item) => item.label === label);
+            // BuyBox units for windows starting on a given day; none elsewhere
+            // (other reports read BuyBoxData too, so match on the window).
+            const buyBoxUnits = (unitsByStart) => {
+                BuyBoxData.find.mockImplementation((query) => {
+                    const units = unitsByStart[query?.date?.$gte];
+                    const rows = units === undefined
+                        ? []
+                        : [{ date: query.date.$gte, asinBuyBoxData: [{ childAsin: 'A1', unitsOrdered: units, sessions: 100 }] }];
+                    return {
+                        sort: () => ({
+                            limit: () => ({ lean: () => Promise.resolve([]) }),
+                            select: () => ({ lean: () => Promise.resolve(rows) }),
+                        }),
+                    };
+                });
+            };
+
+            it('anchors on and sums DailySkuFinance, not SalesOnlyMetrics', async () => {
+                latestMetricDays({ live: '2026-08-31', sales: '2026-03-31' });
+                getFinanceTotals
+                    .mockResolvedValueOnce({ productSales: 1200.456, units: 60 })
+                    .mockResolvedValueOnce({ productSales: 1000, units: 50 });
+                // A stale SalesOnlyMetrics month that must be ignored for totals.
+                SalesOnlyMetrics.aggregate.mockResolvedValue([{ totalSales: 5 }]);
+                PPCMetrics.aggregate
+                    .mockResolvedValueOnce([{ adSales: 200, adSpend: 60 }])
+                    .mockResolvedValueOnce([{ adSales: 100, adSpend: 50 }]);
+
+                const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'monthly-performance');
+
+                expect(report.date).toBe('August 2026');
+                expect(SalesOnlyMetrics.findOne).not.toHaveBeenCalled();
+                expect(getFinanceTotals.mock.calls[0][0]).toMatchObject({ country: 'US', region: 'NA', startDate: '2026-08-01', endDate: '2026-08-31' });
+                expect(getFinanceTotals.mock.calls[1][0]).toMatchObject({ startDate: '2026-07-01', endDate: '2026-07-31' });
+                expect(stat(report, 'Total sales')).toMatchObject({ value: 1200.46, delta: 20.05 });
+                expect(stat(report, 'Organic sales').value).toBe(1000.46);
+                // No BuyBox units, so live units stand in.
+                expect(stat(report, 'Units sold')).toMatchObject({ value: 60, previous: 50 });
+                expect(stat(report, 'TACOS').value).toBe(5);
+            });
+
+            it('keeps BuyBox units primary over live units', async () => {
+                latestMetricDays({ live: '2026-08-31' });
+                getFinanceTotals.mockResolvedValue({ productSales: 1000, units: 60 });
+                buyBoxUnits({ '2026-08-01': 40 });
+
+                const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'monthly-performance');
+
+                expect(stat(report, 'Units sold')).toMatchObject({ value: 40, previous: 60 });
+                expect(stat(report, 'Avg selling price').value).toBe(25);
+            });
+
+            it('clamps organic sales at zero when ad sales exceed booked sales', async () => {
+                latestMetricDays({ live: '2026-08-31' });
+                getFinanceTotals.mockResolvedValue({ productSales: 100, units: 5 });
+                PPCMetrics.aggregate.mockResolvedValue([{ adSales: 150, adSpend: 30 }]);
+
+                const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'monthly-performance');
+
+                expect(stat(report, 'Organic sales').value).toBe(0);
+                expect(report.summary.rows.find((row) => row.metric === 'Organic revenue')).toMatchObject({ current: 0, previous: 0 });
+            });
+
+            it('shows sales-derived tiles as not available when no source holds the month', async () => {
+                // Anchored by ads alone: no DailySkuFinance and no SalesOnlyMetrics rows.
+                latestMetricDays({ ppc: '2026-08-31' });
+                PPCMetrics.aggregate
+                    .mockResolvedValueOnce([{ adSales: 200, adSpend: 60 }])
+                    .mockResolvedValueOnce([{ adSales: 100, adSpend: 50 }]);
+
+                const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'monthly-performance');
+
+                expect(report.available).toBe(true);
+                for (const label of ['Total sales', 'Organic sales', 'TACOS', 'Avg selling price', 'Units sold']) {
+                    expect(stat(report, label)).toMatchObject({ value: null, delta: null });
+                }
+                for (const metric of ['Total sales', 'Organic revenue', 'Avg selling price']) {
+                    expect(report.summary.rows.find((row) => row.metric === metric)).toMatchObject({ current: null, previous: null, change: '-' });
+                }
+                expect(report.summary.rows.find((row) => row.metric === 'TACOS')).toMatchObject({ current: '-', previous: '-' });
+                // Never a fabricated 0 or a negative organic figure.
+                const numbers = report.summary.stats.filter((s) => ['Total sales', 'Organic sales'].includes(s.label)).map((s) => s.value);
+                expect(numbers).toEqual([null, null]);
+                expect(report.caveats.join(' ')).toMatch(/Total sales are not available/);
+                expect(stat(report, 'Ad sales').value).toBe(200);
+            });
+
+            it('is unavailable, not dormant, with no sales data and no ad sales', async () => {
+                latestMetricDays({ ppc: '2026-08-31' });
+
+                const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'monthly-performance');
+
+                expect(report.available).toBe(false);
+                expect(report.reason).toMatch(/not available/i);
+                expect(report.reason).not.toMatch(/dormant/i);
+            });
+
+            it('falls back to SalesOnlyMetrics only for a marketplace with no finance rows', async () => {
+                latestMetricDays({ sales: '2026-08-31' });
+                SalesOnlyMetrics.aggregate.mockResolvedValue([{ totalSales: 300, unitsSold: 3 }]);
+
+                const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'monthly-performance');
+
+                expect(DailySkuFinance.findOne).toHaveBeenCalled();
+                expect(stat(report, 'Total sales').value).toBe(300);
+            });
+
+            it('reads B2B from SalesOnlyMetrics alongside live sales, and hides it without rows', async () => {
+                latestMetricDays({ live: '2026-08-31' });
+                getFinanceTotals.mockResolvedValue({ productSales: 1000, units: 100 });
+                SalesOnlyMetrics.aggregate.mockResolvedValue([{ totalSales: 1, b2bCapturedDays: 31, b2bReportedDays: 31, b2bUnits: 20, b2bOrderItems: 8, splitTotalUnits: 100 }]);
+
+                let report = byKey(await getEsfReports(USER, 'US', 'NA'), 'monthly-performance');
+                expect(stat(report, 'Total sales').value).toBe(1000);
+                expect(stat(report, 'B2B units').value).toBe(20);
+
+                SalesOnlyMetrics.aggregate.mockResolvedValue([]);
+                report = byKey(await getEsfReports(USER, 'US', 'NA'), 'monthly-performance');
+                expect(stat(report, 'B2B units')).toBeUndefined();
+                expect(stat(report, 'Regular units')).toBeUndefined();
+                expect(report.summary.rows.find((row) => row.metric === 'B2B units')).toBeUndefined();
+                expect(report.caveats.join(' ')).toMatch(/split is not available for this marketplace/);
+            });
+        });
+
         it('derives ACOS from summed spend and sales, never from averaged daily rates', async () => {
             latestMetricDays({ sales: '2026-08-31', ppc: '2026-08-31' });
             SalesOnlyMetrics.aggregate.mockResolvedValue([{ totalSales: 1000, unitsSold: 10 }]);
@@ -986,6 +1181,34 @@ describe('getEsfReportHistory', () => {
                 }))),
             }),
         }),
+    });
+
+    it('groups monthly performance by month from live finance, falling back per month', async () => {
+        DailySkuFinance.aggregate.mockResolvedValue([
+            { _id: '2026-09', sales: 900, units: 30, days: 30 },
+            { _id: '2026-08', sales: 1000, units: 40, days: 31 },
+        ]);
+        // July has no finance rows; August's SalesOnlyMetrics row must lose to live.
+        SalesOnlyMetrics.aggregate.mockResolvedValue([
+            { _id: '2026-08', sales: 5, units: 0, days: 31 },
+            { _id: '2026-07', sales: 800, units: 0, days: 31 },
+        ]);
+
+        const history = await getEsfReportHistory(USER, 'US', 'NA', 'monthly-performance');
+
+        const pipeline = DailySkuFinance.aggregate.mock.calls[0][0];
+        expect(pipeline[1].$group._id).toEqual({ $substr: ['$date', 0, 7] });
+        expect(pipeline[1].$group.sales).toEqual({ $sum: { $ifNull: ['$productSales', 0] } });
+        expect(pipeline).toContainEqual({ $limit: 40 });
+        expect(history.available).toBe(true);
+        expect(history.editions.map((e) => e.iso)).toEqual(['2026-09-01', '2026-08-01', '2026-07-01']);
+        expect(history.editions[0].summary).toBe('September 2026: 900 sales over 30 days, down 10%');
+        expect(history.editions[1].summary).toBe('August 2026: 1000 sales over 31 days, up 25%');
+        expect(history.stats).toEqual([
+            { label: 'Latest month sales', value: 900, format: 'currency' },
+            { label: 'Units', value: 30 },
+            { label: 'Months on file', value: 3 },
+        ]);
     });
 
     it('returns null for a key that is not one of our reports', async () => {

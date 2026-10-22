@@ -15,16 +15,19 @@
  */
 
 const logger = require('../../utils/Logger.js');
-const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const GetDateWisePPCspendModel = require('../../models/amazon-ads/GetDateWisePPCspendModel.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
-const { getProductWiseSponsoredAdsData, getAdsSpendByAsin } = require('../amazon-ads/ProductWiseSponsoredAdsService.js');
+const { getProductWiseSponsoredAdsData } = require('../amazon-ads/ProductWiseSponsoredAdsService.js');
 const Profitability = require('./ProfitabilityCalculation.js');
-const { classifyProfitabilityRow, isEconomicsFresh } = require('./RecoverableAmountUtils.js');
+const { classifyProfitabilityRow } = require('./RecoverableAmountUtils.js');
 const { calculateSponsoredAdsMetrics } = require('./SponsoredAdsCalculation.js');
-const { getRedisClient } = require('../../config/redisConn.js');
+// AsinFinanceWindowService requires this module back, but only lazily inside
+// resolveAsinFinance, so loading it here at the top is cycle-safe.
+const { resolveAsinFinance } = require('../Finance/AsinFinanceWindowService.js');
+// Fresh EconomicsMetrics, else live DailySkuFinance, else null (the collection stopped being written).
+const { loadLiveEconomics, isStoredEconomicsDoc } = require('../Finance/LiveEconomicsService.js');
 const PPCMetricsModel = require('../../models/amazon-ads/PPCMetricsModel.js');
 
 /**
@@ -49,9 +52,6 @@ async function getAccountAdSpendForRange(userId, country, region, dateRange) {
         return null;
     }
 }
-
-// Cache TTL for full profitability table data (10 minutes)
-const PROFITABILITY_TABLE_CACHE_TTL = 600;
 
 // Chunk size for yielding to event loop during large data processing
 const YIELD_CHUNK_SIZE = 500;
@@ -92,7 +92,7 @@ const fetchProfitabilityData = async (userId, country, region) => {
         productWiseSponsoredAds,
         dateWisePPCspendData
     ] = await Promise.all([
-        EconomicsMetrics.findLatest(userId, region, country),
+        loadLiveEconomics(userId, region, country),
         Seller.findOne(
             { User: userId },
             { 
@@ -149,6 +149,9 @@ const fetchProfitabilityData = async (userId, country, region) => {
         adsPPCSpend,
         // All ad types (incl. Sponsored Brands) over the economics window — the TACoS numerator.
         accountAdSpend,
+        // calculateProfitabilityDashboard needs the account key for the live
+        // per-ASIN fallback (resolveAsinFinance) when EconomicsMetrics is stale.
+        userId,
         country,
         region
     };
@@ -163,7 +166,8 @@ const fetchProfitabilityData = async (userId, country, region) => {
  */
 const getAsinPpcSalesFromEconomics = async (economicsMetrics) => {
     if (!economicsMetrics) {
-        return { asinPpcSales: {}, totalSales: 0, totalGrossProfit: 0 };
+        // No economics = no data, not $0.
+        return { asinPpcSales: {}, totalSales: null, totalGrossProfit: null };
     }
 
     // Calculate totals from datewiseSales for consistency
@@ -189,7 +193,8 @@ const getAsinPpcSalesFromEconomics = async (economicsMetrics) => {
     const hasEmptyAsinData = !economicsMetrics.asinWiseSales || economicsMetrics.asinWiseSales.length === 0;
     const isLegacyBigAccount = hasEmptyAsinData && (economicsMetrics.totalSales?.amount > 5000);
 
-    if ((isBigAccount || isLegacyBigAccount) && hasEmptyAsinData) {
+    // Big-account rows are keyed by a stored doc's _id; a live-built doc has its rows inline.
+    if ((isBigAccount || isLegacyBigAccount) && hasEmptyAsinData && isStoredEconomicsDoc(economicsMetrics)) {
         try {
             // OPTIMIZED: Use MongoDB aggregation instead of loading all docs into memory
             // getProfitabilityMapByMetricsId aggregates in DB and returns a Map
@@ -306,17 +311,18 @@ const calculateDateWiseTotalCosts = (dateWisePPCData) => {
  */
 const convertToAccountFinance = (economicsMetrics, adsPPCSpend = 0) => {
     if (!economicsMetrics) {
+        // No economics = no data (null), not $0.
         return {
             createdAt: new Date(),
-            Gross_Profit: 0,
-            Total_Sales: 0,
+            Gross_Profit: null,
+            Total_Sales: null,
             ProductAdsPayment: adsPPCSpend,
-            FBA_Fees: 0,
-            Storage: 0,
-            Amazon_Charges: 0,
-            Amazon_Fees: 0,
-            Other_Amazon_Fees: 0,
-            Refunds: 0
+            FBA_Fees: null,
+            Storage: null,
+            Amazon_Charges: null,
+            Amazon_Fees: null,
+            Other_Amazon_Fees: null,
+            Refunds: null
         };
     }
 
@@ -464,12 +470,27 @@ const calculateProfitabilityDashboard = async (rawData) => {
         dateWisePPCspendData,
         adsPPCSpend,
         accountAdSpend,
+        userId,
         country,
         region
     } = rawData;
 
-    // Get ASIN-wise PPC sales from economics (handles big accounts)
-    const economicsData = await getAsinPpcSalesFromEconomics(economicsMetricsData);
+    // Per-ASIN sales/fees via the shared rule (resolveAsinFinance): a stale
+    // EconomicsMetrics map is dropped and live DailySkuFinance (default 30-day
+    // window) takes over, so this legacy endpoint agrees with the dashboard and
+    // the Profitability page instead of showing April-2026 numbers as current.
+    // totalSales is the account-level figure of the same loaded economics; null = no data.
+    const resolvedFinance = await resolveAsinFinance({
+        economicsMetrics: economicsMetricsData,
+        userId,
+        country,
+        region
+    });
+    const economicsData = {
+        asinPpcSales: resolvedFinance.asinPpcSales,
+        totalSales: resolvedFinance.totalSales ?? null,
+        totalGrossProfit: resolvedFinance.totalGrossProfit ?? null
+    };
 
     // Prepare TotalProducts array from seller data
     const TotalProducts = products.map(p => ({
@@ -536,11 +557,11 @@ const calculateProfitabilityDashboard = async (rawData) => {
         : 0;
 
     // Calculate profitability errors
-    // EconomicsMetrics stopped being written in April 2026. Issues from an old doc
-    // would describe April, so they are only judged when the doc is recent.
-    // (The table itself still reads this doc: see the follow-up in the PR.)
+    // Only judged on fresh per-ASIN finance (a recent EconomicsMetrics map or live
+    // DailySkuFinance): EconomicsMetrics stopped being written in April 2026 and
+    // issues from that doc would describe April.
     const profitabilityErrorsData = calculateProfitabilityErrors(profitibilityData, TotalProducts, {
-        financeFresh: isEconomicsFresh(economicsMetricsData) && Object.keys(economicsData.asinPpcSales || {}).length > 0
+        financeFresh: resolvedFinance.financeFresh
     });
 
     // Convert to legacy formats
@@ -625,16 +646,14 @@ const getProfitabilitySummary = async (userId, country, region) => {
     const startTime = Date.now();
     logger.info(`[PERF] ProfitabilityService.getProfitabilitySummary starting for user ${userId}`);
 
-    // Fetch minimal data (EconomicsMetrics + PPC spend only)
-    // OPTIMIZED: Only select fields needed for summary
+    // Fetch minimal data (economics + PPC spend only). Economics is fresh
+    // EconomicsMetrics, else live DailySkuFinance, else null.
     const [economicsMetricsData, productWiseSponsoredAds] = await Promise.all([
-        EconomicsMetrics.findLatest(userId, region, country)
-            .select('datewiseSales totalSales grossProfit fbaFees storageFees refunds dateRange')
-            .lean(),
+        loadLiveEconomics(userId, region, country),
         getProductWiseSponsoredAdsData(userId, country, region)
     ]);
 
-    // With .lean(), economicsMetricsData is already a plain object
+    // The loader returns plain objects
     const processedEconomicsMetrics = economicsMetricsData;
 
     // Calculate PPC spend from Amazon Ads API
@@ -680,7 +699,8 @@ const getProfitabilitySummary = async (userId, country, region) => {
 
     return {
         accountFinance,
-        TotalWeeklySale: parseFloat(totalSales.toFixed(2)),
+        // null = no economics for the account (not $0)
+        TotalWeeklySale: processedEconomicsMetrics ? parseFloat(totalSales.toFixed(2)) : null,
         TotalSales,
         sponsoredAdsMetrics,
         economicsMetrics: processedEconomicsMetrics ? {
@@ -891,228 +911,6 @@ const getProfitabilityChart = async (userId, country, region) => {
         chartData,
         dateRange: processedEconomicsMetrics?.dateRange || null,
         Country: country
-    };
-};
-
-/**
- * INTERNAL: Compute full profitability table data (all parents, children, errors)
- * This is the same logic as before, but extracted for caching.
- * 
- * @param {string} userId - User ID
- * @param {string} country - Country code
- * @param {string} region - Region code
- * @returns {Promise<Object>} Full computed profitability data
- */
-const computeFullProfitabilityTableData = async (userId, country, region) => {
-    const startTime = Date.now();
-    logger.info(`[PERF] Computing full profitability table data for user ${userId}`);
-
-    // Fetch initial data in parallel (same as before)
-    // OPTIMIZED: Use getAdsSpendByAsin instead of loading all sponsored ads items
-    const [economicsMetricsData, sellerData, adsSpendByAsin] = await Promise.all([
-        EconomicsMetrics.findLatest(userId, region, country)
-            .select('_id isBig asinWiseSales datewiseSales totalSales grossProfit dateRange')
-            .lean(),
-        Seller.findOne(
-            { User: userId },
-            { 
-                'sellerAccount': {
-                    $elemMatch: { region, country }
-                }
-            }
-        ).lean(),
-        getAdsSpendByAsin(userId, country, region)
-    ]);
-
-    const processedEconomicsMetrics = economicsMetricsData;
-
-    // Get ASIN-wise data from economics (handles big accounts, includes parentAsin)
-    const economicsData = await getAsinPpcSalesFromEconomics(processedEconomicsMetrics);
-
-    // Extract products from seller data
-    const products = sellerData?.sellerAccount?.[0]?.products || [];
-    
-    // Create product name map
-    const productNameMap = new Map();
-    products.forEach(p => {
-        if (p.asin) {
-            productNameMap.set(p.asin, {
-                itemName: p.itemName,
-                sku: p.sku,
-                status: p.status,
-                price: p.price
-            });
-        }
-    });
-
-    // Get active products only
-    const activeProductSet = new Set();
-    products.forEach(p => {
-        if (p.status === 'Active') {
-            activeProductSet.add(p.asin);
-        }
-    });
-
-    // Step 1: Aggregate by child ASIN first (keeping parentAsin info)
-    const asinAggregates = new Map();
-    
-    Object.entries(economicsData.asinPpcSales).forEach(([asin, data]) => {
-        if (!activeProductSet.has(asin)) return;
-        
-        const parentAsin = data.parentAsin || asin;
-        const productInfo = productNameMap.get(asin) || {};
-        // `.total`, not the entry itself. aggregateSpendByAsin returns
-        // Map<asin, { total, SP, SD }>, but this line treated it as a number, so
-        // `sales - adsSpend` produced NaN and `adsSpend.toFixed(2)` threw TypeError for every
-        // account that actually has ads rows. The shape changed under these two consumers and
-        // they were never updated. `?? 0` (not `|| 0`) so a genuine 0 total is preserved.
-        const adsSpendEntry = adsSpendByAsin.get(asin);
-        const adsSpend = (typeof adsSpendEntry === 'number' ? adsSpendEntry : adsSpendEntry?.total) ?? 0;
-        const sales = data.sales || 0;
-        const totalFees = data.totalFees || 0;
-        const grossProfit = sales - adsSpend - totalFees;
-        const profitMargin = sales > 0 ? (grossProfit / sales) * 100 : 0;
-        
-        asinAggregates.set(asin, {
-            asin,
-            parentAsin,
-            itemName: productInfo.itemName || null,
-            sku: productInfo.sku || null,
-            quantity: data.unitsSold || 0,
-            sales: parseFloat(sales.toFixed(2)),
-            ads: parseFloat(adsSpend.toFixed(2)),
-            amzFee: parseFloat(totalFees.toFixed(2)),
-            totalFees: parseFloat(totalFees.toFixed(2)),
-            amazonFees: parseFloat((data.amazonFees || totalFees).toFixed(2)),
-            fbaFees: parseFloat((data.fbaFees || 0).toFixed(2)),
-            storageFees: parseFloat((data.storageFees || 0).toFixed(2)),
-            grossProfit: parseFloat(grossProfit.toFixed(2)),
-            profitMargin: parseFloat(profitMargin.toFixed(2)),
-            source: 'economicsMetrics',
-            adsSource: 'amazonAdsAPI'
-        });
-    });
-
-    // Step 2: Group by parentAsin
-    const parentGroups = new Map();
-    
-    asinAggregates.forEach((agg, asin) => {
-        const parentAsin = agg.parentAsin || asin;
-        
-        if (!parentGroups.has(parentAsin)) {
-            parentGroups.set(parentAsin, {
-                parentAsin,
-                children: [],
-                totalSales: 0,
-                totalQuantity: 0,
-                totalAds: 0,
-                totalFees: 0,
-                totalAmazonFees: 0,
-                totalFbaFees: 0,
-                totalStorageFees: 0,
-                totalGrossProfit: 0
-            });
-        }
-        
-        const parent = parentGroups.get(parentAsin);
-        parent.children.push(agg);
-        parent.totalSales += agg.sales;
-        parent.totalQuantity += agg.quantity;
-        parent.totalAds += agg.ads;
-        parent.totalFees += agg.totalFees;
-        parent.totalAmazonFees += agg.amazonFees;
-        parent.totalFbaFees += agg.fbaFees;
-        parent.totalStorageFees += agg.storageFees;
-        parent.totalGrossProfit += agg.grossProfit;
-    });
-
-    // Step 3: Convert to display format with parent-child structure
-    const allProfitabilityData = [];
-    let totalChildCount = 0;
-    
-    parentGroups.forEach((parent, parentAsin) => {
-        const productInfo = productNameMap.get(parentAsin) || {};
-        const actualChildren = parent.children.filter(child => child.asin !== parentAsin);
-        const actualChildCount = actualChildren.length;
-        totalChildCount += actualChildCount;
-        const isExpandable = actualChildCount > 0;
-        const grossProfit = parseFloat(parent.totalGrossProfit.toFixed(2));
-        const profitMargin = parent.totalSales > 0 ? (grossProfit / parent.totalSales) * 100 : 0;
-        
-        const childrenForDisplay = actualChildren
-            .map(child => ({
-                asin: child.asin,
-                itemName: child.itemName,
-                sku: child.sku,
-                quantity: child.quantity,
-                sales: child.sales,
-                ads: child.ads,
-                amzFee: child.amzFee,
-                totalFees: child.totalFees,
-                amazonFees: child.amazonFees,
-                fbaFees: child.fbaFees,
-                storageFees: child.storageFees,
-                grossProfit: child.grossProfit,
-                profitMargin: child.profitMargin,
-                source: child.source,
-                adsSource: child.adsSource
-            }))
-            .sort((a, b) => b.sales - a.sales);
-        
-        allProfitabilityData.push({
-            asin: parentAsin,
-            parentAsin: null,
-            itemName: productInfo.itemName || null,
-            sku: productInfo.sku || null,
-            quantity: parent.totalQuantity,
-            sales: parseFloat(parent.totalSales.toFixed(2)),
-            ads: parseFloat(parent.totalAds.toFixed(2)),
-            amzFee: parseFloat(parent.totalFees.toFixed(2)),
-            totalFees: parseFloat(parent.totalFees.toFixed(2)),
-            amazonFees: parseFloat(parent.totalAmazonFees.toFixed(2)),
-            fbaFees: parseFloat(parent.totalFbaFees.toFixed(2)),
-            storageFees: parseFloat(parent.totalStorageFees.toFixed(2)),
-            grossProfit: grossProfit,
-            profitMargin: parseFloat(profitMargin.toFixed(2)),
-            source: 'economicsMetrics',
-            adsSource: 'amazonAdsAPI',
-            isParent: true,
-            isExpandable: isExpandable,
-            children: childrenForDisplay,
-            childrenCount: actualChildCount
-        });
-    });
-
-    // Sort by sales descending (highest revenue first)
-    allProfitabilityData.sort((a, b) => b.sales - a.sales);
-
-    // Calculate error counts (for the full dataset)
-    const flatDataForErrors = [];
-    allProfitabilityData.forEach(parent => {
-        flatDataForErrors.push(parent);
-        if (parent.children && parent.children.length > 0) {
-            flatDataForErrors.push(...parent.children);
-        }
-    });
-    const profitabilityErrorsData = calculateProfitabilityErrors(flatDataForErrors, products, {
-        financeFresh: isEconomicsFresh(processedEconomicsMetrics) && Object.keys(economicsData.asinPpcSales || {}).length > 0
-    });
-
-    const totalParents = allProfitabilityData.length;
-    const totalProducts = totalParents + totalChildCount;
-
-    const computeTime = Date.now() - startTime;
-    logger.info(`[PERF] Full profitability table computed in ${computeTime}ms, ${totalParents} parents, ${totalChildCount} children`);
-
-    return {
-        allProfitabilityData,
-        totalParents,
-        totalChildCount,
-        totalProducts,
-        totalProfitabilityErrors: profitabilityErrorsData.totalErrors,
-        profitabilityErrorDetails: profitabilityErrorsData.errorDetails.slice(0, 10),
-        country,
-        computedAt: Date.now()
     };
 };
 

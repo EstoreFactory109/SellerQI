@@ -10,8 +10,9 @@ const mongoose = require('mongoose');
 const NumberOfProductReviews = require('../../models/seller-performance/NumberOfProductReviewsModel.js');
 const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 const ProductWiseSponsoredAdsItem = require('../../models/amazon-ads/ProductWiseSponsoredAdsItemModel.js');
-const ProfitabilityService = require('./ProfitabilityService.js');
+const { resolveAsinFinance } = require('../Finance/AsinFinanceWindowService.js');
 const logger = require('../../utils/Logger.js');
+const { marketplaceShowsBrandStory } = require('./Conversion.js');
 
 /**
  * Get basic product info for a single ASIN
@@ -57,7 +58,7 @@ async function getProductBasicInfo({ userId, region, country, asin }) {
             refunds: economicsData.refunds || 0,
             adsSpend: ppcSpendData.totalSpend || 0,
             hasAPlus: catalogData.hasAPlus || false,
-            hasBrandStory: catalogData.hasBrandStory || false,
+            hasBrandStory: catalogData.hasBrandStory === undefined ? false : catalogData.hasBrandStory,
             starRating: catalogData.starRating || 0,
             numRatings: catalogData.numRatings || 0,
             bulletPoints: catalogData.bulletPoints || [],
@@ -120,7 +121,10 @@ async function fetchCatalogData(userId, country, region, asin) {
             description: product.product_description || [],
             starRating: parseFloat(product.product_star_ratings) || 0,
             numRatings: parseInt(product.product_num_ratings?.replace(/,/g, '')) || 0,
-            hasBrandStory: product.has_brandstory || false,
+            // null (unknown) where no product in the marketplace shows a Brand
+            // Story: the scrape cannot tell "missing" from "no Brand Registry"
+            // there, the same gate that keeps missing_brand_story tasks out.
+            hasBrandStory: marketplaceShowsBrandStory(doc.Products) ? product.has_brandstory === true : null,
             hasAPlus: (product.product_description?.length > 0) || false
         };
     } catch (error) {
@@ -130,18 +134,22 @@ async function fetchCatalogData(userId, country, region, asin) {
 }
 
 /**
- * Fetch economics data (sales, profit, fees) using the same ASIN aggregation as the profitability table
- * (ProfitabilityService.getAsinPpcSalesFromEconomics — normal + big accounts + duplicate ASIN rows).
+ * Fetch economics data (sales, profit, fees) via the shared per-ASIN rule
+ * (AsinFinanceWindowService.resolveAsinFinance): a FRESH EconomicsMetrics doc is
+ * aggregated as before (normal + big accounts + duplicate ASIN rows); a stale or
+ * missing one is replaced by live DailySkuFinance, so product details stop showing
+ * April-2026 sales as current.
  */
 async function fetchEconomicsData(userId, country, region, asin) {
     try {
         const doc = await EconomicsMetrics.findLatest(userId, region, country);
 
-        if (!doc) {
-            return {};
-        }
-
-        const { asinPpcSales } = await ProfitabilityService.getAsinPpcSalesFromEconomics(doc);
+        const { asinPpcSales } = await resolveAsinFinance({
+            economicsMetrics: doc || null,
+            userId,
+            country,
+            region
+        });
         const normalized = (asin || '').trim().toUpperCase();
         let row = null;
         if (asinPpcSales && typeof asinPpcSales === 'object') {

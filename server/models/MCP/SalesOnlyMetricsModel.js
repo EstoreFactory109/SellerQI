@@ -296,4 +296,19 @@ salesOnlyMetricsSchema.statics.findByUserRegionCountry = async function (
   }));
 };
 
-module.exports = mongoose.model('SalesOnlyMetrics', salesOnlyMetricsSchema);
+/**
+ * True only when a SalesOnlyMetrics read returned real day rows. findLatest,
+ * getRecentDays and getSalesForDateRange never return null: with no rows they
+ * hand back a zero-filled doc, so `if (doc)` is always true and would show $0
+ * as if it were data. Every fallback to SalesOnlyMetrics checks this instead.
+ */
+function hasSalesOnlyRows(doc) {
+  return Array.isArray(doc?.datewiseSales) && doc.datewiseSales.length > 0;
+}
+
+salesOnlyMetricsSchema.statics.hasSalesOnlyRows = hasSalesOnlyRows;
+
+const SalesOnlyMetrics = mongoose.model('SalesOnlyMetrics', salesOnlyMetricsSchema);
+
+module.exports = SalesOnlyMetrics;
+module.exports.hasSalesOnlyRows = hasSalesOnlyRows;

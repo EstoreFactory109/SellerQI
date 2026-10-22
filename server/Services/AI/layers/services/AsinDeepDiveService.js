@@ -133,7 +133,8 @@ function summarizeBasicInfo(basic) {
         starRating: Number(d.starRating || 0),
         numRatings: Number(d.numRatings || 0),
         hasAPlus: Boolean(d.hasAPlus),
-        hasBrandStory: Boolean(d.hasBrandStory),
+        // null = unknown (gated marketplace, see marketplaceShowsBrandStory).
+        hasBrandStory: d.hasBrandStory === null ? null : Boolean(d.hasBrandStory),
     };
 }
 
@@ -274,7 +275,7 @@ function buildAsinContextText(facts) {
         lines.push('CATALOG:');
         lines.push(`- Star rating: ${basic.starRating} (${basic.numRatings} ratings)`);
         lines.push(`- Has A+ content: ${basic.hasAPlus ? 'yes' : 'no'}`);
-        lines.push(`- Has Brand Story: ${basic.hasBrandStory ? 'yes' : 'no'}`);
+        lines.push(`- Has Brand Story: ${basic.hasBrandStory === null ? 'unknown (no product in this marketplace shows one - likely no Brand Registry)' : basic.hasBrandStory ? 'yes' : 'no'}`);
     }
     if (issues) {
         lines.push('');

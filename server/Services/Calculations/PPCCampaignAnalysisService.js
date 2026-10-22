@@ -16,11 +16,15 @@ const NegativeKeywords = require('../../models/amazon-ads/NegetiveKeywords');
 const AdsGroup = require('../../models/amazon-ads/adsgroupModel');
 const Keyword = require('../../models/amazon-ads/keywordModel');
 const ProductWiseSponsoredAdsItem = require('../../models/amazon-ads/ProductWiseSponsoredAdsItemModel');
-const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel');
+const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel');
 const logger = require('../../utils/Logger');
 const { getDefaultReportDateRange } = require('../../utils/reportDateRange');
+const { getCurrencyCode } = require('../../utils/marketplaceCurrency');
 const { loadLatestSnapshotDoc, loadKeywordSnapshot } = require('../../utils/ppcSnapshotLoader');
+// One rule for the wasted-keyword / zero-sale-term / migration tabs and the tasks.
+const { settleCutoffDay, buildNegatedIndex } = require('./AdsSignals.js');
+const { KEYWORD_MIN_CLICKS, SEARCH_TERM_MIN_CLICKS } = require('./TaskRules.js');
 
 /**
  * Parse YYYY-MM-DD-like input as a local date range.
@@ -272,10 +276,17 @@ const aggregatePpcDaily = async (userIdStr, country, region, startDate, endDate)
 };
 
 /**
- * Aggregate total (organic + PPC) sales over the same window from the per-day
- * SalesOnlyMetrics collection. Used as the TACOS denominator.
+ * Aggregate total (organic + PPC) sales over the same window. Used as the TACOS
+ * denominator.
  *
- * NOTE: SalesOnlyMetrics stores `User` as an ObjectId, distinct from
+ * DailySkuFinance first: it is written daily for every live marketplace and is
+ * what the Profitability page and the dashboard's sales figure read, so TACoS
+ * divides by the same sales the seller sees. SalesOnlyMetrics exists for only a
+ * handful of marketplaces and is used only when DailySkuFinance has no rows for
+ * the window. `daysWithData: 0` means neither had any — callers that show "no
+ * data" (the dashboard) key off that rather than the 0 total.
+ *
+ * NOTE: both collections store `User` as an ObjectId, distinct from
  * PPCMetrics' string userId.
  */
 const aggregateTotalSales = async (userId, country, region, startDate, endDate) => {
@@ -286,18 +297,47 @@ const aggregateTotalSales = async (userId, country, region, startDate, endDate) 
                 ? new mongoose.Types.ObjectId(userId)
                 : userId;
     } catch (_) {
-        return { totalSales: 0, currencyCode: 'USD', daysWithData: 0 };
+        return { totalSales: 0, unitsSold: 0, currencyCode: 'USD', daysWithData: 0, source: null };
+    }
+
+    const match = {
+        User: userObjectId,
+        region,
+        country,
+        date: { $gte: startDate, $lte: endDate },
+    };
+
+    const financeRows = await DailySkuFinance.aggregate([
+        { $match: match },
+        {
+            $group: {
+                _id: '$date',
+                sales: { $sum: { $ifNull: ['$productSales', 0] } },
+                units: { $sum: { $ifNull: ['$units', 0] } },
+            },
+        },
+        {
+            $group: {
+                _id: null,
+                totalSales: { $sum: '$sales' },
+                unitsSold: { $sum: '$units' },
+                daysWithData: { $sum: 1 },
+            },
+        },
+    ]);
+    if (financeRows && financeRows[0] && financeRows[0].daysWithData > 0) {
+        const r = financeRows[0];
+        return {
+            totalSales: Math.round((Number(r.totalSales) || 0) * 100) / 100,
+            unitsSold: Number(r.unitsSold) || 0,
+            currencyCode: getCurrencyCode(country),
+            daysWithData: r.daysWithData,
+            source: 'DailySkuFinance',
+        };
     }
 
     const rows = await SalesOnlyMetrics.aggregate([
-        {
-            $match: {
-                User: userObjectId,
-                region,
-                country,
-                date: { $gte: startDate, $lte: endDate },
-            },
-        },
+        { $match: match },
         {
             $group: {
                 _id: null,
@@ -309,8 +349,8 @@ const aggregateTotalSales = async (userId, country, region, startDate, endDate) 
         },
     ]);
     return rows && rows[0]
-        ? rows[0]
-        : { totalSales: 0, unitsSold: 0, currencyCode: 'USD', daysWithData: 0 };
+        ? { ...rows[0], source: 'SalesOnlyMetrics' }
+        : { totalSales: 0, unitsSold: 0, currencyCode: 'USD', daysWithData: 0, source: null };
 };
 
 /**
@@ -589,11 +629,20 @@ const getWastedSpendKeywords = async (userId, country, region, page = 1, limit =
             return { data: [], pagination: createPaginationMeta(page, limit, 0) };
         }
 
+        // Same rule as the wasted-spend task (AdsSignals.isWastedKeyword): the keyword's
+        // LATEST status is ENABLED, it has KEYWORD_MIN_CLICKS clicks, some of its spend
+        // is older than the attribution window, and it has no sales. Filtering each
+        // daily row by status (as before) summed only the pre-pause rows of a keyword
+        // paused mid-window, and judged spend whose sales could still be credited.
+        // Legacy single docs (no metricDate) carry undated rows: nothing in them can be
+        // called settled, exactly as the task treats them.
+        const settleCutoff = match.metricDate ? settleCutoffDay(country) : null;
+
         const skip = (page - 1) * limit;
         const aggregationResult = await adsKeywordsPerformanceModel.aggregate([
             { $match: match },
             { $unwind: '$keywordsData' },
-            { $match: { 'keywordsData.adKeywordStatus': 'ENABLED' } },
+            { $sort: { 'keywordsData.date': 1 } },
             {
                 $group: {
                     _id: {
@@ -610,12 +659,28 @@ const getWastedSpendKeywords = async (userId, country, region, page = 1, limit =
                     matchType: { $first: '$keywordsData.matchType' },
                     status: { $last: '$keywordsData.adKeywordStatus' },
                     spend: { $sum: { $ifNull: ['$keywordsData.cost', 0] } },
+                    settledSpend: {
+                        $sum: {
+                            $cond: [
+                                { $and: [{ $ne: [settleCutoff, null] }, { $lt: ['$keywordsData.date', settleCutoff] }] },
+                                { $ifNull: ['$keywordsData.cost', 0] },
+                                0,
+                            ],
+                        },
+                    },
                     sales: { $sum: { $ifNull: ['$keywordsData.attributedSales30d', 0] } },
                     impressions: { $sum: { $ifNull: ['$keywordsData.impressions', 0] } },
                     clicks: { $sum: { $ifNull: ['$keywordsData.clicks', 0] } },
                 },
             },
-            { $match: { spend: { $gt: 0 }, sales: { $lt: 0.01 } } },
+            {
+                $match: {
+                    status: 'ENABLED',
+                    clicks: { $gte: KEYWORD_MIN_CLICKS },
+                    settledSpend: { $gt: 0 },
+                    sales: { $lt: 0.01 },
+                },
+            },
             {
                 $addFields: {
                     ctr: {
@@ -903,6 +968,12 @@ const getSearchTermsZeroSales = async (userId, country, region, page = 1, limit 
             return { data: [], pagination: createPaginationMeta(page, limit, 0) };
         }
 
+        // Terms the seller already added as a negative are fixed, even though their past
+        // clicks stay in the window. Same rule as the zero-sale task (AdsSignals.isNegated):
+        // ad-group-level or campaign-level negative, same campaign, case-insensitive.
+        const negativesDoc = await loadLatestSnapshotDoc(NegativeKeywords, userIdStr, country, region);
+        const negatedKeys = [...buildNegatedIndex(negativesDoc?.negativeKeywordsData || [])];
+
         const skip = (page - 1) * limit;
         const aggregationResult = await SearchTerms.aggregate([
             { $match: match },
@@ -926,7 +997,25 @@ const getSearchTermsZeroSales = async (userId, country, region, page = 1, limit 
                     impressions: { $sum: { $ifNull: ['$searchTermData.impressions', 0] } },
                 },
             },
-            { $match: { clicks: { $gte: 10 }, sales: { $lt: 0.01 } } },
+            { $match: { clicks: { $gte: SEARCH_TERM_MIN_CLICKS }, sales: { $lt: 0.01 } } },
+            {
+                $addFields: {
+                    _negAdGroupKey: {
+                        $concat: [
+                            { $toString: { $ifNull: ['$campaignId', ''] } }, '|',
+                            { $toString: { $ifNull: ['$adGroupId', ''] } }, '|',
+                            { $toLower: { $trim: { input: { $ifNull: ['$searchTerm', ''] } } } },
+                        ],
+                    },
+                    _negCampaignKey: {
+                        $concat: [
+                            { $toString: { $ifNull: ['$campaignId', ''] } }, '||',
+                            { $toLower: { $trim: { input: { $ifNull: ['$searchTerm', ''] } } } },
+                        ],
+                    },
+                },
+            },
+            { $match: { _negAdGroupKey: { $nin: negatedKeys }, _negCampaignKey: { $nin: negatedKeys } } },
             {
                 $addFields: {
                     ctr: {
@@ -1017,6 +1106,9 @@ const getAutoCampaignInsights = async (userId, country, region, page = 1, limit 
         const manualKeywordsLower = Array.from(new Set(
             keywords
                 .filter((k) => manualCampaignIds.has(k.campaignId))
+                // EXACT only, matching the task: the advice is to add the term "as an
+                // exact match keyword", so broad/phrase does not count as migrated.
+                .filter((k) => !k.matchType || String(k.matchType).toUpperCase() === 'EXACT')
                 .map((k) => (k.keywordText || '').toLowerCase())
                 .filter(Boolean)
         ));

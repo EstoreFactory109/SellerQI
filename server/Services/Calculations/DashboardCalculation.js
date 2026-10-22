@@ -15,19 +15,30 @@ const { createDefaultDashboardData, mergeWithDefaults } = require('./DefaultData
 const CreateTaskService = require('./CreateTasksService.js');
 const logger = require('../../utils/Logger.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
-const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const mongoose = require('mongoose');
 const AsinWiseSalesRun = require('../../models/finance/AsinWiseSalesRunModel.js');
 const AsinWiseSalesItem = require('../../models/finance/AsinWiseSalesItemModel.js');
 const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
 const DataFetchTracking = require('../../models/system/DataFetchTrackingModel.js');
-const { computeProfitabilityAmount, classifyProfitabilityRow, isEconomicsFresh, ECONOMICS_MAX_AGE_DAYS, computeSponsoredAdsAmount, computeBuyBoxBenchmark, computeBuyBoxLostRevenueAmount, computeBuyBoxProfitImpact } = require('./RecoverableAmountUtils.js');
+const { resolveAsinFinance } = require('../Finance/AsinFinanceWindowService.js');
+const { isStoredEconomicsDoc } = require('../Finance/LiveEconomicsService.js');
+const { sumEconomicsSales } = require('../Finance/EconomicsFinanceFormat.js');
+const { computeProfitabilityAmount, classifyProfitabilityRow, computeSponsoredAdsAmount, computeBuyBoxBenchmark, computeBuyBoxLostRevenueAmount, computeBuyBoxProfitImpact } = require('./RecoverableAmountUtils.js');
 const {
     TARGET_ACOS_PERCENT,
     SEARCH_TERM_MIN_CLICKS,
     AUTO_MIGRATION_MIN_SALES
 } = require('./TaskRules.js');
+const {
+    rowDay,
+    newestRowDay,
+    settleCutoffDay,
+    isAdsDataStale,
+    isWastedKeyword,
+    buildNegatedIndex,
+    isNegated
+} = require('./AdsSignals.js');
 
 // Chunk size for yielding to event loop during large data processing
 const YIELD_CHUNK_SIZE = 500;
@@ -57,30 +68,17 @@ async function yieldToEventLoop() {
  */
 const getPpcSalesFromEconomics = async (economicsMetrics) => {
     if (!economicsMetrics) {
-        return { totalPpcSales: 0, asinPpcSales: {}, totalSales: 0, totalGrossProfit: 0 };
+        // No fresh doc and no live DailySkuFinance rows: "no data", not $0.
+        return { totalPpcSales: 0, asinPpcSales: {}, totalSales: null, totalGrossProfit: null };
     }
     
     // Get total PPC spent from economics (this is used for ACOS/TACOS)
     const totalPpcSpent = economicsMetrics.ppcSpent?.amount || 0;
     
     // CRITICAL: Calculate totalSales by summing datewiseSales for consistency
-    // This ensures page load shows same value as custom filter for same dates
-    let totalSales = 0;
-    let totalGrossProfit = 0;
-    
-    if (Array.isArray(economicsMetrics.datewiseSales) && economicsMetrics.datewiseSales.length > 0) {
-        economicsMetrics.datewiseSales.forEach(item => {
-            totalSales += item.sales?.amount || 0;
-            totalGrossProfit += item.grossProfit?.amount || 0;
-        });
-        // Round to 2 decimal places for consistency
-        totalSales = parseFloat(totalSales.toFixed(2));
-        totalGrossProfit = parseFloat(totalGrossProfit.toFixed(2));
-    } else {
-        // Fallback to stored value if datewiseSales not available
-        totalSales = economicsMetrics.totalSales?.amount || 0;
-        totalGrossProfit = economicsMetrics.grossProfit?.amount || 0;
-    }
+    // This ensures page load shows same value as custom filter for same dates.
+    // Shared with the lightweight dashboard endpoints so both show one number.
+    const { totalSales, totalGrossProfit } = sumEconomicsSales(economicsMetrics);
     
     // Get ASIN-wise PPC data
     // For big accounts, aggregate from separate collection to avoid loading full array into memory
@@ -102,7 +100,9 @@ const getPpcSalesFromEconomics = async (economicsMetrics) => {
     const hasEmptyAsinData = !economicsMetrics.asinWiseSales || economicsMetrics.asinWiseSales.length === 0;
     const isLegacyBigAccount = hasEmptyAsinData && (economicsMetrics.totalSales?.amount > 5000);
     
-    if ((isBigAccount || isLegacyBigAccount) && hasEmptyAsinData) {
+    // Only a stored EconomicsMetrics doc has big-account rows keyed by its _id; a doc
+    // built from DailySkuFinance carries its per-ASIN rows inline.
+    if ((isBigAccount || isLegacyBigAccount) && hasEmptyAsinData && isStoredEconomicsDoc(economicsMetrics)) {
         try {
             // OPTIMIZED: Use MongoDB aggregation pipeline to aggregate ASIN data directly in the database
             // This prevents loading all date documents (potentially 163k+ ASIN records) into Node.js memory
@@ -585,11 +585,28 @@ const calculateSponsoredAdsErrors = (
     adsKeywordsPerformanceData = [],
     searchTerms = [],
     campaignData = [],
-    keywords = []
+    keywords = [],
+    { negativeKeywords = [], country = null, now = new Date() } = {}
 ) => {
     let totalErrors = 0;
     let totalAmount = 0;
     const errorDetails = [];
+
+    // Keyword and search-term rows are judged only when they describe the account
+    // now (see AdsSignals.isAdsDataStale). A stale window produces no keyword or
+    // search-term issues rather than re-issuing the last stored 30 days as current.
+    const keywordNewestDay = newestRowDay(adsKeywordsPerformanceData);
+    const searchTermNewestDay = newestRowDay(searchTerms);
+    const keywordsStale = Array.isArray(adsKeywordsPerformanceData) && adsKeywordsPerformanceData.length > 0
+        && isAdsDataStale(keywordNewestDay, country, now);
+    const searchTermsStale = Array.isArray(searchTerms) && searchTerms.length > 0
+        && isAdsDataStale(searchTermNewestDay, country, now);
+    if (keywordsStale || searchTermsStale) {
+        logger.warn('Ads keyword/search-term data is stale; not judging it', {
+            country, keywordNewestDay, searchTermNewestDay, keywordsStale, searchTermsStale
+        });
+    }
+    const keywordSettleCutoff = settleCutoffDay(country, now);
 
     // 1. High ACOS Campaigns (ACOS > 40% and sales > 0)
     if (Array.isArray(campaignWiseTotalSalesAndCost)) {
@@ -625,8 +642,17 @@ const calculateSponsoredAdsErrors = (
         adsKeywordsPerformanceData.forEach((keyword) => {
             const uniqueKey = `${keyword.keyword || ''}|${keyword.campaignId || ''}|${keyword.adGroupId || keyword.adGroupName || ''}`;
             
+            const day = rowDay(keyword);
+            const cost = parseFloat(keyword.cost) || 0;
+            const settled = keywordSettleCutoff && day && day < keywordSettleCutoff ? cost : 0;
             if (aggregatedKeywordsMap.has(uniqueKey)) {
                 const existing = aggregatedKeywordsMap.get(uniqueKey);
+                existing.settledSpend += settled;
+                // Latest status wins: a keyword paused today is not wasting money now.
+                if (keyword.adKeywordStatus && (!existing.statusDay || (day && day >= existing.statusDay))) {
+                    existing.status = keyword.adKeywordStatus;
+                    existing.statusDay = day;
+                }
                 existing.cost += parseFloat(keyword.cost) || 0;
                 existing.attributedSales30d += parseFloat(keyword.attributedSales30d) || 0;
                 // clicks/impressions are aggregated too, so the task text can state
@@ -641,7 +667,10 @@ const calculateSponsoredAdsErrors = (
                     campaignId: keyword.campaignId,
                     adGroupName: keyword.adGroupName,
                     adGroupId: keyword.adGroupId,
-                    cost: parseFloat(keyword.cost) || 0,
+                    cost,
+                    settledSpend: settled,
+                    status: keyword.adKeywordStatus || null,
+                    statusDay: day,
                     attributedSales30d: parseFloat(keyword.attributedSales30d) || 0,
                     clicks: parseInt(keyword.clicks, 10) || 0,
                     impressions: parseInt(keyword.impressions, 10) || 0
@@ -650,11 +679,20 @@ const calculateSponsoredAdsErrors = (
         });
     }
     
-    const aggregatedKeywords = Array.from(aggregatedKeywordsMap.values());
+    const aggregatedKeywords = keywordsStale ? [] : Array.from(aggregatedKeywordsMap.values());
+    // Keywords flagged as wasted, so a zero-sale search term under one of them does not
+    // count the same spend twice in recoverable $.
+    const wastedKeywordKeys = new Set();
     
     aggregatedKeywords.forEach((keyword) => {
-        // Count as error if cost > 0 and sales < 0.01 (wasted spend)
-        if (keyword.cost > 0 && keyword.attributedSales30d < 0.01) {
+        // Shared with the PPC page's wasted-spend tab (AdsSignals.isWastedKeyword).
+        if (isWastedKeyword({
+            clicks: keyword.clicks,
+            sales: keyword.attributedSales30d,
+            settledSpend: keyword.settledSpend,
+            status: keyword.status
+        })) {
+            wastedKeywordKeys.add(`${String(keyword.keyword || '').toLowerCase()}|${keyword.campaignId || ''}|${keyword.adGroupId || keyword.adGroupName || ''}`);
             totalErrors++;
             const amount = computeSponsoredAdsAmount({ errorType: 'wasted_spend_keyword', spend: keyword.cost, sales: keyword.attributedSales30d });
             totalAmount += amount;
@@ -704,13 +742,23 @@ const calculateSponsoredAdsErrors = (
         });
     }
     
-    const aggregatedSearchTerms = Array.from(aggregatedSearchTermsMap.values());
+    const aggregatedSearchTerms = searchTermsStale ? [] : Array.from(aggregatedSearchTermsMap.values());
+    // A term the seller already added as a negative is fixed, even though its past
+    // clicks stay in the 30-day window. Negatives were loaded but never used.
+    const negatedIndex = buildNegatedIndex(negativeKeywords);
     
     aggregatedSearchTerms.forEach((term) => {
         // Count as error if clicks >= 10 and sales < 0.01
-        if (term.clicks >= SEARCH_TERM_MIN_CLICKS && term.sales < 0.01) {
+        if (term.clicks >= SEARCH_TERM_MIN_CLICKS && term.sales < 0.01 && !isNegated(negatedIndex, term)) {
             totalErrors++;
-            const amount = computeSponsoredAdsAmount({ errorType: 'search_term_zero_sales', spend: term.spend, sales: term.sales });
+            // Its spend is already inside its keyword's amount when that keyword is
+            // itself flagged as wasted: count it once.
+            const underWastedKeyword = wastedKeywordKeys.has(
+                `${String(term.keyword || '').toLowerCase()}|${term.campaignId || ''}|${term.adGroupId || term.adGroupName || ''}`
+            );
+            const amount = underWastedKeyword
+                ? 0
+                : computeSponsoredAdsAmount({ errorType: 'search_term_zero_sales', spend: term.spend, sales: term.sales });
             totalAmount += amount;
             errorDetails.push({
                 searchTerm: term.searchTerm,
@@ -741,10 +789,12 @@ const calculateSponsoredAdsErrors = (
         : [];
     const manualCampaignIds = manualCampaigns.map(campaign => campaign.campaignId);
     
-    // Get keywords from manual campaigns
+    // EXACT keywords in manual campaigns. The task advises adding the term "as an
+    // exact match keyword", so a broad/phrase keyword does not count as migrated.
     const manualKeywords = Array.isArray(keywords)
         ? keywords
             .filter(keyword => manualCampaignIds.includes(keyword.campaignId))
+            .filter(keyword => !keyword.matchType || String(keyword.matchType).toUpperCase() === 'EXACT')
             .map(keyword => keyword.keywordText?.toLowerCase() || '')
         : [];
     
@@ -809,13 +859,19 @@ const buildTaskCoverage = (data = {}, {
     profitabilityOk = false,
     financeFresh = false,
     campaignRows = [],
-    sponsoredAdsOk = false
+    sponsoredAdsOk = false,
+    country = null,
+    now = new Date()
 } = {}) => {
     const rankingRows = data.RankingsData?.RankingResultArray;
     const products = activeProductSet.size > 0 && nonEmpty(rankingRows);
     const conv = data.ConversionData || {};
-    const keywords = nonEmpty(data.adsKeywordsPerformanceData);
-    const searchTerms = nonEmpty(data.searchTerms);
+    // Stale ads rows produce no keyword/search-term verdicts (calculateSponsoredAdsErrors),
+    // so they must not count as arrived either, or reconcile would resolve real tasks.
+    const keywords = nonEmpty(data.adsKeywordsPerformanceData)
+        && !isAdsDataStale(newestRowDay(data.adsKeywordsPerformanceData), country, now);
+    const searchTerms = nonEmpty(data.searchTerms)
+        && !isAdsDataStale(newestRowDay(data.searchTerms), country, now);
     const campaigns = nonEmpty(campaignRows);
     const accountHealth = data.AccountData?.accountHealth;
 
@@ -827,7 +883,12 @@ const buildTaskCoverage = (data = {}, {
         'ranking.backend': products && nonEmpty(data.RankingsData?.BackendKeywordResultArray),
         conversion: products && Object.keys(conv).length > 0,
         'conversion.aplus': products && nonEmpty(conv.aPlusResult),
-        'conversion.brandStory': products && nonEmpty(conv.brandStoryResult),
+        // "The scrape arrived", not "results exist": checkBrandStory returns nothing
+        // for a marketplace where no product shows a Brand Story (36 of 76 in
+        // production), and those marketplaces' open tasks must resolve, not linger.
+        // Older messages without the flag fall back to the result list.
+        'conversion.brandStory': products && (conv.brandStoryScrapePresent === true
+            || (conv.brandStoryScrapePresent === undefined && nonEmpty(conv.brandStoryResult))),
         'conversion.images': products && nonEmpty(conv.imageResult),
         'conversion.video': products && nonEmpty(conv.videoResult),
         'conversion.rating': products && nonEmpty(conv.productStarRatingResult),
@@ -920,48 +981,31 @@ const analyseData = async (data, userId = null, options = {}) => {
     ]);
     logger.info(`[PERF] getPpcSalesFromEconomics + getTop4ProductsByIssuesOptimized completed in ${Date.now() - stepStart}ms`);
 
-    // Per-ASIN sales/fees from the LIVE finance collection when EconomicsMetrics has
-    // none. EconomicsMetrics stopped being written in April 2026, so for almost every
-    // account the map above is empty — which made profitability read `sales: 0` for
-    // every product and report profitable products as "losing money on every sale,
-    // Revenue: $0.00". DailySkuFinance is what the Profitability page already reads.
-    //
+    // Per-ASIN sales/fees: resolved by the shared rule in
+    // AsinFinanceWindowService.resolveAsinFinance — the same rule every other
+    // per-ASIN reader (product details, Issues-by-Product, Optimization, QMate,
+    // legacy profitability) now uses, so they cannot disagree with the dashboard.
+    //   - a STALE EconomicsMetrics map (the collection stopped being written in
+    //     April 2026, findLatest still returns the last doc) is dropped, loudly;
+    //   - an empty map falls back to live DailySkuFinance for this window.
     // Only the per-ASIN map is substituted. Account-level totals (totalSales,
     // totalPpcSpent) keep their existing sources so the dashboard headline figures
-    // are not moved by this.
-    // A stale EconomicsMetrics doc is worse than none: its per-ASIN map would be used
-    // as if current. Drop it so the live fallback below takes over.
-    const economicsStale = Object.keys(economicsData.asinPpcSales || {}).length > 0
-        && !isEconomicsFresh(data.EconomicsMetrics);
-    if (economicsStale) {
-        logger.warn('Ignoring stale EconomicsMetrics per-ASIN finance', {
-            userId, country, region,
-            createdAt: data.EconomicsMetrics?.createdAt,
-            maxAgeDays: ECONOMICS_MAX_AGE_DAYS,
-            staleAsins: Object.keys(economicsData.asinPpcSales).length
+    // are not moved by this. The map built above is passed in so it is not rebuilt.
+    const resolvedAsinFinance = await resolveAsinFinance({
+        economicsMetrics: data.EconomicsMetrics,
+        economicsAsinPpcSales: economicsData.asinPpcSales || {},
+        // No userId -> no live fallback (unchanged: the old inline block required it too).
+        userId,
+        country,
+        region,
+        startDate: data.startDate,
+        endDate: data.endDate
+    });
+    economicsData.asinPpcSales = resolvedAsinFinance.asinPpcSales;
+    if (resolvedAsinFinance.source === 'dailySkuFinance') {
+        logger.info('Per-ASIN finance sourced from DailySkuFinance (EconomicsMetrics empty or stale)', {
+            userId, country, region, asins: Object.keys(economicsData.asinPpcSales).length
         });
-        economicsData.asinPpcSales = {};
-    }
-    if (userId && Object.keys(economicsData.asinPpcSales || {}).length === 0) {
-        try {
-            const { getAsinFinanceForWindow } = require('../Finance/AsinFinanceWindowService.js');
-            const liveAsinFinance = await getAsinFinanceForWindow(
-                userId, country, region, data.startDate, data.endDate
-            );
-            const liveCount = Object.keys(liveAsinFinance).length;
-            if (liveCount > 0) {
-                economicsData.asinPpcSales = liveAsinFinance;
-                logger.info('Per-ASIN finance sourced from DailySkuFinance (EconomicsMetrics empty)', {
-                    userId, country, region, asins: liveCount
-                });
-            }
-        } catch (financeError) {
-            // Leave the empty map rather than failing the dashboard; downstream
-            // already tolerates it (it is today's behaviour for every account).
-            logger.error('Could not source per-ASIN finance from DailySkuFinance', {
-                error: financeError.message, userId, country, region
-            });
-        }
     }
     logger.info("EconomicsMetrics data extracted", {
         totalPpcSpent: economicsData.totalPpcSpent,
@@ -1595,8 +1639,22 @@ const analyseData = async (data, userId = null, options = {}) => {
         }
     });
 
-    // Backend keyword errors (only for active products) with safe data access
-    const backendKeywordResultArray = data.RankingsData?.BackendKeywordResultArray || [];
+    // Backend keyword errors (only for active products) with safe data access.
+    // Listing items are per SKU, so an ASIN sold under several SKUs arrives as
+    // several rows; each was counted, while tasks are one per ASIN and error type.
+    // Keep one row per ASIN, preferring one that has an Error, so the header
+    // count equals the tasks created.
+    const backendKeywordRowsByAsin = new Map();
+    const backendRowErrors = (row) => row.data.NumberOfErrors || 0;
+    (Array.isArray(data.RankingsData?.BackendKeywordResultArray) ? data.RankingsData.BackendKeywordResultArray : [])
+        .forEach((row) => {
+            if (!row || !row.asin || !row.data) return;
+            const kept = backendKeywordRowsByAsin.get(row.asin);
+            if (!kept || backendRowErrors(row) > backendRowErrors(kept)) {
+                backendKeywordRowsByAsin.set(row.asin, row);
+            }
+        });
+    const backendKeywordResultArray = [...backendKeywordRowsByAsin.values()];
     if (Array.isArray(backendKeywordResultArray)) {
         backendKeywordResultArray.forEach((elm) => {
             if (!elm || !elm.asin || !elm.data) return;
@@ -1689,7 +1747,10 @@ const analyseData = async (data, userId = null, options = {}) => {
                 if (elm.data.charLim?.status === "Error") {
                     rankingErrors.data.charLim = elm.data.charLim;
                 }
-                if (elm.data.dublicateWords === "Error") {
+                // BackendKeyWordOrAttributesStatus returns a check object; comparing
+                // it to the string "Error" never matched, so no duplicate-words task
+                // was ever created although NumberOfErrors counted it.
+                if (elm.data.dublicateWords?.status === "Error") {
                     rankingErrors.data.dublicateWords = elm.data.dublicateWords;
                 }
             }
@@ -1742,21 +1803,11 @@ const analyseData = async (data, userId = null, options = {}) => {
         fourth = getTopErrorProduct(UniqueProductWisError, 3);
     }
 
-    // Add backend keyword errors to top 4 if applicable (only for active products) with safe data access
-    const uniqueBackendKeywordData = Array.isArray(backendKeywordResultArray) ? 
-        Array.from(
-            new Map(backendKeywordResultArray.filter((obj) => obj && obj.asin && activeProductSet.has(obj.asin)).map(obj => [obj.asin, obj])).values()
-        ) : [];
-
-    uniqueBackendKeywordData.forEach((elm) => {
-        if (elm.data?.NumberOfErrors === 1) {
-            [first, second, third, fourth].forEach(slot => {
-                if (slot && slot.asin === elm.asin) {
-                    slot.errors++;
-                }
-            });
-        }
-    });
+    // Backend keyword errors are already in both top-4 sources: productWiseError
+    // .errors (added above) and the Seller issueCount the optimized query reads,
+    // which ProductIssuesService copies from productWiseError. A block here used to
+    // add 1 more per backend-keyword error, so a top-4 product showed one error
+    // more than its own count and its task list.
 
     // Calculate profitability and sponsored ads errors (already filtered for active products) with error handling
     let profitabilityErrorsData = { totalErrors: 0, errorDetails: [] };
@@ -1766,10 +1817,11 @@ const analyseData = async (data, userId = null, options = {}) => {
     let profitabilityErrorsOk = false;
     let sponsoredAdsErrorsOk = false;
     // Fresh = the per-ASIN map is non-empty after a stale EconomicsMetrics doc was
-    // dropped, i.e. it is live DailySkuFinance or a recent doc. Without it no
-    // profitability verdict is trustworthy, so none is made — and task reconcile must
-    // not read "no verdicts" as "every profitability problem was fixed".
-    const financeFresh = Object.keys(economicsData.asinPpcSales || {}).length > 0;
+    // dropped, i.e. it is live DailySkuFinance or a recent doc (resolveAsinFinance's
+    // financeFresh, by definition). Without it no profitability verdict is
+    // trustworthy, so none is made — and task reconcile must not read "no
+    // verdicts" as "every profitability problem was fixed".
+    const financeFresh = resolvedAsinFinance.financeFresh;
     
     try {
         profitabilityErrorsData = calculateProfitabilityErrors(profitibilityData, TotalProducts, { financeFresh });
@@ -1789,7 +1841,8 @@ const analyseData = async (data, userId = null, options = {}) => {
             data.adsKeywordsPerformanceData || [],
             data.searchTerms || [],
             data.campaignData || [],
-            data.keywords || []
+            data.keywords || [],
+            { negativeKeywords: data.negetiveKeywords || [], country }
         );
         sponsoredAdsErrorsOk = true;
     } catch (error) {
@@ -1817,8 +1870,8 @@ const analyseData = async (data, userId = null, options = {}) => {
         amazonReadyProducts,
         TotalProduct: TotalProducts,
         ActiveProducts: activeProducts,
-        // Use EconomicsMetrics total sales if available, fallback to legacy
-        TotalWeeklySale: economicsData.totalSales || data.FinanceData?.Total_Sales || 0,
+        // Live economics (fresh EconomicsMetrics or DailySkuFinance); null = no data.
+        TotalWeeklySale: economicsData.totalSales ?? data.FinanceData?.Total_Sales ?? null,
         TotalSales: data.TotalSales || [],
         reimbustment: data.Reimburstment || { totalReimbursement: 0 },
         productWiseError: productWiseError,
@@ -1926,7 +1979,8 @@ const analyseData = async (data, userId = null, options = {}) => {
                     // The rows high-ACOS was actually judged on (the PPC page's campaign
                     // totals when available), so coverage describes the real input.
                     campaignRows: Array.isArray(data.campaignSpendSales) ? data.campaignSpendSales : campaignWiseTotalSalesAndCost,
-                    sponsoredAdsOk: sponsoredAdsErrorsOk
+                    sponsoredAdsOk: sponsoredAdsErrorsOk,
+                    country
                 })
             }, country, region);
             // Only a full rebuild changes what the derived AI views summarise; stays

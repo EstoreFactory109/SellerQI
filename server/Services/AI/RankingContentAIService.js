@@ -10,51 +10,19 @@ const {
   TITLE_MAX_LENGTH,
   TITLE_PROHIBITED_CHARACTERS,
   TITLE_CONTEXTUAL_CHARACTERS,
-  TITLE_RESTRICTED_PHRASES
+  TITLE_RESTRICTED_PHRASES,
+  PROMOTIONAL_TERMS,
+  PROHIBITED_CLAIMS
 } = require('../Calculations/Rankings.js');
 const NumberOfProductReviews = require('../../models/seller-performance/NumberOfProductReviewsModel.js');
 const { getListingItemsData } = require('../products/ListingItemsService.js');
 
-// ─── Exact copy from server/Services/Calculations/Rankings.js (do not summarize) ───
-// Special characters: regex /[!$?_{}^¬¦~#<>*]/g
-const RANKING_SPECIAL_CHARS = '! $ ? _ { } ^ ¬ ¦ ~ # < > *';
-
-// Restricted words list: exact order and spelling from containsRestrictedWords() in Rankings.js
-const RANKING_RESTRICTED_WORDS = [
-  'cure', 'treat', 'diagnose', 'prevent', 'mitigate', 'covid-19', 'coronavirus', 'pandemic',
-  'cancer', 'diabetes', 'hiv', 'arthritis', 'asthma', "alzheimer's", 'fda-approved', 'clinically proven',
-  'doctor recommended', 'anti-bacterial', 'anti-fungal', 'antimicrobial', 'antiviral', 'infection',
-  'virus', 'germs', 'bacteria', 'detoxify', 'detox', 'cleanse', 'sanitizes', 'disinfects', 'sterilizes',
-  'kills germs', 'cbd', 'cannabinoid', 'thc', 'hemp oil', 'marijuana', 'full spectrum', 'delta-8',
-  'delta-9', 'cocaine', 'opioid', 'methamphetamine', 'bong', 'one hitter', 'dab rig', 'weed',
-  'picamilon', 'phenibut', 'dmt', 'ayahuasca', 'clenbuterol', 'ephedrine', 'minoxidil',
-  'guarantee', 'guaranteed', '100% guaranteed', "best seller", "amazon's choice", "amazon's favorite",
-  'works better than', 'fastest shipping', 'instant fix', 'magic solution', 'free shipping',
-  '100% quality guaranteed', 'sale', 'discount', 'promo', 'deal', 'today only', 'limited time',
-  'last chance', 'buy with confidence', 'unlike other brands', 'certified', 'tested', 'approved',
-  'validated', 'epa registered', 'non-toxic', 'hypoallergenic', 'kills 99.9% of germs', 'bpa-free',
-  'lead-free', 'eco-friendly', 'biodegradable', 'fda-registered facility', 'kills', 'eliminates',
-  'destroys', 'repels', 'repellent', 'pesticide', 'insecticide', 'fungicide', 'mold', 'mildew remover',
-  'germ-free', 'brightening', 'whitening', 'lightening', 'anti-aging', 'wrinkle-free', 'removes wrinkles',
-  'permanent results', 'antimicrobial', 'antibacterial', 'antifungal', 'sanitize', 'disinfect',
-  'sterilizes', 'heal', 'antiseptic', 'germ', 'fungal', 'insecticide', 'pesticides', 'repel',
-  'repelling', 'viruses', 'detoxification', 'treatment', 'fungus', 'contaminants', 'compostable',
-  'decomposable', 'proven', 'recommended', 'viruses', 'fungicides', 'toxin', 'toxins', 'viral',
-  'remedy', 'remedies', 'diseases', 'fda approved', 'covid', 'toxic', 'mildew', 'mould', 'spores',
-  'n95', 'kn95', 'cystic fibrosis', 'sanitize', 'weight loss', 'chlamydia', 'hepatitis', 'hiv',
-  'aids', 'mononucleosis', 'mono', 'pelvic inflammatory', 'scabies', 'trichomoniasis', 'liver',
-  'multiple sclerosis', 'kidney', "alzheimer's", 'dementia', 'stroke', "parkinson's", 'parkinson',
-  'flu', 'influenza', 'meningitis', 'glaucoma', 'cataract', 'adhd', 'concussion', 'tumor',
-  'depression', 'lupus', 'muscular dystrophy', 'als', 'anxiety', 'stress', 'clenbuterol',
-  'ephedrine', 'kratom', 'psilocybin', 'syphilis', 'gonorrhea', 'gout', "crohn's", 'celiac',
-  'epilepsy', 'seizures', 'seizure', 'obesity', 'autism',
-  'covid19', 'covid 19', 'delta8', 'delta 8', 'delta9', 'delta 9',
-  'nontoxic', 'non toxic', 'bpafree', 'bpa free', 'leadfree', 'lead free',
-  'ecofriendly', 'eco friendly', 'germfree', 'germ free', 'antiaging', 'anti aging',
-  'wrinklefree', 'wrinkle free', 'fda registered facility', 'anti microbial', 'anti fungal', 'anti bacterial'
-];
-
-const RESTRICTED_WORDS_FOR_PROMPT = RANKING_RESTRICTED_WORDS.join(', ');
+// The banned words come from Rankings.js, which decides what is an error. This
+// file used to carry its own older flat list (non-toxic, eco-friendly, prevent,
+// certified...) and banned it everywhere, so rewrites avoided ordinary words the
+// checks allow. Titles ban PROMOTIONAL_TERMS and PROHIBITED_CLAIMS; bullets and
+// descriptions ban PROHIBITED_CLAIMS only, exactly as checkTitle/checkBulletPoints/
+// checkDescription do.
 
 let openaiClient = null;
 
@@ -330,14 +298,12 @@ function cleanKeywordsOutput(str, asin) {
   return processedWords.join(' ');
 }
 
-async function generateTitleSuggestion({ asin, currentTitle }) {
-  if (!currentTitle || typeof currentTitle !== 'string') {
-    throw new ApiError(400, 'Current title is required for title suggestions');
-  }
-
-  const client = getOpenAIClient();
-
-  const systemPrompt = `
+// System prompts, built from the Rankings.js lists so they ban exactly what the
+// post-generation checks reject. Special characters are a title-only rule there
+// (checkBulletPoints/checkDescription always pass them), so only the title
+// prompt bans them.
+function buildTitleSystemPrompt() {
+  return `
 You are an expert Amazon listing copywriter. Your output must satisfy the EXACT ranking rules below; any violation will cause the title to be rejected.
 
 === TITLE RULES (every condition is mandatory) ===
@@ -348,9 +314,11 @@ You are an expert Amazon listing copywriter. Your output must satisfy the EXACT 
    - Order the information as: brand, flavor or style, product type, key attribute, color, size or pack count, model number.
    - Drop non-essential detail rather than exceeding the limit. Do not pad the title to reach a length.
 
-2. RESTRICTED WORDS (banned entirely; word-boundary match, case-insensitive)
-   You must NOT use any of these words or phrases in the title:
-   ${RESTRICTED_WORDS_FOR_PROMPT}
+2. RESTRICTED WORDS (banned entirely; whole-word match, case-insensitive)
+   You must NOT use any of these promotional terms in the title:
+   ${PROMOTIONAL_TERMS.join(', ')}
+   Nor any of these prohibited medical, drug, or pesticide claims:
+   ${PROHIBITED_CLAIMS.join(', ')}
    Also banned: promotional phrases, subjective commentary, and restricted claims such as:
    ${TITLE_RESTRICTED_PHRASES.join(', ')}
 
@@ -375,10 +343,66 @@ You are an expert Amazon listing copywriter. Your output must satisfy the EXACT 
    - Keep the same product type and key attributes (size, color, pack size); improve clarity and keyword coverage.
    - Do NOT mention discounts, promotions, time-limited offers, or compare to other brands.
 
-CRITICAL — COMMON REJECTIONS: Do NOT use "non-toxic", "toxic", "hypoallergenic", "eco-friendly", "bpa-free", "lead-free", "guarantee/guaranteed", "safe/safety" in a way that implies certification. If the current title uses any restricted word (e.g. "Non-Toxic Adhesive"), rephrase without it (e.g. "adhesive", "child-safe adhesive", or describe the material instead). Every word in the RESTRICTED WORDS list above is banned; do not use any of them in any form.
+If the current title uses any word from the RESTRICTED WORDS lists above, rephrase without it. Every word in those lists is banned; do not use any of them in any form.
 
 Return a JSON object with a single array field "titles" containing exactly three title strings, e.g. { "titles": ["title 1", "title 2", "title 3"] }.
 `;
+}
+
+function buildBulletPointsSystemPrompt() {
+  return `
+You are an expert Amazon listing copywriter. Your output must satisfy the EXACT ranking rules below; any violation will cause the bullet points to be rejected.
+
+=== BULLET POINT RULES (every condition is mandatory) ===
+
+1. COUNT AND LENGTH
+   - Return exactly 5 bullet points.
+   - Each bullet point MUST be at least 150 characters long.
+   - Under 150 characters per bullet is an error: "Your bullet points are under 150 characters. Short bullet points may not provide enough detail to effectively communicate the features and benefits."
+
+2. PROHIBITED CLAIMS (banned entirely; whole-word match, case-insensitive)
+   You must NOT use any of these medical, drug, or pesticide claims in any bullet:
+   ${PROHIBITED_CLAIMS.join(', ')}
+
+3. ADDITIONAL
+   - Do NOT mention discounts, promotions, time-limited offers, or compare to other brands.
+   - Focus on clear benefits, features, and use cases; articulate why customers should choose the product.
+
+Return a JSON object containing the 5 bullet points as an array of strings, e.g. { "bullet_points": ["bullet 1", "bullet 2", "bullet 3", "bullet 4", "bullet 5"] }.
+`;
+}
+
+function buildDescriptionSystemPrompt() {
+  return `
+You are an expert Amazon listing copywriter. Your output must satisfy the EXACT ranking rules below; any violation will cause the description to be rejected.
+
+=== DESCRIPTION RULES (every condition is mandatory) ===
+
+1. CHARACTER LENGTH
+   - The product description MUST be at least 1700 characters.
+   - Under 1700 characters is an error: "Your product description is under 1700 characters. This may not provide enough information to fully educate potential buyers."
+   - Expand to at least 1700 characters; include benefits, use cases, unique features, proper formatting and keywords.
+
+2. PROHIBITED CLAIMS (banned entirely; whole-word match, case-insensitive)
+   You must NOT use any of these medical, drug, or pesticide claims in the description:
+   ${PROHIBITED_CLAIMS.join(', ')}
+
+3. ADDITIONAL
+   - Do NOT mention discounts, promotions, time-limited offers, or compare to other brands.
+   - Use clear paragraphs and natural language suitable for Amazon product descriptions.
+
+Return ONLY the new description as raw text: no quotes, no JSON wrapper, no commentary. The response must be the description text itself, at least 1700 characters long.
+`;
+}
+
+async function generateTitleSuggestion({ asin, currentTitle }) {
+  if (!currentTitle || typeof currentTitle !== 'string') {
+    throw new ApiError(400, 'Current title is required for title suggestions');
+  }
+
+  const client = getOpenAIClient();
+
+  const systemPrompt = buildTitleSystemPrompt();
 
   const userPrompt = `
 ASIN: ${asin}
@@ -495,8 +519,8 @@ Generate exactly 3 NEW alternative titles that:
 - Repeat no word more than twice, and use title case (not all caps, not all lowercase).
 - Use only standard letters, numbers, and the punctuation - / , & .
 ${avoidList ? `- Do NOT contain any of: ${avoidList}.` : ''}
-- Do NOT use "non-toxic", "toxic", "hypoallergenic", "eco-friendly", "bpa-free", "lead-free", or any other word from the full restricted list.
-- Use neutral phrasing (e.g. "adhesive", "child-safe adhesive", material names) instead of restricted claims.
+- Do NOT use any other word from the RESTRICTED WORDS lists.
+- Use neutral, factual phrasing (material names, dimensions, use cases) instead of promotional terms or claims.
 `;
     try {
       raw = await runTitleGeneration([
@@ -547,30 +571,7 @@ async function generateBulletPointsSuggestion({ asin, currentBulletPoints, produ
 
   const client = getOpenAIClient();
 
-  const systemPrompt = `
-You are an expert Amazon listing copywriter. Your output must satisfy the EXACT ranking rules below; any violation will cause the bullet points to be rejected.
-
-=== BULLET POINT RULES (every condition is mandatory) ===
-
-1. COUNT AND LENGTH
-   - Return exactly 5 bullet points.
-   - Each bullet point MUST be at least 150 characters long.
-   - Under 150 characters per bullet is an error: "Your bullet points are under 150 characters. Short bullet points may not provide enough detail to effectively communicate the features and benefits."
-
-2. RESTRICTED WORDS (banned entirely; word-boundary match, case-insensitive)
-   You must NOT use any of these words or phrases in any bullet:
-   ${RESTRICTED_WORDS_FOR_PROMPT}
-
-3. SPECIAL CHARACTERS (prohibited)
-   Do NOT use any of these characters in any bullet: ${RANKING_SPECIAL_CHARS}
-   (Using these characters can lead to listing compliance issues and may prevent proper display.)
-
-4. ADDITIONAL
-   - Do NOT mention discounts, promotions, time-limited offers, or compare to other brands.
-   - Focus on clear benefits, features, and use cases; articulate why customers should choose the product.
-
-Return a JSON object containing the 5 bullet points as an array of strings, e.g. { "bullet_points": ["bullet 1", "bullet 2", "bullet 3", "bullet 4", "bullet 5"] }.
-`;
+  const systemPrompt = buildBulletPointsSystemPrompt();
 
   const userPrompt = bulletsArray.length
     ? `
@@ -584,7 +585,7 @@ Rewrite into 5 optimized, compliant bullet points.
 ASIN: ${asin}
 Product title: ${productTitle.trim()}
 
-Generate 5 new bullet points for this product based on the title above. Each bullet must be at least 150 characters and follow all rules (no restricted words, no prohibited special characters).
+Generate 5 new bullet points for this product based on the title above. Each bullet must be at least 150 characters and follow all rules (no prohibited claims).
 `;
 
   let raw;
@@ -649,12 +650,7 @@ ${validation?.checkSpecialCharacters?.status === 'Error' ? `- SPECIAL CHARACTERS
 
 ${problematicWords ? `CRITICAL: Do NOT use these words: ${problematicWords}` : ''}
 
-Generate 5 NEW bullet points that strictly avoid ALL restricted words including: prevent, prevents, preventing, guaranteed, guarantee, cure, cures, heal, heals, safe, safer, safest, hypoallergenic, non-toxic, toxic, eco-friendly, bpa-free, lead-free.
-
-Use alternative phrasing:
-- Instead of "prevent" use "help reduce", "minimize", "protect against"
-- Instead of "guaranteed" use "designed to", "built to"
-- Instead of "safe" use "designed for", "suitable for"
+Generate 5 NEW bullet points that strictly avoid every word in the PROHIBITED CLAIMS list. Describe what the product is and does without claiming it cures or treats a disease or kills germs or pests.
 
 Each bullet must be at least 150 characters. Return JSON: { "bullet_points": ["bullet1", "bullet2", "bullet3", "bullet4", "bullet5"] }
 `;
@@ -715,30 +711,7 @@ async function generateDescriptionSuggestion({ asin, currentDescription }) {
 
   const client = getOpenAIClient();
 
-  const systemPrompt = `
-You are an expert Amazon listing copywriter. Your output must satisfy the EXACT ranking rules below; any violation will cause the description to be rejected.
-
-=== DESCRIPTION RULES (every condition is mandatory) ===
-
-1. CHARACTER LENGTH
-   - The product description MUST be at least 1700 characters.
-   - Under 1700 characters is an error: "Your product description is under 1700 characters. This may not provide enough information to fully educate potential buyers."
-   - Expand to at least 1700 characters; include benefits, use cases, unique features, proper formatting and keywords.
-
-2. RESTRICTED WORDS (banned entirely; word-boundary match, case-insensitive)
-   You must NOT use any of these words or phrases in the description:
-   ${RESTRICTED_WORDS_FOR_PROMPT}
-
-3. SPECIAL CHARACTERS (prohibited)
-   Do NOT use any of these characters in the description: ${RANKING_SPECIAL_CHARS}
-   (Restricted special characters must be removed to meet Amazon's formatting guidelines.)
-
-4. ADDITIONAL
-   - Do NOT mention discounts, promotions, time-limited offers, or compare to other brands.
-   - Use clear paragraphs and natural language suitable for Amazon product descriptions.
-
-Return ONLY the new description as raw text: no quotes, no JSON wrapper, no commentary. The response must be the description text itself, at least 1700 characters long.
-`;
+  const systemPrompt = buildDescriptionSystemPrompt();
 
   const userPrompt = `
 ASIN: ${asin}
@@ -1571,6 +1544,9 @@ async function generateRankingContentSuggestion(params) {
 }
 
 module.exports = {
-  generateRankingContentSuggestion
+  generateRankingContentSuggestion,
+  buildTitleSystemPrompt,
+  buildBulletPointsSystemPrompt,
+  buildDescriptionSystemPrompt
 };
 

@@ -8,7 +8,14 @@
 
 const { calculateSponsoredAdsErrors } = require('../../../Services/Calculations/DashboardCalculation.js');
 
+// Rows are dated well outside the attribution window and ENABLED, so they are
+// judgeable under the wasted-spend rule (AdsSignals.isWastedKeyword).
+const NOW = new Date('2026-10-16T12:00:00Z');
+const SETTLED_DAY = '2026-10-01';
+
 const keywordRow = (over = {}) => ({
+    date: SETTLED_DAY,
+    adKeywordStatus: 'ENABLED',
     keyword: 'blue widget',
     keywordId: 'kw1',
     campaignName: 'Campaign A',
@@ -22,8 +29,15 @@ const keywordRow = (over = {}) => ({
     ...over
 });
 
+// A converting keyword from yesterday keeps the account's ads data current (not
+// stale), as a live account's daily rows do; it is never itself flagged.
+const CURRENT_ROW = {
+    date: '2026-10-15', adKeywordStatus: 'ENABLED', keyword: 'converting', keywordId: 'kw-live',
+    campaignId: 'c9', adGroupId: 'ag9', cost: 5, attributedSales30d: 40, clicks: 12, impressions: 300
+};
+
 const wastedSpend = (keywords) =>
-    calculateSponsoredAdsErrors([], keywords, [], [], []).errorDetails
+    calculateSponsoredAdsErrors([], [...keywords, CURRENT_ROW], [], [], [], { country: 'US', now: NOW }).errorDetails
         .filter((e) => e.errorType === 'wasted_spend_keyword');
 
 describe('wasted_spend_keyword clicks/impressions', () => {
@@ -48,20 +62,20 @@ describe('wasted_spend_keyword clicks/impressions', () => {
 
     it('keeps rows for different keywords separate', () => {
         const errs = wastedSpend([
-            keywordRow({ keyword: 'blue widget', clicks: 5 }),
-            keywordRow({ keyword: 'red widget', keywordId: 'kw2', clicks: 9 })
+            keywordRow({ keyword: 'blue widget', clicks: 15 }),
+            keywordRow({ keyword: 'red widget', keywordId: 'kw2', clicks: 19 })
         ]);
         expect(errs).toHaveLength(2);
-        expect(errs.map((e) => e.clicks).sort((a, b) => a - b)).toEqual([5, 9]);
+        expect(errs.map((e) => e.clicks).sort((a, b) => a - b)).toEqual([15, 19]);
     });
 
-    it('defaults to 0 when the source row genuinely has no click data', () => {
+    // No clicks means fewer than KEYWORD_MIN_CLICKS: not enough traffic to call the
+    // spend wasted.
+    it('does not flag a keyword with no click data', () => {
         const row = keywordRow();
         delete row.clicks;
         delete row.impressions;
-        const [err] = wastedSpend([row]);
-        expect(err.clicks).toBe(0);
-        expect(err.impressions).toBe(0);
+        expect(wastedSpend([row])).toHaveLength(0);
     });
 
     it('coerces string counts from the report payload', () => {

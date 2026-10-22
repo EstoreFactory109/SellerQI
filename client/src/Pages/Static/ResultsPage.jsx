@@ -148,18 +148,11 @@ function ResultsPage() {
     // Helper function to get bullet points info
     const getBulletPointsInfo = () => {
       const bulletResult = analysisResult.rankingResult?.BulletPoints;
-      
-      // No bullet points at all
-      if (bulletResult?.nullCheck?.status === 'Error' || bulletResult?.emptyArray?.status === 'Error') {
+
+      // No bullets is no data, so the check passes; only the count tells it apart
+      // from good bullets.
+      if (analysisResult.actualBulletCount === 0) {
         return { count: 0, avgLength: 0 };
-      }
-      
-      // Has bullet points but issues with null items
-      if (bulletResult?.nullItems?.status === 'Error') {
-        const message = bulletResult.nullItems.Message || '';
-        const match = message.match(/(\d+)\s*bullet/);
-        const nullCount = match ? parseInt(match[1]) : 1;
-        return { count: Math.max(5 - nullCount, 1), avgLength: 100 }; // Some are null
       }
       
       // Character limit issues - has bullets but too short
@@ -179,9 +172,9 @@ function ResultsPage() {
     // Helper function to get description length
     const getDescriptionLength = () => {
       const descResult = analysisResult.rankingResult?.Description;
-      
-      // No description
-      if (descResult?.nullCheck?.status === 'Error' || descResult?.emptyArray?.status === 'Error') {
+
+      // No description: the check returns no charLim for it (no data, no error).
+      if (descResult && !descResult.charLim) {
         return 0;
       }
       
@@ -218,7 +211,7 @@ function ResultsPage() {
         label: 'Product Images',
         score: calculatePercentageScore(imageCount, 7),
         current: `${imageCount} images`,
-        recommended: '7+ high-quality images',
+        recommended: '5+ high-quality images',
         max: 100
       },
       // Product Video
@@ -232,9 +225,12 @@ function ResultsPage() {
       // Product Title
       {
         label: 'Product Title',
-        score: calculatePercentageScore(titleLength, 80),
+        // Amazon caps titles at 75 characters (server Rankings TITLE_MAX_LENGTH):
+        // within the cap scores full marks, and longer titles lose marks in
+        // proportion. This used to reward "80+ characters", i.e. breaking the rule.
+        score: titleLength === 0 ? 0 : titleLength <= 75 ? 100 : Math.round((75 / titleLength) * 100),
         current: `${titleLength} characters`,
-        recommended: '80+ characters',
+        recommended: 'Up to 75 characters',
         max: 100
       }
     ];
@@ -328,27 +324,6 @@ function ResultsPage() {
     }
 
     // Bullet Points checks
-    if (analysisResult.rankingResult?.BulletPoints?.nullCheck?.status === 'Error') {
-      rankingIssues.push({
-        id: 'bullets-null',
-        label: 'Bullet Points Null Check',
-        message: analysisResult.rankingResult.BulletPoints.nullCheck.Message
-      });
-    }
-    if (analysisResult.rankingResult?.BulletPoints?.emptyArray?.status === 'Error') {
-      rankingIssues.push({
-        id: 'bullets-empty',
-        label: 'Bullet Points Empty Array',
-        message: analysisResult.rankingResult.BulletPoints.emptyArray.Message
-      });
-    }
-    if (analysisResult.rankingResult?.BulletPoints?.nullItems?.status === 'Error') {
-      rankingIssues.push({
-        id: 'bullets-null-items',
-        label: 'Bullet Points Null Items',
-        message: analysisResult.rankingResult.BulletPoints.nullItems.Message
-      });
-    }
     if (analysisResult.rankingResult?.BulletPoints?.charLim?.status === 'Error') {
       rankingIssues.push({
         id: 'bullets-charlim',
@@ -372,20 +347,6 @@ function ResultsPage() {
     }
 
     // Description checks
-    if (analysisResult.rankingResult?.Description?.nullCheck?.status === 'Error') {
-      rankingIssues.push({
-        id: 'description-null',
-        label: 'Description Null Check',
-        message: analysisResult.rankingResult.Description.nullCheck.Message
-      });
-    }
-    if (analysisResult.rankingResult?.Description?.emptyArray?.status === 'Error') {
-      rankingIssues.push({
-        id: 'description-empty',
-        label: 'Description Empty Array',
-        message: analysisResult.rankingResult.Description.emptyArray.Message
-      });
-    }
     if (analysisResult.rankingResult?.Description?.charLim?.status === 'Error') {
       rankingIssues.push({
         id: 'description-charlim',

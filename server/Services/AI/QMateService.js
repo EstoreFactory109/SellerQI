@@ -2096,6 +2096,7 @@ You can answer questions about product categorization. The data is in \`dashboar
 - \`targetedInAdsCount\`, \`notTargetedInAdsCount\`
 - \`withVideoCount\`, \`withoutVideoCount\`
 - \`withBrandStoryCount\`, \`withoutBrandStoryCount\`
+- \`brandStoryStatusKnown\` – false when no product in the marketplace shows a Brand Story: Brand Story status is then UNKNOWN (the seller may lack Brand Registry, or the scrape cannot see it). Both brand-story counts are 0 and \`hasBrandStory\` is null; never call these products "without brand story".
 
 **Each product in category arrays has:**
 - \`asin\`, \`sku\`, \`itemName\`, \`status\`, \`price\`, \`quantity\`
@@ -2705,6 +2706,7 @@ Show items 41-45 (only 5 remaining):
      - where in Seller Central or SellerQI to look,
      - expected qualitative impact.
 3. **Be honest about data quality.**
+   - If \`dashboard.summary.salesDataAvailable\` is false (\`noSalesData.type\` = 'no_finance_data'), SellerQI has no sales or finance data for that period yet: say so plainly. Do NOT state any sales, profit or fee amount, and never say sales or profit were $0.00. A null figure means unknown, not zero.
    - If numbers look incomplete, stale, or missing, explicitly say:
      - what is missing,
      - what you can still infer,
@@ -4753,6 +4755,10 @@ const buildOptimizedModelContext = (fetchResults = {}, interpretation = null, qu
         amazonFees: metrics.summary.amazonFees || null,
         totalFees: metrics.summary.totalFees || null,
         refunds: metrics.summary.refunds || null,
+        // false = no sales/finance data for the period: the figures above are
+        // unknown, not zero (see the data-quality rule in the prompt).
+        salesDataAvailable: metrics.summary.salesDataAvailable !== false,
+        noSalesData: metrics.noSalesData || null,
         // STRICT: Use V2 account health only (from metrics.accountHealth).
         // Do not use account.currentStatus.health here because it may be derived from non-V2 sources.
         accountHealth: metrics.accountHealth?.percentage ?? null,

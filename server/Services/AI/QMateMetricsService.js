@@ -16,8 +16,15 @@
  */
 
 const logger = require('../../utils/Logger.js');
-const EconomicsMetrics = require('../../models/MCP/EconomicsMetricsModel.js');
+const { loadLiveEconomics, isStoredEconomicsDoc } = require('../Finance/LiveEconomicsService.js');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
+const { hasSalesOnlyRows } = require('../../models/MCP/SalesOnlyMetricsModel.js');
+
+/** The "no data" marker, in the shape FinanceEngine uses for the same case. */
+const NO_SALES_DATA = {
+    type: 'no_finance_data',
+    message: 'SellerQI has no sales or finance data for this marketplace and period yet. Sales and profit are unknown, not $0.',
+};
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
 const IssueSummary = require('../../models/system/IssueSummaryModel.js');
@@ -35,6 +42,7 @@ const ExpenseReadService = require('../Finance/ExpenseReadService.js');
 const { buildExpenseReportResponseFromDB } = require('../Sp_API/FinanceService.js');
 const { pickSnapshotFeeTotalsForCalendar } = require('../../utils/expenseSnapshotCalendar.js');
 const mongoose = require('mongoose');
+const { classifyBuyBoxLoss, summarizeBuyBoxCounts, activeAsinSetOf } = require('../Calculations/RecoverableAmountUtils.js');
 
 function pickDateRangeStrings(dateRange) {
     const from = dateRange?.startDate || dateRange?.from || dateRange?.start || null;
@@ -205,181 +213,6 @@ async function getExpensesSnapshot({
 }
 
 /**
- * Get summary financial metrics for QMate context
- * Returns sales, profit, fees in a single optimized query
- * 
- * @param {string} userId - User ID
- * @param {string} country - Country code
- * @param {string} region - Region (NA, EU, FE)
- * @returns {Promise<Object>} Financial summary
- */
-async function getFinancialSummary(userId, country, region) {
-    const startTime = Date.now();
-    
-    try {
-        const userObjectId = typeof userId === 'string' 
-            ? new mongoose.Types.ObjectId(userId) 
-            : userId;
-        const userIdStr = userId?.toString() || userId;
-        
-        // Get latest EconomicsMetrics and PPCMetrics documents in parallel
-        // Dashboard uses PPCMetrics as primary source for PPC spend
-        const [economicsMetrics, ppcRollupFin] = await Promise.all([
-            EconomicsMetrics.findLatest(userObjectId, region, country),
-            PPCMetrics.rollupLastDays(userIdStr, country, region, 30)
-        ]);
-        const ppcMetrics =
-            ppcRollupFin && ppcRollupFin.found && ppcRollupFin.summary
-                ? { summary: ppcRollupFin.summary }
-                : null;
-        
-        if (!economicsMetrics) {
-            logger.warn('[QMateMetricsService] No economics metrics found', {
-                userId,
-                country,
-                region,
-                duration: Date.now() - startTime
-            });
-            
-            return {
-                success: false,
-                source: 'none',
-                error: 'No financial data found for this account',
-                data: null
-            };
-        }
-        
-        // =====================================================================
-        // EXACT COPY OF Analyse.js convertEconomicsToFinanceFormat() LOGIC
-        // This ensures QMate shows the same gross profit as the dashboard
-        // =====================================================================
-        
-        // PRIMARY: Use PPCMetrics totalSpend (from Amazon Ads API) - matches dashboard behavior
-        // FALLBACK: Use economicsMetrics.ppcSpent (from SP-API finance events)
-        const ppcSpend = ppcMetrics?.summary?.totalSpend || economicsMetrics.ppcSpent?.amount || 0;
-        
-        // Calculate totalSales by summing datewiseSales for consistency
-        let totalSales = 0;
-        let fbaFees = 0;
-        let storageFees = 0;
-        let refunds = 0;
-        
-        if (Array.isArray(economicsMetrics.datewiseSales) && economicsMetrics.datewiseSales.length > 0) {
-            economicsMetrics.datewiseSales.forEach(item => {
-                totalSales += item.sales?.amount || 0;
-            });
-            totalSales = parseFloat(totalSales.toFixed(2));
-        } else {
-            totalSales = economicsMetrics.totalSales?.amount || 0;
-        }
-        
-        // Calculate fees from datewise data for consistency (SAME as Analyse.js)
-        if (Array.isArray(economicsMetrics.datewiseFeesAndRefunds) && economicsMetrics.datewiseFeesAndRefunds.length > 0) {
-            economicsMetrics.datewiseFeesAndRefunds.forEach(item => {
-                fbaFees += item.fbaFulfillmentFee?.amount || 0;
-                storageFees += item.storageFee?.amount || 0;
-                refunds += item.refunds?.amount || 0;
-            });
-            fbaFees = parseFloat(fbaFees.toFixed(2));
-            storageFees = parseFloat(storageFees.toFixed(2));
-            refunds = parseFloat(refunds.toFixed(2));
-        } else {
-            fbaFees = economicsMetrics.fbaFees?.amount || 0;
-            storageFees = economicsMetrics.storageFees?.amount || 0;
-            refunds = economicsMetrics.refunds?.amount || 0;
-        }
-        
-        // Get Amazon fees - calculate from datewiseAmazonFees for consistency (SAME as Analyse.js)
-        let amazonFees = 0;
-        if (Array.isArray(economicsMetrics.datewiseAmazonFees) && economicsMetrics.datewiseAmazonFees.length > 0) {
-            // PRIMARY: Calculate from datewiseAmazonFees (most accurate)
-            economicsMetrics.datewiseAmazonFees.forEach(item => {
-                amazonFees += item.totalAmount?.amount || 0;
-            });
-            amazonFees = parseFloat(amazonFees.toFixed(2));
-        } else {
-            // Fallback 1: Get from summary level
-            amazonFees = economicsMetrics.amazonFees?.amount || 0;
-            
-            // Fallback 2: Calculate from ASIN-wise data if still 0
-            if (amazonFees === 0 && Array.isArray(economicsMetrics.asinWiseSales) && economicsMetrics.asinWiseSales.length > 0) {
-                economicsMetrics.asinWiseSales.forEach(item => {
-                    amazonFees += item.amazonFees?.amount || item.totalFees?.amount || 0;
-                });
-                amazonFees = parseFloat(amazonFees.toFixed(2));
-            }
-            
-            // Final fallback: use fbaFees + storageFees if still 0
-            if (amazonFees === 0) {
-                amazonFees = fbaFees + storageFees;
-            }
-        }
-        
-        // Calculate gross profit: Sales - Amazon Fees - Refunds (SAME FORMULA as Analyse.js line 659)
-        // Note: This is the BACKEND gross profit, before PPC is subtracted
-        const backendGrossProfit = totalSales - amazonFees - refunds;
-        
-        // DISPLAYED Gross Profit = Backend Gross Profit - PPC Spend
-        // This is what the dashboard displays to users as "Gross Profit"
-        // (matches TotalSales.jsx line 198: grossProfitRaw = grossProfitFromBackend - ppcSpent)
-        const displayedGrossProfit = backendGrossProfit - ppcSpend;
-        
-        const summary = {
-            dateRange: economicsMetrics.dateRange,
-            totalSales: parseFloat(totalSales.toFixed(2)),
-            // grossProfit matches what dashboard DISPLAYS (includes PPC subtraction)
-            grossProfit: parseFloat(displayedGrossProfit.toFixed(2)),
-            ppcSpend: parseFloat(ppcSpend.toFixed(2)),
-            fbaFees: parseFloat(fbaFees.toFixed(2)),
-            storageFees: parseFloat(storageFees.toFixed(2)),
-            amazonFees: parseFloat(amazonFees.toFixed(2)),
-            totalFees: parseFloat((economicsMetrics.totalFees?.amount || 0).toFixed(2)),
-            refunds: parseFloat(refunds.toFixed(2)),
-            amazonFeesBreakdown: economicsMetrics.amazonFeesBreakdown || [],
-            currency: economicsMetrics.totalSales?.currencyCode || 'USD',
-            lastUpdated: economicsMetrics.processedAt || economicsMetrics.updatedAt
-        };
-        
-        // Net profit is same as displayed gross profit (PPC already subtracted)
-        summary.netProfit = parseFloat(displayedGrossProfit.toFixed(2));
-        
-        // Calculate profit margin based on displayed gross profit
-        summary.profitMargin = summary.totalSales > 0 
-            ? parseFloat(((displayedGrossProfit / summary.totalSales) * 100).toFixed(2))
-            : 0;
-        
-        logger.info('[QMateMetricsService] Got financial summary', {
-            userId,
-            country,
-            region,
-            duration: Date.now() - startTime,
-            totalSales: summary.totalSales
-        });
-        
-        return {
-            success: true,
-            source: 'economics_metrics',
-            data: summary
-        };
-        
-    } catch (error) {
-        logger.error('[QMateMetricsService] Error getting financial summary', {
-            error: error.message,
-            stack: error.stack,
-            userId,
-            country,
-            region
-        });
-        
-        return {
-            success: false,
-            error: error.message,
-            data: null
-        };
-    }
-}
-
-/**
  * Get PPC/Ads metrics for QMate context
  * Returns ad spend, ACOS, ROAS, and campaign breakdown
  * 
@@ -466,339 +299,6 @@ async function getPPCMetrics(userId, country, region) {
 }
 
 /**
- * Get datewise sales and profit data for charts
- * 
- * @param {string} userId - User ID
- * @param {string} country - Country code
- * @param {string} region - Region (NA, EU, FE)
- * @param {number} days - Number of days to return (default 30)
- * @returns {Promise<Object>} Datewise sales data
- */
-async function getDatewiseSales(userId, country, region, days = 30) {
-    const startTime = Date.now();
-    
-    try {
-        const userObjectId = typeof userId === 'string' 
-            ? new mongoose.Types.ObjectId(userId) 
-            : userId;
-        
-        const economicsMetrics = await EconomicsMetrics.findLatest(userObjectId, region, country);
-        
-        if (!economicsMetrics || !economicsMetrics.datewiseSales) {
-            return {
-                success: false,
-                source: 'none',
-                error: 'No datewise sales data found',
-                data: null
-            };
-        }
-        
-        // Get last N days of data
-        const datewiseData = (economicsMetrics.datewiseSales || [])
-            .slice(-days)
-            .map(item => ({
-                date: item.date,
-                sales: item.sales?.amount || 0,
-                grossProfit: item.grossProfit?.amount || 0,
-                currency: item.sales?.currencyCode || 'USD'
-            }));
-        
-        logger.info('[QMateMetricsService] Got datewise sales', {
-            userId,
-            country,
-            region,
-            duration: Date.now() - startTime,
-            daysReturned: datewiseData.length
-        });
-        
-        return {
-            success: true,
-            source: 'economics_metrics',
-            data: {
-                dateRange: economicsMetrics.dateRange,
-                datewiseSales: datewiseData
-            }
-        };
-        
-    } catch (error) {
-        logger.error('[QMateMetricsService] Error getting datewise sales', {
-            error: error.message,
-            userId,
-            country,
-            region
-        });
-        
-        return {
-            success: false,
-            error: error.message,
-            data: null
-        };
-    }
-}
-
-/**
- * Get top performing ASINs by sales
- * Uses optimized aggregation for big accounts
- * 
- * @param {string} userId - User ID
- * @param {string} country - Country code
- * @param {string} region - Region (NA, EU, FE)
- * @param {number} limit - Number of ASINs to return (default 25)
- * @returns {Promise<Object>} Top ASINs with sales data
- */
-async function getTopAsinsBySales(userId, country, region, limit = 25) {
-    const startTime = Date.now();
-    
-    try {
-        const userObjectId = typeof userId === 'string' 
-            ? new mongoose.Types.ObjectId(userId) 
-            : userId;
-        
-        const economicsMetrics = await EconomicsMetrics.findLatest(userObjectId, region, country);
-        
-        if (!economicsMetrics) {
-            return {
-                success: false,
-                source: 'none',
-                error: 'No economics data found',
-                data: null
-            };
-        }
-        
-        let topAsins = [];
-        
-        // Check if big account (data stored separately)
-        const isBigAccount = economicsMetrics.isBig === true;
-        const hasEmptyAsinData = !economicsMetrics.asinWiseSales || economicsMetrics.asinWiseSales.length === 0;
-        
-        if (isBigAccount || (hasEmptyAsinData && economicsMetrics.totalSales?.amount > 5000)) {
-            // Use optimized aggregation for big accounts
-            topAsins = await AsinWiseSalesForBigAccounts.getTopAsinsBySales(economicsMetrics._id, limit);
-        } else if (Array.isArray(economicsMetrics.asinWiseSales)) {
-            // Aggregate and sort in memory for small accounts
-            const asinMap = new Map();
-            
-            economicsMetrics.asinWiseSales.forEach(item => {
-                if (!item.asin) return;
-                
-                if (asinMap.has(item.asin)) {
-                    const existing = asinMap.get(item.asin);
-                    existing.totalSales += item.sales?.amount || 0;
-                    existing.unitsSold += item.unitsSold || 0;
-                    existing.grossProfit += item.grossProfit?.amount || 0;
-                    existing.ppcSpent += item.ppcSpent?.amount || 0;
-                    existing.amazonFees += item.amazonFees?.amount || 0;
-                } else {
-                    asinMap.set(item.asin, {
-                        asin: item.asin,
-                        parentAsin: item.parentAsin || item.asin,
-                        totalSales: item.sales?.amount || 0,
-                        unitsSold: item.unitsSold || 0,
-                        grossProfit: item.grossProfit?.amount || 0,
-                        ppcSpent: item.ppcSpent?.amount || 0,
-                        amazonFees: item.amazonFees?.amount || 0
-                    });
-                }
-            });
-            
-            topAsins = Array.from(asinMap.values())
-                .sort((a, b) => b.totalSales - a.totalSales)
-                .slice(0, limit);
-        }
-        
-        logger.info('[QMateMetricsService] Got top ASINs by sales', {
-            userId,
-            country,
-            region,
-            duration: Date.now() - startTime,
-            asinsReturned: topAsins.length,
-            isBigAccount
-        });
-        
-        return {
-            success: true,
-            source: isBigAccount ? 'big_accounts_aggregation' : 'economics_metrics',
-            data: {
-                topAsins,
-                dateRange: economicsMetrics.dateRange
-            }
-        };
-        
-    } catch (error) {
-        logger.error('[QMateMetricsService] Error getting top ASINs', {
-            error: error.message,
-            userId,
-            country,
-            region
-        });
-        
-        return {
-            success: false,
-            error: error.message,
-            data: null
-        };
-    }
-}
-
-/**
- * Get profitability data for ASINs
- * Returns sales, profit, margins, and identifies loss-making products
- * 
- * @param {string} userId - User ID
- * @param {string} country - Country code
- * @param {string} region - Region (NA, EU, FE)
- * @param {number} limit - Number of ASINs to return (default 30)
- * @returns {Promise<Object>} Profitability data with categorization
- */
-async function getProfitabilityData(userId, country, region, limit = 30) {
-    const startTime = Date.now();
-    
-    try {
-        const userObjectId = typeof userId === 'string' 
-            ? new mongoose.Types.ObjectId(userId) 
-            : userId;
-        
-        // Get economics metrics
-        const economicsMetrics = await EconomicsMetrics.findLatest(userObjectId, region, country);
-        
-        if (!economicsMetrics) {
-            return {
-                success: false,
-                source: 'none',
-                error: 'No economics data found',
-                data: null
-            };
-        }
-        
-        // Get COGS data if available
-        let cogsValues = {};
-        try {
-            const cogsDoc = await CogsModel.findOne({ User: userObjectId, country }).lean();
-            if (cogsDoc && cogsDoc.cogsValues) {
-                cogsValues = cogsDoc.cogsValues;
-            }
-        } catch (cogsError) {
-            logger.warn('[QMateMetricsService] Failed to get COGS data', { error: cogsError.message });
-        }
-        
-        let profitabilityData = [];
-        
-        const isBigAccount = economicsMetrics.isBig === true;
-        const hasEmptyAsinData = !economicsMetrics.asinWiseSales || economicsMetrics.asinWiseSales.length === 0;
-        
-        if (isBigAccount || (hasEmptyAsinData && economicsMetrics.totalSales?.amount > 5000)) {
-            // Use optimized aggregation for big accounts
-            const profitMap = await AsinWiseSalesForBigAccounts.getProfitabilityMapByMetricsId(economicsMetrics._id);
-            
-            profitabilityData = Array.from(profitMap.values()).map(item => {
-                const cogsPerUnit = cogsValues[item.asin] || 0;
-                const totalCogs = cogsPerUnit * (item.unitsSold || 0);
-                const netProfit = (item.grossProfit || 0) - totalCogs;
-                const profitMargin = item.sales > 0 ? (netProfit / item.sales) * 100 : 0;
-                
-                return {
-                    asin: item.asin,
-                    sales: parseFloat((item.sales || 0).toFixed(2)),
-                    grossProfit: parseFloat((item.grossProfit || 0).toFixed(2)),
-                    adsSpend: parseFloat((item.ads || 0).toFixed(2)),
-                    amazonFees: parseFloat((item.amzFee || 0).toFixed(2)),
-                    totalFees: parseFloat((item.totalFees || 0).toFixed(2)),
-                    cogs: parseFloat(totalCogs.toFixed(2)),
-                    netProfit: parseFloat(netProfit.toFixed(2)),
-                    profitMargin: parseFloat(profitMargin.toFixed(2)),
-                    unitsSold: item.unitsSold || 0,
-                    status: netProfit < 0 ? 'loss' : profitMargin < 10 ? 'low_margin' : 'healthy'
-                };
-            });
-        } else if (Array.isArray(economicsMetrics.asinWiseSales)) {
-            // Aggregate in memory for small accounts
-            const asinMap = new Map();
-            
-            economicsMetrics.asinWiseSales.forEach(item => {
-                if (!item.asin) return;
-                
-                if (asinMap.has(item.asin)) {
-                    const existing = asinMap.get(item.asin);
-                    existing.sales += item.sales?.amount || 0;
-                    existing.grossProfit += item.grossProfit?.amount || 0;
-                    existing.adsSpend += item.ppcSpent?.amount || 0;
-                    existing.amazonFees += item.amazonFees?.amount || 0;
-                    existing.totalFees += item.totalFees?.amount || 0;
-                    existing.unitsSold += item.unitsSold || 0;
-                } else {
-                    asinMap.set(item.asin, {
-                        asin: item.asin,
-                        sales: item.sales?.amount || 0,
-                        grossProfit: item.grossProfit?.amount || 0,
-                        adsSpend: item.ppcSpent?.amount || 0,
-                        amazonFees: item.amazonFees?.amount || 0,
-                        totalFees: item.totalFees?.amount || 0,
-                        unitsSold: item.unitsSold || 0
-                    });
-                }
-            });
-            
-            profitabilityData = Array.from(asinMap.values()).map(item => {
-                const cogsPerUnit = cogsValues[item.asin] || 0;
-                const totalCogs = cogsPerUnit * item.unitsSold;
-                const netProfit = item.grossProfit - totalCogs;
-                const profitMargin = item.sales > 0 ? (netProfit / item.sales) * 100 : 0;
-                
-                return {
-                    ...item,
-                    cogs: parseFloat(totalCogs.toFixed(2)),
-                    netProfit: parseFloat(netProfit.toFixed(2)),
-                    profitMargin: parseFloat(profitMargin.toFixed(2)),
-                    status: netProfit < 0 ? 'loss' : profitMargin < 10 ? 'low_margin' : 'healthy'
-                };
-            });
-        }
-        
-        // Sort by sales and categorize
-        profitabilityData.sort((a, b) => b.sales - a.sales);
-        
-        const topAsins = profitabilityData.slice(0, limit);
-        const lossMaking = profitabilityData.filter(p => p.status === 'loss').slice(0, 15);
-        const lowMargin = profitabilityData.filter(p => p.status === 'low_margin').slice(0, 15);
-        
-        logger.info('[QMateMetricsService] Got profitability data', {
-            userId,
-            country,
-            region,
-            duration: Date.now() - startTime,
-            totalAsins: profitabilityData.length,
-            lossMakingCount: lossMaking.length,
-            lowMarginCount: lowMargin.length
-        });
-        
-        return {
-            success: true,
-            source: isBigAccount ? 'big_accounts_aggregation' : 'economics_metrics',
-            data: {
-                topAsins,
-                lossMakingAsins: lossMaking,
-                lowMarginAsins: lowMargin,
-                dateRange: economicsMetrics.dateRange
-            }
-        };
-        
-    } catch (error) {
-        logger.error('[QMateMetricsService] Error getting profitability data', {
-            error: error.message,
-            userId,
-            country,
-            region
-        });
-        
-        return {
-            success: false,
-            error: error.message,
-            data: null
-        };
-    }
-}
-
-/**
  * Get BuyBox data for QMate context
  * Returns products with/without buy box
  * 
@@ -815,10 +315,20 @@ async function getBuyBoxData(userId, country, region) {
             ? new mongoose.Types.ObjectId(userId) 
             : userId;
         
-        // Newest NON-EMPTY day: an empty Data Kiosk day (totalProducts 0) would
-        // otherwise tell QMate the seller has no Buy Box data at all.
-        const [buyBoxData] = await BuyBoxData.findRecentDays(userObjectId, region, country, 1);
-        
+        // The same 7-day effective doc the dashboard and the task list use
+        // (findRecentDays(..., 7) -> classifyBuyBoxLoss), counted over ACTIVE ASINs
+        // (summarizeBuyBoxCounts). QMate used to quote the newest single day's raw
+        // stored counts — all ASINs, one day — so it disagreed with the dashboard
+        // and treated a one-day 0% blip as a lost Buy Box.
+        const [days, sellerDoc] = await Promise.all([
+            BuyBoxData.findRecentDays(userObjectId, region, country, 7),
+            Seller.findOne(
+                { User: userObjectId },
+                { sellerAccount: { $elemMatch: { region, country } } }
+            ).lean()
+        ]);
+        const buyBoxData = classifyBuyBoxLoss(days);
+
         if (!buyBoxData) {
             return {
                 success: false,
@@ -827,26 +337,34 @@ async function getBuyBoxData(userId, country, region) {
                 data: null
             };
         }
-        
+
+        const activeAsinSet = activeAsinSetOf(sellerDoc?.sellerAccount?.[0]?.products);
+        const counts = summarizeBuyBoxCounts(buyBoxData, activeAsinSet);
         const summary = {
-            totalProducts: buyBoxData.totalProducts || 0,
-            productsWithBuyBox: buyBoxData.productsWithBuyBox || 0,
-            productsWithoutBuyBox: buyBoxData.productsWithoutBuyBox || 0,
-            buyBoxPercentage: buyBoxData.totalProducts > 0 
-                ? parseFloat(((buyBoxData.productsWithBuyBox / buyBoxData.totalProducts) * 100).toFixed(2))
+            ...counts,
+            buyBoxPercentage: counts.totalProducts > 0
+                ? parseFloat(((counts.productsWithBuyBox / counts.totalProducts) * 100).toFixed(2))
                 : 0,
             dateRange: buyBoxData.dateRange
         };
-        
-        // Get top products without buybox (for recommendations)
+
+        // Active products that lost the Buy Box (0%) or hold it below 50% on their
+        // own newest reading. Unknown (null) and carried-forward percentages are
+        // NOT "low": null < 50 is true in JS, which used to list never-measured
+        // products here.
         const productsWithoutBuyBox = (buyBoxData.asinBuyBoxData || [])
-            .filter(p => p.buyBoxPercentage < 50)
+            .filter(p => p && p.childAsin && activeAsinSet.has(p.childAsin))
+            .filter(p => typeof p.buyBoxPercentage === 'number' && (
+                p.buyBoxPercentage === 0
+                || (p.buyBoxPercentage < 50 && !p.buyBoxPercentageCarriedForward)
+            ))
             .sort((a, b) => (b.sales?.amount || 0) - (a.sales?.amount || 0))
             .slice(0, 20)
             .map(p => ({
                 asin: p.childAsin,
                 parentAsin: p.parentAsin,
                 buyBoxPercentage: p.buyBoxPercentage,
+                buyBoxLost: p.buyBoxLost === true,
                 sales: p.sales?.amount || 0,
                 pageViews: p.pageViews || 0,
                 sessions: p.sessions || 0
@@ -1352,13 +870,24 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
         // Determine if we need to apply date filtering
         const shouldFilterByDate = startDate && endDate && calendarMode !== 'default';
 
-        // Sales-only fast path: build a minimal metrics context without relying
-        // on grossProfit/fees/refunds. This keeps QMate functional even when
-        // `EconomicsMetrics` persistence is disabled.
-        // Per-day model: findLatest aggregates recent 31 days into { totalSales, datewiseSales, dateRange }
-        const salesOnlyMetrics = await SalesOnlyMetrics.findLatest(userObjectId, region, country);
+        // Live finance first: a fresh EconomicsMetrics doc, else DailySkuFinance
+        // for the picked range (or the default window), else null.
+        const economicsMetrics = await loadLiveEconomics(
+            userObjectId, region, country, shouldFilterByDate ? { startDate, endDate } : {}
+        );
 
-        if (salesOnlyMetrics) {
+        // Sales-only fallback, ONLY when live finance has nothing and
+        // SalesOnlyMetrics holds real day rows. Its readers never return null
+        // (a zero-filled doc instead), so a plain `if (doc)` used to win for
+        // every account and answer "$0" over real live sales.
+        let salesOnlyMetrics = null;
+        if (!economicsMetrics) {
+            salesOnlyMetrics = shouldFilterByDate
+                ? await SalesOnlyMetrics.getSalesForDateRange(userObjectId, region, country, startDate, endDate)
+                : await SalesOnlyMetrics.findLatest(userObjectId, region, country);
+        }
+
+        if (!economicsMetrics && hasSalesOnlyRows(salesOnlyMetrics)) {
             const currencyCode = salesOnlyMetrics?.totalSales?.currencyCode || 'USD';
             const datewiseSalesData = Array.isArray(salesOnlyMetrics?.datewiseSales)
                 ? salesOnlyMetrics.datewiseSales
@@ -1470,7 +999,6 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
         
         // Fetch all data in parallel for performance
         const [
-            economicsMetrics, 
             ppcRollupParallel, 
             issueSummary, 
             cogsDoc,
@@ -1481,7 +1009,6 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
             topErrorsResult,
             amazonReadyResult
         ] = await Promise.all([
-            EconomicsMetrics.findLatest(userObjectId, region, country),
             PPCMetrics.rollupLastDays(userIdStr, country, region, 30),
             IssueSummary.getIssueSummary(userObjectId, country, region),
             CogsModel.findOne({ User: userObjectId, country }).lean().catch(() => null),
@@ -1830,6 +1357,28 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
             };
 
             context.expenses = expenseSnapshot?.success ? expenseSnapshot.data : null;
+        } else {
+            // Neither live finance nor SalesOnlyMetrics rows: sales and profit
+            // are unknown, never $0. The marker tells the model to say so.
+            context.summary = {
+                brand: null,
+                country,
+                dateRange: shouldFilterByDate ? { startDate, endDate } : null,
+                totalSales: null,
+                grossProfit: null,
+                netProfit: null,
+                profitMargin: null,
+                // Ad spend is its own source and still known.
+                ppcSpend: ppcMetrics ? parseFloat((ppcMetrics.summary?.totalSpend || 0).toFixed(2)) : null,
+                fbaFees: null,
+                storageFees: null,
+                amazonFees: null,
+                totalFees: null,
+                refunds: null,
+                currency: null,
+                salesDataAvailable: false,
+            };
+            context.noSalesData = NO_SALES_DATA;
         }
         
         // Process PPC Metrics
@@ -1843,7 +1392,10 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
                 totalSalesFromAds: ppcMetrics.summary?.totalSales || 0,
                 overallAcos: ppcMetrics.summary?.overallAcos || 0,
                 overallRoas: ppcMetrics.summary?.overallRoas || 0,
-                tacos: totalSalesForTacos > 0 ? parseFloat(((ppcSpend / totalSalesForTacos) * 100).toFixed(2)) : 0,
+                // Unknown sales give an unknown TACOS, not 0%.
+                tacos: totalSalesForTacos > 0
+                    ? parseFloat(((ppcSpend / totalSalesForTacos) * 100).toFixed(2))
+                    : (context.summary?.salesDataAvailable === false ? null : 0),
                 totalImpressions: ppcMetrics.summary?.totalImpressions || 0,
                 totalClicks: ppcMetrics.summary?.totalClicks || 0,
                 ctr: ppcMetrics.summary?.ctr || 0,
@@ -1869,7 +1421,8 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
             
             let profitabilityData = [];
             
-            if (isBigAccount || (hasEmptyAsinData && economicsMetrics.totalSales?.amount > 5000)) {
+            // Big-account rows are keyed by a stored doc's _id; a live-built doc has them inline.
+            if (isStoredEconomicsDoc(economicsMetrics) && (isBigAccount || (hasEmptyAsinData && economicsMetrics.totalSales?.amount > 5000))) {
                 const profitMap = await AsinWiseSalesForBigAccounts.getProfitabilityMapByMetricsId(economicsMetrics._id);
                 profitabilityData = Array.from(profitMap.values());
             } else if (Array.isArray(economicsMetrics.asinWiseSales)) {
@@ -1989,7 +1542,8 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
         
         return {
             success: true,
-            source: 'pre_computed',
+            // 'no_finance_data' keeps the deterministic shortcuts from quoting a figure.
+            source: economicsMetrics ? 'pre_computed' : 'no_finance_data',
             data: context
         };
         
@@ -2011,11 +1565,7 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
 }
 
 module.exports = {
-    getFinancialSummary,
     getPPCMetrics,
-    getDatewiseSales,
-    getTopAsinsBySales,
-    getProfitabilityData,
     getBuyBoxData,
     getAccountHealthData,
     getOrdersSummary,

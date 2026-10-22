@@ -859,6 +859,26 @@ async function getAccountIssues(userId, country, region) {
 }
 
 /**
+ * ASIN -> Buy Box row, for Issues-by-Product's `buyBoxDetails`.
+ *
+ * Keyed on `childAsin`: effective-doc rows (classifyBuyBoxLoss) carry only
+ * childAsin/parentAsin, never `asin`, so keying on `item.asin` put every row
+ * under `undefined` and Issues-by-Product never showed a Buy Box issue.
+ * `asin` is kept as a fallback for any older row shape.
+ *
+ * @param {Array} asinBuyBoxData
+ * @returns {Map<string, Object>}
+ */
+function buildBuyBoxDetailsMap(asinBuyBoxData) {
+    const map = new Map();
+    (Array.isArray(asinBuyBoxData) ? asinBuyBoxData : []).forEach(item => {
+        const key = item && (item.childAsin || item.asin);
+        if (key && !map.has(key)) map.set(key, item);
+    });
+    return map;
+}
+
+/**
  * Get paginated products with issues for Issues by Product page
  * Supports sorting, filtering by priority, and search
  * 
@@ -917,10 +937,7 @@ async function getProductsWithIssues(userId, country, region, options = {}) {
             inventoryErrorsMap.set(error.asin, error);
         });
         
-        const buyBoxMap = new Map();
-        (issuesData.buyBoxData?.asinBuyBoxData || []).forEach(item => {
-            buyBoxMap.set(item.asin, item);
-        });
+        const buyBoxMap = buildBuyBoxDetailsMap(issuesData.buyBoxData?.asinBuyBoxData);
         
         // Enrich products with detailed error information
         products = products.map(product => {
@@ -1139,6 +1156,7 @@ module.exports = {
     getAccountIssues,
     getProductsWithIssues,
     ensureIssuesData,
+    buildBuyBoxDetailsMap,
     DEFAULT_PAGE_SIZE,
     PRODUCTS_PAGE_SIZE
 };

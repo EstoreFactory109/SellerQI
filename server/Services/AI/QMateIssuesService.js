@@ -21,6 +21,21 @@ const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js')
 const mongoose = require('mongoose');
 
 /**
+ * The words a failing RestictedWords check found. Rankings.js returns them only
+ * inside Message ("... The words used are: sale, cure"); it has no
+ * RestrictedWordsFound field, which this file used to read and so always passed
+ * on undefined. Older stored results say "words Used are", hence /i.
+ * @returns {string[]}
+ */
+function restrictedWordsFound(check) {
+    const match = typeof check?.Message === 'string'
+        ? check.Message.match(/words used are:\s*(.+)$/i)
+        : null;
+    if (!match) return [];
+    return match[1].split(',').map((word) => word.trim()).filter(Boolean);
+}
+
+/**
  * Get issue counts summary for QMate context
  * Fast query that returns only counts without detailed data
  * 
@@ -390,7 +405,7 @@ async function getQMateIssuesContext(userId, country, region, options = {}) {
                         section: 'Title',
                         type: 'restricted_words',
                         message: titleResult.RestictedWords.Message,
-                        restrictedWords: titleResult.RestictedWords.RestrictedWordsFound,
+                        restrictedWords: restrictedWordsFound(titleResult.RestictedWords),
                         howToSolve: titleResult.RestictedWords.HowTOSolve
                     });
                 }
@@ -436,7 +451,7 @@ async function getQMateIssuesContext(userId, country, region, options = {}) {
                         section: 'Bullet Points',
                         type: 'restricted_words',
                         message: bulletPoints.RestictedWords.Message,
-                        restrictedWords: bulletPoints.RestictedWords.RestrictedWordsFound,
+                        restrictedWords: restrictedWordsFound(bulletPoints.RestictedWords),
                         howToSolve: bulletPoints.RestictedWords.HowTOSolve
                     });
                 }
@@ -466,7 +481,7 @@ async function getQMateIssuesContext(userId, country, region, options = {}) {
                         section: 'Description',
                         type: 'restricted_words',
                         message: description.RestictedWords.Message,
-                        restrictedWords: description.RestictedWords.RestrictedWordsFound,
+                        restrictedWords: restrictedWordsFound(description.RestictedWords),
                         howToSolve: description.RestictedWords.HowTOSolve
                     });
                 }
@@ -663,7 +678,7 @@ function transformRankingIssues(rankingErrors) {
                 type: 'title_restricted_words',
                 section: 'Title',
                 message: titleResult.RestictedWords.Message || 'Title contains restricted words',
-                restrictedWords: titleResult.RestictedWords.RestrictedWordsFound || [],
+                restrictedWords: restrictedWordsFound(titleResult.RestictedWords),
                 howToSolve: titleResult.RestictedWords.HowTOSolve || 'Remove restricted words from title',
                 severity: 'high'
             });
@@ -716,7 +731,7 @@ function transformRankingIssues(rankingErrors) {
                 type: 'bullet_restricted_words',
                 section: 'Bullet Points',
                 message: bulletPoints.RestictedWords.Message || 'Bullet points contain restricted words',
-                restrictedWords: bulletPoints.RestictedWords.RestrictedWordsFound || [],
+                restrictedWords: restrictedWordsFound(bulletPoints.RestictedWords),
                 howToSolve: bulletPoints.RestictedWords.HowTOSolve || 'Remove restricted words from bullet points',
                 severity: 'high'
             });
@@ -751,7 +766,7 @@ function transformRankingIssues(rankingErrors) {
                 type: 'description_restricted_words',
                 section: 'Description',
                 message: description.RestictedWords.Message || 'Description contains restricted words',
-                restrictedWords: description.RestictedWords.RestrictedWordsFound || [],
+                restrictedWords: restrictedWordsFound(description.RestictedWords),
                 howToSolve: description.RestictedWords.HowTOSolve || 'Remove restricted words from description',
                 severity: 'high'
             });
@@ -1162,5 +1177,7 @@ module.exports = {
     getIssueCounts,
     getDetailedIssues,
     getTopErrorProducts,
-    getQMateIssuesContext
+    getQMateIssuesContext,
+    restrictedWordsFound,
+    transformRankingIssues
 };

@@ -58,7 +58,7 @@ async function resolveStrategyDateRange(interpretation, userContext, requestDate
  *
  * @param {{ userId, country, region }} userContext
  * @param {{ startDate, endDate }} dateRange
- * @returns {Promise<Object>} { summary, comparison, lossMakingProducts, productsMissingCOGS, expenseBreakdown, overhead }
+ * @returns {Promise<Object|null>} { summary, comparison, lossMakingProducts, productsMissingCOGS, expenseBreakdown, overhead }, or null when the window has no finance data
  */
 async function getFinanceContext(userContext, dateRange) {
   const dashboardData = await FinanceDashboardReadService.getDashboard({
@@ -68,6 +68,10 @@ async function getFinanceContext(userContext, dateRange) {
     startDate: dateRange.startDate,
     endDate: dateRange.endDate,
   });
+
+  // No finance rows for the window: no finance context (the builders already
+  // handle a missing side), not a $0 summary scored as a loss-making account.
+  if (dashboardData.totals == null) return null;
 
   const cogs = await FinanceEngine.fetchCogsForUser(userContext);
 

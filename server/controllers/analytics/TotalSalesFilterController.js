@@ -1,7 +1,9 @@
 /**
  * TotalSalesFilterController.js
  * 
- * Controller for filtering total sales component values from SalesOnlyMetrics model
+ * Controller for filtering total sales component values. Live DailySkuFinance
+ * first (sales, chart, fees, refunds, gross profit, per-ASIN rows); the
+ * SalesOnlyMetrics model only for a window with no finance rows.
  * Supports:
  * - Last 30 days: Returns total values from latest document
  * - Last 7 days: Gets datewise values from latest document, sums them
@@ -13,7 +15,8 @@ const { ApiError } = require('../../utils/ApiError.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
 const logger = require('../../utils/Logger.js');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
-const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
+const { hasSalesOnlyRows } = require('../../models/MCP/SalesOnlyMetricsModel.js');
+const { buildEconomicsFromDailyFinance, lastNDaysWindow } = require('../../Services/Finance/LiveEconomicsService.js');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
 
 /**
@@ -87,23 +90,26 @@ const filterTotalSales = asyncHandler(async (req, res) => {
 });
 
 /**
- * Get last 31 days data - aggregate from per-day documents.
- * Uses the model's getRecentDays method for efficiency.
+ * Get last 30 days data.
+ *
+ * Live finance first: DailySkuFinance for the 30 days ending yesterday. Only
+ * when that has no rows does SalesOnlyMetrics' own newest 31 days stand in,
+ * and only if it holds real day rows (getRecentDays never returns null).
  */
 async function getLast31DaysData(userId, country, region) {
+    const { startDate, endDate } = lastNDaysWindow(30);
+    const live = await buildEconomicsFromDailyFinance({ userId, country, region, startDate, endDate });
+    if (live) {
+        return buildRangeResult(userId, country, region, startDate, endDate, { live, salesData: null });
+    }
+
     const recentData = await SalesOnlyMetrics.getRecentDays(userId, region, country, 31);
-
-    if (!recentData || recentData.datewiseSales.length === 0) {
-        logger.warn('No sales-only metrics found for last 31 days', { userId, country, region });
+    const { startDate: salesStart, endDate: salesEnd } = recentData?.dateRange || {};
+    if (!hasSalesOnlyRows(recentData) || !salesStart || !salesEnd) {
         return createEmptyResult();
     }
 
-    const { startDate, endDate } = recentData.dateRange;
-    if (!startDate || !endDate) {
-        return createEmptyResult();
-    }
-
-    return await getCustomRangeData(userId, country, region, startDate, endDate);
+    return await getCustomRangeData(userId, country, region, salesStart, salesEnd);
 }
 
 /**
@@ -189,66 +195,89 @@ async function getTotalSalesFilteredData(userId, country, region, { periodType =
 }
 
 /**
- * Get custom range data - use aggregation on per-day documents.
- * Each SalesOnlyMetrics document represents a single day.
+ * Get custom range data.
+ *
+ * Live DailySkuFinance first for everything — the sales headline, the chart,
+ * gross profit, fees, refunds and per-ASIN rows — so this agrees with the
+ * dashboard and Profitability page. SalesOnlyMetrics per-day documents supply
+ * the sales only when the range has no finance rows. With neither source the
+ * result is the empty one.
  */
 async function getCustomRangeData(userId, country, region, startDateStr, endDateStr) {
+    const live = await buildEconomicsFromDailyFinance({ userId, country, region, startDate: startDateStr, endDate: endDateStr });
+    // SalesOnlyMetrics is read only when live finance has no rows.
+    const salesData = live
+        ? null
+        : await SalesOnlyMetrics.getSalesForDateRange(userId, region, country, startDateStr, endDateStr);
+    return buildRangeResult(userId, country, region, startDateStr, endDateStr, { live, salesData });
+}
+
+/** The response for [startDateStr, endDateStr] from whichever source holds it. */
+async function buildRangeResult(userId, country, region, startDateStr, endDateStr, { live, salesData }) {
     const startDate = new Date(startDateStr);
     startDate.setHours(0, 0, 0, 0);
     const endDate = new Date(endDateStr);
     endDate.setHours(23, 59, 59, 999);
 
-    const salesData = await SalesOnlyMetrics.getSalesForDateRange(
-        userId,
-        region,
-        country,
-        startDateStr,
-        endDateStr
-    );
+    const hasSalesOnly = !live && hasSalesOnlyRows(salesData);
 
-    if (!salesData || salesData.datewiseSales.length === 0) {
-        logger.warn('No sales-only metrics found for custom range', { userId, country, region, startDateStr, endDateStr });
+    if (!hasSalesOnly && !live) {
+        logger.warn('No sales-only metrics or DailySkuFinance rows for custom range', { userId, country, region, startDateStr, endDateStr });
         return createEmptyResult();
     }
 
-    logger.info('Processing custom date range from per-day documents', {
+    logger.info('Processing custom date range', {
         userId,
         country,
         region,
         requestedRange: { startDate: startDateStr, endDate: endDateStr },
-        daysFound: salesData.datewiseSales.length
+        salesSource: live ? 'dailySkuFinance' : 'salesOnlyMetrics',
+        salesOnlyDays: hasSalesOnly ? salesData.datewiseSales.length : 0,
+        financeDays: live?.datewiseSales?.length || 0
     });
 
-    const totalSales = salesData.totalSales?.amount || 0;
-    const currencyCode = salesData.totalSales?.currencyCode || 'USD';
+    const currencyCode = (live ? live.totalSales?.currencyCode : salesData.totalSales?.currencyCode) || 'USD';
+    const totalSales = live ? (live.totalSales?.amount || 0) : (salesData.totalSales?.amount || 0);
 
     let totalPpcSpent = await getDatewisePPCSpend(userId, country, region, startDateStr, endDateStr);
 
-    const datewiseChartData = salesData.datewiseSales.map((item) => {
+    // Per-day gross profit from live finance (SalesOnlyMetrics has none).
+    const liveGrossProfitByDate = new Map(
+        (live?.datewiseGrossProfit || []).map((d) => [d.date, d.grossProfit?.amount || 0])
+    );
+    const chartSource = live ? live.datewiseSales : salesData.datewiseSales;
+    const datewiseChartData = chartSource.map((item) => {
         const itemDate = new Date(item.date);
         const displayDate = itemDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         return {
             date: displayDate,
             totalSales: item.sales?.amount || 0,
-            grossProfit: item.grossProfit?.amount || 0,
+            grossProfit: liveGrossProfitByDate.has(item.date)
+                ? liveGrossProfitByDate.get(item.date)
+                : (item.grossProfit?.amount || 0),
             originalDate: item.date
         };
     }).sort((a, b) => new Date(a.originalDate) - new Date(b.originalDate));
 
+    // Fee/profit fields: live finance for the range; without it they stay 0 as before.
+    const fbaFees = live?.fbaFees?.amount || 0;
+    const amazonFees = live?.amazonFees?.amount || 0;
+    const otherAmazonFees = Math.max(0, amazonFees - fbaFees);
+
     return {
         totalSales: { amount: parseFloat(totalSales.toFixed(2)), currencyCode },
-        grossProfit: { amount: 0, currencyCode },
+        grossProfit: { amount: parseFloat((live?.grossProfit?.amount || 0).toFixed(2)), currencyCode },
         ppcSpent: { amount: parseFloat(totalPpcSpent.toFixed(2)), currencyCode },
-        fbaFees: { amount: 0, currencyCode },
-        amazonFees: { amount: 0, currencyCode },
-        otherAmazonFees: { amount: 0, currencyCode },
-        refunds: { amount: 0, currencyCode },
+        fbaFees: { amount: parseFloat(fbaFees.toFixed(2)), currencyCode },
+        amazonFees: { amount: parseFloat(amazonFees.toFixed(2)), currencyCode },
+        otherAmazonFees: { amount: parseFloat(otherAmazonFees.toFixed(2)), currencyCode },
+        refunds: { amount: parseFloat((live?.refunds?.amount || 0).toFixed(2)), currencyCode },
         dateRange: {
             startDate: formatDate(startDate),
             endDate: formatDate(endDate)
         },
         datewiseChartData: datewiseChartData,
-        asinWiseSales: [],
+        asinWiseSales: live?.asinWiseSales || [],
         currencyCode
     };
 }
