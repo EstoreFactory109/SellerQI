@@ -2224,39 +2224,17 @@ class ScheduledIntegration {
      */
     static async handleSuccess(userId, Country, Region) {
         logger.info("handleSuccess starting");
-        
+
         try {
-            const userModel = require('../../models/user-auth/userModel.js');
-            const { sendAnalysisReadyEmail } = require('../Email/SendAnalysisReadyEmail.js');
-            const { markFirstAnalysisDone } = require('../User/userServices.js');
-            
-            const userInfo = await userModel.findById(userId).select("analyseAccountSuccess email firstName");
-
-            if (userInfo && userInfo.analyseAccountSuccess === 1) {
-                if (userInfo.email && userInfo.firstName) {
-                    const dashboardUrl = process.env.DASHBOARD_URL || `${process.env.CLIENT_BASE_URL}/dashboard`;
-                    const emailSent = await sendAnalysisReadyEmail(
-                        userInfo.email,
-                        userInfo.firstName,
-                        dashboardUrl
-                    );
-
-                    if (emailSent) {
-                        userInfo.analyseAccountSuccess = 0;
-                        await userInfo.save();
-                        
-                        // Mark first analysis as done when email is successfully sent
-                        // This flag indicates the analysis is complete and dashboard is ready
-                        await markFirstAnalysisDone(userId);
-                        logger.info(`FirstAnalysisDone marked as true for user ${userId}`);
-                    }
-                }
-            }
-            
+            // Unlock the dashboard, then send the ready email best-effort. See firstAnalysisReady.js
+            // for why the flag no longer waits for the email.
+            const { completeFirstAnalysis } = require('../User/firstAnalysisReady.js');
+            const { marked } = await completeFirstAnalysis(userId);
+            if (marked) logger.info(`FirstAnalysisDone marked as true for user ${userId}`);
             logger.info("handleSuccess ended");
-        } catch (emailError) {
-            logger.error("Error sending analysis ready email", {
-                error: emailError.message,
+        } catch (error) {
+            logger.error("Error completing first analysis", {
+                error: error.message,
                 userId
             });
         }
