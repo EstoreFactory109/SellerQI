@@ -5,6 +5,7 @@ import axios from 'axios';
 import { formatCurrencyWithLocale } from '../../../utils/currencyUtils.js';
 import { parseLocalDate } from '../../../utils/dateUtils.js';
 import { resolveProfitabilityQueryDates } from '../../../utils/profitabilityDateRange.js';
+import { hasFinanceDashboardData } from '../../../utils/financeDashboardData.js';
 import { fetchLatestPPCMetrics, selectPPCSummary, selectPPCDateWiseMetrics, selectLatestPPCMetricsLoading } from '../../../redux/slices/PPCMetricsSlice.js';
 import { fetchCogs } from '../../../redux/slices/cogsSlice.js';
 import { computeTotalCogs } from '../../../utils/cogsCalculations.js';
@@ -168,7 +169,10 @@ const TotalSales = ({ onGrossProfitChange } = {}) => {
   };
 
   const pieMetrics = useMemo(() => {
-    const t = financeDashTotals;
+    // No finance rows (totals null, hasFinanceData false, or zero-filled with
+    // totalDays 0) is "not available", not $0 — so nothing below is computed from it.
+    const hasData = hasFinanceDashboardData(financeDashTotals, financeDashMeta);
+    const t = hasData ? financeDashTotals : null;
 
     const totalSalesVal = t?.productSales != null
       ? Number(t.productSales)
@@ -350,15 +354,16 @@ const TotalSales = ({ onGrossProfitChange } = {}) => {
     ];
 
     return {
-      totalSales: totalSalesVal,
+      totalSales: hasData ? totalSalesVal : null,
       ppcSpent: ppcSpentVal,
-      grossProfitRaw: grossProfitRawVal,
-      grossProfit: grossProfitVal,
+      grossProfitRaw: hasData ? grossProfitRawVal : null,
+      grossProfit: hasData ? grossProfitVal : null,
       visibleSlices,
-      hasFinanceData: !!t,
+      hasFinanceData: hasData,
     };
   }, [
     financeDashTotals,
+    financeDashMeta,
     financeDashAsinWise,
     financeDashOverhead,
     filteredPPCMetrics,
@@ -422,12 +427,16 @@ const TotalSales = ({ onGrossProfitChange } = {}) => {
           <div className="min-w-0">
             <h2 className="m-0 text-lg font-semibold" style={{ color: COLORS.textPrimary }}>Where your money goes</h2>
             <p className="m-0 mt-1 text-sm" style={{ color: COLORS.textSecondary }}>
-              {loading ? 'Loading your sales for this period…' : `Every dollar of the ${formatCurrencyWithLocale(totalSales, currency, 2)} you sold ${periodLabel}.`}
+              {loading
+                ? 'Loading your sales for this period…'
+                : showEmptyState
+                  ? `No sales data for ${periodLabel} yet.`
+                  : `Every dollar of the ${formatCurrencyWithLocale(totalSales, currency, 2)} you sold ${periodLabel}.`}
             </p>
           </div>
           <InfoTooltip text="Total product sales from finance data (DailySkuFinance) for the selected date range." />
         </div>
-        <div className="text-right flex-none">
+        {!showEmptyState && <div className="text-right flex-none">
           <div className="flex items-center justify-end gap-1.5">
             <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>You keep</div>
             <InfoTooltip
@@ -442,7 +451,7 @@ const TotalSales = ({ onGrossProfitChange } = {}) => {
               {formatCurrencyWithLocale(grossProfitRaw, currency, 2)}
             </div>
           )}
-        </div>
+        </div>}
       </div>
 
       {loading ? (

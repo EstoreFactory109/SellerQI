@@ -8,7 +8,9 @@ import { motion } from 'framer-motion';
 import { TrendingUp, Calendar, BarChart3, HelpCircle, Loader2 } from 'lucide-react';
 import Calender, { isClickInsideGaCalDropdown } from '../../Components/Calender/Calender.jsx';
 import DownloadReport from '../../Components/DownloadReport/DownloadReport.jsx';
-import { formatCurrencyWithLocale } from '../../utils/currencyUtils.js';
+import { formatCurrencyWithLocale, formatYAxisCurrency } from '../../utils/currencyUtils.js';
+import { hasFinanceDashboardData } from '../../utils/financeDashboardData.js';
+import { buildProfitabilityRow1 } from '../../utils/profitabilityKpis.js';
 import { parseLocalDate, formatDateDisplay } from '../../utils/dateUtils.js';
 import {
   resolveProfitabilityQueryDates,
@@ -75,7 +77,11 @@ const ProfitabilityDashboard = () => {
   const [financeDashOverhead, setFinanceDashOverhead] = useState([]);
   const [financeDashOverheadTotal, setFinanceDashOverheadTotal] = useState(0);
   const [financeDashRelationships, setFinanceDashRelationships] = useState(null);
+  const [financeDashMeta, setFinanceDashMeta] = useState(null);
   const [financeDashLoading, setFinanceDashLoading] = useState(false);
+  // True once a finance-dashboard fetch has finished — before that, no totals means
+  // "still loading" (skeleton); after it, no totals means "no finance data".
+  const [financeDashFetched, setFinanceDashFetched] = useState(false);
   const CalenderRef = useRef(null);
   const calendarAnchorRef = useRef(null);
   const tabsSectionRef = useRef(null);
@@ -196,12 +202,16 @@ const ProfitabilityDashboard = () => {
           setFinanceDashOverhead(fd.overhead || []);
           setFinanceDashOverheadTotal(fd.overheadTotal || 0);
           setFinanceDashRelationships(fd.relationships || null);
+          setFinanceDashMeta(fd.metadata || null);
         }
         setPpcGraphData(ppcGraphResp?.data?.data?.graphData || []);
       } catch (err) {
         console.error('Error fetching finance dashboard data:', err);
       } finally {
-        if (!cancelled) setFinanceDashLoading(false);
+        if (!cancelled) {
+          setFinanceDashLoading(false);
+          setFinanceDashFetched(true);
+        }
       }
     };
 
@@ -225,6 +235,10 @@ const ProfitabilityDashboard = () => {
       endDate: queryDates.endDate,
     }));
   }, [queryDates.ready, queryDates.startDate, queryDates.endDate, dispatch]);
+
+  // No finance rows (totals null, hasFinanceData false, or zero-filled with totalDays 0)
+  // shows as not available — '—' and "Set up" — never as $0.00.
+  const hasFinanceData = hasFinanceDashboardData(financeDashTotals, financeDashMeta);
 
   const chartData = useMemo(() => {
     if (!queryDates.ready) return [];
@@ -324,8 +338,9 @@ const ProfitabilityDashboard = () => {
       adSpend = ppcSummary.totalSpend;
     }
     
-    const totalSales = financeDashTotals?.productSales != null
-      ? Number(financeDashTotals.productSales)
+    const t = hasFinanceData ? financeDashTotals : null;
+    const totalSales = t?.productSales != null
+      ? Number(t.productSales)
       : 0;
 
     // PPC Sales and ACOS from PPCMetrics only
@@ -341,7 +356,6 @@ const ProfitabilityDashboard = () => {
     acos = ppcSales > 0 ? (adSpend / ppcSales) * 100 : 0;
 
     // ── Per-ASIN expenses from financeDashTotals ──
-    const t = financeDashTotals;
     const totalUnitsSold = t?.units != null ? Number(t.units) : 0;
 
     const perAsinExpenses = t ? (
@@ -485,47 +499,35 @@ const ProfitabilityDashboard = () => {
     // Net profit is only as complete as the COGS data behind it — flag it when some products are missing COGS.
     const productsMissingCogs = cogsCompletion.missing;
 
-    const row1 = [
-      {
-        label: 'Total Sales',
-        value: `${currency}${totalSales.toFixed(2)}`,
-        icon: 'dollar-sign',
-        breakdown: salesBreakdown,
-        isExpandable: true,
-      },
-      {
-        label: 'Total Units Sold',
-        value: totalUnitsSold.toLocaleString(),
-        icon: 'list',
-      },
-      {
-        label: 'Expenses',
-        value: `${currency}${displayTotalExpenses.toFixed(2)}`,
-        icon: 'trending-down',
-        breakdown: expenseBreakdown,
-        isExpandable: expenseBreakdown.length > 0,
-        caption: 'Fees, ads, refunds',
-      },
-      {
-        label: 'Net Profit',
-        value: `${currency}${displayProfit.toFixed(2)}`,
-        icon: 'dollar-sign',
-        caption: productsMissingCogs > 0 ? 'Partial — costs missing' : null,
-        tintColor: productsMissingCogs > 0 ? COLORS.watch : null,
-      },
-    ];
+    const row1 = buildProfitabilityRow1({
+      hasFinanceData,
+      currency,
+      totalSales,
+      totalUnitsSold,
+      totalExpenses: displayTotalExpenses,
+      netProfit: displayProfit,
+      salesBreakdown,
+      expenseBreakdown,
+      productsMissingCogs,
+      watchColor: COLORS.watch,
+    });
 
-    const showRow2 = !!financeDashTotals;
+    const showRow2 = hasFinanceData;
     const row2 = showRow2 ? [
       { label: 'ACoS', value: `${acos.toFixed(2)}%`, icon: 'target' },
       { label: 'Profit Margin', value: `${profitMargin}%`, icon: 'percent', caption: 'Healthy: 15–25%' },
     ] : [];
 
     return { row1, row2 };
-  }, [queryDates.ready, queryDates.startDate, queryDates.endDate, ppcSummary, ppcKPISummary, ppcDateWiseMetrics, currency, financeDashTotals, financeDashOverhead, financeDashAsinWise, cogsValues, cogsCompletion]);
+  }, [queryDates.ready, queryDates.startDate, queryDates.endDate, ppcSummary, ppcKPISummary, ppcDateWiseMetrics, currency, financeDashTotals, hasFinanceData, financeDashOverhead, financeDashAsinWise, cogsValues, cogsCompletion]);
 
   // Prepare data for CSV/Excel export
   const prepareProfitabilityData = () => {
+    // No finance data: nothing real to export. Returning null tells DownloadReport the user was already told.
+    if (financeDashFetched && !financeDashLoading && !hasFinanceData) {
+      alert('No finance data is available for this period yet, so there is nothing to export.');
+      return null;
+    }
     try {
       devLog('=== Starting profitability data preparation ===');
       devLog('Input data check:', {
@@ -905,7 +907,7 @@ const ProfitabilityDashboard = () => {
     }
     
     // Add financial summary
-    if (financeDashTotals) {
+    if (hasFinanceData) {
       let totalCOGSSummary = 0;
       const profitibilityDataSummary = Array.isArray(financeDashAsinWise) ? financeDashAsinWise : [];
       profitibilityDataSummary.forEach((product) => {
@@ -914,7 +916,7 @@ const ProfitabilityDashboard = () => {
         totalCOGSSummary += cogsPerUnit * quantity;
       });
       const salesTotal = Number(financeDashTotals.productSales || 0);
-      const profitRow = metrics?.row1?.find((m) => m.label === 'Profit');
+      const profitRow = metrics?.row1?.find((m) => m.label === 'Net Profit');
       const adjustedGrossProfitSummary = salesTotal - totalCOGSSummary;
       
       csvData.push(['Financial Summary (COGS-Adjusted for Profitability Dashboard)']);
@@ -1272,7 +1274,7 @@ const ProfitabilityDashboard = () => {
               style={{ marginBottom: '10px' }}
             >
               {/* Show skeleton when loading OR when metricsData is not yet available (initial state) */}
-              {(!profitabilityDates.bootstrapped || !queryDates.ready || financeDashLoading || !financeDashTotals) ? (
+              {(!profitabilityDates.bootstrapped || !queryDates.ready || financeDashLoading || !financeDashFetched) ? (
                 <div className="flex flex-nowrap items-stretch gap-2 w-full overflow-visible">
                   {[...Array(6)].map((_, i) => (
                     <div key={i} className="animate-pulse flex-1 min-w-[120px]" style={{ background: COLORS.surface, borderRadius: '6px', border: `1px solid ${COLORS.border}`, padding: '16px' }}>
@@ -1285,7 +1287,7 @@ const ProfitabilityDashboard = () => {
                 <div className="flex flex-nowrap items-stretch gap-2 w-full overflow-visible">
                   {[...metrics.row1, ...metrics.row2].map((metric) => (
                     <div key={metric.label} className="flex-1 min-w-[120px] overflow-visible">
-                      <MetricCard label={metric.label} value={metric.value} icon={metric.icon} breakdown={metric.breakdown} isExpandable={metric.isExpandable} currency={currency} caption={metric.caption} tintColor={metric.tintColor} />
+                      <MetricCard label={metric.label} value={metric.value} icon={metric.icon} breakdown={metric.breakdown} isExpandable={metric.isExpandable} currency={currency} caption={metric.caption} tintColor={metric.tintColor} noData={metric.noData} />
                     </div>
                   ))}
                 </div>
@@ -1335,12 +1337,16 @@ const ProfitabilityDashboard = () => {
                   </div>
                 </div>
                 <div style={{ padding: '8px' }}>
-                  {(financeDashLoading || !queryDates.ready || !financeDashDateWise) ? (
+                  {(financeDashLoading || !queryDates.ready || !financeDashFetched) ? (
                     <div className="animate-pulse flex items-center justify-center" style={{ height: 280, background: '#1a1a1a', borderRadius: '8px' }}>
                       <div className="text-center">
                         <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" style={{ color: '#60a5fa' }} />
                         <span style={{ color: '#9ca3af', fontSize: '12px' }}>Loading chart data...</span>
                       </div>
+                    </div>
+                  ) : !hasFinanceData ? (
+                    <div className="flex items-center justify-center" style={{ height: 280, background: '#1a1a1a', borderRadius: '8px' }}>
+                      <span style={{ color: '#9ca3af', fontSize: '12px' }}>No finance data available for this period yet.</span>
                     </div>
                   ) : (
                   <ResponsiveContainer width="100%" height={280}>
@@ -1371,7 +1377,7 @@ const ProfitabilityDashboard = () => {
                         stroke="#30363d"
                         tickLine={false}
                         axisLine={false}
-                        tickFormatter={(value) => `${currency}${value}`}
+                        tickFormatter={(value) => formatYAxisCurrency(value, currency)}
                       />
                       <Tooltip
                         contentStyle={{
@@ -1383,7 +1389,7 @@ const ProfitabilityDashboard = () => {
                           fontSize: '14px',
                           color: '#f3f4f6'
                         }}
-                        formatter={(value, name) => [`${currency}${value}`, name === 'grossProfit' ? 'Gross Profit' : 'Total Sales']}
+                        formatter={(value, name) => [formatCurrencyWithLocale(value, currency, 2), name === 'grossProfit' ? 'Gross Profit' : 'Total Sales']}
                         labelFormatter={(label) => `Date: ${label}`}
                         labelStyle={{ color: '#f3f4f6' }}
                       />

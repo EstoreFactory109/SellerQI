@@ -62,6 +62,7 @@ import { COLORS, InfoTooltip } from '../../Components/Shared/index.js';
 import { parseLocalDate } from '../../utils/dateUtils.js';
 import { shouldUseCalendarDateRange } from '../../utils/totalSalesFilterUrl.js';
 import { getAdsPerformanceVerdict } from '../../utils/adsPerformanceVerdict.js';
+import { computeTacos, formatPercentOrNA } from '../../utils/ppcKpis.js';
 import { usePPCData } from '../../hooks/usePageData.js';
 import { fetchDashboardPhase1 } from '../../redux/slices/PageDataSlice.js';
 import { PageSkeleton, CampaignAnalysisSkeleton } from '../../Components/Skeleton/PageSkeletons.jsx';
@@ -1860,22 +1861,21 @@ const PPCDashboard = () => {
 
     // Real total-sales figure (all channels, same window as PPC sales) — prefer
     // the backend's own aggregate over back-deriving one from TACoS.
-    let totalSales = ppcKPISummary?.totalSales != null ? Number(ppcKPISummary.totalSales) : 0;
+    // null = no sales data at all (TotalWeeklySale is null with no finance data).
+    let totalSales = ppcKPISummary?.totalSales != null ? Number(ppcKPISummary.totalSales) : null;
     if (!totalSales) {
       const totalSalesData = info?.TotalSales;
       if (Array.isArray(totalSalesData) && totalSalesData.length > 0) {
         totalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
-      } else {
-        totalSales = Number(info?.TotalWeeklySale || 0);
+      } else if (info?.TotalWeeklySale != null) {
+        totalSales = Number(info.TotalWeeklySale);
       }
     }
 
     // TACoS: prefer the backend value (uses SalesOnlyMetrics aggregated over
     // the same window as PPC). Only fall back to the locally-derived totalSales
-    // if the backend didn't supply one.
-    if (tacos == null) {
-      tacos = totalSales > 0 ? (spend / totalSales) * 100 : 0;
-    }
+    // if the backend didn't supply one — and with no sales it is '—', not 0% or ∞.
+    tacos = computeTacos({ backendTacos: tacos, spend, totalSales });
 
     // Derive engagement KPIs locally if backend didn't supply them (fallback paths).
     if (ctr == null) ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
@@ -1912,9 +1912,9 @@ const PPCDashboard = () => {
       },
       {
         label: 'TACoS',
-        value: `${tacos.toFixed(2)}%`,
+        value: formatPercentOrNA(tacos),
         icon: Gauge,
-        valueColor: tacos > 15 ? COLORS.watch : undefined,
+        valueColor: tacos != null && tacos > 15 ? COLORS.watch : undefined,
         caption: 'Share of total sales driven by ads',
         tooltip: 'Ad spend as % of total sales — how dependent the business is on ads.',
       },

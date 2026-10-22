@@ -14,9 +14,10 @@ const DashboardDataSlice = createSlice({
       UpdateDashboardInfo:(state,action)=>{
         state.DashBoardInfo.startDate=action.payload.startDate;
         state.DashBoardInfo.endDate=action.payload.endDate;
-        state.DashBoardInfo.accountFinance=action.payload.financeData;
+        // Same shape as usePageData: an object whose fields may be null (no finance data)
+        state.DashBoardInfo.accountFinance=action.payload.financeData || {};
         state.DashBoardInfo.reimbustment=action.payload.reimburstmentData;
-        state.DashBoardInfo.TotalWeeklySale=action.payload.WeeklySales;
+        state.DashBoardInfo.TotalWeeklySale=action.payload.WeeklySales ?? null;
         state.DashBoardInfo.TotalSales=action.payload.TotalSales;
         state.DashBoardInfo.GetOrderData=action.payload.GetOrderData;
         // Set calendar mode flag for custom range

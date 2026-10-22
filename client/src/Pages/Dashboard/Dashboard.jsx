@@ -26,7 +26,7 @@ const Dashboard = () => {
   const [dismissedFixKeys, setDismissedFixKeys] = useState([])
   // Reported up by TotalSales.jsx (below) — the real Gross Profit figure it already
   // computes, so this page doesn't duplicate that fee/COGS calculation independently.
-  const [grossProfitData, setGrossProfitData] = useState({ grossProfitRaw: 0, totalSales: 0, hasFinanceData: false, loading: true })
+  const [grossProfitData, setGrossProfitData] = useState({ grossProfitRaw: null, totalSales: null, hasFinanceData: false, loading: true })
   const contentRef = useRef(null)
   const totalSalesSectionRef = useRef(null)
   const topFixesSectionRef = useRef(null)

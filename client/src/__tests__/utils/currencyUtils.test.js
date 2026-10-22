@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { formatCurrency, formatCurrencyWithLocale, formatYAxisCurrency } from '../../utils/currencyUtils';
+import { formatCurrency, formatCurrencyWithLocale, formatYAxisCurrency, isMissingNumber, NOT_AVAILABLE } from '../../utils/currencyUtils';
 
 describe('currencyUtils', () => {
   describe('formatCurrency', () => {
@@ -86,6 +86,32 @@ describe('currencyUtils', () => {
     it('should use custom currency symbol', () => {
       expect(formatYAxisCurrency(1000, '€')).toBe('€1.0k');
       expect(formatYAxisCurrency(500, '£')).toBe('£500');
+    });
+  });
+
+  describe('no data (null / undefined / NaN)', () => {
+    it("returns '—' instead of throwing or printing $0.00 / $NaN", () => {
+      for (const fn of [formatCurrency, formatCurrencyWithLocale, formatYAxisCurrency]) {
+        expect(fn(null)).toBe('—');
+        expect(fn(undefined)).toBe('—');
+        expect(fn(NaN)).toBe('—');
+        expect(fn(null, '€')).toBe('—');
+      }
+    });
+
+    it('still formats a real 0 as currency', () => {
+      expect(formatCurrency(0)).toBe('$0');
+      expect(formatCurrencyWithLocale(0)).toBe('$0.00');
+      expect(formatYAxisCurrency(0)).toBe('$0');
+    });
+
+    it('isMissingNumber treats only null/undefined/NaN as missing', () => {
+      expect(isMissingNumber(null)).toBe(true);
+      expect(isMissingNumber(undefined)).toBe(true);
+      expect(isMissingNumber(NaN)).toBe(true);
+      expect(isMissingNumber(0)).toBe(false);
+      expect(isMissingNumber(-5)).toBe(false);
+      expect(NOT_AVAILABLE).toBe('—');
     });
   });
 });
