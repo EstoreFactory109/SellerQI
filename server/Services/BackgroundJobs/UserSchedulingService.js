@@ -10,6 +10,28 @@ const logger = require('../../utils/Logger.js');
 // a permanently broken account is paused until tomorrow.
 const MAX_DAILY_ATTEMPTS = 4;
 
+/**
+ * The schedule's per-marketplace entries after the user's marketplaces change.
+ *
+ * This used to rebuild every entry with lastDailyUpdate: null on every connect. Adding one
+ * marketplace therefore also reset the others: their "done today" stamp and their daily attempt
+ * counter went, so an account that had already used its attempts (or finished) was eligible
+ * again. Existing marketplaces now keep their entry as it is; new ones start fresh; marketplaces
+ * no longer on the Seller document are dropped.
+ *
+ * @param {Array} existing  schedule.sellerAccounts (may be undefined)
+ * @param {Array} accounts  seller.sellerAccount
+ */
+function mergeScheduleAccounts(existing, accounts) {
+    const sameMarketplace = (a, b) => a && b && a.country === b.country && a.region === b.region;
+    const current = Array.isArray(existing) ? existing : [];
+    return (Array.isArray(accounts) ? accounts : []).map((account) => {
+        const kept = current.find((entry) => sameMarketplace(entry, account));
+        if (kept) return kept;
+        return { country: account.country, region: account.region, lastDailyUpdate: null };
+    });
+}
+
 class UserSchedulingService {
 
     /**
@@ -264,11 +286,8 @@ class UserSchedulingService {
                 return;
             }
 
-            const sellerAccounts = seller.sellerAccount.map(account => ({
-                country: account.country,
-                region: account.region,
-                lastDailyUpdate: null
-            }));
+            const schedule = await UserUpdateSchedule.findOne({ userId }).select('sellerAccounts').lean();
+            const sellerAccounts = mergeScheduleAccounts(schedule?.sellerAccounts, seller.sellerAccount);
 
             await UserUpdateSchedule.updateOne(
                 { userId },
@@ -467,4 +486,4 @@ class UserSchedulingService {
     }
 }
 
-module.exports = { UserSchedulingService }; 
+module.exports = { UserSchedulingService, mergeScheduleAccounts }; 
