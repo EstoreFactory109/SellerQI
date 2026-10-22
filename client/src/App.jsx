@@ -47,6 +47,7 @@ import QMate from './Pages/Tools/QMate.jsx';
 import Features from './Pages/Marketing/features.jsx';
 import InventoryManagement from './Pages/Marketing/inventoryManagement.jsx';
 import ConnectAccounts from './Pages/Onboarding/ConnectAccounts.jsx';
+import ConnectMarketplaces from './Pages/Onboarding/ConnectMarketplaces.jsx';
 import ProfileIDSelection from './Pages/Onboarding/ProfileIDSeclection.jsx';
 import PaymentCancel from './Pages/Payment/PaymentCancel.jsx';
 import PaymentFailed from './Pages/Payment/PaymentFailed.jsx';
@@ -237,6 +238,7 @@ const App = () => {
         <Route path='/unsubscribe-alerts' element={<UnsubscribeAlerts />} />
         <Route path='/connect-to-amazon' element={<ConnectToAmazon />} />
         <Route path='/connect-accounts' element={<ConnectAccounts />} />
+        <Route path='/connect-marketplaces' element={<ConnectMarketplaces />} />
         <Route path='/auth/callback' element={<FetchingTokens />} />
         <Route path='/analyse-account' element={<AnalysingAccount />} />
         <Route path='/reset-password/:code' element={<ResetPassword />} />

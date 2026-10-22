@@ -22,6 +22,8 @@ import { coordinatedAuthCheck, clearAuthCache } from "../../utils/authCoordinato
 import { loginSuccess, logout } from "../../redux/slices/authSlice.js";
 import OnboardingShell from "../../Components/Onboarding/OnboardingShell.jsx";
 import { COLORS } from "../../Components/Shared/index.js";
+import { fetchChecklist } from "../../utils/multiMarketplaceOnboarding.js";
+import { countryFlag, countryName } from "../../utils/amazonMarketplaces.js";
 
 // Matches the onboarding shell's inset panel shade.
 const PANEL_BG = '#10141C';
@@ -40,6 +42,17 @@ const INNER_PAGES = [
 // Polling interval in milliseconds (15 minutes)
 const POLLING_INTERVAL = 15 * 60 * 1000;
 
+// Multi-marketplace onboarding: each marketplace's own progress, refreshed every minute until all
+// are ready. Only shown when the seller onboarded through the new flow.
+const MARKETPLACE_POLLING_INTERVAL = 60 * 1000;
+const MARKETPLACE_STATUS = {
+  ready: { label: 'Ready', color: COLORS.good },
+  preparing: { label: 'Preparing…', color: '#7EA8F8' },
+  queued: { label: 'Queued', color: COLORS.textSecondary },
+  failed: { label: 'Needs a retry', color: COLORS.watch },
+  not_started: { label: 'Not started', color: COLORS.textMuted },
+};
+
 const AnalysingAccount = () => {
   const user = useSelector((state) => state.Auth?.user);
   const navigate = useNavigate();
@@ -54,6 +67,7 @@ const AnalysingAccount = () => {
   const [isChecking, setIsChecking] = useState(true);
   const pollingIntervalRef = useRef(null);
   const hasCheckedAuthRef = useRef(false);
+  const [marketplaces, setMarketplaces] = useState([]);
 
   // Check authentication on mount
   useEffect(() => {
@@ -148,6 +162,27 @@ const AnalysingAccount = () => {
       }
     };
   }, [checkAnalysisStatus, isAuthenticated, isAuthChecking]);
+
+  // Per-marketplace progress (multi-marketplace onboarding only).
+  useEffect(() => {
+    if (!isAuthenticated || isAuthChecking) return undefined;
+    let timer = null;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const checklist = await fetchChecklist();
+        if (cancelled || !checklist?.enabled) return;
+        const list = checklist.marketplaces || [];
+        setMarketplaces(list);
+        if (list.length && list.every((m) => m.fetch?.status === 'ready')) return;
+      } catch {
+        // Keep the last list; try again on the next tick.
+      }
+      if (!cancelled) timer = setTimeout(refresh, MARKETPLACE_POLLING_INTERVAL);
+    };
+    refresh();
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [isAuthenticated, isAuthChecking]);
 
   // Handle dashboard navigation when analysis is complete
   const handleGoToDashboard = () => {
@@ -257,6 +292,29 @@ const AnalysingAccount = () => {
             </>
           )}
         </div>
+
+        {marketplaces.length > 1 && (
+          <div style={{ border: `1px solid ${COLORS.border}`, borderRadius: 14, background: COLORS.surface, padding: '16px 18px', marginBottom: 18 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.textPrimary, marginBottom: 10 }}>Your marketplaces</div>
+            <div className="flex flex-col" style={{ gap: 6 }}>
+              {marketplaces.map((m) => {
+                const status = MARKETPLACE_STATUS[m.fetch?.status] || MARKETPLACE_STATUS.not_started;
+                return (
+                  <div key={`${m.country}-${m.region}`} className="flex items-center gap-2.5" style={{ padding: '8px 11px', borderRadius: 9, background: PANEL_BG, fontSize: 13 }}>
+                    <span style={{ fontSize: 16 }}>{countryFlag(m.country)}</span>
+                    <span style={{ color: COLORS.textPrimary }}>{countryName(m.country)}</span>
+                    {m.primary && <span style={{ fontSize: 11, color: '#7EA8F8' }}>Main</span>}
+                    <span className="flex-1" />
+                    <span style={{ fontSize: 12, fontWeight: 600, color: status.color }}>{status.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 10 }}>
+              Your main marketplace is prepared first. The others follow and appear in the marketplace switcher when ready.
+            </div>
+          </div>
+        )}
 
         {/* Primary action */}
         <div className="flex items-center gap-3 flex-wrap" style={{ marginBottom: 14 }}>

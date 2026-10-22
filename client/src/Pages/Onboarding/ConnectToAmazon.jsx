@@ -8,48 +8,16 @@ import { hasPremiumAccess } from '../../utils/subscriptionCheck.js';
 import { devLog } from '../../utils/devLogger.js';
 import OnboardingShell from '../../Components/Onboarding/OnboardingShell.jsx';
 import { COLORS } from '../../Components/Shared/index.js';
+import { COUNTRY_DATA, REGION_NAMES } from '../../utils/amazonMarketplaces.js';
+import {
+  fetchChecklist,
+  goToAmazon,
+  errorMessage,
+  CHECKLIST_PATH,
+} from '../../utils/multiMarketplaceOnboarding.js';
 
 // Matches the onboarding shell's inset panel shade.
 const PANEL_BG = '#10141C';
-
-// Complete list of Amazon marketplaces with region mapping
-const COUNTRY_DATA = [
-  // North America (NA)
-  { code: 'CA', name: 'Canada', marketplaceId: 'A2EUQ1WTGCTBG2', region: 'NA', flag: '🇨🇦' },
-  { code: 'US', name: 'United States of America', marketplaceId: 'ATVPDKIKX0DER', region: 'NA', flag: '🇺🇸' },
-  { code: 'MX', name: 'Mexico', marketplaceId: 'A1AM78C64UM0Y8', region: 'NA', flag: '🇲🇽' },
-  { code: 'BR', name: 'Brazil', marketplaceId: 'A2Q3Y263D00KWC', region: 'NA', flag: '🇧🇷' },
-  
-  // Europe (EU)
-  { code: 'IE', name: 'Ireland', marketplaceId: 'A28R8C7NBKEWEA', region: 'EU', flag: '🇮🇪' },
-  { code: 'ES', name: 'Spain', marketplaceId: 'A1RKKUPIHCS9HS', region: 'EU', flag: '🇪🇸' },
-  { code: 'UK', name: 'United Kingdom', marketplaceId: 'A1F83G8C2ARO7P', region: 'EU', flag: '🇬🇧' },
-  { code: 'FR', name: 'France', marketplaceId: 'A13V1IB3VIYZZH', region: 'EU', flag: '🇫🇷' },
-  { code: 'BE', name: 'Belgium', marketplaceId: 'AMEN7PMS3EDWL', region: 'EU', flag: '🇧🇪' },
-  { code: 'NL', name: 'Netherlands', marketplaceId: 'A1805IZSGTT6HS', region: 'EU', flag: '🇳🇱' },
-  { code: 'DE', name: 'Germany', marketplaceId: 'A1PA6795UKMFR9', region: 'EU', flag: '🇩🇪' },
-  { code: 'IT', name: 'Italy', marketplaceId: 'APJ6JRA9NG5V4', region: 'EU', flag: '🇮🇹' },
-  { code: 'SE', name: 'Sweden', marketplaceId: 'A2NODRKZP88ZB9', region: 'EU', flag: '🇸🇪' },
-  { code: 'ZA', name: 'South Africa', marketplaceId: 'AE08WJ6YKNBMC', region: 'EU', flag: '🇿🇦' },
-  { code: 'PL', name: 'Poland', marketplaceId: 'A1C3SOZRARQ6R3', region: 'EU', flag: '🇵🇱' },
-  { code: 'EG', name: 'Egypt', marketplaceId: 'ARBP9OOSHTCHU', region: 'EU', flag: '🇪🇬' },
-  { code: 'TR', name: 'Turkey', marketplaceId: 'A33AVAJ2PDY3EV', region: 'EU', flag: '🇹🇷' },
-  { code: 'SA', name: 'Saudi Arabia', marketplaceId: 'A17E79C6D8DWNP', region: 'EU', flag: '🇸🇦' },
-  { code: 'AE', name: 'United Arab Emirates', marketplaceId: 'A2VIGQ35RCS4UG', region: 'EU', flag: '🇦🇪' },
-  { code: 'IN', name: 'India', marketplaceId: 'A21TJRUUN4KGV', region: 'EU', flag: '🇮🇳' },
-  
-  // Far East (FE)
-  { code: 'SG', name: 'Singapore', marketplaceId: 'A19VAU5U5O7RUS', region: 'FE', flag: '🇸🇬' },
-  { code: 'AU', name: 'Australia', marketplaceId: 'A39IBJ37TRP1C6', region: 'FE', flag: '🇦🇺' },
-  { code: 'JP', name: 'Japan', marketplaceId: 'A1VC38T7YXB528', region: 'FE', flag: '🇯🇵' },
-];
-
-// Region display names
-const REGION_NAMES = {
-  'NA': 'North America',
-  'EU': 'Europe',
-  'FE': 'Far East'
-};
 
 // `basePath`, when given, overrides the agency-derived client route prefix so
 // other portals (e.g. the ESF staff portal) can reuse this flow unchanged.
@@ -60,6 +28,10 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [checkingSubscription, setCheckingSubscription] = useState(true);
+  // Multi-marketplace onboarding (server-flagged, self-serve sellers only): this page then picks
+  // the MAIN marketplace and goes straight to Amazon; the other marketplaces come next.
+  const isSelfServe = !isAgencyContext && !basePath;
+  const [multiMarketplace, setMultiMarketplace] = useState(false);
   const marketplaceDropdownRef = useRef(null);
   const navigate = useNavigate();
 
@@ -95,11 +67,26 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
       // Allow all authenticated users to proceed (skip pricing check)
       // New signups with LITE package can connect Amazon first, then pay later
       devLog('ConnectToAmazon: User authenticated - allowing access');
+      if (isSelfServe) {
+        try {
+          const checklist = await fetchChecklist();
+          if (checklist?.enabled) {
+            // Already part-way through: carry on from the checklist.
+            if (checklist.primary) {
+              navigate(CHECKLIST_PATH, { replace: true });
+              return;
+            }
+            setMultiMarketplace(true);
+          }
+        } catch {
+          // Unknown: keep the current single-marketplace flow.
+        }
+      }
       setCheckingSubscription(false);
     };
 
     checkAuth();
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, navigate, isSelfServe]);
   
   // Get selected country data
   const selectedCountry = useMemo(() => {
@@ -144,6 +131,18 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
     }
     
     setLoading(true);
+
+    if (multiMarketplace) {
+      try {
+        // Nothing is saved yet: the marketplace is created once Amazon approves the region.
+        await goToAmazon({ kind: 'spapi', region, primaryCountry: marketPlace });
+      } catch (error) {
+        setLoading(false);
+        alert(errorMessage(error, 'Could not open Amazon. Please try again.'));
+      }
+      return;
+    }
+
     try {
       devLog("ConnectToAmazon submit:", { region, country: marketPlace });
       
@@ -204,7 +203,9 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
           <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 14, color: COLORS.textPrimary }}>Exactly what happens next</div>
           <div className="flex flex-col" style={{ gap: 13 }}>
             {[
-              'You pick the marketplace your account sells in — that tells us which Amazon region to talk to.',
+              multiMarketplace
+                ? 'You pick your main marketplace — the one you want to see first. Your other marketplaces come next.'
+                : 'You pick the marketplace your account sells in — that tells us which Amazon region to talk to.',
               "Amazon's own consent page opens, so you sign in on amazon.com and not on our site.",
               'Amazon sends you back here and the scan starts. No keys to copy, nothing to paste.',
             ].map((line, i) => (
@@ -248,7 +249,21 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
 
         <form onSubmit={handleSubmit}>
           {/* One marketplace only, and it governs both connections — flagged up front
-              because picking the wrong one here makes the Ads profiles in step 3 mismatch. */}
+              because picking the wrong one here makes the Ads profiles in step 3 mismatch.
+              With multi-marketplace onboarding this is only the MAIN one, so say that instead. */}
+          {multiMarketplace ? (
+            <div
+              className="flex items-start gap-2.5"
+              style={{ padding: '13px 15px', border: '1px solid rgba(59,130,246,.3)', borderRadius: 11, background: 'rgba(59,130,246,.07)', marginBottom: 16 }}
+            >
+              <Globe className="w-4 h-4 flex-shrink-0" style={{ color: '#7EA8F8', marginTop: 1 }} />
+              <div style={{ fontSize: 13, lineHeight: '20px', color: '#C7CFDD' }}>
+                <span style={{ fontWeight: 600, color: COLORS.textPrimary }}>Start with your main marketplace.</span>{' '}
+                Selling in more than one? Amazon will show us the others in the same region after you approve, and
+                you can add other regions next — no need to pick them all now.
+              </div>
+            </div>
+          ) : (
           <div
             className="flex items-start gap-2.5"
             style={{ padding: '13px 15px', border: '1px solid rgba(245,166,35,.3)', borderRadius: 11, background: 'rgba(245,166,35,.07)', marginBottom: 16 }}
@@ -260,11 +275,12 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
               one can be connected during setup. Choosing a different one later means reconnecting both accounts.
             </div>
           </div>
+          )}
 
           <div style={{ marginBottom: 14 }}>
             <label className="flex items-center gap-2" style={{ fontSize: 12, fontWeight: 600, color: COLORS.textSecondary, marginBottom: 8 }}>
               <Globe className="w-3.5 h-3.5" style={{ color: COLORS.textMuted }} />
-              Which marketplace is your account in?
+              {multiMarketplace ? 'Which is your main marketplace?' : 'Which marketplace is your account in?'}
             </label>
 
                   <div className="relative" ref={marketplaceDropdownRef}>
@@ -388,7 +404,7 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
             {loading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Saving…
+                {multiMarketplace ? 'Opening Amazon…' : 'Saving…'}
               </>
             ) : (
               <>
