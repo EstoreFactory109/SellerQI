@@ -158,7 +158,7 @@ function assembleEconomicsDoc({ userId, country, region, startStr, endStr, byDat
         for (const { feeType, amount } of d.feeBreakdown) {
             breakdownTotals.set(feeType, (breakdownTotals.get(feeType) || 0) + amount);
         }
-        datewiseSales.push({ date, sales: money(d.sales, currencyCode), grossProfit: money(d.grossProfit, currencyCode) });
+        datewiseSales.push({ date, sales: money(d.sales, currencyCode), grossProfit: money(d.grossProfit, currencyCode), unitsSold: d.units });
         datewiseGrossProfit.push({ date, grossProfit: money(d.grossProfit, currencyCode) });
         datewiseFeesAndRefunds.push({
             date,

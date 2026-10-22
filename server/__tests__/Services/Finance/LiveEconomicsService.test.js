@@ -142,8 +142,11 @@ describe('LiveEconomicsService', () => {
             expect(doc.datewiseSales[0]).toEqual({
                 date: '2026-10-01',
                 sales: { amount: 150, currencyCode: 'USD' },
-                grossProfit: { amount: 109.5, currencyCode: 'USD' }
+                grossProfit: { amount: 109.5, currencyCode: 'USD' },
+                unitsSold: 6
             });
+            // Units per day, so date-wise readers (QMate, charts) need no second query.
+            expect(doc.datewiseSales.map((d) => d.unitsSold)).toEqual([6, 3, 3]);
             const sum = (arr, f) => Math.round(arr.reduce((s, x) => s + f(x), 0) * 100) / 100;
             expect(sum(doc.datewiseSales, (d) => d.sales.amount)).toBe(290);
             expect(sum(doc.datewiseGrossProfit, (d) => d.grossProfit.amount)).toBe(181.5);

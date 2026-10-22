@@ -30,6 +30,7 @@ const mongoose = require('mongoose');
 
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
+const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
 const logger = require('../../utils/Logger.js');
 const { nextScheduledReport } = require('../BackgroundJobs/esfReportsSchedule.js');
 const { getCurrencySymbol, getCurrencyCode } = require('../../utils/marketplaceCurrency.js');
@@ -71,22 +72,35 @@ const APPROX_USD = {
  * The primary marketplace: the one with the highest sales over the last 60
  * days, compared in approximate USD. With no sales anywhere, the first one
  * connected.
+ *
+ * Sales come from DailySkuFinance (written daily for every marketplace).
+ * SalesOnlyMetrics exists for only a handful, so it ranks a marketplace only
+ * when that marketplace has no finance rows in the window.
  */
 const pickPrimary = async (userId, marketplaces) => {
     if (marketplaces.length < 2) return marketplaces[0] || null;
     const since = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10);
-    let totals = [];
-    try {
-        totals = await SalesOnlyMetrics.aggregate([
-            { $match: { User: new mongoose.Types.ObjectId(String(userId)), date: { $gte: since } } },
-            { $group: { _id: { country: '$country', region: '$region' }, sales: { $sum: { $ifNull: ['$sales.amount', 0] } } } },
-        ]);
-    } catch (error) {
-        logger.warn(`[EsfAccountReports] primary marketplace ranking failed: ${error.message}`);
-    }
+    const match = { User: new mongoose.Types.ObjectId(String(userId)), date: { $gte: since } };
+    const byMarketplace = { _id: { country: '$country', region: '$region' } };
+    const read = (label, promise) => promise.catch((error) => {
+        logger.warn(`[EsfAccountReports] primary marketplace ranking (${label}) failed: ${error.message}`);
+        return [];
+    });
+    const [liveTotals, salesOnlyTotals] = await Promise.all([
+        read('DailySkuFinance', Promise.resolve().then(() => DailySkuFinance.aggregate([
+            { $match: match },
+            { $group: { ...byMarketplace, sales: { $sum: { $ifNull: ['$productSales', 0] } } } },
+        ]))),
+        read('SalesOnlyMetrics', Promise.resolve().then(() => SalesOnlyMetrics.aggregate([
+            { $match: match },
+            { $group: { ...byMarketplace, sales: { $sum: { $ifNull: ['$sales.amount', 0] } } } },
+        ]))),
+    ]);
+    const find = (rows, marketplace) => (rows || [])
+        .find((t) => t._id?.country === marketplace.country && t._id?.region === marketplace.region);
     let best = null;
     for (const marketplace of marketplaces) {
-        const row = totals.find((t) => t._id?.country === marketplace.country && t._id?.region === marketplace.region);
+        const row = find(liveTotals, marketplace) || find(salesOnlyTotals, marketplace);
         const usd = (row?.sales || 0) * (APPROX_USD[getCurrencyCode(marketplace.country)] ?? 1);
         if (!best || usd > best.usd) best = { marketplace, usd };
     }

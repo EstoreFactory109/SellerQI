@@ -20,6 +20,7 @@ const logger = require('../../utils/Logger.js');
 // collection is only read for a stored doc (its rows are keyed by that doc's _id).
 const { loadLiveEconomics, isStoredEconomicsDoc } = require('../Finance/LiveEconomicsService.js');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
+const { hasSalesOnlyRows } = require('../../models/MCP/SalesOnlyMetricsModel.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 const CogsModel = require('../../models/finance/CogsModel.js');
 const ProductWiseFinancial = require('../../models/finance/ProductWiseFinancialModel.js');
@@ -966,12 +967,32 @@ async function getQMateProfitabilityContext(userId, country, region, options = {
     const { asinLimit = 100 } = options;
     
     try {
-        // Sales-only mode: prioritize `SalesOnlyMetrics` so we don't depend on grossProfit/fees/refunds.
-        // If sales-only data exists, return a minimal profitability context with grossProfit forced to 0.
-        // Per-day model: findLatest aggregates recent 31 days into { totalSales, datewiseSales, dateRange }
-        const salesOnlyMetrics = await SalesOnlyMetrics.findLatest(userId, region, country);
+        // Live finance first (fresh EconomicsMetrics, else DailySkuFinance). The
+        // helpers below each read the same loader, so live → the full path.
+        const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+        const liveEconomics = await loadLiveEconomics(userObjectId, region, country);
 
-        if (salesOnlyMetrics) {
+        // Sales-only fallback, ONLY without live finance and with real
+        // SalesOnlyMetrics day rows. findLatest never returns null (a
+        // zero-filled doc instead), so `if (doc)` used to win for every account.
+        // Per-day model: findLatest aggregates recent 31 days into { totalSales, datewiseSales, dateRange }
+        const salesOnlyMetrics = liveEconomics ? null : await SalesOnlyMetrics.findLatest(userId, region, country);
+
+        if (!liveEconomics && !hasSalesOnlyRows(salesOnlyMetrics)) {
+            // Neither source: profitability is unknown, never a page of $0s.
+            logger.info('[QMateProfitabilityService] No finance data for profitability context', { userId, country, region });
+            return {
+                success: true,
+                source: 'no_finance_data',
+                data: null,
+                noData: {
+                    type: 'no_finance_data',
+                    message: 'SellerQI has no sales or finance data for this marketplace yet, so profitability is unknown.',
+                },
+            };
+        }
+
+        if (!liveEconomics) {
             const currencyCode = salesOnlyMetrics?.totalSales?.currencyCode || 'USD';
             const totalSalesAmount = salesOnlyMetrics?.totalSales?.amount || 0;
             const datewiseSales = Array.isArray(salesOnlyMetrics?.datewiseSales) ? salesOnlyMetrics.datewiseSales : [];

@@ -1,8 +1,9 @@
 /**
  * TotalSalesFilterController.js
  * 
- * Controller for filtering total sales component values from SalesOnlyMetrics model,
- * with fees, refunds, gross profit and per-ASIN rows from live DailySkuFinance
+ * Controller for filtering total sales component values. Live DailySkuFinance
+ * first (sales, chart, fees, refunds, gross profit, per-ASIN rows); the
+ * SalesOnlyMetrics model only for a window with no finance rows.
  * Supports:
  * - Last 30 days: Returns total values from latest document
  * - Last 7 days: Gets datewise values from latest document, sums them
@@ -14,6 +15,7 @@ const { ApiError } = require('../../utils/ApiError.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
 const logger = require('../../utils/Logger.js');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
+const { hasSalesOnlyRows } = require('../../models/MCP/SalesOnlyMetricsModel.js');
 const { buildEconomicsFromDailyFinance, lastNDaysWindow } = require('../../Services/Finance/LiveEconomicsService.js');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
 
@@ -88,25 +90,26 @@ const filterTotalSales = asyncHandler(async (req, res) => {
 });
 
 /**
- * Get last 31 days data - aggregate from per-day documents.
- * Uses the model's getRecentDays method for efficiency.
+ * Get last 30 days data.
+ *
+ * Live finance first: DailySkuFinance for the 30 days ending yesterday. Only
+ * when that has no rows does SalesOnlyMetrics' own newest 31 days stand in,
+ * and only if it holds real day rows (getRecentDays never returns null).
  */
 async function getLast31DaysData(userId, country, region) {
-    const recentData = await SalesOnlyMetrics.getRecentDays(userId, region, country, 31);
-
-    if (!recentData || recentData.datewiseSales.length === 0) {
-        // Most marketplaces have no SalesOnlyMetrics; read live finance for the
-        // 30 days ending yesterday (empty result if that has no rows either).
-        const { startDate, endDate } = lastNDaysWindow(30);
-        return await getCustomRangeData(userId, country, region, startDate, endDate);
+    const { startDate, endDate } = lastNDaysWindow(30);
+    const live = await buildEconomicsFromDailyFinance({ userId, country, region, startDate, endDate });
+    if (live) {
+        return buildRangeResult(userId, country, region, startDate, endDate, { live, salesData: null });
     }
 
-    const { startDate, endDate } = recentData.dateRange;
-    if (!startDate || !endDate) {
+    const recentData = await SalesOnlyMetrics.getRecentDays(userId, region, country, 31);
+    const { startDate: salesStart, endDate: salesEnd } = recentData?.dateRange || {};
+    if (!hasSalesOnlyRows(recentData) || !salesStart || !salesEnd) {
         return createEmptyResult();
     }
 
-    return await getCustomRangeData(userId, country, region, startDate, endDate);
+    return await getCustomRangeData(userId, country, region, salesStart, salesEnd);
 }
 
 /**
@@ -194,29 +197,29 @@ async function getTotalSalesFilteredData(userId, country, region, { periodType =
 /**
  * Get custom range data.
  *
- * Sales: SalesOnlyMetrics per-day documents when the account has them (kept so the
- * headline does not move), else live DailySkuFinance. Gross profit, FBA/Amazon fees,
- * refunds and per-ASIN rows: live DailySkuFinance for the range (LiveEconomicsService)
- * — these were hard-coded 0 / []. With neither source the result is the empty one.
+ * Live DailySkuFinance first for everything — the sales headline, the chart,
+ * gross profit, fees, refunds and per-ASIN rows — so this agrees with the
+ * dashboard and Profitability page. SalesOnlyMetrics per-day documents supply
+ * the sales only when the range has no finance rows. With neither source the
+ * result is the empty one.
  */
 async function getCustomRangeData(userId, country, region, startDateStr, endDateStr) {
+    const live = await buildEconomicsFromDailyFinance({ userId, country, region, startDate: startDateStr, endDate: endDateStr });
+    // SalesOnlyMetrics is read only when live finance has no rows.
+    const salesData = live
+        ? null
+        : await SalesOnlyMetrics.getSalesForDateRange(userId, region, country, startDateStr, endDateStr);
+    return buildRangeResult(userId, country, region, startDateStr, endDateStr, { live, salesData });
+}
+
+/** The response for [startDateStr, endDateStr] from whichever source holds it. */
+async function buildRangeResult(userId, country, region, startDateStr, endDateStr, { live, salesData }) {
     const startDate = new Date(startDateStr);
     startDate.setHours(0, 0, 0, 0);
     const endDate = new Date(endDateStr);
     endDate.setHours(23, 59, 59, 999);
 
-    const [salesData, live] = await Promise.all([
-        SalesOnlyMetrics.getSalesForDateRange(
-            userId,
-            region,
-            country,
-            startDateStr,
-            endDateStr
-        ),
-        buildEconomicsFromDailyFinance({ userId, country, region, startDate: startDateStr, endDate: endDateStr })
-    ]);
-
-    const hasSalesOnly = !!(salesData && Array.isArray(salesData.datewiseSales) && salesData.datewiseSales.length > 0);
+    const hasSalesOnly = !live && hasSalesOnlyRows(salesData);
 
     if (!hasSalesOnly && !live) {
         logger.warn('No sales-only metrics or DailySkuFinance rows for custom range', { userId, country, region, startDateStr, endDateStr });
@@ -228,13 +231,13 @@ async function getCustomRangeData(userId, country, region, startDateStr, endDate
         country,
         region,
         requestedRange: { startDate: startDateStr, endDate: endDateStr },
-        salesSource: hasSalesOnly ? 'salesOnlyMetrics' : 'dailySkuFinance',
+        salesSource: live ? 'dailySkuFinance' : 'salesOnlyMetrics',
         salesOnlyDays: hasSalesOnly ? salesData.datewiseSales.length : 0,
         financeDays: live?.datewiseSales?.length || 0
     });
 
-    const currencyCode = (hasSalesOnly ? salesData.totalSales?.currencyCode : live?.totalSales?.currencyCode) || 'USD';
-    const totalSales = hasSalesOnly ? (salesData.totalSales?.amount || 0) : (live.totalSales?.amount || 0);
+    const currencyCode = (live ? live.totalSales?.currencyCode : salesData.totalSales?.currencyCode) || 'USD';
+    const totalSales = live ? (live.totalSales?.amount || 0) : (salesData.totalSales?.amount || 0);
 
     let totalPpcSpent = await getDatewisePPCSpend(userId, country, region, startDateStr, endDateStr);
 
@@ -242,7 +245,7 @@ async function getCustomRangeData(userId, country, region, startDateStr, endDate
     const liveGrossProfitByDate = new Map(
         (live?.datewiseGrossProfit || []).map((d) => [d.date, d.grossProfit?.amount || 0])
     );
-    const chartSource = hasSalesOnly ? salesData.datewiseSales : live.datewiseSales;
+    const chartSource = live ? live.datewiseSales : salesData.datewiseSales;
     const datewiseChartData = chartSource.map((item) => {
         const itemDate = new Date(item.date);
         const displayDate = itemDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });

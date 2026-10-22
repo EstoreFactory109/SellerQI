@@ -2,15 +2,18 @@
  * TotalSalesFilterController.getCustomRangeData used to hard-code gross profit,
  * FBA/Amazon fees and refunds to 0 and asinWiseSales to [], and returned nothing
  * at all for the many marketplaces with no SalesOnlyMetrics. Those fields now come
- * from DailySkuFinance for the range; the sales headline keeps SalesOnlyMetrics
- * where it exists.
+ * from DailySkuFinance for the range, and so does the sales headline: live
+ * finance first, SalesOnlyMetrics only for a window with no finance rows.
  */
 
 let mockSalesOnly = null;
 let mockRecentDays = null;
+let mockSalesOnlyCalls = 0;
 jest.mock('../../models/MCP/SalesOnlyMetricsModel.js', () => ({
-    getSalesForDateRange: async () => mockSalesOnly,
-    getRecentDays: async () => mockRecentDays,
+    getSalesForDateRange: async () => { mockSalesOnlyCalls += 1; return mockSalesOnly; },
+    getRecentDays: async () => { mockSalesOnlyCalls += 1; return mockRecentDays; },
+    // The real helper: a zero-filled doc is not data.
+    hasSalesOnlyRows: (doc) => Array.isArray(doc?.datewiseSales) && doc.datewiseSales.length > 0,
 }));
 
 jest.mock('../../models/amazon-ads/PPCMetricsModel.js', () => ({
@@ -61,6 +64,7 @@ describe('total sales filter on live finance', () => {
         mockRecentDays = null;
         mockLive = null;
         mockLiveArgs = [];
+        mockSalesOnlyCalls = 0;
     });
 
     it('no SalesOnlyMetrics: everything from DailySkuFinance for the range', async () => {
@@ -88,18 +92,29 @@ describe('total sales filter on live finance', () => {
         expect(r.asinWiseSales[0].sales.amount).toBe(150);
     });
 
-    it('SalesOnlyMetrics present: sales headline kept, fees/profit filled from live finance', async () => {
+    it('live finance wins the headline and chart over SalesOnlyMetrics', async () => {
         mockSalesOnly = somDoc();
         mockLive = liveDoc();
 
         const r = await getTotalSalesFilteredData('u', 'US', 'NA', RANGE);
 
-        expect(r.totalSales.amount).toBe(160);
+        expect(r.totalSales.amount).toBe(150);
         expect(r.grossProfit.amount).toBe(92.5);
         expect(r.fbaFees.amount).toBe(15);
         expect(r.refunds.amount).toBe(20);
-        expect(r.datewiseChartData.map((d) => [d.totalSales, d.grossProfit])).toEqual([[110, 75], [50, 17.5]]);
+        expect(r.datewiseChartData.map((d) => [d.totalSales, d.grossProfit])).toEqual([[100, 75], [50, 17.5]]);
         expect(r.asinWiseSales).toHaveLength(1);
+        // SalesOnlyMetrics is not even read when live finance has rows.
+        expect(mockSalesOnlyCalls).toBe(0);
+    });
+
+    it('a zero-filled SalesOnlyMetrics doc is not data', async () => {
+        mockSalesOnly = { totalSales: { amount: 0, currencyCode: 'USD' }, datewiseSales: [], dateRange: { startDate: null, endDate: null } };
+
+        const r = await getTotalSalesFilteredData('u', 'US', 'NA', RANGE);
+
+        expect(r.dateRange).toEqual({ startDate: null, endDate: null });
+        expect(r.datewiseChartData).toBeUndefined();
     });
 
     it('SalesOnlyMetrics only: fee fields stay 0 as before', async () => {
@@ -119,6 +134,34 @@ describe('total sales filter on live finance', () => {
         expect(r.totalSales).toEqual({ amount: 0, currencyCode: 'USD' });
         expect(r.dateRange).toEqual({ startDate: null, endDate: null });
         expect(r.asinWiseSales).toEqual([]);
+    });
+
+    it('last30 reads live finance first, even when SalesOnlyMetrics has rows', async () => {
+        mockLive = liveDoc();
+        mockRecentDays = { ...somDoc(), dateRange: { startDate: '2026-10-01', endDate: '2026-10-02' } };
+
+        const r = await getTotalSalesFilteredData('u', 'US', 'NA', { periodType: 'last30' });
+
+        expect(r.totalSales.amount).toBe(150);
+        expect(mockSalesOnlyCalls).toBe(0);
+    });
+
+    it('last30 falls back to SalesOnlyMetrics rows only without live finance', async () => {
+        mockRecentDays = { ...somDoc(), dateRange: { startDate: '2026-10-01', endDate: '2026-10-02' } };
+        mockSalesOnly = somDoc();
+
+        const r = await getTotalSalesFilteredData('u', 'US', 'NA', { periodType: 'last30' });
+
+        expect(r.totalSales.amount).toBe(160);
+        expect(r.dateRange).toEqual({ startDate: '2026-10-01', endDate: '2026-10-02' });
+    });
+
+    it('last30 with a zero-filled SalesOnlyMetrics doc and no live finance is empty', async () => {
+        mockRecentDays = { totalSales: { amount: 0, currencyCode: 'USD' }, datewiseSales: [], dateRange: { startDate: null, endDate: null } };
+
+        const r = await getTotalSalesFilteredData('u', 'US', 'NA', { periodType: 'last30' });
+
+        expect(r.dateRange).toEqual({ startDate: null, endDate: null });
     });
 
     it('last30 with no SalesOnlyMetrics reads live finance for the 30 days ending yesterday', async () => {
