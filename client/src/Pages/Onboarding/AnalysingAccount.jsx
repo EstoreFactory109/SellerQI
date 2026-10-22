@@ -51,6 +51,7 @@ const MARKETPLACE_STATUS = {
   queued: { label: 'Queued', color: COLORS.textSecondary },
   failed: { label: 'Needs a retry', color: COLORS.watch },
   not_started: { label: 'Not started', color: COLORS.textMuted },
+  unknown: { label: 'Checking…', color: COLORS.textMuted },
 };
 
 const AnalysingAccount = () => {

@@ -79,6 +79,9 @@ const Button = ({ onClick, disabled, busy, variant = 'primary', children }) => {
   );
 };
 
+/** Statuses that mean the data really is on its way (not "unknown" or "not started"). */
+const IN_PROGRESS = ['queued', 'preparing', 'ready'];
+
 const fetchTone = (status) => (status === 'ready' ? 'good' : status === 'failed' ? 'watch' : status === 'not_started' ? 'muted' : 'accent');
 
 /** Tick the marketplaces Amazon reported for this region. */
@@ -253,7 +256,7 @@ const RegionCard = ({ region, checklist, adsSkipped, onSkipAds, onChecklist, onE
               {m.primary && <Pill tone="accent">Main</Pill>}
               <span className="flex-1" />
               {!m.ads && region.ads && <span style={{ fontSize: 11, color: COLORS.textMuted }}>no Ads</span>}
-              {m.fetch.status !== 'not_started' && <Pill tone={fetchTone(m.fetch.status)}>{FETCH_LABELS[m.fetch.status] || m.fetch.status}</Pill>}
+              {m.fetch.status !== 'not_started' && m.fetch.status !== 'unknown' && <Pill tone={fetchTone(m.fetch.status)}>{FETCH_LABELS[m.fetch.status] || m.fetch.status}</Pill>}
             </div>
           ))}
         </div>
@@ -340,11 +343,11 @@ const ConnectMarketplaces = () => {
   // Start the main marketplace as soon as its region is done, so its dashboard is ready as fast
   // as with one marketplace. The rest start on "Continue".
   useEffect(() => {
-    if (!primaryRegionDone || primaryStarted.current || primary?.fetch.status !== 'not_started') return;
+    if (!primaryRegionDone || primaryStarted.current || IN_PROGRESS.includes(primary?.fetch.status)) return;
     primaryStarted.current = true;
     startFetches('primary')
       .then((result) => result?.checklist && setChecklist((prev) => ({ ...prev, ...result.checklist })))
-      .catch(() => { primaryStarted.current = false; });
+      .catch((err) => setError(errorMessage(err, 'Could not start preparing your main marketplace. Continue will try again.')));
   }, [primaryRegionDone, primary?.fetch.status]);
 
   const connectRegion = async (region) => {
@@ -431,7 +434,7 @@ const ConnectMarketplaces = () => {
           <Button onClick={finish} busy={continuing} disabled={!canContinue}>
             Continue <ArrowRight className="w-4 h-4" />
           </Button>
-          {primary?.fetch.status && primary.fetch.status !== 'not_started' && (
+          {IN_PROGRESS.includes(primary?.fetch.status) && (
             <span className="inline-flex items-center gap-1.5" style={{ fontSize: 12, color: COLORS.textMuted }}>
               <CheckCircle2 className="w-3.5 h-3.5" style={{ color: COLORS.good }} />
               {countryName(primary.country)} is already being prepared

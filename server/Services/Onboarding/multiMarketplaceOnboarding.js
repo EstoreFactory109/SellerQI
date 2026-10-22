@@ -236,13 +236,19 @@ const fetchState = async (userId, country, region) => {
         if (!status?.found) return { status: 'not_started' };
         if (status.status === 'completed') return { status: 'ready' };
         if (status.status === 'failed') return { status: 'failed' };
-        if (status.status === 'waiting' || status.status === 'delayed' || status.status === 'pending') return { status: 'queued' };
+        // A job with a priority sits in 'prioritized' until a worker picks it up.
+        if (['waiting', 'prioritized', 'waiting-children', 'delayed', 'pending'].includes(status.status)) return { status: 'queued' };
         return { status: 'preparing', phase: status.currentPhase || null, description: status.currentPhaseDescription || null };
     } catch (error) {
         logger.warn(`[Onboarding] fetch status unavailable for ${userId} ${country}-${region}: ${error.message}`);
         return { status: 'unknown' };
     }
 };
+
+/** States a first fetch can be started from. 'unknown' (the status could not be read) is
+ *  included: addIntegrationJob checks the queue itself, and if the queue is unreachable it throws,
+ *  so the seller sees an error instead of a page that claims their data is being prepared. */
+const STARTABLE = ['not_started', 'failed', 'unknown'];
 
 /**
  * Start first fetches. `scope: 'primary'` starts only the main marketplace (as soon as its region
@@ -254,7 +260,7 @@ const startFetches = async ({ userId, scope = 'all' }) => {
     const targets = checklist.marketplaces.filter((m) => m.spApi && (scope === 'all' || m.primary));
     const started = [];
     for (const m of targets) {
-        if (!['not_started', 'failed'].includes(m.fetch.status)) continue;
+        if (!STARTABLE.includes(m.fetch.status)) continue;
         await addIntegrationJob(userId, m.country, m.region, {
             priority: m.primary ? PRIMARY_PRIORITY : SECONDARY_PRIORITY,
         });
