@@ -13,10 +13,12 @@
  */
 jest.mock('../../../models/user-auth/sellerCentralModel.js', () => ({ findOne: jest.fn() }));
 jest.mock('../../../models/MCP/SalesOnlyMetricsModel.js', () => ({ aggregate: jest.fn(), findOne: jest.fn() }));
+jest.mock('../../../models/finance/DailySkuFinanceModel.js', () => ({ aggregate: jest.fn(), findOne: jest.fn() }));
 jest.mock('../../../utils/Logger.js', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }));
 
 const Seller = require('../../../models/user-auth/sellerCentralModel.js');
 const SalesOnlyMetrics = require('../../../models/MCP/SalesOnlyMetricsModel.js');
+const DailySkuFinance = require('../../../models/finance/DailySkuFinanceModel.js');
 const {
     combine, formatStat, pickPrimary, listMarketplaces, ownsMarketplace,
 } = require('../../../Services/Calculations/EsfAccountReportsService.js');
@@ -171,6 +173,39 @@ describe('formatStat', () => {
 });
 
 describe('pickPrimary', () => {
+    beforeEach(() => {
+        DailySkuFinance.aggregate.mockResolvedValue([]);
+        SalesOnlyMetrics.aggregate.mockResolvedValue([]);
+    });
+
+    it('ranks by live DailySkuFinance sales in approximate USD', async () => {
+        DailySkuFinance.aggregate.mockResolvedValue([
+            { _id: { country: 'IN', region: 'EU' }, sales: 9488 },
+            { _id: { country: 'US', region: 'NA' }, sales: 383 },
+        ]);
+        // A stale SalesOnlyMetrics figure must not outrank live sales.
+        SalesOnlyMetrics.aggregate.mockResolvedValue([{ _id: { country: 'IN', region: 'EU' }, sales: 10000000 }]);
+        expect(await pickPrimary('507f1f77bcf86cd799439011', [IN, US])).toEqual(US);
+        const [pipeline] = DailySkuFinance.aggregate.mock.calls[0];
+        expect(pipeline[1].$group.sales).toEqual({ $sum: { $ifNull: ['$productSales', 0] } });
+    });
+
+    it('uses SalesOnlyMetrics only for a marketplace without finance rows', async () => {
+        DailySkuFinance.aggregate.mockResolvedValue([{ _id: { country: 'US', region: 'NA' }, sales: 100 }]);
+        // IN has no finance rows: ₹100,000 (~$1,200) beats $100.
+        SalesOnlyMetrics.aggregate.mockResolvedValue([
+            { _id: { country: 'IN', region: 'EU' }, sales: 100000 },
+            { _id: { country: 'US', region: 'NA' }, sales: 1 },
+        ]);
+        expect(await pickPrimary('507f1f77bcf86cd799439011', [US, IN])).toEqual(IN);
+    });
+
+    it('keeps ranking when one source fails to read', async () => {
+        DailySkuFinance.aggregate.mockRejectedValue(new Error('boom'));
+        SalesOnlyMetrics.aggregate.mockResolvedValue([{ _id: { country: 'US', region: 'NA' }, sales: 10 }]);
+        expect(await pickPrimary('507f1f77bcf86cd799439011', [IN, US])).toEqual(US);
+    });
+
     it('ranks by value, not by the raw number', async () => {
         // ₹9,488 is about $114: the smaller market despite the bigger number.
         SalesOnlyMetrics.aggregate.mockResolvedValue([
@@ -188,6 +223,7 @@ describe('pickPrimary', () => {
     it('does not rank a single marketplace at all', async () => {
         expect(await pickPrimary('507f1f77bcf86cd799439011', [US])).toEqual(US);
         expect(SalesOnlyMetrics.aggregate).not.toHaveBeenCalled();
+        expect(DailySkuFinance.aggregate).not.toHaveBeenCalled();
     });
 });
 

@@ -117,9 +117,9 @@ describe('dashboard sales come from the live economics doc', () => {
         }
 
         const expectedSeries = [
-            { date: '2026-10-18', sales: { amount: 150, currencyCode: 'USD' }, grossProfit: { amount: 109.5, currencyCode: 'USD' }, unitsSold: null },
-            { date: '2026-10-19', sales: { amount: 75, currencyCode: 'USD' }, grossProfit: { amount: 29.75, currencyCode: 'USD' }, unitsSold: null },
-            { date: '2026-10-20', sales: { amount: 65, currencyCode: 'USD' }, grossProfit: { amount: 46.25, currencyCode: 'USD' }, unitsSold: null },
+            { date: '2026-10-18', sales: { amount: 150, currencyCode: 'USD' }, grossProfit: { amount: 109.5, currencyCode: 'USD' }, unitsSold: 6 },
+            { date: '2026-10-19', sales: { amount: 75, currencyCode: 'USD' }, grossProfit: { amount: 29.75, currencyCode: 'USD' }, unitsSold: 3 },
+            { date: '2026-10-20', sales: { amount: 65, currencyCode: 'USD' }, grossProfit: { amount: 46.25, currencyCode: 'USD' }, unitsSold: 3 },
         ];
         expect(summary.data.TotalSales).toEqual(expectedSeries);
         expect(phase3.data.TotalSales).toEqual(expectedSeries);

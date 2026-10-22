@@ -18,6 +18,13 @@
 const logger = require('../../utils/Logger.js');
 const { loadLiveEconomics, isStoredEconomicsDoc } = require('../Finance/LiveEconomicsService.js');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
+const { hasSalesOnlyRows } = require('../../models/MCP/SalesOnlyMetricsModel.js');
+
+/** The "no data" marker, in the shape FinanceEngine uses for the same case. */
+const NO_SALES_DATA = {
+    type: 'no_finance_data',
+    message: 'SellerQI has no sales or finance data for this marketplace and period yet. Sales and profit are unknown, not $0.',
+};
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
 const IssueSummary = require('../../models/system/IssueSummaryModel.js');
@@ -863,13 +870,24 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
         // Determine if we need to apply date filtering
         const shouldFilterByDate = startDate && endDate && calendarMode !== 'default';
 
-        // Sales-only fast path: build a minimal metrics context without relying
-        // on grossProfit/fees/refunds. This keeps QMate functional even when
-        // `EconomicsMetrics` persistence is disabled.
-        // Per-day model: findLatest aggregates recent 31 days into { totalSales, datewiseSales, dateRange }
-        const salesOnlyMetrics = await SalesOnlyMetrics.findLatest(userObjectId, region, country);
+        // Live finance first: a fresh EconomicsMetrics doc, else DailySkuFinance
+        // for the picked range (or the default window), else null.
+        const economicsMetrics = await loadLiveEconomics(
+            userObjectId, region, country, shouldFilterByDate ? { startDate, endDate } : {}
+        );
 
-        if (salesOnlyMetrics) {
+        // Sales-only fallback, ONLY when live finance has nothing and
+        // SalesOnlyMetrics holds real day rows. Its readers never return null
+        // (a zero-filled doc instead), so a plain `if (doc)` used to win for
+        // every account and answer "$0" over real live sales.
+        let salesOnlyMetrics = null;
+        if (!economicsMetrics) {
+            salesOnlyMetrics = shouldFilterByDate
+                ? await SalesOnlyMetrics.getSalesForDateRange(userObjectId, region, country, startDate, endDate)
+                : await SalesOnlyMetrics.findLatest(userObjectId, region, country);
+        }
+
+        if (!economicsMetrics && hasSalesOnlyRows(salesOnlyMetrics)) {
             const currencyCode = salesOnlyMetrics?.totalSales?.currencyCode || 'USD';
             const datewiseSalesData = Array.isArray(salesOnlyMetrics?.datewiseSales)
                 ? salesOnlyMetrics.datewiseSales
@@ -981,7 +999,6 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
         
         // Fetch all data in parallel for performance
         const [
-            economicsMetrics, 
             ppcRollupParallel, 
             issueSummary, 
             cogsDoc,
@@ -992,9 +1009,6 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
             topErrorsResult,
             amazonReadyResult
         ] = await Promise.all([
-            // Fresh EconomicsMetrics, else live DailySkuFinance (for the picked range
-            // when one is given), else null.
-            loadLiveEconomics(userObjectId, region, country, shouldFilterByDate ? { startDate, endDate } : {}),
             PPCMetrics.rollupLastDays(userIdStr, country, region, 30),
             IssueSummary.getIssueSummary(userObjectId, country, region),
             CogsModel.findOne({ User: userObjectId, country }).lean().catch(() => null),
@@ -1343,6 +1357,28 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
             };
 
             context.expenses = expenseSnapshot?.success ? expenseSnapshot.data : null;
+        } else {
+            // Neither live finance nor SalesOnlyMetrics rows: sales and profit
+            // are unknown, never $0. The marker tells the model to say so.
+            context.summary = {
+                brand: null,
+                country,
+                dateRange: shouldFilterByDate ? { startDate, endDate } : null,
+                totalSales: null,
+                grossProfit: null,
+                netProfit: null,
+                profitMargin: null,
+                // Ad spend is its own source and still known.
+                ppcSpend: ppcMetrics ? parseFloat((ppcMetrics.summary?.totalSpend || 0).toFixed(2)) : null,
+                fbaFees: null,
+                storageFees: null,
+                amazonFees: null,
+                totalFees: null,
+                refunds: null,
+                currency: null,
+                salesDataAvailable: false,
+            };
+            context.noSalesData = NO_SALES_DATA;
         }
         
         // Process PPC Metrics
@@ -1356,7 +1392,10 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
                 totalSalesFromAds: ppcMetrics.summary?.totalSales || 0,
                 overallAcos: ppcMetrics.summary?.overallAcos || 0,
                 overallRoas: ppcMetrics.summary?.overallRoas || 0,
-                tacos: totalSalesForTacos > 0 ? parseFloat(((ppcSpend / totalSalesForTacos) * 100).toFixed(2)) : 0,
+                // Unknown sales give an unknown TACOS, not 0%.
+                tacos: totalSalesForTacos > 0
+                    ? parseFloat(((ppcSpend / totalSalesForTacos) * 100).toFixed(2))
+                    : (context.summary?.salesDataAvailable === false ? null : 0),
                 totalImpressions: ppcMetrics.summary?.totalImpressions || 0,
                 totalClicks: ppcMetrics.summary?.totalClicks || 0,
                 ctr: ppcMetrics.summary?.ctr || 0,
@@ -1503,7 +1542,8 @@ async function getQMateMetricsContext(userId, country, region, options = {}) {
         
         return {
             success: true,
-            source: 'pre_computed',
+            // 'no_finance_data' keeps the deterministic shortcuts from quoting a figure.
+            source: economicsMetrics ? 'pre_computed' : 'no_finance_data',
             data: context
         };
         
