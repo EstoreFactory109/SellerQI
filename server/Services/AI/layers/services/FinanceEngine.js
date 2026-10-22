@@ -359,6 +359,23 @@ function computeFinanceSummary(dashboardData, cogs, adSpend, dateRange) {
   };
 }
 
+// With no DailySkuFinance rows in the window (getDashboard totals: null) every
+// account-level answer says "no data" instead of $0.00. These read their own
+// data (per-ASIN queries, COGS, overhead) and still run.
+const QUERY_TYPES_WITHOUT_ACCOUNT_TOTALS = new Set([
+  'single_asin', 'asin_comparison', 'asin_time_series', 'cogs_query', 'overhead_query',
+]);
+
+/** Result for a window with no finance rows. */
+function buildNoFinanceDataResponse(dateRange) {
+  return {
+    type: 'no_finance_data',
+    available: false,
+    dateRange,
+    message: `SellerQI has no finance data for ${dateRange?.startDate} to ${dateRange?.endDate} yet.`,
+  };
+}
+
 // ── Query classifier (stubbed for now; expanded in a later phase) ──
 
 /**
@@ -656,6 +673,10 @@ async function handleFinanceQuery(interpretation, userContext, requestDateRange)
       endDate: dateRange.endDate,
       hasCOGS: cogs.hasCOGS,
     });
+
+    if (dashboardData.totals == null && !QUERY_TYPES_WITHOUT_ACCOUNT_TOTALS.has(queryType)) {
+      return buildNoFinanceDataResponse(dateRange);
+    }
 
     switch (queryType) {
       case 'summary_metrics':
@@ -1441,8 +1462,9 @@ async function buildComparisonResponse(currentSummary, userContext, currentDateR
   const cogsChange = (currentSummary.totalCogs || 0) - prevTotalCogs;
   const profitDrivers = rankProfitDrivers(deltas, cogsChange);
 
-  const previousDataAvailable =
-    prevTotalSales > 0 || prevUnits > 0 || (prevDashboard.asinWise || []).length > 0;
+  // null totals = no finance rows for the previous window (ads-only rows don't count).
+  const previousDataAvailable = prevDashboard.totals != null &&
+    (prevTotalSales > 0 || prevUnits > 0 || (prevDashboard.asinWise || []).length > 0);
 
   const result = {
     type: 'comparison',
@@ -1946,7 +1968,8 @@ ABSOLUTE RULES:
 9. Do NOT add caveats like 'please note' or 'keep in mind' unless the result includes a specific warning.
 10. If the result type is 'why_analysis', structure your answer as: 1) State what changed, 2) List drivers by impact, 3) List specific products contributing, 4) Actionable next steps from the actionableItems field.
 11. When the result has chart data, mention that a chart is displayed but do NOT describe the chart data points in text — the chart speaks for itself.
-12. For result type 'top_bottom_products' when 'profitableInListShortfall' is true: the user asked for the top N by profit, but only 'profitableCount' products are actually profitable. LEAD with that fact (e.g. "Only 2 of your products were profitable in this period"), then list the products. Clearly flag any listed product with zero or negative profit as break-even or loss-making — do NOT present a product with $0.00 or negative profit as a "top" performer.`;
+12. For result type 'top_bottom_products' when 'profitableInListShortfall' is true: the user asked for the top N by profit, but only 'profitableCount' products are actually profitable. LEAD with that fact (e.g. "Only 2 of your products were profitable in this period"), then list the products. Clearly flag any listed product with zero or negative profit as break-even or loss-making — do NOT present a product with $0.00 or negative profit as a "top" performer.
+13. For result type 'no_finance_data': say there is no finance data for that period yet. Do NOT state any amount, and never say sales or profit were $0.00.`;
 
 /** Currency formatter: $1,234.56 */
 function fmtMoney(n) {
@@ -1977,6 +2000,8 @@ function buildFallbackNarration(result) {
   const dr = fmtRange(result.dateRange);
 
   switch (result.type) {
+    case 'no_finance_data':
+      return result.message || `SellerQI has no finance data for ${dr} yet.`;
     case 'summary_metrics': {
       const m = result.metrics || {};
       return `For ${dr}, your total sales were ${fmtMoney(m.totalSales)}, total expenses ${fmtMoney(m.displayTotalExpenses)}, and profit ${fmtMoney(m.displayProfit)} (${fmtPct(m.profitMargin)} margin).`;
@@ -2106,7 +2131,7 @@ async function narrateFinanceResult(result, userQuestion, modelTools) {
  * @param {Object} interpretation
  * @param {{ userId, country, region }} userContext
  * @param {{ startDate, endDate, calendarMode }} [requestDateRange]
- * @returns {Promise<{ financeSummary, comparison, dateRange, problemAreas, healthIndicator }>}
+ * @returns {Promise<{ financeSummary, comparison, dateRange, problemAreas, healthIndicator }|null>} null when the window has no finance data
  */
 async function buildFinanceSuggestionContext(interpretation, userContext, requestDateRange) {
   const dateRange = await resolveFinanceDateRange(interpretation, userContext, requestDateRange);
@@ -2119,10 +2144,14 @@ async function buildFinanceSuggestionContext(interpretation, userContext, reques
     endDate: dateRange.endDate,
   });
 
+  // No finance rows for the window: give the suggestion engine no finance
+  // context rather than a $0 summary it would reason over as real.
+  if (dashboardData.totals == null) return null;
+
   const cogs = await fetchCogsForUser(userContext);
 
   // Canonical finance summary — same shared formulas + inputs as handleFinanceQuery.
-  const totals = dashboardData.totals || {};
+  const totals = dashboardData.totals;
   const totalSales = totals.productSales || 0;
   const adSpend = await resolvePpcAdSpend(userContext, dateRange.startDate, dateRange.endDate, totals.adsSpend);
   const displayTotalExpenses = computeDisplayTotalExpenses(totals, dashboardData.overhead, adSpend);

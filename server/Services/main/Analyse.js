@@ -16,6 +16,7 @@ const ShipmentModel = require('../../models/inventory/ShipmentModel.js');
 const ProductWiseSalesModel = require('../../models/products/ProductWiseSalesModel.js');
 // Economics (sales, fees, gross profit): fresh EconomicsMetrics, else live DailySkuFinance, else null
 const { loadLiveEconomics } = require('../Finance/LiveEconomicsService.js');
+const { convertEconomicsToFinanceFormat } = require('../Finance/EconomicsFinanceFormat.js');
 // New: BuyBoxData model for buybox metrics
 const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
 // New: DataFetchTracking for getting actual calendar dates from database
@@ -617,124 +618,15 @@ class AnalyseService {
     }
 
     /**
-     * Convert EconomicsMetrics data to legacy financeData format
-     * Uses EconomicsMetrics for sales, fees, refunds but Amazon Ads API for PPC spend
+     * Convert EconomicsMetrics data to legacy financeData format.
+     * The rule lives in Finance/EconomicsFinanceFormat.js so the lightweight
+     * dashboard endpoints apply it without loading this module's graph.
      * @param {Object} economicsMetrics - EconomicsMetrics document
      * @param {number} adsPPCSpend - Total PPC spend from Amazon Ads API (primary source)
      * @returns {Object} Finance data in legacy format
      */
     static convertEconomicsToFinanceFormat(economicsMetrics, adsPPCSpend = 0) {
-        if (!economicsMetrics) {
-            // No fresh economics and no live finance rows: "no data" (null), not $0.
-            return {
-                createdAt: new Date(),
-                Gross_Profit: null,
-                Total_Sales: null,
-                ProductAdsPayment: adsPPCSpend, // Use Ads API PPC spend even if no economics data
-                FBA_Fees: null,
-                Storage: null,
-                Amazon_Charges: null,
-                Amazon_Fees: null,
-                Other_Amazon_Fees: null, // Amazon fees excluding FBA fees (for Total Sales component)
-                Refunds: null
-            };
-        }
-
-        // Use Amazon Ads API PPC spend as PRIMARY source for ProductAdsPayment
-        const ppcSpend = adsPPCSpend || 0;
-        
-        // CRITICAL: Calculate totalSales by summing datewiseSales for consistency
-        // This ensures page load shows same value as custom filter for same dates
-        let totalSales = 0;
-        let totalGrossProfit = 0;
-        let fbaFees = 0;
-        let storageFees = 0;
-        let refunds = 0;
-        
-        if (Array.isArray(economicsMetrics.datewiseSales) && economicsMetrics.datewiseSales.length > 0) {
-            economicsMetrics.datewiseSales.forEach(item => {
-                totalSales += item.sales?.amount || 0;
-                totalGrossProfit += item.grossProfit?.amount || 0;
-            });
-            // Round to 2 decimal places for consistency
-            totalSales = parseFloat(totalSales.toFixed(2));
-            totalGrossProfit = parseFloat(totalGrossProfit.toFixed(2));
-        } else {
-            // Fallback to stored value if datewiseSales not available
-            totalSales = economicsMetrics.totalSales?.amount || 0;
-            totalGrossProfit = economicsMetrics.grossProfit?.amount || 0;
-        }
-        
-        // Calculate fees from datewise data for consistency
-        if (Array.isArray(economicsMetrics.datewiseFeesAndRefunds) && economicsMetrics.datewiseFeesAndRefunds.length > 0) {
-            economicsMetrics.datewiseFeesAndRefunds.forEach(item => {
-                fbaFees += item.fbaFulfillmentFee?.amount || 0;
-                storageFees += item.storageFee?.amount || 0;
-                refunds += item.refunds?.amount || 0;
-            });
-            fbaFees = parseFloat(fbaFees.toFixed(2));
-            storageFees = parseFloat(storageFees.toFixed(2));
-            refunds = parseFloat(refunds.toFixed(2));
-        } else {
-            // Fallback to stored values
-            fbaFees = economicsMetrics.fbaFees?.amount || 0;
-            storageFees = economicsMetrics.storageFees?.amount || 0;
-            refunds = economicsMetrics.refunds?.amount || 0;
-        }
-        
-        // Get Amazon fees - calculate from datewiseAmazonFees for consistency
-        let amazonFees = 0;
-        if (Array.isArray(economicsMetrics.datewiseAmazonFees) && economicsMetrics.datewiseAmazonFees.length > 0) {
-            // PRIMARY: Calculate from datewiseAmazonFees (most accurate)
-            economicsMetrics.datewiseAmazonFees.forEach(item => {
-                amazonFees += item.totalAmount?.amount || 0;
-            });
-            amazonFees = parseFloat(amazonFees.toFixed(2));
-            logger.info('Calculated amazonFees from datewiseAmazonFees', {
-                amazonFees,
-                dateCount: economicsMetrics.datewiseAmazonFees.length
-            });
-        } else {
-            // Fallback 1: Get from summary level
-            amazonFees = economicsMetrics.amazonFees?.amount || 0;
-            
-            // Fallback 2: Calculate from ASIN-wise data if still 0
-            if (amazonFees === 0 && Array.isArray(economicsMetrics.asinWiseSales) && economicsMetrics.asinWiseSales.length > 0) {
-                economicsMetrics.asinWiseSales.forEach(item => {
-                    amazonFees += item.amazonFees?.amount || item.totalFees?.amount || 0;
-                });
-                amazonFees = parseFloat(amazonFees.toFixed(2));
-                logger.info('Calculated amazonFees from ASIN-wise data', {
-                    amazonFees,
-                    asinCount: economicsMetrics.asinWiseSales.length
-                });
-            }
-            
-            // Final fallback: use fbaFees + storageFees if still 0
-            if (amazonFees === 0) {
-                amazonFees = fbaFees + storageFees;
-            }
-        }
-        
-        // Calculate gross profit: Sales - Amazon Fees - Refunds
-        // Note: PPC is subtracted in frontend for display, not in backend calculation
-        const grossProfit = totalSales - amazonFees - refunds;
-        
-        // Calculate Other Amazon Fees = Total Amazon Fees - FBA Fees (for Total Sales component)
-        const otherAmazonFees = Math.max(0, amazonFees - fbaFees);
-
-        return {
-            createdAt: economicsMetrics.createdAt || new Date(),
-            Gross_Profit: parseFloat(grossProfit.toFixed(2)),
-            Total_Sales: totalSales,
-            ProductAdsPayment: ppcSpend, // PRIMARY: Amazon Ads API PPC spend
-            FBA_Fees: fbaFees,
-            Storage: storageFees,
-            Amazon_Charges: amazonFees, // Total Amazon fees (for Profitability page)
-            Amazon_Fees: amazonFees, // Total Amazon fees (FBA, storage, referral, etc.)
-            Other_Amazon_Fees: parseFloat(otherAmazonFees.toFixed(2)), // Amazon fees excluding FBA (for Total Sales component)
-            Refunds: refunds
-        };
+        return convertEconomicsToFinanceFormat(economicsMetrics, adsPPCSpend);
     }
 
     /**

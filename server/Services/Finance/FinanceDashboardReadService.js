@@ -58,6 +58,8 @@ function buildRoundProject(extraFields) {
 }
 
 // ── Step 2: Totals across all SKUs for a date range ──
+// null when the window has no DailySkuFinance rows: "no data", not a row of zeros
+// that every reader would show as $0 sales.
 async function getTotals({ userId, country, region, startDate, endDate }) {
   const match = buildBaseMatch(userId, country, region, startDate, endDate);
 
@@ -97,15 +99,7 @@ async function getTotals({ userId, country, region, startDate, endDate }) {
     ]).catch(() => []),
   ]);
 
-  if (!totalsResult.length) {
-    const empty = {};
-    for (const f of NUMERIC_FIELDS) empty[f] = 0;
-    empty.otherExpensesBreakdown = [];
-    empty.adsSpend = 0;
-    empty.adsSpendSP = 0;
-    empty.adsSpendSD = 0;
-    return empty;
-  }
+  if (!totalsResult.length) return null;
 
   const totals = totalsResult[0];
   totals.otherExpensesBreakdown = otherBreakdownResult || [];
@@ -384,6 +378,8 @@ async function getDashboard({ userId, country, region, startDate, endDate }) {
       region,
       uniqueAsins: asinWise.length,
       totalDays: dateWise.length,
+      // The client keys its "no data" state off this rather than totals being 0.
+      hasFinanceData: dateWise.length > 0,
     },
   };
 }
