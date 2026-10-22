@@ -13,7 +13,8 @@
  */
 
 const logger = require('../../utils/Logger.js');
-const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
+const { loadLiveEconomics } = require('../Finance/LiveEconomicsService.js');
+const { sumEconomicsSales, convertEconomicsToFinanceFormat, toDatewiseSalesSeries } = require('../Finance/EconomicsFinanceFormat.js');
 const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
 const V2_Model = require('../../models/seller-performance/V2_Seller_Performance_ReportModel.js');
 const V1_Model = require('../../models/seller-performance/V1_Seller_Performance_Report_Model.js');
@@ -54,13 +55,13 @@ function summarizeBuyBoxDays(days, products) {
 /**
  * TACoS for the dashboard: PPC spend ÷ total (organic + PPC) sales over the SAME days.
  *
- * The denominator is aggregated over the rollup's exact window rather than taken from
- * SalesOnlyMetrics.getRecentDays / totalWeeklySale, which is "the newest 31 stored docs" and so
- * covers different days than the 30-day PPC rollup. Same formula and source as the Campaign
- * Audit KPI summary (PPCCampaignAnalysisService.getPPCKPISummary). Non-fatal: 0 on any error.
+ * The denominator is aggregated over the rollup's exact window (DailySkuFinance, else
+ * SalesOnlyMetrics — see PPCCampaignAnalysisService.aggregateTotalSales), the same formula
+ * and source as the Campaign Audit KPI summary. null — "no data", not 0% — when there is
+ * no PPC rollup, no sales in the window, or the read fails.
  */
 async function resolveDashboardTacos(userId, country, region, ppcRollup) {
-    if (!ppcRollup?.found || !ppcRollup.dateRange?.startDate || !ppcRollup.dateRange?.endDate) return 0;
+    if (!ppcRollup?.found || !ppcRollup.dateRange?.startDate || !ppcRollup.dateRange?.endDate) return null;
     try {
         const { totalSales } = await PPCCampaignAnalysisService.aggregateTotalSales(
             userId.toString(),
@@ -71,11 +72,48 @@ async function resolveDashboardTacos(userId, country, region, ppcRollup) {
         );
         const spend = Number(ppcRollup.summary?.totalSpend || 0);
         const total = Number(totalSales || 0);
-        return total > 0 ? Math.round((spend / total) * 100 * 100) / 100 : 0;
+        return total > 0 ? Math.round((spend / total) * 100 * 100) / 100 : null;
     } catch (err) {
         logger.warn('[DashboardSummary] resolveDashboardTacos failed', { error: err.message });
-        return 0;
+        return null;
     }
+}
+
+/**
+ * The dashboard's sales and finance figures, from the same loader and the same
+ * conversions the full pipeline uses (Analyse -> DashboardCalculation), so the
+ * light endpoints and the full dashboard show one number. Window: the 30 days
+ * ending yesterday (loadLiveEconomics default), as Analyse loads it.
+ *
+ * It replaces SalesOnlyMetrics.getRecentDays, which exists for only a few
+ * marketplaces and has no fees, so every other account read $0 sales and $0
+ * gross profit. With no data, sales/finance are null and the series is [].
+ *
+ * Split in two so a caller can load the doc in parallel with its other queries
+ * and convert once the PPC spend is known; one load per request.
+ */
+async function loadDashboardEconomics(userId, country, region) {
+    try {
+        return await loadLiveEconomics(userId, region, country);
+    } catch (err) {
+        // Never fail the dashboard over finance; unknown is shown as "no data".
+        logger.warn('[DashboardSummary] loadLiveEconomics failed', { error: err.message });
+        return null;
+    }
+}
+
+/**
+ * @param {Object|null} doc - loadDashboardEconomics result
+ * @param {number} ppcSpend - PPC spend for ProductAdsPayment (the PPC rollup's spend)
+ * @returns {{doc: Object|null, totalWeeklySale: number|null, accountFinance: Object, totalSales: Array}}
+ */
+function buildDashboardSales(doc, ppcSpend = 0) {
+    return {
+        doc,
+        totalWeeklySale: sumEconomicsSales(doc).totalSales,
+        accountFinance: convertEconomicsToFinanceFormat(doc, ppcSpend),
+        totalSales: toDatewiseSalesSeries(doc),
+    };
 }
 
 /**
@@ -112,7 +150,7 @@ async function getDashboardSummary(userId, country, region) {
     try {
         // Run all queries in parallel with projections and .lean()
         const [
-            salesOnlyMetrics,
+            economicsDoc,
             buyBoxDays,
             v2Data,
             v1Data,
@@ -123,8 +161,8 @@ async function getDashboardSummary(userId, country, region) {
             dataFetchTracking,
             issueSummary
         ] = await Promise.all([
-            SalesOnlyMetrics.getRecentDays(userId, region, country, 31),
-            
+            loadDashboardEconomics(userId, country, region),
+
             // BuyBoxData: last 7 non-empty days, minimal projection (see summarizeBuyBoxDays)
             BuyBoxData.findRecentDays(userId, region, country, 7, BUYBOX_SUMMARY_PROJECTION),
             
@@ -194,17 +232,6 @@ async function getDashboardSummary(userId, country, region) {
         const accountHealthPercentage = calculateAccountHealthPercentage(v2Data);
         const accountErrors = checkAccountHealth(v2Data, v1Data, v2History);
 
-        // Calculate total sales from datewiseSales for consistency
-        let totalWeeklySale = 0;
-        if (salesOnlyMetrics?.datewiseSales && Array.isArray(salesOnlyMetrics.datewiseSales)) {
-            totalWeeklySale = salesOnlyMetrics.datewiseSales.reduce(
-                (sum, item) => sum + (item.sales?.amount || 0), 0
-            );
-            totalWeeklySale = parseFloat(totalWeeklySale.toFixed(2));
-        } else if (salesOnlyMetrics?.totalSales?.amount) {
-            totalWeeklySale = salesOnlyMetrics.totalSales.amount;
-        }
-
         // Calculate order count (Shipped, Unshipped, PartiallyShipped)
         let totalOrdersCount = 0;
         let filteredOrders = [];
@@ -240,7 +267,9 @@ async function getDashboardSummary(userId, country, region) {
             cpc: 0
         };
 
-        // Get date range (prefer DataFetchTracking, fallback to economicsMetrics)
+        const sales = buildDashboardSales(economicsDoc, ppcSummary.totalSpend || 0);
+
+        // Get date range (prefer DataFetchTracking, fallback to the economics window)
         let startDate = null;
         let endDate = null;
         let calendarMode = 'default';
@@ -248,9 +277,9 @@ async function getDashboardSummary(userId, country, region) {
         if (dataFetchTracking?.dataRange) {
             startDate = dataFetchTracking.dataRange.startDate;
             endDate = dataFetchTracking.dataRange.endDate;
-        } else if (salesOnlyMetrics?.dateRange) {
-            startDate = salesOnlyMetrics.dateRange.startDate;
-            endDate = salesOnlyMetrics.dateRange.endDate;
+        } else if (sales.doc?.dateRange) {
+            startDate = sales.doc.dateRange.startDate;
+            endDate = sales.doc.dateRange.endDate;
         }
 
         // Build minimal error counts (for quick stats)
@@ -276,22 +305,9 @@ async function getDashboardSummary(userId, country, region) {
             AccountErrors: accountErrors,
             
             // Sales and Finance
-            TotalWeeklySale: totalWeeklySale,
-            accountFinance: (() => {
-                return {
-                    // Sales-only mode: gross profit requires fees/refunds, which we no longer store.
-                    Gross_Profit: 0,
-                    Total_Sales: totalWeeklySale,
-                    ProductAdsPayment: ppcSummary.totalSpend || 0,
-                    FBA_Fees: 0,
-                    Storage: 0,
-                    Amazon_Fees: 0,
-                    Amazon_Charges: 0,
-                    Other_Amazon_Fees: 0,
-                    Refunds: 0
-                };
-            })(),
-            TotalSales: salesOnlyMetrics?.datewiseSales || [],
+            TotalWeeklySale: sales.totalWeeklySale,
+            accountFinance: sales.accountFinance,
+            TotalSales: sales.totalSales,
             
             // Orders
             GetOrderData: filteredOrders,
@@ -568,7 +584,8 @@ async function getDashboardPhase1(userId, country, region) {
  * PHASE 2: Core metrics (~150ms)
  * 
  * Returns core financial/health metrics with minimal projections:
- * - EconomicsMetrics: totalSales, fees (no arrays)
+ * - Live economics (loadLiveEconomics: fresh EconomicsMetrics, else DailySkuFinance):
+ *   total sales and account finance (fees, refunds, gross profit)
  * - V2/V1: account health
  * - BuyBox: summary counts
  * - PPCMetrics: summary only
@@ -583,8 +600,8 @@ async function getDashboardPhase2(userId, country, region) {
     logger.info(`[PERF] Starting getDashboardPhase2 for user ${userId}, country ${country}, region ${region}`);
 
     try {
-        const [salesOnlyMetrics, v2Data, v1Data, buyBoxDays, sellerData, v2HistoryPhase2] = await Promise.all([
-            SalesOnlyMetrics.getRecentDays(userId, region, country, 31),
+        const [economicsDoc, v2Data, v1Data, buyBoxDays, sellerData, v2HistoryPhase2] = await Promise.all([
+            loadDashboardEconomics(userId, country, region),
             V2_Model.findOne({ User: userId, country, region })
                 .sort({ createdAt: -1 })
                 .lean(),
@@ -609,34 +626,18 @@ async function getDashboardPhase2(userId, country, region) {
         const accountHealthPercentage = calculateAccountHealthPercentage(v2Data);
         const accountErrors = checkAccountHealth(v2Data, v1Data, v2HistoryPhase2);
 
-        const totalWeeklySale = salesOnlyMetrics?.totalSales?.amount || 0;
-        const grossProfit = 0;
-        const fbaFees = 0;
-        const storageFees = 0;
-        const amazonFees = 0;
-        const refunds = 0;
-        const otherAmazonFees = 0;
-
         const ppcSummary = ppcMetrics?.summary || {
             totalSales: 0, totalSpend: 0, overallAcos: 0, overallRoas: 0,
             totalImpressions: 0, totalClicks: 0, ctr: 0, cpc: 0
         };
 
+        const sales = buildDashboardSales(economicsDoc, ppcSummary.totalSpend || 0);
+
         const phase2Data = {
             accountHealthPercentage,
             AccountErrors: accountErrors,
-            TotalWeeklySale: parseFloat(totalWeeklySale.toFixed(2)),
-            accountFinance: {
-                Gross_Profit: parseFloat(grossProfit.toFixed(2)),
-                Total_Sales: parseFloat(totalWeeklySale.toFixed(2)),
-                ProductAdsPayment: ppcSummary.totalSpend || 0,
-                FBA_Fees: fbaFees,
-                Storage: storageFees,
-                Amazon_Fees: amazonFees,
-                Amazon_Charges: amazonFees,
-                Other_Amazon_Fees: parseFloat(otherAmazonFees.toFixed(2)),
-                Refunds: refunds
-            },
+            TotalWeeklySale: sales.totalWeeklySale,
+            accountFinance: sales.accountFinance,
             ppcSummary,
             sponsoredAdsMetrics: {
                 totalCost: ppcSummary.totalSpend,
@@ -662,7 +663,7 @@ async function getDashboardPhase2(userId, country, region) {
  * PHASE 3: Charts and arrays (~200ms)
  * 
  * Returns larger data arrays for charts and detailed views:
- * - EconomicsMetrics.datewiseSales: sales chart
+ * - Live economics datewiseSales (loadLiveEconomics): sales chart
  * - PPCMetrics.dateWiseMetrics: PPC chart
  * - adsKeywordsPerformanceData: "Money Wasted" calculation
  * - Orders: filtered orders
@@ -678,8 +679,8 @@ async function getDashboardPhase3(userId, country, region) {
     logger.info(`[PERF] Starting getDashboardPhase3 for user ${userId}, country ${country}, region ${region}`);
 
     try {
-        const [salesOnlyMetrics, adsKeywordsData, orderData, sellerData, dataFetchTracking] = await Promise.all([
-            SalesOnlyMetrics.getRecentDays(userId, region, country, 31),
+        const [economicsDoc, adsKeywordsData, orderData, sellerData, dataFetchTracking] = await Promise.all([
+            loadDashboardEconomics(userId, country, region),
             adsKeywordsPerformanceModel
                 .findMergedKeywordsData(userId, country, region, {})
                 .then((rows) => (rows?.length ? { keywordsData: rows } : null)),
@@ -730,7 +731,7 @@ async function getDashboardPhase3(userId, country, region) {
         const dateWiseMetrics = ppcMetrics?.dateWiseMetrics || [];
 
         const phase3Data = {
-            TotalSales: salesOnlyMetrics?.datewiseSales || [],
+            TotalSales: buildDashboardSales(economicsDoc).totalSales,
             TotalProduct: totalProducts,
             ActiveProducts: activeProducts,
             GetOrderData: filteredOrders,
@@ -765,5 +766,6 @@ module.exports = {
     getDashboardPhase3,
     summarizeBuyBoxDays,
     // Exported for tests: the dashboard's TACoS must divide by total sales over the PPC window.
-    resolveDashboardTacos
+    resolveDashboardTacos,
+    buildDashboardSales
 };

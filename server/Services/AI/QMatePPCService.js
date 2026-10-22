@@ -10,7 +10,7 @@
  * 
  * Data Sources:
  * - PPCMetrics: Overall PPC performance summary and dateWiseMetrics
- * - PPCUnitsSold: Units sold from PPC
+ * - Campaign: latest campaign snapshot (via ppcSnapshotLoader)
  * - PPCCampaignAnalysisService: All 6 dashboard tabs + KPI summary
  * - IssuesDataChunks: PPC-related issues and recommendations
  * 
@@ -19,7 +19,8 @@
 
 const logger = require('../../utils/Logger.js');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
-const PPCUnitsSold = require('../../models/amazon-ads/PPCUnitsSoldModel.js');
+const Campaign = require('../../models/amazon-ads/CampaignModel.js');
+const { loadLatestSnapshotDoc } = require('../../utils/ppcSnapshotLoader.js');
 const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
 const PPCCampaignAnalysisService = require('../Calculations/PPCCampaignAnalysisService.js');
 const mongoose = require('mongoose');
@@ -174,7 +175,8 @@ async function getZeroSalesKeywords(userId, country, region, minSpend = 5) {
                 campaignName: kw.campaignName,
                 adGroupName: kw.adGroupName,
                 matchType: kw.matchType,
-                spend: parseFloat((kw.cost || 0).toFixed(2)),
+                // cost arrives as a string from some reports; String has no toFixed.
+                spend: parseFloat(Number(kw.cost || 0).toFixed(2)),
                 clicks: kw.clicks || 0,
                 impressions: kw.impressions || 0,
                 status: kw.adKeywordStatus || 'unknown',
@@ -378,6 +380,21 @@ async function getSearchTermAnalysis(userId, country, region) {
     }
 }
 
+const CAMPAIGN_TYPE_KEYS = {
+    sponsoredproducts: 'sponsoredProducts',
+    sp: 'sponsoredProducts',
+    sponsoredbrands: 'sponsoredBrands',
+    sb: 'sponsoredBrands',
+    sponsoreddisplay: 'sponsoredDisplay',
+    sd: 'sponsoredDisplay',
+};
+
+/** 'Sponsored Products' / 'SPONSORED_PRODUCTS' / 'sponsoredProducts' / 'sp' -> 'sponsoredProducts'; null if unknown. */
+function normalizeCampaignType(type) {
+    if (typeof type !== 'string') return null;
+    return CAMPAIGN_TYPE_KEYS[type.toLowerCase().replace(/[\s_-]+/g, '')] || null;
+}
+
 /**
  * Get campaign overview with status
  * Returns all campaigns with their current state
@@ -393,9 +410,10 @@ async function getCampaignOverview(userId, country, region) {
     try {
         const userIdStr = userId?.toString() || userId;
         
+        // Latest snapshot by metricDate, reassembled when chunked — same loader as
+        // the Campaign Audit tabs, so QMate counts the campaigns the page shows.
         const [campaignData, ppcRollupOverview] = await Promise.all([
-            Campaign.findOne({ userId: userIdStr, country, region })
-                .sort({ createdAt: -1 }).lean(),
+            loadLatestSnapshotDoc(Campaign, userIdStr, country, region),
             PPCMetrics.rollupLastDays(userIdStr, country, region, 30)
         ]);
         const ppcMetrics =
@@ -422,21 +440,14 @@ async function getCampaignOverview(userId, country, region) {
             total: campaigns.length
         };
         
-        // Count by type
-        const typeCounts = {
-            sponsoredProducts: campaigns.filter(c => 
-                c.campaignType?.toLowerCase()?.includes('sponsored products') || 
-                c.campaignType?.toLowerCase() === 'sp'
-            ).length,
-            sponsoredBrands: campaigns.filter(c => 
-                c.campaignType?.toLowerCase()?.includes('sponsored brands') || 
-                c.campaignType?.toLowerCase() === 'sb'
-            ).length,
-            sponsoredDisplay: campaigns.filter(c => 
-                c.campaignType?.toLowerCase()?.includes('sponsored display') || 
-                c.campaignType?.toLowerCase() === 'sd'
-            ).length
-        };
+        // Count by type. Stored types are 'sponsoredProducts' (GetCampaigns default),
+        // 'SPONSORED_PRODUCTS', 'Sponsored Products' or 'SP'; matching on the
+        // spaced form alone counted every 'sponsoredProducts' campaign as nothing.
+        const typeCounts = { sponsoredProducts: 0, sponsoredBrands: 0, sponsoredDisplay: 0 };
+        for (const c of campaigns) {
+            const key = normalizeCampaignType(c?.campaignType);
+            if (key) typeCounts[key]++;
+        }
         
         // Get campaign list with budgets
         const campaignList = campaigns
@@ -752,5 +763,6 @@ module.exports = {
     getSearchTermAnalysis,
     getCampaignOverview,
     getPPCIssues,
-    getQMatePPCContext
+    getQMatePPCContext,
+    normalizeCampaignType
 };

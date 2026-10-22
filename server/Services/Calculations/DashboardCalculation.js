@@ -23,6 +23,7 @@ const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
 const DataFetchTracking = require('../../models/system/DataFetchTrackingModel.js');
 const { resolveAsinFinance } = require('../Finance/AsinFinanceWindowService.js');
 const { isStoredEconomicsDoc } = require('../Finance/LiveEconomicsService.js');
+const { sumEconomicsSales } = require('../Finance/EconomicsFinanceFormat.js');
 const { computeProfitabilityAmount, classifyProfitabilityRow, computeSponsoredAdsAmount, computeBuyBoxBenchmark, computeBuyBoxLostRevenueAmount, computeBuyBoxProfitImpact } = require('./RecoverableAmountUtils.js');
 const {
     TARGET_ACOS_PERCENT,
@@ -75,23 +76,9 @@ const getPpcSalesFromEconomics = async (economicsMetrics) => {
     const totalPpcSpent = economicsMetrics.ppcSpent?.amount || 0;
     
     // CRITICAL: Calculate totalSales by summing datewiseSales for consistency
-    // This ensures page load shows same value as custom filter for same dates
-    let totalSales = 0;
-    let totalGrossProfit = 0;
-    
-    if (Array.isArray(economicsMetrics.datewiseSales) && economicsMetrics.datewiseSales.length > 0) {
-        economicsMetrics.datewiseSales.forEach(item => {
-            totalSales += item.sales?.amount || 0;
-            totalGrossProfit += item.grossProfit?.amount || 0;
-        });
-        // Round to 2 decimal places for consistency
-        totalSales = parseFloat(totalSales.toFixed(2));
-        totalGrossProfit = parseFloat(totalGrossProfit.toFixed(2));
-    } else {
-        // Fallback to stored value if datewiseSales not available
-        totalSales = economicsMetrics.totalSales?.amount || 0;
-        totalGrossProfit = economicsMetrics.grossProfit?.amount || 0;
-    }
+    // This ensures page load shows same value as custom filter for same dates.
+    // Shared with the lightweight dashboard endpoints so both show one number.
+    const { totalSales, totalGrossProfit } = sumEconomicsSales(economicsMetrics);
     
     // Get ASIN-wise PPC data
     // For big accounts, aggregate from separate collection to avoid loading full array into memory

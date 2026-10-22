@@ -17,8 +17,10 @@ const AdsGroup = require('../../models/amazon-ads/adsgroupModel');
 const Keyword = require('../../models/amazon-ads/keywordModel');
 const ProductWiseSponsoredAdsItem = require('../../models/amazon-ads/ProductWiseSponsoredAdsItemModel');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel');
+const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel');
 const logger = require('../../utils/Logger');
 const { getDefaultReportDateRange } = require('../../utils/reportDateRange');
+const { getCurrencyCode } = require('../../utils/marketplaceCurrency');
 const { loadLatestSnapshotDoc, loadKeywordSnapshot } = require('../../utils/ppcSnapshotLoader');
 // One rule for the wasted-keyword / zero-sale-term / migration tabs and the tasks.
 const { settleCutoffDay, buildNegatedIndex } = require('./AdsSignals.js');
@@ -274,10 +276,17 @@ const aggregatePpcDaily = async (userIdStr, country, region, startDate, endDate)
 };
 
 /**
- * Aggregate total (organic + PPC) sales over the same window from the per-day
- * SalesOnlyMetrics collection. Used as the TACOS denominator.
+ * Aggregate total (organic + PPC) sales over the same window. Used as the TACOS
+ * denominator.
  *
- * NOTE: SalesOnlyMetrics stores `User` as an ObjectId, distinct from
+ * DailySkuFinance first: it is written daily for every live marketplace and is
+ * what the Profitability page and the dashboard's sales figure read, so TACoS
+ * divides by the same sales the seller sees. SalesOnlyMetrics exists for only a
+ * handful of marketplaces and is used only when DailySkuFinance has no rows for
+ * the window. `daysWithData: 0` means neither had any — callers that show "no
+ * data" (the dashboard) key off that rather than the 0 total.
+ *
+ * NOTE: both collections store `User` as an ObjectId, distinct from
  * PPCMetrics' string userId.
  */
 const aggregateTotalSales = async (userId, country, region, startDate, endDate) => {
@@ -288,18 +297,47 @@ const aggregateTotalSales = async (userId, country, region, startDate, endDate) 
                 ? new mongoose.Types.ObjectId(userId)
                 : userId;
     } catch (_) {
-        return { totalSales: 0, currencyCode: 'USD', daysWithData: 0 };
+        return { totalSales: 0, unitsSold: 0, currencyCode: 'USD', daysWithData: 0, source: null };
+    }
+
+    const match = {
+        User: userObjectId,
+        region,
+        country,
+        date: { $gte: startDate, $lte: endDate },
+    };
+
+    const financeRows = await DailySkuFinance.aggregate([
+        { $match: match },
+        {
+            $group: {
+                _id: '$date',
+                sales: { $sum: { $ifNull: ['$productSales', 0] } },
+                units: { $sum: { $ifNull: ['$units', 0] } },
+            },
+        },
+        {
+            $group: {
+                _id: null,
+                totalSales: { $sum: '$sales' },
+                unitsSold: { $sum: '$units' },
+                daysWithData: { $sum: 1 },
+            },
+        },
+    ]);
+    if (financeRows && financeRows[0] && financeRows[0].daysWithData > 0) {
+        const r = financeRows[0];
+        return {
+            totalSales: Math.round((Number(r.totalSales) || 0) * 100) / 100,
+            unitsSold: Number(r.unitsSold) || 0,
+            currencyCode: getCurrencyCode(country),
+            daysWithData: r.daysWithData,
+            source: 'DailySkuFinance',
+        };
     }
 
     const rows = await SalesOnlyMetrics.aggregate([
-        {
-            $match: {
-                User: userObjectId,
-                region,
-                country,
-                date: { $gte: startDate, $lte: endDate },
-            },
-        },
+        { $match: match },
         {
             $group: {
                 _id: null,
@@ -311,8 +349,8 @@ const aggregateTotalSales = async (userId, country, region, startDate, endDate) 
         },
     ]);
     return rows && rows[0]
-        ? rows[0]
-        : { totalSales: 0, unitsSold: 0, currencyCode: 'USD', daysWithData: 0 };
+        ? { ...rows[0], source: 'SalesOnlyMetrics' }
+        : { totalSales: 0, unitsSold: 0, currencyCode: 'USD', daysWithData: 0, source: null };
 };
 
 /**
