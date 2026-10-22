@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 
 const auth = require('../middlewares/Auth/auth.js');
+const { getLocationOptional } = require('../middlewares/Auth/getLocation.js');
 const { getLoggedInUserLocation } = require('../controllers/user-auth/UserLocationController.js');
 
 /**
@@ -15,6 +16,7 @@ const { getLoggedInUserLocation } = require('../controllers/user-auth/UserLocati
  *   - Requires a valid IBEXAccessToken cookie (enforced by `auth` middleware).
  *   - Responds with { country, region } for the authenticated user.
  */
-router.get('/', auth, getLoggedInUserLocation);
+// getLocationOptional: the session's marketplace, when there is one, is a fallback.
+router.get('/', auth, getLocationOptional, getLoggedInUserLocation);
 
 module.exports = router;
