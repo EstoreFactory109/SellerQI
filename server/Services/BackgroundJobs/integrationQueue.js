@@ -202,6 +202,17 @@ async function getCurrentAccountStatus(userId, country, region) {
 }
 
 /**
+ * Job states that mean "queued or running".
+ *
+ * BullMQ 5 keeps a job that has a priority in the `prioritized` state, not `waiting` — and every
+ * integration job has one. Checking only waiting/active/delayed treated a queued job as finished,
+ * so a second trigger deleted it and re-added it at the back of the queue, and the post-add check
+ * in addPhaseJob re-added every phase it had just added.
+ */
+const IN_PROGRESS_STATES = ['waiting', 'prioritized', 'waiting-children', 'active', 'delayed'];
+const isInProgressState = (state) => IN_PROGRESS_STATES.includes(state);
+
+/**
  * Add an integration job to the queue
  * 
  * SIMPLIFIED FLOW (no cooldown, no duplicate checks for completed jobs):
@@ -232,7 +243,7 @@ async function addIntegrationJob(userId, country, region, { priority = 1 } = {})
         const state = await existingJob.getState();
         
         // If job is waiting, active, or delayed - return it (don't create duplicate while it's running)
-        if (state === 'waiting' || state === 'active' || state === 'delayed') {
+        if (isInProgressState(state)) {
             logger.info(`[IntegrationQueue] Job already in progress for user ${userId}, ${country}-${region}. State: ${state}`);
             return {
                 jobId: customJobId,
@@ -307,7 +318,7 @@ async function addPhaseJob(jobData) {
     const existingJob = await queue.getJob(phaseJobId);
     if (existingJob) {
         const state = await existingJob.getState();
-        if (state === 'waiting' || state === 'active' || state === 'delayed') {
+        if (isInProgressState(state)) {
             logger.info(`[IntegrationQueue] Phase job ${phaseJobId} already in progress. State: ${state}`);
             return {
                 jobId: phaseJobId,
@@ -358,7 +369,7 @@ async function addPhaseJob(jobData) {
     const verifyJob = await queue.getJob(phaseJobId);
     const verifyState = verifyJob ? await verifyJob.getState() : 'not-found';
     
-    if (verifyState !== 'waiting' && verifyState !== 'delayed' && verifyState !== 'active') {
+    if (!isInProgressState(verifyState)) {
         logger.warn(`[IntegrationQueue] Phase job ${phaseJobId} state after add: ${verifyState}, retrying add once`);
         
         // Retry the add once
@@ -535,6 +546,7 @@ async function closeIntegrationQueue() {
 }
 
 module.exports = {
+    isInProgressState,
     getIntegrationQueue,
     addIntegrationJob,
     addPhaseJob,

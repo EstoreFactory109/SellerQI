@@ -17,7 +17,7 @@ const queue = {
   on: jest.fn(),
 };
 
-const { addIntegrationJob, addPhaseJob } = require('../../../Services/BackgroundJobs/integrationQueue.js');
+const { addIntegrationJob, addPhaseJob, isInProgressState } = require('../../../Services/BackgroundJobs/integrationQueue.js');
 const { createNextPhaseJobData } = require('../../../Services/BackgroundJobs/integrationPhases.js');
 
 describe('integration job priority', () => {
@@ -65,5 +65,38 @@ describe('integration job priority', () => {
     queue.getJob.mockResolvedValueOnce(null).mockResolvedValue({ getState: async () => 'waiting' });
     await addPhaseJob(next);
     expect(queue.add.mock.calls[0][2].priority).toBe(1);
+  });
+});
+
+describe('a prioritized job counts as in progress', () => {
+  // BullMQ 5 keeps a job with a priority in 'prioritized', and every integration job has one.
+  beforeEach(() => {
+    Queue.mockImplementation(() => queue);
+    queue.add.mockImplementation(async (name, data, opts) => ({ id: opts.jobId }));
+    queue.add.mockClear();
+  });
+
+  it('knows the queued and running states', () => {
+    for (const state of ['waiting', 'prioritized', 'waiting-children', 'active', 'delayed']) {
+      expect(isInProgressState(state)).toBe(true);
+    }
+    for (const state of ['completed', 'failed', 'unknown', undefined]) {
+      expect(isInProgressState(state)).toBe(false);
+    }
+  });
+
+  it('a second trigger leaves a queued job where it is', async () => {
+    const remove = jest.fn();
+    queue.getJob.mockResolvedValue({ getState: async () => 'prioritized', remove });
+    const result = await addIntegrationJob('u1', 'UK', 'EU', { priority: 5 });
+    expect(result).toMatchObject({ isExisting: true, state: 'prioritized' });
+    expect(remove).not.toHaveBeenCalled();
+    expect(queue.add).not.toHaveBeenCalled();
+  });
+
+  it('a phase that is queued is not added a second time', async () => {
+    queue.getJob.mockResolvedValueOnce(null).mockResolvedValue({ getState: async () => 'prioritized' });
+    await addPhaseJob({ userId: 'u1', country: 'UK', region: 'EU', phase: 'init', parentJobId: 'p', priority: 5 });
+    expect(queue.add).toHaveBeenCalledTimes(1);
   });
 });

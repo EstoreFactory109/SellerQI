@@ -15,7 +15,7 @@
 const { ApiError } = require('../../utils/ApiError.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
 const asyncHandler = require('../../utils/AsyncHandler.js');
-const { addIntegrationJob, getIntegrationJobStatus } = require('../../Services/BackgroundJobs/integrationQueue.js');
+const { addIntegrationJob, getIntegrationJobStatus, isInProgressState } = require('../../Services/BackgroundJobs/integrationQueue.js');
 const JobStatus = require('../../models/system/JobStatusModel.js');
 const logger = require('../../utils/Logger.js');
 
@@ -174,7 +174,7 @@ const getActiveJob = asyncHandler(async (req, res) => {
         const queueStatus = await getIntegrationJobStatus(expectedJobId);
 
         // If job is in queue and active/waiting/delayed, return it
-        if (queueStatus.found && (queueStatus.status === 'waiting' || queueStatus.status === 'active' || queueStatus.status === 'delayed')) {
+        if (queueStatus.found && isInProgressState(queueStatus.status)) {
             return res.status(200).json(
                 new ApiResponse(200, {
                     hasActiveJob: true,
