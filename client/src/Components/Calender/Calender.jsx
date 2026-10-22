@@ -482,8 +482,9 @@ export default function DateFilter({ setOpenCalender, setSelectedPeriod, anchorR
         endDate: resolvedEndDate,
         financeData: dateResponse.data.data.FinanceData,
         reimburstmentData: dateResponse.data.data.reimburstmentData,
-        WeeklySales: dateResponse.data.data.TotalSales.totalSales,
-        TotalSales: dateResponse.data.data.TotalSales.dateWiseSales,
+        // totalSales is null when the range has no finance data — kept null (not available), not 0
+        WeeklySales: dateResponse.data.data.TotalSales?.totalSales ?? null,
+        TotalSales: dateResponse.data.data.TotalSales?.dateWiseSales,
         GetOrderData: dateResponse.data.data.GetOrderData,
         calendarMode: calendarMode, // Use determined calendar mode
         createdAccountDate: createdAccountDate

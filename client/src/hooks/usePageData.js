@@ -277,7 +277,8 @@ export const useDashboardData = (autoFetch = true) => {
         // Phase 2: Core (sales, health, finance, PPC summary)
         accountHealthPercentage: p2.accountHealthPercentage || {},
         AccountErrors: p2.AccountErrors || {},
-        TotalWeeklySale: p2.TotalWeeklySale ?? 0,
+        // null = no finance data (shown as not available), not $0
+        TotalWeeklySale: p2.TotalWeeklySale ?? null,
         accountFinance: p2.accountFinance || {},
         ppcSummary: p2.ppcSummary || {},
         sponsoredAdsMetrics: p2.sponsoredAdsMetrics || {},
