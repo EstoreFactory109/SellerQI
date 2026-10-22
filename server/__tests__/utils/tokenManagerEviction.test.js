@@ -26,9 +26,12 @@ const tokenManager = require('../../utils/TokenManager.js');
 
 const SIX_HOURS = 6 * 60 * 60 * 1000;
 
+/** Entries are keyed by user AND credentials; every test entry here uses spR/adsR. */
+const key = (userId) => tokenManager.keyFor(userId, 'spR', 'adsR');
+
 /** Backdate an entry so it looks untouched, without waiting. */
 function backdate(userId, ageMs) {
-    const entry = tokenManager.tokens.get(userId);
+    const entry = tokenManager.tokens.get(key(userId));
     entry.lastRefresh = Date.now() - ageMs;
     entry.spApiTokenTime = Date.now() - ageMs;
     entry.adsTokenTime = Date.now() - ageMs;
@@ -47,8 +50,8 @@ describe('stale entries are evicted', () => {
         // Any subsequent write sweeps.
         tokenManager.setTokens('new-user', 'sp', 'ads', 'spR', 'adsR');
 
-        expect(tokenManager.tokens.has('old-user')).toBe(false);
-        expect(tokenManager.tokens.has('new-user')).toBe(true);
+        expect(tokenManager.tokens.has(key('old-user'))).toBe(false);
+        expect(tokenManager.tokens.has(key('new-user'))).toBe(true);
     });
 
     test('many stale entries are all dropped, so the Map cannot grow without bound', () => {
@@ -62,7 +65,7 @@ describe('stale entries are evicted', () => {
         tokenManager.setTokens('fresh', 'sp', 'ads', 'spR', 'adsR');
 
         expect(tokenManager.tokens.size).toBe(1);
-        expect(tokenManager.tokens.has('fresh')).toBe(true);
+        expect(tokenManager.tokens.has(key('fresh'))).toBe(true);
     });
 });
 
@@ -73,8 +76,8 @@ describe('live entries survive', () => {
         tokenManager.setTokens('warm-user', 'sp', 'ads', 'spR', 'adsR');
         tokenManager.setTokens('other-user', 'sp', 'ads', 'spR', 'adsR');
 
-        expect(tokenManager.tokens.has('warm-user')).toBe(true);
-        expect(tokenManager.tokens.has('other-user')).toBe(true);
+        expect(tokenManager.tokens.has(key('warm-user'))).toBe(true);
+        expect(tokenManager.tokens.has(key('other-user'))).toBe(true);
     });
 
     test('an entry just inside the TTL survives', () => {
@@ -83,7 +86,7 @@ describe('live entries survive', () => {
 
         tokenManager.setTokens('trigger', 'sp', 'ads', 'spR', 'adsR');
 
-        expect(tokenManager.tokens.has('edge-user')).toBe(true);
+        expect(tokenManager.tokens.has(key('edge-user'))).toBe(true);
     });
 
     // The TTL must comfortably exceed the 55-minute refresh threshold, or an account in normal
@@ -92,14 +95,14 @@ describe('live entries survive', () => {
         tokenManager.setTokens('u', 'sp', 'ads', 'spR', 'adsR');
         backdate('u', 2 * 60 * 60 * 1000); // 2h — past refresh age, well inside the TTL
         tokenManager.setTokens('trigger', 'sp', 'ads', 'spR', 'adsR');
-        expect(tokenManager.tokens.has('u')).toBe(true);
+        expect(tokenManager.tokens.has(key('u'))).toBe(true);
     });
 });
 
 describe('eviction does not disturb behaviour', () => {
     test('setTokens still stores everything it did before', () => {
         tokenManager.setTokens('u1', 'spTok', 'adsTok', 'spRef', 'adsRef');
-        const entry = tokenManager.getTokens('u1');
+        const entry = tokenManager.getTokens('u1', 'spRef', 'adsRef');
 
         expect(entry).toEqual(expect.objectContaining({
             spApiToken: 'spTok', adsToken: 'adsTok',
@@ -112,5 +115,45 @@ describe('eviction does not disturb behaviour', () => {
         tokenManager.tokens.set('malformed', {});
         tokenManager.setTokens('trigger', 'sp', 'ads', 'spR', 'adsR');
         expect(tokenManager.tokens.has('malformed')).toBe(false);
+    });
+});
+
+describe('one user with marketplaces in two regions', () => {
+    // Each Amazon region has its own refresh tokens. Keyed by userId alone, the second region's
+    // write replaced the first's, and the first region's next call went out with the wrong
+    // region's access token.
+    test('each region keeps its own access tokens', () => {
+        tokenManager.setTokens('u1', 'na-sp', 'na-ads', 'naSpRef', 'naAdsRef');
+        tokenManager.setTokens('u1', 'eu-sp', 'eu-ads', 'euSpRef', 'euAdsRef');
+
+        expect(tokenManager.getTokens('u1', 'naSpRef', 'naAdsRef').spApiToken).toBe('na-sp');
+        expect(tokenManager.getTokens('u1', 'euSpRef', 'euAdsRef').spApiToken).toBe('eu-sp');
+    });
+
+    test('countries in one region share credentials, so they share one entry', () => {
+        tokenManager.setTokens('u1', 'old', 'old', 'euSpRef', 'euAdsRef');
+        tokenManager.setTokens('u1', 'new', 'new', 'euSpRef', 'euAdsRef');
+        expect(tokenManager.tokens.size).toBe(1);
+        expect(tokenManager.getTokens('u1', 'euSpRef', 'euAdsRef').spApiToken).toBe('new');
+    });
+
+    test('a refresh for one region does not wait on, or reuse, the other region\'s refresh', async () => {
+        const { generateAccessToken } = require('../../Services/Sp_API/GenerateTokens.js');
+        const { generateAdsAccessToken } = require('../../Services/AmazonAds/GenerateToken.js');
+        generateAccessToken.mockImplementation(async (_u, refresh) => `access-for-${refresh}`);
+        generateAdsAccessToken.mockImplementation(async (refresh) => `ads-for-${refresh}`);
+
+        const [na, eu] = await Promise.all([
+            tokenManager.getValidTokens('u1', 'naSpRef', 'naAdsRef'),
+            tokenManager.getValidTokens('u1', 'euSpRef', 'euAdsRef'),
+        ]);
+
+        expect(na).toEqual({ spApiToken: 'access-for-naSpRef', adsToken: 'ads-for-naAdsRef' });
+        expect(eu).toEqual({ spApiToken: 'access-for-euSpRef', adsToken: 'ads-for-euAdsRef' });
+    });
+
+    test('the key does not contain the raw refresh token', () => {
+        expect(tokenManager.keyFor('u1', 'secret-refresh', 'other')).not.toContain('secret-refresh');
+        expect(tokenManager.keyFor('u1')).toBe('u1');
     });
 });
