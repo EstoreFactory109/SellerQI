@@ -12,9 +12,16 @@ const {
 } = require('../controllers/user-auth/AccountIntegrationController.js');
 const auth =require('../middlewares/Auth/auth.js')
 const agencyAuth = require('../middlewares/Auth/agencyAuth.js');
-const {getLocation}=require('../middlewares/Auth/getLocation.js');
+// Cookie-only on purpose: connect/disconnect flows act on the marketplace the onboarding flow put
+// in the cookie, which may not be a connected (owned) marketplace yet. A page's X-Marketplace
+// header must never redirect a token write or delete to a different marketplace.
+const {getLocationCookieOnly: getLocation}=require('../middlewares/Auth/getLocation.js');
+const { invalidateMarketplaceAccessAfter } = require('../utils/marketplaceAccess.js');
 const express=require('express');
 const router=express.Router();
+
+// Every route here can add, change or remove a connected marketplace.
+router.use(invalidateMarketplaceAccessAfter);
 
 router.post('/generateSPAPITokens', auth, getLocation, generateSPAPITokens);
 router.post('/SaveAllDetails', auth, SaveAllDetails);

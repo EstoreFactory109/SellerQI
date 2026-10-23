@@ -16,6 +16,7 @@ import {
 } from '../../redux/slices/KeywordRecommendationsSlice.js';
 import { TablePageSkeleton } from '../../Components/Skeleton/PageSkeletons.jsx';
 import { COLORS } from '../../Components/Shared/index.js';
+import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitcher.jsx'
 
 // Main Dashboard Component
 const KeywordAnalysisDashboard = () => {
@@ -757,6 +758,7 @@ const KeywordAnalysisDashboard = () => {
             Keyword Opportunities
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <MarketplaceSwitcher />
             <button
               onClick={exportToCSV}
               style={{

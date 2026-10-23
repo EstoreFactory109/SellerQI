@@ -32,9 +32,11 @@ import { formatCurrencyWithLocale } from '../../utils/currencyUtils.js';
 import { SkeletonTableBody } from '../../Components/Skeleton/PageSkeletons.jsx';
 import AmazonFbaInventoryCell from '../../Components/Products/AmazonFbaInventoryCell.jsx';
 import { COLORS, KPICard, STATUS, ProductsToFixList } from '../../Components/Shared/index.js';
+import { useQMate } from '../../contexts/QMateContext.js';
 import { useTopProducts } from '../../hooks/useTopProducts.js';
 import axiosInstance from '../../config/axios.config.js';
 import DownloadReport from '../../Components/DownloadReport/DownloadReport.jsx';
+import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitcher.jsx'
 
 // Exactly 6 columns: 4 fixed (ASIN/SKU, Name, Issues or Recommendation, View) + 2 chosen from dropdown.
 // Product tabs: pick 2 from this list to fill columns 5 and 6.
@@ -260,6 +262,7 @@ const ProductThumb = ({ src }) => (
 const YourProducts = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const { askQMate } = useQMate();
   const [searchQuery, setSearchQuery] = useState('');
   // Opens on the ranked list — "where do I start" before the raw inventory.
   const [activeTab, setActiveTab] = useState('topProductsToFix');
@@ -910,6 +913,8 @@ const YourProducts = () => {
               {currentCountry ? ` (${currentCountry.toUpperCase()})` : ''}.
             </p>
           </div>
+          <div className="flex items-center gap-2">
+          <MarketplaceSwitcher />
           <DownloadReport
             prepareDataFunc={prepareYourProductsExport}
             filename="Your_Products_Report"
@@ -917,6 +922,7 @@ const YourProducts = () => {
             showIcon={true}
             buttonClass="flex items-center gap-2 px-[14px] py-[9px] rounded-lg text-[13px] font-medium border border-[#252C3A] hover:border-[#3B4658] bg-[#151A23] text-[#F5F7FA] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           />
+          </div>
         </div>
 
         {/* Summary tiles — real data, restyled with the shared KPICard/StatusPill components */}
@@ -1128,7 +1134,7 @@ const YourProducts = () => {
                 <h2 className="m-0 text-[15px] font-semibold" style={{ color: COLORS.textPrimary }}>Top products to fix</h2>
                 <button
                   type="button"
-                  onClick={() => navigate('/seller-central-checker/qmate')}
+                  onClick={() => askQMate?.()}
                   className="flex items-center gap-1 pl-1 pr-2 py-0.5 rounded-full text-xs font-semibold border transition-colors"
                   style={{ background: 'rgba(59,130,246,.12)', borderColor: 'rgba(59,130,246,.35)', color: '#7EA8F8' }}
                   title="Ask QMate about these products"

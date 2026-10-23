@@ -44,6 +44,21 @@ const REVENUE_OVERHEAD_CATEGORIES = new Set([
 ]);
 
 /**
+ * The fields behind the per-ASIN expense total, with the sign each one carries in it
+ * (+1 adds to expenses, -1 reduces them). One list drives both the headline calculation
+ * (_perAsinExpenses) and the day-by-day one, so they cannot drift apart. Order and signs mirror
+ * ProfitibilityDashboard.jsx perAsinExpenses exactly.
+ */
+const PER_ASIN_EXPENSE_TERMS = [
+  ['fbaFulfillmentFee', 1], ['referralCommission', 1], ['closingFee', 1], ['technologyFee', 1],
+  ['shippingChargeback', 1], ['giftWrapChargeback', 1], ['fbaDisposalFee', 1], ['fbaReversedReimbursement', 1],
+  ['refundedAmount', 1], ['refundCommission', 1],
+  ['refundedReferralFee', -1], ['refundedPromotion', -1], ['restockingFee', -1],
+  ['promotionsDiscount', 1], ['shippingDiscount', 1], ['taxDiscount', 1], ['shippingTaxDiscount', 1],
+  ['tdsDeducted', 1], ['tcsCollected', 1], ['otherExpenses', 1],
+];
+
+/**
  * Per-ASIN (Amazon SKU-level) expense sum — the shared kernel used by both
  * `computeDisplayTotalExpenses` (account totals) and `computeRowProfit`
  * (single ASIN row). Keeping the field list in ONE place guarantees the
@@ -56,30 +71,8 @@ const REVENUE_OVERHEAD_CATEGORIES = new Set([
  * @returns {number} sum of per-ASIN Amazon fees/refund costs/discounts
  */
 function _perAsinExpenses(t) {
-  const abs = Math.abs;
   if (!t) return 0;
-  return (
-    abs(t.fbaFulfillmentFee || 0) +
-    abs(t.referralCommission || 0) +
-    abs(t.closingFee || 0) +
-    abs(t.technologyFee || 0) +
-    abs(t.shippingChargeback || 0) +
-    abs(t.giftWrapChargeback || 0) +
-    abs(t.fbaDisposalFee || 0) +
-    abs(t.fbaReversedReimbursement || 0) +
-    abs(t.refundedAmount || 0) +
-    abs(t.refundCommission || 0) -
-    abs(t.refundedReferralFee || 0) -
-    abs(t.refundedPromotion || 0) -
-    abs(t.restockingFee || 0) +
-    abs(t.promotionsDiscount || 0) +
-    abs(t.shippingDiscount || 0) +
-    abs(t.taxDiscount || 0) +
-    abs(t.shippingTaxDiscount || 0) +
-    abs(t.tdsDeducted || 0) +
-    abs(t.tcsCollected || 0) +
-    abs(t.otherExpenses || 0)
-  );
+  return PER_ASIN_EXPENSE_TERMS.reduce((sum, [field, sign]) => sum + sign * Math.abs(t[field] || 0), 0);
 }
 
 /**
@@ -187,7 +180,155 @@ function computeRowProfit(asinRow, cogsPerUnit, rowAdSpend) {
   return { productSales, totalExpenses, cogs, adSpend, grossProfit, profitMargin };
 }
 
+/**
+ * The Dashboard's "Where your money goes" figures for one marketplace.
+ *
+ * A field-by-field port of the pieMetrics block in
+ * client/src/Components/Dashboard/SamePageComponents/TotalSales.jsx (~lines 170-260), so the
+ * combined (all-marketplaces) Dashboard can build the same slices on the server for each
+ * marketplace and add them up after currency conversion. If TotalSales.jsx changes a field,
+ * this must change too (financeCalculations.test.js pins the two together on fixed numbers).
+ *
+ * @param {Object} totals    - getTotals() result
+ * @param {Array}  overhead  - getOverhead().items
+ * @param {number} totalCogs - computeTotalCogsFromAsinWise() result
+ * @param {number} ppcSpend  - ad spend for the window (PPCMetrics, else totals.adsSpend)
+ * @returns {{productSales:number, amazonFees:number, refundsPromos:number, uncategorizedAmazonFees:number,
+ *            totalCogs:number, additionalAmazonFees:number, overhead:number, reimbursements:number,
+ *            ppcSpend:number, grossProfitRaw:number}}
+ */
+function computeDashboardPieSlices(totals, overhead, totalCogs, ppcSpend) {
+  const abs = Math.abs;
+  const t = totals || null;
+
+  const productSales = t && t.productSales != null ? Number(t.productSales) : 0;
+  const reimbursements = t ? abs(t.fbaInventoryReimbursement || 0) : 0;
+
+  const amazonFees = t ? abs(
+    (t.fbaFulfillmentFee || 0) +
+    (t.referralCommission || 0) +
+    (t.closingFee || 0) +
+    (t.technologyFee || 0) +
+    (t.shippingChargeback || 0) +
+    (t.giftWrapChargeback || 0) +
+    (t.fbaDisposalFee || 0) +
+    (t.fbaReversedReimbursement || 0)
+  ) : 0;
+
+  const refundsPromos = t ? abs(
+    (t.refundedAmount || 0) +
+    (t.refundCommission || 0) -
+    abs(t.refundedReferralFee || 0) -
+    abs(t.refundedPromotion || 0) -
+    abs(t.restockingFee || 0) +
+    (t.promotionsDiscount || 0) +
+    (t.shippingDiscount || 0)
+  ) : 0;
+
+  const breakdown = ((t && t.otherExpensesBreakdown) || []).filter((item) => abs((item && item.amount) || 0) > 0.01);
+  const uncategorizedAmazonFees = breakdown.length > 0
+    ? breakdown.reduce((sum, item) => sum + abs(item.amount), 0)
+    : abs((t && t.otherExpenses) || 0);
+
+  const cogs = Number(totalCogs || 0);
+  const overheadTotal = (overhead || [])
+    .filter((item) => item && !item.isRevenue && !REVENUE_OVERHEAD_CATEGORIES.has(item.category))
+    .reduce((sum, item) => sum + abs(item.amount || 0), 0);
+
+  const spend = abs(ppcSpend || 0);
+  const grossProfitRaw = computeDisplayProfit(productSales, computeDisplayTotalExpenses(t, overhead, spend), cogs);
+
+  return {
+    productSales,
+    amazonFees,
+    refundsPromos,
+    uncategorizedAmazonFees,
+    totalCogs: cogs,
+    additionalAmazonFees: uncategorizedAmazonFees + cogs,
+    overhead: overheadTotal,
+    reimbursements,
+    ppcSpend: spend,
+    grossProfitRaw,
+  };
+}
+
+/**
+ * Gross profit for each day of a window, for ONE marketplace, in its own currency.
+ *
+ * The same arithmetic as computeDashboardPieSlices — sales − (per-ASIN expenses + overhead −
+ * reimbursements) − ad spend − COGS — spread over the days, so the series adds up to the headline
+ * Gross Profit EXACTLY.
+ *
+ * Why not just run the formula on each day: expenses take abs() of each field, and the headline does
+ * that once on the window total. A field whose sign changes between days (a shipping discount that is
+ * a charge one day and a credit the next) would give abs(day) values that add up to MORE than
+ * abs(window) — on a real account that was a $19 gap. So each field's sign is taken from the whole
+ * window, and a day contributes sign(window) × its own amount. Those add up to abs(window total).
+ * Overhead is spread the same way, per category.
+ *
+ * @param {Object}   p
+ * @param {Array}    p.skuRows        DailySkuFinance summed per {date, asin}: { date, asin, units, productSales, ...fee fields }
+ * @param {Array}    p.overheadRows   DailyOverheadFinance rows: { date, category, isRevenue, amount }
+ * @param {Object}   p.adSpendByDate  { 'YYYY-MM-DD': spend } — PPC spend per day
+ * @param {Object}   p.cogsByAsin     { asin: per-unit cost } (only entered costs)
+ * @returns {Array<{date:string, sales:number, profit:number}>} ascending by date
+ */
+function computeDailyGrossProfit({ skuRows, overheadRows, adSpendByDate, cogsByAsin }) {
+  const abs = Math.abs;
+  const sign = (n) => (n < 0 ? -1 : 1);
+  const days = new Map();
+  const day = (date) => {
+    if (!days.has(date)) days.set(date, { totals: {}, cogs: 0, overheadByCategory: {} });
+    return days.get(date);
+  };
+
+  const windowTotals = {};
+  for (const row of skuRows || []) {
+    if (!row || !row.date) continue;
+    const d = day(row.date);
+    for (const [key, value] of Object.entries(row)) {
+      if (key === 'date' || key === 'asin' || typeof value !== 'number') continue;
+      d.totals[key] = (d.totals[key] || 0) + value;
+      windowTotals[key] = (windowTotals[key] || 0) + value;
+    }
+    const perUnit = Number((cogsByAsin && cogsByAsin[row.asin]) || 0);
+    const units = Number(row.units || 0);
+    if (perUnit > 0 && units > 0) d.cogs += perUnit * units;
+  }
+
+  const windowOverhead = {};
+  for (const row of overheadRows || []) {
+    if (!row || !row.date || row.isRevenue || REVENUE_OVERHEAD_CATEGORIES.has(row.category)) continue;
+    const amount = Number(row.amount || 0);
+    day(row.date).overheadByCategory[row.category] = (day(row.date).overheadByCategory[row.category] || 0) + amount;
+    windowOverhead[row.category] = (windowOverhead[row.category] || 0) + amount;
+  }
+
+  // A day can have costs and no sales at all (ads kept running, a storage fee posted). Those days
+  // still belong in the series — the headline subtracts that spend — as a loss.
+  for (const [date, spend] of Object.entries(adSpendByDate || {})) {
+    if (abs(spend || 0) > 0) day(date);
+  }
+
+  return [...days.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([date, d]) => {
+      const sales = Number(d.totals.productSales || 0);
+      let expenses = PER_ASIN_EXPENSE_TERMS.reduce(
+        (sum, [field, termSign]) => sum + termSign * sign(windowTotals[field] || 0) * (d.totals[field] || 0), 0);
+      expenses -= sign(windowTotals.fbaInventoryReimbursement || 0) * (d.totals.fbaInventoryReimbursement || 0);
+      for (const [category, amount] of Object.entries(d.overheadByCategory)) {
+        expenses += sign(windowOverhead[category] || 0) * amount;
+      }
+      const adSpend = abs((adSpendByDate && adSpendByDate[date]) || 0);
+      return { date, sales, profit: computeDisplayProfit(sales, expenses + adSpend, d.cogs) };
+    });
+}
+
 module.exports = {
+  _perAsinExpenses,
+  computeDailyGrossProfit,
+  computeDashboardPieSlices,
   REVENUE_OVERHEAD_CATEGORIES,
   computeDisplayTotalExpenses,
   computeDisplayProfit,

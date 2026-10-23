@@ -23,13 +23,12 @@ const rulesSection = (source) => {
 };
 
 describe('client listing rules match the server', () => {
-  // The restricted-word lists live in four places; tasks come from the server
+  // The restricted-word lists live in these places (the Listing Analyzer page copy was removed with that page); tasks come from the server
   // copy, so any drift makes the analyzers disagree with the task list.
   const server = rulesSection(read('server/Services/Calculations/Rankings.js'));
 
   it.each([
     'client/src/helpers/Rankingsj.js',
-    'client/src/Pages/Products/PreAnalysis.jsx',
     'client/src/Pages/DemoSellerCentralChecker/DemoPreAnalysis.jsx',
   ])('%s carries an identical copy of the restricted wording rules', (path) => {
     expect(server).toBeTruthy();

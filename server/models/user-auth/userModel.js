@@ -363,6 +363,12 @@ const userSchema = new mongoose.Schema(
         type: Boolean,
         default: true
       },
+      // The marketplace the user last picked in a page's marketplace switcher. Used when a
+      // request names no marketplace and carries no location cookie (see getLocation.js).
+      preferredMarketplace: {
+        country: { type: String, default: null },
+        region: { type: String, enum: ['NA', 'EU', 'FE', null], default: null },
+      },
       FirstAnalysisDone: {
         type: Boolean,
         default: false

@@ -32,6 +32,7 @@ const MARKETPLACE_CURRENCY_CODES = Object.freeze({
     SE: 'SEK',
     PL: 'PLN',
     BE: 'EUR',
+    IE: 'EUR',
     TR: 'TRY',
 
     // Asia Pacific
@@ -44,6 +45,9 @@ const MARKETPLACE_CURRENCY_CODES = Object.freeze({
     AE: 'AED',
     SA: 'SAR',
     EG: 'EGP',
+
+    // Africa
+    ZA: 'ZAR',
 });
 
 // country code → display symbol (kept in sync with the client map)
@@ -63,6 +67,7 @@ const MARKETPLACE_CURRENCY_SYMBOLS = Object.freeze({
     SE: 'kr',
     PL: 'zł',
     BE: '€',
+    IE: '€',
     TR: '₺',
 
     JP: '¥',
@@ -73,7 +78,13 @@ const MARKETPLACE_CURRENCY_SYMBOLS = Object.freeze({
     AE: 'د.إ',
     SA: '﷼',
     EG: '£',
+
+    ZA: 'R',
 });
+
+// Every currency a connected marketplace can be in — the set the combined Dashboard can
+// convert between (see Services/Finance/FxService.js).
+const SUPPORTED_CURRENCY_CODES = Object.freeze([...new Set(Object.values(MARKETPLACE_CURRENCY_CODES))]);
 
 const DEFAULT_CURRENCY_CODE = 'USD';
 const DEFAULT_CURRENCY_SYMBOL = '$';
@@ -116,6 +127,7 @@ module.exports = {
     formatMoneyForProse,
     MARKETPLACE_CURRENCY_CODES,
     MARKETPLACE_CURRENCY_SYMBOLS,
+    SUPPORTED_CURRENCY_CODES,
     DEFAULT_CURRENCY_CODE,
     DEFAULT_CURRENCY_SYMBOL,
 };

@@ -9,6 +9,7 @@ import { useSelector } from 'react-redux';
 import { useReimbursementData } from '../../hooks/usePageData';
 import { PageSkeleton } from '../../Components/Skeleton/PageSkeletons.jsx';
 import { COLORS } from '../../Components/Shared/index.js';
+import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitcher.jsx'
 
 const ReimbursementDashboard = () => {
   const currency = useSelector(state => state.currency?.currency) || '$';
@@ -492,6 +493,7 @@ const ReimbursementDashboard = () => {
               </div>
 
               <div className="flex items-center gap-2">
+                <MarketplaceSwitcher />
                 <button
                   onClick={() => setShowFilters(!showFilters)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all text-xs font-medium"

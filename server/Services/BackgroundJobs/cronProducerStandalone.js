@@ -22,6 +22,7 @@
  *   - `initializeEmailReminderJob`         → 48-hour reactivation emails
  *   - `zohoTaskSyncStandalone.setupCron`   → nightly Zoho project-task sync
  *   - `gmailInboxStandalone.setupCron`     → ESF inbox poll + watch renewal
+ *   - `fxRatesStandalone.setupCron`        → daily currency exchange rates
  *
  * Safety
  *   - Wraps the hourly daily-update tick with an `OrchestrationCronLock`
@@ -230,6 +231,17 @@ async function start() {
         logger.info('[CronProducerStandalone] Gmail inbox crons initialized');
     } catch (error) {
         logger.error('[CronProducerStandalone] Gmail inbox init failed', { error: error?.message });
+    }
+
+    // Daily currency exchange rates for the combined (all-marketplaces) Dashboard. Same
+    // reasoning as the Zoho block above. Logs only (writes nothing) while FX_RATES_ENABLED
+    // is off, which is the default.
+    try {
+        const { setupCron: setupFxRatesCron } = require('./fxRatesStandalone.js');
+        setupFxRatesCron();
+        logger.info('[CronProducerStandalone] FX rates crons initialized');
+    } catch (error) {
+        logger.error('[CronProducerStandalone] FX rates init failed', { error: error?.message });
     }
 
     logger.info('[CronProducerStandalone] Started successfully — running all cron schedules');

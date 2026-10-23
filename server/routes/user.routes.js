@@ -1,6 +1,6 @@
 const express=require('express');
 const router=express.Router();
-const {registerUser,registerAgencyClient,verifyUser,loginUser,profileUser,logoutUser,refreshAccessToken,updateProfilePic,updateDetails,updateUserPhone,switchAccount,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser, updateSubscriptionPlan, activateFreeTrial, checkTrialStatus, getAdminProfile, updateAdminProfile, updateAdminProfilePic, updateAdminPassword, getAdminClients, removeAdminClient, switchToClient, completeAgencySignup, getAdminBillingInfo, resendOtp, superAdminUpdateUserPassword, checkFirstAnalysisStatus}=require('../controllers/user-auth/UserController.js')
+const {registerUser,registerAgencyClient,verifyUser,loginUser,profileUser,logoutUser,refreshAccessToken,updateProfilePic,updateDetails,updateUserPhone,switchAccount,setPreferredMarketplace,verifyEmailForPasswordReset,resetPassword,TrackIP,getIPTracking, googleLoginUser,googleRegisterUser, updateSubscriptionPlan, activateFreeTrial, checkTrialStatus, getAdminProfile, updateAdminProfile, updateAdminProfilePic, updateAdminPassword, getAdminClients, removeAdminClient, switchToClient, completeAgencySignup, getAdminBillingInfo, resendOtp, superAdminUpdateUserPassword, checkFirstAnalysisStatus}=require('../controllers/user-auth/UserController.js')
 const registerValidate=require('../middlewares/validator/registerValidate.js')
 const validateLogin =require('../middlewares/validator/LoginValidate.js');
 const { validatePasswordResetEmail, validateResetPasswordCode, validateNewPassword } = require('../middlewares/validator/passwordResetValidate.js');
@@ -49,6 +49,7 @@ router.put('/updateProfilePic', auth, ownerOnly, upload.single('avatar'), update
 router.put('/updateDetails', auth, ownerOnly, validateUpdateDetails, updateDetails);
 router.put('/update-phone', auth, ownerOnly, validateUpdatePhone, updateUserPhone); // phone-collection modal
 router.post('/switch-account', auth, switchAccount);
+router.put('/preferences/marketplace', auth, setPreferredMarketplace); // per-page marketplace switcher
 router.post('/verify-email-for-password-reset', passwordResetRateLimiter, validatePasswordResetEmail, verifyEmailForPasswordReset);
 router.post('/verify-reset-password-code', passwordResetRateLimiter, validateResetPasswordCode, verifyResetPasswordCode);
 router.post('/reset-password', passwordResetRateLimiter, validateNewPassword, resetPassword);

@@ -12,15 +12,25 @@ const UserModel = require('../../models/user-auth/userModel.js');
 /** Capsule filters offered in the picker. */
 const LINKABLE_FILTERS = ['all', 'PRO', 'LITE', 'connected', 'notConnected'];
 
+/** Account types that are never sellers: platform staff, agency owners, ESF staff. */
+const NON_SELLER_ACCESS_TYPES = ['superAdmin', 'enterpriseAdmin', 'esfUser'];
+
 /**
  * Who may be adopted.
  *
- * Excludes, in order: platform staff and agency owners (accessType), our own
- * clients, anyone already owned by an agency, and purged accounts. What is left
+ * Excludes, in order: platform staff and agency owners (accessType, and the AGENCY
+ * plan the admin portal uses to tell agencies apart), our own clients, anyone already
+ * owned by an agency, purged accounts, and accounts that never finished signing up
+ * (unverified: they cannot log in and no data is ever fetched for them). What is left
  * is a self-serve seller with nobody else managing them.
+ *
+ * accessType is matched as "not staff" rather than equal to 'user': accounts created
+ * before the field existed have none stored (the schema default only applies to new
+ * documents), and an exact match silently hid those sellers from the picker.
  */
 const linkableBaseMatch = () => ({
-    accessType: 'user',
+    accessType: { $nin: NON_SELLER_ACCESS_TYPES },
+    packageType: { $ne: 'AGENCY' },
     isEsfClient: { $ne: true },
     isAgencyClient: { $ne: true },
     agencyId: null,
@@ -28,12 +38,49 @@ const linkableBaseMatch = () => ({
     isVerified: true,
 });
 
-/** Case-insensitive match across the fields someone would actually search by. */
+const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** A search word as a regex; a straight or curly apostrophe matches either, as brands use both. */
+const wordRegex = (word) => new RegExp(escapeRegex(word).replace(/['\u2018\u2019]/g, "['\u2018\u2019]"), 'i');
+
+/**
+ * Fields a single search word may match. additionalEmails covers sellers who are known by
+ * an address other than their login one. sellerBrands (every brand on the user's seller
+ * documents) is joined in, so the search runs after the lookup.
+ */
+const SEARCH_FIELDS = ['firstName', 'lastName', 'email', 'additionalEmails.email', 'phone', 'sellerBrands'];
+
+/**
+ * A phone number typed with spaces, dashes or brackets ("+1 (555) 123-4567") against one stored in
+ * another layout. Matches the same digits in order with anything but digits in between.
+ */
+const phoneRegex = (term) => {
+    const digits = term.replace(/\D/g, '');
+    if (digits.length < 3 || !/^[+\d\s().-]+$/.test(term)) return null;
+    return new RegExp(digits.split('').join('\\D*'));
+};
+
+/**
+ * Case-insensitive search across what is shown in each row: name, email, phone and brand.
+ *
+ * The words are matched separately, each against any field, so "john smith" finds John Smith
+ * (first and last name are separate fields) and "acme john" finds John at Acme. A term that
+ * looks like a phone number also matches regardless of how the stored number is spaced.
+ */
 const searchMatch = (search) => {
     const term = (search || '').trim();
     if (!term) return null;
-    const rx = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-    return { $or: [{ firstName: rx }, { lastName: rx }, { email: rx }, { phone: rx }] };
+
+    const words = term.split(/\s+/).filter(Boolean);
+    const everyWord = {
+        $and: words.map((word) => {
+            const rx = wordRegex(word);
+            return { $or: SEARCH_FIELDS.map((field) => ({ [field]: rx })) };
+        }),
+    };
+
+    const phoneRx = phoneRegex(term);
+    return phoneRx ? { $or: [everyWord, { phone: phoneRx }] } : everyWord;
 };
 
 /** Translate a capsule into a match stage against the computed connection fields. */
@@ -46,6 +93,65 @@ const filterMatch = (filter) => {
         default: return null;
     }
 };
+
+const SELLER_PROJECTION = { brand: 1, sellerAccount: { $slice: ['$sellerAccount', 1] } };
+
+/** True when a seller document's brand is a real value, not missing or blank. */
+const hasBrand = (path) => ({
+    $gt: [{ $strLenCP: { $trim: { input: { $ifNull: [path, ''] } } } }, 0],
+});
+
+/**
+ * Joins the seller document(s) behind each user and derives the brand.
+ *
+ * The user's own `sellerCentral` reference is the link the rest of the app trusts (the
+ * admin portal's accounts list and the ESF inbox both use it), so that document comes
+ * first. Seller documents pointing back at the user through `User` are joined too: older
+ * accounts lack the reference, and some users have more than one seller document. Every
+ * brand found is searchable; the one shown is the referenced document's brand when it has
+ * one, otherwise the first brand on any of them.
+ *
+ * Joining on `User` alone (as before) missed brands the admin portal shows, so searching
+ * by brand did not find those accounts.
+ */
+const sellerLookupStages = () => ([
+    {
+        $lookup: {
+            from: 'sellers',
+            localField: 'sellerCentral',
+            foreignField: '_id',
+            as: 'sellerByRef',
+            pipeline: [{ $project: SELLER_PROJECTION }],
+        },
+    },
+    {
+        $lookup: {
+            from: 'sellers',
+            localField: '_id',
+            foreignField: 'User',
+            as: 'sellerByUser',
+            pipeline: [{ $project: SELLER_PROJECTION }],
+        },
+    },
+    { $addFields: { seller: { $concatArrays: ['$sellerByRef', '$sellerByUser'] } } },
+    {
+        $addFields: {
+            sellerBrands: {
+                $map: {
+                    input: { $filter: { input: '$seller', as: 's', cond: hasBrand('$$s.brand') } },
+                    as: 's',
+                    in: { $trim: { input: '$$s.brand' } },
+                },
+            },
+            firstAccount: { $arrayElemAt: [{ $arrayElemAt: ['$seller.sellerAccount', 0] }, 0] },
+        },
+    },
+    {
+        $addFields: {
+            brandName: { $ifNull: [{ $arrayElemAt: ['$sellerBrands', 0] }, null] },
+        },
+    },
+]);
 
 /**
  * One page of linkable users plus the count behind every capsule.
@@ -61,28 +167,10 @@ const getLinkableUsers = async ({ search = '', filter = 'all', page = 1, limit =
     const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10) || 10));
     const activeFilter = LINKABLE_FILTERS.includes(filter) ? filter : 'all';
 
-    const pre = [{ $match: linkableBaseMatch() }];
-    const search$ = searchMatch(search);
-    if (search$) pre.push({ $match: search$ });
-
-    // Connection state comes from the seller document, so it has to be joined
-    // before it can be filtered or counted on.
+    // Connection state and brand come from the seller document, so it has to be joined
+    // before they can be searched, filtered or counted on.
+    const pre = [{ $match: linkableBaseMatch() }, ...sellerLookupStages()];
     pre.push(
-        {
-            $lookup: {
-                from: 'sellers',
-                localField: '_id',
-                foreignField: 'User',
-                as: 'seller',
-                pipeline: [{ $project: { brand: 1, sellerAccount: { $slice: ['$sellerAccount', 1] } } }],
-            },
-        },
-        {
-            $addFields: {
-                brandName: { $ifNull: [{ $arrayElemAt: ['$seller.brand', 0] }, null] },
-                firstAccount: { $arrayElemAt: [{ $arrayElemAt: ['$seller.sellerAccount', 0] }, 0] },
-            },
-        },
         {
             $addFields: {
                 hasSpApi: { $gt: [{ $strLenCP: { $ifNull: ['$firstAccount.spiRefreshToken', ''] } }, 0] },
@@ -91,6 +179,8 @@ const getLinkableUsers = async ({ search = '', filter = 'all', page = 1, limit =
             },
         }
     );
+    const search$ = searchMatch(search);
+    if (search$) pre.push({ $match: search$ });
 
     const filter$ = filterMatch(activeFilter);
 
@@ -174,9 +264,11 @@ const linkUsersToEsf = async (userIds, esfUserId) => {
 
 module.exports = {
     LINKABLE_FILTERS,
+    NON_SELLER_ACCESS_TYPES,
     linkableBaseMatch,
     searchMatch,
     filterMatch,
+    sellerLookupStages,
     getLinkableUsers,
     linkUsersToEsf,
 };

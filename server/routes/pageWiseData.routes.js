@@ -6,6 +6,7 @@
  */
 
 const express = require('express');
+const { getMarketplaceComparisonData } = require('../controllers/analytics/MarketplaceComparisonController.js');
 const router = express.Router();
 const auth = require('../middlewares/Auth/auth.js');
 const { getLocation, getLocationOptional } = require('../middlewares/Auth/getLocation.js');
@@ -171,6 +172,8 @@ router.get('/top-products', auth, getLocation, analyseDataCache(3600, 'top-produ
 
 // ===== MULTI-PHASE DASHBOARD (Progressive Loading) =====
 // Phase 1: Instant (~50ms) - precomputed error counts, product counts, date range
+// Every marketplace side by side, each in its own currency (caches internally; behind ALL_MARKETPLACES_DASHBOARD_ENABLED).
+router.get('/dashboard-marketplaces', auth, getMarketplaceComparisonData);
 router.get('/dashboard-phase1', auth, getLocation, analyseDataCache(3600, 'dashboard-phase1'), getDashboardPhase1);
 
 // Phase 2: Core (~150ms) - sales totals, account health, finance summary, PPC summary

@@ -231,6 +231,27 @@ async function getDateWiseTotals({ userId, country, region, startDate, endDate }
   ]);
 }
 
+// ── Daily per-ASIN totals + daily overhead ──
+// The raw material for a day-by-day gross profit (shared/financeCalculations.computeDailyGrossProfit):
+// every NUMERIC_FIELD summed per {date, asin}, so COGS can be applied per product per day, and the
+// overhead categories per {date, category}.
+async function getDailyAsinTotals({ userId, country, region, startDate, endDate }) {
+  const group = buildSumGroup({ date: '$date', asin: '$asin' });
+  return DailySkuFinance.aggregate([
+    { $match: buildBaseMatch(userId, country, region, startDate, endDate) },
+    { $group: group },
+    { $project: { _id: 0, date: '$_id.date', asin: '$_id.asin', ...Object.fromEntries(NUMERIC_FIELDS.map((f) => [f, 1])) } },
+  ]).allowDiskUse(true);
+}
+
+async function getDailyOverheadRows({ userId, country, region, startDate, endDate }) {
+  return DailyOverheadFinance.aggregate([
+    { $match: buildBaseMatch(userId, country, region, startDate, endDate) },
+    { $group: { _id: { date: '$date', category: '$category', isRevenue: '$isRevenue' }, amount: { $sum: '$amount' } } },
+    { $project: { _id: 0, date: '$_id.date', category: '$_id.category', isRevenue: '$_id.isRevenue', amount: 1 } },
+  ]);
+}
+
 // ── Per-ASIN (or per-SKU) date-wise series ──
 // One row per calendar day for a SINGLE product, from DailySkuFinance
 // (the per-(User,country,region,sku,date) source). Powers QMate's "datewise
@@ -611,6 +632,8 @@ async function getAsinSnapshot({ userId, country, region, startDate, endDate, as
 
 module.exports = {
   getTotals,
+  getDailyAsinTotals,
+  getDailyOverheadRows,
   getAsinWisePL,
   getDateWiseTotals,
   getAsinDateWise,

@@ -38,6 +38,7 @@ const esfPageGuard=require('../middlewares/Auth/esfPageGuard.js')
 const memberPageGuard=require('../middlewares/Auth/memberPageGuard.js')
 const userDetailsRoute=require('../routes/userDetails.routes.js')
 const userLocationRoute=require('../routes/userLocation.routes.js')
+const onboardingRoute=require('../routes/onboarding.routes.js')
 const reimbursementRoute=require('../routes/reimbursement.routes.js')
 const mcpRoute=require('../routes/mcp.routes.js')
 const pageWiseDataRoute=require('../routes/pageWiseData.routes.js')
@@ -94,7 +95,10 @@ const testRoutesEnabled =
     !process.env.NODE_ENV;
 
 
-app.use(cors({origin:process.env.CORS_ORIGIN_DOMAIN,credentials:true}))
+// No allowedHeaders list, so the browser's requested headers (incl. the per-page X-Marketplace)
+// are reflected back. A custom header makes every API call preflighted; maxAge lets the browser
+// cache that preflight for 10 minutes instead of sending one before each request.
+app.use(cors({origin:process.env.CORS_ORIGIN_DOMAIN,credentials:true,maxAge:600}))
 app.use(cookieParser());
 
 // Helmet security headers - configured to work with existing setup
@@ -191,6 +195,7 @@ app.use('/app/esf',esfRoute)
 app.use('/app/members',membersRoute)
 app.use('/app/getUserDetails',userDetailsRoute)
 app.use('/app/user-location',userLocationRoute)
+app.use('/app/onboarding',onboardingRoute)
 app.use('/app/reimbursements',reimbursementRoute)
 app.use('/app/mcp',mcpRoute)
 // Enforces ESF per-member page access before any client data is served.

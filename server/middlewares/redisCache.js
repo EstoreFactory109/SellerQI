@@ -267,7 +267,10 @@ const clearAnalyseCache = async (userId, country, region, adminId = null) => {
         const redisClient = getRedisClient();
         
         // List of all page types that are cached
-        const pageTypes = ['navbar', 'dashboard', 'profitability', 'profitability-metrics', 'profitability-chart', 'profitability-issues-summary', 'ppc', 'issues', 'issues-by-product', 'keyword-analysis', 'reimbursement', 'inventory', 'your-products', 'your-products-v2-initial', 'your-products-v2-products', 'your-products-v3-summary', 'your-products-v3-active', 'your-products-v3-inactive', 'your-products-v3-incomplete', 'your-products-v3-without-aplus', 'your-products-v3-not-targeted-in-ads', 'asin-wise-sales', 'ppc-metrics-latest', 'ppc-metrics-graph', 'ppc-metrics-history', 'ppc-units-sold-latest', 'ppc-units-sold-summary', 'ppc-summary', 'ppc-tab-counts', 'top-opportunities'];
+        const pageTypes = ['navbar', 'dashboard', 'profitability', 'profitability-metrics', 'profitability-chart', 'profitability-issues-summary', 'ppc', 'issues', 'issues-by-product', 'keyword-analysis', 'reimbursement', 'inventory', 'your-products', 'your-products-v2-initial', 'your-products-v2-products', 'your-products-v3-summary', 'your-products-v3-active', 'your-products-v3-inactive', 'your-products-v3-incomplete', 'your-products-v3-without-aplus', 'your-products-v3-not-targeted-in-ads', 'asin-wise-sales', 'ppc-metrics-latest', 'ppc-metrics-graph', 'ppc-metrics-history', 'ppc-units-sold-latest', 'ppc-units-sold-summary', 'ppc-summary', 'ppc-tab-counts', 'top-opportunities',
+            // The Dashboard's own phase endpoints and the reimbursement summary card were cached but
+            // never cleared here, so a refreshed account kept serving the old Dashboard for an hour.
+            'dashboard-phase1', 'dashboard-phase2', 'dashboard-phase3', 'reimbursement-summary'];
         
         // Clear cache for all page types
         const clearPromises = pageTypes.map(pageType => {
@@ -277,6 +280,24 @@ const clearAnalyseCache = async (userId, country, region, adminId = null) => {
             });
         });
         
+        // The "All marketplaces" Dashboard includes this marketplace, whatever hint currency it was
+        // built for — so drop every entry for the user, plus this marketplace's raw snapshot
+        // (see MarketplaceComparisonService).
+        for (const pattern of [
+            `analyse_data:dashboard-marketplaces:${userId}:*`,
+            `dash_snapshot:${userId}:${country}:${region}:*`,
+        ]) {
+            try {
+                const keys = await redisClient.keys(pattern);
+                if (keys && keys.length > 0) {
+                    await Promise.all(keys.map((key) => redisClient.del(key)));
+                    logger.info(`Cleared ${keys.length} cache entries matching ${pattern}`);
+                }
+            } catch (patternError) {
+                logger.warn(`Could not clear cache pattern ${pattern}:`, patternError.message);
+            }
+        }
+
         // Clear your-products paginated cache using pattern matching
         const yourProductsPattern = `analyse_data:your-products:${userId}:${country}:${region}:${adminId || 'null'}:*`;
         try {

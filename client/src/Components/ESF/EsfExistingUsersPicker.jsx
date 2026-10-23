@@ -57,22 +57,30 @@ const EsfExistingUsersPicker = ({ onCancel, onLinked }) => {
     return () => clearTimeout(t);
   }, [search]);
 
+  // Only the latest request may update the list: a slow response to an earlier search must not
+  // replace the results of the one typed after it.
+  const latestRequest = useRef(0);
+
   const load = useCallback(async () => {
+    const requestId = ++latestRequest.current;
+    const isStale = () => requestId !== latestRequest.current;
     try {
       setLoading(true);
       setError('');
       const res = await axiosInstance.get('/app/esf/linkable-users', {
-        params: { search: debouncedSearch, filter, page, limit: 10 },
+        params: { search: debouncedSearch.trim(), filter, page, limit: 10 },
       });
+      if (isStale()) return;
       if (res.data?.statusCode === 200) {
         setUsers(res.data.data.users || []);
         setCounts(res.data.data.counts || {});
         setPagination(res.data.data.pagination || { page: 1, totalPages: 1, totalCount: 0 });
       }
     } catch (err) {
+      if (isStale()) return;
       setError(extractServerError(err, 'Failed to load users'));
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
   }, [debouncedSearch, filter, page]);
 
@@ -118,7 +126,7 @@ const EsfExistingUsersPicker = ({ onCancel, onLinked }) => {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by name, email or phone…"
+          placeholder="Search by name, brand, email or phone…"
           className="w-full pl-9 pr-3 py-2.5 text-sm rounded-lg border border-white/10 bg-white/[0.04] text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500/70 focus:ring-2 focus:ring-blue-500/10 transition"
         />
       </div>

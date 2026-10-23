@@ -5,6 +5,7 @@ import Account from "../../Components/Issues_pages/Account.jsx";
 import { AlertTriangle } from 'lucide-react';
 import { useSearchParams } from "react-router-dom";
 import { COLORS } from "../../Components/Shared/index.js";
+import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitcher.jsx'
 
 export default function Dashboard() {
   const [searchParams] = useSearchParams();
@@ -39,6 +40,7 @@ export default function Dashboard() {
                 </p>
               </div>
             </div>
+            <MarketplaceSwitcher />
           </div>
         </div>
       </div>

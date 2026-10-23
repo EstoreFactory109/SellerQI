@@ -7,6 +7,9 @@ import { updateImageLink } from "../redux/slices/profileImage.js";
 import { setAllAccounts } from '../redux/slices/AllAccountsSlice.js';
 import { setCurrency } from '../redux/slices/currencySlice.js';
 import { setDashboardInfo } from '../redux/slices/DashboardSlice.js';
+import { initMarketplace } from '../redux/slices/marketplaceSlice.js';
+import { resolveMarketplaceParam } from '../hooks/useMarketplace.js';
+import { PER_PAGE_MARKETPLACE } from '../utils/featureFlags.js';
 import axiosInstance from '../config/axios.config.js';
 import { coordinatedAuthCheck } from '../utils/authCoordinator.js';
 import Loader from '../Components/Loader/Loader.jsx';
@@ -185,6 +188,27 @@ const ProtectedRouteWrapper = ({ children }) => {
           // Dispatch all seller accounts for account switching
           if (navbarData.AllSellerAccounts && navbarData.AllSellerAccounts.length > 0) {
             dispatch(setAllAccounts(navbarData.AllSellerAccounts));
+          }
+
+          // The marketplace pages start on: the URL's ?marketplace= if it is one of the user's,
+          // else the one the server resolved for this session (cookie → saved preference →
+          // primary; see getLocation.js). Pages change it with their own switcher.
+          {
+            // Only with per-page switching on: otherwise no header is sent, and a URL value
+            // would relabel the page without changing whose data the server returns.
+            const fromUrl = PER_PAGE_MARKETPLACE && resolveMarketplaceParam(
+              new URLSearchParams(window.location.search).get('marketplace'),
+              navbarData.AllSellerAccounts || []
+            );
+            const selected = fromUrl && fromUrl !== 'all'
+              ? fromUrl
+              : (navbarData.Country && navbarData.Region ? { country: navbarData.Country, region: navbarData.Region } : null);
+            dispatch(initMarketplace({ selected }));
+            if (selected && (selected.country !== navbarData.Country || selected.region !== navbarData.Region)) {
+              const currency = amazonMarketplaceCurrencies[selected.country] || '$';
+              dispatch(setCurrency({ currency, country: selected.country }));
+              dispatch(setDashboardInfo({ Country: selected.country, Region: selected.region }));
+            }
           }
 
           devLog("✅ Navbar data loaded successfully");
