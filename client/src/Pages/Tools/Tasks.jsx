@@ -24,6 +24,11 @@ import {
   groupKeyForTask,
   indexGroups
 } from '../../utils/taskBuckets.js';
+import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitcher.jsx'
+import FixItPackagesModal from '../../Components/Tasks/FixItPackagesModal.jsx';
+import FixItUrgencyCard from '../../Components/Tasks/FixItUrgencyCard.jsx';
+import { openTasksOf, summarizeUrgency } from '../../utils/taskUrgency.js';
+import { trackEvent } from '../../utils/analytics.js';
 
 // Helper function to escape special regex characters in currency symbol
 const escapeRegex = (str) => {
@@ -203,6 +208,7 @@ const FormattedHowToSolve = ({ text }) => {
 export default function Tasks() {
   const dispatch = useDispatch();
   const [searchQuery, setSearchQuery] = useState('');
+  const [showFixIt, setShowFixIt] = useState(false);
   // Deep-link support: the Dashboard's "Top things to fix" links here with
   // ?category=&type= so a seller lands on the individual rows that make up the
   // figure they just clicked, instead of the unfiltered list.
@@ -320,6 +326,8 @@ export default function Tasks() {
         stillDetected: !!task.stillDetected,
         amount: task.amount || 0,
         amountIsEstimated: !!task.amountIsEstimated,
+        // Stock value stuck in FBA: a one-off figure, never added to monthly money.
+        capitalAmount: task.capitalAmount || 0,
         // Effort/impact come from the server (TaskPrioritizationService) and drive
         // the bucketing below.
         effortMinutes: task.effortMinutes,
@@ -451,6 +459,21 @@ export default function Tasks() {
   );
 
   const groupsById = useMemo(() => indexGroups(taskGroups), [taskGroups]);
+
+  // What leaving the open tasks undone costs: drives the hero, the risk banner and
+  // the per-package value in the Fix it modal. Open tasks only, so ticking one off
+  // lowers the figures straight away.
+  const openTasks = useMemo(() => openTasksOf(transformedTasks, completedTasks), [transformedTasks, completedTasks]);
+  const urgency = useMemo(() => summarizeUrgency(openTasks, taskGroups), [openTasks, taskGroups]);
+
+  const openFixIt = (source) => {
+    trackEvent('fixit_open', {
+      source,
+      open_tasks: urgency.openCount,
+      monthly_recoverable: urgency.monthlyRecoverable,
+    });
+    setShowFixIt(true);
+  };
 
   // "1 of 93 keywords spending money with zero sales · A$187.41 total" — shown on
   // highlighted rows so a A$26.37 task reads as part of the Dashboard's A$187.41,
@@ -617,6 +640,7 @@ export default function Tasks() {
           <p className="m-0 text-sm" style={{ color: COLORS.textSecondary }}>Every issue we found, turned into something you can actually do. Start at the top.</p>
         </div>
         <div className='flex items-center gap-2 flex-shrink-0'>
+          <MarketplaceSwitcher />
           {/* Export Button */}
           <button
             onClick={exportToCSV}
@@ -640,24 +664,15 @@ export default function Tasks() {
         </div>
       </div>
 
-      {/* Progress summary - real completion numbers, real percentage */}
-      <div className="rounded-2xl border px-5 py-[18px] mb-3" style={{ background: COLORS.surface, borderColor: COLORS.border }}>
-        <div className="flex items-baseline justify-between gap-4 mb-[11px]">
-          <div className="text-[15px] font-semibold" style={{ color: COLORS.textPrimary }}>
-            You&apos;ve completed <span className="tabular-nums">{completedTasksCount}</span> of {totalTasksCount}
-            {totalTasksCount === 0 ? '' : pendingTasksCount > 0 ? ' — keep going.' : ' — nice work.'}
-          </div>
-          <div className="text-[13px] tabular-nums flex-shrink-0" style={{ color: COLORS.textSecondary }}>{progressPct}%</div>
-        </div>
-        <div className="h-[7px] rounded overflow-hidden" style={{ background: COLORS.border }}>
-          <div className="h-full rounded transition-all duration-300" style={{ background: COLORS.good, width: `${progressWidth}%` }} />
-        </div>
-        <div className="mt-[11px] text-xs" style={{ color: COLORS.textMuted }}>
-          {totalTasksCount === 0
-            ? 'No tasks yet — tasks are generated from the issues we find on your account.'
-            : `${pendingTasksCount} task${pendingTasksCount === 1 ? '' : 's'} still pending.`}
-        </div>
-      </div>
+      {/* One card: what the open tasks cost, what threatens the account, and the
+          way out. Every figure comes from the seller's own open tasks. */}
+      <FixItUrgencyCard
+        urgency={urgency}
+        openTasks={openTasks}
+        totalTasks={transformedTasks.length}
+        currency={currency}
+        onFix={openFixIt}
+      />
 
       {/* Renew date tip - always visible (same style as Your Products page) */}
       <div className="bg-blue-500/10 border-l-4 border-blue-500/40 p-2 mb-2 rounded-r space-y-3">
@@ -827,6 +842,16 @@ export default function Tasks() {
                   <span className="text-[13px] flex-shrink-0" style={{ color: COLORS.textSecondary }}>{pendingInGroup} pending</span>
                   <ChevronRight size={16} style={{ color: COLORS.textMuted, transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s', flexShrink: 0 }} />
                 </button>
+                {groupId === BUCKET.HIGH_IMPACT && pendingInGroup > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => openFixIt('bucket')}
+                    className="flex-none px-[11px] py-1.5 rounded-lg text-xs font-semibold transition-opacity hover:opacity-90 whitespace-nowrap"
+                    style={{ background: 'rgba(59,130,246,.14)', color: COLORS.accent }}
+                  >
+                    Have us fix these
+                  </button>
+                )}
                 {items.length > 0 && (
                   <button
                     type="button"
@@ -1006,6 +1031,13 @@ export default function Tasks() {
         </div>
       )}
       </div>
+
+      <FixItPackagesModal
+        open={showFixIt}
+        onClose={() => setShowFixIt(false)}
+        openTasks={openTasks}
+        currency={currency}
+      />
     </div>
   );
 }
