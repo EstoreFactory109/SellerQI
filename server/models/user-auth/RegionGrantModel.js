@@ -39,6 +39,9 @@ const regionGrantSchema = new mongoose.Schema({
     // The seller's main marketplace, when it is in this region. Set from the first approval;
     // it is fetched first and is the marketplace the dashboard opens on.
     primaryCountry: { type: String, default: null },
+    // Every marketplace the seller said they sell in, picked up front with the main one. Kept on
+    // the main region's grant; it pre-ticks marketplaces and lists the regions still to approve.
+    plannedCountries: { type: [String], default: [] },
 }, { timestamps: true });
 
 regionGrantSchema.index({ User: 1, region: 1 }, { unique: true });

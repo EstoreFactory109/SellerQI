@@ -27,9 +27,9 @@ describe('OAuth state', () => {
   beforeEach(() => mockStore.clear());
 
   it('is accepted once, for the user and kind it was made for, and carries the region', async () => {
-    const state = await createState({ userId: 'u1', kind: 'spapi', region: 'EU', primaryCountry: 'UK' });
+    const state = await createState({ userId: 'u1', kind: 'spapi', region: 'EU', primaryCountry: 'UK', plannedCountries: ['UK', 'US'] });
     expect(await consumeState(state, { userId: 'u1', kind: 'spapi' })).toEqual({
-      userId: 'u1', kind: 'spapi', region: 'EU', primaryCountry: 'UK',
+      userId: 'u1', kind: 'spapi', region: 'EU', primaryCountry: 'UK', plannedCountries: ['UK', 'US'],
     });
     expect(await consumeState(state, { userId: 'u1', kind: 'spapi' })).toBeNull();
   });

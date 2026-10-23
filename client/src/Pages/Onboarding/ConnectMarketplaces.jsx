@@ -87,9 +87,18 @@ const fetchTone = (status) => (status === 'ready' ? 'good' : status === 'failed'
 /** Tick the marketplaces Amazon reported for this region. */
 const MarketplacePicker = ({ region, primary, onSaved, onError }) => {
   const confirmed = useMemo(() => new Set(region.confirmed), [region.confirmed]);
-  const [selected, setSelected] = useState(() => new Set(region.available.map((m) => m.country)));
+  const planned = useMemo(() => new Set(region.planned || []), [region.planned]);
+  const isMain = (country) => primary?.region === region.region && primary?.country === country;
+  // Pre-tick what the seller picked up front (Amazon permitting); with no picks for this region,
+  // everything Amazon reported.
+  const [selected, setSelected] = useState(() => new Set(region.available
+    .map((m) => m.country)
+    .filter((country) => !planned.size || planned.has(country) || isMain(country))));
+  const unavailable = region.discoveryFailed
+    ? []
+    : [...planned].filter((country) => !region.available.some((m) => m.country === country));
   const [busy, setBusy] = useState(false);
-  const locked = (country) => confirmed.has(country) || (primary?.region === region.region && primary?.country === country);
+  const locked = (country) => confirmed.has(country) || isMain(country);
   const pending = region.available.filter((m) => !confirmed.has(m.country));
   if (!pending.length) return null;
 
@@ -149,11 +158,20 @@ const MarketplacePicker = ({ region, primary, onSaved, onError }) => {
               </span>
               <span style={{ fontSize: 16 }}>{countryFlag(m.country)}</span>
               <span className="flex-1 min-w-0 truncate">{countryName(m.country)}</span>
+              {planned.size > 0 && !planned.has(m.country) && !isLocked && (
+                <span style={{ fontSize: 11, color: COLORS.textMuted }}>Also on your account</span>
+              )}
               {isLocked && <Lock className="w-3.5 h-3.5" style={{ color: COLORS.textMuted }} aria-label="Always included" />}
             </button>
           );
         })}
       </div>
+      {unavailable.length > 0 && (
+        <div style={{ fontSize: 12, color: COLORS.watch, marginBottom: 12 }}>
+          Not on this Amazon account: {unavailable.map(countryName).join(', ')}. If you sell there under a separate
+          seller account, you can connect it from Settings later.
+        </div>
+      )}
       <Button onClick={save} busy={busy} disabled={![...selected].some((c) => !confirmed.has(c))}>
         Add selected marketplaces
       </Button>
@@ -334,7 +352,11 @@ const ConnectMarketplaces = () => {
     () => (checklist?.regions || []).filter((r) => r.sellerCentral),
     [checklist]
   );
-  const otherRegions = REGIONS.filter((r) => !connectedRegions.some((c) => c.region === r));
+  const notConnected = REGIONS.filter((r) => !connectedRegions.some((c) => c.region === r));
+  // Regions the seller ticked marketplaces in up front come first, as "next to connect".
+  const plannedFor = (r) => (checklist?.regions || []).find((x) => x.region === r)?.planned || [];
+  const nextRegions = notConnected.filter((r) => plannedFor(r).length > 0);
+  const otherRegions = notConnected.filter((r) => plannedFor(r).length === 0);
   const primary = checklist?.marketplaces.find((m) => m.primary);
   const primaryRegion = connectedRegions.find((r) => r.region === primary?.region);
   const primaryRegionDone = Boolean(primary && primaryRegion
@@ -350,10 +372,10 @@ const ConnectMarketplaces = () => {
       .catch((err) => setError(errorMessage(err, 'Could not start preparing your main marketplace. Continue will try again.')));
   }, [primaryRegionDone, primary?.fetch.status]);
 
-  const connectRegion = async (region) => {
+  const connectRegion = async (region, country) => {
     setOpeningRegion(region);
     try {
-      await goToAmazon({ kind: 'spapi', region });
+      await goToAmazon({ kind: 'spapi', region, country });
     } catch (err) {
       setOpeningRegion(null);
       setError(errorMessage(err, 'Could not open Amazon. Please try again.'));
@@ -412,6 +434,26 @@ const ConnectMarketplaces = () => {
             onChecklist={(next) => { setError(''); setChecklist((prev) => ({ ...prev, ...next })); }}
             onError={setError}
           />
+        ))}
+
+        {nextRegions.map((r) => (
+          <div key={r} style={{ border: '1px solid rgba(59,130,246,.35)', borderRadius: 13, background: 'rgba(59,130,246,.05)', padding: 18, marginBottom: 12 }}>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Globe className="w-4 h-4" style={{ color: '#7EA8F8' }} />
+              <span style={{ fontSize: 15, fontWeight: 600, color: COLORS.textPrimary }}>{REGION_NAMES[r]}</span>
+              <Pill tone="accent">Next to connect</Pill>
+            </div>
+            <div className="flex flex-wrap" style={{ gap: 6, margin: '10px 0 14px' }}>
+              {plannedFor(r).map((country) => (
+                <span key={country} className="inline-flex items-center gap-1.5" style={{ padding: '4px 10px', borderRadius: 999, background: PANEL_BG, fontSize: 12, color: COLORS.textSecondary }}>
+                  <span style={{ fontSize: 14 }}>{countryFlag(country)}</span>{countryName(country)}
+                </span>
+              ))}
+            </div>
+            <Button onClick={() => connectRegion(r, plannedFor(r)[0])} busy={openingRegion === r}>
+              Connect Seller Central for {REGION_NAMES[r]} <ArrowRight className="w-4 h-4" />
+            </Button>
+          </div>
         ))}
 
         {otherRegions.length > 0 && (

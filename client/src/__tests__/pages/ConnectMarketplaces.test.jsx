@@ -27,7 +27,7 @@ const marketplace = (country, region, extra = {}) => ({
 });
 
 const region = (code, extra = {}) => ({
-  region: code, sellerCentral: false, ads: false, discoveryFailed: false, available: [], confirmed: [], adsMapping: [], ...extra,
+  region: code, planned: [], sellerCentral: false, ads: false, discoveryFailed: false, available: [], confirmed: [], adsMapping: [], ...extra,
 });
 
 const checklist = (overrides = {}) => ({
@@ -148,6 +148,39 @@ describe('ConnectMarketplaces', () => {
     expect(await screen.findByRole('button', { name: /North America/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Far East/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^\s*Europe/ })).not.toBeInTheDocument();
+  });
+
+  it('pre-ticks what the seller picked up front, shows Amazon\'s extras unticked, and flags picks Amazon lacks', async () => {
+    const eu = region('EU', {
+      sellerCentral: true,
+      planned: ['UK', 'FR'],
+      available: [{ country: 'UK' }, { country: 'DE' }],
+    });
+    axiosInstance.get.mockResolvedValue(respond(checklist({ regions: [region('NA'), eu, region('FE')] })));
+
+    renderPage();
+    const germany = await screen.findByRole('button', { name: /Germany/ });
+    expect(germany).toHaveAttribute('aria-pressed', 'false');
+    expect(within(germany).getByText('Also on your account')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /United Kingdom/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText(/Not on this Amazon account: France/)).toBeInTheDocument();
+  });
+
+  it('lists regions picked up front as next to connect, with their marketplaces', async () => {
+    const eu = region('EU', { sellerCentral: true, confirmed: ['UK'], available: [{ country: 'UK' }], planned: ['UK'] });
+    axiosInstance.get.mockResolvedValue(respond(checklist({
+      regions: [region('NA', { planned: ['US', 'CA'] }), eu, region('FE')],
+      marketplaces: [marketplace('UK', 'EU', { primary: true })],
+    })));
+    axiosInstance.post.mockResolvedValue(respond({ state: 'a'.repeat(64) }));
+
+    renderPage();
+    expect(await screen.findByText('Next to connect')).toBeInTheDocument();
+    expect(screen.getByText('Canada')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /Connect Seller Central for North America/ }));
+    expect(axiosInstance.post).toHaveBeenCalledWith('/app/onboarding/oauth-state', { kind: 'spapi', region: 'NA' });
+    // Far East was not picked: offered only as "another region".
+    expect(screen.getByRole('button', { name: /Far East/ })).toBeInTheDocument();
   });
 
   it('sends a seller the flag is off for back to the single-marketplace flow', async () => {

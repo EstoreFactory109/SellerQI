@@ -28,14 +28,16 @@ export const isMultiMarketplaceOnboardingOn = async () => {
 
 /**
  * Send the seller to Amazon to approve a region.
- * @param {{kind: 'spapi'|'ads', region: string, country?: string, primaryCountry?: string}} options
- *   country: which Seller Central site opens; primaryCountry: the main marketplace, first trip only
+ * @param {{kind: 'spapi'|'ads', region: string, country?: string, primaryCountry?: string, plannedCountries?: string[]}} options
+ *   country: which Seller Central site opens; primaryCountry: the main marketplace, first trip only;
+ *   plannedCountries: every marketplace the seller ticked up front, first trip only
  */
-export const goToAmazon = async ({ kind, region, country, primaryCountry }) => {
+export const goToAmazon = async ({ kind, region, country, primaryCountry, plannedCountries }) => {
   const response = await axiosInstance.post('/app/onboarding/oauth-state', {
     kind,
     region,
     ...(primaryCountry ? { primaryCountry } : {}),
+    ...(primaryCountry && plannedCountries?.length ? { plannedCountries } : {}),
   });
   const state = data(response)?.state;
   if (!state) throw new Error('Could not start the Amazon connection');

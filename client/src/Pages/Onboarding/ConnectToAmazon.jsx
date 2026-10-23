@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from 'framer-motion';
-import { Globe, ChevronDown, ArrowRight, Loader2, Search, AlertTriangle } from 'lucide-react';
+import { Globe, ChevronDown, ArrowRight, Loader2, Search, AlertTriangle, Check } from 'lucide-react';
 import axios from 'axios';
 import { useSelector } from 'react-redux';
 import { hasPremiumAccess } from '../../utils/subscriptionCheck.js';
@@ -19,6 +19,104 @@ import {
 // Matches the onboarding shell's inset panel shade.
 const PANEL_BG = '#10141C';
 
+/** Regions of the picked marketplaces, the main marketplace's region first (it is approved first). */
+const regionsOf = (codes, main) => {
+  const regionOfCode = (c) => COUNTRY_DATA.find((x) => x.code === c)?.region;
+  return [...new Set([regionOfCode(main), ...codes.map(regionOfCode)].filter(Boolean))];
+};
+
+/**
+ * Multi-marketplace picker: tick every marketplace the seller sells in, choose one as main.
+ * A list rather than a dropdown so several can be ticked and seen at once.
+ */
+const MarketplaceMultiPicker = ({ selected, main, onToggle, onMain }) => {
+  const [query, setQuery] = useState('');
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? COUNTRY_DATA.filter((c) => c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q)) : COUNTRY_DATA;
+  }, [query]);
+  const regions = regionsOf(selected, main);
+
+  return (
+    <div>
+      <div className="relative" style={{ marginBottom: 10 }}>
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: COLORS.textMuted }} />
+        <input
+          type="text"
+          placeholder="Search country..."
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="w-full pl-10 pr-4 py-2 outline-none"
+          style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, color: COLORS.textPrimary, borderRadius: 10, fontSize: 13 }}
+        />
+      </div>
+      <div style={{ border: `1px solid ${COLORS.border}`, borderRadius: 10, background: COLORS.surface, overflow: 'hidden' }}>
+        {['NA', 'EU', 'FE'].map((regionCode) => {
+          const rows = visible.filter((c) => c.region === regionCode);
+          if (!rows.length) return null;
+          return (
+            <div key={regionCode}>
+              <div
+                className="px-4 py-2"
+                style={{ background: COLORS.surfaceElevated, fontSize: 11, fontWeight: 600, color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: '.06em', borderBottom: `1px solid ${COLORS.border}` }}
+              >
+                {REGION_NAMES[regionCode]}
+              </div>
+              {rows.map((country) => {
+                const on = selected.includes(country.code);
+                const isMain = on && main === country.code;
+                return (
+                  <div
+                    key={country.code}
+                    className="flex items-center gap-3 px-4"
+                    style={{ minHeight: 42, background: on ? 'rgba(59,130,246,.08)' : 'transparent', borderBottom: `1px solid ${COLORS.border}` }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onToggle(country.code)}
+                      aria-pressed={on}
+                      className="flex flex-1 items-center gap-3 text-left py-2.5"
+                      style={{ fontSize: 13, color: on ? COLORS.textPrimary : COLORS.textSecondary }}
+                    >
+                      <span
+                        className="flex items-center justify-center flex-none"
+                        style={{ width: 18, height: 18, borderRadius: 5, background: on ? COLORS.accent : 'transparent', border: `1px solid ${on ? COLORS.accent : COLORS.borderStrong}` }}
+                      >
+                        {on && <Check className="w-3 h-3" style={{ color: '#061021' }} />}
+                      </span>
+                      <span style={{ fontSize: 16 }}>{country.flag}</span>
+                      <span className="flex-1">{country.name}</span>
+                    </button>
+                    {isMain ? (
+                      <span style={{ padding: '2px 9px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: 'rgba(59,130,246,.16)', color: '#7EA8F8' }}>Main</span>
+                    ) : on ? (
+                      <button type="button" onClick={() => onMain(country.code)} style={{ fontSize: 11, color: COLORS.textMuted }}>
+                        Make main
+                      </button>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+        {!visible.length && (
+          <div className="px-4 py-8 text-center" style={{ color: COLORS.textMuted, fontSize: 13 }}>
+            No countries found matching &ldquo;{query}&rdquo;
+          </div>
+        )}
+      </div>
+      {selected.length > 0 && (
+        <div style={{ marginTop: 10, fontSize: 12, color: COLORS.textSecondary }}>
+          {selected.length} marketplace{selected.length === 1 ? '' : 's'} in {regions.length} region{regions.length === 1 ? '' : 's'}
+          {' — '}you&rsquo;ll approve {regions.map((r) => REGION_NAMES[r]).join(', then ')}
+          {regions.length > 1 ? ' (main marketplace’s region first).' : '.'}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // `basePath`, when given, overrides the agency-derived client route prefix so
 // other portals (e.g. the ESF staff portal) can reuse this flow unchanged.
 const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = '', basePath = '' }) => {
@@ -32,6 +130,25 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
   // the MAIN marketplace and goes straight to Amazon; the other marketplaces come next.
   const isSelfServe = !isAgencyContext && !basePath;
   const [multiMarketplace, setMultiMarketplace] = useState(false);
+  // Multi mode: every marketplace the seller sells in; `marketPlace` is the main one among them.
+  const [picked, setPicked] = useState([]);
+
+  const chooseMain = (code) => {
+    const country = COUNTRY_DATA.find((c) => c.code === code);
+    if (!country) return;
+    setMarketPlace(code);
+    setRegion(country.region);
+  };
+
+  const togglePicked = (code) => {
+    const next = picked.includes(code) ? picked.filter((c) => c !== code) : [...picked, code];
+    setPicked(next);
+    // The first pick is the main one until the seller says otherwise; un-picking the main one
+    // hands it to the next pick.
+    if (!next.includes(marketPlace)) {
+      if (next.length) chooseMain(next[0]); else { setMarketPlace(''); setRegion(''); }
+    }
+  };
   const marketplaceDropdownRef = useRef(null);
   const navigate = useNavigate();
 
@@ -135,7 +252,7 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
     if (multiMarketplace) {
       try {
         // Nothing is saved yet: the marketplace is created once Amazon approves the region.
-        await goToAmazon({ kind: 'spapi', region, primaryCountry: marketPlace });
+        await goToAmazon({ kind: 'spapi', region, primaryCountry: marketPlace, plannedCountries: picked });
       } catch (error) {
         setLoading(false);
         alert(errorMessage(error, 'Could not open Amazon. Please try again.'));
@@ -204,7 +321,7 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
           <div className="flex flex-col" style={{ gap: 13 }}>
             {[
               multiMarketplace
-                ? 'You pick your main marketplace — the one you want to see first. Your other marketplaces come next.'
+                ? 'You tick the marketplaces you sell in and choose a main one — the one you want to see first.'
                 : 'You pick the marketplace your account sells in — that tells us which Amazon region to talk to.',
               "Amazon's own consent page opens, so you sign in on amazon.com and not on our site.",
               'Amazon sends you back here and the scan starts. No keys to copy, nothing to paste.',
@@ -258,9 +375,9 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
             >
               <Globe className="w-4 h-4 flex-shrink-0" style={{ color: '#7EA8F8', marginTop: 1 }} />
               <div style={{ fontSize: 13, lineHeight: '20px', color: '#C7CFDD' }}>
-                <span style={{ fontWeight: 600, color: COLORS.textPrimary }}>Start with your main marketplace.</span>{' '}
-                Selling in more than one? Amazon will show us the others in the same region after you approve, and
-                you can add other regions next — no need to pick them all now.
+                <span style={{ fontWeight: 600, color: COLORS.textPrimary }}>Tick every marketplace you sell in.</span>{' '}
+                Amazon approves one region at a time, so you&rsquo;ll approve once per region — every marketplace in that
+                region comes with it. Choose a main marketplace: it&rsquo;s prepared first and opens your dashboard.
               </div>
             </div>
           ) : (
@@ -280,9 +397,12 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
           <div style={{ marginBottom: 14 }}>
             <label className="flex items-center gap-2" style={{ fontSize: 12, fontWeight: 600, color: COLORS.textSecondary, marginBottom: 8 }}>
               <Globe className="w-3.5 h-3.5" style={{ color: COLORS.textMuted }} />
-              {multiMarketplace ? 'Which is your main marketplace?' : 'Which marketplace is your account in?'}
+              {multiMarketplace ? 'Which marketplaces do you sell in?' : 'Which marketplace is your account in?'}
             </label>
 
+                  {multiMarketplace ? (
+                    <MarketplaceMultiPicker selected={picked} main={marketPlace} onToggle={togglePicked} onMain={chooseMain} />
+                  ) : (
                   <div className="relative" ref={marketplaceDropdownRef}>
                     {/* Selected Country Display / Dropdown Trigger */}
                     <button
@@ -384,6 +504,7 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
                       </motion.div>
                     )}
                   </div>
+                  )}
           </div>
 
           <button

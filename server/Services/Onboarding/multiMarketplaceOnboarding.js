@@ -83,11 +83,20 @@ const isDuplicateSellerId = (error) => error?.code === 11000 && /selling_partner
 
 /* ------------------------------------------------------- seller central -- */
 
+/** Supported, de-duplicated, upper-cased; always includes the main marketplace. */
+const normalisePlanned = (countries, primaryCountry) => {
+    const list = (Array.isArray(countries) ? countries : [])
+        .map((c) => String(c || '').toUpperCase())
+        .filter((c) => regionOf(c));
+    if (primaryCountry) list.unshift(primaryCountry);
+    return [...new Set(list)];
+};
+
 /**
  * The seller came back from Seller Central with an authorisation for `region`.
  * @returns the marketplaces to offer: what Amazon reported, or the whole region when that failed
  */
-const connectSellerCentral = async ({ userId, region, authCode, sellingPartnerId, primaryCountry }) => {
+const connectSellerCentral = async ({ userId, region, authCode, sellingPartnerId, primaryCountry, plannedCountries = [] }) => {
     if (!isRegion(region)) throw new ApiError(400, 'Unknown region');
     if (!authCode) throw new ApiError(400, 'Authorization code is required');
 
@@ -116,6 +125,7 @@ const connectSellerCentral = async ({ userId, region, authCode, sellingPartnerId
     if (primaryCountry && regionOf(primaryCountry) === region
         && !(await RegionGrant.exists({ User: userId, primaryCountry: { $ne: null } }))) {
         update.primaryCountry = String(primaryCountry).toUpperCase();
+        update.plannedCountries = normalisePlanned(plannedCountries, update.primaryCountry);
     }
 
     await RegionGrant.updateOne({ User: userId, region }, { $set: update }, { upsert: true });
@@ -284,6 +294,7 @@ const getChecklist = async (userId) => {
     const grantFor = new Map(grants.map((g) => [g.region, g]));
     const primaryGrant = grants.find((g) => g.primaryCountry);
     const primary = primaryGrant ? { country: primaryGrant.primaryCountry, region: primaryGrant.region } : null;
+    const planned = primaryGrant?.plannedCountries || [];
 
     const accounts = (seller?.sellerAccount || []).filter((a) => a?.country && a?.region);
     const marketplaces = await Promise.all(accounts.map(async (a) => ({
@@ -303,6 +314,9 @@ const getChecklist = async (userId) => {
             : [];
         return {
             region,
+            // What the seller said they sell in here, picked up front (may include marketplaces
+            // this Amazon account turns out not to have).
+            planned: planned.filter((country) => regionOf(country) === region),
             sellerCentral: Boolean(grant?.spiRefreshToken) || accounts.some((a) => a.region === region && a.spiRefreshToken),
             ads: Boolean(grant?.adsRefreshToken),
             discoveryFailed: Boolean(grant?.discoveryFailed),

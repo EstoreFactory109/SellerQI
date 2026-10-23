@@ -35,11 +35,12 @@ const requireRedis = () => {
 };
 
 /**
- * @param {{userId: string, kind: 'spapi'|'ads', region: 'NA'|'EU'|'FE', primaryCountry?: string}} payload
+ * @param {{userId: string, kind: 'spapi'|'ads', region: 'NA'|'EU'|'FE', primaryCountry?: string, plannedCountries?: string[]}} payload
  *   primaryCountry: the main marketplace the seller picked, sent with their first region's approval
+ *   plannedCountries: every marketplace they said they sell in, sent with the same approval
  * @returns {Promise<string>} the state value to send to Amazon
  */
-const createState = async ({ userId, kind, region, primaryCountry = null }) => {
+const createState = async ({ userId, kind, region, primaryCountry = null, plannedCountries = [] }) => {
     const client = requireRedis();
     const state = crypto.randomBytes(32).toString('hex');
     await client.setEx(`${STATE_PREFIX}${state}`, STATE_TTL_SECONDS, JSON.stringify({
@@ -47,6 +48,7 @@ const createState = async ({ userId, kind, region, primaryCountry = null }) => {
         kind,
         region,
         primaryCountry,
+        plannedCountries,
     }));
     return state;
 };

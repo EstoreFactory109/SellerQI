@@ -58,9 +58,9 @@ const getChecklist = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, { enabled: true, ...checklist }, 'OK'));
 });
 
-/** POST /app/onboarding/oauth-state { kind, region, primaryCountry? } → { state } */
+/** POST /app/onboarding/oauth-state { kind, region, primaryCountry?, plannedCountries? } → { state } */
 const createOauthState = asyncHandler(async (req, res) => {
-    const { kind, region, primaryCountry } = req.body || {};
+    const { kind, region, primaryCountry, plannedCountries } = req.body || {};
     if (!KINDS.includes(kind) || !isRegion(region)) {
         return res.status(400).json(new ApiResponse(400, null, 'kind and region are required'));
     }
@@ -68,7 +68,16 @@ const createOauthState = asyncHandler(async (req, res) => {
         return res.status(400).json(new ApiResponse(400, null, 'The main marketplace is not in this region'));
     }
     try {
-        const state = await createState({ userId: req.userId, kind, region, primaryCountry: primaryCountry || null });
+        const planned = Array.isArray(plannedCountries)
+            ? plannedCountries.map((c) => String(c || '').toUpperCase()).filter((c) => regionOf(c)).slice(0, 30)
+            : [];
+        const state = await createState({
+            userId: req.userId,
+            kind,
+            region,
+            primaryCountry: primaryCountry || null,
+            plannedCountries: primaryCountry ? planned : [],
+        });
         return res.status(200).json(new ApiResponse(200, { state }, 'OK'));
     } catch (error) {
         return fail(res, error, 'Could not start the Amazon connection');
@@ -95,6 +104,7 @@ const sellerCentralCallback = asyncHandler(async (req, res) => {
             authCode: req.body?.authCode,
             sellingPartnerId: req.body?.sellingPartnerId,
             primaryCountry: payload.primaryCountry,
+            plannedCountries: payload.plannedCountries,
         });
         return res.status(200).json(new ApiResponse(200, { region: payload.region, ...checklist }, 'Seller Central connected'));
     } catch (error) {
