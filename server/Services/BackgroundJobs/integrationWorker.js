@@ -248,13 +248,14 @@ async function startWorker() {
             // and returning success — the bootstrap job's only responsibility is
             // to seed the pipeline; the actual work runs as a separate INIT job.
             logger.info(`[IntegrationWorker:${WORKER_NAME}] Legacy integration job ${job.id} → bootstrapping INIT phase`, { userId });
-            const { country, region } = job.data || {};
+            const { country, region, priority } = job.data || {};
             const parentJobId = job.id;
             try {
                 const phaseInfo = await addPhaseJob({
                     userId,
                     country,
                     region,
+                    priority,
                     phase: integrationPhases.PHASES.INIT,
                     parentJobId,
                     phaseData: {},

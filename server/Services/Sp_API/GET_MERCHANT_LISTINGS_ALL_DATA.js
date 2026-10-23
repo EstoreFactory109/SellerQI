@@ -404,35 +404,12 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
         }
 
        
-        const getSellerDetails = await SellerModel.findOne({ User: userId });
+        const getSellerDetails = await saveListingsForMarketplace(userId, country, region, ProductData);
         if (!getSellerDetails) {
             logger.error(new ApiError(404, "Seller not found"));
             return false;
         }
-        
 
-        for (let i = 0; i < getSellerDetails.sellerAccount.length; i++) {
-            if (getSellerDetails.sellerAccount[i].country === country && getSellerDetails.sellerAccount[i].region === region) {
-                // Carry over the fields other services own BEFORE the replace, or the sub-schema
-                // defaults wipe them for the whole account until CALC_REVIEW runs hours later.
-                // Still a full replace, so delisted listings drop out exactly as before.
-                carryForwardProductFields(getSellerDetails.sellerAccount[i].products, ProductData);
-                getSellerDetails.sellerAccount[i].products=ProductData;
-                getSellerDetails.sellerAccount[i].TotatProducts.push({
-                    NumberOfProducts:ProductData.length
-                })
-                // Bound the history. Appended every run, read by nothing; production had 1,131
-                // entries on one document. splice() so the Mongoose array tracks the change.
-                const history = getSellerDetails.sellerAccount[i].TotatProducts;
-                if (history.length > TOTAT_PRODUCTS_HISTORY_LIMIT) {
-                    history.splice(0, history.length - TOTAT_PRODUCTS_HISTORY_LIMIT);
-                }
-                break;
-            }
-        }
-
-
-        await getSellerDetails.save();
         logger.info("Data saved successfully");
         logger.info("GET_MERCHANT_LISTINGS_ALL_DATA ended");
         return getSellerDetails;
@@ -494,6 +471,62 @@ async function convertTSVToJsonLegacy(tsvBuffer) {
     });
 }
 
+/**
+ * Replace one marketplace's product list on the Seller document, atomically.
+ *
+ * WHY NOT findOne + save(). All of a user's marketplaces live in ONE Seller document. The old
+ * read-modify-save rewrote the whole document, so two marketplaces importing at once (several
+ * first fetches, or the daily run) — or a marketplace being connected while one imports — could
+ * overwrite each other or fail with a VersionError. This reads only the one marketplace's entry
+ * (for carryForwardProductFields) and writes only that entry, by country + region.
+ *
+ * Returns a Seller-shaped object whose `sellerAccount` holds just this marketplace's updated entry
+ * — the callers (extractProductData / extractInactiveProductData) look the marketplace up in it by
+ * country + region. Returns false when the user has no Seller document. A user without this
+ * marketplace gets an empty `sellerAccount`, as before (nothing is written).
+ */
+async function saveListingsForMarketplace(userId, country, region, ProductData) {
+    const current = await SellerModel.findOne(
+        { User: userId, sellerAccount: { $elemMatch: { country, region } } },
+        { User: 1, 'sellerAccount.$': 1 }
+    ).lean();
+
+    if (!current) {
+        const seller = await SellerModel.findOne({ User: userId }, { User: 1 }).lean();
+        return seller ? { ...seller, sellerAccount: [] } : false;
+    }
+
+    const account = current.sellerAccount[0];
+    // Carry over the fields other services own BEFORE the replace, or the sub-schema
+    // defaults wipe them for the whole account until CALC_REVIEW runs hours later.
+    // Still a full replace, so delisted listings drop out exactly as before.
+    carryForwardProductFields(account.products, ProductData);
+
+    const historyEntry = { NumberOfProducts: ProductData.length };
+    await SellerModel.updateOne(
+        { _id: current._id },
+        {
+            $set: { 'sellerAccount.$[acct].products': ProductData },
+            // Bound the history. Appended every run, read by nothing; production had 1,131
+            // entries on one document. $slice keeps the newest.
+            $push: {
+                'sellerAccount.$[acct].TotatProducts': {
+                    $each: [historyEntry],
+                    $slice: -TOTAT_PRODUCTS_HISTORY_LIMIT,
+                },
+            },
+        },
+        { arrayFilters: [{ 'acct.country': country, 'acct.region': region }] }
+    );
+
+    const history = [...(account.TotatProducts || []), historyEntry].slice(-TOTAT_PRODUCTS_HISTORY_LIMIT);
+    return {
+        _id: current._id,
+        User: current.User,
+        sellerAccount: [{ ...account, products: ProductData, TotatProducts: history }],
+    };
+}
+
 module.exports = getReport;
 // Named exports alongside the default: every caller does `require(...)` and calls the result
 // directly, so the default must stay a function. These exist so the merge can be unit-tested as a
@@ -502,3 +535,4 @@ module.exports = getReport;
 module.exports.carryForwardProductFields = carryForwardProductFields;
 module.exports.productKey = productKey;
 module.exports.TOTAT_PRODUCTS_HISTORY_LIMIT = TOTAT_PRODUCTS_HISTORY_LIMIT;
+module.exports.saveListingsForMarketplace = saveListingsForMarketplace;

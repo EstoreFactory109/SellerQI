@@ -83,6 +83,7 @@ const ProductWiseSales = require('../../models/products/ProductWiseSalesModel.js
 const OrderAndRevenue = require('../../models/products/OrderAndRevenueModel.js');
 const FBAReimbursements = require('../../models/finance/FBAReimbursementsModel.js');
 const AgencySeller = require('../../models/user-auth/AgencySellerModel.js');
+const RegionGrant = require('../../models/user-auth/RegionGrantModel.js');
 const DataFetchTracking = require('../../models/system/DataFetchTrackingModel.js');
 const AccountHistory = require('../../models/user-auth/AccountHistory.js');
 const LedgerDetailView = require('../../models/finance/LedgerDetailViewModel.js');
@@ -149,6 +150,8 @@ const collectionsWithUser = [
     // Members of this seller account. They have no data of their own; without the
     // account they belong to, their invitations and sign-ins are meaningless.
     { model: AccountMember, key: 'owner' },
+    // Holds Amazon refresh tokens from multi-marketplace onboarding.
+    { model: RegionGrant, key: 'User' },
     { model: ListingItemsKeyword, key: 'User' },
     { model: ListingItems, key: 'User' },
     { model: BuyBoxData, key: 'User' },

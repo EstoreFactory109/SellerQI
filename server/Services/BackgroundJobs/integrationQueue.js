@@ -202,6 +202,17 @@ async function getCurrentAccountStatus(userId, country, region) {
 }
 
 /**
+ * Job states that mean "queued or running".
+ *
+ * BullMQ 5 keeps a job that has a priority in the `prioritized` state, not `waiting` — and every
+ * integration job has one. Checking only waiting/active/delayed treated a queued job as finished,
+ * so a second trigger deleted it and re-added it at the back of the queue, and the post-add check
+ * in addPhaseJob re-added every phase it had just added.
+ */
+const IN_PROGRESS_STATES = ['waiting', 'prioritized', 'waiting-children', 'active', 'delayed'];
+const isInProgressState = (state) => IN_PROGRESS_STATES.includes(state);
+
+/**
  * Add an integration job to the queue
  * 
  * SIMPLIFIED FLOW (no cooldown, no duplicate checks for completed jobs):
@@ -214,9 +225,13 @@ async function getCurrentAccountStatus(userId, country, region) {
  * @param {string} userId - User ID
  * @param {string} country - Country code
  * @param {string} region - Region code
+ * @param {Object} [options]
+ * @param {number} [options.priority=1] BullMQ priority, lower runs first. Onboarding starts a
+ *   seller's main marketplace at 1 and their other marketplaces lower, so every new signup's main
+ *   marketplace is fetched before anyone's extra ones. Every phase of the pipeline inherits it.
  * @returns {Object} Job info with jobId
  */
-async function addIntegrationJob(userId, country, region) {
+async function addIntegrationJob(userId, country, region, { priority = 1 } = {}) {
     const queue = getIntegrationQueue();
     
     // Create a unique job ID based on userId, country, region
@@ -228,7 +243,7 @@ async function addIntegrationJob(userId, country, region) {
         const state = await existingJob.getState();
         
         // If job is waiting, active, or delayed - return it (don't create duplicate while it's running)
-        if (state === 'waiting' || state === 'active' || state === 'delayed') {
+        if (isInProgressState(state)) {
             logger.info(`[IntegrationQueue] Job already in progress for user ${userId}, ${country}-${region}. State: ${state}`);
             return {
                 jobId: customJobId,
@@ -254,11 +269,12 @@ async function addIntegrationJob(userId, country, region) {
             userId,
             country,
             region,
+            priority,
             triggeredAt: new Date().toISOString()
         },
         {
             jobId: customJobId,
-            priority: 1 // Higher priority than scheduled jobs
+            priority // 1 by default: higher priority than scheduled jobs
         }
     );
     
@@ -292,6 +308,8 @@ async function addIntegrationJob(userId, country, region) {
 async function addPhaseJob(jobData) {
     const queue = getIntegrationQueue();
     const { userId, country, region, phase, parentJobId, phaseData, triggeredAt } = jobData;
+    // Inherited from addIntegrationJob through the phase chain; 1 when absent (older jobs).
+    const priority = Number(jobData.priority) || 1;
     
     // Generate phase-specific job ID
     const phaseJobId = `${parentJobId}-${phase}`;
@@ -300,7 +318,7 @@ async function addPhaseJob(jobData) {
     const existingJob = await queue.getJob(phaseJobId);
     if (existingJob) {
         const state = await existingJob.getState();
-        if (state === 'waiting' || state === 'active' || state === 'delayed') {
+        if (isInProgressState(state)) {
             logger.info(`[IntegrationQueue] Phase job ${phaseJobId} already in progress. State: ${state}`);
             return {
                 jobId: phaseJobId,
@@ -327,12 +345,13 @@ async function addPhaseJob(jobData) {
             region,
             phase,
             parentJobId,
+            priority,
             phaseData: phaseData || {},
             triggeredAt: triggeredAt || new Date().toISOString()
         },
         {
             jobId: phaseJobId,
-            priority: 1,
+            priority,
             // Phase-specific settings
             attempts: 2,
             backoff: {
@@ -350,7 +369,7 @@ async function addPhaseJob(jobData) {
     const verifyJob = await queue.getJob(phaseJobId);
     const verifyState = verifyJob ? await verifyJob.getState() : 'not-found';
     
-    if (verifyState !== 'waiting' && verifyState !== 'delayed' && verifyState !== 'active') {
+    if (!isInProgressState(verifyState)) {
         logger.warn(`[IntegrationQueue] Phase job ${phaseJobId} state after add: ${verifyState}, retrying add once`);
         
         // Retry the add once
@@ -362,12 +381,13 @@ async function addPhaseJob(jobData) {
                 region,
                 phase,
                 parentJobId,
+                priority,
                 phaseData: phaseData || {},
                 triggeredAt: triggeredAt || new Date().toISOString()
             },
             {
                 jobId: phaseJobId,
-                priority: 1,
+                priority,
                 attempts: 2,
                 backoff: {
                     type: 'exponential',
@@ -526,6 +546,7 @@ async function closeIntegrationQueue() {
 }
 
 module.exports = {
+    isInProgressState,
     getIntegrationQueue,
     addIntegrationJob,
     addPhaseJob,

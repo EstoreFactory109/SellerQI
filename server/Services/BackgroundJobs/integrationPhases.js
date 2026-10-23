@@ -100,12 +100,14 @@ function calculateOverallProgress(phase, phaseProgress = 100) {
  * @returns {Object} Job data for next phase
  */
 function createNextPhaseJobData(nextPhase, currentJobData, phaseResult = {}) {
-    const { userId, country, region, parentJobId, triggeredAt } = currentJobData;
+    const { userId, country, region, parentJobId, triggeredAt, priority } = currentJobData;
     
     return {
         userId,
         country,
         region,
+        // Carried so every phase of a pipeline keeps the priority it was started with.
+        ...(priority !== undefined ? { priority } : {}),
         phase: nextPhase,
         parentJobId: parentJobId || currentJobData.jobId,
         triggeredAt: triggeredAt || new Date().toISOString(),
