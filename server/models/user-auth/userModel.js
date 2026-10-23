@@ -262,6 +262,16 @@ const userSchema = new mongoose.Schema(
         required: false,
         default: null,
       },
+      // Activity monitoring: when the seller (or a member of their account) was last actually
+      // using SellerQI, and on which page. Staff opening the account never move these.
+      lastActiveAt: {
+        type: Date,
+        default: null,
+      },
+      lastActivePath: {
+        type: String,
+        default: null,
+      },
       packageType:{
         type:String,
         required:true,

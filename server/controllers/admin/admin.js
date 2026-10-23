@@ -295,6 +295,8 @@ const buildAccountLookupStages = () => ([
  * Adds the computed display fields (fullName, brand, renewalDate, etc.) shared by
  * the main accounts list and the agency-clients endpoint.
  */
+const { isActiveNow } = require('../../Services/Activity/activityService.js');
+
 const mapAccountFields = (account) => ({
     ...account,
     fullName: `${account.firstName} ${account.lastName}`,
@@ -307,7 +309,8 @@ const mapAccountFields = (account) => ({
     // Include brand from sellerCentral
     brand: account.sellerCentral?.brand || null,
     // Renewal date sourced from the Subscription doc, already synced from Stripe via webhooks
-    renewalDate: account.subscriptionInfo?.nextBillingDate || account.subscriptionInfo?.currentPeriodEnd || null
+    renewalDate: account.subscriptionInfo?.nextBillingDate || account.subscriptionInfo?.currentPeriodEnd || null,
+    isActiveNow: isActiveNow(account.lastActiveAt),
 });
 
 /**
@@ -375,7 +378,9 @@ const buildAccountsPipeline = (filters) => {
             createdAt: 1,
             updatedAt: 1,
             adminId: 1,
-            sellerCentral: 1
+            sellerCentral: 1,
+            // Activity monitoring: shown as the "Last active" column.
+            lastActiveAt: 1
         }
     });
 
@@ -1729,6 +1734,7 @@ const updateUserTrialPeriod = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+    requireSuperAdmin,
     adminLogin,
     adminLogout,
     getAllAccounts,

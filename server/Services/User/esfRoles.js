@@ -103,7 +103,14 @@ const canSeeClientIdentity = (user) => {
     return canManageTeam(user);
 };
 
+/**
+ * Who may see client activity (last active, pages viewed): owner and admins, plus platform
+ * superAdmins servicing the portal. Members don't — they see clients only as anonymised labels.
+ */
+const canViewClientActivity = (user) => canManageTaskRequests(user);
+
 module.exports = {
+    canViewClientActivity,
     ESF_ROLES,
     ASSIGNABLE_ESF_ROLES,
     ESF_OWNER_EMAIL,

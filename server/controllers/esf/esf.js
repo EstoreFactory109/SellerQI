@@ -37,7 +37,7 @@ const {
     isEsfOwner,
     resolveEsfRole,
     canManageTeam,
-    canSeeClientIdentity,
+    canSeeClientIdentity, canViewClientActivity,
 } = require('../../Services/User/esfRoles.js');
 const { splitStaffName } = require('../../Services/User/staffName.js');
 const {
@@ -266,6 +266,8 @@ const updateEsfPassword = asyncHandler(async (req, res) => {
 /* --------------------------------------------------------------- clients -- */
 
 /** GET /app/esf/clients — every client added through this portal. */
+const { isActiveNow } = require('../../Services/Activity/activityService.js');
+
 const getEsfClients = asyncHandler(async (req, res) => {
     /**
      * Members get the label, not the person.
@@ -286,9 +288,20 @@ const getEsfClients = asyncHandler(async (req, res) => {
         : [];
     const staffById = new Map(staff.map((s) => [String(s._id), staffDisplayName(s)]));
 
+    // Activity (last active) for owner/admins only — members never receive it.
+    const showActivity = canViewClientActivity(req.esfUser);
+    const activity = showActivity && clients.length
+        ? await UserModel.find({ _id: { $in: clients.map((c) => c._id) } }).select('lastActiveAt').lean()
+        : [];
+    const lastActiveById = new Map(activity.map((a) => [String(a._id), a.lastActiveAt || null]));
+
     const withAddedBy = clients.map((client) => ({
         ...client,
         addedByName: client.esfAddedBy ? staffById.get(String(client.esfAddedBy)) || null : null,
+        ...(showActivity ? {
+            lastActiveAt: lastActiveById.get(String(client._id)) || null,
+            isActiveNow: isActiveNow(lastActiveById.get(String(client._id))),
+        } : {}),
     }));
 
     return res.status(200).json(new ApiResponse(200, withAddedBy, 'ESF clients fetched successfully'));

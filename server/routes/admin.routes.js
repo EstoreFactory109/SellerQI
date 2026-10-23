@@ -5,6 +5,7 @@ const { getSubscriptionData } = require('../controllers/admin/AdminSubscriptionC
 const { getAdminEmailLogs } = require('../controllers/admin/AdminEmailLogsController.js');
 const { getAdminTicketMessages } = require('../controllers/admin/AdminTicketMessagesController.js');
 const { getAdminUserSessions, getAdminUserErrorLogs, getAdminUserSessionDetails } = require('../controllers/admin/AdminUserLogsController.js');
+const { getActivityOverview, getUserActivity } = require('../controllers/admin/AdminActivityController.js');
 const superAdminAuth = require('../middlewares/Auth/superAdminAuth.js');
 const { authRateLimiter } = require('../middlewares/rateLimiting.js');
 const { validateAdminLogin } = require('../middlewares/validator/adminValidate.js');
@@ -16,6 +17,9 @@ router.post('/admin-login', authRateLimiter, validateAdminLogin, refuseIfOtherSe
 // Protected admin routes (require superAdmin authentication)
 router.post('/admin-logout', superAdminAuth, adminLogout);
 router.get('/admin/accounts', superAdminAuth, getAllAccounts);
+// Seller activity monitoring (last active, pages viewed).
+router.get('/admin/activity', superAdminAuth, getActivityOverview);
+router.get('/admin/activity/users/:userId', superAdminAuth, getUserActivity);
 router.get('/admin/accounts/export', superAdminAuth, exportAllAccountsCsv);
 router.get('/admin/accounts/country-stats', superAdminAuth, getCountryStats);
 router.get('/admin/accounts/:agencyId/clients', superAdminAuth, getAgencyClients);

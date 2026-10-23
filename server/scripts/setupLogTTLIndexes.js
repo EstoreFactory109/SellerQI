@@ -40,6 +40,7 @@ require('../models/system/ErrorLogs.js');
 require('../models/system/PaymentLogsModel.js');
 require('../models/system/EmailLogsModel.js');
 require('../models/finance/FinanceSyncLogModel.js');
+require('../models/system/UserPageViewModel.js');
 
 async function ensureTtlIndex(policyKey) {
   const policy = LOG_RETENTION[policyKey];

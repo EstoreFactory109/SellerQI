@@ -65,6 +65,7 @@ const ProductWiseFBADataItem = require('../../models/inventory/ProductWiseFBADat
 const GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE = require('../../models/inventory/GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA.js');
 const EmailLogs = require('../../models/system/EmailLogsModel.js');
 const UserAccountLogs = require('../../models/system/ErrorLogs.js');
+const UserPageView = require('../../models/system/UserPageViewModel.js');
 
 const ListingItemsKeyword = require('../../models/products/ListingItemsKeywordModel.js');
 const ListingItems = require('../../models/products/GetListingItemsModel.js');
@@ -271,6 +272,7 @@ const collectionsWithUserId = [
     { model: ProductWiseFBADataItem, key: 'userId' },
     { model: GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE, key: 'userId' },
     { model: UserAccountLogs, key: 'userId' },
+    { model: UserPageView, key: 'userId' },
     { model: ListingFixStatus, key: 'userId' },
     { model: WhatsAppLink, key: 'userId' },
 ];
