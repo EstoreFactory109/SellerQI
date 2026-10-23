@@ -35,14 +35,16 @@ const SECONDARY_PRIORITY = 5;
 /* ------------------------------------------------------------------ flag -- */
 
 /**
- * Who gets the new flow. MULTI_MARKETPLACE_ONBOARDING_ENABLED=true turns it on for everyone;
- * otherwise only the emails in MULTI_MARKETPLACE_ONBOARDING_USERS (comma-separated), for a
- * production trial. Agency and ESF clients keep the current flow either way.
+ * Who gets the new flow. ON by default for self-serve sellers.
+ * MULTI_MARKETPLACE_ONBOARDING_ENABLED=false is the kill switch: everyone goes back to the
+ * single-marketplace flow, except the emails in MULTI_MARKETPLACE_ONBOARDING_USERS
+ * (comma-separated), so it can still be tried while switched off. Agency and ESF clients keep the
+ * current flow either way.
  */
 const isEnabledFor = (user) => {
     if (!user) return false;
     if (user.isAgencyClient || user.isEsfClient || user.agencyId) return false;
-    if (String(process.env.MULTI_MARKETPLACE_ONBOARDING_ENABLED || '').toLowerCase() === 'true') return true;
+    if (String(process.env.MULTI_MARKETPLACE_ONBOARDING_ENABLED || '').toLowerCase() !== 'false') return true;
     const allow = String(process.env.MULTI_MARKETPLACE_ONBOARDING_USERS || '')
         .split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
     return Boolean(user.email) && allow.includes(String(user.email).toLowerCase());

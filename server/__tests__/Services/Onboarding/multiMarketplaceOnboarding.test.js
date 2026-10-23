@@ -113,23 +113,27 @@ describe('who gets the new flow', () => {
   const env = { ...process.env };
   afterEach(() => { process.env = { ...env }; });
 
-  it('nobody by default', () => {
+  it('every self-serve seller by default', () => {
     delete process.env.MULTI_MARKETPLACE_ONBOARDING_ENABLED;
     delete process.env.MULTI_MARKETPLACE_ONBOARDING_USERS;
-    expect(onboarding.isEnabledFor({ email: 'a@b.com' })).toBe(false);
-  });
-
-  it('allow-listed emails, case-insensitively, for a production trial', () => {
-    process.env.MULTI_MARKETPLACE_ONBOARDING_USERS = 'Tester@Example.com, other@x.com';
-    expect(onboarding.isEnabledFor({ email: 'tester@example.com' })).toBe(true);
-    expect(onboarding.isEnabledFor({ email: 'someone@else.com' })).toBe(false);
-  });
-
-  it('everyone when switched on, except agency and ESF clients', () => {
+    expect(onboarding.isEnabledFor({ email: 'a@b.com' })).toBe(true);
     process.env.MULTI_MARKETPLACE_ONBOARDING_ENABLED = 'true';
     expect(onboarding.isEnabledFor({ email: 'a@b.com' })).toBe(true);
+  });
+
+  it('never agency or ESF clients', () => {
+    delete process.env.MULTI_MARKETPLACE_ONBOARDING_ENABLED;
     expect(onboarding.isEnabledFor({ email: 'a@b.com', isAgencyClient: true })).toBe(false);
+    expect(onboarding.isEnabledFor({ email: 'a@b.com', agencyId: 'x' })).toBe(false);
     expect(onboarding.isEnabledFor({ email: 'a@b.com', isEsfClient: true })).toBe(false);
+    expect(onboarding.isEnabledFor(null)).toBe(false);
+  });
+
+  it('switched off with =false, except allow-listed emails (case-insensitive)', () => {
+    process.env.MULTI_MARKETPLACE_ONBOARDING_ENABLED = 'FALSE';
+    process.env.MULTI_MARKETPLACE_ONBOARDING_USERS = 'Tester@Example.com, other@x.com';
+    expect(onboarding.isEnabledFor({ email: 'someone@else.com' })).toBe(false);
+    expect(onboarding.isEnabledFor({ email: 'tester@example.com' })).toBe(true);
   });
 });
 

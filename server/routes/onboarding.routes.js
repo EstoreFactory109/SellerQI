@@ -16,8 +16,8 @@ const {
 
 /**
  * Multi-marketplace onboarding (/app/onboarding): connect each Amazon region once, confirm its
- * marketplaces. Off unless MULTI_MARKETPLACE_ONBOARDING_ENABLED / _USERS say otherwise; the
- * checklist read tells the client which flow to show.
+ * marketplaces. On by default; MULTI_MARKETPLACE_ONBOARDING_ENABLED=false switches it off (the
+ * _USERS allowlist still gets it). The checklist read tells the client which flow to show.
  *
  * getLocationOptional: the session's marketplace, when there is one, lets the endpoints that
  * point the session at the main marketplace skip a cookie that is already right.

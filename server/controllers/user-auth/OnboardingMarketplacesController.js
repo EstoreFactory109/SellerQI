@@ -2,8 +2,9 @@
  * Multi-marketplace onboarding endpoints (/app/onboarding). The flow and its rules live in
  * Services/Onboarding/multiMarketplaceOnboarding.js; this file is request/response only.
  *
- * Every endpoint except GET /marketplaces answers 404 for users the flag is off for, so the
- * current single-marketplace flow is untouched for them (and for agency / ESF clients).
+ * Every endpoint except GET /marketplaces answers 404 for users the flow is off for (agency / ESF
+ * clients, or everyone when MULTI_MARKETPLACE_ONBOARDING_ENABLED=false), so the single-marketplace
+ * flow is untouched for them.
  */
 const asyncHandler = require('../../utils/AsyncHandler.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
