@@ -15,12 +15,16 @@ import {
   ChevronRight,
   FolderGit2,
   Lock,
+  Radio,
 } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 import EsfAddClientForm from '../../Components/ESF/EsfAddClientForm.jsx';
 import EsfExistingUsersPicker from '../../Components/ESF/EsfExistingUsersPicker.jsx';
 import EsfConnectProjectModal from '../../Components/ESF/EsfConnectProjectModal.jsx';
 import { useEsfUser } from '../../contexts/EsfUserContext.js';
+import LastActiveBadge from '../../Components/Activity/LastActiveBadge.jsx';
+import UserActivityDrawer from '../../Components/Activity/UserActivityDrawer.jsx';
+import { canViewClientActivity } from '../../utils/esfActivityAccess.js';
 
 const ITEMS_PER_PAGE = 10;
 const DROPDOWN_MENU_WIDTH = 180;
@@ -32,7 +36,10 @@ const EsfClients = () => {
   // Members may open a client, but only the owner and admins may detach one.
   // The server enforces the same rule on DELETE /app/esf/clients/:id.
   const canRemoveClients = signedInUser?.esfRole === 'owner' || signedInUser?.esfRole === 'admin';
-  const menuHeight = DROPDOWN_MENU_ITEM_HEIGHT * (canRemoveClients ? 3 : 2);
+  // Activity monitoring is for the owner and admins; the server sends members no activity at all.
+  const showActivity = canViewClientActivity(signedInUser);
+  const menuHeight = DROPDOWN_MENU_ITEM_HEIGHT * (2 + (canRemoveClients ? 1 : 0) + (showActivity ? 1 : 0));
+  const [activityClient, setActivityClient] = useState(null);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -287,7 +294,7 @@ const EsfClients = () => {
             {/* Table */}
             <div className="rounded-2xl border border-white/10 bg-[#101722]/90 overflow-hidden shadow-2xl shadow-black/20 backdrop-blur">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[900px]">
+                <table className="w-full min-w-[980px]">
                   <thead>
                     <tr className="border-b border-white/10 bg-[#080c12]/90">
                       <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider min-w-[150px]">Client</th>
@@ -296,6 +303,9 @@ const EsfClients = () => {
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">SpAPI</th>
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Ads</th>
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Added By</th>
+                      {showActivity && (
+                        <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap">Last active</th>
+                      )}
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap">Joining Date</th>
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Actions</th>
                     </tr>
@@ -376,6 +386,11 @@ const EsfClients = () => {
                               {client.addedByName || '-'}
                             </span>
                           </td>
+                          {showActivity && (
+                            <td className="px-2 py-2.5 text-center">
+                              <LastActiveBadge lastActiveAt={client.lastActiveAt} isActiveNow={client.isActiveNow} />
+                            </td>
+                          )}
                           <td className="px-2 py-2.5 text-center text-xs text-gray-500 whitespace-nowrap">
                             {formatDate(client.createdAt)}
                           </td>
@@ -572,6 +587,20 @@ const EsfClients = () => {
                     top: Math.max(8, Math.min(dropdownPosition.top, window.innerHeight - menuHeight - 8)),
                   }}
                 >
+                  {showActivity && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenDropdownId(null);
+                        setDropdownPosition(null);
+                        setActivityClient(client);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-blue-300 hover:bg-[#252525] hover:text-blue-200"
+                    >
+                      <Radio className="w-3.5 h-3.5" />
+                      View activity
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
@@ -659,6 +688,13 @@ const EsfClients = () => {
             )}
           </>
         )}
+
+        <UserActivityDrawer
+          open={Boolean(activityClient)}
+          onClose={() => setActivityClient(null)}
+          timelineUrl={activityClient ? `/app/esf/activity/clients/${activityClient._id}` : null}
+          title={activityClient?.label || `${activityClient?.firstName || ''} ${activityClient?.lastName || ''}`.trim()}
+        />
 
         {/* Connect this client to an existing Zoho project. Refetches the list on
             success so the Project column reflects the change immediately. */}

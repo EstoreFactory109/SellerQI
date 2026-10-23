@@ -14,7 +14,7 @@ const PORTAL_PREFIXES = [
   ['admin', ['/manage-accounts']],
   ['agency', ['/manage-agency-users', '/agency/']],
   ['esf', ['/esf/']],
-  ['user', ['/seller-central-checker/', '/analyse-account', '/connect-to-amazon', '/connect-accounts', '/profile-selection']],
+  ['user', ['/seller-central-checker/', '/analyse-account', '/connect-to-amazon', '/connect-accounts', '/connect-marketplaces', '/profile-selection']],
 ];
 
 const keyFor = (portal) => `lastPortalPage:${portal}`;

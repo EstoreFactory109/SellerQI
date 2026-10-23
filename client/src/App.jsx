@@ -10,6 +10,7 @@ import AnalysingAccount from './Pages/Onboarding/AnalysingAccount.jsx';
 import ProtectedAuthRouteWrapper from './Layout/ProtectedAuthRouteWrapper.jsx';
 import LoginPageGuard, { PortalGate } from './Layout/LoginPageGuard.jsx';
 import { rememberPortalPage } from './utils/portalPages.js';
+import { startActivityTracking, trackPage } from './utils/activityTracker.js';
 import MemberLogin from './Pages/Auth/MemberLogin.jsx';
 import MemberLinkLanding from './Pages/Auth/MemberLinkLanding.jsx';
 import MainLayout from './Layout/MainPagesLayout.jsx';
@@ -47,6 +48,8 @@ import Features from './Pages/Marketing/features.jsx';
 import InventoryManagement from './Pages/Marketing/inventoryManagement.jsx';
 import ConnectAccounts from './Pages/Onboarding/ConnectAccounts.jsx';
 import ConnectMarketplaces from './Pages/Onboarding/ConnectMarketplaces.jsx';
+import AdminActivity from './Pages/Admin/AdminActivity.jsx';
+import EsfActivity from './Pages/ESF/EsfActivity.jsx';
 import ProfileIDSelection from './Pages/Onboarding/ProfileIDSeclection.jsx';
 import PaymentCancel from './Pages/Payment/PaymentCancel.jsx';
 import PaymentFailed from './Pages/Payment/PaymentFailed.jsx';
@@ -137,6 +140,10 @@ const App = () => {
     rememberPortalPage(pathname, search);
   }, [pathname, search]);
 
+  // Activity monitoring: page opens and heartbeats on seller pages (see utils/activityTracker.js).
+  useEffect(() => { startActivityTracking(); }, []);
+  useEffect(() => { trackPage(pathname); }, [pathname]);
+
   // Keep demo-mode flag in sync: set it while browsing demo pages,
   // clear it when leaving demo pages so main routes stay unaffected.
   useEffect(() => {
@@ -213,6 +220,7 @@ const App = () => {
             <Route path='users' element={<EsfUsers />} />
             <Route path='messages' element={<EsfMessages />} />
             <Route path='task-requests' element={<EsfTaskRequests />} />
+            <Route path='activity' element={<EsfActivity />} />
             <Route path='estore-factory/zoho-projects' element={<EsfEstoreFactoryZoho />} />
             <Route path='settings' element={<EsfSettings />} />
           </Route>
@@ -229,6 +237,7 @@ const App = () => {
           <Route path='logs/email' element={<AdminEmailLogs />} />
           <Route path='logs/payment' element={<AdminPaymentLogs />} />
           <Route path='logs/user' element={<AdminUserLogs />} />
+          <Route path='activity' element={<AdminActivity />} />
           <Route path='logs/user/:userId' element={<AdminUserLogDetails />} />
           <Route path='ticket-messages' element={<AdminTicketMessages />} />
         </Route>

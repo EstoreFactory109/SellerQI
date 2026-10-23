@@ -23,8 +23,11 @@ import {
   Download,
   RefreshCw,
   Clock,
+  Radio,
 } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
+import LastActiveBadge from '../../Components/Activity/LastActiveBadge.jsx';
+import UserActivityDrawer from '../../Components/Activity/UserActivityDrawer.jsx';
 
 // Left padding of the User cell per nesting level: top-level, an agency client or
 // a member, and a member of an agency client.
@@ -190,11 +193,13 @@ const ManageAccounts = () => {
   const [trialError, setTrialError] = useState('');
   const [trialSuccess, setTrialSuccess] = useState('');
   const [openDropdownId, setOpenDropdownId] = useState(null);
+  // Seller whose activity drawer is open (activity monitoring).
+  const [activityUser, setActivityUser] = useState(null);
   const [dropdownPosition, setDropdownPosition] = useState(null);
   const dropdownRef = useRef(null);
   const openDropdownButtonRef = useRef(null);
   const DROPDOWN_MENU_WIDTH = 160;
-  const DROPDOWN_MENU_HEIGHT = 124;
+  const DROPDOWN_MENU_HEIGHT = 156;
 
   const handleExportCsv = async () => {
     try {
@@ -990,6 +995,9 @@ const ManageAccounts = () => {
             <span className="text-gray-500">—</span>
           )}
         </td>
+        <td className="px-2 py-2.5 text-center">
+          <LastActiveBadge lastActiveAt={user.lastActiveAt} isActiveNow={user.isActiveNow} />
+        </td>
         <td className="px-2 py-2.5 text-center text-xs text-gray-500 whitespace-nowrap">
           {user.createdAt ? formatDate(user.createdAt) : '—'}
         </td>
@@ -1057,6 +1065,7 @@ const ManageAccounts = () => {
       <td className="px-2 py-2.5 text-center text-xs">{DASH}</td>
       <td className="px-2 py-2.5 text-center text-xs">{DASH}</td>
       <td className="px-2 py-2.5 text-center text-xs">{DASH}</td>
+      <td className="px-2 py-2.5 text-center text-xs">{DASH}</td>
       <td className="px-2 py-2.5 text-center text-xs text-gray-500 whitespace-nowrap">{joined ? formatDate(joined) : DASH}</td>
       <td className="px-2 py-2.5 text-center text-xs">{DASH}</td>
       <td className="px-2 py-2.5 text-center text-xs">{DASH}</td>
@@ -1065,7 +1074,7 @@ const ManageAccounts = () => {
 
   const emptyRow = (key, text) => (
     <tr key={key}>
-      <td colSpan={10} className="px-3 py-3 text-center text-xs text-gray-500 bg-blue-500/[0.035]">{text}</td>
+      <td colSpan={11} className="px-3 py-3 text-center text-xs text-gray-500 bg-blue-500/[0.035]">{text}</td>
     </tr>
   );
 
@@ -1288,6 +1297,13 @@ const ManageAccounts = () => {
               </div>
             </div>
           )}
+
+          <UserActivityDrawer
+            open={Boolean(activityUser)}
+            onClose={() => setActivityUser(null)}
+            timelineUrl={activityUser ? `/app/auth/admin/activity/users/${activityUser._id}` : null}
+            title={activityUser ? `${activityUser.firstName || ''} ${activityUser.lastName || ''}`.trim() : ''}
+          />
 
           {/* Change Trial Period Modal */}
           {trialUser && (
@@ -1532,6 +1548,18 @@ const ManageAccounts = () => {
                   top: Math.max(8, Math.min(dropdownPosition.top, window.innerHeight - DROPDOWN_MENU_HEIGHT - 8)),
                 }}
               >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpenDropdownId(null);
+                    setDropdownPosition(null);
+                    setActivityUser(user);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-blue-300 hover:bg-[#252525] hover:text-blue-200"
+                >
+                  <Radio className="w-3.5 h-3.5" />
+                  View activity
+                </button>
                 {canLoginAs && (
                 <button
                   type="button"
@@ -1878,7 +1906,7 @@ const ManageAccounts = () => {
               {/* Table */}
               <div className="rounded-2xl border border-white/10 bg-[#101722]/90 overflow-hidden shadow-2xl shadow-black/20 backdrop-blur">
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[980px]">
+                  <table className="w-full min-w-[1060px]">
                     <thead>
                       <tr className="border-b border-white/10 bg-[#080c12]/90">
                         <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider min-w-[150px]">User</th>
@@ -1888,6 +1916,7 @@ const ManageAccounts = () => {
                         <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">SpAPI</th>
                         <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Ads</th>
                         <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Card</th>
+                        <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap">Last active</th>
                         <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap">Joining Date</th>
                         <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap">Renewal Date</th>
                         <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Actions</th>
