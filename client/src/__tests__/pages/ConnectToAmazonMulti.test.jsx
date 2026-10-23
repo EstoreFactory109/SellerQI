@@ -25,27 +25,29 @@ const renderOn = () => {
 describe('ConnectToAmazon — several marketplaces', () => {
   it('ticks several, makes the first main, and lets another become main', async () => {
     renderOn();
-    await userEvent.click(await screen.findByRole('button', { name: /United States of America/ }));
-    await userEvent.click(screen.getByRole('button', { name: /United Kingdom/ }));
-    await userEvent.click(screen.getByRole('button', { name: /Germany/ }));
+    await userEvent.click(await screen.findByRole('button', { name: 'United States of America' }));
+    await userEvent.click(screen.getByRole('button', { name: 'United Kingdom' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Germany' }));
 
-    expect(screen.getByRole('button', { name: /Germany/ })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getAllByText('Main')).toHaveLength(1);
-    expect(screen.getByText(/3 marketplaces in 2 regions/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Germany' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getAllByRole('button', { name: /is your main marketplace/ })).toHaveLength(1);
+    expect(screen.getByRole('button', { name: /United States of America is your main/ })).toBeInTheDocument();
+    expect(screen.getByText(/2 Amazon approvals/)).toBeInTheDocument();
 
-    const makeMain = screen.getAllByRole('button', { name: 'Make main' });
-    expect(makeMain).toHaveLength(2);
-    await userEvent.click(makeMain[0]); // United Kingdom (Europe rows follow North America)
-    expect(screen.getByText(/approve Europe, then North America/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Make United Kingdom main' }));
+    expect(screen.getByRole('button', { name: /United Kingdom is your main/ })).toBeInTheDocument();
+    // The main marketplace's region is approved first.
+    const plan = screen.getByText(/You.ll approve/).parentElement.textContent;
+    expect(plan.indexOf('Europe')).toBeLessThan(plan.indexOf('North America'));
   });
 
   it('sends the seller to the main marketplace\'s region with every pick', async () => {
     axiosInstance.post.mockResolvedValue({ data: { data: { state: 'a'.repeat(64) } } });
     const assign = vi.spyOn(window, 'location', 'get').mockReturnValue({ origin: 'http://app', href: '' });
     renderOn();
-    await userEvent.click(await screen.findByRole('button', { name: /United States of America/ }));
-    await userEvent.click(screen.getByRole('button', { name: /Canada/ }));
-    await userEvent.click(screen.getByRole('button', { name: /United Kingdom/ }));
+    await userEvent.click(await screen.findByRole('button', { name: 'United States of America' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Canada' }));
+    await userEvent.click(screen.getByRole('button', { name: 'United Kingdom' }));
     await userEvent.click(screen.getByRole('button', { name: /Connect with Amazon/ }));
 
     await waitFor(() => expect(axiosInstance.post).toHaveBeenCalledWith('/app/onboarding/oauth-state', {
@@ -56,10 +58,10 @@ describe('ConnectToAmazon — several marketplaces', () => {
 
   it('un-ticking the main marketplace hands main to the next pick', async () => {
     renderOn();
-    await userEvent.click(await screen.findByRole('button', { name: /United States of America/ }));
-    await userEvent.click(screen.getByRole('button', { name: /Japan/ }));
-    await userEvent.click(screen.getByRole('button', { name: /United States of America/ }));
-    expect(screen.getByText(/1 marketplace in 1 region — you’ll approve Far East\./)).toBeInTheDocument();
-    expect(screen.getAllByText('Main')).toHaveLength(1);
+    await userEvent.click(await screen.findByRole('button', { name: 'United States of America' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Japan' }));
+    await userEvent.click(screen.getByRole('button', { name: 'United States of America' }));
+    expect(screen.getByRole('button', { name: /Japan is your main marketplace/ })).toBeInTheDocument();
+    expect(screen.getByText(/one Amazon approval/)).toBeInTheDocument();
   });
 });

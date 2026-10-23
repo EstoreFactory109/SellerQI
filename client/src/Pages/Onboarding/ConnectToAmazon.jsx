@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from 'framer-motion';
-import { Globe, ChevronDown, ArrowRight, Loader2, Search, AlertTriangle, Check } from 'lucide-react';
+import { Globe, ChevronDown, ArrowRight, Loader2, Search, AlertTriangle, Star } from 'lucide-react';
 import axios from 'axios';
 import { useSelector } from 'react-redux';
 import { hasPremiumAccess } from '../../utils/subscriptionCheck.js';
@@ -25,94 +25,163 @@ const regionsOf = (codes, main) => {
   return [...new Set([regionOfCode(main), ...codes.map(regionOfCode)].filter(Boolean))];
 };
 
+/** Shorter names for the picker tiles, so they fit without truncating. */
+const TILE_NAMES = { US: 'United States', AE: 'UAE', SA: 'Saudi Arabia', UK: 'United Kingdom' };
+const tileName = (country) => TILE_NAMES[country.code] || country.name;
+
+/** Largest marketplaces first within each region, so most sellers find theirs in the first row. */
+const TILE_ORDER = ['US', 'CA', 'MX', 'BR', 'UK', 'DE', 'FR', 'IT', 'ES', 'NL', 'SE', 'PL', 'BE', 'IE', 'TR', 'AE', 'SA', 'EG', 'IN', 'ZA', 'JP', 'AU', 'SG'];
+const BY_SIZE = [...COUNTRY_DATA].sort((a, b) => TILE_ORDER.indexOf(a.code) - TILE_ORDER.indexOf(b.code));
+
 /**
- * Multi-marketplace picker: tick every marketplace the seller sells in, choose one as main.
- * A list rather than a dropdown so several can be ticked and seen at once.
+ * Multi-marketplace picker: tick every marketplace the seller sells in, star one as main.
+ * A compact grid of tiles per region (23 marketplaces), with a summary of the picks and the order
+ * the regions will be approved in.
  */
 const MarketplaceMultiPicker = ({ selected, main, onToggle, onMain }) => {
   const [query, setQuery] = useState('');
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return q ? COUNTRY_DATA.filter((c) => c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q)) : COUNTRY_DATA;
+    return q ? BY_SIZE.filter((c) => c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q) || tileName(c).toLowerCase().includes(q)) : BY_SIZE;
   }, [query]);
   const regions = regionsOf(selected, main);
+  const ordered = [main, ...selected.filter((c) => c !== main)].filter(Boolean);
 
   return (
     <div>
-      <div className="relative" style={{ marginBottom: 10 }}>
+      <div className="relative" style={{ marginBottom: 14 }}>
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: COLORS.textMuted }} />
         <input
           type="text"
-          placeholder="Search country..."
+          placeholder="Search marketplaces…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          className="w-full pl-10 pr-4 py-2 outline-none"
-          style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, color: COLORS.textPrimary, borderRadius: 10, fontSize: 13 }}
+          className="w-full pl-10 pr-4 outline-none"
+          style={{ height: 40, background: COLORS.surface, border: `1px solid ${COLORS.border}`, color: COLORS.textPrimary, borderRadius: 10, fontSize: 13 }}
         />
       </div>
-      <div style={{ border: `1px solid ${COLORS.border}`, borderRadius: 10, background: COLORS.surface, overflow: 'hidden' }}>
+
+      <div className="flex flex-col" style={{ gap: 16 }}>
         {['NA', 'EU', 'FE'].map((regionCode) => {
-          const rows = visible.filter((c) => c.region === regionCode);
-          if (!rows.length) return null;
+          const tiles = visible.filter((c) => c.region === regionCode);
+          if (!tiles.length) return null;
+          const count = selected.filter((code) => COUNTRY_DATA.find((c) => c.code === code)?.region === regionCode).length;
           return (
-            <div key={regionCode}>
-              <div
-                className="px-4 py-2"
-                style={{ background: COLORS.surfaceElevated, fontSize: 11, fontWeight: 600, color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: '.06em', borderBottom: `1px solid ${COLORS.border}` }}
-              >
-                {REGION_NAMES[regionCode]}
+            <section key={regionCode}>
+              <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: COLORS.textMuted }}>
+                  {REGION_NAMES[regionCode]}
+                </span>
+                {count > 0 && (
+                  <span style={{ fontSize: 11, fontWeight: 600, color: '#7EA8F8' }}>{count} selected</span>
+                )}
               </div>
-              {rows.map((country) => {
-                const on = selected.includes(country.code);
-                const isMain = on && main === country.code;
-                return (
-                  <div
-                    key={country.code}
-                    className="flex items-center gap-3 px-4"
-                    style={{ minHeight: 42, background: on ? 'rgba(59,130,246,.08)' : 'transparent', borderBottom: `1px solid ${COLORS.border}` }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => onToggle(country.code)}
-                      aria-pressed={on}
-                      className="flex flex-1 items-center gap-3 text-left py-2.5"
-                      style={{ fontSize: 13, color: on ? COLORS.textPrimary : COLORS.textSecondary }}
+              <div className="grid grid-cols-2 sm:grid-cols-3" style={{ gap: 8 }}>
+                {tiles.map((country) => {
+                  const on = selected.includes(country.code);
+                  const isMain = on && main === country.code;
+                  return (
+                    <div
+                      key={country.code}
+                      className="relative flex items-center transition-colors"
+                      style={{
+                        minHeight: 44,
+                        borderRadius: 10,
+                        border: `1px solid ${isMain ? COLORS.accent : on ? 'rgba(59,130,246,.45)' : COLORS.border}`,
+                        background: isMain ? 'rgba(59,130,246,.16)' : on ? 'rgba(59,130,246,.08)' : COLORS.surface,
+                        boxShadow: isMain ? '0 0 0 3px rgba(59,130,246,.15)' : 'none',
+                      }}
                     >
-                      <span
-                        className="flex items-center justify-center flex-none"
-                        style={{ width: 18, height: 18, borderRadius: 5, background: on ? COLORS.accent : 'transparent', border: `1px solid ${on ? COLORS.accent : COLORS.borderStrong}` }}
+                      <button
+                        type="button"
+                        onClick={() => onToggle(country.code)}
+                        aria-pressed={on}
+                        aria-label={country.name}
+                        title={country.name}
+                        className="flex flex-1 min-w-0 items-center self-stretch text-left"
+                        style={{ gap: 9, padding: '6px 6px 6px 12px', fontSize: 13, color: on ? COLORS.textPrimary : COLORS.textSecondary }}
                       >
-                        {on && <Check className="w-3 h-3" style={{ color: '#061021' }} />}
-                      </span>
-                      <span style={{ fontSize: 16 }}>{country.flag}</span>
-                      <span className="flex-1">{country.name}</span>
-                    </button>
-                    {isMain ? (
-                      <span style={{ padding: '2px 9px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: 'rgba(59,130,246,.16)', color: '#7EA8F8' }}>Main</span>
-                    ) : on ? (
-                      <button type="button" onClick={() => onMain(country.code)} style={{ fontSize: 11, color: COLORS.textMuted }}>
-                        Make main
+                        <span style={{ fontSize: 18, lineHeight: 1 }}>{country.flag}</span>
+                        {/* Wraps rather than truncating on narrow screens. */}
+                        <span style={{ fontWeight: on ? 600 : 500, lineHeight: '16px' }}>{tileName(country)}</span>
                       </button>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
+                      {on && (
+                        <button
+                          type="button"
+                          onClick={() => !isMain && onMain(country.code)}
+                          aria-label={isMain ? `${country.name} is your main marketplace` : `Make ${country.name} main`}
+                          title={isMain ? 'Main marketplace' : 'Make main'}
+                          className="flex-none flex items-center justify-center"
+                          style={{ width: 32, alignSelf: 'stretch', cursor: isMain ? 'default' : 'pointer' }}
+                        >
+                          <Star
+                            className="w-4 h-4"
+                            style={{ color: isMain ? '#7EA8F8' : COLORS.textMuted }}
+                            fill={isMain ? '#7EA8F8' : 'none'}
+                          />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
           );
         })}
         {!visible.length && (
-          <div className="px-4 py-8 text-center" style={{ color: COLORS.textMuted, fontSize: 13 }}>
-            No countries found matching &ldquo;{query}&rdquo;
+          <div className="py-8 text-center" style={{ color: COLORS.textMuted, fontSize: 13, border: `1px dashed ${COLORS.border}`, borderRadius: 10 }}>
+            No marketplaces match &ldquo;{query}&rdquo;
           </div>
         )}
       </div>
-      {selected.length > 0 && (
-        <div style={{ marginTop: 10, fontSize: 12, color: COLORS.textSecondary }}>
-          {selected.length} marketplace{selected.length === 1 ? '' : 's'} in {regions.length} region{regions.length === 1 ? '' : 's'}
-          {' — '}you&rsquo;ll approve {regions.map((r) => REGION_NAMES[r]).join(', then ')}
-          {regions.length > 1 ? ' (main marketplace’s region first).' : '.'}
-        </div>
-      )}
+
+      <div style={{ marginTop: 16, padding: '14px 16px', borderRadius: 12, border: `1px solid ${COLORS.border}`, background: PANEL_BG }}>
+        {selected.length === 0 ? (
+          <div style={{ fontSize: 13, color: COLORS.textMuted }}>
+            Tick the marketplaces you sell in. Star the one you want to see first.
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center" style={{ gap: 6 }}>
+              {ordered.map((code) => {
+                const country = COUNTRY_DATA.find((c) => c.code === code);
+                const isMain = code === main;
+                return (
+                  <span
+                    key={code}
+                    className="inline-flex items-center"
+                    style={{
+                      gap: 6,
+                      padding: '4px 10px',
+                      borderRadius: 999,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      background: isMain ? 'rgba(59,130,246,.18)' : COLORS.surfaceElevated,
+                      color: isMain ? '#AFC8FB' : COLORS.textSecondary,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{country?.flag}</span>
+                    {tileName(country)}
+                    {isMain && <Star className="w-3 h-3" style={{ color: '#7EA8F8' }} fill="#7EA8F8" />}
+                  </span>
+                );
+              })}
+            </div>
+            <div className="flex items-center flex-wrap" style={{ gap: 6, marginTop: 10, fontSize: 12, color: COLORS.textSecondary }}>
+              <span>You&rsquo;ll approve</span>
+              {regions.map((r, i) => (
+                <React.Fragment key={r}>
+                  {i > 0 && <ArrowRight className="w-3 h-3" style={{ color: COLORS.textMuted }} />}
+                  <span style={{ fontWeight: 600, color: COLORS.textPrimary }}>{REGION_NAMES[r]}</span>
+                </React.Fragment>
+              ))}
+              <span style={{ color: COLORS.textMuted }}>
+                · {regions.length === 1 ? 'one Amazon approval' : `${regions.length} Amazon approvals`}
+              </span>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 };
