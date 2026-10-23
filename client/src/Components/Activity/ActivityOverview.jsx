@@ -114,7 +114,7 @@ const ActivityOverview = ({ overviewUrl, timelineUrlFor, subjectLabel = 'sellers
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium text-gray-100">{u.name}</div>
                   <div className="truncate text-xs text-gray-400">
-                    {u.currentPage ? <>On <span className="text-gray-200">{u.currentPage.label}</span>{u.currentPage.seconds != null && ` · ${formatDuration(u.currentPage.seconds)}`}</> : 'Using SellerQI'}
+                    {u.currentPage ? <>On <span className="text-gray-200">{u.currentPage.label}</span>{u.currentPage.seconds >= 5 && ` · ${formatDuration(u.currentPage.seconds)}`}</> : 'Using SellerQI'}
                   </div>
                 </div>
                 <ChevronRight className="h-4 w-4 flex-none text-gray-600" />

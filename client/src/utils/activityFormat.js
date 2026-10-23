@@ -29,6 +29,9 @@ export const formatDuration = (seconds) => {
   return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
 };
 
+/** Time on one page: like formatDuration, but "<5s" for a glance rather than a misleading "0s". */
+export const formatPageTime = (seconds) => (Math.round(Number(seconds) || 0) < 5 ? '<5s' : formatDuration(seconds));
+
 /** Who made a visit, for staff and member entries. */
 export const actorLabel = (actor) => {
   switch (actor?.kind) {

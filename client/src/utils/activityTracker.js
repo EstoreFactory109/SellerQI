@@ -2,9 +2,12 @@
  * Seller activity tracker (activity monitoring for the super admin and ESF admins).
  *
  * On seller pages only, it tells the server:
- *   - a page was opened (a new `visitId` per page), and
+ *   - a page was opened (a new `visitId` per page),
  *   - every 30 s, that the seller is still there — but only while the tab is visible AND they
- *     have moved, typed, scrolled or touched in the last 5 minutes.
+ *     have moved, typed, scrolled or touched in the last 5 minutes, and
+ *   - once more when they leave the page (navigate, hide the tab, close it), so a page left
+ *     before its first heartbeat still gets its real time instead of 0s. Skipped when they were
+ *     already idle, so an abandoned tab never gains time it wasn't used.
  * So an open-but-ignored tab, or the app's own background polling, never counts as "active".
  *
  * Visits made within 30 minutes of each other share an `activityId` (per tab), which the admin
@@ -54,8 +57,16 @@ const send = (type) => {
 
 const onInput = () => { state.lastInputAt = Date.now(); };
 
+/** Close out the current visit with its real end time (navigation, hidden tab, page close). */
+const closeVisit = () => {
+  if (state.visitId && recentlyActive()) send('beat');
+};
+
 const onVisibility = () => {
-  if (!isVisible()) return;
+  if (!isVisible()) {
+    closeVisit();
+    return;
+  }
   // Coming back to the tab is itself a sign someone is there.
   onInput();
   send('beat');
@@ -68,6 +79,7 @@ export const startActivityTracking = () => {
   state.lastInputAt = Date.now();
   INPUT_EVENTS.forEach((event) => window.addEventListener(event, onInput, { passive: true }));
   document.addEventListener('visibilitychange', onVisibility);
+  window.addEventListener('pagehide', closeVisit);
   state.timer = setInterval(() => {
     if (state.visitId && isVisible() && recentlyActive()) send('beat');
   }, HEARTBEAT_MS);
@@ -76,12 +88,13 @@ export const startActivityTracking = () => {
 /** Call on every route change. Pages outside the seller app end the current visit. */
 export const trackPage = (pathname) => {
   const isSellerPage = portalOf(pathname) === 'user';
+  if (pathname === state.path && state.visitId) return;
+  closeVisit(); // the page being left gets its time up to now
   if (!isSellerPage) {
     state.visitId = null;
     state.path = null;
     return;
   }
-  if (pathname === state.path && state.visitId) return;
   state.visitId = newId();
   state.path = pathname;
   onInput(); // navigating is interaction
@@ -93,6 +106,7 @@ export const resetActivityTracking = () => {
   if (typeof window !== 'undefined') {
     INPUT_EVENTS.forEach((event) => window.removeEventListener(event, onInput));
     document.removeEventListener('visibilitychange', onVisibility);
+    window.removeEventListener('pagehide', closeVisit);
   }
   clearInterval(state.timer);
   Object.assign(state, { started: false, visitId: null, path: null, lastInputAt: 0, timer: null });

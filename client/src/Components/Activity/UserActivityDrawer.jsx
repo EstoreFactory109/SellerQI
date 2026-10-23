@@ -4,7 +4,7 @@ import { X as XIcon, Loader2, Eye, Clock, MousePointerClick, Users } from 'lucid
 import axiosInstance from '../../config/axios.config.js';
 import LastActiveBadge from './LastActiveBadge.jsx';
 import { useNow, usePolling } from './useNow.js';
-import { formatDuration, actorLabel, isStaffActor } from '../../utils/activityFormat.js';
+import { formatDuration, formatPageTime, actorLabel, isStaffActor } from '../../utils/activityFormat.js';
 
 /**
  * A seller's activity: status, time spent, and every sitting with the pages opened in it and
@@ -42,7 +42,7 @@ const Sitting = ({ sitting }) => {
     <div className={`rounded-xl border px-3.5 py-3 ${staff ? 'border-dashed border-white/10 bg-transparent' : 'border-white/10 bg-white/[0.03]'}`}>
       <div className="flex items-center gap-2 text-xs">
         <span className="font-semibold text-gray-200 tabular-nums">{clock(sitting.startedAt)} – {clock(sitting.endedAt)}</span>
-        <span className="text-gray-500">· {formatDuration(sitting.seconds)}</span>
+        <span className="text-gray-500">· {formatPageTime(sitting.seconds)}</span>
         {who && (
           <span className={`ml-auto inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] ${staff ? 'bg-amber-500/10 text-amber-300 border border-amber-500/20' : 'bg-blue-500/10 text-blue-300 border border-blue-500/20'}`}>
             {staff ? <Eye className="w-3 h-3" /> : <Users className="w-3 h-3" />} {who}
@@ -54,7 +54,7 @@ const Sitting = ({ sitting }) => {
           <li key={`${page.startedAt}-${i}`} className="flex items-center gap-2.5 text-[13px]">
             <span className={`h-1.5 w-1.5 flex-none rounded-full ${staff ? 'bg-gray-600' : 'bg-blue-400'}`} />
             <span className={`truncate ${staff ? 'text-gray-400' : 'text-gray-200'}`} title={page.path}>{page.label}</span>
-            <span className="ml-auto flex-none text-xs text-gray-500 tabular-nums">{clock(page.startedAt)} · {formatDuration(page.seconds)}</span>
+            <span className="ml-auto flex-none text-xs text-gray-500 tabular-nums">{clock(page.startedAt)} · {formatPageTime(page.seconds)}</span>
           </li>
         ))}
       </ol>

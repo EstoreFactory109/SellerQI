@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatLastActive, formatDuration, actorLabel, isStaffActor } from '../../utils/activityFormat.js';
+import { formatLastActive, formatDuration, formatPageTime, actorLabel, isStaffActor } from '../../utils/activityFormat.js';
 
 const now = Date.parse('2026-10-23T12:00:00Z');
 const ago = (ms) => new Date(now - ms);
@@ -19,6 +19,8 @@ describe('activity formatting', () => {
     expect(formatDuration(180)).toBe('3m');
     expect(formatDuration(3900)).toBe('1h 05m');
     expect(formatDuration(undefined)).toBe('0s');
+    expect(formatPageTime(2)).toBe('<5s');
+    expect(formatPageTime(75)).toBe('1m 15s');
   });
 
   it('labels staff and member visits', () => {

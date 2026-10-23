@@ -41,9 +41,9 @@ describe('activity tracker', () => {
     trackPage('/seller-central-checker/dashboard');
     trackPage('/seller-central-checker/dashboard');
     trackPage('/seller-central-checker/tasks');
-    const [a, b] = bodies();
-    expect(bodies()).toHaveLength(2);
-    expect(a.visitId).not.toBe(b.visitId);
+    const views = bodies().filter((b) => b.type === 'view');
+    expect(views).toHaveLength(2);
+    expect(views[0].visitId).not.toBe(views[1].visitId);
   });
 
   it('heartbeats every 30 s while someone is there', () => {
@@ -71,6 +71,29 @@ describe('activity tracker', () => {
     global.fetch.mockClear();
     setVisibility('hidden');
     vi.advanceTimersByTime(HEARTBEAT_MS * 3);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('leaving a page closes its visit with the real end time', () => {
+    trackPage('/seller-central-checker/dashboard');
+    vi.advanceTimersByTime(4000); // left before the first heartbeat
+    trackPage('/seller-central-checker/tasks');
+    const [open, close, next] = bodies();
+    expect(close).toMatchObject({ type: 'beat', visitId: open.visitId, path: '/seller-central-checker/dashboard' });
+    expect(next).toMatchObject({ type: 'view', path: '/seller-central-checker/tasks' });
+  });
+
+  it('hiding or closing the tab closes the visit — unless they were already idle', () => {
+    trackPage('/seller-central-checker/tasks');
+    global.fetch.mockClear();
+    setVisibility('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(bodies()).toEqual([expect.objectContaining({ type: 'beat' })]);
+
+    setVisibility('visible');
+    vi.advanceTimersByTime(IDLE_MS + 1000);
+    global.fetch.mockClear();
+    window.dispatchEvent(new Event('pagehide'));
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
