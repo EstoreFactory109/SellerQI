@@ -1699,8 +1699,13 @@ class Integration {
             // catalogue row like the inactive ones, so the listing-warnings task can read
             // them. `issues` is left out on purpose: that field belongs to inactive SKUs.
             const activeListingIssues = genericKeyWordArray
-                .filter(item => item && item.sku && Array.isArray(item.listingIssues))
-                .map(item => ({ sku: item.sku, listingIssues: item.listingIssues }));
+                .filter(item => item && item.sku && (Array.isArray(item.listingIssues) || item.fulfillmentChannel))
+                .map(item => ({
+                    sku: item.sku,
+                    listingIssues: item.listingIssues,
+                    fulfillmentChannel: item.fulfillmentChannel,
+                    handlingTimeDays: item.handlingTimeDays
+                }));
             if (activeListingIssues.length > 0) {
                 await this.updateSellerProductIssues(userId, Country, Region, activeListingIssues);
             }
@@ -1962,6 +1967,7 @@ class Integration {
             // Create a map of SKU to issues for quick lookup (chunked for large datasets)
             const issuesMap = new Map();
             const listingIssuesMap = new Map();
+            const fulfillmentMap = new Map();
             const MAP_BUILD_CHUNK_SIZE = 500;
             for (let i = 0; i < issuesDataArray.length; i++) {
                 const item = issuesDataArray[i];
@@ -1972,6 +1978,10 @@ class Integration {
                 // without the other, so neither may gate the other.
                 if (Array.isArray(item.listingIssues)) {
                     listingIssuesMap.set(item.sku, item.listingIssues);
+                }
+                // Fulfilment channel and handling time, from the active-SKU listing sync.
+                if (item.fulfillmentChannel) {
+                    fulfillmentMap.set(item.sku, { channel: item.fulfillmentChannel, handlingTimeDays: item.handlingTimeDays });
                 }
                 // Yield periodically for large arrays
                 if ((i + 1) % MAP_BUILD_CHUNK_SIZE === 0) {
@@ -1996,6 +2006,12 @@ class Integration {
                     // and that is exactly the case worth reporting.
                     if (listingIssuesMap.has(product.sku)) {
                         product.listingIssues = listingIssuesMap.get(product.sku);
+                    }
+                    if (fulfillmentMap.has(product.sku)) {
+                        const f = fulfillmentMap.get(product.sku);
+                        product.fulfillmentChannel = f.channel;
+                        // null = the listing sets no handling time; stored as unset, not 0.
+                        product.handlingTimeDays = Number.isFinite(f.handlingTimeDays) ? f.handlingTimeDays : undefined;
                     }
                 }
                 // Yield to event loop to allow lock extension

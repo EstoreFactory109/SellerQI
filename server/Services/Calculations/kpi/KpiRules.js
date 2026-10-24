@@ -117,6 +117,15 @@ const TOP_SELLER_NO_ADS_DAYS = 14;
 // The same warning on at least this many listings is one grouped task. Internal.
 const LISTING_WARNING_GROUP_MIN = 3;
 
+// ── Handling time (FBM) ──
+// Spreadsheet: P4 task when handling time is over 2 days. Internal.
+const HANDLING_TIME_MAX_DAYS = 2;
+
+// ── Stale data (internal guard) ──
+// Spreadsheet: latest pull older than 36 hours. Per source, its own cadence plus the
+// lag Amazon builds in; the guard reports, the detectors already hold stale inputs.
+const STALE_DAILY_HOURS = 36;
+
 // ── Low-inventory-level fee ──
 // Amazon rule: fee applies when historical days of supply is under 28 on BOTH the
 // short (30-day) and long (90-day) measures. Early warning under 35 is internal.
@@ -159,6 +168,8 @@ module.exports = {
     WEEKS_OF_COVER_TARGET,
     TOP_SELLER_NO_ADS_DAYS,
     LISTING_WARNING_GROUP_MIN,
+    HANDLING_TIME_MAX_DAYS,
+    STALE_DAILY_HOURS,
     LOW_INVENTORY_FEE_DAYS,
     LOW_INVENTORY_WARNING_DAYS,
     FBA_FEE_MIN_INCREASE_SHARE,

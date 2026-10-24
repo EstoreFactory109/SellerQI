@@ -2021,7 +2021,7 @@ const analyseData = async (data, userId = null, options = {}) => {
     logger.info(`[PERF] DashboardCalculation TOTAL time: ${totalCalcTime}ms`);
     logger.info("=== DashboardCalculation: Returning dashboard data ===");
     // kpiTasks is for previews (persistTasks: false); page callers read dashboardData only.
-    return { dashboardData, tasksRebuilt, taskAiRefreshMinIntervalHours, kpiTasks: kpiResult.tasks };
+    return { dashboardData, tasksRebuilt, taskAiRefreshMinIntervalHours, kpiTasks: kpiResult.tasks, kpiStaleSources: kpiResult.staleSources || [] };
 };
 
 module.exports = {

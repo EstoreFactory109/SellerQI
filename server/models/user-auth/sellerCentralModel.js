@@ -79,6 +79,19 @@ const Products=new mongoose.Schema({
     type: Boolean,
     required: false,
     default: false
+  },
+  // From the weekly listing-items sync: who fulfils this SKU ('DEFAULT' = the seller,
+  // i.e. FBM; anything else = Amazon) and the handling time the seller set. Unset until
+  // that sync has run for the SKU.
+  fulfillmentChannel:{
+    type: String,
+    required: false,
+    default: undefined
+  },
+  handlingTimeDays:{
+    type: Number,
+    required: false,
+    default: undefined
   }
 },{timestamps:true})
 

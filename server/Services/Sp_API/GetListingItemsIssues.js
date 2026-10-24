@@ -50,6 +50,22 @@ const SUPPRESSION_ACTIONS = new Set([
  * @param {Array} issuesArray  response.data.issues
  * @returns {Array} structured issues, safe to store
  */
+/**
+ * Who fulfils the SKU and the seller's handling time, from the same listing response
+ * (includedData already has attributes and fulfillmentAvailability). 'DEFAULT' is the
+ * seller's own channel (FBM). Handling time is the attribute's lead_time_to_ship_max_days
+ * for that channel; null when the listing does not set one.
+ */
+function extractFulfillment(data) {
+  const availability = Array.isArray(data?.fulfillmentAvailability) ? data.fulfillmentAvailability : [];
+  const codes = availability.map(a => String(a?.fulfillmentChannelCode || '')).filter(Boolean);
+  const fulfillmentChannel = codes.includes('DEFAULT') ? 'DEFAULT' : (codes[0] || null);
+  const attr = Array.isArray(data?.attributes?.fulfillment_availability) ? data.attributes.fulfillment_availability : [];
+  const own = attr.find(a => String(a?.fulfillment_channel_code || '') === 'DEFAULT') || attr[0];
+  const lead = Number(own?.lead_time_to_ship_max_days);
+  return { fulfillmentChannel, handlingTimeDays: Number.isFinite(lead) ? lead : null };
+}
+
 const extractListingIssues = (issuesArray) => {
     if (!Array.isArray(issuesArray)) return [];
 
@@ -167,6 +183,7 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
     // answer entirely. An ACTIVE listing can still be suppressed, so the issues
     // matter as much here as on the inactive path below.
     const listingIssues = extractListingIssues(response.data?.issues);
+    const { fulfillmentChannel, handlingTimeDays } = extractFulfillment(response.data);
 
     // Check for B2B pricing in multiple locations:
     // 1. response.data.offers array (offerType === "B2B")
@@ -206,6 +223,8 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
         marketplace_id: null,
         has_b2b_pricing: hasB2BPricing,
         listingIssues,
+        fulfillmentChannel,
+        handlingTimeDays,
         sku: sku
       };
     }
@@ -216,6 +235,8 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
       marketplace_id: keywordData.marketplace_id,
       has_b2b_pricing: hasB2BPricing,
       listingIssues,
+      fulfillmentChannel,
+      handlingTimeDays,
       sku: sku
     };
 
@@ -462,4 +483,5 @@ module.exports = { GetListingItem, GetListingItemIssuesForInactive };
 // Exported for tests: the enforcement parsing is the part that can be checked
 // without a live Amazon response, and the part most likely to be quietly wrong.
 module.exports.extractListingIssues = extractListingIssues;
+module.exports.extractFulfillment = extractFulfillment;
 module.exports.SUPPRESSION_ACTIONS = SUPPRESSION_ACTIONS;

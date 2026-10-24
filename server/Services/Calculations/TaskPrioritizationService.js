@@ -166,7 +166,8 @@ const EFFORT_MINUTES = {
     'inventory:listing_warnings': 10,       // fix one flagged field
     'account:invoice_defect_rate': 15,      // upload missing invoices
     'inventory:low_inventory_fee_risk': 30, // create an FBA shipment
-    'inventory:fba_fee_increase': 20        // check dimensions, open a case
+    'inventory:fba_fee_increase': 20,       // check dimensions, open a case
+    'inventory:handling_time_long': 5       // change one offer setting
 };
 
 /**
@@ -253,6 +254,8 @@ const IMPACT_WEIGHT = {
     'inventory:fba_fee_increase': 57,
     'inventory:low_inventory_fee_risk': 54,
     'inventory:listing_warnings': 46,
+    // A later promised delivery date costs conversion, but it is a setting, not a loss.
+    'inventory:handling_time_long': 30,
 
     // Conversion drag.
     'conversion:insufficient_images': 55,

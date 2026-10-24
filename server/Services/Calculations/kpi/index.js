@@ -14,6 +14,7 @@ const logger = require('../../../utils/Logger.js');
 const W1 = require('./Wave1Detectors.js');
 const W2 = require('./Wave2Detectors.js');
 const W3 = require('./Wave3Detectors.js');
+const { staleSources } = require('./DataFreshness.js');
 const { SALES_WINDOW_MAX_AGE_DAYS } = require('./KpiRules.js');
 
 /** Coverage key per task type; mirrored in TaskReconcilePlanner.SOURCE_BY_TYPE. */
@@ -38,7 +39,8 @@ const KPI_SOURCES = Object.freeze({
     'inventory:listing_warnings': 'kpi.listingWarnings',
     'account:invoice_defect_rate': 'kpi.invoiceDefect',
     'inventory:low_inventory_fee_risk': 'kpi.lowInventoryFee',
-    'inventory:fba_fee_increase': 'kpi.fbaFeeIncrease'
+    'inventory:fba_fee_increase': 'kpi.fbaFeeIncrease',
+    'inventory:handling_time_long': 'kpi.handlingTime'
 });
 
 const safely = (name, context, fn) => {
@@ -195,6 +197,18 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, country
             ? W3.detectLowInventoryFeeRisk({ planning: inputs.planning, salesByAsin: recentSales, productsByAsin })
             : { tasks: [], covered: false })), 'inventory:low_inventory_fee_risk');
         add(safely('fba_fee_increase', context, () => W3.detectFbaFeeIncrease({ fbaFees: inputs.fbaFees, salesByAsin: recentSales, productsByAsin, now })), 'inventory:fba_fee_increase');
+        add(safely('handling_time_long', context, () => W3.detectLongHandlingTime({ products, productsByAsin })), 'inventory:handling_time_long');
+    }
+
+    // Internal stale-data guard: never a client task, only the alert.
+    let stale = [];
+    try {
+        stale = staleSources(inputs, now);
+    } catch (error) {
+        logger.error('[KpiDetectors] stale-data check failed', { ...context, error: error.message });
+    }
+    if (stale.length > 0) {
+        logger.warn('[DataFreshness] inputs behind schedule; their tasks are held this run', { ...context, stale });
     }
 
     logger.info('[KpiDetectors] run', {
@@ -204,7 +218,7 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, country
         byType: tasks.reduce((acc, t) => ({ ...acc, [t.errorType]: (acc[t.errorType] || 0) + 1 }), {}),
         coverage
     });
-    return { tasks, coverage };
+    return { tasks, coverage, staleSources: stale };
 }
 
 module.exports = { runKpiDetectors, windowDaysOf, windowIsRecent, windowPhrase, KPI_SOURCES };

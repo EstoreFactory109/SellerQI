@@ -93,7 +93,8 @@ const SOURCE_BY_TYPE = {
     'inventory:listing_warnings': 'kpi.listingWarnings',
     'account:invoice_defect_rate': 'kpi.invoiceDefect',
     'inventory:low_inventory_fee_risk': 'kpi.lowInventoryFee',
-    'inventory:fba_fee_increase': 'kpi.fbaFeeIncrease'
+    'inventory:fba_fee_increase': 'kpi.fbaFeeIncrease',
+    'inventory:handling_time_long': 'kpi.handlingTime'
 };
 
 /** @returns {string} the coverage key for a task */

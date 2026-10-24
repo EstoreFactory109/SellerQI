@@ -63,7 +63,7 @@ async function previewMarketplace(userId, country, region) {
     // persistTasks:false = no task writes. The userId stays, so live per-ASIN finance is read.
     const result = await analyseData(analysed.message, userId, { persistTasks: false });
     const inputs = analysed.message.KpiInputs || null;
-    return { tasks: result?.kpiTasks || [], inputs };
+    return { tasks: result?.kpiTasks || [], inputs, stale: result?.kpiStaleSources || [] };
 }
 
 const describeInputs = (inputs) => {
@@ -110,10 +110,11 @@ async function main() {
         for (const { country, region } of account.marketplaces) {
             const label = `${account.userId} ${country}-${region}`;
             try {
-                const { tasks, inputs } = await withTimeout(previewMarketplace(account.userId, country, region), TIMEOUT_MS, label);
+                const { tasks, inputs, stale } = await withTimeout(previewMarketplace(account.userId, country, region), TIMEOUT_MS, label);
                 const byType = {};
                 for (const t of tasks) (byType[t.errorType] = byType[t.errorType] || []).push(t);
                 console.log(`\n${label}: ${tasks.length} tasks  [${describeInputs(inputs)}]`);
+                if (stale.length) console.log(`  STALE: ${stale.map(s => `${s.source} ${s.ageHours}h > ${s.maxHours}h`).join(', ')}`);
                 for (const [type, list] of Object.entries(byType)) {
                     totals[type] = (totals[type] || 0) + list.length;
                     console.log(`  ${type}: ${list.length}`);
@@ -122,7 +123,7 @@ async function main() {
                         console.log(`    - ${t.asin} ${t.productName}${money}\n      ${t.error}`);
                     }
                 }
-                report.push({ userId: account.userId, country, region, inputs: describeInputs(inputs), tasks });
+                report.push({ userId: account.userId, country, region, inputs: describeInputs(inputs), stale, tasks });
             } catch (error) {
                 console.log(`\n${label}: ERROR ${error.message}`);
                 report.push({ userId: account.userId, country, region, error: error.message });

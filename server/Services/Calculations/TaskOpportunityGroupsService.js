@@ -184,6 +184,10 @@ const GROUP_COPY = {
         title: 'Products Amazon now charges more to fulfil',
         action: 'Check the measurements and ask for a re-measure if wrong'
     },
+    'inventory:handling_time_long': {
+        title: 'Seller-fulfilled products promising slow delivery',
+        action: 'Shorten handling time where your team can ship faster'
+    },
     'inventory:removal_confirm_receipt': {
         title: 'Removal orders waiting for you to confirm what arrived',
         action: 'Enter the units you received so missing ones can be claimed'

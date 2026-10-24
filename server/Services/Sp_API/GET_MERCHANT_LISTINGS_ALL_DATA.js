@@ -95,6 +95,14 @@ function carryForwardProductFields(existingProducts, incomingProducts) {
             row.issues = prev.issues;
         }
 
+        // Written weekly by the listing-items sync for ACTIVE SKUs (and daily for inactive ones by
+        // processInactiveListingItems, which overwrites). Without carrying them, Sunday's values
+        // were wiped by Monday's rebuild. Safe to carry: the next weekly fetch writes `[]` for a
+        // listing Amazon no longer flags, so a fixed listing still clears.
+        if (Array.isArray(prev.listingIssues)) row.listingIssues = prev.listingIssues;
+        if (prev.fulfillmentChannel) row.fulfillmentChannel = prev.fulfillmentChannel;
+        if (prev.handlingTimeDays !== undefined && prev.handlingTimeDays !== null) row.handlingTimeDays = prev.handlingTimeDays;
+
         // `quantity` is deliberately NOT carried: FbaInventoryStorageService overwrites it seconds
         // later in the same phase, and the report supplies a value anyway.
     }

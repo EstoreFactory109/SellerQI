@@ -94,7 +94,8 @@ const ALL_TASK_TYPES = [
     ['inventory', 'listing_warnings'],
     ['inventory', 'low_inventory_fee_risk'],
     ['inventory', 'fba_fee_increase'],
-    ['account', 'invoice_defect_rate']
+    ['account', 'invoice_defect_rate'],
+    ['inventory', 'handling_time_long']
 ];
 
 describe('normalizeErrorType', () => {

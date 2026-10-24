@@ -121,3 +121,24 @@ describe('detectFbaFeeIncrease', () => {
         expect(W3.detectFbaFeeIncrease({ fbaFees: { newest: snap({}, daysAgo(11)), previous: snap({}, daysAgo(18)) }, now: NOW }).covered).toBe(false);
     });
 });
+
+describe('detectLongHandlingTime', () => {
+    it('flags active seller-fulfilled SKUs over 2 days, per ASIN with the longest', () => {
+        const r = W3.detectLongHandlingTime({
+            products: [
+                { asin: 'A1', sku: 'S1', status: 'Active', fulfillmentChannel: 'DEFAULT', handlingTimeDays: 3 },
+                { asin: 'A1', sku: 'S1-B', status: 'Active', fulfillmentChannel: 'DEFAULT', handlingTimeDays: 5 },
+                { asin: 'A2', sku: 'S2', status: 'Active', fulfillmentChannel: 'AMAZON_NA', handlingTimeDays: 9 },
+                { asin: 'A3', sku: 'S3', status: 'Active', fulfillmentChannel: 'DEFAULT', handlingTimeDays: 2 },
+                { asin: 'A4', sku: 'S4', status: 'Inactive', fulfillmentChannel: 'DEFAULT', handlingTimeDays: 7 }
+            ],
+            productsByAsin: products
+        });
+        expect(r.tasks.map(t => [t.asin, t.renderData.handlingTimeDays])).toEqual([['A1', 5]]);
+        expect(r.tasks[0].error).toBe('Long Handling Time: This product, shipped by you, has a 5-day handling time, so Amazon shows shoppers a later delivery date.');
+    });
+
+    it('is not covered until the weekly sync has stored a fulfilment channel', () => {
+        expect(W3.detectLongHandlingTime({ products: [{ asin: 'A1', sku: 'S1', status: 'Active' }] }).covered).toBe(false);
+    });
+});

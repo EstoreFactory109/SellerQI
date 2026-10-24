@@ -214,7 +214,40 @@ function detectFbaFeeIncrease({ fbaFees, salesByAsin = {}, productsByAsin = new 
     return { tasks, covered: true };
 }
 
+/**
+ * Handling time (FBM). Spreadsheet: handling time over 2 days (P4) on seller-fulfilled
+ * SKUs. Read from the catalogue rows the weekly listing sync fills; covered once any
+ * SKU carries a fulfilment channel, i.e. that sync has run since it began storing it.
+ */
+function detectLongHandlingTime({ products = [], productsByAsin = new Map() }) {
+    const synced = (products || []).some(p => p?.fulfillmentChannel);
+    if (!synced) return { tasks: [], covered: false };
+    const byAsin = new Map();
+    for (const p of products || []) {
+        if (!p?.asin || p.status !== 'Active' || p.fulfillmentChannel !== 'DEFAULT') continue;
+        const days = Number(p.handlingTimeDays);
+        if (!Number.isFinite(days) || days <= R.HANDLING_TIME_MAX_DAYS) continue;
+        const prev = byAsin.get(p.asin);
+        if (!prev || days > prev.days) byAsin.set(p.asin, { days, sku: p.sku });
+    }
+    const tasks = [];
+    for (const [asin, e] of byAsin) {
+        tasks.push({
+            asin,
+            productName: nameOf(productsByAsin, asin),
+            errorCategory: 'inventory',
+            errorType: 'handling_time_long',
+            error: `Long Handling Time: This product, shipped by you, has a ${e.days}-day handling time, so Amazon shows shoppers a later delivery date.`,
+            solution: `If your team can ship faster, lower the handling time on this offer (Inventory > Manage All Inventory > Edit > Offer > Handling time) to ${R.HANDLING_TIME_MAX_DAYS} days or less. Only promise what you can meet: late shipments hurt account health more.`,
+            renderData: { handlingTimeDays: e.days, sku: e.sku },
+            status: PENDING
+        });
+    }
+    return { tasks, covered: true };
+}
+
 module.exports = {
+    detectLongHandlingTime,
     detectListingWarnings,
     detectInvoiceDefectRate,
     detectLowInventoryFeeRisk,
