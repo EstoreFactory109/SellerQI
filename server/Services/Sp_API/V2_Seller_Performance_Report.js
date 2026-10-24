@@ -148,7 +148,8 @@ const extractExtendedMetrics = (refinedData) => {
  * which is what has always kept a malformed report out of the collection.
  */
 const buildSnapshot = (refinedData) => ({
-    ahrScore: refinedData.performanceMetrics[0].accountHealthRating.ahrScore,
+    // Amazon omits the score for some accounts; store null ("no data"), never 0.
+    ahrScore: refinedData.performanceMetrics[0].accountHealthRating.ahrScore ?? null,
     accountStatuses: refinedData.accountStatuses[0].status,
     listingPolicyViolations: refinedData.performanceMetrics[0].listingPolicyViolations.status,
     validTrackingRateStatus: refinedData.performanceMetrics[0].validTrackingRate.status,
