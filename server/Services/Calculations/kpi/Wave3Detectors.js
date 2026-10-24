@@ -246,7 +246,43 @@ function detectLongHandlingTime({ products = [], productsByAsin = new Map() }) {
     return { tasks, covered: true };
 }
 
+/**
+ * New seller on brand listing. Spreadsheet: a seller ID not seen before appears on a
+ * brand-registered ASIN; exclude sellers the client has whitelisted. Compares this
+ * week's brand-offer check with last week's, ASIN by ASIN, and only where both checks
+ * got an answer for that ASIN and Amazon returned seller IDs at all — an ASIN or a
+ * fetch without identities is "unknown", never "new seller".
+ */
+function detectNewSellerOnBrand({ brandOffers, productsByAsin = new Map(), now }) {
+    const b = brandOffers;
+    if (!b?.newest || !b.previous || ageDays(b.newest.at, now) > R.BRAND_OFFERS_MAX_AGE_DAYS
+        || !b.newest.sellerIdsReturned || !b.previous.sellerIdsReturned) {
+        return { tasks: [], covered: false };
+    }
+    const authorized = new Set(b.authorized || []);
+    const tasks = [];
+    for (const [asin, cur] of Object.entries(b.newest.byAsin || {})) {
+        const old = b.previous.byAsin?.[asin];
+        if (!old || cur.error || old.error) continue;
+        const known = new Set(old.sellerIds);
+        const fresh = cur.sellerIds.filter(id => !known.has(id) && !authorized.has(id));
+        if (fresh.length === 0) continue;
+        tasks.push({
+            asin,
+            productName: nameOf(productsByAsin, asin),
+            errorCategory: 'inventory',
+            errorType: 'new_seller_on_brand',
+            error: `New Seller on Your Brand Listing: ${fresh.length === 1 ? 'A new seller' : `${fresh.length} new sellers`} started offering this product since last week (seller ${fresh.join(', ')}). It can be an unauthorised reseller or a counterfeit.`,
+            solution: 'Check whether they are your authorised reseller; if so, mark them as one below. If not, place a test buy, and report the listing through Brand Registry (Report a Violation) with the evidence if the item is counterfeit or infringes your brand.',
+            renderData: { sellerIds: fresh },
+            status: PENDING
+        });
+    }
+    return { tasks, covered: true };
+}
+
 module.exports = {
+    detectNewSellerOnBrand,
     detectLongHandlingTime,
     detectListingWarnings,
     detectInvoiceDefectRate,

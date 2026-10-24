@@ -80,6 +80,19 @@ const SUNDAY_FUNCTIONS = {
         apiDataKey: 'fbaFeeEstimatesData',
         isDefaultExport: true
     },
+    // Who offers on the seller's own brand listings (top 200 by revenue), for the
+    // tasks-logics.xlsx "New seller on brand listing" task. Weekly: the Product Pricing
+    // batch call allows one request per 11s, so 200 ASINs take about two minutes.
+    // Batch 3, after the brand sync. Stored in BrandOfferSnapshot, never in
+    // CompetitiveOffers (the ESF Buy Box report's source).
+    'brandOffersData': {
+        service: require('../Sp_API/BrandOffersSync.js'),
+        functionName: null, // Default export, use service directly
+        description: 'Brand Listing Offers',
+        requiresAccessToken: true,
+        apiDataKey: 'brandOffersData',
+        isDefaultExport: true
+    },
     // ── The two AI views are NOT registered here, deliberately ──
     // Both derive from TaskItem, and tasks are refreshed by addNewAccountHistory,
     // which runs AFTER fetchScheduledApiData completes. A batch-5 service would

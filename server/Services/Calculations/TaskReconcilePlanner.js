@@ -94,7 +94,8 @@ const SOURCE_BY_TYPE = {
     'account:invoice_defect_rate': 'kpi.invoiceDefect',
     'inventory:low_inventory_fee_risk': 'kpi.lowInventoryFee',
     'inventory:fba_fee_increase': 'kpi.fbaFeeIncrease',
-    'inventory:handling_time_long': 'kpi.handlingTime'
+    'inventory:handling_time_long': 'kpi.handlingTime',
+    'inventory:new_seller_on_brand': 'kpi.newSellerOnBrand'
 };
 
 /** @returns {string} the coverage key for a task */

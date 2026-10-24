@@ -117,6 +117,10 @@ const TOP_SELLER_NO_ADS_DAYS = 14;
 // The same warning on at least this many listings is one grouped task. Internal.
 const LISTING_WARNING_GROUP_MIN = 3;
 
+// ── New seller on brand listing (weekly brand-offer check) ──
+// The newest check must be this recent to compare. Internal.
+const BRAND_OFFERS_MAX_AGE_DAYS = 10;
+
 // ── Handling time (FBM) ──
 // Spreadsheet: P4 task when handling time is over 2 days. Internal.
 const HANDLING_TIME_MAX_DAYS = 2;
@@ -169,6 +173,7 @@ module.exports = {
     TOP_SELLER_NO_ADS_DAYS,
     LISTING_WARNING_GROUP_MIN,
     HANDLING_TIME_MAX_DAYS,
+    BRAND_OFFERS_MAX_AGE_DAYS,
     STALE_DAILY_HOURS,
     LOW_INVENTORY_FEE_DAYS,
     LOW_INVENTORY_WARNING_DAYS,

@@ -272,6 +272,10 @@ const getCompetitiveOffers = async (accessToken, marketplaceIds, userId, baseUri
     const marketplaceId = Array.isArray(marketplaceIds) ? marketplaceIds[0] : marketplaceIds;
     const asins = [...new Set((options.asins || []).filter(Boolean).map(String))];
     const ourSellerId = String(options.ourSellerId || '');
+    // persist:false returns the fetch instead of storing it in CompetitiveOffers, whose
+    // newest document the ESF Buy Box report reads (used by the weekly brand check).
+    const persist = options.persist !== false;
+    const store = (doc) => (persist ? CompetitiveOffers.create(doc) : doc);
 
     if (!accessToken || !marketplaceId || !baseUri) {
         logger.error('[CompetitiveOffers] Missing credentials or marketplace', { userId, country, region });
@@ -282,7 +286,7 @@ const getCompetitiveOffers = async (accessToken, marketplaceIds, userId, baseUri
     // report say "checked, no competitors" rather than "never checked".
     if (!asins.length) {
         logger.info('[CompetitiveOffers] no contested ASINs to price', { userId, country, region });
-        return CompetitiveOffers.create({
+        return store({
             User: userId, region, country, items: [], asinsRequested: 0, sellerIdsReturned: false,
         });
     }
@@ -369,7 +373,7 @@ const getCompetitiveOffers = async (accessToken, marketplaceIds, userId, baseUri
         const priced = items.filter((item) => item.buyBoxPrice !== null && item.buyBoxPrice !== undefined).length;
         logger.info(`[CompetitiveOffers] ${items.length} ASIN(s) returned, ${priced} with a Buy Box price`, { userId, country, region });
 
-        return CompetitiveOffers.create({
+        return store({
             User: userId,
             region,
             country,

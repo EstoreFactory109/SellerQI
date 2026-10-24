@@ -142,3 +142,31 @@ describe('detectLongHandlingTime', () => {
         expect(W3.detectLongHandlingTime({ products: [{ asin: 'A1', sku: 'S1', status: 'Active' }] }).covered).toBe(false);
     });
 });
+
+describe('detectNewSellerOnBrand', () => {
+    const check = (byAsin, at, sellerIdsReturned = true) => ({ at, sellerIdsReturned, byAsin });
+    const run = (newest, previous, authorized = []) => W3.detectNewSellerOnBrand({
+        brandOffers: { newest: check(newest, daysAgo(2)), previous: previous && check(previous, daysAgo(9)), authorized },
+        productsByAsin: products, now: NOW
+    });
+
+    it('flags a seller not on last week\'s list', () => {
+        const r = run({ A1: { sellerIds: ['S1', 'S9'], error: '' } }, { A1: { sellerIds: ['S1'], error: '' } });
+        expect(r.tasks[0]).toMatchObject({ asin: 'A1', errorType: 'new_seller_on_brand', renderData: { sellerIds: ['S9'] } });
+        expect(r.tasks[0].error).toContain('A new seller started offering this product since last week (seller S9)');
+    });
+
+    it('skips authorised resellers and ASINs either check could not read', () => {
+        expect(run({ A1: { sellerIds: ['S9'], error: '' } }, { A1: { sellerIds: [], error: '' } }, ['S9']).tasks).toEqual([]);
+        expect(run({ A1: { sellerIds: ['S9'], error: '' } }, { A1: { sellerIds: [], error: 'Amazon returned 500' } }).tasks).toEqual([]);
+        expect(run({ A1: { sellerIds: ['S9'], error: '' } }, {}).tasks).toEqual([]);
+    });
+
+    it('is not covered without two checks, or when Amazon withheld seller IDs', () => {
+        expect(run({ A1: { sellerIds: ['S9'], error: '' } }, null).covered).toBe(false);
+        const withheld = W3.detectNewSellerOnBrand({
+            brandOffers: { newest: check({}, daysAgo(2), false), previous: check({}, daysAgo(9)), authorized: [] }, now: NOW
+        });
+        expect(withheld.covered).toBe(false);
+    });
+});

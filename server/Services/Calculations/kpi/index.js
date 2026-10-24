@@ -40,7 +40,8 @@ const KPI_SOURCES = Object.freeze({
     'account:invoice_defect_rate': 'kpi.invoiceDefect',
     'inventory:low_inventory_fee_risk': 'kpi.lowInventoryFee',
     'inventory:fba_fee_increase': 'kpi.fbaFeeIncrease',
-    'inventory:handling_time_long': 'kpi.handlingTime'
+    'inventory:handling_time_long': 'kpi.handlingTime',
+    'inventory:new_seller_on_brand': 'kpi.newSellerOnBrand'
 });
 
 const safely = (name, context, fn) => {
@@ -198,6 +199,7 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, country
             : { tasks: [], covered: false })), 'inventory:low_inventory_fee_risk');
         add(safely('fba_fee_increase', context, () => W3.detectFbaFeeIncrease({ fbaFees: inputs.fbaFees, salesByAsin: recentSales, productsByAsin, now })), 'inventory:fba_fee_increase');
         add(safely('handling_time_long', context, () => W3.detectLongHandlingTime({ products, productsByAsin })), 'inventory:handling_time_long');
+        add(safely('new_seller_on_brand', context, () => W3.detectNewSellerOnBrand({ brandOffers: inputs.brandOffers, productsByAsin, now })), 'inventory:new_seller_on_brand');
     }
 
     // Internal stale-data guard: never a client task, only the alert.

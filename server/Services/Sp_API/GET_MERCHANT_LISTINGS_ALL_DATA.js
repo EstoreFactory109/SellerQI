@@ -102,6 +102,7 @@ function carryForwardProductFields(existingProducts, incomingProducts) {
         if (Array.isArray(prev.listingIssues)) row.listingIssues = prev.listingIssues;
         if (prev.fulfillmentChannel) row.fulfillmentChannel = prev.fulfillmentChannel;
         if (prev.handlingTimeDays !== undefined && prev.handlingTimeDays !== null) row.handlingTimeDays = prev.handlingTimeDays;
+        if (prev.brand) row.brand = prev.brand;
 
         // `quantity` is deliberately NOT carried: FbaInventoryStorageService overwrites it seconds
         // later in the same phase, and the report supplies a value anyway.

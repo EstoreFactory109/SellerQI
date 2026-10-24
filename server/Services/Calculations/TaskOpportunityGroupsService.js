@@ -184,6 +184,10 @@ const GROUP_COPY = {
         title: 'Products Amazon now charges more to fulfil',
         action: 'Check the measurements and ask for a re-measure if wrong'
     },
+    'inventory:new_seller_on_brand': {
+        title: 'New sellers on your own brand listings',
+        action: 'Check each one: authorised reseller, or test buy and report'
+    },
     'inventory:handling_time_long': {
         title: 'Seller-fulfilled products promising slow delivery',
         action: 'Shorten handling time where your team can ship faster'

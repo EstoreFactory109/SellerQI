@@ -29,7 +29,8 @@ const SOURCES = [
     ['traffic', (i) => (i.traffic?.newestDate ? `${i.traffic.newestDate}T23:59:59Z` : null), LAGGED_DAILY_HOURS],
     ['tacos', (i) => (i.tacos?.newestDate ? `${i.tacos.newestDate}T23:59:59Z` : null), LAGGED_DAILY_HOURS],
     ['reviews', (i) => i.reviews?.newest?.at, WEEKLY_HOURS],
-    ['fbaFees', (i) => i.fbaFees?.newest?.at, WEEKLY_HOURS]
+    ['fbaFees', (i) => i.fbaFees?.newest?.at, WEEKLY_HOURS],
+    ['brandOffers', (i) => i.brandOffers?.newest?.at, WEEKLY_HOURS]
 ];
 
 /**

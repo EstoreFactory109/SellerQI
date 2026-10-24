@@ -63,7 +63,10 @@ function extractFulfillment(data) {
   const attr = Array.isArray(data?.attributes?.fulfillment_availability) ? data.attributes.fulfillment_availability : [];
   const own = attr.find(a => String(a?.fulfillment_channel_code || '') === 'DEFAULT') || attr[0];
   const lead = Number(own?.lead_time_to_ship_max_days);
-  return { fulfillmentChannel, handlingTimeDays: Number.isFinite(lead) ? lead : null };
+  // The listing's brand, for "is this the seller's own brand listing" (new-seller check).
+  const brandAttr = Array.isArray(data?.attributes?.brand) ? data.attributes.brand[0] : null;
+  const brand = String(brandAttr?.value || data?.summaries?.[0]?.brand || '').trim() || null;
+  return { fulfillmentChannel, handlingTimeDays: Number.isFinite(lead) ? lead : null, brand };
 }
 
 const extractListingIssues = (issuesArray) => {
@@ -183,7 +186,7 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
     // answer entirely. An ACTIVE listing can still be suppressed, so the issues
     // matter as much here as on the inactive path below.
     const listingIssues = extractListingIssues(response.data?.issues);
-    const { fulfillmentChannel, handlingTimeDays } = extractFulfillment(response.data);
+    const { fulfillmentChannel, handlingTimeDays, brand } = extractFulfillment(response.data);
 
     // Check for B2B pricing in multiple locations:
     // 1. response.data.offers array (offerType === "B2B")
@@ -225,6 +228,7 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
         listingIssues,
         fulfillmentChannel,
         handlingTimeDays,
+        brand,
         sku: sku
       };
     }
@@ -237,6 +241,7 @@ const GetListingItem = async (dataToReceive, sku, asin, userId, baseuri, Country
       listingIssues,
       fulfillmentChannel,
       handlingTimeDays,
+      brand,
       sku: sku
     };
 

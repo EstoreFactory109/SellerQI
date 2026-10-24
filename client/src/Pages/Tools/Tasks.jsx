@@ -28,6 +28,7 @@ import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitche
 import FixItPackagesModal from '../../Components/Tasks/FixItPackagesModal.jsx';
 import FixItUrgencyCard from '../../Components/Tasks/FixItUrgencyCard.jsx';
 import RemovalReceiptModal from '../../Components/Tasks/RemovalReceiptModal.jsx';
+import axiosInstance from '../../config/axios.config.js';
 import { openTasksOf, summarizeUrgency } from '../../utils/taskUrgency.js';
 import { trackEvent } from '../../utils/analytics.js';
 
@@ -212,6 +213,32 @@ export default function Tasks() {
   const [showFixIt, setShowFixIt] = useState(false);
   // The removal_confirm_receipt task whose "Confirm what arrived" form is open.
   const [receiptTaskId, setReceiptTaskId] = useState(null);
+  // new_seller_on_brand tasks: which one is saving, and per-task messages.
+  const [resellerSaving, setResellerSaving] = useState(null);
+  const [resellerNotes, setResellerNotes] = useState({});
+
+  // "These are my authorised resellers": whitelist the task's new seller IDs, so they
+  // are never flagged again on this marketplace, and tick the task off.
+  const markAuthorisedResellers = async (item) => {
+    const sellerIds = item.renderData?.sellerIds || [];
+    if (sellerIds.length === 0) return;
+    const ok = window.confirm(
+      `Mark ${sellerIds.length === 1 ? `seller ${sellerIds[0]}` : `sellers ${sellerIds.join(', ')}`} as authorised to sell your products? ` +
+      'You will not be warned about them again on this marketplace.'
+    );
+    if (!ok) return;
+    setResellerSaving(item.taskId);
+    try {
+      await axiosInstance.post('/api/authorized-resellers', { sellerIds }, { withCredentials: true });
+      setResellerNotes((n) => ({ ...n, [item.taskId]: { ok: true, text: 'Saved as authorised. They will not be flagged again.' } }));
+      trackEvent('authorized_resellers_add', { count: sellerIds.length });
+      if (!completedTasks.has(item.taskId)) dispatch(updateTaskStatus({ taskId: item.taskId, status: 'completed' }));
+    } catch (err) {
+      setResellerNotes((n) => ({ ...n, [item.taskId]: { ok: false, text: err.response?.data?.message || 'Could not save. Please try again.' } }));
+    } finally {
+      setResellerSaving(null);
+    }
+  };
   // Deep-link support: the Dashboard's "Top things to fix" links here with
   // ?category=&type= so a seller lands on the individual rows that make up the
   // figure they just clicked, instead of the unfiltered list.
@@ -335,7 +362,10 @@ export default function Tasks() {
         // the bucketing below.
         effortMinutes: task.effortMinutes,
         impactWeight: task.impactWeight,
-        isQuickWin: !!task.isQuickWin
+        isQuickWin: !!task.isQuickWin,
+        // Task-specific details some actions need (e.g. the seller IDs on a
+        // new_seller_on_brand task).
+        renderData: task.renderData || null
       };
     });
   }, [tasks, productDetailsMap]);
@@ -931,6 +961,28 @@ export default function Tasks() {
                           <span style={{ color: COLORS.textMuted }}>How to fix — </span>
                           <FormattedHowToSolve text={item.howToSolve} />
                         </div>
+                        {item.errorType === 'new_seller_on_brand' && (item.renderData?.sellerIds || []).length > 0 && (
+                          <div className="mt-2.5 flex items-center gap-2.5 flex-wrap">
+                            {!completedTasks.has(item.taskId) && (
+                              <button
+                                type="button"
+                                onClick={() => markAuthorisedResellers(item)}
+                                disabled={resellerSaving === item.taskId}
+                                className="px-3.5 py-1.5 rounded-lg text-xs font-semibold border disabled:opacity-50"
+                                style={{ borderColor: COLORS.border, color: COLORS.textPrimary, background: 'transparent' }}
+                              >
+                                {resellerSaving === item.taskId
+                                  ? 'Saving…'
+                                  : (item.renderData.sellerIds.length === 1 ? 'This is my authorised reseller' : 'These are my authorised resellers')}
+                              </button>
+                            )}
+                            {resellerNotes[item.taskId] && (
+                              <span role="status" className="text-xs" style={{ color: resellerNotes[item.taskId].ok ? COLORS.good : COLORS.watch }}>
+                                {resellerNotes[item.taskId].text}
+                              </span>
+                            )}
+                          </div>
+                        )}
                         {item.errorType === 'removal_confirm_receipt' && !completedTasks.has(item.taskId) && (
                           <button
                             type="button"

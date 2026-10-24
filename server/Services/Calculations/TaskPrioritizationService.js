@@ -167,7 +167,8 @@ const EFFORT_MINUTES = {
     'account:invoice_defect_rate': 15,      // upload missing invoices
     'inventory:low_inventory_fee_risk': 30, // create an FBA shipment
     'inventory:fba_fee_increase': 20,       // check dimensions, open a case
-    'inventory:handling_time_long': 5       // change one offer setting
+    'inventory:handling_time_long': 5,      // change one offer setting
+    'inventory:new_seller_on_brand': 15     // check the seller, test buy if unknown
 };
 
 /**
@@ -256,6 +257,8 @@ const IMPACT_WEIGHT = {
     'inventory:listing_warnings': 46,
     // A later promised delivery date costs conversion, but it is a setting, not a loss.
     'inventory:handling_time_long': 30,
+    // A hijacker takes sales and a counterfeit costs reviews and the account's standing.
+    'inventory:new_seller_on_brand': 60,
 
     // Conversion drag.
     'conversion:insufficient_images': 55,

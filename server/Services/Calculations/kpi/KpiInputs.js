@@ -417,6 +417,31 @@ async function loadFbaFeeSnapshots(userId, country, region) {
     };
 }
 
+/**
+ * The two newest weekly brand-offer checks, plus the sellers the brand owner has
+ * marked as authorised. Compact: seller IDs per ASIN.
+ */
+async function loadBrandOffers(userId, country, region) {
+    const BrandOfferSnapshot = require('../../../models/products/BrandOfferSnapshotModel.js');
+    const AuthorizedReseller = require('../../../models/products/AuthorizedResellerModel.js');
+    const User = toObjectId(userId);
+    const [docs, authorized] = await Promise.all([
+        BrandOfferSnapshot.find({ User, country, region }).sort({ createdAt: -1 }).limit(2).lean(),
+        AuthorizedReseller.find({ User, country, region }).select('sellerId').lean()
+    ]);
+    if (docs.length === 0) return null;
+    const reduce = (doc) => ({
+        at: iso(doc.createdAt),
+        sellerIdsReturned: !!doc.sellerIdsReturned,
+        byAsin: Object.fromEntries((doc.items || []).map(i => [i.asin, { sellerIds: i.sellerIds || [], error: i.error || '' }]))
+    });
+    return {
+        newest: reduce(docs[0]),
+        previous: docs[1] ? reduce(docs[1]) : null,
+        authorized: authorized.map(a => a.sellerId)
+    };
+}
+
 /** The V2 report's invoice defect fields, keeping "never read" apart from "blank". */
 function buildInvoice(v2Data) {
     if (!v2Data) return null;
@@ -515,11 +540,13 @@ async function loadKpiInputs({ userId, country, region, waves, allData, now = ne
 
     // Wave 3: inputs that needed pipeline work first.
     if (waves.includes(3)) {
-        const fbaFees = await Promise.resolve()
-            .then(() => loadFbaFeeSnapshots(userId, country, region))
-            .catch(unavailable('FBA fee snapshots'));
+        const [fbaFees, brandOffers] = await Promise.all([
+            Promise.resolve().then(() => loadFbaFeeSnapshots(userId, country, region)).catch(unavailable('FBA fee snapshots')),
+            Promise.resolve().then(() => loadBrandOffers(userId, country, region)).catch(unavailable('Brand offers'))
+        ]);
         Object.assign(inputs, {
             fbaFees,
+            brandOffers,
             planning: buildPlanning(freshInventoryReportOrNull(allData?.inventoryPlanningData, 'Inventory planning (KPI)', { userId, country, region }, now)),
             invoice: buildInvoice(allData?.v2Data)
         });
@@ -535,6 +562,7 @@ module.exports = {
     loadTacosSeries,
     loadReviewSnapshots,
     loadFbaFeeSnapshots,
+    loadBrandOffers,
     buildRestock,
     buildPlanning,
     buildInvoice,

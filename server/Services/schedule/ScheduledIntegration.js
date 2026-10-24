@@ -1130,7 +1130,7 @@ class ScheduledIntegration {
                 return 2;
             }
             // Batch 3: Shipment Data, Brand Data, Ad Groups Data, MCP SalesOnly, MCP BuyBox
-            if (['shipment', 'brandData', 'adGroupsData', 'mcpEconomicsData', 'mcpBuyBoxData'].includes(functionKey)) {
+            if (['shipment', 'brandData', 'adGroupsData', 'mcpEconomicsData', 'mcpBuyBoxData', 'brandOffersData'].includes(functionKey)) {
                 return 3;
             }
             // Finance: ISOLATED from batch 3 because syncFinanceData polls Amazon for 10-25 min
@@ -2730,7 +2730,7 @@ class ScheduledIntegration {
             'calculateDamagedInventoryReimbursement', 'calculateDisposedInventoryReimbursement'
         ],
         // MCP slice (batch 3 — shipment + brand + adGroups + MCP SalesOnly + BuyBox)
-        mcp: ['shipment', 'brandData', 'adGroupsData', 'mcpEconomicsData', 'mcpBuyBoxData'],
+        mcp: ['shipment', 'brandData', 'adGroupsData', 'mcpEconomicsData', 'mcpBuyBoxData', 'brandOffersData'],
         // Finance slice (isolated finance phase)
         finance: ['financeSync'],
         // Keywords slice (batch 4)

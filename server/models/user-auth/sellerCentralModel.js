@@ -92,6 +92,13 @@ const Products=new mongoose.Schema({
     type: Number,
     required: false,
     default: undefined
+  },
+  // The listing's brand, from the same weekly sync; compared with the account's brand
+  // to tell the seller's own brand listings from resale ones.
+  brand:{
+    type: String,
+    required: false,
+    default: undefined
   }
 },{timestamps:true})
 
