@@ -1,279 +1,119 @@
-const axios = require("axios");
-const { parseAsync, yieldToEventLoop } = require('../../utils/asyncCsvParser');
+/**
+ * GET_FBA_ESTIMATED_FBA_FEES_TXT_DATA — Amazon's per-SKU FBA fee estimate: size
+ * tier, dimensions, weight and the expected fulfilment fee.
+ *
+ * Every column is stored as Amazon sends it (ProductWiseFBADataService keeps the
+ * last 3 batches), so the "FBA fee increase or size tier change" task compares
+ * this week's snapshot with last week's without any header mapping to drift.
+ *
+ * Runs weekly on the schedule (ScheduleConfig 'fbaFeeEstimatesData'). The inline
+ * path uses the shared bounded create -> poll -> download cycle, and the async
+ * adapter lets the report engine poll it without holding a worker.
+ */
+
 const logger = require("../../utils/Logger");
-const { ApiError } = require('../../utils/ApiError');
-const zlib = require('zlib');
-const { promisify } = require('util');
-const gunzip = promisify(zlib.gunzip);
+const { parseAsync } = require('../../utils/asyncCsvParser');
 // Use service layer for saving data (handles 16MB limit with separate collection)
 const { saveProductWiseFBAData } = require('../inventory/ProductWiseFBADataService');
-const { getReportOptions, normalizeHeaders } = require('../../utils/ReportHeaderMapping');
+const { getReportOptions } = require('../../utils/ReportHeaderMapping');
+const {
+    runSpApiReportInline,
+    createSpApiReport,
+    checkSpApiStatusOnceNoDataOnCancel,
+    downloadSpApiDocument,
+} = require('./spApiReportAdapter.js');
 
-const generateReport = async (accessToken, marketplaceIds, baseuri) => {
-    try {
-        const now = new Date();
-        const EndTime = new Date(now.getTime() - 2 * 60 * 1000); // 2 minutes before now
-        const StartTime = new Date(EndTime.getTime() - 30 * 24 * 60 * 60 * 1000); // 30 days before end
+const REPORT_TYPE = "GET_FBA_ESTIMATED_FBA_FEES_TXT_DATA";
+const WINDOW_DAYS = 30;
 
-        const reportType = "GET_FBA_ESTIMATED_FBA_FEES_TXT_DATA";
-        const requestBody = {
-            reportType: reportType,
-            marketplaceIds: marketplaceIds,
-            dataStartTime: StartTime.toISOString(),
-            dataEndTime: EndTime.toISOString(),
-        };
-        
-        // Add reportOptions to request English headers (for non-English marketplaces)
-        const reportOptions = getReportOptions(reportType);
-        if (reportOptions) {
-            requestBody.reportOptions = reportOptions;
-        }
-        
-        const response = await axios.post(
-            `https://${baseuri}/reports/2021-06-30/reports`,
-            requestBody,
-            {
-                headers: {
-                    "x-amz-access-token": accessToken,
-                    "Content-Type": "application/json",
-                },
-            }
-        );
-
-        return response.data.reportId;
-    } catch (error) {
-        logger.error("Error generating report:", error.response ? error.response.data : error.message);
-        throw new Error("Failed to generate report");
-    }
+const requestBody = (marketplaceIds, now = new Date()) => {
+    const end = new Date(now.getTime() - 2 * 60 * 1000);
+    const body = {
+        reportType: REPORT_TYPE,
+        marketplaceIds,
+        dataStartTime: new Date(end.getTime() - WINDOW_DAYS * 86400000).toISOString(),
+        dataEndTime: end.toISOString(),
+    };
+    // English headers for non-English marketplaces
+    const reportOptions = getReportOptions(REPORT_TYPE);
+    if (reportOptions) body.reportOptions = reportOptions;
+    return body;
 };
 
-const checkReportStatus = async (accessToken, reportId, baseuri) => {
-    try {
-        const response = await axios.get(
-            `https://${baseuri}/reports/2021-06-30/reports/${reportId}`,
-            {
-                headers: { "x-amz-access-token": accessToken },
-            }
-        );
-
-        const status = response.data.processingStatus;
-        const reportDocumentId = response.data.reportDocumentId || null;
-
-        switch (status) {
-            case "DONE":
-                logger.info(`Report Ready! Document ID: ${reportDocumentId}`);
-                return reportDocumentId;
-
-            case "FATAL":
-                logger.error("Report failed with a fatal error.");
-                return false;
-
-            case "CANCELLED":
-                logger.error("Report was cancelled by Amazon.");
-                return false;
-
-            case "IN_PROGRESS":
-                return null;
-
-            case "IN_QUEUE":
-                return null;
-
-            case "DONE_NO_DATA":
-                logger.error("Report completed but contains no data.");
-                return false;
-
-            case "FAILED":
-                logger.error("Report failed for an unknown reason.");
-                return false;
-
-            default:
-                logger.error(`Unknown report status: ${status}`);
-                return false;
-        }
-    } catch (error) {
-        logger.error("Error checking report status:", error.response ? error.response.data : error.message);
-        throw new Error("Failed to check report status");
-    }
+/** Report body -> rows, every column kept as-is (blank for missing). Exported for tests. */
+const parseFeeRows = async (buffer) => {
+    const records = await parseAsync(buffer, { delimiter: '\t', columns: true, reportType: 'GetProductWiseFBAData' });
+    return (records || []).map((item) => {
+        const row = {};
+        for (const key of Object.keys(item)) row[key] = item[key] || "";
+        return row;
+    });
 };
 
-const getReportLink = async (accessToken, reportDocumentId, baseuri) => {
-    try {
-        const response = await axios.get(
-            `https://${baseuri}/reports/2021-06-30/documents/${reportDocumentId}`,
-            { headers: { "x-amz-access-token": accessToken } }
-        );
-
-        if (!response.data.url) {
-            throw new Error("No valid report URL found");
-        }
-
-        return response.data.url;
-    } catch (error) {
-        logger.error("Error downloading report:", error.response ? error.response.data : error.message);
-        throw new Error("Failed to download report");
+const save = async (userId, country, region, rows) => {
+    if (rows.length === 0) {
+        logger.info(`[${REPORT_TYPE}] report contains no rows`, { userId, country, region });
+        return { success: true, message: "Report completed successfully but contains no data", data: [] };
     }
+    const saveResult = await saveProductWiseFBAData(userId, country, region, rows);
+    if (!saveResult || !saveResult.success) {
+        logger.error(`[${REPORT_TYPE}] could not be stored`, { userId, country, region });
+        return { success: false, message: "Error saving report to database" };
+    }
+    logger.info(`[${REPORT_TYPE}] stored ${rows.length} row(s)`, { userId, country, region });
+    return {
+        success: true,
+        message: "Report fetched and saved successfully",
+        data: { userId, country, region, itemCount: saveResult.itemCount, batchId: saveResult.batchId },
+    };
 };
 
 const getReport = async (accessToken, marketplaceIds, userId, baseuri, country, region) => {
-    logger.info("GetProductWiseFBAData starting");
-    
+    logger.info(`${REPORT_TYPE} starting`, { userId, country, region });
     if (!accessToken || !marketplaceIds) {
-        throw new ApiError(400, "Credentials are missing");
+        return { success: false, message: "Credentials are missing" };
+    }
+
+    const result = await runSpApiReportInline({ accessToken, baseuri, body: requestBody(marketplaceIds), retries: 1 });
+    if (result.status === 'FAILED') {
+        logger.error(`${REPORT_TYPE} failed: ${result.note}`, { userId, country, region });
+        return { success: false, message: result.note };
     }
 
     try {
-        const reportId = await generateReport(accessToken, marketplaceIds, baseuri);
-        if (!reportId) {
-            logger.error(new ApiError(408, "Report generation failed"));
-            return {
-                success: false,
-                message: "Report generation failed",
-            };
-        }
-
-        let reportDocumentId = null;
-        const retryInterval = 10000;
-        let attempt = 0;
-
-        while (true) {
-            attempt++;
-            logger.info(`Checking report status... (Attempt ${attempt})`);
-            reportDocumentId = await checkReportStatus(accessToken, reportId, baseuri);
-            
-            if (reportDocumentId === false) {
-                return {
-                    success: false,
-                    message: "Report failed or was cancelled",
-                };
-            }
-            
-            if (reportDocumentId) {
-                break;
-            }
-            
-            // Wait before next check
-            await new Promise(resolve => setTimeout(resolve, retryInterval));
-        }
-
-        const reportUrl = await getReportLink(accessToken, reportDocumentId, baseuri);
-
-        const fullReport = await axios({
-            method: "GET",
-            url: reportUrl,
-            responseType: "arraybuffer",
-        });
-
-        if (!fullReport || !fullReport.data) {
-            throw new ApiError(500, "Internal server error in generating the report");
-        }
-
-        const refinedData = await convertTSVToJson(fullReport.data);
-
-        if (refinedData.length === 0) {
-            logger.info("Report completed but contains no data");
-            return {
-                success: true,
-                message: "Report completed successfully but contains no data",
-                data: [],
-            };
-        }
-
-        // Transform data to match model structure - capture ALL fields from report dynamically
-        // This ensures we don't miss any fields that Amazon might add in the future
-        const fbaData = refinedData.map((item) => {
-            // Create a new object with all fields from the report, preserving exact field names
-            const mappedItem = {};
-            
-            // Iterate through all keys in the item and copy them with their exact names
-            for (const key in item) {
-                if (item.hasOwnProperty(key)) {
-                    // Preserve the exact field name from the report
-                    mappedItem[key] = item[key] || "";
-                }
-            }
-            
-            return mappedItem;
-        });
-
-        // Save to database using service layer (handles 16MB limit with separate collection)
-        const saveResult = await saveProductWiseFBAData(userId, country, region, fbaData);
-
-        if (!saveResult || !saveResult.success) {
-            logger.error(new ApiError(500, "Internal server error in saving the report"));
-            return {
-                success: false,
-                message: "Error saving report to database",
-            };
-        }
-
-        logger.info("Data saved successfully");
-        logger.info("GetProductWiseFBAData ended");
-        return {
-            success: true,
-            message: "Report fetched and saved successfully",
-            data: {
-                userId: userId,
-                country: country,
-                region: region,
-                itemCount: saveResult.itemCount,
-                batchId: saveResult.batchId
-            },
-        };
+        const rows = result.status === 'NO_DATA' ? [] : await parseFeeRows(result.buffer);
+        return await save(userId, country, region, rows);
     } catch (error) {
-        logger.error("Error in getReport:", error.message);
-        throw new ApiError(500, error.message);
+        logger.error(`${REPORT_TYPE} could not be parsed or stored: ${error.message}`, { userId, country, region });
+        return { success: false, message: error.message };
     }
 };
 
-/**
- * Convert TSV buffer to JSON using async streaming parser.
- * Uses async parsing to prevent blocking the event loop during large file processing.
- */
-async function convertTSVToJson(tsvBuffer) {
-    try {
-        const records = await parseAsync(tsvBuffer, {
-            delimiter: '\t',
-            columns: true,
-            reportType: 'GetProductWiseFBAData'
-        });
-
-        return records;
-
-    } catch (error) {
-        logger.error('[GetProductWiseFBAData] TSV parsing failed', { 
-            error: error.message 
-        });
-
-        // Fallback to legacy parsing
-        try {
-            return await convertTSVToJsonLegacy(tsvBuffer);
-        } catch (fallbackError) {
-            logger.error('[GetProductWiseFBAData] Fallback parsing also failed', { 
-                error: fallbackError.message 
-            });
-            return [];
-        }
-    }
-}
-
-async function convertTSVToJsonLegacy(tsvBuffer) {
-    let decompressedData;
-    try {
-        decompressedData = await gunzip(tsvBuffer);
-    } catch (decompressError) {
-        decompressedData = tsvBuffer;
-    }
-    const tsv = decompressedData.toString("utf-8");
-    const rows = tsv.split("\n").filter(row => row.trim() !== "");
-    if (rows.length === 0) return [];
-    const headers = rows[0].split("\t");
-    return rows.slice(1).map(row => {
-        const values = row.split("\t");
-        return headers.reduce((obj, header, index) => {
-            obj[header.trim()] = values[index] ? values[index].trim() : "";
-            return obj;
-        }, {});
-    });
-}
+getReport.spApiAsync = {
+    serviceName: 'fbaFeeEstimatesData',
+    buildSpecs: ({ userId, country, region, accessToken, baseuri, marketplaceIds }) => {
+        const body = requestBody(marketplaceIds);
+        return [{
+            service: 'fbaFeeEstimatesData',
+            paramsKey: 'default',
+            params: {},
+            marketplaceId: '',
+            submit: async () => await createSpApiReport(accessToken, baseuri, body),
+            checkStatusOnce: (reportId) => checkSpApiStatusOnceNoDataOnCancel(accessToken, reportId, baseuri),
+            finalize: async (handle) => {
+                // No document: nothing to store. An empty batch would wipe last week's
+                // snapshot out of the 3 kept, and with it the comparison.
+                if (!handle?.reportDocumentId) return { empty: true };
+                const buffer = await downloadSpApiDocument(accessToken, handle.reportDocumentId, baseuri);
+                const rows = await parseFeeRows(buffer);
+                await save(userId, country, region, rows);
+                return { empty: rows.length === 0 };
+            },
+        }];
+    },
+    saveFromRows: async () => ({ documentsSaved: 0 }),
+};
 
 module.exports = getReport;
+module.exports.parseFeeRows = parseFeeRows;
+module.exports.REPORT_TYPE = REPORT_TYPE;

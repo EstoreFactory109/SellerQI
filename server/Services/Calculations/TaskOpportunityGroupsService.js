@@ -121,6 +121,15 @@ const GROUP_COPY = {
         title: 'Ad targets needing a closer look',
         action: 'Review these targets against their performance data'
     },
+    'sponsoredAds:tacos_rising': {
+        title: 'Ad spend rising faster than sales',
+        action: 'Trim the campaigns that grew spend without growing sales'
+    },
+    'sponsoredAds:top_seller_not_advertised': {
+        title: 'Best sellers with no ads running',
+        action: 'Launch campaigns to protect and grow these products',
+        isGrowthOpportunity: true
+    },
     'sponsoredAds:ads_on_unbuyable': {
         title: 'Ads running on products shoppers cannot buy',
         action: 'Pause these ads until the product can sell again'
@@ -159,6 +168,22 @@ const GROUP_COPY = {
         title: 'Removal orders that came back short',
         action: 'Claim the missing units from Amazon before the window closes'
     },
+    'inventory:weeks_of_cover': {
+        title: 'Products with far more stock than they sell',
+        action: 'Pause inbound and promote these down to 8-12 weeks of cover'
+    },
+    'inventory:listing_warnings': {
+        title: 'Listings with Amazon warnings that can turn into blocks',
+        action: 'Fix the flagged field on each before Amazon blocks it'
+    },
+    'inventory:low_inventory_fee_risk': {
+        title: 'Products paying, or close to paying, the low-inventory fee',
+        action: 'Send stock to hold at least 28 days of sales'
+    },
+    'inventory:fba_fee_increase': {
+        title: 'Products Amazon now charges more to fulfil',
+        action: 'Check the measurements and ask for a re-measure if wrong'
+    },
     'inventory:removal_confirm_receipt': {
         title: 'Removal orders waiting for you to confirm what arrived',
         action: 'Enter the units you received so missing ones can be claimed'
@@ -189,6 +214,22 @@ const GROUP_COPY = {
         title: 'Products whose rating is driving buyers away',
         action: 'Address the complaints behind the low rating'
     },
+    'conversion:sales_drop': {
+        title: 'Products whose sales suddenly fell',
+        action: 'Find what changed: price, Buy Box, reviews or ads'
+    },
+    'conversion:conversion_rate_drop': {
+        title: 'Products converting fewer visitors than before',
+        action: 'Check price, images, reviews and competing offers'
+    },
+    'conversion:traffic_drop': {
+        title: 'Products getting fewer visitors than before',
+        action: 'Check search rank, ad spend and listing status'
+    },
+    'conversion:rating_drop': {
+        title: 'Products whose rating is falling',
+        action: 'Fix the complaint behind the recent low reviews'
+    },
     'conversion:insufficient_reviews': {
         title: 'Products with too few reviews to build trust',
         action: 'Enrol these in review programmes to build social proof'
@@ -198,6 +239,10 @@ const GROUP_COPY = {
     'account:accountStatus': {
         title: 'Your selling account is at risk',
         action: 'Resolve this with Amazon immediately — it can stop all sales'
+    },
+    'account:invoice_defect_rate': {
+        title: 'Amazon Business orders missing invoices',
+        action: 'Upload the missing invoices and automate future ones'
     },
     'account:ahr_early_warning': {
         title: 'Your Account Health Rating is falling',

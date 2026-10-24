@@ -12,6 +12,8 @@
 
 const logger = require('../../../utils/Logger.js');
 const W1 = require('./Wave1Detectors.js');
+const W2 = require('./Wave2Detectors.js');
+const W3 = require('./Wave3Detectors.js');
 const { SALES_WINDOW_MAX_AGE_DAYS } = require('./KpiRules.js');
 
 /** Coverage key per task type; mirrored in TaskReconcilePlanner.SOURCE_BY_TYPE. */
@@ -23,7 +25,20 @@ const KPI_SOURCES = Object.freeze({
     'account:ahr_early_warning': 'kpi.ahrEarlyWarning',
     'inventory:removal_shortfall': 'kpi.removalShortfall',
     // Same input as the shortfall: the removal report plus the seller's answers.
-    'inventory:removal_confirm_receipt': 'kpi.removalShortfall'
+    'inventory:removal_confirm_receipt': 'kpi.removalShortfall',
+    // Wave 2
+    'conversion:sales_drop': 'kpi.salesDrop',
+    'conversion:conversion_rate_drop': 'kpi.conversionDrop',
+    'conversion:traffic_drop': 'kpi.trafficDrop',
+    'sponsoredAds:tacos_rising': 'kpi.tacos',
+    'sponsoredAds:top_seller_not_advertised': 'kpi.topSellerAds',
+    'conversion:rating_drop': 'kpi.ratingDrop',
+    'inventory:weeks_of_cover': 'kpi.weeksOfCover',
+    // Wave 3
+    'inventory:listing_warnings': 'kpi.listingWarnings',
+    'account:invoice_defect_rate': 'kpi.invoiceDefect',
+    'inventory:low_inventory_fee_risk': 'kpi.lowInventoryFee',
+    'inventory:fba_fee_increase': 'kpi.fbaFeeIncrease'
 });
 
 const safely = (name, context, fn) => {
@@ -78,9 +93,10 @@ function windowPhrase(startDate, endDate, days, recent) {
  */
 function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, country = null, userId = null, now = new Date() } = {}) {
     const inputs = data?.KpiInputs;
-    if (!inputs || !Array.isArray(inputs.waves) || !inputs.waves.includes(1)) {
+    if (!inputs || !Array.isArray(inputs.waves) || inputs.waves.length === 0) {
         return { tasks: [], coverage: {} };
     }
+    const waveOn = (n) => inputs.waves.includes(n);
 
     const products = Array.isArray(data.TotalProducts) ? data.TotalProducts : [];
     const productsByAsin = new Map();
@@ -122,20 +138,67 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, country
         reimbursements: inputs.removalReimbursements, products, productsByAsin, now
     }));
 
-    const tasks = [
-        ...suppressed.tasks, ...outOfStock.tasks, ...ads.tasks,
-        ...cogs.tasks, ...ahr.tasks, ...removals.tasks
-    ];
-    const coverage = {
-        [KPI_SOURCES['inventory:listing_suppressed']]: suppressed.covered,
-        [KPI_SOURCES['inventory:out_of_stock']]: outOfStock.covered,
-        [KPI_SOURCES['sponsoredAds:ads_on_unbuyable']]: ads.covered,
-        [KPI_SOURCES['profitability:cogs_missing']]: cogs.covered,
-        [KPI_SOURCES['account:ahr_early_warning']]: ahr.covered,
-        [KPI_SOURCES['inventory:removal_shortfall']]: removals.covered
+    // Wave 1 always runs (its out-of-stock and suppression verdicts feed the waves
+    // after it) but only adds tasks and coverage when wave 1 itself is on.
+    const tasks = [];
+    const coverage = {};
+    const add = (result, ...types) => {
+        tasks.push(...result.tasks);
+        for (const type of types) coverage[KPI_SOURCES[type]] = result.covered;
     };
+    if (waveOn(1)) {
+        add(suppressed, 'inventory:listing_suppressed');
+        add(outOfStock, 'inventory:out_of_stock');
+        add(ads, 'sponsoredAds:ads_on_unbuyable');
+        add(cogs, 'profitability:cogs_missing');
+        add(ahr, 'account:ahr_early_warning');
+        add(removals, 'inventory:removal_shortfall', 'inventory:removal_confirm_receipt');
+    }
 
-    logger.info('[KpiDetectors] wave 1', {
+    if (waveOn(2)) {
+        // A drop that out of stock, suppression or a lost Buy Box already explains is
+        // that task's, not a trend task (spreadsheet: Sales drop skip rule).
+        const skipAsins = new Map([...outOfStock.asins, ...suppressed.asins]);
+        for (const row of data.BuyBoxData?.asinBuyBoxData || []) {
+            const asin = row?.childAsin || row?.asin;
+            if (asin && (row.buyBoxLost === true || (Number.isFinite(row.buyBoxPercentage) && row.buyBoxPercentage < 80))) {
+                skipAsins.set(asin, 'no Buy Box');
+            }
+        }
+        const suppressedAsins = new Set(suppressed.tasks.map(t => t.asin));
+        const buyable = (asin) => !suppressedAsins.has(asin)
+            && (W1.buyableUnits(catalogue.get(asin)) > 0 || (inputs.stock?.byAsin?.[asin]?.fulfillable || 0) > 0);
+        const activeAsins = new Set(products.filter(p => p?.status === 'Active' && p.asin).map(p => p.asin));
+
+        add(safely('sales_drop', context, () => W2.detectSalesDrop({ traffic: inputs.traffic, skipAsins, productsByAsin, now })), 'conversion:sales_drop');
+        add(safely('conversion_rate_drop', context, () => W2.detectConversionRateDrop({ traffic: inputs.traffic, skipAsins, productsByAsin, now })), 'conversion:conversion_rate_drop');
+        add(safely('traffic_drop', context, () => W2.detectTrafficDrop({ traffic: inputs.traffic, skipAsins, productsByAsin, now })), 'conversion:traffic_drop');
+        add(safely('tacos_rising', context, () => W2.detectTacosRising({ tacos: inputs.tacos, now })), 'sponsoredAds:tacos_rising');
+        add(safely('top_seller_not_advertised', context, () => (salesRecent
+            ? W2.detectTopSellerNotAdvertised({
+                adsRows: data.ProductWiseSponsoredAds, topAsins: W1.topRevenueAsins(recentSales), buyable,
+                country, productsByAsin, salesByAsin: recentSales, now
+            })
+            : { tasks: [], covered: false })), 'sponsoredAds:top_seller_not_advertised');
+        add(safely('rating_drop', context, () => W2.detectRatingDrop({ reviews: inputs.reviews, productsByAsin, now })), 'conversion:rating_drop');
+        // No coverage key of its own: thousands of stored tasks of this retired type
+        // resolve on the 'conversion' source (the listing scrape), and a key that only
+        // exists while wave 2 is on would hold them forever when it is off.
+        add(safely('insufficient_reviews', context, () => W2.detectLowReviewCount({ reviews: inputs.reviews, activeAsins, productsByAsin, now })));
+        add(safely('weeks_of_cover', context, () => W2.detectWeeksOfCover({ restock: inputs.restock, productsByAsin })), 'inventory:weeks_of_cover');
+    }
+
+    if (waveOn(3)) {
+        add(safely('listing_warnings', context, () => W3.detectListingWarnings({ products, productsByAsin })), 'inventory:listing_warnings');
+        add(safely('invoice_defect_rate', context, () => W3.detectInvoiceDefectRate({ v2: inputs.invoice })), 'account:invoice_defect_rate');
+        add(safely('low_inventory_fee_risk', context, () => (salesRecent
+            ? W3.detectLowInventoryFeeRisk({ planning: inputs.planning, salesByAsin: recentSales, productsByAsin })
+            : { tasks: [], covered: false })), 'inventory:low_inventory_fee_risk');
+        add(safely('fba_fee_increase', context, () => W3.detectFbaFeeIncrease({ fbaFees: inputs.fbaFees, salesByAsin: recentSales, productsByAsin, now })), 'inventory:fba_fee_increase');
+    }
+
+    logger.info('[KpiDetectors] run', {
+        waves: inputs.waves,
         ...context,
         tasks: tasks.length,
         byType: tasks.reduce((acc, t) => ({ ...acc, [t.errorType]: (acc[t.errorType] || 0) + 1 }), {}),

@@ -458,6 +458,7 @@ function detectRemovalShortfall({ removals, receipts = null, reimbursements = nu
 
 module.exports = {
     catalogueByAsin,
+    buyableUnits,
     topRevenueAsins,
     detectListingSuppressed,
     detectOutOfStock,

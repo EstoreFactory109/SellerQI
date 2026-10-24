@@ -82,7 +82,18 @@ const SOURCE_BY_TYPE = {
     'profitability:cogs_missing': 'kpi.cogsMissing',
     'account:ahr_early_warning': 'kpi.ahrEarlyWarning',
     'inventory:removal_shortfall': 'kpi.removalShortfall',
-    'inventory:removal_confirm_receipt': 'kpi.removalShortfall'
+    'inventory:removal_confirm_receipt': 'kpi.removalShortfall',
+    'conversion:sales_drop': 'kpi.salesDrop',
+    'conversion:conversion_rate_drop': 'kpi.conversionDrop',
+    'conversion:traffic_drop': 'kpi.trafficDrop',
+    'sponsoredAds:tacos_rising': 'kpi.tacos',
+    'sponsoredAds:top_seller_not_advertised': 'kpi.topSellerAds',
+    'conversion:rating_drop': 'kpi.ratingDrop',
+    'inventory:weeks_of_cover': 'kpi.weeksOfCover',
+    'inventory:listing_warnings': 'kpi.listingWarnings',
+    'account:invoice_defect_rate': 'kpi.invoiceDefect',
+    'inventory:low_inventory_fee_risk': 'kpi.lowInventoryFee',
+    'inventory:fba_fee_increase': 'kpi.fbaFeeIncrease'
 };
 
 /** @returns {string} the coverage key for a task */

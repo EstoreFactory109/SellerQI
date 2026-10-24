@@ -153,7 +153,20 @@ const EFFORT_MINUTES = {
     'inventory:removal_confirm_receipt': 5, // type in what arrived per order
     'sponsoredAds:ads_on_unbuyable': 3,     // pause the ad group: a couple of clicks
     'profitability:cogs_missing': 20,       // enter unit costs for the listed products
-    'account:ahr_early_warning': 30         // find what moved the score and fix it
+    'account:ahr_early_warning': 30,        // find what moved the score and fix it
+    // Wave 2
+    'conversion:sales_drop': 30,            // find the cause: price, Buy Box, reviews, ads
+    'conversion:conversion_rate_drop': 30,
+    'conversion:traffic_drop': 30,
+    'sponsoredAds:tacos_rising': 30,        // review campaigns that grew spend
+    'sponsoredAds:top_seller_not_advertised': 20, // set up an auto campaign
+    'conversion:rating_drop': 60,           // read reviews, fix the cause
+    'inventory:weeks_of_cover': 20,         // pause inbound, set a coupon
+    // Wave 3
+    'inventory:listing_warnings': 10,       // fix one flagged field
+    'account:invoice_defect_rate': 15,      // upload missing invoices
+    'inventory:low_inventory_fee_risk': 30, // create an FBA shipment
+    'inventory:fba_fee_increase': 20        // check dimensions, open a case
 };
 
 /**
@@ -225,6 +238,21 @@ const IMPACT_WEIGHT = {
     // At or above the client's account-risk floor (ACCOUNT_RISK_MIN_WEIGHT = 68),
     // so it shows as a risk, but below the sustained Amazon statuses.
     'account:ahr_early_warning': 70,
+    // Business invoices: a real Amazon metric, but only for Amazon Business sellers.
+    'account:invoice_defect_rate': 45,
+    // Wave 2: sales already falling, then the signals that explain or precede it.
+    'conversion:sales_drop': 64,
+    'conversion:conversion_rate_drop': 62,
+    'conversion:traffic_drop': 56,
+    'conversion:rating_drop': 50,
+    'sponsoredAds:tacos_rising': 44,
+    'inventory:weeks_of_cover': 42,
+    // Growth, not loss: below every loss above.
+    'sponsoredAds:top_seller_not_advertised': 33,
+    // Wave 3: fees being charged now, then warnings that can become blocks.
+    'inventory:fba_fee_increase': 57,
+    'inventory:low_inventory_fee_risk': 54,
+    'inventory:listing_warnings': 46,
 
     // Conversion drag.
     'conversion:insufficient_images': 55,

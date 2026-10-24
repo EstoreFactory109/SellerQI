@@ -1,7 +1,7 @@
 /**
  * kpiGate.js — which waves of tasks-logics.xlsx tasks run for ONE account.
  *
- *   KPI_TASKS_WAVE1=true
+ *   KPI_TASKS_WAVE1=true   (and KPI_TASKS_WAVE2, KPI_TASKS_WAVE3 — each wave its own switch)
  *   KPI_TASKS_USER_IDS=6a57b823571ceb9266953c30[,<more>]
  *
  * Off unless the wave's flag is exactly 'true'. The allowlist is shared by all
@@ -13,7 +13,7 @@
 
 const { gateFor } = require('../../../utils/asyncFinanceGate.js');
 
-const WAVES = Object.freeze([1]);
+const WAVES = Object.freeze([1, 2, 3]);
 
 /**
  * @param {number} wave

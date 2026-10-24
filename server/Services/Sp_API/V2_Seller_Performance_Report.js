@@ -101,6 +101,8 @@ const extractExtendedMetrics = (refinedData) => {
         validTrackingRate: rateDetail(metrics.validTrackingRate, 'shipmentCount'),
         onTimeDeliveryRate: rateDetail(metrics.onTimeDeliveryRate, 'shipmentCountWithValidTracking'),
         unitOnTimeDeliveryRate: rateDetail(metrics.unitOnTimeDeliveryRate, 'totalUnitCount'),
+        // Amazon Business invoices; absent for sellers Amazon Business does not apply to.
+        invoiceDefectRate: rateDetail(metrics.invoiceDefectRate, 'orderCount'),
     };
     const rateDetails = Object.fromEntries(Object.entries(details).filter(([, detail]) => detail));
 
@@ -127,6 +129,8 @@ const extractExtendedMetrics = (refinedData) => {
         onTimeDeliveryRatePct: details.onTimeDeliveryRate?.pct ?? null,
         unitOnTimeDeliveryRateStatus: details.unitOnTimeDeliveryRate?.status || '',
         unitOnTimeDeliveryRatePct: details.unitOnTimeDeliveryRate?.pct ?? null,
+        invoiceDefectRateStatus: details.invoiceDefectRate?.status || '',
+        invoiceDefectRatePct: details.invoiceDefectRate?.pct ?? null,
         // Target, condition and basis for each rate, keyed as above.
         rateDetails,
         chargebackCount: sumCounts('chargebacks'),

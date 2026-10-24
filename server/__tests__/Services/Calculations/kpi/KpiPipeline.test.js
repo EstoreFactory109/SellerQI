@@ -36,8 +36,9 @@ describe('kpiGate', () => {
     });
 
     it('knows no wave it has no detectors for', () => {
-        expect(kpiWaveEnabledFor(2, USER, { KPI_TASKS_WAVE2: 'true' })).toBe(false);
+        expect(kpiWaveEnabledFor(4, USER, { KPI_TASKS_WAVE4: 'true' })).toBe(false);
         expect(enabledKpiWaves(USER, { KPI_TASKS_WAVE1: 'true' })).toEqual([1]);
+        expect(enabledKpiWaves(USER, { KPI_TASKS_WAVE2: 'true', KPI_TASKS_WAVE3: 'true' })).toEqual([2, 3]);
     });
 });
 
@@ -201,6 +202,30 @@ describe('runKpiDetectors', () => {
         expect(runKpiDetectors(data, ctx).tasks.some(t => t.errorType === 'listing_suppressed')).toBe(false);
         data.KpiInputs.salesLookback = { A1: { sales: 40, unitsSold: 2 } };
         expect(runKpiDetectors(data, ctx).tasks.some(t => t.errorType === 'listing_suppressed')).toBe(true);
+    });
+
+    it('wave 2 alone adds only its own tasks and coverage, using wave 1\'s verdicts to skip', () => {
+        const data = baseData();
+        data.KpiInputs.waves = [2];
+        // A1 is out of stock (wave 1 verdict), so its sales drop belongs to that task.
+        data.KpiInputs.traffic = {
+            newestDate: daysAgo(2).slice(0, 10), recent14Days: 14, baselineDays: 60, recent7Days: 7, prior28Days: 28,
+            byAsin: { A1: { rs: 0, ru: 0, bs: 0, bu: 0, u7: 0, u28: 200 }, A2: { rs: 0, ru: 0, bs: 0, bu: 0, u7: 0, u28: 200 } }
+        };
+        const r = runKpiDetectors(data, { salesByAsin: { A1: { sales: 300, unitsSold: 30 } }, financeFresh: true, country: 'US', now: NOW });
+        expect(r.tasks.map(t => [t.asin, t.errorType])).toEqual([['A2', 'sales_drop']]);
+        expect(Object.keys(r.coverage)).not.toContain('kpi.outOfStock');
+        expect(r.coverage['kpi.salesDrop']).toBe(true);
+        expect(r.coverage['kpi.tacos']).toBe(false);
+    });
+
+    it('wave 3 alone reads listing warnings from the catalogue rows', () => {
+        const data = baseData({ TotalProducts: [{ asin: 'A1', sku: 'S1', status: 'Active', quantity: 5, listingIssues: [{ severity: 'WARNING', message: 'Add a color' }] }] });
+        data.KpiInputs.waves = [3];
+        const r = runKpiDetectors(data, { salesByAsin: {}, financeFresh: true, country: 'US', now: NOW });
+        expect(r.tasks.map(t => t.errorType)).toEqual(['listing_warnings']);
+        expect(r.coverage['kpi.listingWarnings']).toBe(true);
+        expect(r.coverage['kpi.fbaFeeIncrease']).toBe(false);
     });
 
     it('windowIsRecent allows a window whose last day ended within the last week', () => {

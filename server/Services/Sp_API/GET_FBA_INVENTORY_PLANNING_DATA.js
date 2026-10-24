@@ -216,6 +216,12 @@ async function _processFbaPlanningDocument(accessToken, reportDocumentId, baseur
                 return null;
             };
 
+            const rawOrNull = (value) => {
+                if (value === null || value === undefined) return null;
+                const trimmed = String(value).trim();
+                return trimmed === '' ? null : trimmed;
+            };
+
             // Skip items without ASIN
             const asin = item.asin || item.ASIN || item['asin'] || "";
             if (!asin) {
@@ -264,6 +270,30 @@ async function _processFbaPlanningDocument(accessToken, reportDocumentId, baseur
                     "unfulfillable_quantity",
                     "unfulfillableQuantity"
                 )),
+                // Low-inventory-level fee inputs (tasks-logics.xlsx). Amazon's column
+                // names are not publicly documented, so null (not "0") when the
+                // column is absent: the task must read "no data", not "0 days".
+                // The report's real headers are stored on the document (`headers`)
+                // to settle the names from the first live run.
+                historical_days_of_supply_short: rawOrNull(findField(item,
+                    "short-term-historical-days-of-supply",
+                    "short_term_historical_days_of_supply",
+                    "historical-days-of-supply-short-term"
+                )),
+                historical_days_of_supply_long: rawOrNull(findField(item,
+                    "long-term-historical-days-of-supply",
+                    "long_term_historical_days_of_supply",
+                    "historical-days-of-supply-long-term"
+                )),
+                historical_days_of_supply: rawOrNull(findField(item,
+                    "historical-days-of-supply",
+                    "historical_days_of_supply"
+                )),
+                low_inventory_level_fee_applied: rawOrNull(findField(item,
+                    "low-inventory-level-fee-applied",
+                    "low_inventory_level_fee_applied",
+                    "low-inventory-level-fee-applied-in-current-week"
+                )),
             });
         });
 
@@ -275,7 +305,9 @@ async function _processFbaPlanningDocument(accessToken, reportDocumentId, baseur
             User: userId,
             region: Region,
             country: Country,
-            data: result
+            data: result,
+            // What Amazon actually sent, so an unmapped column can be diagnosed from the data.
+            headers: Object.keys(refinedData[0] || {})
         })
         if (!createReport) {
             logger.error(new ApiError(500, "Internal server error in generating the report"));

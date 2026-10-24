@@ -36,7 +36,12 @@ const dataSchema = new mongoose.Schema({
     unfulfillable_quantity: {
         type: String,
         required: true
-    }
+    },
+    // Low-inventory-level fee inputs; null when the report has no such column.
+    historical_days_of_supply_short: { type: String, default: null },
+    historical_days_of_supply_long: { type: String, default: null },
+    historical_days_of_supply: { type: String, default: null },
+    low_inventory_level_fee_applied: { type: String, default: null }
 },{timestamps:true})
 
 // Define the schema
@@ -55,7 +60,9 @@ const GET_FBA_INVENTORY_PLANNING_DATA_Schema = new mongoose.Schema(
             type: String,
             require: true
         },
-        data:[dataSchema]
+        data:[dataSchema],
+        // The report's own column names, so a column we do not map yet can be found.
+        headers: { type: [String], default: [] }
     },
     { timestamps: true } // CreatedAt & UpdatedAt automatically managed
 );

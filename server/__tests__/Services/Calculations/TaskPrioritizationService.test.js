@@ -83,7 +83,18 @@ const ALL_TASK_TYPES = [
     ['inventory', 'removal_confirm_receipt'],
     ['sponsoredAds', 'ads_on_unbuyable'],
     ['profitability', 'cogs_missing'],
-    ['account', 'ahr_early_warning']
+    ['account', 'ahr_early_warning'],
+    ['conversion', 'sales_drop'],
+    ['conversion', 'conversion_rate_drop'],
+    ['conversion', 'traffic_drop'],
+    ['conversion', 'rating_drop'],
+    ['sponsoredAds', 'tacos_rising'],
+    ['sponsoredAds', 'top_seller_not_advertised'],
+    ['inventory', 'weeks_of_cover'],
+    ['inventory', 'listing_warnings'],
+    ['inventory', 'low_inventory_fee_risk'],
+    ['inventory', 'fba_fee_increase'],
+    ['account', 'invoice_defect_rate']
 ];
 
 describe('normalizeErrorType', () => {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Preview the tasks-logics.xlsx Wave 1 tasks against real accounts. READ-ONLY.
+ * Preview the tasks-logics.xlsx tasks (all waves) against real accounts. READ-ONLY.
  *
  * Runs Analyse + analyseData with `persistTasks: false` (writes nothing) and the
  * wave forced on inside THIS process only — the deployed flag is not touched.
@@ -24,6 +24,8 @@ require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 
 // Before anything that reads the gate is required: on for every account, here only.
 process.env.KPI_TASKS_WAVE1 = 'true';
+process.env.KPI_TASKS_WAVE2 = 'true';
+process.env.KPI_TASKS_WAVE3 = 'true';
 delete process.env.KPI_TASKS_USER_IDS;
 
 const dbConsts = require('../config/config.js');
@@ -74,14 +76,21 @@ const describeInputs = (inputs) => {
         `removals=${inputs.removals ? `${inputs.removals.lines.length} lines @${(inputs.removals.createdAt || '?').slice(0, 10)}` : 'none'}`,
         // Orders whose reimbursements matched by order id: 0 everywhere would mean the join never hits.
         `removalReimbursed=${inputs.removalReimbursements ? `${Object.keys(inputs.removalReimbursements).length} orders` : 'unread'}`,
-        `sales60=${inputs.salesLookback ? `${Object.keys(inputs.salesLookback).length} asins` : 'none'}`
+        `sales60=${inputs.salesLookback ? `${Object.keys(inputs.salesLookback).length} asins` : 'none'}`,
+        `traffic=${inputs.traffic ? `${Object.keys(inputs.traffic.byAsin).length} asins @${inputs.traffic.newestDate} base=${inputs.traffic.baselineDays}d` : 'none'}`,
+        `tacos=${inputs.tacos ? `@${inputs.tacos.newestDate}` : 'none'}`,
+        `reviews=${inputs.reviews ? `@${(inputs.reviews.newest.at || '').slice(0, 10)}${inputs.reviews.older ? ' +older' : ''}` : 'none'}`,
+        `restock=${inputs.restock ? inputs.restock.rows.length : 'none'}`,
+        `fbaFees=${inputs.fbaFees ? (inputs.fbaFees.previous ? '2 snapshots' : '1 snapshot') : 'none'}`,
+        `planningCols=${inputs.planning ? (inputs.planning.rows.some(r => r.short !== null || r.long !== null || r.feeApplied !== null) ? 'yes' : 'no') : 'none'}`,
+        `invoice=${inputs.invoice ? (Object.keys(inputs.invoice).length ? inputs.invoice.invoiceDefectRateStatus || 'blank' : 'not read yet') : 'none'}`
     ].join(' ');
 };
 
 async function main() {
     if (!MONGODB_URI) throw new Error('No Mongo URI configured');
     await mongoose.connect(MONGODB_URI);
-    console.log('KPI Wave 1 preview — READ ONLY (persistTasks:false, flag forced on in this process only)');
+    console.log('KPI preview (waves 1-3) — READ ONLY (persistTasks:false, flag forced on in this process only)');
 
     const tuples = await Seller.aggregate([
         { $unwind: '$sellerAccount' },

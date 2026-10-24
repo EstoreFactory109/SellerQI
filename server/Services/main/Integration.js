@@ -1693,7 +1693,18 @@ class Integration {
             if (b2bPricingData.length > 0) {
                 await this.updateSellerProductB2BPricing(userId, Country, Region, b2bPricingData);
             }
-            
+
+            // Amazon's issues on ACTIVE listings (GetListingItem already asks for them).
+            // They were fetched and dropped; only inactive SKUs kept theirs. Stored on the
+            // catalogue row like the inactive ones, so the listing-warnings task can read
+            // them. `issues` is left out on purpose: that field belongs to inactive SKUs.
+            const activeListingIssues = genericKeyWordArray
+                .filter(item => item && item.sku && Array.isArray(item.listingIssues))
+                .map(item => ({ sku: item.sku, listingIssues: item.listingIssues }));
+            if (activeListingIssues.length > 0) {
+                await this.updateSellerProductIssues(userId, Country, Region, activeListingIssues);
+            }
+
             logger.info("processListingItems ended");
         } catch (listingError) {
             logger.error("Error during listing items processing", {

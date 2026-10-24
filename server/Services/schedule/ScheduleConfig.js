@@ -67,6 +67,19 @@ const SUNDAY_FUNCTIONS = {
         apiDataKey: 'removalOrdersData',
         isDefaultExport: true
     },
+    // FBA fee estimates per SKU (size tier, dimensions, expected fulfilment fee), for the
+    // tasks-logics.xlsx "FBA fee increase or size tier change" task, which compares this
+    // week's snapshot with last week's. Weekly: fees and size tiers change rarely, and
+    // ProductWiseFBADataService keeps the last 3 batches, so that is 3 weeks of history.
+    // Its columns are copied as-is from the report, so no header mapping can drift.
+    'fbaFeeEstimatesData': {
+        service: require('../Sp_API/GetProductWiseFBAData.js'),
+        functionName: null, // Default export, use service directly
+        description: 'FBA Fee Estimates',
+        requiresAccessToken: true,
+        apiDataKey: 'fbaFeeEstimatesData',
+        isDefaultExport: true
+    },
     // ── The two AI views are NOT registered here, deliberately ──
     // Both derive from TaskItem, and tasks are refreshed by addNewAccountHistory,
     // which runs AFTER fetchScheduledApiData completes. A batch-5 service would
