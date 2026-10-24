@@ -80,6 +80,7 @@ const ALL_TASK_TYPES = [
     ['inventory', 'listing_suppressed'],
     ['inventory', 'out_of_stock'],
     ['inventory', 'removal_shortfall'],
+    ['inventory', 'removal_confirm_receipt'],
     ['sponsoredAds', 'ads_on_unbuyable'],
     ['profitability', 'cogs_missing'],
     ['account', 'ahr_early_warning']

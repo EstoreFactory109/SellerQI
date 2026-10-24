@@ -13,6 +13,7 @@
 
 const SuppressedListings = require('../../../models/products/SuppressedListingsModel.js');
 const RemovalOrders = require('../../../models/inventory/RemovalOrdersModel.js');
+const RemovalReceipt = require('../../../models/inventory/RemovalReceiptModel.js');
 const { getAsinFinanceForWindow } = require('../../Finance/AsinFinanceWindowService.js');
 const { getFBAReimbursementsData } = require('../../Finance/FBAReimbursementsService.js');
 const logger = require('../../../utils/Logger.js');
@@ -167,9 +168,26 @@ function buildRemovalReimbursements(reimbursementsDoc, removalOrderIds = new Set
 }
 
 /**
+ * The seller's answers to "what arrived from this removal order". null when they
+ * could not be read, so the removal rule is held rather than re-asking.
+ * @param {Array|null} docs - RemovalReceipt documents (lean)
+ */
+function buildRemovalReceipts(docs) {
+    if (!Array.isArray(docs)) return null;
+    return docs
+        .filter(d => d && d.orderId)
+        .map(d => ({
+            orderId: d.orderId,
+            sku: d.sku || '',
+            shippedQuantity: Number(d.shippedQuantity) || 0,
+            receivedQuantity: Number(d.receivedQuantity) || 0
+        }));
+}
+
+/**
  * Pure: raw documents -> KpiInputs.
  */
-function buildKpiInputs({ waves = [], fbaInventoryDetailData, cogsData, v2History, suppressedDoc, removalDoc, salesLookback, reimbursementsDoc }) {
+function buildKpiInputs({ waves = [], fbaInventoryDetailData, cogsData, v2History, suppressedDoc, removalDoc, salesLookback, reimbursementsDoc, receiptDocs }) {
     const removals = buildRemovals(removalDoc);
     const removalOrderIds = new Set((removals?.lines || []).map(line => String(line.orderId).trim()));
     return {
@@ -180,7 +198,8 @@ function buildKpiInputs({ waves = [], fbaInventoryDetailData, cogsData, v2Histor
         suppressed: buildSuppressed(suppressedDoc),
         removals,
         salesLookback: buildSalesLookback(salesLookback),
-        removalReimbursements: buildRemovalReimbursements(reimbursementsDoc, removalOrderIds)
+        removalReimbursements: buildRemovalReimbursements(reimbursementsDoc, removalOrderIds),
+        removalReceipts: buildRemovalReceipts(receiptDocs)
     };
 }
 
@@ -208,7 +227,7 @@ async function loadKpiInputs({ userId, country, region, waves, allData, now = ne
     const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
     const start = new Date(end.getTime() - (SUPPRESSED_SALES_LOOKBACK_DAYS - 1) * 24 * 60 * 60 * 1000);
 
-    const [suppressedDoc, removalDoc, salesLookback, reimbursementsDoc] = await Promise.all([
+    const [suppressedDoc, removalDoc, salesLookback, reimbursementsDoc, receiptDocs] = await Promise.all([
         latest(SuppressedListings, 'Suppressed listings'),
         latest(RemovalOrders, 'Removal orders'),
         Promise.resolve()
@@ -216,7 +235,10 @@ async function loadKpiInputs({ userId, country, region, waves, allData, now = ne
             .catch(unavailable('Sales lookback')),
         Promise.resolve()
             .then(() => getFBAReimbursementsData(userId, country, region))
-            .catch(unavailable('FBA reimbursements'))
+            .catch(unavailable('FBA reimbursements')),
+        Promise.resolve()
+            .then(() => RemovalReceipt.find({ User: userId, country, region }).lean())
+            .catch(unavailable('Removal receipts'))
     ]);
 
     return buildKpiInputs({
@@ -227,7 +249,8 @@ async function loadKpiInputs({ userId, country, region, waves, allData, now = ne
         suppressedDoc,
         removalDoc,
         salesLookback,
-        reimbursementsDoc
+        reimbursementsDoc,
+        receiptDocs
     });
 }
 
@@ -240,5 +263,6 @@ module.exports = {
     buildSuppressed,
     buildRemovals,
     buildSalesLookback,
-    buildRemovalReimbursements
+    buildRemovalReimbursements,
+    buildRemovalReceipts
 };

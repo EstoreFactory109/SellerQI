@@ -81,7 +81,8 @@ const SOURCE_BY_TYPE = {
     'sponsoredAds:ads_on_unbuyable': 'kpi.adsOnUnbuyable',
     'profitability:cogs_missing': 'kpi.cogsMissing',
     'account:ahr_early_warning': 'kpi.ahrEarlyWarning',
-    'inventory:removal_shortfall': 'kpi.removalShortfall'
+    'inventory:removal_shortfall': 'kpi.removalShortfall',
+    'inventory:removal_confirm_receipt': 'kpi.removalShortfall'
 };
 
 /** @returns {string} the coverage key for a task */

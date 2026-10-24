@@ -21,7 +21,9 @@ const KPI_SOURCES = Object.freeze({
     'sponsoredAds:ads_on_unbuyable': 'kpi.adsOnUnbuyable',
     'profitability:cogs_missing': 'kpi.cogsMissing',
     'account:ahr_early_warning': 'kpi.ahrEarlyWarning',
-    'inventory:removal_shortfall': 'kpi.removalShortfall'
+    'inventory:removal_shortfall': 'kpi.removalShortfall',
+    // Same input as the shortfall: the removal report plus the seller's answers.
+    'inventory:removal_confirm_receipt': 'kpi.removalShortfall'
 });
 
 const safely = (name, context, fn) => {
@@ -116,7 +118,8 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, country
         ahrHistory: inputs.ahrHistory, now
     }));
     const removals = safely('removal_shortfall', context, () => W1.detectRemovalShortfall({
-        removals: inputs.removals, reimbursements: inputs.removalReimbursements, products, productsByAsin, now
+        removals: inputs.removals, receipts: inputs.removalReceipts,
+        reimbursements: inputs.removalReimbursements, products, productsByAsin, now
     }));
 
     const tasks = [

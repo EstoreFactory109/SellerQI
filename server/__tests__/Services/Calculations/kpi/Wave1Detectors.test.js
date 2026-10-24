@@ -301,75 +301,78 @@ describe('detectAhrEarlyWarning', () => {
     });
 });
 
-describe('detectRemovalShortfall', () => {
+describe('detectRemovalShortfall (seller-confirmed receipts)', () => {
     const line = (over) => ({
-        orderId: 'R1', orderType: 'Return', orderStatus: 'Completed', lastUpdatedDate: daysAgo(10), sku: 'S1',
-        requestedQuantity: 10, shippedQuantity: 6, disposedQuantity: 0, cancelledQuantity: 1, inProcessQuantity: 0, ...over
+        orderId: 'R1', orderType: 'Return', orderStatus: 'Completed', lastUpdatedDate: daysAgo(10), requestDate: daysAgo(20), sku: 'S1',
+        requestedQuantity: 10, shippedQuantity: 10, disposedQuantity: 0, cancelledQuantity: 0, inProcessQuantity: 0, ...over
     });
     const removals = (lines, at = daysAgo(2)) => ({ createdAt: at, lines });
+    const receipt = (orderId, sku, receivedQuantity, shippedQuantity = 10) => ({ orderId, sku, receivedQuantity, shippedQuantity });
     const catalogue = [...products.values()];
+    const run = (over) => W1.detectRemovalShortfall({
+        removals: removals([line()]), receipts: [], products: catalogue, productsByAsin: products, now: NOW, ...over
+    });
 
-    it('flags a completed order with units unaccounted for', () => {
-        const r = W1.detectRemovalShortfall({ removals: removals([line()]), products: catalogue, productsByAsin: products, now: NOW });
+    it('asks the seller to confirm what arrived, one task for all open orders', () => {
+        const r = run({ removals: removals([line(), line({ sku: 'S2', shippedQuantity: 4 }), line({ orderId: 'R2' })]) });
+        expect(r.covered).toBe(true);
+        expect(r.tasks).toHaveLength(1);
+        expect(r.tasks[0]).toMatchObject({ asin: 'REMOVALS', errorCategory: 'inventory', errorType: 'removal_confirm_receipt' });
+        expect(r.tasks[0].error).toContain('Amazon says it shipped 24 units back to you on 2 removal orders in the last 60 days');
+        expect(r.tasks[0].renderData).toEqual({ orders: 2, lines: 3, units: 24 });
+    });
+
+    it('only asks about stock that actually came back to the seller', () => {
+        const r = run({ removals: removals([
+            line({ orderType: 'Disposal' }),
+            line({ orderType: 'Liquidations' }),
+            line({ orderStatus: 'Pending' }),
+            line({ orderStatus: 'Cancelled' }),
+            line({ shippedQuantity: 0 }),
+            line({ lastUpdatedDate: daysAgo(61) })
+        ]) });
+        expect(r).toEqual({ tasks: [], covered: true });
+    });
+
+    it('treats Delivered like Completed', () => {
+        expect(run({ removals: removals([line({ orderStatus: 'Delivered' })]) }).tasks[0].errorType).toBe('removal_confirm_receipt');
+    });
+
+    it('stops asking once the seller answered, and raises nothing when everything arrived', () => {
+        expect(run({ receipts: [receipt('R1', 'S1', 10)] })).toEqual({ tasks: [], covered: true });
+    });
+
+    it('raises a claim when fewer units arrived than Amazon shipped', () => {
+        const r = run({ receipts: [receipt('R1', 'S1', 7)] });
         expect(r.tasks).toHaveLength(1);
         expect(r.tasks[0]).toMatchObject({ asin: 'A1', productName: 'Garlic Press', errorType: 'removal_shortfall' });
-        expect(r.tasks[0].error).toBe('Removal Order Shortfall: Removal order R1 was completed with 3 units not accounted for (requested 10, shipped 6, disposed 0, cancelled 1).');
-    });
-
-    it('ignores open orders, full orders and orders outside 60 days', () => {
-        const r = W1.detectRemovalShortfall({
-            removals: removals([
-                line({ orderStatus: 'Pending' }),
-                line({ orderId: 'R2', shippedQuantity: 9 }),
-                line({ orderId: 'R3', lastUpdatedDate: daysAgo(61) })
-            ]),
-            products: catalogue, productsByAsin: products, now: NOW
-        });
-        expect(r.tasks).toEqual([]);
-        expect(r.covered).toBe(true);
-    });
-
-    it('subtracts units Amazon already reimbursed against the order', () => {
-        const r = W1.detectRemovalShortfall({
-            removals: removals([line()]), reimbursements: { R1: { S1: 2 } },
-            products: catalogue, productsByAsin: products, now: NOW
-        });
-        expect(r.tasks[0].renderData.units).toBe(1);
-        expect(r.tasks[0].error).toContain('with 1 unit not accounted for');
-        expect(r.tasks[0].error).toContain('already reimbursed 2');
-    });
-
-    it('raises nothing once the reimbursement covers the shortfall, using SKU-less rows too', () => {
-        const r = W1.detectRemovalShortfall({
-            removals: removals([line()]), reimbursements: { R1: { S1: 1, '': 5 } },
-            products: catalogue, productsByAsin: products, now: NOW
-        });
-        expect(r.tasks).toEqual([]);
-    });
-
-    it('spends one order\'s reimbursed units only once across its lines', () => {
-        const r = W1.detectRemovalShortfall({
-            removals: removals([line(), line({ sku: 'S2' })]), reimbursements: { R1: { '': 3 } },
-            products: catalogue, productsByAsin: products, now: NOW
-        });
-        // 3 short on each line; the 3 reimbursed units clear the first line only.
-        expect(r.tasks.map(t => [t.asin, t.renderData.units])).toEqual([['A2', 3]]);
-    });
-
-    it('ignores reimbursements for other orders', () => {
-        const r = W1.detectRemovalShortfall({
-            removals: removals([line()]), reimbursements: { R9: { S1: 10 } },
-            products: catalogue, productsByAsin: products, now: NOW
-        });
+        expect(r.tasks[0].error).toBe('Removal Order Shortfall: You received 7 of the 10 units Amazon shipped back to you on removal order R1, so 3 units are still missing.');
         expect(r.tasks[0].renderData.units).toBe(3);
     });
 
+    it('subtracts units Amazon already reimbursed, and spends them once across lines', () => {
+        const one = run({ receipts: [receipt('R1', 'S1', 7)], reimbursements: { R1: { S1: 2 } } });
+        expect(one.tasks[0].error).toContain('and Amazon has reimbursed 2, so 1 unit is still missing');
+        const two = run({
+            removals: removals([line(), line({ sku: 'S2' })]),
+            receipts: [receipt('R1', 'S1', 7), receipt('R1', 'S2', 7)],
+            reimbursements: { R1: { '': 3 } }
+        });
+        expect(two.tasks.map(t => [t.asin, t.renderData.units])).toEqual([['A2', 3]]);
+    });
+
+    it('no claim once the order is outside the 60-day window', () => {
+        const r = run({ removals: removals([line({ lastUpdatedDate: daysAgo(61) })]), receipts: [receipt('R1', 'S1', 2)] });
+        expect(r.tasks).toEqual([]);
+    });
+
     it('keys an unknown SKU by the SKU, not a made-up ASIN', () => {
-        const r = W1.detectRemovalShortfall({ removals: removals([line({ sku: 'GONE-1' })]), products: catalogue, now: NOW });
+        const r = run({ removals: removals([line({ sku: 'GONE-1' })]), receipts: [receipt('R1', 'GONE-1', 0)] });
         expect(r.tasks[0]).toMatchObject({ asin: 'SKU:GONE-1', productName: 'SKU GONE-1' });
     });
 
-    it('is not covered when the weekly report is older than 10 days', () => {
-        expect(W1.detectRemovalShortfall({ removals: removals([], daysAgo(11)), now: NOW }).covered).toBe(false);
+    it('is not covered when the report is old or the answers could not be read', () => {
+        expect(run({ removals: removals([], daysAgo(11)) }).covered).toBe(false);
+        expect(run({ receipts: null }).covered).toBe(false);
     });
 });

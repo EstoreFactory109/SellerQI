@@ -5,6 +5,7 @@
  */
 jest.mock('../../../../models/products/SuppressedListingsModel.js', () => ({ findOne: jest.fn() }));
 jest.mock('../../../../models/inventory/RemovalOrdersModel.js', () => ({ findOne: jest.fn() }));
+jest.mock('../../../../models/inventory/RemovalReceiptModel.js', () => ({ find: jest.fn() }));
 jest.mock('../../../../Services/Finance/AsinFinanceWindowService.js', () => ({ getAsinFinanceForWindow: jest.fn() }));
 jest.mock('../../../../Services/Finance/FBAReimbursementsService.js', () => ({ getFBAReimbursementsData: jest.fn() }));
 
@@ -113,6 +114,8 @@ describe('KpiInputs', () => {
         Removals.findOne.mockReturnValue(chain(Promise.reject(new Error('boom'))));
         getAsinFinanceForWindow.mockResolvedValue({ A1: { sales: 50, unitsSold: 2 } });
         getFBAReimbursementsData.mockRejectedValue(new Error('down'));
+        const RemovalReceipt = require('../../../../models/inventory/RemovalReceiptModel.js');
+        RemovalReceipt.find.mockReturnValue({ lean: () => Promise.resolve([{ orderId: 'R1', sku: 'S1', shippedQuantity: 10, receivedQuantity: 7 }]) });
 
         const inputs = await KpiInputs.loadKpiInputs({ userId: USER, country: 'US', region: 'NA', waves: [1], allData: {}, now: NOW });
         expect(inputs.waves).toEqual([1]);
@@ -120,6 +123,7 @@ describe('KpiInputs', () => {
         expect(inputs.removals).toBeNull();
         expect(inputs.salesLookback).toEqual({ A1: { sales: 50, unitsSold: 2 } });
         expect(inputs.removalReimbursements).toBeNull();
+        expect(inputs.removalReceipts).toEqual([{ orderId: 'R1', sku: 'S1', shippedQuantity: 10, receivedQuantity: 7 }]);
         // 60 days ending yesterday (UTC).
         const [, , , start, end] = getAsinFinanceForWindow.mock.calls[0];
         expect(end.toISOString().slice(0, 10)).toBe('2026-10-23');
@@ -140,7 +144,8 @@ describe('runKpiDetectors', () => {
             cogsAsins: [],
             ahrHistory: [{ at: daysAgo(0), score: 700 }],
             suppressed: { createdAt: daysAgo(0), items: [] },
-            removals: { createdAt: daysAgo(1), lines: [] }
+            removals: { createdAt: daysAgo(1), lines: [] },
+            removalReceipts: []
         },
         ...over
     });

@@ -57,6 +57,7 @@ const updateProductContentTestRoute=require('../routes/updateProductContentTest.
 const updateProductContentRoute=require('../routes/updateProductContent.routes.js')
 const sixMonthUserMaintenanceTestRoute=require('../routes/sixMonthUserMaintenanceTest.routes.js')
 const cogsRoute=require('../routes/cogs.routes.js')
+const removalReceiptsRoute=require('../routes/removalReceipts.routes.js')
 const expensesRoute=require('../routes/expenses.routes.js')
 const fbaInventoryRoute=require('../routes/fbaInventory.routes.js')
 const asinWiseSalesRoute=require('../routes/asinWiseSales.routes.js')
@@ -217,6 +218,7 @@ if (testRoutesEnabled) {
 }
 app.use('/api/listings',updateProductContentRoute)
 app.use('/api/cogs',cogsRoute)
+app.use('/api/removal-receipts',removalReceiptsRoute)
 app.use('/api/expenses',expensesRoute)
 app.use('/api/fba-inventory',fbaInventoryRoute)
 app.use('/api/asin-wise-sales',asinWiseSalesRoute)

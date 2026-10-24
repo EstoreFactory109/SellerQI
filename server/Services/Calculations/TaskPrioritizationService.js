@@ -149,7 +149,8 @@ const EFFORT_MINUTES = {
     // ── tasks-logics.xlsx detectors (kpi/) ──
     'inventory:listing_suppressed': 15,     // fix the flagged field or upload a document
     'inventory:out_of_stock': 30,           // create and send an FBA shipment
-    'inventory:removal_shortfall': 20,      // check what arrived, open a case
+    'inventory:removal_shortfall': 20,      // open a case with the order and what arrived
+    'inventory:removal_confirm_receipt': 5, // type in what arrived per order
     'sponsoredAds:ads_on_unbuyable': 3,     // pause the ad group: a couple of clicks
     'profitability:cogs_missing': 20,       // enter unit costs for the listed products
     'account:ahr_early_warning': 30         // find what moved the score and fix it
@@ -217,6 +218,8 @@ const IMPACT_WEIGHT = {
     'inventory:out_of_stock': 74,
     'sponsoredAds:ads_on_unbuyable': 66,
     'inventory:removal_shortfall': 48,
+    // Not a loss yet, only the question that finds one: below the claim itself.
+    'inventory:removal_confirm_receipt': 30,
     // Without unit costs no profit figure is real: below money already being lost.
     'profitability:cogs_missing': 40,
     // At or above the client's account-risk floor (ACCOUNT_RISK_MIN_WEIGHT = 68),

@@ -157,7 +157,11 @@ const GROUP_COPY = {
     },
     'inventory:removal_shortfall': {
         title: 'Removal orders that came back short',
-        action: 'Check what arrived and claim the missing units from Amazon'
+        action: 'Claim the missing units from Amazon before the window closes'
+    },
+    'inventory:removal_confirm_receipt': {
+        title: 'Removal orders waiting for you to confirm what arrived',
+        action: 'Enter the units you received so missing ones can be claimed'
     },
 
     // ── Conversion ──

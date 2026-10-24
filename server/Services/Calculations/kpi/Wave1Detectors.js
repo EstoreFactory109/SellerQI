@@ -20,6 +20,7 @@
 
 const { rowDay, shiftDay, newestRowDay, isAdsDataStale } = require('../AdsSignals.js');
 const R = require('./KpiRules.js');
+const { receiptKey, isReturnShippedLine, receiptsByKey, linesAwaitingConfirmation } = require('./RemovalReceipts.js');
 
 const PENDING = 'pending';
 
@@ -347,15 +348,43 @@ function detectAhrEarlyWarning({ ahrHistory, now }) {
 
 /**
  * Potential reimbursement: removal order shortfall.
- * Spreadsheet: shipped quantity below requested with no cancellation or
- * reimbursement, within about 60 days. Here: a completed line whose shipped +
- * disposed + cancelled units fall short of what was requested, less any units
- * Amazon already reimbursed against that order (`reimbursements`, keyed order id
- * then SKU, '' for rows without one).
+ * Spreadsheet: part of a removal order did not arrive back; "Client action to
+ * confirm what was received". Amazon's report cannot show this — units lost by
+ * the carrier still count as shipped, and on 24 Oct 2026 none of 8,913 removal
+ * lines was short — so the seller is asked:
+ *
+ *   inventory:removal_confirm_receipt  one task per marketplace while any Return
+ *                                      order line shipped back in the claim window
+ *                                      has no answer yet (kpi/RemovalReceipts.js)
+ *   inventory:removal_shortfall        per product, where the seller received fewer
+ *                                      units than Amazon shipped, less any units
+ *                                      Amazon already reimbursed against the order
+ *                                      (`reimbursements`, keyed order id then SKU)
+ *
+ * `receipts` are the seller's answers (RemovalReceipt documents); null when they
+ * could not be read, which leaves the whole rule uncovered.
  */
-function detectRemovalShortfall({ removals, reimbursements = null, products = [], productsByAsin = new Map(), now }) {
-    if (!removals || ageDays(removals.createdAt, now) > R.REMOVAL_REPORT_MAX_AGE_DAYS) {
+function detectRemovalShortfall({ removals, receipts = null, reimbursements = null, products = [], productsByAsin = new Map(), now }) {
+    if (!removals || ageDays(removals.createdAt, now) > R.REMOVAL_REPORT_MAX_AGE_DAYS || !Array.isArray(receipts)) {
         return { tasks: [], covered: false };
+    }
+    const confirmed = receiptsByKey(receipts);
+    const tasks = [];
+
+    const awaiting = linesAwaitingConfirmation(removals.lines, confirmed, now);
+    if (awaiting.length > 0) {
+        const orders = unique(awaiting.map(l => l.orderId));
+        const units = awaiting.reduce((sum, l) => sum + l.shippedQuantity, 0);
+        tasks.push({
+            asin: 'REMOVALS',
+            productName: 'Removal orders',
+            errorCategory: 'inventory',
+            errorType: 'removal_confirm_receipt',
+            error: `Removal Orders | Confirm What Arrived: Amazon says it shipped ${units} ${units === 1 ? 'unit' : 'units'} back to you on ${orders.length} removal ${orders.length === 1 ? 'order' : 'orders'} in the last ${R.REMOVAL_CLAIM_WINDOW_DAYS} days. Amazon's report cannot show units lost on the way, so tell us how many actually arrived.`,
+            solution: `Click "Confirm what arrived" and enter the units you received for each order. If any are missing, a task to claim them from Amazon will appear here, inside the ${R.REMOVAL_CLAIM_WINDOW_DAYS}-day claim window.`,
+            renderData: { orders: orders.length, lines: awaiting.length, units },
+            status: PENDING
+        });
     }
 
     const asinBySku = new Map();
@@ -378,17 +407,18 @@ function detectRemovalShortfall({ removals, reimbursements = null, products = []
         return taken;
     };
 
-    const since = now.getTime() - R.REMOVAL_CLAIM_WINDOW_DAYS * R.DAY_MS;
     const byEntity = new Map();
     for (const line of removals.lines || []) {
-        if (!/^completed$/i.test(String(line.orderStatus || '').trim())) continue;
-        const short = line.requestedQuantity - line.shippedQuantity - line.disposedQuantity - line.cancelledQuantity;
+        // Only answered lines still inside the claim window can become a claim.
+        if (!isReturnShippedLine(line, now)) continue;
+        const receipt = confirmed.get(receiptKey(line.orderId, line.sku));
+        if (!receipt) continue;
+        const received = Math.max(0, Number(receipt.receivedQuantity) || 0);
+        const short = line.shippedQuantity - received;
         if (short <= 0) continue;
         const reimbursed = takeReimbursed(line.orderId, line.sku, short);
         const missing = short - reimbursed;
         if (missing <= 0) continue;
-        const updated = Date.parse(line.lastUpdatedDate || line.requestDate || '');
-        if (!Number.isFinite(updated) || updated < since) continue;
 
         const asin = asinBySku.get(line.sku) || null;
         // The task's identity: the ASIN when the SKU is in the catalogue, else the SKU.
@@ -397,32 +427,28 @@ function detectRemovalShortfall({ removals, reimbursements = null, products = []
         entry.units += missing;
         entry.orders.push({
             orderId: line.orderId,
-            orderType: line.orderType,
             sku: line.sku,
-            requested: line.requestedQuantity,
             shipped: line.shippedQuantity,
-            disposed: line.disposedQuantity,
-            cancelled: line.cancelledQuantity,
+            received,
             reimbursed,
             missing
         });
         byEntity.set(key, entry);
     }
 
-    const tasks = [];
     for (const [key, entry] of byEntity) {
         const ids = unique(entry.orders.map(o => o.orderId));
         const o = entry.orders[0];
-        const detail = entry.orders.length === 1
-            ? ` (requested ${o.requested}, shipped ${o.shipped}, disposed ${o.disposed}, cancelled ${o.cancelled}${o.reimbursed ? `, already reimbursed ${o.reimbursed}` : ''})`
-            : '';
+        const headline = entry.orders.length === 1
+            ? `You received ${o.received} of the ${o.shipped} units Amazon shipped back to you on removal order ${o.orderId}${o.reimbursed ? `, and Amazon has reimbursed ${o.reimbursed}` : ''}, so ${o.missing} ${o.missing === 1 ? 'unit is' : 'units are'} still missing.`
+            : `${entry.units} units Amazon shipped back to you on removal orders ${ids.join(', ')} did not arrive and have not been reimbursed.`;
         tasks.push({
             asin: key,
             productName: entry.asin ? productNameOf(productsByAsin, entry.asin) : `SKU ${entry.sku}`.substring(0, 100),
             errorCategory: 'inventory',
             errorType: 'removal_shortfall',
-            error: `Removal Order Shortfall: ${ids.length === 1 ? `Removal order ${ids[0]} was` : `Removal orders ${ids.join(', ')} were`} completed with ${entry.units} ${entry.units === 1 ? 'unit' : 'units'} not accounted for${detail}.`,
-            solution: 'Check what you actually received from this removal. If units are missing, open a case with Seller Support under FBA inventory > removal orders and ask Amazon to reimburse them, before the claim window (about 60 days) closes.',
+            error: `Removal Order Shortfall: ${headline}`,
+            solution: `Open a case with Seller Support (Fulfillment by Amazon > Removal orders) with the order ID, the units you received and any delivery photos, and ask Amazon to reimburse the missing units. Claims are accepted for about ${R.REMOVAL_CLAIM_WINDOW_DAYS} days after the order.`,
             renderData: { units: entry.units, orders: entry.orders.slice(0, 20), sku: entry.sku },
             status: PENDING
         });
