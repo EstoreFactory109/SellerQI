@@ -34,6 +34,8 @@ export const ACCOUNT_RISK_LABELS = {
   NCX: 'Negative Customer Experience',
   a_z_claims: 'A-to-Z Claims',
   responseUnder24HoursCount: 'Response Time',
+  // tasks-logics.xlsx wave 1 (server kpi/Wave1Detectors.detectAhrEarlyWarning)
+  ahr_early_warning: 'Falling Account Health Rating',
 };
 
 const money = (n) => (Number.isFinite(Number(n)) ? Number(n) : 0);

@@ -27,6 +27,7 @@ import {
 import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitcher.jsx'
 import FixItPackagesModal from '../../Components/Tasks/FixItPackagesModal.jsx';
 import FixItUrgencyCard from '../../Components/Tasks/FixItUrgencyCard.jsx';
+import RemovalReceiptModal from '../../Components/Tasks/RemovalReceiptModal.jsx';
 import { openTasksOf, summarizeUrgency } from '../../utils/taskUrgency.js';
 import { trackEvent } from '../../utils/analytics.js';
 
@@ -209,6 +210,8 @@ export default function Tasks() {
   const dispatch = useDispatch();
   const [searchQuery, setSearchQuery] = useState('');
   const [showFixIt, setShowFixIt] = useState(false);
+  // The removal_confirm_receipt task whose "Confirm what arrived" form is open.
+  const [receiptTaskId, setReceiptTaskId] = useState(null);
   // Deep-link support: the Dashboard's "Top things to fix" links here with
   // ?category=&type= so a seller lands on the individual rows that make up the
   // figure they just clicked, instead of the unfiltered list.
@@ -928,6 +931,16 @@ export default function Tasks() {
                           <span style={{ color: COLORS.textMuted }}>How to fix — </span>
                           <FormattedHowToSolve text={item.howToSolve} />
                         </div>
+                        {item.errorType === 'removal_confirm_receipt' && !completedTasks.has(item.taskId) && (
+                          <button
+                            type="button"
+                            onClick={() => { setReceiptTaskId(item.taskId); trackEvent('removal_receipts_open'); }}
+                            className="mt-2.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold"
+                            style={{ background: COLORS.accent, color: '#061021' }}
+                          >
+                            Confirm what arrived
+                          </button>
+                        )}
                         {groupId !== BUCKET.EVERYTHING_ELSE && getGroupContext(item) && (
                           <div className="text-[11px] mt-1.5" style={{ color: COLORS.textMuted }}>
                             {getGroupContext(item)}
@@ -1037,6 +1050,17 @@ export default function Tasks() {
         onClose={() => setShowFixIt(false)}
         openTasks={openTasks}
         currency={currency}
+      />
+
+      <RemovalReceiptModal
+        open={!!receiptTaskId}
+        onClose={() => setReceiptTaskId(null)}
+        // Answered: the ask is done. Any shortfall comes back as its own claim task.
+        onConfirmed={() => {
+          if (receiptTaskId && !completedTasks.has(receiptTaskId)) {
+            dispatch(updateTaskStatus({ taskId: receiptTaskId, status: 'completed' }));
+          }
+        }}
       />
     </div>
   );
