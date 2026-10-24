@@ -20,10 +20,12 @@ const GET_V2_SELLER_PERFORMANCE_REPORT_Schema = new mongoose.Schema(
         required:false,
         default: ""
     },
+    // A report without a score must read as "no data". A default of 0 was scored
+    // as 30% "Unhealthy" on the dashboard.
     ahrScore:{
         type:Number,
         required:false,
-        default: 0
+        default: null
     },
     accountStatuses:{
         type:String,

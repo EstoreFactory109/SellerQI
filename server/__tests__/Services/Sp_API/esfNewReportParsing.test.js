@@ -69,6 +69,16 @@ describe('V2 performance: the rest of the report', () => {
         });
     });
 
+    it('stores a missing ahrScore as null, so it reads as "no data" rather than a score of 0', () => {
+        const report = v2Report({ accountHealthRating: { ahrStatus: 'GREAT' } });
+        expect(buildSnapshot(report).ahrScore).toBeNull();
+    });
+
+    it('stores the V2 model default for ahrScore as null', () => {
+        const Model = jest.requireActual('../../../models/seller-performance/V2_Seller_Performance_ReportModel.js');
+        expect(new Model({}).ahrScore).toBeNull();
+    });
+
     it('still refuses a report missing the original fields, which is what keeps a malformed one out', () => {
         const report = v2Report();
         delete report.performanceMetrics[0].lateShipmentRate;
