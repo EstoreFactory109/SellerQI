@@ -99,6 +99,12 @@ const GET_V1_SELLER_PERFORMANCE_REPORT_Schema = new mongoose.Schema(
     type:String,
     default:""
    },
+   // Buyer messages left unanswered past 24 hours (noResponseForContactsOlderThan24Hours).
+   // null when the report does not carry the field: no task is raised on a guess.
+   noResponseOver24HoursCount:{
+    type:Number,
+    default:null
+   },
 
   },
   { timestamps: true } // CreatedAt & UpdatedAt automatically managed

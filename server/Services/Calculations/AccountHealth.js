@@ -230,11 +230,15 @@ const checkAccountHealth=(v2Data,v1Data,v2History=null)=>{
         result.a_z_claims={}
     }
     
-    if(Number(v1Data?.responseUnder24HoursCount || 0)!=0){
+    // Judged on buyer messages left unanswered past 24 hours. It used to fire on
+    // `responseUnder24HoursCount`, the count of replies made IN time. The result key
+    // keeps its old name so stored tasks, weights and labels stay attached to it.
+    const unanswered = Number(v1Data?.noResponseOver24HoursCount);
+    if(Number.isFinite(unanswered) && unanswered > 0){
         errorCounter++;
         result.responseUnder24HoursCount={
             status:"Error",
-            Message:"Some customer messages have not been responded to within 24 hours. Delayed responses can negatively impact your seller metrics, customer satisfaction, and account health.",
+            Message:`${unanswered} buyer ${unanswered === 1 ? 'message has' : 'messages have'} waited more than 24 hours for a reply. Delayed responses can negatively impact your seller metrics, customer satisfaction, and account health.`,
             HowTOSolve:"Ensure that all customer inquiries are responded to within 24 hours, including weekends and holidays. Use Amazon’s Buyer-Seller Messaging Service to track and manage messages efficiently. Set up automated responses acknowledging inquiries and follow up with a detailed reply as soon as possible. If needed, consider using a virtual assistant or customer support software to handle messages faster."
         }
     }else{
