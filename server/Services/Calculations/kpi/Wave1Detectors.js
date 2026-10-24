@@ -220,7 +220,7 @@ function detectAdsOnUnbuyable({ adsRows, unbuyable, buyBoxRows, unbuyableCovered
  * Cost of goods missing. One account-level task.
  * Spreadsheet: SKUs with sales but no COGS on file.
  */
-function detectCogsMissing({ cogsAsins, salesByAsin = {}, financeFresh, windowDays, productsByAsin = new Map() }) {
+function detectCogsMissing({ cogsAsins, salesByAsin = {}, financeFresh, windowText = 'in the last 30 days', productsByAsin = new Map() }) {
     if (!Array.isArray(cogsAsins) || !financeFresh) return { tasks: [], covered: false };
 
     const withCost = new Set(cogsAsins);
@@ -230,7 +230,6 @@ function detectCogsMissing({ cogsAsins, salesByAsin = {}, financeFresh, windowDa
         .map(([asin]) => asin);
     if (missing.length === 0) return { tasks: [], covered: true };
 
-    const days = windowDays > 0 ? windowDays : 30;
     const named = missing.slice(0, 5).map(asin => {
         const name = productNameOf(productsByAsin, asin, '');
         return name && name !== asin ? `${asin} (${name.substring(0, 40)})` : asin;
@@ -241,7 +240,7 @@ function detectCogsMissing({ cogsAsins, salesByAsin = {}, financeFresh, windowDa
             productName: 'Product costs',
             errorCategory: 'profitability',
             errorType: 'cogs_missing',
-            error: `Profitability | Cost of Goods Missing: ${missing.length} ${missing.length === 1 ? 'product that sold' : 'products that sold'} in the last ${days} days ${missing.length === 1 ? 'has' : 'have'} no product cost on file, so ${missing.length === 1 ? 'its' : 'their'} true profit cannot be worked out.`,
+            error: `Profitability | Cost of Goods Missing: ${missing.length} ${missing.length === 1 ? 'product that sold' : 'products that sold'} ${windowText} ${missing.length === 1 ? 'has' : 'have'} no product cost on file, so ${missing.length === 1 ? 'its' : 'their'} true profit cannot be worked out.`,
             solution: `Enter the cost per unit on the Profitability page (Cost of goods). Start with your best sellers: ${named.join(', ')}.`,
             amount: 0,
             renderData: { count: missing.length, asins: missing.slice(0, 50) },

@@ -17,6 +17,13 @@ const SUPPRESSED_REPORT_MAX_AGE_DAYS = 7;
 // Spreadsheet: P1 when the ASIN is in the top 20% of account revenue. Internal.
 const TOP_REVENUE_SHARE = 0.2;
 
+// ── Sales window ──
+// Per-ASIN sales cover the dashboard window, which ends where the account's last
+// completed data run ended — weeks back on an account whose pipeline stopped
+// (seen: a window ending 1 Sep read on 24 Oct, finance still called fresh). Rules
+// that need "sold recently" only run when the window ends within this many days. Internal.
+const SALES_WINDOW_MAX_AGE_DAYS = 7;
+
 // ── Out of stock ──
 // FBA Inventory API rows are refreshed daily (INIT phase); older rows cannot
 // say the shelf is empty today. Internal.
@@ -47,6 +54,7 @@ module.exports = {
     DAY_MS,
     SUPPRESSED_SALES_LOOKBACK_DAYS,
     SUPPRESSED_REPORT_MAX_AGE_DAYS,
+    SALES_WINDOW_MAX_AGE_DAYS,
     TOP_REVENUE_SHARE,
     FBA_STOCK_MAX_AGE_DAYS,
     ADS_UNBUYABLE_BUYBOX_PCT,

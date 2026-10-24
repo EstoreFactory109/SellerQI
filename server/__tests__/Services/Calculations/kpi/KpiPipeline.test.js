@@ -10,7 +10,7 @@ jest.mock('../../../../Services/Finance/FBAReimbursementsService.js', () => ({ g
 
 const { kpiWaveEnabledFor, enabledKpiWaves } = require('../../../../Services/Calculations/kpi/kpiGate.js');
 const KpiInputs = require('../../../../Services/Calculations/kpi/KpiInputs.js');
-const { runKpiDetectors, windowDaysOf, KPI_SOURCES } = require('../../../../Services/Calculations/kpi/index.js');
+const { runKpiDetectors, windowDaysOf, windowIsRecent, KPI_SOURCES } = require('../../../../Services/Calculations/kpi/index.js');
 const { coverageSourceFor } = require('../../../../Services/Calculations/TaskReconcilePlanner.js');
 
 const USER = '6a57b823571ceb9266953c30';
@@ -173,6 +173,37 @@ describe('runKpiDetectors', () => {
         const r = runKpiDetectors(data, { salesByAsin: {}, financeFresh: true, country: 'US', now: NOW });
         expect(r.coverage['kpi.removalShortfall']).toBe(false);
         expect(r.coverage['kpi.suppressed']).toBe(true);
+    });
+
+    // Seen in production: a stalled account's window was 3 Aug - 1 Sep, read on 24 Oct,
+    // with finance still "fresh" because it had rows for that window.
+    it('does not call an old window "recent": out of stock held, COGS text names the dates', () => {
+        const data = baseData({ startDate: '2026-08-03', endDate: '2026-09-01' });
+        const r = runKpiDetectors(data, {
+            salesByAsin: { A1: { sales: 300, unitsSold: 30 } }, financeFresh: true, country: 'US', now: NOW
+        });
+        expect(r.coverage['kpi.outOfStock']).toBe(false);
+        expect(r.coverage['kpi.adsOnUnbuyable']).toBe(false);
+        expect(r.tasks.map(t => t.errorType)).toEqual(['cogs_missing']);
+        expect(r.tasks[0].error).toContain('sold between Aug 3 and Sep 1 has no product cost');
+    });
+
+    it('an old window cannot qualify a suppressed listing, the 60-day lookback still can', () => {
+        const data = baseData({ startDate: '2026-08-03', endDate: '2026-09-01' });
+        data.KpiInputs.stock = null;
+        data.KpiInputs.suppressed = { createdAt: daysAgo(0), items: [{ sku: 'S1', asin: 'A1', status: 'Blocked', reason: 'x' }] };
+        const ctx = { salesByAsin: { A1: { sales: 300, unitsSold: 30 } }, financeFresh: true, country: 'US', now: NOW };
+        expect(runKpiDetectors(data, ctx).tasks.some(t => t.errorType === 'listing_suppressed')).toBe(false);
+        data.KpiInputs.salesLookback = { A1: { sales: 40, unitsSold: 2 } };
+        expect(runKpiDetectors(data, ctx).tasks.some(t => t.errorType === 'listing_suppressed')).toBe(true);
+    });
+
+    it('windowIsRecent allows a window whose last day ended within the last week', () => {
+        // NOW is Oct 24 12:00 UTC; a window "ends" at the end of its last day.
+        expect(windowIsRecent('2026-10-23', NOW)).toBe(true);
+        expect(windowIsRecent('2026-10-17', NOW)).toBe(true);   // ended 6.5 days ago
+        expect(windowIsRecent('2026-10-16', NOW)).toBe(false);  // ended 7.5 days ago
+        expect(windowIsRecent(null, NOW)).toBe(false);
     });
 
     it('windowDaysOf counts both ends and falls back to 30', () => {

@@ -12,6 +12,7 @@
 
 const logger = require('../../../utils/Logger.js');
 const W1 = require('./Wave1Detectors.js');
+const { SALES_WINDOW_MAX_AGE_DAYS } = require('./KpiRules.js');
 
 /** Coverage key per task type; mirrored in TaskReconcilePlanner.SOURCE_BY_TYPE. */
 const KPI_SOURCES = Object.freeze({
@@ -32,15 +33,36 @@ const safely = (name, context, fn) => {
     }
 };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const parseDay = (value) => Date.parse(`${String(value || '').slice(0, 10)}T00:00:00Z`);
+
 /**
  * Days covered by the dashboard window ('YYYY-MM-DD' strings, inclusive).
  * @returns {number} days, or 30 when the window is unreadable
  */
 function windowDaysOf(startDate, endDate) {
-    const start = Date.parse(`${String(startDate || '').slice(0, 10)}T00:00:00Z`);
-    const end = Date.parse(`${String(endDate || '').slice(0, 10)}T00:00:00Z`);
+    const start = parseDay(startDate);
+    const end = parseDay(endDate);
     if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return 30;
-    return Math.round((end - start) / (24 * 60 * 60 * 1000)) + 1;
+    return Math.round((end - start) / DAY_MS) + 1;
+}
+
+/**
+ * Whether the dashboard window ends recently enough for "sold recently" rules.
+ * An unreadable end date is not recent.
+ */
+function windowIsRecent(endDate, now, maxAgeDays = SALES_WINDOW_MAX_AGE_DAYS) {
+    const end = parseDay(endDate);
+    return Number.isFinite(end) && (now.getTime() - end) / DAY_MS <= maxAgeDays + 1;
+}
+
+const shortDate = (value) => new Date(parseDay(value)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+
+/** "in the last 30 days" for a recent window, else its dates, so old data never reads as current. */
+function windowPhrase(startDate, endDate, days, recent) {
+    if (recent) return `in the last ${days} days`;
+    if (!Number.isFinite(parseDay(startDate)) || !Number.isFinite(parseDay(endDate))) return `in the ${days} days of data we have`;
+    return `between ${shortDate(startDate)} and ${shortDate(endDate)}`;
 }
 
 /**
@@ -62,14 +84,18 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, country
     const productsByAsin = new Map();
     for (const p of products) if (p?.asin && !productsByAsin.has(p.asin)) productsByAsin.set(p.asin, p);
     const windowDays = windowDaysOf(data.startDate, data.endDate);
+    // "Sold recently" needs a window that ends recently, not just finance rows for it.
+    const salesRecent = financeFresh && windowIsRecent(data.endDate, now);
+    const recentSales = salesRecent ? salesByAsin : {};
     const context = { userId, country };
 
     const suppressed = safely('listing_suppressed', context, () => W1.detectListingSuppressed({
-        suppressed: inputs.suppressed, stock: inputs.stock, salesByAsin,
+        // The 60-day lookback ends yesterday, so it stands on its own when the window is old.
+        suppressed: inputs.suppressed, stock: inputs.stock, salesByAsin: recentSales,
         salesLookback: inputs.salesLookback, productsByAsin, now
     }));
     const outOfStock = safely('out_of_stock', context, () => W1.detectOutOfStock({
-        stock: inputs.stock, salesByAsin, financeFresh, windowDays, productsByAsin, now
+        stock: inputs.stock, salesByAsin: recentSales, financeFresh: salesRecent, windowDays, productsByAsin, now
     }));
     const ads = safely('ads_on_unbuyable', context, () => W1.detectAdsOnUnbuyable({
         adsRows: data.ProductWiseSponsoredAds,
@@ -80,7 +106,10 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, country
         country, productsByAsin, now
     }));
     const cogs = safely('cogs_missing', context, () => W1.detectCogsMissing({
-        cogsAsins: inputs.cogsAsins, salesByAsin, financeFresh, windowDays, productsByAsin
+        // A product that sold without a cost on file is missing one however old the
+        // window is; the text says which dates it means.
+        cogsAsins: inputs.cogsAsins, salesByAsin, financeFresh, productsByAsin,
+        windowText: windowPhrase(data.startDate, data.endDate, windowDays, windowIsRecent(data.endDate, now))
     }));
     const ahr = safely('ahr_early_warning', context, () => W1.detectAhrEarlyWarning({
         ahrHistory: inputs.ahrHistory, now
@@ -111,4 +140,4 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, country
     return { tasks, coverage };
 }
 
-module.exports = { runKpiDetectors, windowDaysOf, KPI_SOURCES };
+module.exports = { runKpiDetectors, windowDaysOf, windowIsRecent, windowPhrase, KPI_SOURCES };
