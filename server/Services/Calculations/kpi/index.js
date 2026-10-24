@@ -65,7 +65,8 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, country
     const context = { userId, country };
 
     const suppressed = safely('listing_suppressed', context, () => W1.detectListingSuppressed({
-        suppressed: inputs.suppressed, stock: inputs.stock, salesByAsin, productsByAsin, now
+        suppressed: inputs.suppressed, stock: inputs.stock, salesByAsin,
+        salesLookback: inputs.salesLookback, productsByAsin, now
     }));
     const outOfStock = safely('out_of_stock', context, () => W1.detectOutOfStock({
         stock: inputs.stock, salesByAsin, financeFresh, windowDays, productsByAsin, now
@@ -85,7 +86,7 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, country
         ahrHistory: inputs.ahrHistory, now
     }));
     const removals = safely('removal_shortfall', context, () => W1.detectRemovalShortfall({
-        removals: inputs.removals, products, productsByAsin, now
+        removals: inputs.removals, reimbursements: inputs.removalReimbursements, products, productsByAsin, now
     }));
 
     const tasks = [

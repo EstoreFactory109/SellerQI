@@ -13,7 +13,10 @@
 
 const SuppressedListings = require('../../../models/products/SuppressedListingsModel.js');
 const RemovalOrders = require('../../../models/inventory/RemovalOrdersModel.js');
+const { getAsinFinanceForWindow } = require('../../Finance/AsinFinanceWindowService.js');
+const { getFBAReimbursementsData } = require('../../Finance/FBAReimbursementsService.js');
 const logger = require('../../../utils/Logger.js');
+const { SUPPRESSED_SALES_LOOKBACK_DAYS } = require('./KpiRules.js');
 
 const iso = (value) => {
     if (!value) return null;
@@ -122,16 +125,62 @@ function buildRemovals(doc) {
 }
 
 /**
+ * Per-ASIN sales over the longer suppressed-listing lookback, only ASINs that
+ * sold. null when there is nothing to read (the detector then falls back to the
+ * dashboard window).
+ * @param {Object} financeMap - getAsinFinanceForWindow result
+ */
+function buildSalesLookback(financeMap) {
+    if (!financeMap || typeof financeMap !== 'object') return null;
+    const out = {};
+    for (const [asin, v] of Object.entries(financeMap)) {
+        const sales = Number(v?.sales) || 0;
+        const unitsSold = Number(v?.unitsSold) || 0;
+        if (asin && (sales > 0 || unitsSold > 0)) out[asin] = { sales, unitsSold };
+    }
+    return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * Units Amazon already reimbursed against removal orders, keyed by order id then
+ * SKU ('' when the row has no SKU). A removal reimbursement carries the removal
+ * order id in `amazon_order_id`, so rows are matched on the ids in the removal
+ * report rather than on Amazon's reason wording; customer order ids never collide
+ * with removal order ids. Reversals are negative quantities and net off by summing.
+ * @param {Object|null} reimbursementsDoc - getFBAReimbursementsData result
+ * @param {Set<string>} removalOrderIds - order ids in the removal report
+ * @returns {Object|null} null when the report could not be read
+ */
+function buildRemovalReimbursements(reimbursementsDoc, removalOrderIds = new Set()) {
+    if (!reimbursementsDoc || !Array.isArray(reimbursementsDoc.data)) return null;
+    const out = {};
+    for (const row of reimbursementsDoc.data) {
+        const orderId = String(row?.amazon_order_id || '').trim();
+        if (!orderId || !removalOrderIds.has(orderId)) continue;
+        const qty = Number(row?.quantity_reimbursed_total) || 0;
+        if (qty === 0) continue;
+        const sku = String(row?.sku || '').trim();
+        const bySku = out[orderId] || (out[orderId] = {});
+        bySku[sku] = (bySku[sku] || 0) + qty;
+    }
+    return out;
+}
+
+/**
  * Pure: raw documents -> KpiInputs.
  */
-function buildKpiInputs({ waves = [], fbaInventoryDetailData, cogsData, v2History, suppressedDoc, removalDoc }) {
+function buildKpiInputs({ waves = [], fbaInventoryDetailData, cogsData, v2History, suppressedDoc, removalDoc, salesLookback, reimbursementsDoc }) {
+    const removals = buildRemovals(removalDoc);
+    const removalOrderIds = new Set((removals?.lines || []).map(line => String(line.orderId).trim()));
     return {
         waves,
         stock: buildStock(fbaInventoryDetailData),
         cogsAsins: buildCogsAsins(cogsData),
         ahrHistory: buildAhrHistory(v2History),
         suppressed: buildSuppressed(suppressedDoc),
-        removals: buildRemovals(removalDoc)
+        removals,
+        salesLookback: buildSalesLookback(salesLookback),
+        removalReimbursements: buildRemovalReimbursements(reimbursementsDoc, removalOrderIds)
     };
 }
 
@@ -144,18 +193,30 @@ function buildKpiInputs({ waves = [], fbaInventoryDetailData, cogsData, v2Histor
  * @param {number[]} params.waves - enabled waves (kpiGate)
  * @param {Object} params.allData - fetchAllDataModels result
  */
-async function loadKpiInputs({ userId, country, region, waves, allData }) {
+async function loadKpiInputs({ userId, country, region, waves, allData, now = new Date() }) {
+    const unavailable = (name) => (error) => {
+        logger.warn(`[KpiInputs] ${name} unavailable`, { userId, country, region, error: error.message });
+        return null;
+    };
     const latest = (Model, name) => Model.findOne({ User: userId, country, region })
         .sort({ createdAt: -1 })
         .lean()
-        .catch((error) => {
-            logger.warn(`[KpiInputs] ${name} unavailable`, { userId, country, region, error: error.message });
-            return null;
-        });
+        .catch(unavailable(name));
 
-    const [suppressedDoc, removalDoc] = await Promise.all([
+    // The suppressed-listing rule looks back further than the dashboard window:
+    // the N days ending yesterday (UTC).
+    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
+    const start = new Date(end.getTime() - (SUPPRESSED_SALES_LOOKBACK_DAYS - 1) * 24 * 60 * 60 * 1000);
+
+    const [suppressedDoc, removalDoc, salesLookback, reimbursementsDoc] = await Promise.all([
         latest(SuppressedListings, 'Suppressed listings'),
-        latest(RemovalOrders, 'Removal orders')
+        latest(RemovalOrders, 'Removal orders'),
+        Promise.resolve()
+            .then(() => getAsinFinanceForWindow(userId, country, region, start, end))
+            .catch(unavailable('Sales lookback')),
+        Promise.resolve()
+            .then(() => getFBAReimbursementsData(userId, country, region))
+            .catch(unavailable('FBA reimbursements'))
     ]);
 
     return buildKpiInputs({
@@ -164,7 +225,9 @@ async function loadKpiInputs({ userId, country, region, waves, allData }) {
         cogsData: allData?.cogsData,
         v2History: allData?.v2History,
         suppressedDoc,
-        removalDoc
+        removalDoc,
+        salesLookback,
+        reimbursementsDoc
     });
 }
 
@@ -175,5 +238,7 @@ module.exports = {
     buildCogsAsins,
     buildAhrHistory,
     buildSuppressed,
-    buildRemovals
+    buildRemovals,
+    buildSalesLookback,
+    buildRemovalReimbursements
 };

@@ -51,10 +51,13 @@ function topRevenueAsins(salesByAsin = {}) {
 
 /**
  * Listing blocked / suppressed / inactive.
- * Spreadsheet: SKU with stock or sales that is not buyable. Source here is
- * Amazon's Suppressed Listings report, "at risk" rows excluded (still visible).
+ * Spreadsheet: SKU with stock or sales in the last 60 days that is not buyable.
+ * Source here is Amazon's Suppressed Listings report, "at risk" rows excluded
+ * (still visible). `salesLookback` is the 60-day sales; without it the dashboard
+ * window's sales stand in. The amount stays on the dashboard window, like every
+ * other task's.
  */
-function detectListingSuppressed({ suppressed, stock, salesByAsin = {}, productsByAsin = new Map(), now }) {
+function detectListingSuppressed({ suppressed, stock, salesByAsin = {}, salesLookback = null, productsByAsin = new Map(), now }) {
     if (!suppressed || ageDays(suppressed.createdAt, now) > R.SUPPRESSED_REPORT_MAX_AGE_DAYS) {
         return { tasks: [], covered: false, asins: new Map() };
     }
@@ -76,7 +79,8 @@ function detectListingSuppressed({ suppressed, stock, salesByAsin = {}, products
         // Seller-fulfilled stock lives on the catalogue row (merchant listings report).
         const ownUnits = Number(productsByAsin.get(asin)?.quantity) || 0;
         const sales = salesByAsin[asin] || {};
-        const sold = (Number(sales.unitsSold) || 0) > 0 || (Number(sales.sales) || 0) > 0;
+        const lookback = (salesLookback && salesLookback[asin]) || sales;
+        const sold = (Number(lookback.unitsSold) || 0) > 0 || (Number(lookback.sales) || 0) > 0;
         if (fbaUnits + ownUnits <= 0 && !sold) continue;
 
         const status = unique(entry.statuses).join(', ') || 'Suppressed';
@@ -301,10 +305,11 @@ function detectAhrEarlyWarning({ ahrHistory, now }) {
  * Potential reimbursement: removal order shortfall.
  * Spreadsheet: shipped quantity below requested with no cancellation or
  * reimbursement, within about 60 days. Here: a completed line whose shipped +
- * disposed + cancelled units fall short of what was requested. Reimbursements
- * are not netted off (no reliable join to the removal order yet).
+ * disposed + cancelled units fall short of what was requested, less any units
+ * Amazon already reimbursed against that order (`reimbursements`, keyed order id
+ * then SKU, '' for rows without one).
  */
-function detectRemovalShortfall({ removals, products = [], productsByAsin = new Map(), now }) {
+function detectRemovalShortfall({ removals, reimbursements = null, products = [], productsByAsin = new Map(), now }) {
     if (!removals || ageDays(removals.createdAt, now) > R.REMOVAL_REPORT_MAX_AGE_DAYS) {
         return { tasks: [], covered: false };
     }
@@ -312,11 +317,31 @@ function detectRemovalShortfall({ removals, products = [], productsByAsin = new 
     const asinBySku = new Map();
     for (const p of products || []) if (p?.sku && p?.asin) asinBySku.set(p.sku, p.asin);
 
+    // Reimbursed units per order are spent once: a SKU's own rows first, then the
+    // order's SKU-less rows, across that order's lines in report order.
+    const remaining = {};
+    for (const [orderId, bySku] of Object.entries(reimbursements || {})) remaining[orderId] = { ...bySku };
+    const takeReimbursed = (orderId, sku, wanted) => {
+        const pool = remaining[orderId];
+        if (!pool) return 0;
+        let taken = 0;
+        for (const key of [sku, '']) {
+            const available = Math.max(0, pool[key] || 0);
+            const take = Math.min(available, wanted - taken);
+            pool[key] = available - take;
+            taken += take;
+        }
+        return taken;
+    };
+
     const since = now.getTime() - R.REMOVAL_CLAIM_WINDOW_DAYS * R.DAY_MS;
     const byEntity = new Map();
     for (const line of removals.lines || []) {
         if (!/^completed$/i.test(String(line.orderStatus || '').trim())) continue;
-        const missing = line.requestedQuantity - line.shippedQuantity - line.disposedQuantity - line.cancelledQuantity;
+        const short = line.requestedQuantity - line.shippedQuantity - line.disposedQuantity - line.cancelledQuantity;
+        if (short <= 0) continue;
+        const reimbursed = takeReimbursed(line.orderId, line.sku, short);
+        const missing = short - reimbursed;
         if (missing <= 0) continue;
         const updated = Date.parse(line.lastUpdatedDate || line.requestDate || '');
         if (!Number.isFinite(updated) || updated < since) continue;
@@ -334,6 +359,7 @@ function detectRemovalShortfall({ removals, products = [], productsByAsin = new 
             shipped: line.shippedQuantity,
             disposed: line.disposedQuantity,
             cancelled: line.cancelledQuantity,
+            reimbursed,
             missing
         });
         byEntity.set(key, entry);
@@ -342,8 +368,9 @@ function detectRemovalShortfall({ removals, products = [], productsByAsin = new 
     const tasks = [];
     for (const [key, entry] of byEntity) {
         const ids = unique(entry.orders.map(o => o.orderId));
+        const o = entry.orders[0];
         const detail = entry.orders.length === 1
-            ? ` (requested ${entry.orders[0].requested}, shipped ${entry.orders[0].shipped}, disposed ${entry.orders[0].disposed}, cancelled ${entry.orders[0].cancelled})`
+            ? ` (requested ${o.requested}, shipped ${o.shipped}, disposed ${o.disposed}, cancelled ${o.cancelled}${o.reimbursed ? `, already reimbursed ${o.reimbursed}` : ''})`
             : '';
         tasks.push({
             asin: key,

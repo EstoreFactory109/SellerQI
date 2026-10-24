@@ -71,7 +71,10 @@ const describeInputs = (inputs) => {
         `cogs=${Array.isArray(inputs.cogsAsins) ? inputs.cogsAsins.length : 'unread'}`,
         `ahr=${(inputs.ahrHistory || []).length} reports`,
         `suppressed=${inputs.suppressed ? `${inputs.suppressed.items.length} @${(inputs.suppressed.createdAt || '?').slice(0, 10)}` : 'none'}`,
-        `removals=${inputs.removals ? `${inputs.removals.lines.length} lines @${(inputs.removals.createdAt || '?').slice(0, 10)}` : 'none'}`
+        `removals=${inputs.removals ? `${inputs.removals.lines.length} lines @${(inputs.removals.createdAt || '?').slice(0, 10)}` : 'none'}`,
+        // Orders whose reimbursements matched by order id: 0 everywhere would mean the join never hits.
+        `removalReimbursed=${inputs.removalReimbursements ? `${Object.keys(inputs.removalReimbursements).length} orders` : 'unread'}`,
+        `sales60=${inputs.salesLookback ? `${Object.keys(inputs.salesLookback).length} asins` : 'none'}`
     ].join(' ');
 };
 

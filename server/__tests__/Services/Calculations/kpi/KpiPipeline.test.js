@@ -5,6 +5,8 @@
  */
 jest.mock('../../../../models/products/SuppressedListingsModel.js', () => ({ findOne: jest.fn() }));
 jest.mock('../../../../models/inventory/RemovalOrdersModel.js', () => ({ findOne: jest.fn() }));
+jest.mock('../../../../Services/Finance/AsinFinanceWindowService.js', () => ({ getAsinFinanceForWindow: jest.fn() }));
+jest.mock('../../../../Services/Finance/FBAReimbursementsService.js', () => ({ getFBAReimbursementsData: jest.fn() }));
 
 const { kpiWaveEnabledFor, enabledKpiWaves } = require('../../../../Services/Calculations/kpi/kpiGate.js');
 const KpiInputs = require('../../../../Services/Calculations/kpi/KpiInputs.js');
@@ -72,17 +74,56 @@ describe('KpiInputs', () => {
         expect(KpiInputs.buildRemovals({ unreadable: true, lines: [] })).toBeNull();
     });
 
-    it('loadKpiInputs reads the two extra reports and survives a failed read', async () => {
+    it('keeps only ASINs that sold in the sales lookback, null when none did', () => {
+        expect(KpiInputs.buildSalesLookback({ A1: { sales: 10, unitsSold: 1 }, A2: { sales: 0, unitsSold: 0 } }))
+            .toEqual({ A1: { sales: 10, unitsSold: 1 } });
+        expect(KpiInputs.buildSalesLookback({})).toBeNull();
+    });
+
+    it('keeps reimbursements for removal orders only, per order then SKU, netting reversals', () => {
+        const r = KpiInputs.buildRemovalReimbursements({ data: [
+            { amazon_order_id: 'R1', reason: 'Lost_Outbound', sku: 'S1', quantity_reimbursed_total: '3' },
+            { amazon_order_id: 'R1', reason: 'Reimbursement_Reversal', sku: 'S1', quantity_reimbursed_total: '-1' },
+            { amazon_order_id: 'R1', reason: 'Damaged_Outbound', sku: '', quantity_reimbursed_total: '2' },
+            { amazon_order_id: '111-2223334-5556667', reason: 'CustomerReturn', sku: 'S1', quantity_reimbursed_total: '9' },
+            { amazon_order_id: '', reason: 'Lost_Warehouse', sku: 'S1', quantity_reimbursed_total: '9' }
+        ] }, new Set(['R1']));
+        expect(r).toEqual({ R1: { S1: 2, '': 2 } });
+        expect(KpiInputs.buildRemovalReimbursements(null)).toBeNull();
+    });
+
+    it('buildKpiInputs matches reimbursements to the removal report\'s own order ids', () => {
+        const inputs = KpiInputs.buildKpiInputs({
+            removalDoc: { createdAt: new Date(daysAgo(1)), lines: [{ orderId: 'R1', sku: 'S1', requestedQuantity: 5 }] },
+            reimbursementsDoc: { data: [
+                { amazon_order_id: 'R1', sku: 'S1', quantity_reimbursed_total: '2' },
+                { amazon_order_id: 'R2', sku: 'S1', quantity_reimbursed_total: '4' }
+            ] }
+        });
+        expect(inputs.removalReimbursements).toEqual({ R1: { S1: 2 } });
+    });
+
+    it('loadKpiInputs reads the extra sources and survives a failed read', async () => {
         const Suppressed = require('../../../../models/products/SuppressedListingsModel.js');
         const Removals = require('../../../../models/inventory/RemovalOrdersModel.js');
+        const { getAsinFinanceForWindow } = require('../../../../Services/Finance/AsinFinanceWindowService.js');
+        const { getFBAReimbursementsData } = require('../../../../Services/Finance/FBAReimbursementsService.js');
         const chain = (value) => ({ sort: () => ({ lean: () => value }) });
         Suppressed.findOne.mockReturnValue(chain(Promise.resolve({ createdAt: new Date(daysAgo(0)), items: [] })));
         Removals.findOne.mockReturnValue(chain(Promise.reject(new Error('boom'))));
+        getAsinFinanceForWindow.mockResolvedValue({ A1: { sales: 50, unitsSold: 2 } });
+        getFBAReimbursementsData.mockRejectedValue(new Error('down'));
 
-        const inputs = await KpiInputs.loadKpiInputs({ userId: USER, country: 'US', region: 'NA', waves: [1], allData: {} });
+        const inputs = await KpiInputs.loadKpiInputs({ userId: USER, country: 'US', region: 'NA', waves: [1], allData: {}, now: NOW });
         expect(inputs.waves).toEqual([1]);
         expect(inputs.suppressed).toEqual({ createdAt: daysAgo(0), items: [] });
         expect(inputs.removals).toBeNull();
+        expect(inputs.salesLookback).toEqual({ A1: { sales: 50, unitsSold: 2 } });
+        expect(inputs.removalReimbursements).toBeNull();
+        // 60 days ending yesterday (UTC).
+        const [, , , start, end] = getAsinFinanceForWindow.mock.calls[0];
+        expect(end.toISOString().slice(0, 10)).toBe('2026-10-23');
+        expect(start.toISOString().slice(0, 10)).toBe('2026-08-25');
     });
 });
 

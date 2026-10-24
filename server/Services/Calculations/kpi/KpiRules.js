@@ -9,8 +9,8 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // ── Listing blocked / suppressed / inactive ──
-// Spreadsheet: SKU with stock or sales in the last 60 days. Per-ASIN sales here
-// cover the dashboard window (about 30 days), so the sales half is narrower.
+// Spreadsheet: SKU with stock or sales in the last 60 days (Lookback is internal).
+const SUPPRESSED_SALES_LOOKBACK_DAYS = 60;
 // The Suppressed Listings report is daily; a week tolerates missed runs (same
 // guard as the other daily inventory reports, InventoryReportFreshness.js).
 const SUPPRESSED_REPORT_MAX_AGE_DAYS = 7;
@@ -45,6 +45,7 @@ const REMOVAL_REPORT_MAX_AGE_DAYS = 10;
 
 module.exports = {
     DAY_MS,
+    SUPPRESSED_SALES_LOOKBACK_DAYS,
     SUPPRESSED_REPORT_MAX_AGE_DAYS,
     TOP_REVENUE_SHARE,
     FBA_STOCK_MAX_AGE_DAYS,

@@ -17,7 +17,7 @@ const mongoose = require('mongoose');
 const Task = require('../../models/MCP/TaskModel.js');
 const TaskItem = require('../../models/MCP/TaskItemModel.js');
 const logger = require('../../utils/Logger.js');
-const { getTaskPriorityMeta } = require('./TaskPrioritizationService.js');
+const { getTaskPriorityMeta, normalizeErrorType } = require('./TaskPrioritizationService.js');
 const { buildGroupsFromTasks } = require('./TaskOpportunityGroupsService.js');
 const { planReconcile } = require('./TaskReconcilePlanner.js');
 const { taskReconcileModeFor, MODES: RECONCILE_MODES } = require('../../utils/taskReconcileGate.js');
@@ -329,6 +329,21 @@ class CreateTaskService {
 
             // tasks-logics.xlsx detectors (kpi/): already task-shaped, with their own text.
             if (Array.isArray(data.kpiTasks)) {
+                // An empty shelf is one problem: the out-of-stock task (with its lost
+                // sales) replaces the product's replenishment tasks, which Amazon's
+                // restock alert also raises for out-of-stock SKUs.
+                const outOfStock = new Set(data.kpiTasks
+                    .filter(t => t.errorCategory === 'inventory' && t.errorType === 'out_of_stock')
+                    .map(t => t.asin));
+                if (outOfStock.size > 0) {
+                    for (let i = tasks.length - 1; i >= 0; i--) {
+                        const t = tasks[i];
+                        if (t.errorCategory === 'inventory' && outOfStock.has(t.asin)
+                            && normalizeErrorType(t.errorType) === 'replenishment_needed') {
+                            tasks.splice(i, 1);
+                        }
+                    }
+                }
                 tasks.push(...data.kpiTasks.map(task => ({ status: TaskStatus.PENDING, ...task })));
             }
 

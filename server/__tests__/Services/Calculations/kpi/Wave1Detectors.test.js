@@ -58,6 +58,18 @@ describe('detectListingSuppressed', () => {
         expect(r.covered).toBe(true);
     });
 
+    it('counts sales from the 60-day lookback when the dashboard window has none', () => {
+        const input = {
+            suppressed: suppressed([{ sku: 'S2', asin: 'A2', status: 'Blocked', reason: 'x' }]),
+            stock: null, salesByAsin: {}, productsByAsin: products, now: NOW
+        };
+        expect(W1.detectListingSuppressed(input).tasks).toEqual([]);
+        const r = W1.detectListingSuppressed({ ...input, salesLookback: { A2: { sales: 80, unitsSold: 4 } } });
+        expect(r.tasks.map(t => t.asin)).toEqual(['A2']);
+        // The amount stays on the dashboard window, like every other task's.
+        expect(r.tasks[0].amount).toBe(0);
+    });
+
     it('merges several SKUs of one ASIN into one task', () => {
         const r = W1.detectListingSuppressed({
             suppressed: suppressed([
@@ -245,6 +257,41 @@ describe('detectRemovalShortfall', () => {
         });
         expect(r.tasks).toEqual([]);
         expect(r.covered).toBe(true);
+    });
+
+    it('subtracts units Amazon already reimbursed against the order', () => {
+        const r = W1.detectRemovalShortfall({
+            removals: removals([line()]), reimbursements: { R1: { S1: 2 } },
+            products: catalogue, productsByAsin: products, now: NOW
+        });
+        expect(r.tasks[0].renderData.units).toBe(1);
+        expect(r.tasks[0].error).toContain('with 1 unit not accounted for');
+        expect(r.tasks[0].error).toContain('already reimbursed 2');
+    });
+
+    it('raises nothing once the reimbursement covers the shortfall, using SKU-less rows too', () => {
+        const r = W1.detectRemovalShortfall({
+            removals: removals([line()]), reimbursements: { R1: { S1: 1, '': 5 } },
+            products: catalogue, productsByAsin: products, now: NOW
+        });
+        expect(r.tasks).toEqual([]);
+    });
+
+    it('spends one order\'s reimbursed units only once across its lines', () => {
+        const r = W1.detectRemovalShortfall({
+            removals: removals([line(), line({ sku: 'S2' })]), reimbursements: { R1: { '': 3 } },
+            products: catalogue, productsByAsin: products, now: NOW
+        });
+        // 3 short on each line; the 3 reimbursed units clear the first line only.
+        expect(r.tasks.map(t => [t.asin, t.renderData.units])).toEqual([['A2', 3]]);
+    });
+
+    it('ignores reimbursements for other orders', () => {
+        const r = W1.detectRemovalShortfall({
+            removals: removals([line()]), reimbursements: { R9: { S1: 10 } },
+            products: catalogue, productsByAsin: products, now: NOW
+        });
+        expect(r.tasks[0].renderData.units).toBe(3);
     });
 
     it('keys an unknown SKU by the SKU, not a made-up ASIN', () => {
