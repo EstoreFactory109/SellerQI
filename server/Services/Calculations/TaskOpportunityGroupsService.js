@@ -73,6 +73,10 @@ const GROUP_COPY = {
         title: 'Products with unresolved profitability problems',
         action: 'Review pricing, fees and ad spend on these ASINs'
     },
+    'profitability:cogs_missing': {
+        title: 'Products with no cost of goods on file',
+        action: 'Enter unit costs so true profit can be measured'
+    },
 
     // ── Sponsored Ads ──
     'sponsoredAds:wasted_spend_keyword': {
@@ -117,6 +121,10 @@ const GROUP_COPY = {
         title: 'Ad targets needing a closer look',
         action: 'Review these targets against their performance data'
     },
+    'sponsoredAds:ads_on_unbuyable': {
+        title: 'Ads running on products shoppers cannot buy',
+        action: 'Pause these ads until the product can sell again'
+    },
 
     // ── Inventory ──
     'inventory:unfulfillable_inventory': {
@@ -138,6 +146,22 @@ const GROUP_COPY = {
     'inventory:replenishment_needed': {
         title: 'Products about to run out of stock',
         action: 'Create an FBA shipment before these go unavailable'
+    },
+    'inventory:listing_suppressed': {
+        title: 'Listings Amazon is hiding from shoppers',
+        action: 'Fix the issue Amazon flagged so these become buyable again'
+    },
+    'inventory:out_of_stock': {
+        title: 'Selling products with nothing in stock',
+        action: 'Send stock now — every day out of stock is lost sales'
+    },
+    'inventory:removal_shortfall': {
+        title: 'Removal orders that came back short',
+        action: 'Claim the missing units from Amazon before the window closes'
+    },
+    'inventory:removal_confirm_receipt': {
+        title: 'Removal orders waiting for you to confirm what arrived',
+        action: 'Enter the units you received so missing ones can be claimed'
     },
 
     // ── Conversion ──
@@ -174,6 +198,10 @@ const GROUP_COPY = {
     'account:accountStatus': {
         title: 'Your selling account is at risk',
         action: 'Resolve this with Amazon immediately — it can stop all sales'
+    },
+    'account:ahr_early_warning': {
+        title: 'Your Account Health Rating is falling',
+        action: 'Find what moved the score this week before it reaches At Risk'
     },
     'account:PolicyViolations': {
         title: 'Policy violations on your account',

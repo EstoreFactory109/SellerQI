@@ -144,7 +144,16 @@ const EFFORT_MINUTES = {
     'account:orderWithDefectsStatus_unstable': 30,
     'account:lateShipmentRateStatus_unstable': 20,
     'account:CancellationRate_unstable': 20,
-    'account:validTrackingRateStatus_unstable': 10
+    'account:validTrackingRateStatus_unstable': 10,
+
+    // ── tasks-logics.xlsx detectors (kpi/) ──
+    'inventory:listing_suppressed': 15,     // fix the flagged field or upload a document
+    'inventory:out_of_stock': 30,           // create and send an FBA shipment
+    'inventory:removal_shortfall': 20,      // open a case with the order and what arrived
+    'inventory:removal_confirm_receipt': 5, // type in what arrived per order
+    'sponsoredAds:ads_on_unbuyable': 3,     // pause the ad group: a couple of clicks
+    'profitability:cogs_missing': 20,       // enter unit costs for the listed products
+    'account:ahr_early_warning': 30         // find what moved the score and fix it
 };
 
 /**
@@ -202,6 +211,20 @@ const IMPACT_WEIGHT = {
     'inventory:unfulfillable_inventory': 60,
     'inventory:replenishment_needed': 52,
     'inventory:inbound_non_compliance': 34,
+    // tasks-logics.xlsx: a listing shoppers cannot buy, or nothing on the shelf, is
+    // the same class of loss as stranded stock; ads on them are money with no
+    // possible return; a removal shortfall is a claim with a deadline.
+    'inventory:listing_suppressed': 78,
+    'inventory:out_of_stock': 74,
+    'sponsoredAds:ads_on_unbuyable': 66,
+    'inventory:removal_shortfall': 48,
+    // Not a loss yet, only the question that finds one: below the claim itself.
+    'inventory:removal_confirm_receipt': 30,
+    // Without unit costs no profit figure is real: below money already being lost.
+    'profitability:cogs_missing': 40,
+    // At or above the client's account-risk floor (ACCOUNT_RISK_MIN_WEIGHT = 68),
+    // so it shows as a risk, but below the sustained Amazon statuses.
+    'account:ahr_early_warning': 70,
 
     // Conversion drag.
     'conversion:insufficient_images': 55,

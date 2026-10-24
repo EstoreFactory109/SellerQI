@@ -75,7 +75,15 @@ const ALL_TASK_TYPES = [
     ['account', 'orderWithDefectsStatus_unstable'],
     ['account', 'lateShipmentRateStatus_unstable'],
     ['account', 'CancellationRate_unstable'],
-    ['profitability', 'ad_spend_no_sales']
+    ['profitability', 'ad_spend_no_sales'],
+    // tasks-logics.xlsx detectors (Services/Calculations/kpi/).
+    ['inventory', 'listing_suppressed'],
+    ['inventory', 'out_of_stock'],
+    ['inventory', 'removal_shortfall'],
+    ['inventory', 'removal_confirm_receipt'],
+    ['sponsoredAds', 'ads_on_unbuyable'],
+    ['profitability', 'cogs_missing'],
+    ['account', 'ahr_early_warning']
 ];
 
 describe('normalizeErrorType', () => {

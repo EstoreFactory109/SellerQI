@@ -13,6 +13,7 @@ const Profitability = require('./ProfitabilityCalculation.js');
 const { calculateSponsoredAdsMetrics, calculateNegativeKeywordsMetrics } = require('./SponsoredAdsCalculation.js');
 const { createDefaultDashboardData, mergeWithDefaults } = require('./DefaultDataStructure.js');
 const CreateTaskService = require('./CreateTasksService.js');
+const { runKpiDetectors } = require('./kpi/index.js');
 const logger = require('../../utils/Logger.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
@@ -1954,6 +1955,20 @@ const analyseData = async (data, userId = null, options = {}) => {
 
     logger.info(`Dashboard data processed successfully with ${activeProducts.length} active products`);
     
+    // tasks-logics.xlsx detectors. A no-op ({ tasks: [], coverage: {} }) unless Analyse
+    // attached KpiInputs for an enabled wave (kpi/kpiGate.js).
+    let kpiResult = { tasks: [], coverage: {} };
+    try {
+        kpiResult = runKpiDetectors(data, {
+            salesByAsin: economicsData.asinPpcSales || {},
+            financeFresh,
+            country,
+            userId
+        });
+    } catch (error) {
+        logger.error('Error running KPI detectors:', { message: error.message });
+    }
+
     // Call CreateTask service if userId is provided and writes are wanted
     let tasksRebuilt = false;
     // How old the AI views must be before this change regenerates them. 0 for a full
@@ -1969,19 +1984,23 @@ const analyseData = async (data, userId = null, options = {}) => {
                 profitabilityErrorDetails: profitabilityErrorsData.errorDetails,
                 sponsoredAdsErrorDetails: sponsoredAdsErrorsData.errorDetails,
                 AccountErrors: data.AccountData?.accountHealth || {},
+                kpiTasks: kpiResult.tasks,
                 TotalProducts: TotalProducts,
                 forceReconcile: forceTaskReconcile,
-                coverage: buildTaskCoverage(data, {
-                    activeProductSet,
-                    profitabilityRows: profitibilityData,
-                    profitabilityOk: profitabilityErrorsOk,
-                    financeFresh,
-                    // The rows high-ACOS was actually judged on (the PPC page's campaign
-                    // totals when available), so coverage describes the real input.
-                    campaignRows: Array.isArray(data.campaignSpendSales) ? data.campaignSpendSales : campaignWiseTotalSalesAndCost,
-                    sponsoredAdsOk: sponsoredAdsErrorsOk,
-                    country
-                })
+                coverage: {
+                    ...buildTaskCoverage(data, {
+                        activeProductSet,
+                        profitabilityRows: profitibilityData,
+                        profitabilityOk: profitabilityErrorsOk,
+                        financeFresh,
+                        // The rows high-ACOS was actually judged on (the PPC page's campaign
+                        // totals when available), so coverage describes the real input.
+                        campaignRows: Array.isArray(data.campaignSpendSales) ? data.campaignSpendSales : campaignWiseTotalSalesAndCost,
+                        sponsoredAdsOk: sponsoredAdsErrorsOk,
+                        country
+                    }),
+                    ...kpiResult.coverage
+                }
             }, country, region);
             // Only a full rebuild changes what the derived AI views summarise; stays
             // false if task creation threw, so a failed build never triggers them.
@@ -2001,7 +2020,8 @@ const analyseData = async (data, userId = null, options = {}) => {
     const totalCalcTime = Date.now() - calcStartTime;
     logger.info(`[PERF] DashboardCalculation TOTAL time: ${totalCalcTime}ms`);
     logger.info("=== DashboardCalculation: Returning dashboard data ===");
-    return { dashboardData, tasksRebuilt, taskAiRefreshMinIntervalHours };
+    // kpiTasks is for previews (persistTasks: false); page callers read dashboardData only.
+    return { dashboardData, tasksRebuilt, taskAiRefreshMinIntervalHours, kpiTasks: kpiResult.tasks };
 };
 
 module.exports = {

@@ -73,7 +73,16 @@ const SOURCE_BY_TYPE = {
     'sponsoredAds:high_acos': 'sponsoredAds.campaigns',
     'sponsoredAds:wasted_spend_keyword': 'sponsoredAds.keywords',
     'sponsoredAds:search_term_zero_sales': 'sponsoredAds.searchTerms',
-    'sponsoredAds:auto_campaign_migration_needed': 'sponsoredAds.autoMigration'
+    'sponsoredAds:auto_campaign_migration_needed': 'sponsoredAds.autoMigration',
+
+    // tasks-logics.xlsx detectors: each has its own input (kpi/index.js KPI_SOURCES).
+    'inventory:listing_suppressed': 'kpi.suppressed',
+    'inventory:out_of_stock': 'kpi.outOfStock',
+    'sponsoredAds:ads_on_unbuyable': 'kpi.adsOnUnbuyable',
+    'profitability:cogs_missing': 'kpi.cogsMissing',
+    'account:ahr_early_warning': 'kpi.ahrEarlyWarning',
+    'inventory:removal_shortfall': 'kpi.removalShortfall',
+    'inventory:removal_confirm_receipt': 'kpi.removalShortfall'
 };
 
 /** @returns {string} the coverage key for a task */

@@ -154,4 +154,6 @@ module.exports = {
     financeStep2SlicingEnabledFor,
     adsAsyncEnabledFor,
     parseUserIdList,
+    // For other per-account gates (kpi/kpiGate.js), so they share these semantics.
+    gateFor,
 };
