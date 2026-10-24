@@ -66,6 +66,9 @@ const differenceCalculation = require('../Calculations/DifferenceCalcualtion.js'
 const KeywordTrackingModel = require('../../models/amazon-ads/KeywordTrackingModel.js');
 // PPC Units Sold model for date-wise units sold data
 const PPCUnitsSold = require('../../models/amazon-ads/PPCUnitsSoldModel.js');
+// Inputs for the tasks-logics.xlsx detectors, only for accounts with a wave enabled
+const { enabledKpiWaves } = require('../Calculations/kpi/kpiGate.js');
+const { loadKpiInputs } = require('../Calculations/kpi/KpiInputs.js');
 
 class AnalyseService {
     /**
@@ -154,6 +157,20 @@ class AnalyseService {
             differenceData
         });
         logger.info(`[PERF] createBaseResult completed in ${Date.now() - stepStart}ms`);
+
+        // Inputs for the tasks-logics.xlsx detectors (DashboardCalculation runs them).
+        // Absent unless a wave is enabled for this account, so everyone else's
+        // message is unchanged. A failure leaves them absent: no new tasks, none resolved.
+        const kpiWaves = enabledKpiWaves(userId);
+        if (kpiWaves.length > 0) {
+            stepStart = Date.now();
+            try {
+                result.KpiInputs = await loadKpiInputs({ userId, country, region, waves: kpiWaves, allData });
+            } catch (error) {
+                logger.error('[Analyse] KPI inputs not built', { userId, country, region, error: error.message });
+            }
+            logger.info(`[PERF] loadKpiInputs completed in ${Date.now() - stepStart}ms`);
+        }
 
         // Process conversion and ranking data
         stepStart = Date.now();

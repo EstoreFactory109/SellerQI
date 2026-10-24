@@ -327,6 +327,11 @@ class CreateTaskService {
                 tasks.push(...this.generateAccountTasks(data.AccountErrors));
             }
 
+            // tasks-logics.xlsx detectors (kpi/): already task-shaped, with their own text.
+            if (Array.isArray(data.kpiTasks)) {
+                tasks.push(...data.kpiTasks.map(task => ({ status: TaskStatus.PENDING, ...task })));
+            }
+
             for (const task of tasks) {
                 task.taskId = stableTaskId(userId, country, region, task);
             }
