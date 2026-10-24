@@ -83,6 +83,7 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, country
     const products = Array.isArray(data.TotalProducts) ? data.TotalProducts : [];
     const productsByAsin = new Map();
     for (const p of products) if (p?.asin && !productsByAsin.has(p.asin)) productsByAsin.set(p.asin, p);
+    const catalogue = W1.catalogueByAsin(products);
     const windowDays = windowDaysOf(data.startDate, data.endDate);
     // "Sold recently" needs a window that ends recently, not just finance rows for it.
     const salesRecent = financeFresh && windowIsRecent(data.endDate, now);
@@ -92,10 +93,10 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, country
     const suppressed = safely('listing_suppressed', context, () => W1.detectListingSuppressed({
         // The 60-day lookback ends yesterday, so it stands on its own when the window is old.
         suppressed: inputs.suppressed, stock: inputs.stock, salesByAsin: recentSales,
-        salesLookback: inputs.salesLookback, productsByAsin, now
+        salesLookback: inputs.salesLookback, catalogue, productsByAsin, now
     }));
     const outOfStock = safely('out_of_stock', context, () => W1.detectOutOfStock({
-        stock: inputs.stock, salesByAsin: recentSales, financeFresh: salesRecent, windowDays, productsByAsin, now
+        stock: inputs.stock, salesByAsin: recentSales, financeFresh: salesRecent, windowDays, catalogue, productsByAsin, now
     }));
     const ads = safely('ads_on_unbuyable', context, () => W1.detectAdsOnUnbuyable({
         adsRows: data.ProductWiseSponsoredAds,

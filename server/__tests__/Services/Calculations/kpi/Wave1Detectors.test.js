@@ -36,17 +36,33 @@ describe('detectListingSuppressed', () => {
             asin: 'A1', errorCategory: 'inventory', errorType: 'listing_suppressed',
             productName: 'Garlic Press', amount: 300, amountIsEstimated: true
         });
-        expect(r.tasks[0].error).toContain('Main image missing');
+        expect(r.tasks[0].error).toBe('Listing Blocked | Search Suppressed: Amazon is hiding this product from search results, so shoppers cannot find it, because: Main image missing.');
         expect(r.tasks[0].renderData.topSeller).toBe(true);
         expect(r.asins.get('A1')).toBeTruthy();
     });
 
-    it('counts seller-fulfilled stock on the catalogue row', () => {
+    it('counts seller-fulfilled stock on the catalogue rows', () => {
         const r = W1.detectListingSuppressed({
             suppressed: suppressed([{ sku: 'S3', asin: 'A3', status: 'Blocked', reason: 'x' }]),
-            stock: null, salesByAsin: {}, productsByAsin: products, now: NOW
+            stock: null, salesByAsin: {}, catalogue: W1.catalogueByAsin([...products.values()]),
+            productsByAsin: products, now: NOW
         });
         expect(r.tasks.map(t => t.asin)).toEqual(['A3']);
+        // A3's only SKU is the suppressed one, so the product is unbuyable.
+        expect(r.asins.has('A3')).toBe(true);
+    });
+
+    it('keeps the SKU task but does not call the product unbuyable while another SKU sells', () => {
+        const catalogue = W1.catalogueByAsin([
+            { asin: 'A3', sku: 'S3', status: 'Active', quantity: 12 },
+            { asin: 'A3', sku: 'S3-FBM', status: 'Active', quantity: 40 }
+        ]);
+        const r = W1.detectListingSuppressed({
+            suppressed: suppressed([{ sku: 'S3', asin: 'A3', status: 'Blocked', reason: 'x' }]),
+            stock: null, salesByAsin: {}, catalogue, productsByAsin: products, now: NOW
+        });
+        expect(r.tasks.map(t => t.asin)).toEqual(['A3']);
+        expect(r.asins.has('A3')).toBe(false);
     });
 
     it('skips a suppressed listing with no stock and no sales (spreadsheet: stock or sales)', () => {
@@ -96,12 +112,58 @@ describe('detectOutOfStock', () => {
         const r = W1.detectOutOfStock({
             stock: stock({ A1: { fulfillable: 0, inbound: 0, total: 0, skus: ['S1'] } }),
             salesByAsin: { A1: { sales: 600, unitsSold: 60 } },
-            financeFresh: true, windowDays: 30, productsByAsin: products, now: NOW
+            financeFresh: true, windowDays: 30, catalogue: W1.catalogueByAsin([...products.values()]),
+            productsByAsin: products, now: NOW
         });
         expect(r.tasks).toHaveLength(1);
         expect(r.tasks[0]).toMatchObject({ asin: 'A1', errorType: 'out_of_stock', amount: 600, amountIsEstimated: true });
-        expect(r.tasks[0].error).toContain('losing about 2 units of sales a day');
+        expect(r.tasks[0].error).toContain('It sold 60 units in the last 30 days, so it is losing about 2 sales a day.');
         expect(r.tasks[0].renderData).toMatchObject({ unitsPerDay: 2, salesPerDay: 20 });
+    });
+
+    // Seen on a German account: FBA SKUs at 0 next to an active self-shipped SKU
+    // holding 69,967 units. 78 false "out of stock" tasks before this rule.
+    it('does not fire while another active SKU of the product has stock', () => {
+        const r = W1.detectOutOfStock({
+            stock: stock({ A1: { fulfillable: 0, inbound: 0, total: 0 } }),
+            salesByAsin: { A1: { sales: 600, unitsSold: 60 } }, financeFresh: true, windowDays: 30,
+            catalogue: W1.catalogueByAsin([
+                { asin: 'A1', sku: 'S1-FBA', status: 'Inactive', quantity: 0 },
+                { asin: 'A1', sku: 'S1', status: 'Active', quantity: 69967 }
+            ]),
+            now: NOW
+        });
+        expect(r.tasks).toEqual([]);
+    });
+
+    // Seen on a US account: an old FBA SKU at 0 for an ASIN no longer in the catalogue.
+    it('does not fire for a product that is no longer in the catalogue', () => {
+        const r = W1.detectOutOfStock({
+            stock: stock({ GONE: { fulfillable: 0, inbound: 0, total: 0 } }),
+            salesByAsin: { GONE: { sales: 350, unitsSold: 1 } }, financeFresh: true, windowDays: 30,
+            catalogue: W1.catalogueByAsin([...products.values()]), now: NOW
+        });
+        expect(r.tasks).toEqual([]);
+    });
+
+    it('an inactive SKU with a stale quantity does not count as stock', () => {
+        const r = W1.detectOutOfStock({
+            stock: stock({ A1: { fulfillable: 0, inbound: 0, total: 0 } }),
+            salesByAsin: { A1: { sales: 600, unitsSold: 60 } }, financeFresh: true, windowDays: 30,
+            catalogue: W1.catalogueByAsin([{ asin: 'A1', sku: 'S1', status: 'Inactive', quantity: 5 }]),
+            now: NOW
+        });
+        expect(r.tasks).toHaveLength(1);
+    });
+
+    it('states slow sellers plainly instead of "0.0 units a day"', () => {
+        const run = (unitsSold) => W1.detectOutOfStock({
+            stock: stock({ A1: { fulfillable: 0, inbound: 0, total: 0 } }),
+            salesByAsin: { A1: { sales: 350, unitsSold } }, financeFresh: true, windowDays: 30,
+            catalogue: W1.catalogueByAsin([...products.values()]), now: NOW
+        }).tasks[0].error;
+        expect(run(1)).toContain('It sold 1 unit in the last 30 days.');
+        expect(run(8)).toContain('It sold 8 units in the last 30 days, so it is losing about 2 sales a week.');
     });
 
     it('does not fire while stock is inbound', () => {
@@ -211,9 +273,17 @@ describe('detectAhrEarlyWarning', () => {
         expect(W1.detectAhrEarlyWarning({ ahrHistory: h([6, 414], [0, 395]), now: NOW }).tasks).toEqual([]);
     });
 
-    it('fires between 200 and 249 even without a drop', () => {
-        const r = W1.detectAhrEarlyWarning({ ahrHistory: h([0, 240]), now: NOW });
-        expect(r.tasks[0].error).toContain("close to Amazon's At Risk cutoff of 200");
+    it('fires when the score crosses below 250 this week, even by less than 20 points', () => {
+        const r = W1.detectAhrEarlyWarning({ ahrHistory: h([5, 262], [0, 246]), now: NOW });
+        expect(r.tasks).toHaveLength(1);
+        expect(r.tasks[0].error).toBe("Account | Account Health Early Warning: It fell below 250 this week and at 246 is close to Amazon's At Risk cutoff of 200.");
+    });
+
+    // Production, 24 Oct 2026: 56 of 81 fresh marketplaces sat at 200-249; one held
+    // exactly 200 every day for a month. A resting score is not a warning.
+    it('does not fire on a score resting below 250', () => {
+        expect(W1.detectAhrEarlyWarning({ ahrHistory: h([6, 200], [3, 200], [0, 200]), now: NOW })).toEqual({ tasks: [], covered: true });
+        expect(W1.detectAhrEarlyWarning({ ahrHistory: h([0, 240]), now: NOW }).tasks).toEqual([]);
     });
 
     it('leaves below 200 to the account-status task', () => {

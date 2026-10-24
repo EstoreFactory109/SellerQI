@@ -30,6 +30,29 @@ const ageDays = (isoString, now) => {
 
 const unique = (values) => [...new Set(values.filter(Boolean))];
 
+/**
+ * Catalogue SKUs per ASIN, from the merchant listings sync (TotalProducts). For an
+ * FBA SKU `quantity` mirrors FBA fulfillable stock; for a seller-fulfilled SKU it
+ * is the seller's own stock, which is how one ASIN can have no FBA units and still
+ * be buyable (seen: 69,967 units on an active self-shipped SKU next to empty FBA ones).
+ * @returns {Map<string, Array<{sku, status, quantity}>>}
+ */
+function catalogueByAsin(products = []) {
+    const out = new Map();
+    for (const p of products || []) {
+        if (!p?.asin) continue;
+        const list = out.get(p.asin) || [];
+        list.push({ sku: p.sku || '', status: p.status || '', quantity: Number(p.quantity) || 0 });
+        out.set(p.asin, list);
+    }
+    return out;
+}
+
+/** Units on the ASIN's active SKUs, leaving out any SKU in `exceptSkus`. */
+const buyableUnits = (skus = [], exceptSkus = new Set()) => skus
+    .filter(s => s.status === 'Active' && s.quantity > 0 && !exceptSkus.has(s.sku))
+    .reduce((sum, s) => sum + s.quantity, 0);
+
 const productNameOf = (productsByAsin, asin, fallback) => {
     const p = productsByAsin.get(asin);
     const name = p?.itemName || p?.title || p?.productName || p?.name;
@@ -57,7 +80,7 @@ function topRevenueAsins(salesByAsin = {}) {
  * window's sales stand in. The amount stays on the dashboard window, like every
  * other task's.
  */
-function detectListingSuppressed({ suppressed, stock, salesByAsin = {}, salesLookback = null, productsByAsin = new Map(), now }) {
+function detectListingSuppressed({ suppressed, stock, salesByAsin = {}, salesLookback = null, catalogue = new Map(), productsByAsin = new Map(), now }) {
     if (!suppressed || ageDays(suppressed.createdAt, now) > R.SUPPRESSED_REPORT_MAX_AGE_DAYS) {
         return { tasks: [], covered: false, asins: new Map() };
     }
@@ -75,9 +98,10 @@ function detectListingSuppressed({ suppressed, stock, salesByAsin = {}, salesLoo
     const tasks = [];
     const asins = new Map();
     for (const [asin, entry] of byAsin) {
+        const skus = catalogue.get(asin) || [];
         const fbaUnits = stock?.byAsin?.[asin]?.total || 0;
-        // Seller-fulfilled stock lives on the catalogue row (merchant listings report).
-        const ownUnits = Number(productsByAsin.get(asin)?.quantity) || 0;
+        // Seller-fulfilled stock lives on the catalogue rows (merchant listings report).
+        const ownUnits = skus.reduce((sum, s) => sum + s.quantity, 0);
         const sales = salesByAsin[asin] || {};
         const lookback = (salesLookback && salesLookback[asin]) || sales;
         const sold = (Number(lookback.unitsSold) || 0) > 0 || (Number(lookback.sales) || 0) > 0;
@@ -85,13 +109,19 @@ function detectListingSuppressed({ suppressed, stock, salesByAsin = {}, salesLoo
 
         const status = unique(entry.statuses).join(', ') || 'Suppressed';
         const reason = unique(entry.reasons).join('; ') || 'Amazon did not give a reason in the report';
-        asins.set(asin, 'the listing is suppressed');
+        // The SKU is still worth a task, but the product is only unbuyable (for the
+        // ads rule) when no other active SKU of it has stock.
+        if (buyableUnits(skus, new Set(entry.skus)) <= 0) asins.set(asin, 'the listing is suppressed');
         tasks.push({
             asin,
             productName: productNameOf(productsByAsin, asin),
             errorCategory: 'inventory',
             errorType: 'listing_suppressed',
-            error: `Listing Blocked | ${status}: This product cannot be bought on Amazon right now because: ${reason}.`,
+            // "Search Suppressed" hides the listing from search (shoppers can still reach it
+            // by direct link); the other statuses stop it selling at all.
+            error: entry.statuses.every(s => /search\s*suppressed/i.test(s))
+                ? `Listing Blocked | ${status}: Amazon is hiding this product from search results, so shoppers cannot find it, because: ${reason}.`
+                : `Listing Blocked | ${status}: This product cannot be bought on Amazon right now because: ${reason}.`,
             solution: 'Fix the issue Amazon has flagged so the listing becomes active again. In Seller Central go to Inventory > Fix Your Listings, open this SKU, correct the field or upload the document Amazon asks for, and resubmit. Open a case with Seller Support if the reason is unclear.',
             // Sales that ran through this listing in the window: what is at stake while it is hidden.
             amount: Math.round((Number(sales.sales) || 0) * 100) / 100,
@@ -114,7 +144,7 @@ function detectListingSuppressed({ suppressed, stock, salesByAsin = {}, salesLoo
  * Spreadsheet: fulfillable = 0, inbound = 0, and the SKU sold in the last 30 days.
  * FBA only: the FBA Inventory API is the only stock source that says "nothing inbound".
  */
-function detectOutOfStock({ stock, salesByAsin = {}, financeFresh, windowDays, productsByAsin = new Map(), now }) {
+function detectOutOfStock({ stock, salesByAsin = {}, financeFresh, windowDays, catalogue = new Map(), productsByAsin = new Map(), now }) {
     if (!stock || ageDays(stock.fetchedAt, now) > R.FBA_STOCK_MAX_AGE_DAYS || !financeFresh) {
         return { tasks: [], covered: false, asins: new Map() };
     }
@@ -124,19 +154,28 @@ function detectOutOfStock({ stock, salesByAsin = {}, financeFresh, windowDays, p
     const asins = new Map();
     for (const [asin, s] of Object.entries(stock.byAsin || {})) {
         if (s.fulfillable > 0 || s.inbound > 0) continue;
+        // Not in the catalogue at all: a closed or deleted listing, where "send stock" is the wrong advice.
+        if (!catalogue.has(asin)) continue;
+        // Still buyable through another active SKU (typically one the seller ships themselves).
+        if (buyableUnits(catalogue.get(asin)) > 0) continue;
         const units = Number(salesByAsin[asin]?.unitsSold) || 0;
         const sales = Number(salesByAsin[asin]?.sales) || 0;
         if (units <= 0) continue;
 
         const unitsPerDay = units / days;
         const salesPerDay = sales / days;
+        const pace = unitsPerDay >= 1
+            ? `, so it is losing about ${Math.round(unitsPerDay)} ${Math.round(unitsPerDay) === 1 ? 'sale' : 'sales'} a day`
+            : unitsPerDay >= 1 / 7
+                ? `, so it is losing about ${Math.round(unitsPerDay * 7)} ${Math.round(unitsPerDay * 7) === 1 ? 'sale' : 'sales'} a week`
+                : '';
         asins.set(asin, 'it is out of stock');
         tasks.push({
             asin,
             productName: productNameOf(productsByAsin, asin),
             errorCategory: 'inventory',
             errorType: 'out_of_stock',
-            error: `Out of Stock: This product has no sellable units in Amazon's warehouses and nothing on the way. It sold ${units} units in the last ${days} days, so it is losing about ${unitsPerDay < 1 ? unitsPerDay.toFixed(1) : Math.round(unitsPerDay)} ${unitsPerDay === 1 ? 'unit' : 'units'} of sales a day.`,
+            error: `Out of Stock: This product has no sellable units in Amazon's warehouses, nothing on the way, and no other active listing with stock. It sold ${units} ${units === 1 ? 'unit' : 'units'} in the last ${days} days${pace}.`,
             solution: 'Send new stock as soon as possible: create an FBA shipment (Send to Amazon) using the restock recommendation as a guide. If you also ship orders yourself, switch the listing to seller-fulfilled until the shipment is received.',
             // A month of the sales it was making: estimated, from the window's own run rate.
             amount: Math.round(salesPerDay * 30 * 100) / 100,
@@ -252,9 +291,14 @@ function detectCogsMissing({ cogsAsins, salesByAsin = {}, financeFresh, windowTe
 
 /**
  * Account Health early warning.
- * Spreadsheet: score down 20+ points in 7 days, or below 250. Below 200 is At
- * Risk, which the account-status task already reports, so the floor rule here
- * covers 200-249 only. A report without a score is never judged.
+ * Spreadsheet: score down 20+ points in 7 days, or below 250 (an internal buffer).
+ * Below 200 is At Risk, which the account-status task already reports.
+ *
+ * The floor rule fires only when the score CROSSED below 250 inside the window:
+ * 200 is where most accounts rest (on 24 Oct 2026, 56 of 81 fresh marketplaces
+ * sat at 200-249, one at exactly 200 every day for a month), so "below 250" as
+ * a level would warn most sellers permanently about nothing that changed. A
+ * report without a score is never judged.
  */
 function detectAhrEarlyWarning({ ahrHistory, now }) {
     if (!Array.isArray(ahrHistory) || ahrHistory.length === 0) return { tasks: [], covered: false };
@@ -272,13 +316,14 @@ function detectAhrEarlyWarning({ ahrHistory, now }) {
 
     const drop = baseline ? baseline.score - newest.score : 0;
     const dropped = drop >= R.AHR_DROP_POINTS;
-    const nearFloor = newest.score >= 200 && newest.score < R.AHR_WARNING_FLOOR;
+    const nearFloor = newest.score >= 200 && newest.score < R.AHR_WARNING_FLOOR
+        && !!baseline && baseline.score >= R.AHR_WARNING_FLOOR;
     if (!dropped && !nearFloor) return { tasks: [], covered: true };
 
     const days = baseline ? Math.max(1, Math.round((newestAt - Date.parse(baseline.at)) / R.DAY_MS)) : 0;
     const parts = [];
     if (dropped) parts.push(`Your Account Health Rating dropped ${Math.round(drop)} points in the last ${days} ${days === 1 ? 'day' : 'days'}, from ${baseline.score} to ${newest.score}.`);
-    if (nearFloor) parts.push(`At ${newest.score} it is close to Amazon's At Risk cutoff of 200.`);
+    if (nearFloor) parts.push(`It fell below ${R.AHR_WARNING_FLOOR} this week and at ${newest.score} is close to Amazon's At Risk cutoff of 200.`);
 
     return {
         tasks: [{
@@ -386,6 +431,7 @@ function detectRemovalShortfall({ removals, reimbursements = null, products = []
 }
 
 module.exports = {
+    catalogueByAsin,
     topRevenueAsins,
     detectListingSuppressed,
     detectOutOfStock,
