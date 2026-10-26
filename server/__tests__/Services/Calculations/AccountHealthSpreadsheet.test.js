@@ -77,3 +77,25 @@ describe('A-to-z claims', () => {
         expect(r.a_z_claims.status).toBe('Error');
     });
 });
+
+describe('negative feedback', () => {
+    const { feedbackRise } = require('../../../Services/Sp_API/GET_V1_SELLER_PERFORMANCE_REPORT.js');
+    const NOW = new Date('2026-10-26T06:00:00Z');
+    const fb = (count) => ({ negativeFeedbacks: { count: String(count) } });
+
+    it('records when the count went up, and carries it forward', () => {
+        expect(feedbackRise(fb(1), fb(2), NOW)).toEqual({ negativeFeedbacksRoseAt: NOW, negativeFeedbacksCompared: true });
+        const earlier = new Date('2026-10-22T06:00:00Z');
+        expect(feedbackRise({ ...fb(2), negativeFeedbacksRoseAt: earlier }, fb(2), NOW).negativeFeedbacksRoseAt).toBe(earlier);
+        expect(feedbackRise(null, fb(2), NOW).negativeFeedbacksCompared).toBe(false);
+    });
+
+    it('fires for new feedback this week, not for old feedback still counted', () => {
+        const v1 = (over) => ({ ...fb(3), createdAt: NOW, negativeFeedbacksCompared: true, ...over });
+        expect(checkAccountHealth(null, v1({ negativeFeedbacksRoseAt: new Date('2026-10-23T06:00:00Z') }), null).negativeFeedbacks.status).toBe('Error');
+        expect(checkAccountHealth(null, v1({ negativeFeedbacksRoseAt: new Date('2026-10-10T06:00:00Z') }), null).negativeFeedbacks).toEqual({});
+        expect(checkAccountHealth(null, v1({ negativeFeedbacksRoseAt: null }), null).negativeFeedbacks).toEqual({});
+        // Not compared yet: the old rule.
+        expect(checkAccountHealth(null, { ...fb(1), negativeFeedbacksCompared: false }, null).negativeFeedbacks.status).toBe('Error');
+    });
+});

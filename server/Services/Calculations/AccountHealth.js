@@ -130,6 +130,9 @@ const POLICY_LABELS = {
 const policyLabel = (key) => POLICY_LABELS[key]
     || String(key).replace(/([A-Z])/g, ' $1').trim().toLowerCase();
 
+// A new negative feedback stays a task for this long after the report that saw it.
+const NEW_FEEDBACK_WINDOW_DAYS = 7;
+
 const isVerdict = (v) => typeof v === 'string' && v.trim() !== '' && v.trim().toUpperCase() !== 'NONE';
 
 /** Policy categories on one report: [{key, status, count}], listing policy included. */
@@ -308,9 +311,20 @@ const checkAccountHealth=(v2Data,v1Data,v2History=null)=>{
 
     //all v1 checks
 
-    if(Number(v1Data?.negativeFeedbacks?.count || 0)>0){
+    // tasks-logics.xlsx: new 1-2 star feedback since the last run, kept up for a
+    // week. A report saved before the rise was tracked falls back to "any negative
+    // feedback in Amazon's window", which kept the task up for months.
+    const feedbackJudged = v1Data?.negativeFeedbacksCompared === true;
+    const roseAt = v1Data?.negativeFeedbacksRoseAt ? new Date(v1Data.negativeFeedbacksRoseAt).getTime() : NaN;
+    const feedbackNew = feedbackJudged && Number.isFinite(roseAt)
+        && (new Date(v1Data.createdAt || Date.now()).getTime() - roseAt) <= NEW_FEEDBACK_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+    if(feedbackJudged ? feedbackNew : Number(v1Data?.negativeFeedbacks?.count || 0)>0){
         errorCounter++;
-        result.negativeFeedbacks={
+        result.negativeFeedbacks= feedbackJudged ? {
+            status:"Error",
+            Message:"You received new negative seller feedback this week.",
+            HowTOSolve:"Request removal where Amazon's rules allow (feedback about FBA delivery, or that is really a product review), otherwise reach out to the buyer to resolve the problem."
+        } : {
             status:"Error",
             Message:"Your account has received negative seller feedback. This can affect your seller rating, Buy Box eligibility, and customer trust, potentially impacting sales.",
             HowTOSolve:"Review the negative feedback in Seller Central and identify common issues. If the feedback is related to fulfillment by Amazon (FBA), you may request Amazon to remove it. For valid complaints, reach out to the customer to resolve their concerns professionally. Improving response time, order accuracy, and customer service can help prevent future negative feedback."

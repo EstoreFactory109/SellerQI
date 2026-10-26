@@ -28,6 +28,8 @@ const NO_SALES_DATA = {
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 const PPCMetrics = require('../../models/amazon-ads/PPCMetricsModel.js');
 const IssueSummary = require('../../models/system/IssueSummaryModel.js');
+const TaskItem = require('../../models/MCP/TaskItemModel.js');
+const { priorityLevelFor, blocksAmazonReady } = require('../Calculations/TaskPriorityLevels.js');
 const IssuesDataChunks = require('../../models/system/IssuesDataChunksModel.js');
 const CogsModel = require('../../models/finance/CogsModel.js');
 const BuyBoxData = require('../../models/MCP/BuyBoxDataModel.js');
@@ -807,12 +809,20 @@ async function getAmazonReadyProducts(userId, country, region) {
         const totalProducts = products.length;
         const activeProducts = products.filter(p => p.status === 'Active');
         
-        // Get issue data to determine amazon ready products
-        const issueSummary = await IssueSummary.getIssueSummary(userObjectId, country, region);
-        const productsWithIssues = issueSummary?.numberOfProductsWithIssues || 0;
-        
-        // Amazon ready = Active products without issues
-        const amazonReadyCount = Math.max(0, activeProducts.length - productsWithIssues);
+        // Amazon Ready = an active product with no open P1-P3 task, the dashboard's
+        // rule (tasks-logics.xlsx; DashboardCalculation narrows the same way). It used
+        // to be "active minus products with any issue" from IssueSummary, which also
+        // counted P4 polish and so disagreed with the dashboard.
+        const openTasks = await TaskItem.find({
+            ...TaskItem.scopeFilter(userObjectId, country, region),
+            status: { $in: TaskItem.OPEN_STATUSES }
+        }).select('asin errorCategory errorType renderData').lean();
+        const blocked = new Set(openTasks
+            .filter(t => t?.asin && blocksAmazonReady(priorityLevelFor(t)))
+            .map(t => t.asin));
+        const activeAsins = [...new Set(activeProducts.map(p => p.asin).filter(Boolean))];
+        const productsWithIssues = activeAsins.filter(asin => blocked.has(asin)).length;
+        const amazonReadyCount = activeAsins.length - productsWithIssues;
         
         logger.info('[QMateMetricsService] Got Amazon ready products', {
             userId, country, region,

@@ -105,6 +105,18 @@ const GET_V1_SELLER_PERFORMANCE_REPORT_Schema = new mongoose.Schema(
     type:Number,
     default:null
    },
+   // When the negative-feedback count last went up against the previous report,
+   // carried forward between reports (tasks-logics.xlsx: "new 1 or 2 star feedback
+   // since the last run"). Compared is false when there was no previous report to
+   // compare with, and the check then falls back to "any negative feedback".
+   negativeFeedbacksRoseAt:{
+    type:Date,
+    default:null
+   },
+   negativeFeedbacksCompared:{
+    type:Boolean,
+    default:false
+   },
 
   },
   { timestamps: true } // CreatedAt & UpdatedAt automatically managed

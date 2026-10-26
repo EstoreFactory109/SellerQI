@@ -164,12 +164,19 @@ async function _processV1Document(accessToken, reportDocumentId, baseuri, userId
     const jsonData = await convertXMLToJson(xmlData);
 
     const User=userId
+    const metrics = extractV1Metrics(jsonData);
+    const previous = await GET_V1_SELLER_PERFORMANCE_REPORT.findOne({ User, country, region })
+        .sort({ createdAt: -1 })
+        .select('negativeFeedbacks negativeFeedbacksRoseAt')
+        .lean()
+        .catch(() => null);
 
     const createReportData=await GET_V1_SELLER_PERFORMANCE_REPORT.create({
         User,
         region,
         country,
-        ...extractV1Metrics(jsonData)
+        ...metrics,
+        ...feedbackRise(previous, metrics, new Date())
     })
 
     if(!createReportData){
@@ -227,6 +234,28 @@ function latestWindow(entries, fields) {
         };
     }
     return out;
+}
+
+/**
+ * Carries "when did negative feedback last go up" from the previous report.
+ * @returns {{negativeFeedbacksRoseAt: Date|null, negativeFeedbacksCompared: boolean}}
+ */
+function feedbackRise(previous, metrics, now) {
+    const count = (doc) => {
+        const raw = doc?.negativeFeedbacks?.count;
+        if (raw === '' || raw === null || raw === undefined) return null;
+        const n = Number(raw);
+        return Number.isFinite(n) ? n : null;
+    };
+    const before = count(previous);
+    const after = count(metrics);
+    if (before === null || after === null) {
+        return { negativeFeedbacksRoseAt: previous?.negativeFeedbacksRoseAt || null, negativeFeedbacksCompared: false };
+    }
+    return {
+        negativeFeedbacksRoseAt: after > before ? now : (previous.negativeFeedbacksRoseAt || null),
+        negativeFeedbacksCompared: true
+    };
 }
 
 function extractV1Metrics(jsonData) {
@@ -291,3 +320,4 @@ getReport.spApiAsync = {
 
 module.exports = getReport;
 module.exports.extractV1Metrics = extractV1Metrics;
+module.exports.feedbackRise = feedbackRise;

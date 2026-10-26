@@ -87,3 +87,14 @@ describe('classifyProfitabilityRow loss-making rule (tasks pass cogsMap)', () =>
         expect(classifyProfitabilityRow(loss, { financeFresh: true }).errorType).toBe('negative_profit');
     });
 });
+
+describe('Profitability page uses the same loss rule as the tasks', () => {
+    const { calculateProfitabilityIssues } = require('../../../Services/Calculations/ProfitabilityIssuesService.js');
+    const row = { asin: 'A1', sales: 500, ads: 100, amzFee: 150, quantity: 10, source: 'economics' };
+
+    it('counts COGS when it is entered', () => {
+        const r = calculateProfitabilityIssues([row], { cogsMap: { A1: 30 } });
+        expect(r.issues.map(i => i.issueType)).toEqual(['negative_profit']);
+        expect(calculateProfitabilityIssues([row], { cogsMap: { A1: 10 } }).issues.map(i => i.issueType)).not.toContain('negative_profit');
+    });
+});
