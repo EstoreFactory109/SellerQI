@@ -30,6 +30,7 @@ import FixItPackagesModal from '../../Components/Tasks/FixItPackagesModal.jsx';
 import FixItUrgencyCard from '../../Components/Tasks/FixItUrgencyCard.jsx';
 import RemovalReceiptModal from '../../Components/Tasks/RemovalReceiptModal.jsx';
 import ApproveChangeModal from '../../Components/Tasks/ApproveChangeModal.jsx';
+import BulkApproveModal from '../../Components/Tasks/BulkApproveModal.jsx';
 import axiosInstance from '../../config/axios.config.js';
 import { openTasksOf, summarizeUrgency } from '../../utils/taskUrgency.js';
 import { trackEvent } from '../../utils/analytics.js';
@@ -223,6 +224,8 @@ export default function Tasks() {
   const [showFixIt, setShowFixIt] = useState(false);
   // The task whose "approve this change on Amazon" dialog is open.
   const [approveTask, setApproveTask] = useState(null);
+  // Several selected ad changes approved together.
+  const [bulkApproveTasks, setBulkApproveTasks] = useState(null);
   // The removal_confirm_receipt task whose "Confirm what arrived" form is open.
   const [receiptTaskId, setReceiptTaskId] = useState(null);
   // Replenishment lead time for this marketplace (server default 45 days when unset).
@@ -1211,6 +1214,20 @@ export default function Tasks() {
           >
             Export selected
           </button>
+          {(() => {
+            const approvable = transformedTasks.filter((t) => selectedTaskIds.has(t.taskId) && t.proposedAction && !t.proposedAction.editable
+              && !t.proposedAction.done && !completedTasks.has(t.taskId));
+            return approvable.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => { setBulkApproveTasks(approvable); trackEvent('task_action_bulk_open', { count: approvable.length }); }}
+                className="px-3 py-2 rounded-lg text-[13px] border transition-colors"
+                style={{ borderColor: COLORS.accent, color: COLORS.textPrimary, background: 'transparent' }}
+              >
+                Approve {approvable.length} change{approvable.length === 1 ? '' : 's'}…
+              </button>
+            ) : null;
+          })()}
           <button
             type="button"
             onClick={markSelectedComplete}
@@ -1230,6 +1247,13 @@ export default function Tasks() {
         currency={currency}
       />
 
+      <BulkApproveModal
+        tasks={bulkApproveTasks}
+        onClose={() => setBulkApproveTasks(null)}
+        onApproved={(taskId) => {
+          if (!completedTasks.has(taskId)) dispatch(toggleTaskStatusLocal({ taskId }));
+        }}
+      />
       <ApproveChangeModal
         task={approveTask}
         onClose={() => setApproveTask(null)}
