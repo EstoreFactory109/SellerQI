@@ -98,6 +98,11 @@ const LOST_DAMAGED_CLAIM_DAYS = 60;
 const LOST_REASON_CODES = ['M', '5'];
 const DAMAGED_REASON_CODES = ['6', '7', 'E', 'H', 'K', 'U'];
 
+// Spreadsheet "Potential reimbursements: refund given, item not returned": refunds
+// 60-120 days old (Amazon's claim window) with no return and no reimbursement.
+const REFUND_CLAIM_FROM_DAYS = 60;
+const REFUND_CLAIM_TO_DAYS = 120;
+
 // Spreadsheet "Detail page changed without us": changes in the last 7 days that no
 // recorded edit (Fix It, an approved task fix) explains. A recorded edit up to 3 days
 // before the change counts as ours (internal). A price that changed on 3+ of the last
@@ -211,6 +216,8 @@ module.exports = {
     LOW_TRAFFIC_CVR_RATIO,
     LOW_TRAFFIC_MIN_ORDERS,
     TRAFFIC_MIX_MIN_ASINS,
+    REFUND_CLAIM_FROM_DAYS,
+    REFUND_CLAIM_TO_DAYS,
     DETAIL_CHANGE_DAYS,
     DETAIL_CHANGE_OURS_DAYS,
     REPRICER_PRICE_DAYS,

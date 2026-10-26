@@ -12,6 +12,12 @@ jest.mock('../../../../Services/Finance/FBAReimbursementsService.js', () => ({ g
 jest.mock('../../../../models/finance/LedgerDetailViewItemModel.js', () => ({
     findOne: () => ({ sort: () => ({ select: () => ({ lean: () => Promise.resolve(null) }) }) })
 }));
+jest.mock('../../../../models/finance/RefundOrderModel.js', () => ({
+    find: () => ({ select: () => ({ lean: () => Promise.resolve([]) }) })
+}));
+jest.mock('../../../../models/inventory/CustomerReturnsModel.js', () => ({
+    findOne: () => ({ sort: () => ({ select: () => ({ lean: () => Promise.resolve(null) }), lean: () => Promise.resolve(null) }) })
+}));
 jest.mock('../../../../models/inventory/ShipmentModel.js', () => ({
     findOne: () => ({ sort: () => ({ lean: () => Promise.resolve(null) }) })
 }));
@@ -134,6 +140,8 @@ describe('KpiInputs', () => {
         expect(inputs.removalReceipts).toEqual([{ orderId: 'R1', sku: 'S1', shippedQuantity: 10, receivedQuantity: 7 }]);
         expect(inputs.lostDamaged).toBeNull();
         expect(inputs.inboundShortage).toBeNull();
+        // Refunds read, but no returns report: the check will make no verdict.
+        expect(inputs.refundCheck).toMatchObject({ refunds: [], returnsFetchedAt: null, reimbursementsRead: false });
         // 60 days ending yesterday (UTC).
         const [, , , start, end] = getAsinFinanceForWindow.mock.calls[0];
         expect(end.toISOString().slice(0, 10)).toBe('2026-10-23');
@@ -157,7 +165,8 @@ describe('runKpiDetectors', () => {
             removals: { createdAt: daysAgo(1), lines: [] },
             removalReceipts: [],
             lostDamaged: { fetchedAt: daysAgo(1), events: [] },
-            inboundShortage: { fetchedAt: daysAgo(1), shipments: [], reimbursedByFnsku: {}, reimbursementsRead: true }
+            inboundShortage: { fetchedAt: daysAgo(1), shipments: [], reimbursedByFnsku: {}, reimbursementsRead: true },
+            refundCheck: { refunds: [], returnedOrders: new Set(), reimbursedOrders: new Set(), returnsFetchedAt: daysAgo(1), returnsWindowStart: daysAgo(150), reimbursementsRead: true }
         },
         ...over
     });

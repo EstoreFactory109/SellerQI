@@ -200,6 +200,10 @@ const GROUP_COPY = {
         title: 'Units Amazon lost or damaged and has not paid for',
         action: 'File claims before the 60-day window closes'
     },
+    'inventory:refund_not_returned': {
+        title: 'Refunds where the item never came back',
+        action: 'File a claim for each order before 120 days'
+    },
     'inventory:inbound_shortage': {
         title: 'Shipments Amazon checked in short',
         action: 'Open a case with the invoice and proof of delivery'

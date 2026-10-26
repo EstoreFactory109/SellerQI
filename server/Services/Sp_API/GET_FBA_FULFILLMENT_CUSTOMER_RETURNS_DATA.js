@@ -23,8 +23,9 @@ const {
 
 const REPORT_TYPE = 'GET_FBA_FULFILLMENT_CUSTOMER_RETURNS_DATA';
 
-/** 90 days: the 30-day spike rule, with room for later three-month return-rate rules. */
-const WINDOW_DAYS = 90;
+/** 150 days: the 30-day spike rule, the 3-month return rate, and "refund given, item
+ *  not returned", which looks for a return up to 120 days after a refund. */
+const WINDOW_DAYS = 150;
 
 /** Keeps a snapshot well inside Mongo's 16MB limit; newest returns are kept first. */
 const MAX_LINES = 20000;

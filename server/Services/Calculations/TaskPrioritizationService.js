@@ -177,6 +177,7 @@ const EFFORT_MINUTES = {
     'inventory:return_reason_spike': 30,    // read comments, fix listing or supplier
     'ranking:detail_page_changed': 10,      // check and restore, or mark as yours
     'inventory:inbound_shortage': 20,       // open a case with documents
+    'inventory:refund_not_returned': 15,    // file a claim per order
     'conversion:high_traffic_low_conversion': 45, // listing work
     'conversion:low_traffic_high_conversion': 20, // ads/keywords
     'sponsoredAds:product_acos_above_breakeven': 5, // lower bids / pause targets
@@ -309,6 +310,7 @@ const IMPACT_WEIGHT = {
     // Spreadsheet P2: someone else editing the listing can cost sales fast.
     'ranking:detail_page_changed': 70,
     'inventory:inbound_shortage': 72,
+    'inventory:refund_not_returned': 72,
     // Spreadsheet P3 / P4.
     'conversion:high_traffic_low_conversion': 50,
     'conversion:low_traffic_high_conversion': 30,

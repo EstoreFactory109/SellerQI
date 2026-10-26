@@ -349,6 +349,26 @@ async function loadLostDamagedEvents(userId, country, region, now = new Date()) 
 }
 
 /**
+ * What "refund given, item not returned" needs: refunds in the claim window, the
+ * orders a return was seen for, and the orders Amazon already reimbursed.
+ */
+function buildRefundCheck(refunds, returnsDoc, reimbursementsDoc) {
+    if (!Array.isArray(refunds)) return null;
+    const returnedOrders = new Set();
+    for (const l of returnsDoc?.lines || []) if (l?.orderId) returnedOrders.add(String(l.orderId).trim());
+    const reimbursedOrders = new Set();
+    for (const r of reimbursementsDoc?.data || []) if (r?.amazon_order_id) reimbursedOrders.add(String(r.amazon_order_id).trim());
+    return {
+        refunds,
+        returnedOrders,
+        reimbursedOrders,
+        returnsFetchedAt: returnsDoc && !returnsDoc.unreadable ? returnsDoc.createdAt : null,
+        returnsWindowStart: returnsDoc?.windowStart || null,
+        reimbursementsRead: !!reimbursementsDoc
+    };
+}
+
+/**
  * Closed inbound shipments (the fetch keeps only CLOSED, updated in the last 30
  * days) with lines received short, plus the inbound reimbursements by FNSKU.
  */
@@ -610,6 +630,18 @@ async function loadKpiInputs({ userId, country, region, waves, allData, now = ne
             .then(() => RemovalReceipt.find({ User: userId, country, region }).lean())
             .catch(unavailable('Removal receipts'))
     ]);
+    const R = require('./KpiRules.js');
+    const DAY = 24 * 60 * 60 * 1000;
+    const [refunds, returnsForRefunds] = await Promise.all([
+        require('../../../models/finance/RefundOrderModel.js')
+            .find({ User: toObjectId(userId), country, region, refundDate: { $gte: new Date(now.getTime() - R.REFUND_CLAIM_TO_DAYS * DAY), $lte: new Date(now.getTime() - R.REFUND_CLAIM_FROM_DAYS * DAY) } })
+            .select('orderId sku asin refundDate amount units').lean()
+            .catch(unavailable('Refund orders')),
+        require('../../../models/inventory/CustomerReturnsModel.js')
+            .findOne({ User: toObjectId(userId), country, region }).sort({ createdAt: -1 })
+            .select('createdAt windowStart unreadable lines.orderId lines.sku').lean()
+            .catch(unavailable('Customer returns'))
+    ]);
     const [lostDamaged, shipmentDoc] = await Promise.all([
         Promise.resolve().then(() => loadLostDamagedEvents(userId, country, region, now)).catch(unavailable('Ledger detail')),
         Promise.resolve()
@@ -629,6 +661,7 @@ async function loadKpiInputs({ userId, country, region, waves, allData, now = ne
         receiptDocs
     });
     inputs.lostDamaged = lostDamaged;
+    inputs.refundCheck = buildRefundCheck(refunds, returnsForRefunds, reimbursementsDoc);
     inputs.inboundShortage = buildInboundShortage(shipmentDoc, reimbursementsDoc);
 
     // Wave 2: trends and coverage. Each load fails to null on its own.
@@ -680,6 +713,7 @@ async function loadKpiInputs({ userId, country, region, waves, allData, now = ne
 }
 
 module.exports = {
+    buildRefundCheck,
     buildInboundShortage,
     buildKpiInputs,
     loadKpiInputs,

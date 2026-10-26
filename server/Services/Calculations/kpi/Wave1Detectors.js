@@ -547,8 +547,57 @@ function detectInboundShortage({ inboundShortage, products = [], now }) {
     return { tasks, covered: true };
 }
 
+/**
+ * Refund given, item not returned. Spreadsheet: refund older than 60 days (and inside
+ * the 120-day claim window), no return received and no reimbursement. FBA orders only
+ * (a seller-fulfilled return is the seller's own business). One task per product,
+ * listing the orders; there is no Amazon API to file the claims, so the task says how.
+ */
+function detectRefundNotReturned({ refundCheck, products = [], productsByAsin = new Map(), now }) {
+    if (!refundCheck || !refundCheck.reimbursementsRead || !refundCheck.returnsFetchedAt
+        || ageDays(refundCheck.returnsFetchedAt, now) > REIMBURSEMENT_INPUT_MAX_AGE_DAYS) {
+        return { tasks: [], covered: false };
+    }
+    const channelBySku = new Map(products.filter(p => p?.sku).map(p => [String(p.sku), p.fulfillmentChannel || null]));
+    const windowStart = refundCheck.returnsWindowStart ? Date.parse(refundCheck.returnsWindowStart) : NaN;
+    const byAsin = new Map();
+    for (const r of refundCheck.refunds || []) {
+        const orderId = String(r?.orderId || '').trim();
+        if (!orderId || !r.asin) continue;
+        if (channelBySku.get(String(r.sku || '')) === 'DEFAULT') continue; // seller-fulfilled
+        // The returns report must reach back to the refund, or "no return" is unknown.
+        if (!Number.isFinite(windowStart) || windowStart > new Date(r.refundDate).getTime()) continue;
+        if (refundCheck.returnedOrders.has(orderId) || refundCheck.reimbursedOrders.has(orderId)) continue;
+        const a = byAsin.get(r.asin) || { orders: [], amount: 0, firstRefund: r.refundDate };
+        a.orders.push(orderId);
+        a.amount += Number(r.amount) || 0;
+        if (new Date(r.refundDate) < new Date(a.firstRefund)) a.firstRefund = r.refundDate;
+        byAsin.set(r.asin, a);
+    }
+    const tasks = [];
+    for (const [asin, a] of byAsin) {
+        const deadline = new Date(new Date(a.firstRefund).getTime() + R.REFUND_CLAIM_TO_DAYS * R.DAY_MS).toISOString();
+        const n = a.orders.length;
+        const shown = a.orders.slice(0, 5).join(', ') + (n > 5 ? ` and ${n - 5} more` : '');
+        tasks.push({
+            asin,
+            productName: productNameOf(productsByAsin, asin),
+            errorCategory: 'inventory',
+            errorType: 'refund_not_returned',
+            error: `Reimbursement | Refund Not Returned: ${n} ${n === 1 ? 'customer was' : 'customers were'} refunded for this product more than ${R.REFUND_CLAIM_FROM_DAYS} days ago but never returned it, and Amazon has not reimbursed you (orders ${shown}). The first claim window closes on ${shortDay(deadline)}.`,
+            solution: 'File a reimbursement claim for each order in Seller Central before its window closes (Amazon has no way to file these for you). Claims can be made between 60 and 120 days after the refund.',
+            amount: money2(a.amount),
+            amountIsEstimated: false,
+            renderData: { orders: a.orders, refundCount: n, firstRefund: a.firstRefund, claimDeadline: deadline },
+            status: PENDING
+        });
+    }
+    return { tasks, covered: true };
+}
+
 module.exports = {
     catalogueByAsin,
+    detectRefundNotReturned,
     detectLostDamagedUnreimbursed,
     detectInboundShortage,
     buyableUnits,

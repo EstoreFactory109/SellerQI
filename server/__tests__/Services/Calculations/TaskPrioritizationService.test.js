@@ -105,6 +105,7 @@ const ALL_TASK_TYPES = [
     ['inventory', 'return_reason_spike'],
     ['ranking', 'detail_page_changed'],
     ['inventory', 'inbound_shortage'],
+    ['inventory', 'refund_not_returned'],
     ['conversion', 'high_traffic_low_conversion'],
     ['conversion', 'low_traffic_high_conversion'],
     ['ranking', 'backend_keywords_title_overlap'],

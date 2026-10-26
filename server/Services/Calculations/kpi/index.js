@@ -31,6 +31,7 @@ const KPI_SOURCES = Object.freeze({
     'inventory:removal_confirm_receipt': 'kpi.removalShortfall',
     'inventory:lost_damaged_unreimbursed': 'kpi.lostDamaged',
     'inventory:inbound_shortage': 'kpi.inboundShortage',
+    'inventory:refund_not_returned': 'kpi.refundNotReturned',
     // Wave 2
     'conversion:sales_drop': 'kpi.salesDrop',
     'conversion:conversion_rate_drop': 'kpi.conversionDrop',
@@ -204,6 +205,7 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, profitR
         add(ahr, 'account:ahr_early_warning');
         add(removals, 'inventory:removal_shortfall', 'inventory:removal_confirm_receipt');
         add(safely('lost_damaged_unreimbursed', context, () => W1.detectLostDamagedUnreimbursed({ lostDamaged: inputs.lostDamaged, productsByAsin, now })), 'inventory:lost_damaged_unreimbursed');
+        add(safely('refund_not_returned', context, () => W1.detectRefundNotReturned({ refundCheck: inputs.refundCheck, products, productsByAsin, now })), 'inventory:refund_not_returned');
         add(safely('inbound_shortage', context, () => W1.detectInboundShortage({ inboundShortage: inputs.inboundShortage, products, now })), 'inventory:inbound_shortage');
     }
 

@@ -35,6 +35,7 @@ const PRIORITY_LEVEL = {
     // ── Money owed, with a claim deadline
     'inventory:lost_damaged_unreimbursed': 'P1',
     'inventory:inbound_shortage': 'P1',
+    'inventory:refund_not_returned': 'P1',
     'inventory:removal_shortfall': 'P2',
     'inventory:removal_confirm_receipt': 'P2',
 

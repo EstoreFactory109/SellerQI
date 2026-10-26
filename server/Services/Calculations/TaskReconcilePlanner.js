@@ -101,6 +101,7 @@ const SOURCE_BY_TYPE = {
     'inventory:return_reason_spike': 'kpi.returnReasons',
     'ranking:detail_page_changed': 'kpi.detailPageChanged',
     'inventory:inbound_shortage': 'kpi.inboundShortage',
+    'inventory:refund_not_returned': 'kpi.refundNotReturned',
     'conversion:high_traffic_low_conversion': 'kpi.trafficMix',
     'conversion:low_traffic_high_conversion': 'kpi.trafficMix',
     'sponsoredAds:product_acos_above_breakeven': 'kpi.productAcos',
