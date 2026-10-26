@@ -99,6 +99,7 @@ const SOURCE_BY_TYPE = {
     'ranking:listing_errors': 'kpi.listingErrors',
     'inventory:lost_damaged_unreimbursed': 'kpi.lostDamaged',
     'inventory:return_reason_spike': 'kpi.returnReasons',
+    'ranking:detail_page_changed': 'kpi.detailPageChanged',
     'inventory:inbound_shortage': 'kpi.inboundShortage',
     'conversion:high_traffic_low_conversion': 'kpi.trafficMix',
     'conversion:low_traffic_high_conversion': 'kpi.trafficMix',

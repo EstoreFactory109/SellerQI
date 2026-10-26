@@ -103,6 +103,8 @@ function carryForwardProductFields(existingProducts, incomingProducts) {
         if (prev.fulfillmentChannel) row.fulfillmentChannel = prev.fulfillmentChannel;
         if (prev.handlingTimeDays !== undefined && prev.handlingTimeDays !== null) row.handlingTimeDays = prev.handlingTimeDays;
         if (prev.brand) row.brand = prev.brand;
+        if (prev.bulletsHash) row.bulletsHash = prev.bulletsHash;
+        if (prev.mainImage) row.mainImage = prev.mainImage;
 
         // `quantity` is deliberately NOT carried: FbaInventoryStorageService overwrites it seconds
         // later in the same phase, and the report supplies a value anyway.
@@ -510,6 +512,9 @@ async function saveListingsForMarketplace(userId, country, region, ProductData) 
     // defaults wipe them for the whole account until CALC_REVIEW runs hours later.
     // Still a full replace, so delisted listings drop out exactly as before.
     carryForwardProductFields(account.products, ProductData);
+    // Title and price changes since yesterday, for the detail-page-changed task.
+    const { diffDailyListings, recordListingChanges } = require('../Calculations/ListingChanges.js');
+    await recordListingChanges(userId, country, region, diffDailyListings(account.products, ProductData));
 
     const historyEntry = { NumberOfProducts: ProductData.length };
     await SellerModel.updateOne(

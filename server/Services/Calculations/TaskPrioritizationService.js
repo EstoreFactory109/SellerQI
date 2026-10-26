@@ -175,6 +175,7 @@ const EFFORT_MINUTES = {
     'ranking:listing_errors': 10,           // fix the field Amazon flagged
     'inventory:lost_damaged_unreimbursed': 15, // file a claim
     'inventory:return_reason_spike': 30,    // read comments, fix listing or supplier
+    'ranking:detail_page_changed': 10,      // check and restore, or mark as yours
     'inventory:inbound_shortage': 20,       // open a case with documents
     'conversion:high_traffic_low_conversion': 45, // listing work
     'conversion:low_traffic_high_conversion': 20, // ads/keywords
@@ -305,6 +306,8 @@ const IMPACT_WEIGHT = {
     // Spreadsheet P1 with a deadline: money Amazon owes, lost if the window closes.
     'inventory:lost_damaged_unreimbursed': 72,
     'inventory:return_reason_spike': 45,
+    // Spreadsheet P2: someone else editing the listing can cost sales fast.
+    'ranking:detail_page_changed': 70,
     'inventory:inbound_shortage': 72,
     // Spreadsheet P3 / P4.
     'conversion:high_traffic_low_conversion': 50,

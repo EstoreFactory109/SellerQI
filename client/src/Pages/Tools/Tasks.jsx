@@ -225,6 +225,20 @@ export default function Tasks() {
   const [approveTask, setApproveTask] = useState(null);
   // The removal_confirm_receipt task whose "Confirm what arrived" form is open.
   const [receiptTaskId, setReceiptTaskId] = useState(null);
+  // detail_page_changed: the seller says the change was theirs.
+  const [mineSaving, setMineSaving] = useState(null);
+  const markChangeAsMine = async (item) => {
+    setMineSaving(item.taskId);
+    try {
+      await axiosInstance.post('/api/pagewise/tasks/listing-changes/confirm', { taskId: item.taskId }, { withCredentials: true });
+      trackEvent('listing_change_confirm_mine');
+      if (!completedTasks.has(item.taskId)) dispatch(toggleTaskStatusLocal({ taskId: item.taskId }));
+    } catch (err) {
+      setResellerNotes((n) => ({ ...n, [item.taskId]: { ok: false, text: err.response?.data?.message || 'Could not save. Please try again.' } }));
+    } finally {
+      setMineSaving(null);
+    }
+  };
   // new_seller_on_brand tasks: which one is saving, and per-task messages.
   const [resellerSaving, setResellerSaving] = useState(null);
   const [resellerNotes, setResellerNotes] = useState({});
@@ -998,6 +1012,20 @@ export default function Tasks() {
                               </span>
                             )}
                           </div>
+                        )}
+                        {item.errorType === 'detail_page_changed' && !completedTasks.has(item.taskId) && (
+                          <button
+                            type="button"
+                            onClick={() => markChangeAsMine(item)}
+                            disabled={mineSaving === item.taskId}
+                            className="mt-2.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold border"
+                            style={{ borderColor: COLORS.border, color: COLORS.textPrimary, background: 'transparent' }}
+                          >
+                            {mineSaving === item.taskId ? 'Saving…' : 'I made this change'}
+                          </button>
+                        )}
+                        {item.errorType === 'detail_page_changed' && resellerNotes[item.taskId] && (
+                          <span role="status" className="block mt-1 text-xs" style={{ color: COLORS.watch }}>{resellerNotes[item.taskId].text}</span>
                         )}
                         {item.proposedAction && !item.proposedAction.done && !completedTasks.has(item.taskId) && (
                           <button

@@ -99,6 +99,18 @@ const Products=new mongoose.Schema({
     type: String,
     required: false,
     default: undefined
+  },
+  // Fingerprint of the bullet points and the main image URL from the weekly sync, so
+  // a change between two syncs can be noticed (ListingChanges, "detail page changed").
+  bulletsHash:{
+    type: String,
+    required: false,
+    default: undefined
+  },
+  mainImage:{
+    type: String,
+    required: false,
+    default: undefined
   }
 },{timestamps:true})
 

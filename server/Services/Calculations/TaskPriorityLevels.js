@@ -94,6 +94,7 @@ const PRIORITY_LEVEL = {
 
     // ── Listing text (Rankings)
     'ranking:listing_errors': 'P2',
+    'ranking:detail_page_changed': 'P2',
     'ranking:backend_keywords_char_limit': 'P2', // over Amazon's limit: all ignored
     'ranking:backend_keywords_duplicate_words': 'P4',
     'ranking:backend_keywords_title_overlap': 'P4',

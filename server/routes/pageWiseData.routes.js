@@ -33,6 +33,7 @@ const {
     getTasksData,
     updateTaskStatus,
     approveTaskActions,
+    confirmListingChanges,
     getInventoryData,
     getAsinWiseSalesData,
     getYourProductsData,
@@ -587,6 +588,9 @@ router.put('/tasks/status', auth, validateTaskStatusBody, updateTaskStatus);
 
 // Make the changes the seller approved on the Tasks page (TaskActionService).
 router.post('/tasks/approve-actions', auth, getLocation, approveTaskActions);
+
+// "I made this change" on a detail-page-changed task.
+router.post('/tasks/listing-changes/confirm', auth, getLocation, confirmListingChanges);
 
 // ===== PPC METRICS (from PPCMetrics Model) =====
 // Get latest PPC metrics for dashboards

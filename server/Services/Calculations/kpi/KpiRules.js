@@ -98,6 +98,14 @@ const LOST_DAMAGED_CLAIM_DAYS = 60;
 const LOST_REASON_CODES = ['M', '5'];
 const DAMAGED_REASON_CODES = ['6', '7', 'E', 'H', 'K', 'U'];
 
+// Spreadsheet "Detail page changed without us": changes in the last 7 days that no
+// recorded edit (Fix It, an approved task fix) explains. A recorded edit up to 3 days
+// before the change counts as ours (internal). A price that changed on 3+ of the last
+// 7 days is a repricer, not a change to report (user decision, 2026-10-26).
+const DETAIL_CHANGE_DAYS = 7;
+const DETAIL_CHANGE_OURS_DAYS = 3;
+const REPRICER_PRICE_DAYS = 3;
+
 // Spreadsheet "Return reason spike": 'not as described', 'defective' or 'wrong item'
 // make up 30%+ of a product's returns in 30 days. The 10-return floor is internal (2
 // of 3 returns is not a spike). Codes per Amazon's returns report; ORDERED_WRONG_ITEM
@@ -203,6 +211,9 @@ module.exports = {
     LOW_TRAFFIC_CVR_RATIO,
     LOW_TRAFFIC_MIN_ORDERS,
     TRAFFIC_MIX_MIN_ASINS,
+    DETAIL_CHANGE_DAYS,
+    DETAIL_CHANGE_OURS_DAYS,
+    REPRICER_PRICE_DAYS,
     RETURN_SPIKE_DAYS,
     RETURN_SPIKE_SHARE,
     RETURN_SPIKE_MIN_RETURNS,

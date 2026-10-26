@@ -884,6 +884,26 @@ const approveTaskActions = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, { results }, 'Approved changes processed'));
 });
 
+/**
+ * POST /api/pagewise/tasks/listing-changes/confirm
+ * Body: { taskId } — the seller says a "detail page changed" task's changes were
+ * theirs: those changes are never reported again, and the task is done.
+ */
+const confirmListingChanges = asyncHandler(async (req, res) => {
+    const { taskId } = req.body || {};
+    if (!taskId) return res.status(400).json(new ApiError(400, 'taskId is required'));
+    const TaskItem = require('../../models/MCP/TaskItemModel.js');
+    const ListingChangeEvent = require('../../models/products/ListingChangeEventModel.js');
+    const task = await TaskItem.findOne({ userId: req.userId, country: req.country, region: req.region, taskId, errorType: 'detail_page_changed' }).lean();
+    if (!task) return res.status(404).json(new ApiError(404, 'Task not found'));
+    const ids = (task.renderData?.eventIds || []).filter(Boolean);
+    const updated = ids.length
+        ? await ListingChangeEvent.updateMany({ _id: { $in: ids }, User: req.userId, country: req.country, region: req.region }, { $set: { sellerConfirmed: true } })
+        : { modifiedCount: 0 };
+    await TaskItem.updateOne({ _id: task._id }, { $set: { status: 'completed', completedAt: new Date(), stillDetected: false } });
+    return res.status(200).json(new ApiResponse(200, { confirmed: updated.modifiedCount || 0 }, 'Marked as your change'));
+});
+
 const updateTaskStatus = asyncHandler(async (req, res) => {
     const userId = req.userId;
     const { taskId, status } = req.body;
@@ -4177,6 +4197,7 @@ const getDashboardPhase3 = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+    confirmListingChanges,
     approveTaskActions,
     getDashboardData,
     getDashboardSummary,

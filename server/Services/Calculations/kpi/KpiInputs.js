@@ -652,6 +652,16 @@ async function loadKpiInputs({ userId, country, region, waves, allData, now = ne
             Promise.resolve().then(() => loadFbaFeeSnapshots(userId, country, region)).catch(unavailable('FBA fee snapshots')),
             Promise.resolve().then(() => loadBrandOffers(userId, country, region)).catch(unavailable('Brand offers'))
         ]);
+        const changeSince = new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000);
+        const [changeEvents, ourFixes] = await Promise.all([
+            require('../../../models/products/ListingChangeEventModel.js')
+                .find({ User: toObjectId(userId), country, region, createdAt: { $gte: changeSince } }).lean()
+                .catch(unavailable('Listing changes')),
+            require('../../../models/system/ListingFixStatusModel.js')
+                .find({ userId: toObjectId(userId), country, region, fixedAt: { $gte: new Date(changeSince.getTime() - 3 * 24 * 60 * 60 * 1000) } })
+                .select('asin sku attribute fixedAt').lean()
+                .catch(() => [])
+        ]);
         const returnsDoc = await require('../../../models/inventory/CustomerReturnsModel.js')
             .findOne({ User: toObjectId(userId), country, region })
             .sort({ createdAt: -1 }).lean()
@@ -659,6 +669,7 @@ async function loadKpiInputs({ userId, country, region, waves, allData, now = ne
         Object.assign(inputs, {
             fbaFees,
             brandOffers,
+            listingChanges: Array.isArray(changeEvents) ? { events: changeEvents, ourFixes: ourFixes || [] } : null,
             returns: returnsDoc ? { fetchedAt: returnsDoc.createdAt, unreadable: !!returnsDoc.unreadable, lines: returnsDoc.lines || [] } : null,
             planning: buildPlanning(freshInventoryReportOrNull(allData?.inventoryPlanningData, 'Inventory planning (KPI)', { userId, country, region }, now)),
             invoice: buildInvoice(allData?.v2Data)

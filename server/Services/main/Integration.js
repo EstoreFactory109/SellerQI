@@ -1982,7 +1982,7 @@ class Integration {
                 }
                 // Fulfilment channel and handling time, from the active-SKU listing sync.
                 if (item.fulfillmentChannel) {
-                    fulfillmentMap.set(item.sku, { channel: item.fulfillmentChannel, handlingTimeDays: item.handlingTimeDays, brand: item.brand });
+                    fulfillmentMap.set(item.sku, { channel: item.fulfillmentChannel, handlingTimeDays: item.handlingTimeDays, brand: item.brand, bullets: item.bullets, bulletsHash: item.bulletsHash, mainImage: item.mainImage });
                 }
                 // Yield periodically for large arrays
                 if ((i + 1) % MAP_BUILD_CHUNK_SIZE === 0) {
@@ -1994,6 +1994,9 @@ class Integration {
             const products = sellerDetails.sellerAccount[accountIndex].products;
             let updatedCount = 0;
             const CHUNK_SIZE = 200;
+            // Bullet, main image and brand changes since the last weekly sync.
+            const { diffWeeklyListing, recordListingChanges } = require('../Calculations/ListingChanges.js');
+            const listingChanges = [];
 
             for (let i = 0; i < products.length; i += CHUNK_SIZE) {
                 const chunk = products.slice(i, Math.min(i + CHUNK_SIZE, products.length));
@@ -2013,7 +2016,10 @@ class Integration {
                         product.fulfillmentChannel = f.channel;
                         // null = the listing sets no handling time; stored as unset, not 0.
                         product.handlingTimeDays = Number.isFinite(f.handlingTimeDays) ? f.handlingTimeDays : undefined;
+                        listingChanges.push(...diffWeeklyListing(product, f));
                         if (f.brand) product.brand = f.brand;
+                        if (f.bulletsHash) product.bulletsHash = f.bulletsHash;
+                        if (f.mainImage) product.mainImage = f.mainImage;
                     }
                 }
                 // Yield to event loop to allow lock extension
@@ -2021,6 +2027,7 @@ class Integration {
             }
 
             await sellerDetails.save();
+            await recordListingChanges(userId, Country, Region, listingChanges);
 
             logger.info("updateSellerProductIssues ended", {
                 updatedCount,

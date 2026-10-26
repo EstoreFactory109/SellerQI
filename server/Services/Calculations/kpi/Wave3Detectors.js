@@ -360,7 +360,68 @@ function detectReturnReasonSpike({ returns, productsByAsin = new Map(), now }) {
     return { tasks, covered: true };
 }
 
+const FIELD_NAMES = { title: 'title', price: 'price', bulletpoints: 'bullet points', main_image: 'main image', brand: 'brand' };
+const quote = (v) => `"${String(v).slice(0, 80)}${String(v).length > 80 ? '…' : ''}"`;
+
+/**
+ * Detail page changed without us. A change in the last 7 days to title, price,
+ * bullet points, main image or brand that no recorded edit explains (Fix It or an
+ * approved task fix, up to 3 days before), and that the seller has not said was
+ * theirs. Repricer price moves (3+ days of the last 7) are left out. One task per ASIN.
+ */
+function detectDetailPageChanged({ listingChanges, productsByAsin = new Map(), now }) {
+    if (!listingChanges) return { tasks: [], covered: false };
+    const DAY = R.DAY_MS;
+    const since = now.getTime() - R.DETAIL_CHANGE_DAYS * DAY;
+    const events = (listingChanges.events || []).filter(e => e?.asin && new Date(e.createdAt).getTime() >= since);
+
+    const priceDays = new Map();
+    for (const e of events) {
+        if (e.field !== 'price') continue;
+        const key = `${e.asin}|${e.sku}`;
+        if (!priceDays.has(key)) priceDays.set(key, new Set());
+        priceDays.get(key).add(new Date(e.createdAt).toISOString().slice(0, 10));
+    }
+    const fixAttr = { title: 'title', bulletpoints: 'bulletpoints' };
+    const ours = (e) => (listingChanges.ourFixes || []).some(f => f.asin === e.asin
+        && fixAttr[e.field] === f.attribute
+        && new Date(f.fixedAt).getTime() <= new Date(e.createdAt).getTime() + DAY
+        && new Date(f.fixedAt).getTime() >= new Date(e.createdAt).getTime() - R.DETAIL_CHANGE_OURS_DAYS * DAY);
+
+    const byAsin = new Map();
+    for (const e of events) {
+        if (e.sellerConfirmed || ours(e)) continue;
+        if (e.field === 'price' && (priceDays.get(`${e.asin}|${e.sku}`)?.size || 0) >= R.REPRICER_PRICE_DAYS) continue;
+        if (!byAsin.has(e.asin)) byAsin.set(e.asin, []);
+        byAsin.get(e.asin).push(e);
+    }
+
+    const tasks = [];
+    for (const [asin, list] of byAsin) {
+        // The newest change per field.
+        const latest = new Map();
+        for (const e of list.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))) latest.set(e.field, e);
+        const parts = [...latest.values()].map(e => {
+            const name = FIELD_NAMES[e.field] || e.field;
+            if (e.field === 'title' || e.field === 'brand' || e.field === 'price') return `${name} changed from ${quote(e.oldValue)} to ${quote(e.newValue)}`;
+            return `${name} changed`;
+        });
+        tasks.push({
+            asin,
+            productName: nameOf(productsByAsin, asin),
+            errorCategory: 'ranking',
+            errorType: 'detail_page_changed',
+            error: `Detail Page Changed: This listing changed in the last ${R.DETAIL_CHANGE_DAYS} days with no record of you or SellerQI making the change: ${parts.join('; ')}.`,
+            solution: 'If you or your team made this change, mark it as yours. If not, check the listing in Seller Central, restore the correct content, and contact Brand Registry support if someone else changed it.',
+            renderData: { eventIds: list.map(e => String(e._id)), fields: [...latest.keys()] },
+            status: PENDING
+        });
+    }
+    return { tasks, covered: true };
+}
+
 module.exports = {
+    detectDetailPageChanged,
     detectReturnReasonSpike,
     detectListingErrors,
     detectListingIssues,

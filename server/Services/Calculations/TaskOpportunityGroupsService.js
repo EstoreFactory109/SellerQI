@@ -188,6 +188,10 @@ const GROUP_COPY = {
         title: 'Products whose ads cost more than they earn',
         action: 'Lower bids or pause the targets above break-even ACoS'
     },
+    'ranking:detail_page_changed': {
+        title: 'Listings changed with no record of who changed them',
+        action: 'Check each one, and restore it or mark the change as yours'
+    },
     'inventory:return_reason_spike': {
         title: 'Products returned as defective, wrong or not as described',
         action: 'Read the return comments and fix the listing or the product'
