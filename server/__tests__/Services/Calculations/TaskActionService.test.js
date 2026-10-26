@@ -32,6 +32,12 @@ jest.mock('../../../Services/AmazonAds/Pause-ArchiveKeywords.js', () => ({
     updateKeywordBids: (...args) => mockBids(...args)
 }));
 let mockSnapshot = null;
+let mockProductAds = [];
+const mockPauseAds = jest.fn();
+jest.mock('../../../Services/AmazonAds/ProductAds.js', () => ({
+    listEnabledProductAdsForAsin: async () => mockProductAds,
+    pauseProductAds: (...a) => mockPauseAds(...a)
+}));
 const mockTargetBids = jest.fn();
 let mockLiveTargets = new Map();
 jest.mock('../../../Services/AmazonAds/AdsTargets.js', () => ({
@@ -62,7 +68,7 @@ beforeEach(() => {
     mockTasks.length = 0; mockLogs.length = 0;
     mockTaskUpdates.length = 0;
     mockAddToNegative.mockReset(); mockPause.mockReset(); mockBids.mockReset(); mockSnapshot = null;
-    mockUpdateContent.mockReset(); mockFixed.length = 0; mockTargetBids.mockReset(); mockLiveTargets = new Map();
+    mockUpdateContent.mockReset(); mockFixed.length = 0; mockTargetBids.mockReset(); mockLiveTargets = new Map(); mockProductAds = []; mockPauseAds.mockReset();
     process.env.AMAZON_ADS_CLIENT_ID = 'cid';
     delete process.env.TASK_ACTIONS_DISABLED;
 });
@@ -239,5 +245,27 @@ describe('lower_bids on targets', () => {
         expect(r.status).toBe('succeeded');
         expect(mockTargetBids).not.toHaveBeenCalled();
         expect(mockLogs[0].response).toMatchObject({ sent: 1, skippedChanged: 1 });
+    });
+});
+
+describe('pause_product_ads', () => {
+    const task = { taskId: 'T11', asin: 'B0CTGKRCPN', errorCategory: 'sponsoredAds', errorType: 'ads_on_unbuyable', renderData: { reason: 'it is out of stock' } };
+
+    it('proposes pausing the product\'s ads, naming why', () => {
+        expect(S.proposedActionFor(task)).toMatchObject({ type: 'pause_product_ads', payload: { asin: 'B0CTGKRCPN' } });
+        expect(S.proposedActionFor(task).summary).toContain('while it is out of stock');
+    });
+
+    it('pauses the enabled ads found live, and fails cleanly when there are none', async () => {
+        mockTasks.push(task);
+        mockProductAds = [{ adId: 'A1' }, { adId: 'A2' }];
+        mockPauseAds.mockResolvedValue({ productAds: { success: [{}, {}], error: [] } });
+        const [r] = await run(['T11']);
+        expect(r.status).toBe('succeeded');
+        expect(mockPauseAds).toHaveBeenCalledWith(expect.objectContaining({ adIds: ['A1', 'A2'] }));
+        mockLogs.length = 0; mockProductAds = [];
+        const [none] = await run(['T11']);
+        expect(none.status).toBe('failed');
+        expect(none.message).toContain('no enabled Sponsored Products ads');
     });
 });

@@ -12,6 +12,8 @@
  *   wasted_spend_keyword   -> pause the keyword
  *   product_acos_above_breakeven -> lower the bids of the keywords proposed on the
  *     task (renderData.bidChanges); any keyword whose bid changed since is skipped
+ *   ads_on_unbuyable -> pause that product's enabled product ads (found live at
+ *     approval); the seller turns them back on once the product can sell
  *   listing text tasks (title, bullets, description, backend keywords) -> replace
  *     that field with text the seller writes or picks from AI suggestions, checked
  *     against the same listing rules before anything is sent ("Fix It")
@@ -108,6 +110,15 @@ function proposedActionFor(task) {
     }
     if (task?.errorCategory !== 'sponsoredAds') return null;
     const d = task.renderData || {};
+
+    if (task.errorType === 'ads_on_unbuyable' && task.asin && /^[A-Z0-9]{10}$/i.test(task.asin)) {
+        return {
+            type: 'pause_product_ads',
+            label: 'Pause ads for this product',
+            summary: `Pause every Sponsored Products ad for ${task.asin}${d.reason ? ` while ${d.reason}` : ''}. Campaigns and keywords stay as they are; turn the ads back on in Amazon Ads once the product can sell again.`,
+            payload: { asin: String(task.asin).toUpperCase() }
+        };
+    }
     const campaign = d.campaignName ? ` in the campaign "${d.campaignName}"` : '';
 
     if (task.errorType === 'product_acos_above_breakeven') {
@@ -233,6 +244,15 @@ async function execute(action, { userId, country, region }) {
         const sent = kwSend.length + tgSend.length;
         if (errors.length > 0) throw Object.assign(new Error(`Amazon rejected ${errors.length} of ${sent}: ${JSON.stringify(errors[0]).slice(0, 300)}`), { response: responses });
         return { ...responses, sent, skippedChanged: action.payload.bids.length - sent };
+    }
+    if (action.type === 'pause_product_ads') {
+        const { listEnabledProductAdsForAsin, pauseProductAds } = require('../AmazonAds/ProductAds.js');
+        const ads = await listEnabledProductAdsForAsin({ asin: action.payload.asin, accessToken, profileId, region: adsRegion });
+        if (ads.length === 0) throw new Error('This product has no enabled Sponsored Products ads now, so nothing was paused.');
+        const result = await pauseProductAds({ adIds: ads.map(a => a.adId), accessToken, profileId, region: adsRegion });
+        const errors = v3Errors(result);
+        if (errors.length > 0) throw Object.assign(new Error(`Amazon rejected ${errors.length} of ${ads.length}: ${JSON.stringify(errors[0]).slice(0, 300)}`), { response: result });
+        return { ...result, paused: ads.length, adIds: ads.map(a => String(a.adId)) };
     }
     if (action.type === 'pause_keyword') {
         const { pauseKeywords } = require('../AmazonAds/Pause-ArchiveKeywords.js');
