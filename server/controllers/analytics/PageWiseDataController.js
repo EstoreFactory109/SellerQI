@@ -855,6 +855,33 @@ const getTasksData = asyncHandler(async (req, res) => {
 /**
  * Update task status
  */
+/**
+ * POST /api/pagewise/tasks/approve-actions
+ * Body: { taskIds: string[] } — the changes the seller approved on the Tasks page.
+ * Each change is re-derived from the stored task, never taken from the body.
+ */
+const approveTaskActions = asyncHandler(async (req, res) => {
+    const { taskIds } = req.body || {};
+    if (!Array.isArray(taskIds) || taskIds.length === 0) {
+        return res.status(400).json(new ApiError(400, 'taskIds is required'));
+    }
+    const TaskActionService = require('../../Services/Calculations/TaskActionService.js');
+    if (taskIds.length > TaskActionService.MAX_ACTIONS_PER_REQUEST) {
+        return res.status(400).json(new ApiError(400, `At most ${TaskActionService.MAX_ACTIONS_PER_REQUEST} changes at a time`));
+    }
+    if (TaskActionService.actionsDisabled()) {
+        return res.status(503).json(new ApiError(503, 'Changes on Amazon are switched off right now'));
+    }
+    const results = await TaskActionService.approveTaskActions({
+        userId: req.userId,
+        country: req.country,
+        region: req.region,
+        taskIds,
+        approvedBy: { userId: req.userId, memberId: req.memberId, adminId: req.adminId, superAdminId: req.superAdminId }
+    });
+    return res.status(200).json(new ApiResponse(200, { results }, 'Approved changes processed'));
+});
+
 const updateTaskStatus = asyncHandler(async (req, res) => {
     const userId = req.userId;
     const { taskId, status } = req.body;
@@ -4148,6 +4175,7 @@ const getDashboardPhase3 = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+    approveTaskActions,
     getDashboardData,
     getDashboardSummary,
     getProductCheckerData,

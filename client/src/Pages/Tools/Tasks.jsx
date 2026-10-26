@@ -10,7 +10,7 @@ import {
   ChevronRight,
   Info
 } from 'lucide-react';
-import { fetchTasks, updateTaskStatus } from '../../redux/slices/TasksSlice.js';
+import { fetchTasks, updateTaskStatus, toggleTaskStatusLocal } from '../../redux/slices/TasksSlice.js';
 import { TasksPageSkeleton } from '../../Components/Skeleton/PageSkeletons.jsx';
 import { COLORS } from '../../Components/Shared/index.js';
 
@@ -29,6 +29,7 @@ import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitche
 import FixItPackagesModal from '../../Components/Tasks/FixItPackagesModal.jsx';
 import FixItUrgencyCard from '../../Components/Tasks/FixItUrgencyCard.jsx';
 import RemovalReceiptModal from '../../Components/Tasks/RemovalReceiptModal.jsx';
+import ApproveChangeModal from '../../Components/Tasks/ApproveChangeModal.jsx';
 import axiosInstance from '../../config/axios.config.js';
 import { openTasksOf, summarizeUrgency } from '../../utils/taskUrgency.js';
 import { trackEvent } from '../../utils/analytics.js';
@@ -220,6 +221,8 @@ export default function Tasks() {
   const dispatch = useDispatch();
   const [searchQuery, setSearchQuery] = useState('');
   const [showFixIt, setShowFixIt] = useState(false);
+  // The task whose "approve this change on Amazon" dialog is open.
+  const [approveTask, setApproveTask] = useState(null);
   // The removal_confirm_receipt task whose "Confirm what arrived" form is open.
   const [receiptTaskId, setReceiptTaskId] = useState(null);
   // new_seller_on_brand tasks: which one is saving, and per-task messages.
@@ -374,6 +377,8 @@ export default function Tasks() {
         isQuickWin: !!task.isQuickWin,
         // tasks-logics.xlsx P1-P4 (server TaskPriorityLevels).
         priorityLevel: task.priorityLevel || null,
+        // A fix SellerQI can make on Amazon once the seller approves it (server TaskActionService).
+        proposedAction: task.proposedAction || null,
         // Task-specific details some actions need (e.g. the seller IDs on a
         // new_seller_on_brand task).
         renderData: task.renderData || null
@@ -994,6 +999,19 @@ export default function Tasks() {
                             )}
                           </div>
                         )}
+                        {item.proposedAction && !item.proposedAction.done && !completedTasks.has(item.taskId) && (
+                          <button
+                            type="button"
+                            onClick={() => { setApproveTask(item); trackEvent('task_action_open', { type: item.proposedAction.type }); }}
+                            className="mt-2.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold"
+                            style={{ background: COLORS.accent, color: '#061021' }}
+                          >
+                            {item.proposedAction.label}…
+                          </button>
+                        )}
+                        {item.proposedAction?.done && (
+                          <span className="mt-2.5 inline-block text-xs" style={{ color: COLORS.good }}>Changed on Amazon after your approval.</span>
+                        )}
                         {item.errorType === 'removal_confirm_receipt' && !completedTasks.has(item.taskId) && (
                           <button
                             type="button"
@@ -1124,6 +1142,14 @@ export default function Tasks() {
         currency={currency}
       />
 
+      <ApproveChangeModal
+        task={approveTask}
+        onClose={() => setApproveTask(null)}
+        // The server marks the task done; mirror it locally without a second write.
+        onApproved={(taskId) => {
+          if (!completedTasks.has(taskId)) dispatch(toggleTaskStatusLocal({ taskId }));
+        }}
+      />
       <RemovalReceiptModal
         open={!!receiptTaskId}
         onClose={() => setReceiptTaskId(null)}

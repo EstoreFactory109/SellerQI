@@ -1113,7 +1113,12 @@ class CreateTaskService {
                     // products a campaign advertises (see AdsProductAttributionService).
                     // Keyword/search-term records have no ASIN of their own, so the
                     // campaign is the only link to a product.
-                    campaignId: error.campaignId ? String(error.campaignId) : undefined
+                    campaignId: error.campaignId ? String(error.campaignId) : undefined,
+                    // Needed to make the fix on Amazon once the seller approves it
+                    // (TaskActionService): the negative goes in this ad group, and
+                    // the keyword is paused by its ID.
+                    adGroupId: error.adGroupId ? String(error.adGroupId) : undefined,
+                    keywordId: error.keywordId ? String(error.keywordId) : undefined
                 },
                 amount: error.amount || 0,
                 status: TaskStatus.PENDING
@@ -1251,10 +1256,12 @@ class CreateTaskService {
             // lean renderData-backed types) and annotated with effort/impact so
             // the client can sort them into High impact / Quick wins / the rest.
             const rawTasks = await TaskItem.findByUserId(userId, options);
-            const tasks = rawTasks.map(task => ({
+            // Each fix SellerQI can make on Amazon once the seller approves it
+            // (TaskActionService) rides along as proposedAction.
+            const tasks = await require('./TaskActionService.js').annotateProposedActions(userId, rawTasks.map(task => ({
                 ...this.renderTaskIfNeeded(task),
                 ...getTaskPriorityMeta(task)
-            }));
+            })));
             const taskCounts = await TaskItem.countByStatus(userId, country, region);
 
             // The same issue-type groups the Dashboard's "Top things to fix" shows,

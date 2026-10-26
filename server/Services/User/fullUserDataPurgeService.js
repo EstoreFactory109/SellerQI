@@ -95,6 +95,7 @@ const CompetitiveOffers = require('../../models/products/CompetitiveOffersModel.
 const SuppressedListings = require('../../models/products/SuppressedListingsModel.js');
 const RemovalOrders = require('../../models/inventory/RemovalOrdersModel.js');
 const CustomerReturns = require('../../models/inventory/CustomerReturnsModel.js');
+const TaskActionLog = require('../../models/MCP/TaskActionLogModel.js');
 const RemovalReceipt = require('../../models/inventory/RemovalReceiptModel.js');
 const BrandOfferSnapshot = require('../../models/products/BrandOfferSnapshotModel.js');
 const AuthorizedReseller = require('../../models/products/AuthorizedResellerModel.js');
@@ -186,6 +187,7 @@ const collectionsWithUser = [
     { model: SuppressedListings, key: 'User' },
     { model: RemovalOrders, key: 'User' },
     { model: CustomerReturns, key: 'User' },
+    { model: TaskActionLog, key: 'userId' },
     { model: RemovalReceipt, key: 'User' },
     { model: BrandOfferSnapshot, key: 'User' },
     { model: AuthorizedReseller, key: 'User' },
