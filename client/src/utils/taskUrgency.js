@@ -30,6 +30,7 @@ export const ACCOUNT_RISK_LABELS = {
   orderWithDefectsStatus: 'Order Defect Rate',
   lateShipmentRateStatus: 'Late Shipment Rate',
   CancellationRate: 'Cancellation Rate',
+  onTimeDeliveryRateStatus: 'On-Time Delivery Rate',
   negativeFeedbacks: 'Negative Feedback',
   NCX: 'Negative Customer Experience',
   a_z_claims: 'A-to-Z Claims',

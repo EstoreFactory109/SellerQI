@@ -59,8 +59,9 @@ const V2_CHECKS = [
     },
     {
         key: 'PolicyViolations',
-        field: 'listingPolicyViolations',
-        name: 'listing policy compliance',
+        // Every policy category, not only listing policy (deriveV2).
+        field: 'policyStatus',
+        name: 'policy compliance',
         errorMessage: "Amazon has issued a listing policy violation notification for one or more of your products. Ignoring this could lead to listing suppression, restricted selling privileges, or account suspension.",
         howToSolve: "Open Account Health in Seller Central and review each listing policy violation. Fix or remove the affected listings, then submit a Plan of Action for any violation that requires one. Check for intellectual property, restricted product and listing-content complaints, and respond before any stated deadline.",
         successMessage: "Excellent! You have no listing policy violations, ensuring your products remain active and compliant with Amazon’s marketplace guidelines.",
@@ -75,7 +76,8 @@ const V2_CHECKS = [
     },
     {
         key: 'orderWithDefectsStatus',
-        field: 'orderWithDefectsStatus',
+        // The channel that carried the orders; orderWithDefectsStatus was always FBA.
+        field: 'odrStatus',
         name: 'Order Defect Rate',
         errorMessage: "Your Order Defect Rate (ODR) is above Amazon's acceptable threshold. A high ODR can lead to listing deactivation, loss of Buy Box eligibility, or even account suspension if not addressed.",
         howToSolve: "Analyze the root causes of defects, such as negative feedback, A-to-Z claims, or chargebacks. Address customer complaints promptly, improve product quality, and ensure accurate product descriptions to set the right expectations. If you receive unjustified negative feedback, request Amazon to remove it. Maintain excellent customer service and fulfillment reliability to lower your ODR over time.",
@@ -99,13 +101,99 @@ const V2_CHECKS = [
         howToSolve: "Keep inventory counts accurate so you never sell stock you don't have: sync quantities across every sales channel, and set realistic handling times. Review recent seller-cancelled orders in Seller Central to find the cause (out of stock, pricing errors, address issues) and fix it at the source.",
         successMessage: "Great job! Your Cancellation Rate is within Amazon's acceptable range, keeping your seller-fulfilled selling privileges secure.",
     },
+    {
+        // tasks-logics.xlsx "On-time delivery rate (FBM)": status not GOOD.
+        key: 'onTimeDeliveryRateStatus',
+        field: 'onTimeDeliveryStatus',
+        name: 'On-Time Delivery Rate',
+        errorMessage: "Your on-time delivery rate is below Amazon's 90% target, so too many seller-fulfilled orders arrive after the promised date.",
+        howToSolve: "Use faster or more reliable carriers and set realistic transit times.",
+        successMessage: "Your orders arrive on time.",
+    },
 ];
+
+// tasks-logics.xlsx "Policy violations": the categories Amazon reports, by name.
+const POLICY_LABELS = {
+    listingPolicyViolations: 'listing policy',
+    productAuthenticityCustomerComplaints: 'product authenticity complaint',
+    productConditionCustomerComplaints: 'product condition complaint',
+    productSafetyCustomerComplaints: 'product safety complaint',
+    receivedIntellectualPropertyComplaints: 'intellectual property complaint',
+    suspectedIntellectualPropertyViolations: 'suspected intellectual property',
+    restrictedProductPolicyViolations: 'restricted product',
+    customerProductReviewsPolicyViolations: 'customer product reviews policy',
+    foodAndProductSafetyIssues: 'food and product safety',
+    otherPolicyViolations: 'policy',
+    documentRequests: 'document request',
+    policyViolationWarnings: 'policy warning',
+};
+const policyLabel = (key) => POLICY_LABELS[key]
+    || String(key).replace(/([A-Z])/g, ' $1').trim().toLowerCase();
+
+const isVerdict = (v) => typeof v === 'string' && v.trim() !== '' && v.trim().toUpperCase() !== 'NONE';
+
+/** Policy categories on one report: [{key, status, count}], listing policy included. */
+const policyCategories = (doc) => {
+    const rows = Array.isArray(doc?.policyMetrics) ? doc.policyMetrics.filter((m) => m && m.key) : [];
+    if (!rows.some((m) => m.key === 'listingPolicyViolations') && isVerdict(doc?.listingPolicyViolations)) {
+        rows.push({ key: 'listingPolicyViolations', status: doc.listingPolicyViolations, count: null });
+    }
+    return rows;
+};
+
+/**
+ * Adds the fields the V2 checks judge to one report (never mutates it):
+ * policyStatus - the worst status across all policy categories;
+ * odrStatus - ODR of the channel with orders, else the FBA status read before;
+ * onTimeDeliveryStatus - blank when nothing was shipped seller-fulfilled.
+ */
+const deriveV2 = (doc) => {
+    if (!doc || typeof doc !== 'object') return doc;
+    const statuses = policyCategories(doc).map((m) => m.status).filter(isVerdict);
+    const policyStatus = statuses.find((v) => v.toUpperCase() !== 'GOOD') || statuses[0] || '';
+    const otdBasis = doc.rateDetails?.onTimeDeliveryRate?.basis;
+    return {
+        ...doc,
+        policyStatus,
+        odrStatus: isVerdict(doc.orderDefectRateStatus) ? doc.orderDefectRateStatus : (doc.orderWithDefectsStatus || ''),
+        onTimeDeliveryStatus: otdBasis === 0 ? '' : (doc.onTimeDeliveryRateStatus || ''),
+    };
+};
+
+/**
+ * Counts that went up from one report day to the next inside the window
+ * (tasks-logics.xlsx: "higher than the last run"). Judged over the window, not
+ * only the newest pair, so the task stays up for the week instead of one day.
+ * @param {Array<{day, doc}>} series - newest first
+ * @param {Function} countsOf - doc -> {[key]: number|null}
+ * @returns {Object} {[key]: {from, to, day}} for each key that rose
+ */
+const risenCounts = (series, countsOf) => {
+    const risen = {};
+    const days = (series || []).slice().reverse(); // oldest first
+    for (let i = 1; i < days.length; i++) {
+        const before = countsOf(days[i - 1].doc);
+        const after = countsOf(days[i].doc);
+        for (const [key, to] of Object.entries(after)) {
+            const from = before[key];
+            if (Number.isFinite(to) && Number.isFinite(from) && to > from) {
+                risen[key] = { from: risen[key]?.from ?? from, to, day: days[i].day };
+            }
+        }
+    }
+    return risen;
+};
+
+const policyCountsOf = (doc) => Object.fromEntries(
+    policyCategories(doc).filter((m) => Number.isFinite(m.count)).map((m) => [m.key, m.count])
+);
+const claimsCountOf = (doc) => (Number.isFinite(doc?.claimsCount) ? { claims: doc.claimsCount } : {});
 
 const V2_FIELDS = V2_CHECKS.map((c) => c.field);
 
 const hasV2Data = (v2Data) =>
     !!v2Data && typeof v2Data === 'object'
-    && V2_FIELDS.some((f) => typeof v2Data[f] === 'string' && v2Data[f].trim() !== '' && v2Data[f].trim().toUpperCase() !== 'NONE');
+    && V2_FIELDS.some((f) => isVerdict(deriveV2(v2Data)[f]));
 
 const hasV1Data = (v1Data) => !!v1Data && typeof v1Data === 'object' && Object.keys(v1Data).length > 0;
 
@@ -182,15 +270,40 @@ const checkAccountHealth=(v2Data,v1Data,v2History=null)=>{
     let errorCounter=0;
     let result={}
 
-    const series = Array.isArray(v2History) && v2History.length > 0 ? toDailySeries(v2History) : null;
+    const series = Array.isArray(v2History) && v2History.length > 0
+        ? toDailySeries(v2History).map(({ day, doc }) => ({ day, doc: deriveV2(doc) }))
+        : null;
+    const v2Derived = deriveV2(v2Data);
     if (hasV2Data(v2Data) || (series && series.length > 0)) {
         for (const check of V2_CHECKS) {
-            const judged = judgeV2Check(check, v2Data, series);
+            const judged = judgeV2Check(check, v2Derived, series);
             // No value for this status in any report: no data, not an error.
             if (!judged) continue;
             if (judged.status === 'Error') errorCounter++;
             result[check.key] = judged;
         }
+    }
+
+    // Policy: name the categories, and a count that rose this week is a task even
+    // while the status still reads GOOD.
+    const newestDoc = series?.[0]?.doc || v2Derived;
+    const badCategories = policyCategories(newestDoc)
+        .filter((m) => isVerdict(m.status) && m.status.toUpperCase() !== 'GOOD')
+        .map((m) => policyLabel(m.key));
+    const risenPolicies = Object.keys(risenCounts(series, policyCountsOf)).map(policyLabel);
+    const policy = result.PolicyViolations;
+    if (policy && policy.level === 'error' && badCategories.length > 0) {
+        policy.Message = `Amazon has raised a ${[...new Set(badCategories)].join(', ')} issue on your account. ` + policy.Message;
+    }
+    if (risenPolicies.length > 0 && !(policy && policy.level === 'error')) {
+        if (!policy || policy.status !== 'Error') errorCounter++;
+        result.PolicyViolations = {
+            ...(policy || {}),
+            status: 'Error',
+            level: 'error',
+            Message: `Amazon has raised a new ${[...new Set(risenPolicies)].join(', ')} issue on your account this week.`,
+            HowTOSolve: 'Open Account Health, review the details and fix or appeal before the deadline.'
+        };
     }
 
     //all v1 checks
@@ -219,12 +332,22 @@ const checkAccountHealth=(v2Data,v1Data,v2History=null)=>{
         result.NCX={}
     }
 
-    if(Number(v1Data?.a_z_claims?.count || 0)!=0){
+    // tasks-logics.xlsx: a claim count higher than the last run (V2, over this
+    // week's reports). Claims stay in Amazon's 60-day count long after they are
+    // handled, so "any claim" kept this task up for two months. The V1 count is
+    // the fallback only for an account whose reports carry no V2 claim count.
+    const claimsJudged = (series || []).filter(({ doc }) => Number.isFinite(doc?.claimsCount)).length >= 2;
+    const claimsRose = claimsJudged && Object.keys(risenCounts(series, claimsCountOf)).length > 0;
+    if(claimsJudged ? claimsRose : Number(v1Data?.a_z_claims?.count || 0)!=0){
         errorCounter++;
         result.a_z_claims={
             status:"Error",
-            Message:"An A-to-Z Guarantee Claim has been filed against your order. Unresolved claims can negatively impact your Order Defect Rate (ODR) and may lead to account restrictions if frequent claims occur.",
-            HowTOSolve:"Review the claim details in Seller Central > Performance > A-to-Z Guarantee Claims. If the claim is valid, work with the customer to resolve the issue promptly by issuing a refund or replacement. If you believe the claim is unjustified, submit an appeal with supporting evidence, such as tracking details, delivery confirmation, or proof of product quality. Prevent future claims by improving order accuracy, shipping reliability, and customer communication."
+            Message: claimsRose
+                ? "A customer has opened an A-to-z claim this week. Unanswered claims count against your Order Defect Rate."
+                : "An A-to-Z Guarantee Claim has been filed against your order. Unresolved claims can negatively impact your Order Defect Rate (ODR) and may lead to account restrictions if frequent claims occur.",
+            HowTOSolve: claimsRose
+                ? "Respond to the claim with tracking or proof of delivery, or refund if the claim is valid."
+                : "Review the claim details in Seller Central > Performance > A-to-Z Guarantee Claims. If the claim is valid, work with the customer to resolve the issue promptly by issuing a refund or replacement. If you believe the claim is unjustified, submit an appeal with supporting evidence, such as tracking details, delivery confirmation, or proof of product quality. Prevent future claims by improving order accuracy, shipping reliability, and customer communication."
         }
     }else{
         result.a_z_claims={}
@@ -251,4 +374,4 @@ const checkAccountHealth=(v2Data,v1Data,v2History=null)=>{
     return result;
 }
 
-module.exports={calculateAccountHealthPercentage,checkAccountHealth,V2_CHECKS}
+module.exports={calculateAccountHealthPercentage,checkAccountHealth,V2_CHECKS,deriveV2,risenCounts}

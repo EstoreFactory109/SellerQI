@@ -132,6 +132,7 @@ const EFFORT_MINUTES = {
     'account:a_z_claims': 15,
     'account:lateShipmentRateStatus': 20,
     'account:CancellationRate': 20,
+    'account:onTimeDeliveryRateStatus': 20,
     'account:PolicyViolations': 30,
     'account:orderWithDefectsStatus': 30,
     'account:NCX': 30,
@@ -144,6 +145,7 @@ const EFFORT_MINUTES = {
     'account:orderWithDefectsStatus_unstable': 30,
     'account:lateShipmentRateStatus_unstable': 20,
     'account:CancellationRate_unstable': 20,
+    'account:onTimeDeliveryRateStatus_unstable': 20,
     'account:validTrackingRateStatus_unstable': 10,
 
     // ── tasks-logics.xlsx detectors (kpi/) ──
@@ -193,6 +195,8 @@ const IMPACT_WEIGHT = {
     'account:orderWithDefectsStatus': 75,
     'account:lateShipmentRateStatus': 68,
     'account:CancellationRate': 68,
+    // Spreadsheet P1, same tier as late shipment and cancellation.
+    'account:onTimeDeliveryRateStatus': 68,
     'account:NCX': 55,
     'account:negativeFeedbacks': 50,
     'account:validTrackingRateStatus': 30,
@@ -204,6 +208,7 @@ const IMPACT_WEIGHT = {
     'account:orderWithDefectsStatus_unstable': 45,
     'account:lateShipmentRateStatus_unstable': 41,
     'account:CancellationRate_unstable': 41,
+    'account:onTimeDeliveryRateStatus_unstable': 41,
     'account:validTrackingRateStatus_unstable': 18,
 
     // Money leaving the account right now.

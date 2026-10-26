@@ -296,6 +296,10 @@ const GROUP_COPY = {
         title: 'Cancellation rate above Amazon\'s limit',
         action: 'Keep stock accurate so orders are not cancelled'
     },
+    'account:onTimeDeliveryRateStatus': {
+        title: 'On-time delivery rate below Amazon\'s target',
+        action: 'Use more reliable carriers and realistic transit times'
+    },
     'account:NCX': {
         title: 'Products flagged for negative customer experience',
         action: 'Fix the product or listing problems driving complaints'
@@ -334,6 +338,10 @@ const GROUP_COPY = {
     'account:CancellationRate_unstable': {
         title: 'Cancellation rate keeps slipping',
         action: 'Keep stock accurate so orders are not cancelled'
+    },
+    'account:onTimeDeliveryRateStatus_unstable': {
+        title: 'On-time delivery rate keeps dipping',
+        action: 'Use more reliable carriers and realistic transit times'
     },
     'account:validTrackingRateStatus_unstable': {
         title: 'Valid tracking rate keeps dipping',

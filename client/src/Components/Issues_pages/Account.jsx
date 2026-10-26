@@ -17,6 +17,7 @@ const PRIORITY_RANK = { high: 0, medium: 1, low: 2 };
 const V2_METRIC_KEYS = new Set([
     'accountStatus', 'PolicyViolations', 'validTrackingRateStatus',
     'orderWithDefectsStatus', 'lateShipmentRateStatus', 'CancellationRate',
+    'onTimeDeliveryRateStatus',
 ]);
 
 // A status Amazon keeps flipping between good and bad (server level 'warning'):
@@ -137,6 +138,13 @@ export default function AccountHealthDashboard() {
             name: 'Cancellation Rate (CR)',
             data: AccountErrors?.CancellationRate,
             icon: XCircle,
+            priority: 'medium'
+        },
+        {
+            key: 'onTimeDeliveryRateStatus',
+            name: 'On-Time Delivery Rate',
+            data: AccountErrors?.onTimeDeliveryRateStatus,
+            icon: Activity,
             priority: 'medium'
         },
         {

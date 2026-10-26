@@ -111,11 +111,12 @@ const extractExtendedMetrics = (refinedData) => {
     const policyMetrics = [];
     for (const [key, node] of Object.entries(metrics)) {
         if (!node || typeof node !== 'object' || Array.isArray(node)) continue;
-        if (!('defectsCount' in node)) continue;
+        // policyViolationWarnings carries warningsCount instead of defectsCount.
+        if (!('defectsCount' in node) && !('warningsCount' in node)) continue;
         policyMetrics.push({
             key,
             status: String(node.status || ''),
-            count: countOf(node.defectsCount),
+            count: countOf('defectsCount' in node ? node.defectsCount : node.warningsCount),
         });
     }
 

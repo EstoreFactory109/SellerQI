@@ -64,6 +64,7 @@ const ALL_TASK_TYPES = [
     ['account', 'orderWithDefectsStatus'],
     ['account', 'lateShipmentRateStatus'],
     ['account', 'CancellationRate'],
+    ['account', 'onTimeDeliveryRateStatus'],
     ['account', 'negativeFeedbacks'],
     ['account', 'NCX'],
     ['account', 'a_z_claims'],
@@ -75,6 +76,7 @@ const ALL_TASK_TYPES = [
     ['account', 'orderWithDefectsStatus_unstable'],
     ['account', 'lateShipmentRateStatus_unstable'],
     ['account', 'CancellationRate_unstable'],
+    ['account', 'onTimeDeliveryRateStatus_unstable'],
     ['profitability', 'ad_spend_no_sales'],
     // tasks-logics.xlsx detectors (Services/Calculations/kpi/).
     ['inventory', 'listing_suppressed'],
