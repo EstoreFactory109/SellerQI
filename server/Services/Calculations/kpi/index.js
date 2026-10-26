@@ -28,6 +28,8 @@ const KPI_SOURCES = Object.freeze({
     'inventory:removal_shortfall': 'kpi.removalShortfall',
     // Same input as the shortfall: the removal report plus the seller's answers.
     'inventory:removal_confirm_receipt': 'kpi.removalShortfall',
+    'inventory:lost_damaged_unreimbursed': 'kpi.lostDamaged',
+    'inventory:inbound_shortage': 'kpi.inboundShortage',
     // Wave 2
     'conversion:sales_drop': 'kpi.salesDrop',
     'conversion:conversion_rate_drop': 'kpi.conversionDrop',
@@ -36,6 +38,8 @@ const KPI_SOURCES = Object.freeze({
     'sponsoredAds:top_seller_not_advertised': 'kpi.topSellerAds',
     'conversion:rating_drop': 'kpi.ratingDrop',
     'inventory:weeks_of_cover': 'kpi.weeksOfCover',
+    'conversion:high_traffic_low_conversion': 'kpi.trafficMix',
+    'conversion:low_traffic_high_conversion': 'kpi.trafficMix',
     // Wave 3
     'inventory:listing_warnings': 'kpi.listingWarnings',
     'account:invoice_defect_rate': 'kpi.invoiceDefect',
@@ -183,6 +187,8 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, profitR
         add(cogs, 'profitability:cogs_missing');
         add(ahr, 'account:ahr_early_warning');
         add(removals, 'inventory:removal_shortfall', 'inventory:removal_confirm_receipt');
+        add(safely('lost_damaged_unreimbursed', context, () => W1.detectLostDamagedUnreimbursed({ lostDamaged: inputs.lostDamaged, productsByAsin, now })), 'inventory:lost_damaged_unreimbursed');
+        add(safely('inbound_shortage', context, () => W1.detectInboundShortage({ inboundShortage: inputs.inboundShortage, products, now })), 'inventory:inbound_shortage');
     }
 
     if (waveOn(2)) {
@@ -210,6 +216,17 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, profitR
                 country, productsByAsin, salesByAsin: recentSales, now
             })
             : { tasks: [], covered: false })), 'sponsoredAds:top_seller_not_advertised');
+        const mix = (() => {
+            try {
+                return W2.detectTrafficMix({ traffic: inputs.traffic, skipAsins, productsByAsin, now });
+            } catch (error) {
+                logger.error('[KpiDetectors] traffic_mix failed', { ...context, error: error.message });
+                return { high: { tasks: [], covered: false }, low: { tasks: [], covered: false } };
+            }
+        })();
+        tasks.push(...mix.high.tasks, ...mix.low.tasks);
+        // One source for both: covered only when both halves were judged.
+        coverage[KPI_SOURCES['conversion:high_traffic_low_conversion']] = mix.high.covered && mix.low.covered;
         add(safely('rating_drop', context, () => W2.detectRatingDrop({ reviews: inputs.reviews, productsByAsin, now })), 'conversion:rating_drop');
         // No coverage key of its own: thousands of stored tasks of this retired type
         // resolve on the 'conversion' source (the listing scrape), and a key that only

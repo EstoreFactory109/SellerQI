@@ -188,6 +188,22 @@ const GROUP_COPY = {
         title: 'Products whose ads cost more than they earn',
         action: 'Lower bids or pause the targets above break-even ACoS'
     },
+    'inventory:lost_damaged_unreimbursed': {
+        title: 'Units Amazon lost or damaged and has not paid for',
+        action: 'File claims before the 60-day window closes'
+    },
+    'inventory:inbound_shortage': {
+        title: 'Shipments Amazon checked in short',
+        action: 'Open a case with the invoice and proof of delivery'
+    },
+    'conversion:high_traffic_low_conversion': {
+        title: 'Products with plenty of visits but few sales',
+        action: 'Improve images, price position and A+ content'
+    },
+    'conversion:low_traffic_high_conversion': {
+        title: 'Products that convert well but get few visitors',
+        action: 'Send more traffic through ads and better keywords'
+    },
     'ranking:listing_errors': {
         title: 'Listings Amazon has flagged with errors',
         action: 'Fix the flagged field before Amazon suppresses the listing'

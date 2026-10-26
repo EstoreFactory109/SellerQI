@@ -101,6 +101,10 @@ const ALL_TASK_TYPES = [
     ['inventory', 'new_seller_on_brand'],
     ['ranking', 'listing_errors'],
     ['sponsoredAds', 'product_acos_above_breakeven'],
+    ['inventory', 'lost_damaged_unreimbursed'],
+    ['inventory', 'inbound_shortage'],
+    ['conversion', 'high_traffic_low_conversion'],
+    ['conversion', 'low_traffic_high_conversion'],
     ['ranking', 'backend_keywords_title_overlap'],
     ['ranking', 'backend_keywords_underused'],
     ['ranking', 'titleresult_too_short']

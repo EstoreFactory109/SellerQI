@@ -97,6 +97,10 @@ const SOURCE_BY_TYPE = {
     'inventory:handling_time_long': 'kpi.handlingTime',
     'inventory:new_seller_on_brand': 'kpi.newSellerOnBrand',
     'ranking:listing_errors': 'kpi.listingErrors',
+    'inventory:lost_damaged_unreimbursed': 'kpi.lostDamaged',
+    'inventory:inbound_shortage': 'kpi.inboundShortage',
+    'conversion:high_traffic_low_conversion': 'kpi.trafficMix',
+    'conversion:low_traffic_high_conversion': 'kpi.trafficMix',
     'sponsoredAds:product_acos_above_breakeven': 'kpi.productAcos',
     'ranking:backend_keywords_title_overlap': 'ranking.backend',
     'ranking:backend_keywords_underused': 'ranking.backend'

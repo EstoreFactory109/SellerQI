@@ -218,7 +218,8 @@ async function loadTrafficTrend(userId, country, region) {
     const b0 = shiftDayKey(r14, -R.TRAFFIC_BASELINE_DAYS);
     const r7 = shiftDayKey(newestDate, -(R.SALES_RECENT_DAYS - 1));
     const p28 = shiftDayKey(r7, -R.SALES_BASELINE_DAYS);
-    const from = b0 < p28 ? b0 : p28;
+    const r30 = shiftDayKey(newestDate, -(R.TRAFFIC_MIX_DAYS - 1));
+    const from = [b0, p28, r30].sort()[0];
 
     const perDay = [
         { $match: { User, country, region, date: { $gte: from, $lte: newestDate } } },
@@ -246,7 +247,8 @@ async function loadTrafficTrend(userId, country, region) {
         recent14: countIn(r14, r14End),
         baseline: countIn(b0, r14),
         recent7: countIn(r7, r14End),
-        prior28: countIn(p28, r7)
+        prior28: countIn(p28, r7),
+        recent30: countIn(r30, r14End)
     };
 
     const sumIf = (lo, hi, field) => ({ $sum: { $cond: [{ $and: [{ $gte: ['$day', lo] }, { $lt: ['$day', hi] }] }, { $ifNull: [field, 0] }, 0] } });
@@ -254,7 +256,7 @@ async function loadTrafficTrend(userId, country, region) {
         ...perDay,
         { $match: { _id: { $nin: eventDays } } },
         { $unwind: '$rows' },
-        { $project: { day: '$_id', asin: '$rows.childAsin', sessions: '$rows.sessions', units: '$rows.unitsOrdered' } },
+        { $project: { day: '$_id', asin: '$rows.childAsin', sessions: '$rows.sessions', units: '$rows.unitsOrdered', orders: '$rows.totalOrderItems' } },
         { $match: { asin: { $nin: [null, ''] } } },
         {
             $group: {
@@ -264,22 +266,97 @@ async function loadTrafficTrend(userId, country, region) {
                 bs: sumIf(b0, r14, '$sessions'),
                 bu: sumIf(b0, r14, '$units'),
                 u7: sumIf(r7, r14End, '$units'),
-                u28: sumIf(p28, r7, '$units')
+                u28: sumIf(p28, r7, '$units'),
+                s30: sumIf(r30, r14End, '$sessions'),
+                u30: sumIf(r30, r14End, '$units'),
+                o30: sumIf(r30, r14End, '$orders')
             }
         }
     ]).allowDiskUse(true);
 
     const byAsin = {};
-    for (const r of rows) byAsin[r._id] = { rs: r.rs, ru: r.ru, bs: r.bs, bu: r.bu, u7: r.u7, u28: r.u28 };
+    for (const r of rows) byAsin[r._id] = { rs: r.rs, ru: r.ru, bs: r.bs, bu: r.bu, u7: r.u7, u28: r.u28, s30: r.s30, u30: r.u30, o30: r.o30 };
     return {
         newestDate,
         recent14Days: days.recent14,
         baselineDays: days.baseline,
         recent7Days: days.recent7,
         prior28Days: days.prior28,
+        recent30Days: days.recent30,
         eventDays,
         byAsin
     };
+}
+
+/**
+ * Lost and damaged ledger events Amazon has not reconciled yet (neither found nor
+ * reimbursed: Amazon's own unreconciled quantity), from the newest ledger-detail
+ * fetch, inside the 60-day claim window. Read in Mongo, Adjustments only.
+ * @returns {Promise<{fetchedAt: Date, events: Array}|null>} null when no ledger fetch exists
+ */
+async function loadLostDamagedEvents(userId, country, region, now = new Date()) {
+    const LedgerDetailViewItem = require('../../../models/finance/LedgerDetailViewItemModel.js');
+    const R = require('./KpiRules.js');
+    const User = toObjectId(userId);
+    const newest = await LedgerDetailViewItem.findOne({ User, country, region })
+        .sort({ createdAt: -1 }).select('batchId createdAt').lean();
+    if (!newest) return null;
+    const rows = await LedgerDetailViewItem.find({
+        User, country, region, batchId: newest.batchId,
+        event_type: 'Adjustments',
+        reason: { $in: [...R.LOST_REASON_CODES, ...R.DAMAGED_REASON_CODES] },
+        unreconciled_quantity: { $nin: ['0', '', null, '-0'] }
+    }).select('date_and_time reference_id fnsku asin msku reason unreconciled_quantity').lean();
+    const oldest = now.getTime() - R.LOST_DAMAGED_CLAIM_DAYS * R.DAY_MS;
+    const events = [];
+    for (const row of rows) {
+        const at = Date.parse(row.date_and_time || '');
+        const units = Math.abs(Number(row.unreconciled_quantity) || 0);
+        if (!Number.isFinite(at) || at < oldest || units <= 0) continue;
+        events.push({
+            at: new Date(at).toISOString(),
+            referenceId: row.reference_id || '',
+            asin: row.asin || '',
+            fnsku: row.fnsku || '',
+            sku: row.msku || '',
+            kind: R.LOST_REASON_CODES.includes(row.reason) ? 'lost' : 'damaged',
+            units
+        });
+    }
+    return { fetchedAt: newest.createdAt, events };
+}
+
+/**
+ * Closed inbound shipments (the fetch keeps only CLOSED, updated in the last 30
+ * days) with lines received short, plus the inbound reimbursements by FNSKU.
+ */
+function buildInboundShortage(shipmentDoc, reimbursementsDoc) {
+    if (!shipmentDoc) return null;
+    const shipments = [];
+    for (const s of shipmentDoc.shipmentData || []) {
+        const lines = [];
+        for (const item of s.itemDetails || []) {
+            const short = (parseInt(item.QuantityShipped, 10) || 0) - (parseInt(item.QuantityReceived, 10) || 0);
+            if (short > 0) lines.push({ sku: String(item.SellerSKU || '').trim(), fnsku: String(item.FulfillmentNetworkSKU || '').trim(), short });
+        }
+        if (lines.length > 0) {
+            shipments.push({
+                shipmentId: s.shipmentId || '',
+                shipmentName: s.shipmentName || '',
+                shipmentDate: s.shipmentDate ? new Date(s.shipmentDate).toISOString() : null,
+                lines
+            });
+        }
+    }
+    const reimbursedByFnsku = {};
+    for (const row of reimbursementsDoc?.data || []) {
+        const reason = String(row?.reason || '').toLowerCase();
+        if (reason !== 'lost_inbound' && reason !== 'damaged_inbound') continue;
+        const fnsku = String(row.fnsku || '').trim();
+        const units = Number(String(row.quantity_reimbursed_total ?? '0').replace(/[^0-9.-]/g, '')) || 0;
+        if (fnsku && units > 0) reimbursedByFnsku[fnsku] = (reimbursedByFnsku[fnsku] || 0) + units;
+    }
+    return { fetchedAt: shipmentDoc.createdAt, shipments, reimbursedByFnsku, reimbursementsRead: !!reimbursementsDoc };
 }
 
 /**
@@ -510,6 +587,12 @@ async function loadKpiInputs({ userId, country, region, waves, allData, now = ne
             .then(() => RemovalReceipt.find({ User: userId, country, region }).lean())
             .catch(unavailable('Removal receipts'))
     ]);
+    const [lostDamaged, shipmentDoc] = await Promise.all([
+        Promise.resolve().then(() => loadLostDamagedEvents(userId, country, region, now)).catch(unavailable('Ledger detail')),
+        Promise.resolve()
+            .then(() => require('../../../models/inventory/ShipmentModel.js').findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean())
+            .catch(unavailable('Inbound shipments'))
+    ]);
 
     const inputs = buildKpiInputs({
         waves,
@@ -522,6 +605,8 @@ async function loadKpiInputs({ userId, country, region, waves, allData, now = ne
         reimbursementsDoc,
         receiptDocs
     });
+    inputs.lostDamaged = lostDamaged;
+    inputs.inboundShortage = buildInboundShortage(shipmentDoc, reimbursementsDoc);
 
     // Wave 2: trends and coverage. Each load fails to null on its own.
     if (waves.includes(2)) {
@@ -556,6 +641,7 @@ async function loadKpiInputs({ userId, country, region, waves, allData, now = ne
 }
 
 module.exports = {
+    buildInboundShortage,
     buildKpiInputs,
     loadKpiInputs,
     loadTrafficTrend,

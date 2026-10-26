@@ -323,8 +323,66 @@ function detectWeeksOfCover({ restock, productsByAsin = new Map() }) {
     return { tasks, covered: true };
 }
 
+/** Value at share p (0..1) of a sorted ascending list. */
+const quantile = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor(p * (sorted.length - 1))))];
+
+/**
+ * High traffic / low conversion and low traffic / high conversion, judged against
+ * this account's own products over the last 30 days. One pass, two results.
+ * Products that out of stock, suppression or a lost Buy Box already explain are
+ * skipped, as for the other trend tasks.
+ */
+function detectTrafficMix({ traffic, skipAsins = new Map(), productsByAsin = new Map(), now }) {
+    const none = { tasks: [], covered: false };
+    if (!trafficUsable(traffic, now) || !(traffic.recent30Days >= R.TRAFFIC_MIX_MIN_DAYS)) return { high: none, low: none };
+
+    const rows = Object.entries(traffic.byAsin || {})
+        .map(([asin, t]) => ({ asin, sessions: Number(t.s30) || 0, units: Number(t.u30) || 0, orders: Number(t.o30) || 0 }))
+        .filter(r => r.sessions > 0)
+        .map(r => ({ ...r, cvr: (r.units / r.sessions) * 100 }));
+    if (rows.length < R.TRAFFIC_MIX_MIN_ASINS) return { high: { tasks: [], covered: true }, low: { tasks: [], covered: true } };
+
+    const sessionsSorted = rows.map(r => r.sessions).sort((a, b) => a - b);
+    const cvrSorted = rows.map(r => r.cvr).sort((a, b) => a - b);
+    const topCut = quantile(sessionsSorted, 1 - R.TRAFFIC_MIX_TOP_SHARE);
+    const bottomCut = quantile(sessionsSorted, R.TRAFFIC_MIX_TOP_SHARE);
+    const mid = Math.floor(cvrSorted.length / 2);
+    const medianCvr = cvrSorted.length % 2 ? cvrSorted[mid] : (cvrSorted[mid - 1] + cvrSorted[mid]) / 2;
+    const days = traffic.recent30Days;
+
+    const high = [];
+    const low = [];
+    for (const r of rows) {
+        if (skipAsins.has(r.asin)) continue;
+        const base = {
+            asin: r.asin,
+            productName: nameOf(productsByAsin, r.asin),
+            errorCategory: 'conversion',
+            renderData: { sessions: r.sessions, units: r.units, orders: r.orders, cvrPct: Math.round(r.cvr * 10) / 10, medianCvrPct: Math.round(medianCvr * 10) / 10, days },
+            status: PENDING
+        };
+        if (r.sessions >= R.HIGH_TRAFFIC_MIN_SESSIONS && r.sessions >= topCut && medianCvr > 0 && r.cvr < medianCvr * R.HIGH_TRAFFIC_CVR_RATIO) {
+            high.push({
+                ...base,
+                errorType: 'high_traffic_low_conversion',
+                error: `High Traffic, Low Conversion: This product gets plenty of visits (${r.sessions.toLocaleString('en-US')} in the last ${days} days, among your top 30%) but converts at only ${pct1(r.cvr)}, under half your account's typical ${pct1(medianCvr)}.`,
+                solution: 'Improve images, price position and A+ content to turn more visits into sales.'
+            });
+        } else if (r.orders >= R.LOW_TRAFFIC_MIN_ORDERS && r.sessions <= bottomCut && medianCvr > 0 && r.cvr >= medianCvr * R.LOW_TRAFFIC_CVR_RATIO) {
+            low.push({
+                ...base,
+                errorType: 'low_traffic_high_conversion',
+                error: `Low Traffic, High Conversion: This product converts well (${pct1(r.cvr)}, against your account's typical ${pct1(medianCvr)}) but gets few visitors (${r.sessions.toLocaleString('en-US')} in the last ${days} days, among your bottom 30%).`,
+                solution: 'Send more traffic to it through ads and better keywords.'
+            });
+        }
+    }
+    return { high: { tasks: high, covered: true }, low: { tasks: low, covered: true } };
+}
+
 module.exports = {
     detectSalesDrop,
+    detectTrafficMix,
     detectConversionRateDrop,
     detectTrafficDrop,
     detectTacosRising,

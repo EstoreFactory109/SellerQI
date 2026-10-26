@@ -456,8 +456,101 @@ function detectRemovalShortfall({ removals, receipts = null, reimbursements = nu
     return { tasks, covered: true };
 }
 
+// Reimbursement inputs older than this are not judged: Amazon may have reconciled
+// since. Both reports are fetched at least weekly. Internal.
+const REIMBURSEMENT_INPUT_MAX_AGE_DAYS = 14;
+const money2 = (n) => Math.round(n * 100) / 100;
+const shortDay = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+
+/**
+ * Lost or damaged in Amazon's warehouse, not reimbursed. Spreadsheet: units with no
+ * reimbursement or found event 30 days after the event, still inside the 60-day
+ * claim window. Amazon's own unreconciled quantity is "not found, not reimbursed".
+ * One task per ASIN; the amount is units x price (an estimate of the claim).
+ */
+function detectLostDamagedUnreimbursed({ lostDamaged, productsByAsin = new Map(), now }) {
+    if (!lostDamaged || ageDays(lostDamaged.fetchedAt, now) > REIMBURSEMENT_INPUT_MAX_AGE_DAYS) return { tasks: [], covered: false };
+    const waitUntil = now.getTime() - R.LOST_DAMAGED_WAIT_DAYS * R.DAY_MS;
+    const byAsin = new Map();
+    for (const e of lostDamaged.events || []) {
+        if (!e.asin || Date.parse(e.at) > waitUntil) continue;
+        const a = byAsin.get(e.asin) || { lost: 0, damaged: 0, oldest: e.at };
+        a[e.kind] += e.units;
+        if (e.at < a.oldest) a.oldest = e.at;
+        byAsin.set(e.asin, a);
+    }
+    const tasks = [];
+    for (const [asin, a] of byAsin) {
+        const units = a.lost + a.damaged;
+        const deadline = new Date(Date.parse(a.oldest) + R.LOST_DAMAGED_CLAIM_DAYS * R.DAY_MS).toISOString();
+        const what = a.lost && a.damaged ? `lost ${a.lost} and damaged ${a.damaged}` : (a.lost ? `lost ${a.lost}` : `damaged ${a.damaged}`);
+        const price = Number(productsByAsin.get(asin)?.price) || 0;
+        tasks.push({
+            asin,
+            productName: productNameOf(productsByAsin, asin),
+            errorCategory: 'inventory',
+            errorType: 'lost_damaged_unreimbursed',
+            error: `Reimbursement | Lost or Damaged: Amazon ${what} ${units === 1 ? 'unit' : 'units'} of this product in its warehouse and has not reimbursed you yet. The oldest claim window closes on ${shortDay(deadline)}.`,
+            solution: 'We will file a claim before the 60-day deadline. Amazon may ask for your purchase invoice.',
+            amount: money2(units * price),
+            amountIsEstimated: true,
+            renderData: { lostUnits: a.lost, damagedUnits: a.damaged, units, oldestEvent: a.oldest, claimDeadline: deadline },
+            status: PENDING
+        });
+    }
+    return { tasks, covered: true };
+}
+
+/**
+ * Inbound shipment shortage. Spreadsheet: shipment closed with received under
+ * shipped and no reimbursement. The reimbursement report names no shipment, so
+ * Lost_Inbound / Damaged_Inbound units are matched by FNSKU, oldest shipment first.
+ * One task per shipment.
+ */
+function detectInboundShortage({ inboundShortage, products = [], now }) {
+    if (!inboundShortage || !inboundShortage.reimbursementsRead || ageDays(inboundShortage.fetchedAt, now) > REIMBURSEMENT_INPUT_MAX_AGE_DAYS) {
+        return { tasks: [], covered: false };
+    }
+    const bySku = new Map();
+    for (const p of products) if (p?.sku && !bySku.has(String(p.sku).trim())) bySku.set(String(p.sku).trim(), p);
+    const credit = { ...(inboundShortage.reimbursedByFnsku || {}) };
+    const shipments = [...(inboundShortage.shipments || [])]
+        .sort((x, y) => String(x.shipmentDate || '').localeCompare(String(y.shipmentDate || '')));
+
+    const tasks = [];
+    for (const s of shipments) {
+        let units = 0;
+        let value = 0;
+        for (const line of s.lines) {
+            const covered = Math.min(line.short, credit[line.fnsku] || 0);
+            if (covered > 0) credit[line.fnsku] -= covered;
+            const open = line.short - covered;
+            if (open <= 0) continue;
+            units += open;
+            value += open * (Number(bySku.get(line.sku)?.price) || 0);
+        }
+        if (units <= 0) continue;
+        const id = s.shipmentId || s.shipmentName;
+        tasks.push({
+            asin: `SHIPMENT:${id}`,
+            productName: `Shipment ${s.shipmentName || id}`.substring(0, 100),
+            errorCategory: 'inventory',
+            errorType: 'inbound_shortage',
+            error: `Reimbursement | Inbound Shortage: Amazon checked in ${units} fewer ${units === 1 ? 'unit' : 'units'} than you sent in shipment ${id}, and has not reimbursed them.`,
+            solution: 'We will open a case. Please share the invoice and proof of delivery for this shipment.',
+            amount: money2(value),
+            amountIsEstimated: true,
+            renderData: { shipmentId: s.shipmentId, shipmentName: s.shipmentName, units },
+            status: PENDING
+        });
+    }
+    return { tasks, covered: true };
+}
+
 module.exports = {
     catalogueByAsin,
+    detectLostDamagedUnreimbursed,
+    detectInboundShortage,
     buyableUnits,
     topRevenueAsins,
     detectListingSuppressed,

@@ -74,6 +74,30 @@ const SALES_BASELINE_DAYS = 28;
 const SALES_DROP_SHARE = 0.30;
 const SALES_MIN_BASELINE_UNITS_WEEK = 20;
 
+// Spreadsheet "High traffic, low conversion": sessions in the account's top 30% and
+// conversion under half the account median over 30 days; 300+ sessions.
+// "Low traffic, high conversion": conversion 1.5x+ the median, sessions in the bottom
+// 30%; 10+ orders. Medians and percentiles over this account's ASINs with traffic.
+const TRAFFIC_MIX_DAYS = 30;
+// Fewer days than this in the 30-day window (gaps, new account) is not judged. Internal.
+const TRAFFIC_MIX_MIN_DAYS = 21;
+const TRAFFIC_MIX_TOP_SHARE = 0.30;
+const HIGH_TRAFFIC_MIN_SESSIONS = 300;
+const HIGH_TRAFFIC_CVR_RATIO = 0.5;
+const LOW_TRAFFIC_CVR_RATIO = 1.5;
+const LOW_TRAFFIC_MIN_ORDERS = 10;
+// Too few products to call any of them "top 30%" or compare to a median. Internal.
+const TRAFFIC_MIX_MIN_ASINS = 5;
+
+// Spreadsheet "Potential reimbursements: lost or damaged": lost or damaged units still
+// unreconciled (neither found nor reimbursed) 30 days after the event and still inside
+// Amazon's 60-day claim window. Ledger reason codes: M and 5 lost; 6, 7, E, H, K, U
+// damaged (the codes the Reimbursement page already uses).
+const LOST_DAMAGED_WAIT_DAYS = 30;
+const LOST_DAMAGED_CLAIM_DAYS = 60;
+const LOST_REASON_CODES = ['M', '5'];
+const DAMAGED_REASON_CODES = ['6', '7', 'E', 'H', 'K', 'U'];
+
 // A day selling over this multiple of the account's median day is an event day (Prime
 // Day, a deal) and is left out of every trend window. Internal.
 const EVENT_DAY_MULTIPLE = 3;
@@ -156,6 +180,18 @@ module.exports = {
     SALES_DROP_SHARE,
     SALES_MIN_BASELINE_UNITS_WEEK,
     EVENT_DAY_MULTIPLE,
+    TRAFFIC_MIX_DAYS,
+    TRAFFIC_MIX_MIN_DAYS,
+    TRAFFIC_MIX_TOP_SHARE,
+    HIGH_TRAFFIC_MIN_SESSIONS,
+    HIGH_TRAFFIC_CVR_RATIO,
+    LOW_TRAFFIC_CVR_RATIO,
+    LOW_TRAFFIC_MIN_ORDERS,
+    TRAFFIC_MIX_MIN_ASINS,
+    LOST_DAMAGED_WAIT_DAYS,
+    LOST_DAMAGED_CLAIM_DAYS,
+    LOST_REASON_CODES,
+    DAMAGED_REASON_CODES,
     TACOS_WINDOW_DAYS,
     TACOS_RISE_POINTS,
     TACOS_SALES_FLAT_SHARE,

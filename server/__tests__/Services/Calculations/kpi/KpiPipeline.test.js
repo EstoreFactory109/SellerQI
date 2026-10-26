@@ -8,6 +8,13 @@ jest.mock('../../../../models/inventory/RemovalOrdersModel.js', () => ({ findOne
 jest.mock('../../../../models/inventory/RemovalReceiptModel.js', () => ({ find: jest.fn() }));
 jest.mock('../../../../Services/Finance/AsinFinanceWindowService.js', () => ({ getAsinFinanceForWindow: jest.fn() }));
 jest.mock('../../../../Services/Finance/FBAReimbursementsService.js', () => ({ getFBAReimbursementsData: jest.fn() }));
+// No ledger fetch and no shipment doc: both inputs read as "not arrived".
+jest.mock('../../../../models/finance/LedgerDetailViewItemModel.js', () => ({
+    findOne: () => ({ sort: () => ({ select: () => ({ lean: () => Promise.resolve(null) }) }) })
+}));
+jest.mock('../../../../models/inventory/ShipmentModel.js', () => ({
+    findOne: () => ({ sort: () => ({ lean: () => Promise.resolve(null) }) })
+}));
 
 const { kpiWaveEnabledFor, enabledKpiWaves } = require('../../../../Services/Calculations/kpi/kpiGate.js');
 const KpiInputs = require('../../../../Services/Calculations/kpi/KpiInputs.js');
@@ -125,6 +132,8 @@ describe('KpiInputs', () => {
         expect(inputs.salesLookback).toEqual({ A1: { sales: 50, unitsSold: 2 } });
         expect(inputs.removalReimbursements).toBeNull();
         expect(inputs.removalReceipts).toEqual([{ orderId: 'R1', sku: 'S1', shippedQuantity: 10, receivedQuantity: 7 }]);
+        expect(inputs.lostDamaged).toBeNull();
+        expect(inputs.inboundShortage).toBeNull();
         // 60 days ending yesterday (UTC).
         const [, , , start, end] = getAsinFinanceForWindow.mock.calls[0];
         expect(end.toISOString().slice(0, 10)).toBe('2026-10-23');
@@ -146,7 +155,9 @@ describe('runKpiDetectors', () => {
             ahrHistory: [{ at: daysAgo(0), score: 700 }],
             suppressed: { createdAt: daysAgo(0), items: [] },
             removals: { createdAt: daysAgo(1), lines: [] },
-            removalReceipts: []
+            removalReceipts: [],
+            lostDamaged: { fetchedAt: daysAgo(1), events: [] },
+            inboundShortage: { fetchedAt: daysAgo(1), shipments: [], reimbursedByFnsku: {}, reimbursementsRead: true }
         },
         ...over
     });

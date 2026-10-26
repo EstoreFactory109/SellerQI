@@ -173,6 +173,10 @@ const EFFORT_MINUTES = {
     'inventory:new_seller_on_brand': 15,    // check the seller, test buy if unknown
     // Spreadsheet alignment
     'ranking:listing_errors': 10,           // fix the field Amazon flagged
+    'inventory:lost_damaged_unreimbursed': 15, // file a claim
+    'inventory:inbound_shortage': 20,       // open a case with documents
+    'conversion:high_traffic_low_conversion': 45, // listing work
+    'conversion:low_traffic_high_conversion': 20, // ads/keywords
     'sponsoredAds:product_acos_above_breakeven': 5, // lower bids / pause targets
     'ranking:backend_keywords_title_overlap': 3,
     'ranking:backend_keywords_underused': 10,  // add synonyms and alternate terms
@@ -297,6 +301,12 @@ const IMPACT_WEIGHT = {
     'ranking:titleresult_too_short': 16,
     // Amazon itself flagged it, and unfixed it can lead to suppression (spreadsheet P2).
     'ranking:listing_errors': 66,
+    // Spreadsheet P1 with a deadline: money Amazon owes, lost if the window closes.
+    'inventory:lost_damaged_unreimbursed': 72,
+    'inventory:inbound_shortage': 72,
+    // Spreadsheet P3 / P4.
+    'conversion:high_traffic_low_conversion': 50,
+    'conversion:low_traffic_high_conversion': 30,
     // Same family as high_acos (58), but judged on the product's own break-even.
     'sponsoredAds:product_acos_above_breakeven': 60,
     'ranking:bulletpoints_char_limit': 35,
