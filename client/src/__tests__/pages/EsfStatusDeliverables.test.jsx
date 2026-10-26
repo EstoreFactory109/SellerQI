@@ -113,6 +113,9 @@ describe('Status page deliverables', () => {
     expect(axiosInstance.post).toHaveBeenCalledWith('/api/pagewise/esf/project-status/files/f_12/visibility', { visibility: 'show' });
     expect(await screen.findByRole('button', { name: 'Hide working.psd from client' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Let the AI decide for working.psd' })).toBeInTheDocument();
+    // A shown image can be taken back from its thumbnail.
+    await userEvent.click(screen.getByRole('button', { name: 'Hide main-image.jpg from client' }));
+    expect(axiosInstance.post).toHaveBeenLastCalledWith('/api/pagewise/esf/project-status/files/f_11/visibility', { visibility: 'hide' });
   });
 
   it('nothing new appears while the feature is off', async () => {

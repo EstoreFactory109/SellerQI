@@ -47,7 +47,7 @@ const errorText = (err) => (err?.response?.status === 503
   : 'Could not download this file. Please try again.');
 
 /** An image thumbnail fetched through our server (cookies), shown from a blob URL. */
-const Thumb = ({ item, onOpen }) => {
+const Thumb = ({ item, onOpen, canManage, onVisibility, busy }) => {
   const [src, setSrc] = useState(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -60,16 +60,31 @@ const Thumb = ({ item, onOpen }) => {
   }, [item.key]);
 
   return (
-    <button
-      type="button"
-      onClick={() => onOpen(item)}
-      title={item.name}
-      className="relative h-[72px] w-[72px] flex-none overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] hover:border-blue-400/50"
-    >
-      {src ? <img src={src} alt={item.name} className="h-full w-full object-cover" />
-        : failed ? <FileImage className="m-auto h-6 w-6 text-gray-500" />
-          : <Loader2 className="m-auto h-4 w-4 animate-spin text-gray-500" />}
-    </button>
+    <div className="relative h-[72px] w-[72px] flex-none">
+      <button
+        type="button"
+        onClick={() => onOpen(item)}
+        title={item.name}
+        className="h-full w-full overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] hover:border-blue-400/50"
+      >
+        {src ? <img src={src} alt={item.name} className="h-full w-full object-cover" />
+          : failed ? <FileImage className="m-auto h-6 w-6 text-gray-500" />
+            : <Loader2 className="m-auto h-4 w-4 animate-spin text-gray-500" />}
+      </button>
+      {/* Staff only: take back an image the AI showed. */}
+      {canManage && (
+        <button
+          type="button"
+          onClick={() => onVisibility(item, 'hide')}
+          disabled={busy}
+          title="Hide from client"
+          aria-label={`Hide ${item.name} from client`}
+          className="absolute right-1 top-1 rounded-md bg-black/70 p-1 text-gray-200 hover:bg-black/90 disabled:opacity-50"
+        >
+          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <EyeOff className="h-3 w-3" />}
+        </button>
+      )}
+    </div>
   );
 };
 
@@ -178,7 +193,9 @@ export const DeliverableList = ({ items, canManage, actions, compact = false }) 
     <div className={`flex flex-col ${compact ? 'gap-2 mt-2' : 'gap-2.5'}`}>
       {images.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          {images.map((i) => <Thumb key={i.key} item={i} onOpen={actions.open} />)}
+          {images.map((i) => (
+            <Thumb key={i.key} item={i} onOpen={actions.open} canManage={canManage} onVisibility={actions.setVisibility} busy={actions.busyKey === i.key} />
+          ))}
         </div>
       )}
       {others.length > 0 && (
