@@ -98,6 +98,7 @@ const ALL_TASK_TYPES = [
     ['inventory', 'handling_time_long'],
     ['inventory', 'new_seller_on_brand'],
     ['ranking', 'listing_errors'],
+    ['sponsoredAds', 'product_acos_above_breakeven'],
     ['ranking', 'backend_keywords_title_overlap'],
     ['ranking', 'backend_keywords_underused'],
     ['ranking', 'titleresult_too_short']

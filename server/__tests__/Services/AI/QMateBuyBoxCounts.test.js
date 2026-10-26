@@ -35,11 +35,11 @@ const day = (date, rows) => ({
 
 describe('QMateMetricsService.getBuyBoxData', () => {
     beforeEach(() => {
-        // A: lost 2 traffic days (flagged). B: one-day blip (carried forward). N: no reading.
+        // A: 0% on 60 sessions (flagged: under 80% on 50+ sessions). B: one-day blip (carried forward). N: no reading.
         // L: 30% today. X: lost but inactive.
         mockDays = [
-            day('2026-10-13', { A: [0, 10], B: [0, 10], N: [null, 0], L: [30, 10], X: [0, 10] }),
-            day('2026-10-12', { A: [0, 10], B: [100, 10], N: [null, 0], L: [30, 10], X: [0, 10] })
+            day('2026-10-13', { A: [0, 30], B: [0, 10], N: [null, 0], L: [30, 10], X: [0, 10] }),
+            day('2026-10-12', { A: [0, 30], B: [100, 10], N: [null, 0], L: [30, 10], X: [0, 10] })
         ];
         mockProducts = ['A', 'B', 'N', 'L'].map((asin) => ({ asin, status: 'Active' }))
             .concat([{ asin: 'X', status: 'Inactive' }]);

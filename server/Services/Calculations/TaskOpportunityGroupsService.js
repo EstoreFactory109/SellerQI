@@ -184,6 +184,10 @@ const GROUP_COPY = {
         title: 'Products Amazon now charges more to fulfil',
         action: 'Check the measurements and ask for a re-measure if wrong'
     },
+    'sponsoredAds:product_acos_above_breakeven': {
+        title: 'Products whose ads cost more than they earn',
+        action: 'Lower bids or pause the targets above break-even ACoS'
+    },
     'ranking:listing_errors': {
         title: 'Listings Amazon has flagged with errors',
         action: 'Fix the flagged field before Amazon suppresses the listing'

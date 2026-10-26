@@ -1242,7 +1242,7 @@ const PPCDashboard = () => {
   // LEGACY: Filtered search terms for CSV export only
   const filteredSearchTerms = useMemo(() => {
     if (!computeLegacyData) return [];
-    return aggregatedSearchTerms.filter(term => term.clicks >= 10 && term.sales < 0.01);
+    return aggregatedSearchTerms.filter(term => term.clicks >= 15 && term.sales < 0.01);
   }, [computeLegacyData, aggregatedSearchTerms]);
   
   // Transform the data for the chart — PRIMARY source is the backend

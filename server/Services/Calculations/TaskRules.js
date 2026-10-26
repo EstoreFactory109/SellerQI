@@ -16,9 +16,10 @@ const TARGET_PROFIT_MARGIN_PERCENT = 10;
 // amount is the spend above it.
 const TARGET_ACOS_PERCENT = 40;
 
-// A search term needs at least this many clicks with no sales before it counts as
-// wasted, so a term with one stray click is not flagged.
-const SEARCH_TERM_MIN_CLICKS = 10;
+// tasks-logics.xlsx "Search terms with spend and no sales": 15+ clicks, 0 orders and
+// spend over the product's price in 30 days. Search-term rows carry no ASIN, so
+// the price is the median price of the account's active products.
+const SEARCH_TERM_MIN_CLICKS = 15;
 
 // An auto-campaign search term with more than this in sales has proven itself and
 // should move to a manual campaign.

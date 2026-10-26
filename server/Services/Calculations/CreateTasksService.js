@@ -146,6 +146,14 @@ const renderProfitabilityTaskText = (errorType, renderData = {}) => {
     const sales = typeof renderData.sales === 'number' ? renderData.sales : 0;
     const profitMargin = typeof renderData.profitMargin === 'number' ? renderData.profitMargin : 0;
 
+    if (errorType === 'negative_profit' && typeof renderData.units === 'number' && renderData.units > 0) {
+        // tasks-logics.xlsx "Loss-making product" (rows judged after COGS on 10+ units).
+        const perUnit = Math.abs(netProfit) / renderData.units;
+        return {
+            error: `Profitability | Loss-Making Product: This product lost about $${perUnit.toFixed(2)} per unit last month after all costs (${renderData.units} units, net -$${Math.abs(netProfit).toFixed(2)} on $${sales.toFixed(2)} of sales).`,
+            solution: 'We will review price, ad spend and fees with you to make it profitable or decide whether to keep it.'
+        };
+    }
     if (errorType === 'negative_profit') {
         const totalCosts = sales - netProfit;
         return {
@@ -251,9 +259,15 @@ const renderBuyBoxTaskText = (renderData = {}) => {
     const pageViews = renderData.pageViews || 0;
     const sessions = renderData.sessions || 0;
 
-    // Upstream only ever flags buyBoxPercentage === 0 (see the asinBuyBoxData
-    // filter in DashboardCalculation.js), so this is the only tailored tier;
-    // anything else falls through to the generic message below.
+    // Upstream flags a session-weighted share under 80% (classifyBuyBoxLoss);
+    // 80%+ or a missing share falls through to the generic message below.
+    // tasks-logics.xlsx: held the Buy Box on under 80% of visits over 7 days.
+    if (typeof buyBoxPercentage === 'number' && buyBoxPercentage > 0 && buyBoxPercentage < 80) {
+        return {
+            error: `Buy Box | Losing Visits: This product held the Buy Box on only ${buyBoxPercentage}% of visits in the last 7 days, so many shoppers bought from another seller or saw no Add to Cart button.`,
+            solution: 'Check whether another seller is winning the offer, whether your price is above the featured offer price, and whether stock or account health is affecting your eligibility.'
+        };
+    }
     if (buyBoxPercentage === 0) {
         return {
             error: `Buy Box | No Ownership: This product has 0% Buy Box ownership. With ${pageViews} page views and ${sessions} sessions, you're losing potential sales to competitors who own the Buy Box.`,
@@ -1001,6 +1015,7 @@ class CreateTaskService {
                     sales: error.sales,
                     ads: error.ads,
                     profitMargin: error.profitMargin,
+                    units: error.units,
                     message: error.message
                 },
                 amount: error.amount || 0,

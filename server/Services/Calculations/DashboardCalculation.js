@@ -25,7 +25,7 @@ const DataFetchTracking = require('../../models/system/DataFetchTrackingModel.js
 const { resolveAsinFinance } = require('../Finance/AsinFinanceWindowService.js');
 const { isStoredEconomicsDoc } = require('../Finance/LiveEconomicsService.js');
 const { sumEconomicsSales } = require('../Finance/EconomicsFinanceFormat.js');
-const { computeProfitabilityAmount, classifyProfitabilityRow, computeSponsoredAdsAmount, computeBuyBoxBenchmark, computeBuyBoxLostRevenueAmount, computeBuyBoxProfitImpact } = require('./RecoverableAmountUtils.js');
+const { computeProfitabilityAmount, classifyProfitabilityRow, computeSponsoredAdsAmount, computeBuyBoxBenchmark, computeBuyBoxLostRevenueAmount, computeBuyBoxProfitImpact, buyBoxJudgedAsinSetOf } = require('./RecoverableAmountUtils.js');
 const {
     TARGET_ACOS_PERCENT,
     SEARCH_TERM_MIN_CLICKS,
@@ -528,7 +528,7 @@ const calculateCampaignWiseTotalSalesAndCost = (dateWisePPCData) => {
  * @param {Array} totalProducts - Array of all products with names
  * @returns {Object} Total errors and error details
  */
-const calculateProfitabilityErrors = (profitibilityData, totalProducts = [], { financeFresh = true } = {}) => {
+const calculateProfitabilityErrors = (profitibilityData, totalProducts = [], { financeFresh = true, cogsMap = null } = {}) => {
     let totalErrors = 0;
     let totalAmount = 0;
     const errorDetails = [];
@@ -546,7 +546,7 @@ const calculateProfitabilityErrors = (profitibilityData, totalProducts = [], { f
     profitibilityData.forEach((item) => {
         // COGS is 0 until the seller enters it. The rule itself is shared with the
         // Profitability pages (RecoverableAmountUtils.classifyProfitabilityRow).
-        const verdict = classifyProfitabilityRow(item, { financeFresh });
+        const verdict = classifyProfitabilityRow(item, { financeFresh, cogsMap });
         if (!verdict) return;
         totalErrors++;
         totalAmount += verdict.amount;
@@ -557,6 +557,8 @@ const calculateProfitabilityErrors = (profitibilityData, totalProducts = [], { f
             ads: item.ads || 0,
             netProfit: verdict.netProfit,
             profitMargin: verdict.profitMargin,
+            // Units only when the loss was judged with COGS, so the task can say "per unit".
+            units: cogsMap && Number(cogsMap[item.asin]) > 0 ? (Number(item.quantity) || 0) : undefined,
             errorType: verdict.errorType,
             amount: verdict.amount
         });
@@ -581,13 +583,25 @@ const calculateProfitabilityErrors = (profitibilityData, totalProducts = [], { f
  * @param {Array} keywords - Keywords data for manual campaign lookup
  * @returns {Object} { totalErrors, errorDetails }
  */
+// Median price of the account's active products, 0 when none has a price.
+const medianActivePrice = (products) => {
+    const prices = (Array.isArray(products) ? products : [])
+        .filter((p) => p && p.status === 'Active')
+        .map((p) => Number(p.price) || 0)
+        .filter((n) => n > 0)
+        .sort((a, b) => a - b);
+    if (prices.length === 0) return 0;
+    const mid = Math.floor(prices.length / 2);
+    return prices.length % 2 ? prices[mid] : (prices[mid - 1] + prices[mid]) / 2;
+};
+
 const calculateSponsoredAdsErrors = (
     campaignWiseTotalSalesAndCost = [],
     adsKeywordsPerformanceData = [],
     searchTerms = [],
     campaignData = [],
     keywords = [],
-    { negativeKeywords = [], country = null, now = new Date() } = {}
+    { negativeKeywords = [], country = null, now = new Date(), referencePrice = 0 } = {}
 ) => {
     let totalErrors = 0;
     let totalAmount = 0;
@@ -714,7 +728,8 @@ const calculateSponsoredAdsErrors = (
         }
     });
     
-    // 3. Search Terms with Zero Sales (clicks >= 10 and sales < 0.01)
+    // 3. Search Terms with Zero Sales (TaskRules.SEARCH_TERM_MIN_CLICKS, no sales,
+    // spend over the reference product price when one is known)
     // Aggregate search terms by searchTerm+campaign+adGroup to avoid duplicates
     const aggregatedSearchTermsMap = new Map();
     
@@ -749,8 +764,8 @@ const calculateSponsoredAdsErrors = (
     const negatedIndex = buildNegatedIndex(negativeKeywords);
     
     aggregatedSearchTerms.forEach((term) => {
-        // Count as error if clicks >= 10 and sales < 0.01
-        if (term.clicks >= SEARCH_TERM_MIN_CLICKS && term.sales < 0.01 && !isNegated(negatedIndex, term)) {
+        const spendOverPrice = !(referencePrice > 0) || term.spend > referencePrice;
+        if (term.clicks >= SEARCH_TERM_MIN_CLICKS && term.sales < 0.01 && spendOverPrice && !isNegated(negatedIndex, term)) {
             totalErrors++;
             // Its spend is already inside its keyword's amount when that keyword is
             // itself flagged as wasted: count it once.
@@ -1274,11 +1289,12 @@ const analyseData = async (data, userId = null, options = {}) => {
             ? (totalGrossProfit / totalSalesForMargin) * 100
             : 0;
 
-        // Use MCP BuyBox data - filter products with buyBoxPercentage = 0.
-        // BuyBoxData is the multi-day effective doc from classifyBuyBoxLoss, so 0%
-        // here means "0% on the ASIN's last two days with traffic", not one bad day.
+        // The verdict from classifyBuyBoxLoss (under 80% of visits over 7 days on 50+
+        // sessions). An ASIN with no stock on any of its listings is left to the
+        // out-of-stock task (tasks-logics.xlsx: "otherwise 'Out of stock' owns it").
+        const judgedAsins = buyBoxJudgedAsinSetOf(TotalProducts);
         productsWithOutBuyboxError = data.BuyBoxData.asinBuyBoxData
-            .filter((p) => p && p.buyBoxPercentage === 0 && p.childAsin && activeProductSet.has(p.childAsin))
+            .filter((p) => p && p.buyBoxLost === true && p.childAsin && judgedAsins.has(p.childAsin))
             .map((p) => {
                 // Average day across the observed days when the effective doc
                 // carries it; the newest day's figures otherwise (older callers).
@@ -1825,7 +1841,7 @@ const analyseData = async (data, userId = null, options = {}) => {
     const financeFresh = resolvedAsinFinance.financeFresh;
     
     try {
-        profitabilityErrorsData = calculateProfitabilityErrors(profitibilityData, TotalProducts, { financeFresh });
+        profitabilityErrorsData = calculateProfitabilityErrors(profitibilityData, TotalProducts, { financeFresh, cogsMap: data.cogsValues || {} });
         profitabilityErrorsOk = true;
     } catch (error) {
         logger.error("Error calculating profitability errors:", error);
@@ -1843,7 +1859,7 @@ const analyseData = async (data, userId = null, options = {}) => {
             data.searchTerms || [],
             data.campaignData || [],
             data.keywords || [],
-            { negativeKeywords: data.negetiveKeywords || [], country }
+            { negativeKeywords: data.negetiveKeywords || [], country, referencePrice: medianActivePrice(TotalProducts) }
         );
         sponsoredAdsErrorsOk = true;
     } catch (error) {
@@ -1962,6 +1978,8 @@ const analyseData = async (data, userId = null, options = {}) => {
         kpiResult = runKpiDetectors(data, {
             salesByAsin: economicsData.asinPpcSales || {},
             financeFresh,
+            profitRows: profitibilityData,
+            cogsMap: data.cogsValues || {},
             country,
             userId
         });

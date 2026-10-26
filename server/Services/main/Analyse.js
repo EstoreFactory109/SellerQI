@@ -960,6 +960,8 @@ class AnalyseService {
             GetOrderData: (allData.GetOrderData || { RevenueData: [] }).RevenueData,
             GetDateWisePPCspendData: (allData.GetDateWisePPCspendData || { dateWisePPCSpends: [] }).dateWisePPCSpends,
             campaignSpendSales: allData.campaignSpendSales || null,
+            // Per-unit COGS by ASIN ({} until the seller enters it): the loss-making rule needs it.
+            cogsValues: (allData.cogsData && allData.cogsData.success && allData.cogsData.data?.cogsValues) || {},
             AdsGroupData: (allData.AdsGroupData || { adsGroupData: [] }).adsGroupData,
             keywordTrackingData: (allData.keywordTrackingData || { keywords: [] }).keywords || [],
             DifferenceData: differenceData.percentageDifference,
@@ -1170,12 +1172,19 @@ class AnalyseService {
             });
         }
 
+        // Selling price per ASIN, to value unfulfillable units when COGS is missing.
+        const restockPriceMap = {};
+        (safeRestockData.Products || []).forEach((row) => {
+            const price = Number(row?.price);
+            if (row?.asin && price > 0) restockPriceMap[row.asin] = price;
+        });
+
         // Process Inventory Planning Data for each ASIN
         if (safeInventoryPlanningData.data && Array.isArray(safeInventoryPlanningData.data)) {
             safeInventoryPlanningData.data.forEach(item => {
                 if (item && item.asin) {
                     try {
-                        const planningResult = processInventoryPlanningData(item, costMap, ltsfAmountMap);
+                        const planningResult = processInventoryPlanningData(item, costMap, ltsfAmountMap, restockPriceMap);
                         inventoryAnalysis.inventoryPlanning.push(planningResult);
                     } catch (error) {
                         logger.error(`Error processing inventory planning data for ASIN ${item.asin}: ${error.message}`);

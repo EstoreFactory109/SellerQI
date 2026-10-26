@@ -123,15 +123,19 @@ describe('CreateTasksService renderers', () => {
             expect(error).toContain('0% Buy Box ownership');
         });
 
-        // Upstream only ever flags buyBoxPercentage === 0, so any other value
-        // falls through to the generic message.
-        it('falls back to the source message for any non-zero percentage', () => {
-            const { error } = CreateTaskService.renderBuyBoxTaskText({ buyBoxPercentage: 32.4, message: 'Custom buybox note' });
+        it('renders the partial tier for a share under 80%', () => {
+            const { error, solution } = CreateTaskService.renderBuyBoxTaskText({ buyBoxPercentage: 32.4, message: 'Custom buybox note' });
+            expect(error).toContain('only 32.4% of visits in the last 7 days');
+            expect(solution).toBeTruthy();
+        });
+
+        it('falls back to the source message at 80% or more', () => {
+            const { error } = CreateTaskService.renderBuyBoxTaskText({ buyBoxPercentage: 85, message: 'Custom buybox note' });
             expect(error).toBe('Custom buybox note');
         });
 
-        it('falls back to a safe default when there is no source message either', () => {
-            const { error, solution } = CreateTaskService.renderBuyBoxTaskText({ buyBoxPercentage: 60 });
+        it('falls back to a safe default when there is no share or message', () => {
+            const { error, solution } = CreateTaskService.renderBuyBoxTaskText({});
             expect(error).toContain('not winning the Buy Box');
             expect(solution).toBeTruthy();
         });

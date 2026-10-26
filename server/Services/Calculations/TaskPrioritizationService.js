@@ -171,6 +171,7 @@ const EFFORT_MINUTES = {
     'inventory:new_seller_on_brand': 15,    // check the seller, test buy if unknown
     // Spreadsheet alignment
     'ranking:listing_errors': 10,           // fix the field Amazon flagged
+    'sponsoredAds:product_acos_above_breakeven': 5, // lower bids / pause targets
     'ranking:backend_keywords_title_overlap': 3,
     'ranking:backend_keywords_underused': 10,  // add synonyms and alternate terms
     'ranking:titleresult_too_short': 10        // add searched details to the title
@@ -291,6 +292,8 @@ const IMPACT_WEIGHT = {
     'ranking:titleresult_too_short': 16,
     // Amazon itself flagged it, and unfixed it can lead to suppression (spreadsheet P2).
     'ranking:listing_errors': 66,
+    // Same family as high_acos (58), but judged on the product's own break-even.
+    'sponsoredAds:product_acos_above_breakeven': 60,
     'ranking:bulletpoints_char_limit': 35,
     'ranking:bulletpoints_restricted_words': 35,
     'ranking:bulletpoints_special_characters': 35,

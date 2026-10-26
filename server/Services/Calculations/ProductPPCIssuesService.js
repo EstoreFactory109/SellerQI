@@ -22,6 +22,7 @@ const adsKeywordsPerformanceModel = require('../../models/amazon-ads/adsKeywords
 const SearchTerms = require('../../models/amazon-ads/SearchTermsModel.js');
 const DataFetchTracking = require('../../models/system/DataFetchTrackingModel.js');
 const logger = require('../../utils/Logger.js');
+const { SEARCH_TERM_MIN_CLICKS } = require('./TaskRules.js');
 const { loadLatestSnapshotDoc, loadKeywordSnapshot } = require('../../utils/ppcSnapshotLoader.js');
 
 const toYyyyMmDd = (value) => {
@@ -630,7 +631,7 @@ function buildKeywordTables(keywordPerformance, searchTerms) {
             acos: parseFloat(k.acos.toFixed(2))
         }));
 
-    // 3. Search Terms with Zero Sales (clicks >= 10 and sales < 0.01) — same as Campaign Audit
+    // 3. Search Terms with Zero Sales (clicks >= SEARCH_TERM_MIN_CLICKS and sales < 0.01) — same as Campaign Audit
     const searchTermMap = new Map();
     searchTerms.forEach(st => {
         const uniqueKey = `${st.searchTerm || ''}|${st.campaignId || ''}|${st.adGroupId || ''}`;
@@ -658,7 +659,7 @@ function buildKeywordTables(keywordPerformance, searchTerms) {
     });
 
     const searchTermsZeroSales = Array.from(searchTermMap.values())
-        .filter(t => t.clicks >= 10 && t.sales < 0.01)
+        .filter(t => t.clicks >= SEARCH_TERM_MIN_CLICKS && t.sales < 0.01)
         .sort((a, b) => b.spend - a.spend)
         .slice(0, 50)
         .map(t => ({
@@ -973,7 +974,7 @@ async function getProductTopPerformingKeywords({ userId, region, country, asin, 
 
 /**
  * Get search terms with zero sales for a specific ASIN (paginated).
- * Uses same aggregation as Campaign Audit (clicks >= 10) but filtered to this ASIN's ad groups.
+ * Uses same aggregation as Campaign Audit (clicks >= SEARCH_TERM_MIN_CLICKS) but filtered to this ASIN's ad groups.
  */
 async function getProductSearchTermsZeroSales({ userId, region, country, asin, page = 1, limit = 10, startDate, endDate }) {
     if (!asin) {
@@ -1036,7 +1037,7 @@ async function getProductSearchTermsZeroSales({ userId, region, country, asin, p
                     impressions: { $sum: { $ifNull: ['$searchTermData.impressions', 0] } },
                 },
             },
-            { $match: { clicks: { $gte: 10 }, sales: { $lt: 0.01 } } },
+            { $match: { clicks: { $gte: SEARCH_TERM_MIN_CLICKS }, sales: { $lt: 0.01 } } },
             {
                 $addFields: {
                     ctr: {

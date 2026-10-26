@@ -361,7 +361,7 @@ describe('AdsEngine handlers — return shape', () => {
     expect(r.type).toBe('wasted_spend');
     expect(r.totalWastedSpend).toBe(100);
     expect(r.wastedKeywords).toMatchObject({ total: 1, criteria: 'spend > $0, sales < $0.01' });
-    expect(r.zeroSalesTerms).toMatchObject({ total: 1, criteria: 'clicks >= 10, sales < $0.01' });
+    expect(r.zeroSalesTerms).toMatchObject({ total: 1, criteria: 'clicks >= 15, sales < $0.01' });
     expect(Array.isArray(r.worstCampaigns)).toBe(true);
     // Interactive table entries must carry IDs for the pause/negative buttons.
     expect(r.wasted_keywords[0]).toMatchObject({ keyword: 'junk', keywordId: 'k1', campaignId: 'c1', adGroupId: 'g1' });

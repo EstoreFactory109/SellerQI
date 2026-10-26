@@ -694,12 +694,12 @@ async function getQMatePPCContext(userId, country, region, options = {}) {
                 criteria: 'ACOS < 20%, sales > 100, impressions > 1000'
             },
             
-            // Search Terms with Zero Sales (clicks >= 10, sales < 0.01) - Tab 4
+            // Search Terms with Zero Sales (clicks >= 15, sales < 0.01) - Tab 4
             searchTermsZeroSales: {
                 data: zeroSalesData?.data || [],
                 total: zeroSalesData?.pagination?.totalItems || 0,
                 totalWastedSpend: (zeroSalesData?.data || []).reduce((sum, t) => sum + (t.spend || 0), 0),
-                criteria: 'Search terms with 10+ clicks but no sales'
+                criteria: 'Search terms with 15+ clicks but no sales'
             },
             
             // Auto Campaign Insights (sales > 30, auto campaign, not in manual) - Tab 5

@@ -193,8 +193,10 @@ function computeBuyBoxBenchmark(asinBuyBoxData) {
     let benchmarkUnits = 0;
     let benchmarkRevenue = 0;
 
+    // Flagged rows carry their real (partial) share now, so buyBoxLost is checked
+    // too: an ASIN losing the Buy Box is not a holder whatever its %.
     asinBuyBoxData.forEach(p => {
-        if (p && p.buyBoxPercentage > 0) {
+        if (p && p.buyBoxPercentage > 0 && p.buyBoxLost !== true) {
             benchmarkSessions += p.sessions || 0;
             benchmarkUnits += p.unitsOrdered || 0;
             benchmarkRevenue += p.sales?.amount || 0;
@@ -297,6 +299,11 @@ function readBuyBoxPct(row) {
  * @returns {Object|null} effective doc, or null when there are no days at all
  *   (= no Buy Box data, so no Buy Box issues — never "every product lost").
  */
+// tasks-logics.xlsx "Products without Buy Box": Featured Offer % under 80% over the
+// last 7 days, with 50+ sessions in those days (the 'Low' band starts at 80%).
+const BUYBOX_LOW_PCT = 80;
+const BUYBOX_MIN_SESSIONS = 50;
+
 function classifyBuyBoxLoss(days) {
     const usable = Array.isArray(days) ? days.filter((d) => d && Array.isArray(d.asinBuyBoxData)) : [];
     if (usable.length === 0) return null;
@@ -320,6 +327,13 @@ function classifyBuyBoxLoss(days) {
             h.rows.push({ dayIndex, row });
             h.totalSessions += Number(row.sessions) || 0;
             h.totalSales += Number(row.sales?.amount) || 0;
+            // Session-weighted Buy Box share over the loaded days (up to 7).
+            const pct = readBuyBoxPct(row);
+            const sessions = Number(row.sessions) || 0;
+            if (pct !== null && sessions > 0) {
+                h.weightedPct = (h.weightedPct || 0) + pct * sessions;
+                h.judgedSessions = (h.judgedSessions || 0) + sessions;
+            }
         }
     });
 
@@ -327,12 +341,19 @@ function classifyBuyBoxLoss(days) {
     for (const [asin, h] of history) {
         const trafficDays = h.rows.filter(({ row }) => (Number(row.sessions) || 0) > 0 && readBuyBoxPct(row) !== null);
         const zeroDays = trafficDays.filter(({ row }) => readBuyBoxPct(row) === 0).length;
-        const flagged = trafficDays.length >= 2
-            && readBuyBoxPct(trafficDays[0].row) === 0
-            && readBuyBoxPct(trafficDays[1].row) === 0;
+        // Was: 0% on the last two traffic days. Now the spreadsheet's rule: under
+        // 80% of visits over the window, on enough traffic to mean something.
+        const sevenDayPct = h.judgedSessions > 0 ? h.weightedPct / h.judgedSessions : null;
+        // Two days with traffic at least (kept from the earlier fix): one day of
+        // data must not raise a week-long task.
+        const flagged = sevenDayPct !== null
+            && trafficDays.length >= 2
+            && h.judgedSessions >= BUYBOX_MIN_SESSIONS
+            && sevenDayPct < BUYBOX_LOW_PCT;
         const lastNonZero = h.rows.find(({ row }) => (readBuyBoxPct(row) || 0) > 0);
         verdicts.set(asin, {
             flagged,
+            sevenDayPct: sevenDayPct === null ? null : Math.round(sevenDayPct * 10) / 10,
             zeroDays,
             trafficDays: trafficDays.length,
             lastNonZeroPct: lastNonZero ? readBuyBoxPct(lastNonZero.row) : null,
@@ -361,7 +382,9 @@ function classifyBuyBoxLoss(days) {
         const v = verdicts.get(row.childAsin);
         const pct = readBuyBoxPct(row);
         if (v.flagged) {
-            rows.push(decorate(row, v, 0, false));
+            // The real 7-day share (e.g. 45%), not a forced 0%: readers pick lost
+            // rows by `buyBoxLost`.
+            rows.push(decorate(row, v, v.sevenDayPct, false));
         } else if (pct !== null && pct > 0) {
             rows.push(decorate(row, v, pct, false));
         } else if (v.lastNonZeroPct !== null) {
@@ -372,16 +395,16 @@ function classifyBuyBoxLoss(days) {
         }
     }
     for (const [asin, v] of verdicts) {
-        if (v.flagged && !inLatest.has(asin)) rows.push(decorate(v.newestRow, v, 0, false));
+        if (v.flagged && !inLatest.has(asin)) rows.push(decorate(v.newestRow, v, v.sevenDayPct, false));
     }
 
     let productsWithBuyBox = 0;
     let productsWithoutBuyBox = 0;
     let productsWithLowBuyBox = 0;
     for (const r of rows) {
-        // Unknown (null) rows count as neither.
-        if (r.buyBoxPercentage > 0) productsWithBuyBox++;
-        else if (r.buyBoxPercentage === 0) productsWithoutBuyBox++;
+        // Lost = the verdict, whatever share it held. Unknown (null) rows count as neither.
+        if (r.buyBoxLost) productsWithoutBuyBox++;
+        else if (r.buyBoxPercentage > 0) productsWithBuyBox++;
         if (r.buyBoxPercentage > 0 && r.buyBoxPercentage < 50) productsWithLowBuyBox++;
     }
 
@@ -408,7 +431,7 @@ function classifyBuyBoxLoss(days) {
 function countActiveBuyBoxLosses(effectiveDoc, activeAsinSet) {
     if (!effectiveDoc || !Array.isArray(effectiveDoc.asinBuyBoxData) || !activeAsinSet) return 0;
     return effectiveDoc.asinBuyBoxData.filter(
-        (p) => p && p.buyBoxPercentage === 0 && p.childAsin && activeAsinSet.has(p.childAsin)
+        (p) => p && p.buyBoxLost === true && p.childAsin && activeAsinSet.has(p.childAsin)
     ).length;
 }
 
@@ -424,6 +447,24 @@ function activeAsinSetOf(products) {
             .filter((p) => p && p.asin && p.status === 'Active')
             .map((p) => p.asin)
     );
+}
+
+/**
+ * The ASINs whose Buy Box is judged: Active, and not out of stock on every active
+ * listing (tasks-logics.xlsx: an out-of-stock product belongs to the out-of-stock
+ * task). Used by the Buy Box task list and every Buy Box count, so they agree.
+ *
+ * Stock is only trusted when the account has stock data at all: a catalogue whose
+ * quantities never synced reads 0 everywhere, and must not lose every Buy Box task.
+ * @param {Array} products - sellerAccount.products
+ * @returns {Set<string>}
+ */
+function buyBoxJudgedAsinSetOf(products) {
+    const list = (Array.isArray(products) ? products : []).filter((p) => p && p.asin && p.status === 'Active');
+    const stock = new Map();
+    for (const p of list) stock.set(p.asin, (stock.get(p.asin) || 0) + (Number(p.quantity) || 0));
+    const hasStockData = [...stock.values()].some((q) => q > 0);
+    return new Set([...stock.keys()].filter((asin) => !hasStockData || stock.get(asin) > 0));
 }
 
 /**
@@ -461,9 +502,10 @@ function summarizeBuyBoxCounts(effectiveDoc, activeAsinSet) {
     for (const row of effectiveDoc.asinBuyBoxData) {
         if (!row || !row.childAsin || !activeAsinSet.has(row.childAsin)) continue;
         const pct = row.buyBoxPercentage;
-        if (typeof pct !== 'number' || Number.isNaN(pct)) {
+        if (row.buyBoxLost !== true && (typeof pct !== 'number' || Number.isNaN(pct))) {
             counts.productsWithUnknownBuyBox++;
-        } else if (pct === 0) {
+        } else if (row.buyBoxLost === true) {
+            // The verdict, whatever share it held (under 80% over 7 days).
             counts.productsWithoutBuyBox++;
         } else if (pct > 0) {
             counts.productsWithBuyBox++;
@@ -565,14 +607,27 @@ function isEconomicsFresh(economicsMetrics, now = new Date(), maxAgeDays = ECONO
  * @param {boolean} opts.financeFresh - the per-ASIN finance behind the rows is current
  * @returns {null | { errorType, amount, netProfit, profitMargin }}
  */
-function classifyProfitabilityRow(row, { financeFresh } = {}) {
+const LOSS_MAKING_MIN_UNITS = 10;
+
+function classifyProfitabilityRow(row, { financeFresh, cogsMap = null } = {}) {
     if (!row || !financeFresh) return null;
     if (row.source === 'legacy') return null;
 
     const sales = Number(row.sales) || 0;
     const ads = Number(row.ads) || 0;
     const fees = Number(row.amzFee) || Number(row.totalFees) || 0;
-    const netProfit = sales - ads - fees;
+    let netProfit = sales - ads - fees;
+
+    // Tasks pass cogsMap: tasks-logics.xlsx "Loss-making product" is net profit per
+    // unit below 0 over 30 days after fees, ads AND COGS, judged only on 10+ units
+    // with COGS entered (no COGS -> the cogs_missing task asks for it instead).
+    if (cogsMap && sales > 0) {
+        const units = Number(row.quantity) || 0;
+        const unitCost = Number(cogsMap[row.asin]) || 0;
+        if (unitCost > 0) netProfit -= unitCost * units;
+        const judged = unitCost > 0 && units >= LOSS_MAKING_MIN_UNITS;
+        if (netProfit < 0 && !judged) return null;
+    }
 
     if (sales <= 0) {
         if (ads <= 0) return null;
@@ -600,6 +655,10 @@ function classifyProfitabilityRow(row, { financeFresh } = {}) {
 }
 
 module.exports = {
+    LOSS_MAKING_MIN_UNITS,
+    buyBoxJudgedAsinSetOf,
+    BUYBOX_LOW_PCT,
+    BUYBOX_MIN_SESSIONS,
     computeProfitabilityAmount,
     classifyProfitabilityRow,
     isEconomicsFresh,

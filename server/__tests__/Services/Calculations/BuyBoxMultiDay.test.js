@@ -63,18 +63,27 @@ describe('classifyBuyBoxLoss', () => {
         expect(eff.productsWithBuyBox).toBe(1);
     });
 
-    it('flags an ASIN at 0% on its two most recent traffic days', () => {
+    // tasks-logics.xlsx: under 80% of visits over 7 days, on 50+ sessions.
+    it('flags an ASIN under 80% of visits over the window, keeping its real share', () => {
         const eff = classifyBuyBoxLoss([
-            day('2026-10-13', { A: [0, 10] }),
-            day('2026-10-12', { A: [0, 8] }),
+            day('2026-10-13', { A: [0, 30] }),
+            day('2026-10-12', { A: [0, 20] }),
             day('2026-10-11', { A: [100, 9] })
         ]);
         const a = row(eff, 'A');
         expect(a.buyBoxLost).toBe(true);
-        expect(a.buyBoxPercentage).toBe(0);
+        expect(a.buyBoxPercentage).toBe(15.3); // 900 / 59 sessions
         expect(a.zeroDays).toBe(2);
         expect(a.trafficDays).toBe(3);
         expect(eff.productsWithoutBuyBox).toBe(1);
+    });
+
+    it('flags a partial loss too, not only 0%', () => {
+        const eff = classifyBuyBoxLoss([
+            day('2026-10-13', { A: [60, 30] }),
+            day('2026-10-12', { A: [70, 30] })
+        ]);
+        expect(row(eff, 'A')).toMatchObject({ buyBoxLost: true, buyBoxPercentage: 65 });
     });
 
     it('does not flag when it holds the Buy Box on the newest traffic day', () => {
@@ -87,24 +96,21 @@ describe('classifyBuyBoxLoss', () => {
         expect(row(eff, 'A').buyBoxPercentage).toBe(50);
     });
 
-    it('skips no-traffic days when looking for two in a row', () => {
-        // 0% on the newest day, no sessions the day before, 0% again before that:
-        // the two most recent TRAFFIC days are both 0%.
-        const flagged = classifyBuyBoxLoss([
-            day('2026-10-13', { A: [0, 4] }),
-            day('2026-10-12', { A: [100, 0] }),
-            day('2026-10-11', { A: [0, 6] })
+    it('needs 50+ sessions over the window, and ignores zero-session days', () => {
+        const tooFew = classifyBuyBoxLoss([
+            day('2026-10-13', { A: [0, 20] }),
+            day('2026-10-12', { A: [0, 20] })
         ]);
-        expect(row(flagged, 'A').buyBoxLost).toBe(true);
+        expect(row(tooFew, 'A').buyBoxLost).toBe(false);
 
         // A 0% on a zero-session day is no evidence either way.
-        const notFlagged = classifyBuyBoxLoss([
-            day('2026-10-13', { A: [0, 4] }),
+        const enough = classifyBuyBoxLoss([
+            day('2026-10-13', { A: [0, 30] }),
             day('2026-10-12', { A: [0, 0] }),
-            day('2026-10-11', { A: [70, 6] })
+            day('2026-10-11', { A: [0, 25] })
         ]);
-        expect(row(notFlagged, 'A').buyBoxLost).toBe(false);
-        expect(row(notFlagged, 'A').buyBoxPercentage).toBe(70);
+        expect(row(enough, 'A').buyBoxLost).toBe(true);
+        expect(row(enough, 'A').buyBoxPercentage).toBe(0);
     });
 
     it('does not flag an ASIN with only one day of traffic, even at 0%', () => {
@@ -142,8 +148,8 @@ describe('classifyBuyBoxLoss', () => {
     it('keeps a flagged ASIN that is absent from the newest day', () => {
         const eff = classifyBuyBoxLoss([
             day('2026-10-13', { B: [100, 5] }),
-            day('2026-10-12', { A: [0, 3], B: [100, 5] }),
-            day('2026-10-11', { A: [0, 4], B: [100, 5] })
+            day('2026-10-12', { A: [0, 30], B: [100, 5] }),
+            day('2026-10-11', { A: [0, 25], B: [100, 5] })
         ]);
         expect(row(eff, 'A')).toMatchObject({ buyBoxPercentage: 0, buyBoxLost: true });
         expect(eff.totalProducts).toBe(2);
@@ -152,11 +158,11 @@ describe('classifyBuyBoxLoss', () => {
 
     it('recomputes the summary counts from the effective rows', () => {
         // Stored counts on the newest doc say 3 without Buy Box; only C is a real loss.
-        const newest = day('2026-10-13', { A: [0, 5], B: [0, 0], C: [0, 9], D: [30, 9], E: [100, 9] },
+        const newest = day('2026-10-13', { A: [0, 5], B: [0, 0], C: [0, 30], D: [30, 9], E: [100, 9] },
             { productsWithBuyBox: 2, productsWithoutBuyBox: 3, productsWithLowBuyBox: 1 });
         const eff = classifyBuyBoxLoss([
             newest,
-            day('2026-10-12', { A: [60, 5], B: [0, 0], C: [0, 9], D: [30, 9], E: [100, 9] })
+            day('2026-10-12', { A: [60, 5], B: [0, 0], C: [0, 30], D: [30, 9], E: [100, 9] })
         ]);
         expect(eff.totalProducts).toBe(5);
         expect(eff.productsWithoutBuyBox).toBe(1); // C
@@ -254,11 +260,12 @@ describe('BuyBoxData.findLatest', () => {
 });
 
 describe('dashboard count equals the active Buy Box task list', () => {
-    // A: lost, active. B: lost, inactive. C: blip, active. D: holds it, active.
+    // A: lost, active. B: lost, inactive. C: one bad day, still 89% of visits, active.
+    // D: holds it, active.
     const days = () => [
-        day('2026-10-13', { A: [0, 10], B: [0, 10], C: [0, 10], D: [100, 10] }),
-        day('2026-10-12', { A: [0, 10], B: [0, 10], C: [100, 10], D: [100, 10] }),
-        day('2026-10-11', { A: [100, 10], B: [0, 10], C: [100, 10], D: [100, 10] })
+        day('2026-10-13', { A: [0, 30], B: [0, 30], C: [0, 10], D: [100, 10] }),
+        day('2026-10-12', { A: [0, 30], B: [0, 30], C: [100, 40], D: [100, 30] }),
+        day('2026-10-11', { A: [100, 30], B: [0, 30], C: [100, 40], D: [100, 30] })
     ];
     const products = [
         { asin: 'A', status: 'Active' },
@@ -294,11 +301,11 @@ describe('dashboard count equals the active Buy Box task list', () => {
         // X lost but inactive; Y low but inactive.
         const eff = () => ({
             asinBuyBoxData: [
-                { childAsin: 'A', buyBoxPercentage: 0 },
+                { childAsin: 'A', buyBoxPercentage: 0, buyBoxLost: true },
                 { childAsin: 'L', buyBoxPercentage: 30 },
                 { childAsin: 'N', buyBoxPercentage: null },
                 { childAsin: 'H', buyBoxPercentage: 100 },
-                { childAsin: 'X', buyBoxPercentage: 0 },
+                { childAsin: 'X', buyBoxPercentage: 0, buyBoxLost: true },
                 { childAsin: 'Y', buyBoxPercentage: 10 }
             ]
         });
@@ -356,8 +363,8 @@ describe('dashboard count equals the active Buy Box task list', () => {
         expect(dashboardData.productsWithoutBuyBox).toBe(buyBoxTasks.length);
         expect(dashboardData.productsWithOutBuyboxError).toBe(buyBoxTasks.length);
 
-        // 5 sessions/day x 0.2 x $20 = $20/day, x 30 days. One-day sessions (10)
-        // would have given 1200; diluting the benchmark with C would lower it.
+        // 5 sessions/day x 0.2 x $20 = $20/day, x 30 days. One-day sessions (30)
+        // would have given 3600; diluting the benchmark with C would lower it.
         expect(buyBoxTasks[0].lostRevenueAmount).toBeCloseTo(600);
         expect(buyBoxTasks[0].observedDays).toBe(3);
         expect(buyBoxTasks[0]).not.toHaveProperty('estimatedFromSingleDaySnapshot');

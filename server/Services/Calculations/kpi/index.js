@@ -14,6 +14,7 @@ const logger = require('../../../utils/Logger.js');
 const W1 = require('./Wave1Detectors.js');
 const W2 = require('./Wave2Detectors.js');
 const W3 = require('./Wave3Detectors.js');
+const Aligned = require('./AlignedDetectors.js');
 const { staleSources } = require('./DataFreshness.js');
 const { SALES_WINDOW_MAX_AGE_DAYS } = require('./KpiRules.js');
 
@@ -43,7 +44,8 @@ const KPI_SOURCES = Object.freeze({
     'inventory:handling_time_long': 'kpi.handlingTime',
     'inventory:new_seller_on_brand': 'kpi.newSellerOnBrand',
     // Alignment of an existing check (runs without a wave flag)
-    'ranking:listing_errors': 'kpi.listingErrors'
+    'ranking:listing_errors': 'kpi.listingErrors',
+    'sponsoredAds:product_acos_above_breakeven': 'kpi.productAcos'
 });
 
 const safely = (name, context, fn) => {
@@ -92,11 +94,13 @@ function windowPhrase(startDate, endDate, days, recent) {
  * @param {Object} ctx
  * @param {Object} ctx.salesByAsin - { [asin]: { sales, unitsSold } } for the dashboard window
  * @param {boolean} ctx.financeFresh - whether salesByAsin is trustworthy (resolveAsinFinance)
+ * @param {Array} [ctx.profitRows] - 30-day profitability rows, for break-even ACoS
+ * @param {Object} [ctx.cogsMap] - per-unit COGS by ASIN
  * @param {string} ctx.country
  * @param {Date} [ctx.now]
  * @returns {{tasks: Array, coverage: Object}}
  */
-function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, country = null, userId = null, now = new Date() } = {}) {
+function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, profitRows = [], cogsMap = {}, country = null, userId = null, now = new Date() } = {}) {
     // Spreadsheet alignment of existing checks: these replace an older check, so they
     // run for every account, waves or not. Amazon's own ERROR flags on listings take
     // over from our restricted-word list (now a review flag only).
@@ -104,9 +108,18 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, country
     const allByAsin = new Map();
     for (const p of allProducts) if (p?.asin && !allByAsin.has(p.asin)) allByAsin.set(p.asin, p);
     const aligned = safely('listing_errors', { userId, country }, () => W3.detectListingErrors({ products: allProducts, productsByAsin: allByAsin }));
+    // Break-even needs fresh finance; without it the product ACoS check holds its tasks.
+    const productAcos = financeFresh
+        ? safely('product_acos_above_breakeven', { userId, country }, () => Aligned.detectProductAcos({
+            adsRows: data?.ProductWiseSponsoredAds, profitRows, cogsMap, country, productsByAsin: allByAsin, now
+        }))
+        : { tasks: [], covered: false };
     const alignedResult = {
-        tasks: aligned.tasks,
-        coverage: { [KPI_SOURCES['ranking:listing_errors']]: aligned.covered }
+        tasks: [...aligned.tasks, ...productAcos.tasks],
+        coverage: {
+            [KPI_SOURCES['ranking:listing_errors']]: aligned.covered,
+            [KPI_SOURCES['sponsoredAds:product_acos_above_breakeven']]: productAcos.covered
+        }
     };
 
     const inputs = data?.KpiInputs;

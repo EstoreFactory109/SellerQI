@@ -1113,7 +1113,7 @@ const PPCDashboard = () => {
   // LEGACY: Filtered search terms for CSV export only
   const filteredSearchTerms = useMemo(() => {
     if (!computeLegacyData) return [];
-    return aggregatedSearchTerms.filter(term => term.clicks >= 10 && term.sales < 0.01);
+    return aggregatedSearchTerms.filter(term => term.clicks >= 15 && term.sales < 0.01);
   }, [computeLegacyData, aggregatedSearchTerms]);
   
   // Transform the data for the chart - prioritize PPCMetrics model data
@@ -1771,7 +1771,7 @@ const PPCDashboard = () => {
     // This counts campaign/keyword-level issues:
     // - High ACOS Campaigns (ACOS > 40%)
     // - Wasted Spend Keywords (cost > 0, sales < 0.01)
-    // - Search Terms with Zero Sales (clicks >= 10, sales < 0.01)
+    // - Search Terms with Zero Sales (clicks >= 15, sales < 0.01)
     // - Auto Campaign Insights needing migration
     const totalIssues = ppcKPISummary?.totalIssues ?? info?.totalSponsoredAdsErrors ?? 0;
     

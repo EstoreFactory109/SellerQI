@@ -152,7 +152,7 @@ describe('runKpiDetectors', () => {
     });
 
     it('runs only the always-on alignment check without any wave', () => {
-        const none = { tasks: [], coverage: { 'kpi.listingErrors': false }, staleSources: [] };
+        const none = { tasks: [], coverage: { 'kpi.listingErrors': false, 'kpi.productAcos': false }, staleSources: [] };
         expect(runKpiDetectors({}, { now: NOW })).toEqual(none);
         expect(runKpiDetectors({ KpiInputs: { waves: [] } }, { now: NOW })).toEqual(none);
         // Amazon's ERROR flags on a listing are a task whether or not a wave is on.

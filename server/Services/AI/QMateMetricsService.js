@@ -42,7 +42,7 @@ const ExpenseReadService = require('../Finance/ExpenseReadService.js');
 const { buildExpenseReportResponseFromDB } = require('../Sp_API/FinanceService.js');
 const { pickSnapshotFeeTotalsForCalendar } = require('../../utils/expenseSnapshotCalendar.js');
 const mongoose = require('mongoose');
-const { classifyBuyBoxLoss, summarizeBuyBoxCounts, activeAsinSetOf } = require('../Calculations/RecoverableAmountUtils.js');
+const { classifyBuyBoxLoss, summarizeBuyBoxCounts, activeAsinSetOf, buyBoxJudgedAsinSetOf } = require('../Calculations/RecoverableAmountUtils.js');
 
 function pickDateRangeStrings(dateRange) {
     const from = dateRange?.startDate || dateRange?.from || dateRange?.start || null;
@@ -338,7 +338,7 @@ async function getBuyBoxData(userId, country, region) {
             };
         }
 
-        const activeAsinSet = activeAsinSetOf(sellerDoc?.sellerAccount?.[0]?.products);
+        const activeAsinSet = buyBoxJudgedAsinSetOf(sellerDoc?.sellerAccount?.[0]?.products);
         const counts = summarizeBuyBoxCounts(buyBoxData, activeAsinSet);
         const summary = {
             ...counts,
@@ -354,10 +354,10 @@ async function getBuyBoxData(userId, country, region) {
         // products here.
         const productsWithoutBuyBox = (buyBoxData.asinBuyBoxData || [])
             .filter(p => p && p.childAsin && activeAsinSet.has(p.childAsin))
-            .filter(p => typeof p.buyBoxPercentage === 'number' && (
+            .filter(p => p.buyBoxLost === true || (typeof p.buyBoxPercentage === 'number' && (
                 p.buyBoxPercentage === 0
                 || (p.buyBoxPercentage < 50 && !p.buyBoxPercentageCarriedForward)
-            ))
+            )))
             .sort((a, b) => (b.sales?.amount || 0) - (a.sales?.amount || 0))
             .slice(0, 20)
             .map(p => ({

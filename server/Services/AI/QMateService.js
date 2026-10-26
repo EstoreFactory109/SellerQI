@@ -1491,7 +1491,7 @@ Performance split by Sponsored Products, Sponsored Brands, Sponsored Display.
 | **Wasted Spend Keywords** | \`wastedSpendKeywords\` | cost > 0 and sales < 0.01 | keyword, campaignName, adGroupName, matchType, spend, clicks, status |
 | **Campaigns Without Negatives** | \`campaignsWithoutNegatives\` | No negative keywords | campaignId, campaignName, adGroupId, adGroupName |
 | **Top Performing Keywords** | \`topPerformingKeywords\` | ACOS < 20%, sales > 100, impressions > 1000 | keyword, campaignName, spend, sales, acos, impressions |
-| **Search Terms Zero Sales** | \`searchTermsZeroSales\` | clicks >= 10, sales < 0.01 | searchTerm, keyword, campaignName, clicks, spend |
+| **Search Terms Zero Sales** | \`searchTermsZeroSales\` | clicks >= 15, sales < 0.01 | searchTerm, keyword, campaignName, clicks, spend |
 | **Auto Campaign Insights** | \`autoCampaignInsights\` | sales > 30, auto campaign, not in manual | searchTerm, campaignName, sales, spend, acos, action |
 
 **When answering PPC queries:**
@@ -4908,13 +4908,13 @@ const buildOptimizedModelContext = (fetchResults = {}, interpretation = null, qu
             criteria: ppc.topPerformingKeywords?.criteria || 'ACOS < 20%, sales > 100, impressions > 1000'
         },
         
-        // Tab 4: Search Terms with Zero Sales (clicks >= 10, sales < 0.01)
+        // Tab 4: Search Terms with Zero Sales (clicks >= 15, sales < 0.01)
         searchTermsZeroSales: {
             data: sliceForPagination(ppc.searchTermsZeroSales?.data || []),
             total: ppc.searchTermsZeroSales?.total || 0,
             currentOffset: paginationOffset,
             totalWastedSpend: ppc.searchTermsZeroSales?.totalWastedSpend || 0,
-            criteria: ppc.searchTermsZeroSales?.criteria || 'Search terms with 10+ clicks but no sales'
+            criteria: ppc.searchTermsZeroSales?.criteria || 'Search terms with 15+ clicks but no sales'
         },
         
         // Tab 5: Auto Campaign Insights (sales > 30, auto campaign, not in manual)
