@@ -420,7 +420,8 @@ class AnalyseService {
             ltsfData,
             fbaInventoryDetailData,
             campaignSpendSales,
-            adGroupsByAsin
+            adGroupsByAsin,
+            adsTargets
         ] = await Promise.all([
             timedQuery('v2Data', () => V2_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
             timedQuery('v1Data', () => V1_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
@@ -493,6 +494,12 @@ class AnalyseService {
             timedQuery('adGroupsByAsin', () =>
                 require('../../models/amazon-ads/ProductWiseSponsoredAdsItemModel.js')
                     .adGroupsByAsinSince(userId, country, region, new Date(Date.now() - 20 * 86400000).toISOString().slice(0, 10))
+                    .catch(() => null)),
+            // Product and auto targets with bids (weekly), for target bid cuts.
+            timedQuery('adsTargets', () =>
+                require('../../models/amazon-ads/AdsTargetSnapshotModel.js')
+                    .findOne({ userId, country, region, createdAt: { $gte: new Date(Date.now() - 10 * 86400000) } })
+                    .sort({ createdAt: -1 }).lean()
                     .catch(() => null))
         ]);
         
@@ -614,7 +621,8 @@ class AnalyseService {
             ltsfData,
             fbaInventoryDetailData,
             campaignSpendSales,
-            adGroupsByAsin
+            adGroupsByAsin,
+            adsTargets
         };
     }
 
@@ -969,6 +977,7 @@ class AnalyseService {
             GetDateWisePPCspendData: (allData.GetDateWisePPCspendData || { dateWisePPCSpends: [] }).dateWisePPCSpends,
             campaignSpendSales: allData.campaignSpendSales || null,
             AdGroupsByAsin: allData.adGroupsByAsin || null,
+            AdsTargets: allData.adsTargets?.targets || null,
             // Per-unit COGS by ASIN ({} until the seller enters it): the loss-making rule needs it.
             cogsValues: (allData.cogsData && allData.cogsData.success && allData.cogsData.data?.cogsValues) || {},
             AdsGroupData: (allData.AdsGroupData || { adsGroupData: [] }).adsGroupData,

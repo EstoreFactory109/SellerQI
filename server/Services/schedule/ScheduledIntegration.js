@@ -3048,6 +3048,9 @@ class ScheduledIntegration {
             require('../AmazonAds/GetPPCProductWise.js').adsAsync,
             require('../AmazonAds/GetWastedSpendKeywords.js').adsAsync,
             require('../AmazonAds/GetDateWiseSpendKeywords.js').adsAsync,
+            // Weekly (skips itself while this week's snapshot exists): product and auto
+            // targets with bids, so ACoS tasks can propose target bid cuts too.
+            require('../AmazonAds/AdsTargets.js').adsAsync,
         ];
         return this._runAsyncAdsPhase({ userId, Region, Country, phaseData, group: 'sched_ads', services, sliceKeys: [SLICE_KEYS.ADS] });
     }

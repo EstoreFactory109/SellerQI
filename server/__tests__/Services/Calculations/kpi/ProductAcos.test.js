@@ -87,3 +87,33 @@ describe('proposeBidCuts', () => {
         expect(proposeBidCuts({ asin: 'A1', bePct: 20, adGroupsByAsin: groups, keywordRows: [perf('K1', 'G1', 25, 0, 20)], keywordSnapshot: low, country: 'US', from: '2026-10-12' })).toEqual([]);
     });
 });
+
+describe('proposeBidCuts with product and auto targets', () => {
+    const { proposeBidCuts } = require('../../../../Services/Calculations/kpi/AlignedDetectors.js');
+    const groups = [{ asin: 'A1', adGroupId: 'G1' }];
+    const target = (over) => ({ targetId: 'T1', adGroupId: 'G1', campaignId: 'C2', expression: 'close-match', bid: 1.2, cost: 30, sales: 60, clicks: 25, ...over });
+    const run = (targets) => proposeBidCuts({ asin: 'A1', bePct: 20, adGroupsByAsin: groups, keywordRows: [], keywordSnapshot: [], targets, country: 'US', from: '2026-10-12' });
+
+    it('cuts a target above break-even, marked as a target', () => {
+        // ACoS 50% vs 20% -> factor 0.4, capped at a 30% cut -> 0.84.
+        expect(run([target()])).toEqual([expect.objectContaining({ kind: 'target', targetId: 'T1', keyword: 'close-match', currentBid: 1.2, newBid: 0.84 })]);
+    });
+
+    it('skips targets without a bid, under 10 clicks, or in other ad groups', () => {
+        expect(run([target({ bid: null })])).toEqual([]);
+        expect(run([target({ clicks: 9 })])).toEqual([]);
+        expect(run([target({ adGroupId: 'G9' })])).toEqual([]);
+    });
+});
+
+describe('targetsFromReport', () => {
+    const { targetsFromReport } = require('../../../../Services/AmazonAds/AdsTargets.js');
+    it('keeps targets that spent, not keywords', () => {
+        const rows = [
+            { keywordId: 1, keywordType: 'TARGETING_EXPRESSION_PREDEFINED', targeting: 'close-match', adGroupId: 9, campaignId: 8, cost: 5, sales7d: 0, clicks: 3 },
+            { keywordId: 2, keywordType: 'TARGETING_EXPRESSION', targeting: 'asin="B0X"', adGroupId: 9, campaignId: 8, cost: 0, sales7d: 0, clicks: 0 },
+            { keywordId: 3, keywordType: 'EXACT', targeting: 'garlic', adGroupId: 9, campaignId: 8, cost: 7, sales7d: 1, clicks: 2 }
+        ];
+        expect(targetsFromReport(rows)).toEqual([expect.objectContaining({ targetId: '1', expression: 'close-match', adGroupId: '9', cost: 5 })]);
+    });
+});

@@ -111,16 +111,19 @@ function proposedActionFor(task) {
     const campaign = d.campaignName ? ` in the campaign "${d.campaignName}"` : '';
 
     if (task.errorType === 'product_acos_above_breakeven') {
-        const changes = (Array.isArray(d.bidChanges) ? d.bidChanges : []).filter(c => c?.keywordId && Number(c.newBid) > 0);
+        const changes = (Array.isArray(d.bidChanges) ? d.bidChanges : []).filter(c => (c?.keywordId || c?.targetId) && Number(c.newBid) > 0);
         if (changes.length === 0) return null;
-        const lines = changes.map(c => `"${c.keyword}" ${money(c.currentBid)} → ${money(c.newBid)}`).join('; ');
+        const lines = changes.map(c => `${c.kind === 'target' ? 'target ' : ''}"${c.keyword}" ${money(c.currentBid)} → ${money(c.newBid)}`).join('; ');
         const shared = changes.some(c => c.sharedAdGroup)
-            ? ' Some of these keywords are in ad groups that also advertise other products, so their bids change for those too.' : '';
+            ? ' Some of these are in ad groups that also advertise other products, so their bids change for those too.' : '';
+        const hasTargets = changes.some(c => c.kind === 'target');
         return {
             type: 'lower_bids',
             label: `Lower ${changes.length} bid${changes.length === 1 ? '' : 's'}`,
-            summary: `Lower the bids on ${changes.length} keyword${changes.length === 1 ? '' : 's'} whose ads cost more than this product's break-even: ${lines}.${shared} Product targets and auto campaigns are not changed.`,
-            payload: { bids: changes.map(c => ({ keywordId: String(c.keywordId), bid: Number(c.newBid), expectedCurrentBid: Number(c.currentBid) })) }
+            summary: `Lower the bids on ${changes.length} keyword${hasTargets ? 's and targets' : (changes.length === 1 ? '' : 's')} whose ads cost more than this product's break-even: ${lines}.${shared}${hasTargets ? '' : ' Product targets and auto campaigns are not changed.'}`,
+            payload: { bids: changes.map(c => (c.kind === 'target'
+                ? { kind: 'target', targetId: String(c.targetId), bid: Number(c.newBid), expectedCurrentBid: Number(c.currentBid) }
+                : { keywordId: String(c.keywordId), bid: Number(c.newBid), expectedCurrentBid: Number(c.currentBid) })) }
         };
     }
 
@@ -203,16 +206,33 @@ async function execute(action, { userId, country, region }) {
     if (action.type === 'lower_bids') {
         // Only keywords whose bid is still what the proposal saw: a bid the seller
         // changed since is theirs to keep.
+        const keywordBids = action.payload.bids.filter(b => b.kind !== 'target');
+        const targetBids = action.payload.bids.filter(b => b.kind === 'target');
+        const unchanged = (current, id, expected) => Math.abs((current.get(id) ?? NaN) - expected) < 0.005;
+        // Keywords: the daily keyword snapshot (checked against live Amazon, 150/150 equal).
         const { loadKeywordSnapshot } = require('../../utils/ppcSnapshotLoader.js');
-        const snapshot = await loadKeywordSnapshot(String(userId), country, region).catch(() => null);
-        const current = new Map((snapshot?.keywordData || []).map(k => [String(k.keywordId), Number(k.bid)]));
-        const bids = action.payload.bids.filter(b => Math.abs((current.get(b.keywordId) ?? NaN) - b.expectedCurrentBid) < 0.005);
-        if (bids.length === 0) throw new Error('These bids have changed since the suggestion was made, so nothing was sent. Refresh to see a new suggestion.');
-        const { updateKeywordBids } = require('../AmazonAds/Pause-ArchiveKeywords.js');
-        const result = await updateKeywordBids({ bids: bids.map(({ keywordId, bid }) => ({ keywordId, bid })), accessToken, profileId, region: adsRegion, clientId });
-        const errors = v3Errors(result);
-        if (errors.length > 0) throw Object.assign(new Error(`Amazon rejected ${errors.length} of ${bids.length}: ${JSON.stringify(errors[0]).slice(0, 300)}`), { response: result });
-        return { ...result, sent: bids.length, skippedChanged: action.payload.bids.length - bids.length };
+        const snapshot = keywordBids.length ? await loadKeywordSnapshot(String(userId), country, region).catch(() => null) : null;
+        const kwCurrent = new Map((snapshot?.keywordData || []).map(k => [String(k.keywordId), Number(k.bid)]));
+        const kwSend = keywordBids.filter(b => unchanged(kwCurrent, b.keywordId, b.expectedCurrentBid));
+        // Targets: their snapshot is weekly, so the current bid is read live (a read).
+        const { listTargetBids, updateTargetBids } = require('../AmazonAds/AdsTargets.js');
+        const live = targetBids.length ? await listTargetBids(accessToken, profileId, adsRegion, targetBids.map(b => b.targetId)) : new Map();
+        const tgCurrent = new Map([...live].map(([id, t]) => [id, t.bid]));
+        const tgSend = targetBids.filter(b => unchanged(tgCurrent, b.targetId, b.expectedCurrentBid));
+        if (kwSend.length + tgSend.length === 0) throw new Error('These bids have changed since the suggestion was made, so nothing was sent. Refresh to see a new suggestion.');
+
+        const responses = {};
+        if (kwSend.length) {
+            const { updateKeywordBids } = require('../AmazonAds/Pause-ArchiveKeywords.js');
+            responses.keywords = await updateKeywordBids({ bids: kwSend.map(({ keywordId, bid }) => ({ keywordId, bid })), accessToken, profileId, region: adsRegion, clientId });
+        }
+        if (tgSend.length) {
+            responses.targets = await updateTargetBids({ bids: tgSend.map(({ targetId, bid }) => ({ targetId, bid })), accessToken, profileId, region: adsRegion });
+        }
+        const errors = [...v3Errors(responses.keywords), ...v3Errors(responses.targets)];
+        const sent = kwSend.length + tgSend.length;
+        if (errors.length > 0) throw Object.assign(new Error(`Amazon rejected ${errors.length} of ${sent}: ${JSON.stringify(errors[0]).slice(0, 300)}`), { response: responses });
+        return { ...responses, sent, skippedChanged: action.payload.bids.length - sent };
     }
     if (action.type === 'pause_keyword') {
         const { pauseKeywords } = require('../AmazonAds/Pause-ArchiveKeywords.js');

@@ -530,6 +530,8 @@ function buildWastedSpendSpecs({ userId, country, region, accessToken, profileId
 
 module.exports = {
     getKeywordPerformanceReport,
+    // Shared with the weekly targets sync (AdsTargets.js), which downloads the same way.
+    downloadReportData,
     adsAsync: {
         serviceName: 'adsKeywordsPerformanceData',
         buildSpecs: buildWastedSpendSpecs,

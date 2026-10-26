@@ -32,6 +32,12 @@ jest.mock('../../../Services/AmazonAds/Pause-ArchiveKeywords.js', () => ({
     updateKeywordBids: (...args) => mockBids(...args)
 }));
 let mockSnapshot = null;
+const mockTargetBids = jest.fn();
+let mockLiveTargets = new Map();
+jest.mock('../../../Services/AmazonAds/AdsTargets.js', () => ({
+    listTargetBids: async () => mockLiveTargets,
+    updateTargetBids: (...a) => mockTargetBids(...a)
+}));
 const mockUpdateContent = jest.fn();
 const mockFixed = [];
 jest.mock('../../../Services/Sp_API/UpdateProductContentService.js', () => ({
@@ -56,7 +62,7 @@ beforeEach(() => {
     mockTasks.length = 0; mockLogs.length = 0;
     mockTaskUpdates.length = 0;
     mockAddToNegative.mockReset(); mockPause.mockReset(); mockBids.mockReset(); mockSnapshot = null;
-    mockUpdateContent.mockReset(); mockFixed.length = 0;
+    mockUpdateContent.mockReset(); mockFixed.length = 0; mockTargetBids.mockReset(); mockLiveTargets = new Map();
     process.env.AMAZON_ADS_CLIENT_ID = 'cid';
     delete process.env.TASK_ACTIONS_DISABLED;
 });
@@ -200,5 +206,38 @@ describe('update_listing_content (Fix It from the Tasks page)', () => {
     it('checks backend keyword bytes and splits bullets by line', () => {
         expect(S.validateListingContent('generic_keyword', 'x'.repeat(251)).ok).toBe(false);
         expect(S.validateListingContent('bulletpoints', 'One\nTwo\n\n').value).toEqual(['One', 'Two']);
+    });
+});
+
+describe('lower_bids on targets', () => {
+    const task = { taskId: 'T9', errorCategory: 'sponsoredAds', errorType: 'product_acos_above_breakeven',
+        renderData: { bidChanges: [
+            { keywordId: 'K1', keyword: 'garlic press', currentBid: 1, newBid: 0.8 },
+            { kind: 'target', targetId: 'X1', keyword: 'close-match', currentBid: 1.2, newBid: 0.84 }
+        ] } };
+
+    it('names targets in the summary and sends each kind to its own call, checked live', async () => {
+        expect(S.proposedActionFor(task).summary).toContain('target "close-match" 1.20 → 0.84');
+        expect(S.proposedActionFor(task).summary).not.toContain('are not changed');
+        mockTasks.push(task);
+        mockSnapshot = { keywordData: [{ keywordId: 'K1', bid: 1 }] };
+        mockLiveTargets = new Map([['X1', { bid: 1.2, state: 'ENABLED' }]]);
+        mockBids.mockResolvedValue({ keywords: { success: [{}], error: [] } });
+        mockTargetBids.mockResolvedValue({ targetingClauses: { success: [{}], error: [] } });
+        const [r] = await run(['T9']);
+        expect(r.status).toBe('succeeded');
+        expect(mockTargetBids).toHaveBeenCalledWith(expect.objectContaining({ bids: [{ targetId: 'X1', bid: 0.84 }] }));
+        expect(mockLogs[0].response).toMatchObject({ sent: 2, skippedChanged: 0 });
+    });
+
+    it('skips a target whose live bid changed', async () => {
+        mockTasks.push(task);
+        mockSnapshot = { keywordData: [{ keywordId: 'K1', bid: 1 }] };
+        mockLiveTargets = new Map([['X1', { bid: 0.9, state: 'ENABLED' }]]);
+        mockBids.mockResolvedValue({ keywords: { success: [{}], error: [] } });
+        const [r] = await run(['T9']);
+        expect(r.status).toBe('succeeded');
+        expect(mockTargetBids).not.toHaveBeenCalled();
+        expect(mockLogs[0].response).toMatchObject({ sent: 1, skippedChanged: 1 });
     });
 });

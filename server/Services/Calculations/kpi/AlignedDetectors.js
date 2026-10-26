@@ -58,7 +58,7 @@ function breakEvenAcosByAsin(profitRows = [], cogsMap = {}) {
  *
  * @returns {Array<{keywordId, keyword, campaignId, adGroupId, currentBid, newBid, acos, spend, clicks, sharedAdGroup}>}
  */
-function proposeBidCuts({ asin, bePct, adGroupsByAsin = [], keywordRows = [], keywordSnapshot = [], country, from }) {
+function proposeBidCuts({ asin, bePct, adGroupsByAsin = [], keywordRows = [], keywordSnapshot = [], targets = null, country, from }) {
     const groupsOfAsin = new Set();
     const asinsPerGroup = new Map();
     for (const r of adGroupsByAsin || []) {
@@ -112,6 +112,30 @@ function proposeBidCuts({ asin, bePct, adGroupsByAsin = [], keywordRows = [], ke
             sharedAdGroup: (asinsPerGroup.get(stored.adGroupId)?.size || 1) > 1
         });
     }
+    // Product and auto targets (weekly snapshot, its own 14 days): same rule.
+    for (const t of targets || []) {
+        if (!t?.targetId || !groupsOfAsin.has(String(t.adGroupId)) || !(Number(t.bid) > 0)) continue;
+        if ((Number(t.clicks) || 0) < BID_CUT_MIN_CLICKS || !(Number(t.cost) > 0)) continue;
+        const acos = Number(t.sales) > 0 ? (Number(t.cost) / Number(t.sales)) * 100 : Infinity;
+        if (acos <= bePct) continue;
+        const factor = Number.isFinite(acos) && bePct > 0 ? bePct / acos : 0;
+        const bid = Number(t.bid);
+        const newBid = round2(Math.max(minBid, bid * Math.max(factor, 1 - BID_CUT_MAX_SHARE)));
+        if (newBid >= bid - 0.005) continue;
+        cuts.push({
+            kind: 'target',
+            targetId: String(t.targetId),
+            keyword: t.expression || t.targetId,
+            campaignId: t.campaignId ? String(t.campaignId) : undefined,
+            adGroupId: String(t.adGroupId),
+            currentBid: bid,
+            newBid,
+            acos: Number.isFinite(acos) ? round1(acos) : null,
+            spend: round2(Number(t.cost)),
+            clicks: Number(t.clicks),
+            sharedAdGroup: (asinsPerGroup.get(String(t.adGroupId))?.size || 1) > 1
+        });
+    }
     return cuts.sort((a, b) => b.spend - a.spend).slice(0, BID_CUT_MAX_KEYWORDS);
 }
 
@@ -124,7 +148,7 @@ function proposeBidCuts({ asin, bePct, adGroupsByAsin = [], keywordRows = [], ke
  * @param {Object} params.cogsMap - per-unit COGS by ASIN
  * @param {Map} params.productsByAsin - catalogue rows (price, name)
  */
-function detectProductAcos({ adsRows, profitRows = [], cogsMap = {}, country, productsByAsin = new Map(), now, adGroupsByAsin = null, keywordRows = [], keywordSnapshot = [] }) {
+function detectProductAcos({ adsRows, profitRows = [], cogsMap = {}, country, productsByAsin = new Map(), now, adGroupsByAsin = null, keywordRows = [], keywordSnapshot = [], targets = null }) {
     const newestDay = newestRowDay(adsRows || []);
     if (!Array.isArray(adsRows) || adsRows.length === 0 || isAdsDataStale(newestDay, country, now)) {
         return { tasks: [], covered: false };
@@ -158,7 +182,7 @@ function detectProductAcos({ adsRows, profitRows = [], cogsMap = {}, country, pr
 
         const bePct = round1(Math.max(0, be.pct));
         const bidChanges = Array.isArray(adGroupsByAsin)
-            ? proposeBidCuts({ asin, bePct: Math.max(0, be.pct), adGroupsByAsin, keywordRows, keywordSnapshot, country, from })
+            ? proposeBidCuts({ asin, bePct: Math.max(0, be.pct), adGroupsByAsin, keywordRows, keywordSnapshot, targets, country, from })
             : [];
         const acosText = Number.isFinite(acos) ? `${round1(acos)}%` : 'all';
         const beText = be.fromCogs ? `your break-even of ${bePct}%` : `your target of ${bePct}% (add your cost of goods for a true break-even)`;

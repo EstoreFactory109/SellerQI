@@ -121,7 +121,8 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, profitR
     const productAcos = financeFresh
         ? safely('product_acos_above_breakeven', { userId, country }, () => Aligned.detectProductAcos({
             adsRows: data?.ProductWiseSponsoredAds, profitRows, cogsMap, country, productsByAsin: allByAsin, now,
-            adGroupsByAsin: data?.AdGroupsByAsin, keywordRows: data?.adsKeywordsPerformanceData, keywordSnapshot: data?.keywords
+            adGroupsByAsin: data?.AdGroupsByAsin, keywordRows: data?.adsKeywordsPerformanceData, keywordSnapshot: data?.keywords,
+            targets: data?.AdsTargets
         }))
         : { tasks: [], covered: false };
     const alignedResult = {
