@@ -98,6 +98,20 @@ const LOST_DAMAGED_CLAIM_DAYS = 60;
 const LOST_REASON_CODES = ['M', '5'];
 const DAMAGED_REASON_CODES = ['6', '7', 'E', 'H', 'K', 'U'];
 
+// Spreadsheet "Return reason spike": 'not as described', 'defective' or 'wrong item'
+// make up 30%+ of a product's returns in 30 days. The 10-return floor is internal (2
+// of 3 returns is not a spike). Codes per Amazon's returns report; ORDERED_WRONG_ITEM
+// is the buyer's mistake, not a wrong item sent, so it is excluded. UNCONFIRMED until
+// the first live report: CustomerReturns.reasonCounts shows the codes really sent.
+const RETURN_SPIKE_DAYS = 30;
+const RETURN_SPIKE_SHARE = 0.30;
+const RETURN_SPIKE_MIN_RETURNS = 10;
+const isProductFaultReturn = (reason) => {
+    const r = String(reason || '').toUpperCase().replace(/[\s-]+/g, '_');
+    if (r === 'ORDERED_WRONG_ITEM') return false;
+    return /DEFECTIVE|NOT_AS_DESCRIBED|WRONG_ITEM|INACCURATE_WEBSITE_DESCRIPTION/.test(r);
+};
+
 // A day selling over this multiple of the account's median day is an event day (Prime
 // Day, a deal) and is left out of every trend window. Internal.
 const EVENT_DAY_MULTIPLE = 3;
@@ -188,6 +202,10 @@ module.exports = {
     LOW_TRAFFIC_CVR_RATIO,
     LOW_TRAFFIC_MIN_ORDERS,
     TRAFFIC_MIX_MIN_ASINS,
+    RETURN_SPIKE_DAYS,
+    RETURN_SPIKE_SHARE,
+    RETURN_SPIKE_MIN_RETURNS,
+    isProductFaultReturn,
     LOST_DAMAGED_WAIT_DAYS,
     LOST_DAMAGED_CLAIM_DAYS,
     LOST_REASON_CODES,

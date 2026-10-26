@@ -1126,7 +1126,7 @@ class ScheduledIntegration {
                  'ledgerSummaryViewData', 'ledgerDetailViewData', 'fbaReimbursementsData',
                  'calculateShipmentDiscrepancy', 'calculateLostInventoryReimbursement', 'calculateDamagedInventoryReimbursement',
                  'calculateDisposedInventoryReimbursement', 'ltsfData',
-                 'suppressedListingsData', 'removalOrdersData', 'fbaFeeEstimatesData'].includes(functionKey)) {
+                 'suppressedListingsData', 'removalOrdersData', 'fbaFeeEstimatesData', 'customerReturnsData'].includes(functionKey)) {
                 return 2;
             }
             // Batch 3: Shipment Data, Brand Data, Ad Groups Data, MCP SalesOnly, MCP BuyBox
@@ -2720,7 +2720,7 @@ class ScheduledIntegration {
         inventory: [
             'RestockinventoryData', 'fbaInventoryPlanningData',
             'strandedInventoryData', 'inboundNonComplianceData', 'ltsfData',
-            'suppressedListingsData', 'removalOrdersData', 'fbaFeeEstimatesData'
+            'suppressedListingsData', 'removalOrdersData', 'fbaFeeEstimatesData', 'customerReturnsData'
         ],
         // Performance slice (batch 1/2 — V2/V1 perf + reviews + ledger/reimbursement reads)
         performance: [

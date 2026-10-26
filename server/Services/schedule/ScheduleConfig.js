@@ -85,6 +85,16 @@ const SUNDAY_FUNCTIONS = {
     // batch call allows one request per 11s, so 200 ASINs take about two minutes.
     // Batch 3, after the brand sync. Stored in BrandOfferSnapshot, never in
     // CompetitiveOffers (the ESF Buy Box report's source).
+    // FBA customer returns with their reasons, for the tasks-logics.xlsx "Return
+    // reason spike" task. Weekly: the rule looks at 30 days of returns.
+    'customerReturnsData': {
+        service: require('../Sp_API/GET_FBA_FULFILLMENT_CUSTOMER_RETURNS_DATA.js'),
+        functionName: null, // Default export, use service directly
+        description: 'FBA Customer Returns',
+        requiresAccessToken: true,
+        apiDataKey: 'customerReturnsData',
+        isDefaultExport: true
+    },
     'brandOffersData': {
         service: require('../Sp_API/BrandOffersSync.js'),
         functionName: null, // Default export, use service directly

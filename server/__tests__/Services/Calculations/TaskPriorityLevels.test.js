@@ -67,3 +67,17 @@ describe('Amazon Ready = no open P1-P3 task (analyseData)', () => {
         expect(dashboardData.amazonReadyProducts).toEqual(['B']);
     });
 });
+
+describe('A+ Content priority', () => {
+    it('is P3 for a top seller and P4 otherwise', () => {
+        expect(lvl('conversion', 'missing_aplus_content', { topSeller: true })).toBe('P3');
+        expect(lvl('conversion', 'missing_aplus_content', { topSeller: false })).toBe('P4');
+        expect(lvl('conversion', 'missing_aplus_content')).toBe('P3');
+    });
+
+    it('the task carries the flag', () => {
+        const CreateTaskService = require('../../../Services/Calculations/CreateTasksService.js');
+        const [task] = CreateTaskService.generateConversionTasks([{ asin: 'A1', aplusErrorData: { Message: 'x', topSeller: false } }]);
+        expect(task.renderData).toEqual({ topSeller: false });
+    });
+});

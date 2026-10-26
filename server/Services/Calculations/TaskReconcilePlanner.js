@@ -98,6 +98,7 @@ const SOURCE_BY_TYPE = {
     'inventory:new_seller_on_brand': 'kpi.newSellerOnBrand',
     'ranking:listing_errors': 'kpi.listingErrors',
     'inventory:lost_damaged_unreimbursed': 'kpi.lostDamaged',
+    'inventory:return_reason_spike': 'kpi.returnReasons',
     'inventory:inbound_shortage': 'kpi.inboundShortage',
     'conversion:high_traffic_low_conversion': 'kpi.trafficMix',
     'conversion:low_traffic_high_conversion': 'kpi.trafficMix',

@@ -174,6 +174,7 @@ const EFFORT_MINUTES = {
     // Spreadsheet alignment
     'ranking:listing_errors': 10,           // fix the field Amazon flagged
     'inventory:lost_damaged_unreimbursed': 15, // file a claim
+    'inventory:return_reason_spike': 30,    // read comments, fix listing or supplier
     'inventory:inbound_shortage': 20,       // open a case with documents
     'conversion:high_traffic_low_conversion': 45, // listing work
     'conversion:low_traffic_high_conversion': 20, // ads/keywords
@@ -303,6 +304,7 @@ const IMPACT_WEIGHT = {
     'ranking:listing_errors': 66,
     // Spreadsheet P1 with a deadline: money Amazon owes, lost if the window closes.
     'inventory:lost_damaged_unreimbursed': 72,
+    'inventory:return_reason_spike': 45,
     'inventory:inbound_shortage': 72,
     // Spreadsheet P3 / P4.
     'conversion:high_traffic_low_conversion': 50,

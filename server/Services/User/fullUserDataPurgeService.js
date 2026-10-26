@@ -94,6 +94,7 @@ const APlusPremium = require('../../models/seller-performance/APlusPremiumModel.
 const CompetitiveOffers = require('../../models/products/CompetitiveOffersModel.js');
 const SuppressedListings = require('../../models/products/SuppressedListingsModel.js');
 const RemovalOrders = require('../../models/inventory/RemovalOrdersModel.js');
+const CustomerReturns = require('../../models/inventory/CustomerReturnsModel.js');
 const RemovalReceipt = require('../../models/inventory/RemovalReceiptModel.js');
 const BrandOfferSnapshot = require('../../models/products/BrandOfferSnapshotModel.js');
 const AuthorizedReseller = require('../../models/products/AuthorizedResellerModel.js');
@@ -184,6 +185,7 @@ const collectionsWithUser = [
     { model: CompetitiveOffers, key: 'User' },
     { model: SuppressedListings, key: 'User' },
     { model: RemovalOrders, key: 'User' },
+    { model: CustomerReturns, key: 'User' },
     { model: RemovalReceipt, key: 'User' },
     { model: BrandOfferSnapshot, key: 'User' },
     { model: AuthorizedReseller, key: 'User' },

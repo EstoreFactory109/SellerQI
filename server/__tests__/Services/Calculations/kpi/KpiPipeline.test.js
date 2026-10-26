@@ -163,7 +163,7 @@ describe('runKpiDetectors', () => {
     });
 
     it('runs only the always-on alignment check without any wave', () => {
-        const none = { tasks: [], coverage: { 'kpi.listingErrors': false, 'kpi.productAcos': false }, staleSources: [] };
+        const none = { tasks: [], coverage: { 'kpi.listingErrors': false, 'kpi.productAcos': false }, staleSources: [], dataFaults: [] };
         expect(runKpiDetectors({}, { now: NOW })).toEqual(none);
         expect(runKpiDetectors({ KpiInputs: { waves: [] } }, { now: NOW })).toEqual(none);
         // Amazon's ERROR flags on a listing are a task whether or not a wave is on.
@@ -226,7 +226,7 @@ describe('runKpiDetectors', () => {
         // A1 is out of stock (wave 1 verdict), so its sales drop belongs to that task.
         data.KpiInputs.traffic = {
             newestDate: daysAgo(2).slice(0, 10), recent14Days: 14, baselineDays: 60, recent7Days: 7, prior28Days: 28,
-            byAsin: { A1: { rs: 0, ru: 0, bs: 0, bu: 0, u7: 0, u28: 200 }, A2: { rs: 0, ru: 0, bs: 0, bu: 0, u7: 0, u28: 200 } }
+            byAsin: { A1: { rs: 50, ru: 0, bs: 200, bu: 0, u7: 0, u28: 200 }, A2: { rs: 50, ru: 0, bs: 200, bu: 0, u7: 0, u28: 200 } }
         };
         const r = runKpiDetectors(data, { salesByAsin: { A1: { sales: 300, unitsSold: 30 } }, financeFresh: true, country: 'US', now: NOW });
         expect(r.tasks.map(t => [t.asin, t.errorType])).toEqual([['A2', 'sales_drop']]);

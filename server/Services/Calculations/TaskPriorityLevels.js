@@ -50,6 +50,7 @@ const PRIORITY_LEVEL = {
     'inventory:weeks_of_cover': 'P3',
     'inventory:low_inventory_fee_risk': 'P3',
     'inventory:fba_fee_increase': 'P3',
+    'inventory:return_reason_spike': 'P3',
     'inventory:listing_warnings': 'P4',
     'inventory:handling_time_long': 'P4',
 
@@ -128,6 +129,9 @@ function priorityLevelFor(task) {
         || (category === 'ranking' ? rankingLevel(type) : null)
         || DEFAULT_LEVEL;
     if (category === 'inventory' && type === 'listing_suppressed' && task?.renderData?.topSeller === true) level = 'P1';
+    // Missing A+ is P3 for a top-20%-revenue product, P4 otherwise. Tasks stored
+    // before the flag existed keep P3.
+    if (category === 'conversion' && type === 'missing_aplus_content' && task?.renderData?.topSeller === false) level = 'P4';
     return LEVELS[Math.min(LEVELS.length - 1, LEVELS.indexOf(level) + demote)];
 }
 

@@ -102,6 +102,7 @@ const ALL_TASK_TYPES = [
     ['ranking', 'listing_errors'],
     ['sponsoredAds', 'product_acos_above_breakeven'],
     ['inventory', 'lost_damaged_unreimbursed'],
+    ['inventory', 'return_reason_spike'],
     ['inventory', 'inbound_shortage'],
     ['conversion', 'high_traffic_low_conversion'],
     ['conversion', 'low_traffic_high_conversion'],

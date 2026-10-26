@@ -316,7 +316,50 @@ function detectNewSellerOnBrand({ brandOffers, productsByAsin = new Map(), now }
     return { tasks, covered: true };
 }
 
+/**
+ * Return reason spike. Spreadsheet: 'not as described', 'defective' or 'wrong item'
+ * are 30%+ of a product's returns in the last 30 days. One task per ASIN.
+ */
+function detectReturnReasonSpike({ returns, productsByAsin = new Map(), now }) {
+    const age = returns ? (now.getTime() - new Date(returns.fetchedAt).getTime()) / R.DAY_MS : Infinity;
+    // Fetched weekly; older than two weeks is not judged. An unreadable file is no answer.
+    if (!returns || returns.unreadable || !(age <= 14)) return { tasks: [], covered: false };
+    const from = new Date(now.getTime() - R.RETURN_SPIKE_DAYS * R.DAY_MS).toISOString().slice(0, 10);
+    const byAsin = new Map();
+    for (const line of returns.lines || []) {
+        if (!line?.asin || String(line.returnDate || '').slice(0, 10) < from) continue;
+        const a = byAsin.get(line.asin) || { total: 0, fault: 0, reasons: {} };
+        const qty = Number(line.quantity) || 1;
+        a.total += qty;
+        if (R.isProductFaultReturn(line.reason)) {
+            a.fault += qty;
+            a.reasons[line.reason] = (a.reasons[line.reason] || 0) + qty;
+        }
+        byAsin.set(line.asin, a);
+    }
+    const tasks = [];
+    for (const [asin, a] of byAsin) {
+        if (a.total < R.RETURN_SPIKE_MIN_RETURNS || a.fault / a.total < R.RETURN_SPIKE_SHARE) continue;
+        const share = Math.round((a.fault / a.total) * 100);
+        const top = Object.entries(a.reasons).sort((x, y) => y[1] - x[1])
+            .map(([reason, n]) => `${reason.toLowerCase().replace(/_/g, ' ')} (${n})`).join(', ');
+        const p = productsByAsin.get(asin);
+        tasks.push({
+            asin,
+            productName: (p?.itemName || p?.title || asin).substring(0, 100),
+            errorCategory: 'inventory',
+            errorType: 'return_reason_spike',
+            error: `Returns | Reason Spike: ${share}% of this product's ${a.total} returns in the last ${R.RETURN_SPIKE_DAYS} days say it was defective, not as described or the wrong item: ${top}.`,
+            solution: 'Read the return comments in Seller Central (Reports > Fulfillment > Customer Returns), fix the listing if it misleads, and check the stock or supplier for a quality problem.',
+            renderData: { returns: a.total, faultReturns: a.fault, sharePct: share, reasons: a.reasons },
+            status: PENDING
+        });
+    }
+    return { tasks, covered: true };
+}
+
 module.exports = {
+    detectReturnReasonSpike,
     detectListingErrors,
     detectListingIssues,
     detectNewSellerOnBrand,

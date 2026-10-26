@@ -276,8 +276,30 @@ async function loadTrafficTrend(userId, country, region) {
 
     const byAsin = {};
     for (const r of rows) byAsin[r._id] = { rs: r.rs, ru: r.ru, bs: r.bs, bu: r.bu, u7: r.u7, u28: r.u28, s30: r.s30, u30: r.u30, o30: r.o30 };
+
+    // Data fault guard: the newest day matching another of the seller's marketplaces
+    // exactly (same products, sessions and units) is a copy, not two real markets.
+    let sameAsMarketplace = null;
+    try {
+        const signatures = await BuyBoxData.aggregate([
+            { $match: { User, date: newestDate } },
+            { $sort: { createdAt: -1 } },
+            { $group: { _id: { country: '$country', region: '$region' }, rows: { $first: '$asinBuyBoxData' } } },
+            { $project: {
+                n: { $size: { $ifNull: ['$rows', []] } },
+                sessions: { $sum: { $ifNull: ['$rows.sessions', []] } },
+                units: { $sum: { $ifNull: ['$rows.unitsOrdered', []] } }
+            } }
+        ]);
+        const own = signatures.find(x => x._id.country === country && x._id.region === region);
+        const twin = own && own.sessions > 0 && signatures.find(x => !(x._id.country === country && x._id.region === region)
+            && x.n === own.n && x.sessions === own.sessions && x.units === own.units);
+        if (twin) sameAsMarketplace = `${twin._id.country}-${twin._id.region}`;
+    } catch (_) { /* a failed comparison is no finding */ }
+
     return {
         newestDate,
+        sameAsMarketplace,
         recent14Days: days.recent14,
         baselineDays: days.baseline,
         recent7Days: days.recent7,
@@ -629,9 +651,14 @@ async function loadKpiInputs({ userId, country, region, waves, allData, now = ne
             Promise.resolve().then(() => loadFbaFeeSnapshots(userId, country, region)).catch(unavailable('FBA fee snapshots')),
             Promise.resolve().then(() => loadBrandOffers(userId, country, region)).catch(unavailable('Brand offers'))
         ]);
+        const returnsDoc = await require('../../../models/inventory/CustomerReturnsModel.js')
+            .findOne({ User: toObjectId(userId), country, region })
+            .sort({ createdAt: -1 }).lean()
+            .catch(unavailable('Customer returns'));
         Object.assign(inputs, {
             fbaFees,
             brandOffers,
+            returns: returnsDoc ? { fetchedAt: returnsDoc.createdAt, unreadable: !!returnsDoc.unreadable, lines: returnsDoc.lines || [] } : null,
             planning: buildPlanning(freshInventoryReportOrNull(allData?.inventoryPlanningData, 'Inventory planning (KPI)', { userId, country, region }, now)),
             invoice: buildInvoice(allData?.v2Data)
         });

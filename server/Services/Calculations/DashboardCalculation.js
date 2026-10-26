@@ -1375,6 +1375,8 @@ const analyseData = async (data, userId = null, options = {}) => {
 
     // This is for getting conversion error for each product
     // OPTIMIZED: Uses Maps for O(1) lookups instead of O(n) array.find()
+    // tasks-logics.xlsx "A+ Content": P3 for a top-20%-revenue product, P4 otherwise.
+    const topRevenue = require('./kpi/Wave1Detectors.js').topRevenueAsins(economicsData.asinPpcSales || {});
     const getConversionErrors = (asin) => {
         let errorCount = 0;
         const convData = { asin };
@@ -1382,7 +1384,7 @@ const analyseData = async (data, userId = null, options = {}) => {
         // Use Map lookups (O(1)) instead of array.find() (O(n))
         const aplusFound = aplusErrorMap.get(asin);
         if (aplusFound) {
-            convData.aplusErrorData = aplusFound.data;
+            convData.aplusErrorData = { ...aplusFound.data, topSeller: topRevenue.has(asin) };
             errorCount++;
         }
 
@@ -2067,7 +2069,7 @@ const analyseData = async (data, userId = null, options = {}) => {
     logger.info("=== DashboardCalculation: Returning dashboard data ===");
     // kpiTasks is for previews (persistTasks: false); page callers read dashboardData only.
     // kpiTasks / previewTasks are for previews (persistTasks: false); page callers read dashboardData only.
-    return { dashboardData, tasksRebuilt, taskAiRefreshMinIntervalHours, kpiTasks: kpiResult.tasks, kpiStaleSources: kpiResult.staleSources || [], previewTasks };
+    return { dashboardData, tasksRebuilt, taskAiRefreshMinIntervalHours, kpiTasks: kpiResult.tasks, kpiStaleSources: kpiResult.staleSources || [], kpiDataFaults: kpiResult.dataFaults || [], previewTasks };
 };
 
 module.exports = {

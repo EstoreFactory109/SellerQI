@@ -188,6 +188,10 @@ const GROUP_COPY = {
         title: 'Products whose ads cost more than they earn',
         action: 'Lower bids or pause the targets above break-even ACoS'
     },
+    'inventory:return_reason_spike': {
+        title: 'Products returned as defective, wrong or not as described',
+        action: 'Read the return comments and fix the listing or the product'
+    },
     'inventory:lost_damaged_unreimbursed': {
         title: 'Units Amazon lost or damaged and has not paid for',
         action: 'File claims before the 60-day window closes'

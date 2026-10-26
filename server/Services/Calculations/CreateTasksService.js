@@ -833,6 +833,8 @@ class CreateTaskService {
                     errorType,
                     error: `${label}: ${errorData.Message || fallbackMessage}`,
                     solution: errorData.HowToSolve || errorData.HowTOSolve || fallbackSolution,
+                    // Read by TaskPriorityLevels (A+ is P3 only for top sellers).
+                    ...(typeof errorData.topSeller === 'boolean' ? { renderData: { topSeller: errorData.topSeller } } : {}),
                     status: TaskStatus.PENDING
                 });
             });

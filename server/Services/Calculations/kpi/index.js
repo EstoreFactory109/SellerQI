@@ -16,6 +16,7 @@ const W2 = require('./Wave2Detectors.js');
 const W3 = require('./Wave3Detectors.js');
 const Aligned = require('./AlignedDetectors.js');
 const { staleSources } = require('./DataFreshness.js');
+const { dataFaults, withoutFaultySources } = require('./DataFaults.js');
 const { SALES_WINDOW_MAX_AGE_DAYS } = require('./KpiRules.js');
 
 /** Coverage key per task type; mirrored in TaskReconcilePlanner.SOURCE_BY_TYPE. */
@@ -47,6 +48,7 @@ const KPI_SOURCES = Object.freeze({
     'inventory:fba_fee_increase': 'kpi.fbaFeeIncrease',
     'inventory:handling_time_long': 'kpi.handlingTime',
     'inventory:new_seller_on_brand': 'kpi.newSellerOnBrand',
+    'inventory:return_reason_spike': 'kpi.returnReasons',
     // Alignment of an existing check (runs without a wave flag)
     'ranking:listing_errors': 'kpi.listingErrors',
     'sponsoredAds:product_acos_above_breakeven': 'kpi.productAcos'
@@ -126,10 +128,22 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, profitR
         }
     };
 
-    const inputs = data?.KpiInputs;
-    if (!inputs || !Array.isArray(inputs.waves) || inputs.waves.length === 0) {
-        return { ...alignedResult, staleSources: [] };
+    const rawInputs = data?.KpiInputs;
+    if (!rawInputs || !Array.isArray(rawInputs.waves) || rawInputs.waves.length === 0) {
+        return { ...alignedResult, staleSources: [], dataFaults: [] };
     }
+    // Data fault guard: a source that cannot be true is held for this run (internal
+    // alert only; its detectors see it as not arrived).
+    let faults = [];
+    try {
+        faults = dataFaults(rawInputs);
+    } catch (error) {
+        logger.error('[KpiDetectors] data fault check failed', { userId, country, error: error.message });
+    }
+    if (faults.length > 0) {
+        logger.warn('[DataFault] source looks broken; its tasks are held this run', { userId, country, faults });
+    }
+    const inputs = withoutFaultySources(rawInputs, faults);
     const waveOn = (n) => inputs.waves.includes(n);
 
     const products = Array.isArray(data.TotalProducts) ? data.TotalProducts : [];
@@ -243,6 +257,7 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, profitR
             : { tasks: [], covered: false })), 'inventory:low_inventory_fee_risk');
         add(safely('fba_fee_increase', context, () => W3.detectFbaFeeIncrease({ fbaFees: inputs.fbaFees, salesByAsin: recentSales, productsByAsin, now })), 'inventory:fba_fee_increase');
         add(safely('handling_time_long', context, () => W3.detectLongHandlingTime({ products, productsByAsin })), 'inventory:handling_time_long');
+        add(safely('return_reason_spike', context, () => W3.detectReturnReasonSpike({ returns: inputs.returns, productsByAsin, now })), 'inventory:return_reason_spike');
         add(safely('new_seller_on_brand', context, () => W3.detectNewSellerOnBrand({ brandOffers: inputs.brandOffers, productsByAsin, now })), 'inventory:new_seller_on_brand');
     }
 
@@ -264,7 +279,7 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, profitR
         byType: tasks.reduce((acc, t) => ({ ...acc, [t.errorType]: (acc[t.errorType] || 0) + 1 }), {}),
         coverage
     });
-    return { tasks, coverage, staleSources: stale };
+    return { tasks, coverage, staleSources: stale, dataFaults: faults };
 }
 
 module.exports = { runKpiDetectors, windowDaysOf, windowIsRecent, windowPhrase, KPI_SOURCES };
