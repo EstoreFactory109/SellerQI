@@ -22,6 +22,11 @@ const currencyToCountry = {
     'EGP': 'EG'
 };
 
+// tasks-logics.xlsx "Aged inventory surcharge": estimate over $25 ($25 internal), or
+// 91-180-day units not selling within AGED_SELL_THROUGH_DAYS (see inventoryPlanningData).
+const AGED_SURCHARGE_MIN_USD = 25;
+const AGED_SELL_THROUGH_DAYS = 45;
+
 // tasks-logics.xlsx "Unfulfillable inventory": 5+ units or $50+ in value.
 const UNFULFILLABLE_MIN_UNITS = 5;
 const UNFULFILLABLE_MIN_VALUE = 50;
@@ -117,16 +122,35 @@ const inventoryPlanningData=(data, costMap = {}, ltsfAmountMap = {}, priceMap = 
     let longTermStorageFees={};
     const Total=Number(data.quantity_to_be_charged_ais_181_210_days)+Number(data.quantity_to_be_charged_ais_211_240_days)+Number(data.quantity_to_be_charged_ais_241_270_days)+Number(data.quantity_to_be_charged_ais_271_300_days)+Number(data.quantity_to_be_charged_ais_301_330_days)+Number(data.quantity_to_be_charged_ais_331_365_days)+Number(data.quantity_to_be_charged_ais_365_plus_days);
 
-    if(Total!==0){
+    // tasks-logics.xlsx "Aged inventory surcharge": Amazon's estimated surcharge over
+    // $25, or units aged 91-180 days that will not sell before day 181 at the current
+    // rate. Units in that band reach 181 days in 1 to 90 days, 45 on average, so
+    // they are judged against 45 days of sales (internal). Reports without the
+    // estimate columns keep the old rule (any unit in a surcharge bucket).
+    const estimate = data.estimated_ais_total === null || data.estimated_ais_total === undefined
+        ? null : Number(data.estimated_ais_total);
+    const aged91 = Number(data.inv_age_91_to_180_days);
+    const sold90 = Number(data.units_shipped_t90);
+    const agingUnsold = Number.isFinite(aged91) && Number.isFinite(sold90) && aged91 > 0
+        ? Math.max(0, Math.round(aged91 - (sold90 / 90) * AGED_SELL_THROUGH_DAYS)) : 0;
+    const surchargeDue = estimate !== null && Number.isFinite(estimate)
+        ? estimate > AGED_SURCHARGE_MIN_USD
+        : Total > 0;
+    const fee = Number(ltsfAmountMap[data.asin]) || (Number.isFinite(estimate) ? estimate : 0) || 0;
+
+    if(surchargeDue || agingUnsold > 0){
         longTermStorageFees.status="Error";
-        longTermStorageFees.Message="Your inventory has been stored in FBA for a long period, making it eligible for Long-Term Storage Fees (LTSF). These fees can significantly increase your operating costs, reducing profit margins.";
-        longTermStorageFees.HowToSolve="Review your inventory levels and sales velocity to identify slow-moving or stagnant stock. Consider running promotions or lowering prices to increase sales and reduce inventory levels. Alternatively, remove excess inventory from FBA to avoid additional LTSF. Strategically plan your inventory replenishment based on demand forecasts to prevent future stock from becoming eligible for LTSF.";
-        // Real $ from the GET_FBA_FULFILLMENT_LONGTERM_STORAGE_FEE_CHARGES_DATA sync when
-        // available; 0 until that sync is enabled + has run for this account.
-        longTermStorageFees.amount = ltsfAmountMap[data.asin] || 0;
+        longTermStorageFees.Message = surchargeDue
+            ? `${Total} units have been in Amazon's warehouse long enough to attract an aged inventory surcharge${fee > 0 ? ` of about $${fee.toFixed(2)} a month` : ''}.`
+            : `About ${agingUnsold} units aged 91-180 days will not sell before they reach 181 days at the current sales rate, when Amazon starts charging an aged inventory surcharge.`;
+        longTermStorageFees.HowToSolve="Clear this stock with a price drop, coupon or deal, or create a removal or liquidation order before the next charge on the 15th.";
+        longTermStorageFees.units = Total;
+        longTermStorageFees.agingUnsoldUnits = agingUnsold;
+        // Real $ from the LTSF sync when it runs, else Amazon's estimate from this report.
+        longTermStorageFees.amount = fee;
     }else{
         longTermStorageFees.status="Success";
-        longTermStorageFees.Message="Great job managing your FBA inventory efficiently! Keeping your inventory levels optimized helps avoid Long-Term Storage Fees and maximizes your profitability." ;
+        longTermStorageFees.Message="None of your stock is old enough to be charged an aged inventory surcharge.";
         longTermStorageFees.HowToSolve="";
         longTermStorageFees.amount = 0;
     }

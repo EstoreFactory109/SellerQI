@@ -98,3 +98,33 @@ describe('Profitability page uses the same loss rule as the tasks', () => {
         expect(calculateProfitabilityIssues([row], { cogsMap: { A1: 10 } }).issues.map(i => i.issueType)).not.toContain('negative_profit');
     });
 });
+
+describe('aged inventory surcharge (planning report)', () => {
+    const row = (over) => ({ asin: 'A1', unfulfillable_quantity: '0',
+        quantity_to_be_charged_ais_181_210_days: '0', quantity_to_be_charged_ais_211_240_days: '0', quantity_to_be_charged_ais_241_270_days: '0',
+        quantity_to_be_charged_ais_271_300_days: '0', quantity_to_be_charged_ais_301_330_days: '0', quantity_to_be_charged_ais_331_365_days: '0',
+        quantity_to_be_charged_ais_365_plus_days: '0', ...over });
+
+    it('flags an estimated surcharge over $25, with the fee', () => {
+        const { longTermStorageFees } = inventoryPlanningData(row({ quantity_to_be_charged_ais_181_210_days: '12', estimated_ais_total: 30.5 }));
+        expect(longTermStorageFees.status).toBe('Error');
+        expect(longTermStorageFees.amount).toBe(30.5);
+        expect(longTermStorageFees.Message).toBe("12 units have been in Amazon's warehouse long enough to attract an aged inventory surcharge of about $30.50 a month.");
+    });
+
+    it('lets a small surcharge through when the estimate is known', () => {
+        expect(inventoryPlanningData(row({ quantity_to_be_charged_ais_181_210_days: '2', estimated_ais_total: 4 })).longTermStorageFees.status).toBe('Success');
+    });
+
+    it('flags 91-180-day stock that will not sell in time', () => {
+        // 100 aged units; 90 sold in 90 days -> 45 sell in 45 days -> 55 left.
+        const { longTermStorageFees } = inventoryPlanningData(row({ estimated_ais_total: 0, inv_age_91_to_180_days: '100', units_shipped_t90: '90' }));
+        expect(longTermStorageFees.status).toBe('Error');
+        expect(longTermStorageFees.agingUnsoldUnits).toBe(55);
+        expect(inventoryPlanningData(row({ estimated_ais_total: 0, inv_age_91_to_180_days: '40', units_shipped_t90: '90' })).longTermStorageFees.status).toBe('Success');
+    });
+
+    it('keeps the old rule for reports without estimate columns', () => {
+        expect(inventoryPlanningData(row({ quantity_to_be_charged_ais_365_plus_days: '1' })).longTermStorageFees.status).toBe('Error');
+    });
+});

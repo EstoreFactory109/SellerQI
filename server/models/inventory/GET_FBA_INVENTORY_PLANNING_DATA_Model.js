@@ -41,7 +41,13 @@ const dataSchema = new mongoose.Schema({
     historical_days_of_supply_short: { type: String, default: null },
     historical_days_of_supply_long: { type: String, default: null },
     historical_days_of_supply: { type: String, default: null },
-    low_inventory_level_fee_applied: { type: String, default: null }
+    low_inventory_level_fee_applied: { type: String, default: null },
+    low_inventory_level_fee_exempt: { type: String, default: null },
+    // Aged inventory surcharge: Amazon's estimate summed over its buckets, plus
+    // what the "units aged 91-180 days" rule needs.
+    estimated_ais_total: { type: Number, default: null },
+    inv_age_91_to_180_days: { type: String, default: null },
+    units_shipped_t90: { type: String, default: null }
 },{timestamps:true})
 
 // Define the schema

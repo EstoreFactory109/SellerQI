@@ -101,15 +101,16 @@ const DAMAGED_REASON_CODES = ['6', '7', 'E', 'H', 'K', 'U'];
 // Spreadsheet "Return reason spike": 'not as described', 'defective' or 'wrong item'
 // make up 30%+ of a product's returns in 30 days. The 10-return floor is internal (2
 // of 3 returns is not a spike). Codes per Amazon's returns report; ORDERED_WRONG_ITEM
-// is the buyer's mistake, not a wrong item sent, so it is excluded. UNCONFIRMED until
-// the first live report: CustomerReturns.reasonCounts shows the codes really sent.
+// is the buyer's mistake, not a wrong item sent, so it is excluded. Codes checked
+// against live AU and US reports (Oct 2026): DEFECTIVE, NOT_AS_DESCRIBED, SWITCHEROO.
 const RETURN_SPIKE_DAYS = 30;
 const RETURN_SPIKE_SHARE = 0.30;
 const RETURN_SPIKE_MIN_RETURNS = 10;
 const isProductFaultReturn = (reason) => {
     const r = String(reason || '').toUpperCase().replace(/[\s-]+/g, '_');
     if (r === 'ORDERED_WRONG_ITEM') return false;
-    return /DEFECTIVE|NOT_AS_DESCRIBED|WRONG_ITEM|INACCURATE_WEBSITE_DESCRIPTION/.test(r);
+    // SWITCHEROO is Amazon's code for "wrong item was sent" (seen in a live US report).
+    return /DEFECTIVE|NOT_AS_DESCRIBED|WRONG_ITEM|SWITCHEROO|INACCURATE_WEBSITE_DESCRIPTION/.test(r);
 };
 
 // A day selling over this multiple of the account's median day is an event day (Prime

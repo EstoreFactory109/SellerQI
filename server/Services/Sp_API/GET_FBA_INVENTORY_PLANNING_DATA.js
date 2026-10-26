@@ -160,6 +160,135 @@ const getReport = async (accessToken, marketplaceIds, userId, baseuri, Country, 
     }
 };
 
+/**
+ * One normalised report row -> what is stored. Pure; exported for tests.
+ * @returns {Object|null} null for a row without an ASIN
+ */
+function mapPlanningRow(item) {
+    // Helper function to convert empty strings to "0" for required fields
+    // Handles null, undefined, empty string, and missing fields
+    const getValue = (value) => {
+        if (value === null || value === undefined || value === '' || value === 'undefined') {
+            return "0";
+        }
+        const trimmed = String(value).trim();
+        return trimmed === '' ? "0" : trimmed;
+    };
+
+    // Helper to find field with different possible names (Amazon uses different naming conventions)
+    const findField = (item, ...possibleNames) => {
+        for (const name of possibleNames) {
+            if (item[name] !== undefined) {
+                return item[name];
+            }
+        }
+        return null;
+    };
+
+    const rawOrNull = (value) => {
+        if (value === null || value === undefined) return null;
+        const trimmed = String(value).trim();
+        return trimmed === '' ? null : trimmed;
+    };
+
+    // Skip items without ASIN
+    const asin = item.asin || item.ASIN || item['asin'] || "";
+    if (!asin) {
+        return null; // Skip this item
+    }
+
+    return {
+        asin: asin,
+        quantity_to_be_charged_ais_181_210_days: getValue(findField(item, 
+            "quantity-to-be-charged-ais-181-210-days",
+            "quantity_to_be_charged_ais_181_210_days",
+            "quantityToBeChargedAis181210Days"
+        )),
+        quantity_to_be_charged_ais_211_240_days: getValue(findField(item,
+            "quantity-to-be-charged-ais-211-240-days",
+            "quantity_to_be_charged_ais_211_240_days",
+            "quantityToBeChargedAis211240Days"
+        )),
+        quantity_to_be_charged_ais_241_270_days: getValue(findField(item,
+            "quantity-to-be-charged-ais-241-270-days",
+            "quantity_to_be_charged_ais_241_270_days",
+            "quantityToBeChargedAis241270Days"
+        )),
+        quantity_to_be_charged_ais_271_300_days: getValue(findField(item,
+            "quantity-to-be-charged-ais-271-300-days",
+            "quantity_to_be_charged_ais_271_300_days",
+            "quantityToBeChargedAis271300Days"
+        )),
+        quantity_to_be_charged_ais_301_330_days: getValue(findField(item,
+            "quantity-to-be-charged-ais-301-330-days",
+            "quantity_to_be_charged_ais_301_330_days",
+            "quantityToBeChargedAis301330Days"
+        )),
+        quantity_to_be_charged_ais_331_365_days: getValue(findField(item,
+            "quantity-to-be-charged-ais-331-365-days",
+            "quantity_to_be_charged_ais_331_365_days",
+            "quantityToBeChargedAis331365Days"
+        )),
+        // Amazon's US report (seen live Oct 2026) splits 365+ into 366-455 and
+        // 456+; other marketplaces still send 365+. Every reader uses 365+, so
+        // the split buckets are summed into it.
+        quantity_to_be_charged_ais_365_plus_days: findField(item,
+            "quantity-to-be-charged-ais-365-plus-days",
+            "quantity_to_be_charged_ais_365_plus_days",
+            "quantityToBeChargedAis365PlusDays"
+        ) != null
+            ? getValue(findField(item, "quantity-to-be-charged-ais-365-plus-days", "quantity_to_be_charged_ais_365_plus_days", "quantityToBeChargedAis365PlusDays"))
+            : String((Number(getValue(findField(item, "quantity_to_be_charged_ais_366_455_days", "quantity-to-be-charged-ais-366-455-days"))) || 0)
+                + (Number(getValue(findField(item, "quantity_to_be_charged_ais_456_plus_days", "quantity-to-be-charged-ais-456-plus-days"))) || 0)),
+        // Amazon's own estimate of the aged inventory surcharge, summed over
+        // every estimated-ais-* bucket (tasks-logics.xlsx "Aged inventory
+        // surcharge"). null when the report has no estimate columns.
+        estimated_ais_total: (() => {
+            const keys = Object.keys(item).filter(k => /^estimated[-_]ais[-_]/.test(k));
+            if (keys.length === 0) return null;
+            return keys.reduce((sum, k) => sum + (Number(String(item[k] || '').replace(/[^0-9.-]/g, '')) || 0), 0);
+        })(),
+        inv_age_91_to_180_days: rawOrNull(findField(item, "inv-age-91-to-180-days", "inv_age_91_to_180_days")),
+        units_shipped_t90: rawOrNull(findField(item, "units-shipped-t90", "units_shipped_t90")),
+        unfulfillable_quantity: getValue(findField(item,
+            "unfulfillable-quantity",
+            "unfulfillable_quantity",
+            "unfulfillableQuantity"
+        )),
+        // Low-inventory-level fee inputs (tasks-logics.xlsx). Amazon's column
+        // names are not publicly documented, so null (not "0") when the
+        // column is absent: the task must read "no data", not "0 days".
+        // The report's real headers are stored on the document (`headers`)
+        // to settle the names from the first live run.
+        historical_days_of_supply_short: rawOrNull(findField(item,
+            "short-term-historical-days-of-supply",
+            "short_term_historical_days_of_supply",
+            "historical-days-of-supply-short-term"
+        )),
+        historical_days_of_supply_long: rawOrNull(findField(item,
+            "long-term-historical-days-of-supply",
+            "long_term_historical_days_of_supply",
+            "historical-days-of-supply-long-term"
+        )),
+        historical_days_of_supply: rawOrNull(findField(item,
+            "historical-days-of-supply",
+            "historical_days_of_supply"
+        )),
+        // Live US headers (Oct 2026): "Low-Inventory-Level fee applied in current
+        // week?" and "Exempted from Low-Inventory-Level fee?", normalised below.
+        low_inventory_level_fee_applied: rawOrNull(findField(item,
+            "low_inventory_level_fee_applied_in_current_week?",
+            "low-inventory-level-fee-applied",
+            "low_inventory_level_fee_applied",
+            "low-inventory-level-fee-applied-in-current-week"
+        )),
+        low_inventory_level_fee_exempt: rawOrNull(findField(item,
+            "exempted_from_low_inventory_level_fee?",
+            "exempted-from-low-inventory-level-fee"
+        )),
+    };
+}
+
 // Extracted post-poll step (download → parse TSV → save). Shared by inline + P8 async.
 async function _processFbaPlanningDocument(accessToken, reportDocumentId, baseuri, userId, Country, Region) {
         const reportUrl = await getReportLink(accessToken, reportDocumentId, baseuri);
@@ -196,110 +325,9 @@ async function _processFbaPlanningDocument(accessToken, reportDocumentId, baseur
         const result = [];
 
         refinedData.forEach((item) => {
-            // Helper function to convert empty strings to "0" for required fields
-            // Handles null, undefined, empty string, and missing fields
-            const getValue = (value) => {
-                if (value === null || value === undefined || value === '' || value === 'undefined') {
-                    return "0";
-                }
-                const trimmed = String(value).trim();
-                return trimmed === '' ? "0" : trimmed;
-            };
-
-            // Helper to find field with different possible names (Amazon uses different naming conventions)
-            const findField = (item, ...possibleNames) => {
-                for (const name of possibleNames) {
-                    if (item[name] !== undefined) {
-                        return item[name];
-                    }
-                }
-                return null;
-            };
-
-            const rawOrNull = (value) => {
-                if (value === null || value === undefined) return null;
-                const trimmed = String(value).trim();
-                return trimmed === '' ? null : trimmed;
-            };
-
-            // Skip items without ASIN
-            const asin = item.asin || item.ASIN || item['asin'] || "";
-            if (!asin) {
-                return; // Skip this item
-            }
-
-            result.push({
-                asin: asin,
-                quantity_to_be_charged_ais_181_210_days: getValue(findField(item, 
-                    "quantity-to-be-charged-ais-181-210-days",
-                    "quantity_to_be_charged_ais_181_210_days",
-                    "quantityToBeChargedAis181210Days"
-                )),
-                quantity_to_be_charged_ais_211_240_days: getValue(findField(item,
-                    "quantity-to-be-charged-ais-211-240-days",
-                    "quantity_to_be_charged_ais_211_240_days",
-                    "quantityToBeChargedAis211240Days"
-                )),
-                quantity_to_be_charged_ais_241_270_days: getValue(findField(item,
-                    "quantity-to-be-charged-ais-241-270-days",
-                    "quantity_to_be_charged_ais_241_270_days",
-                    "quantityToBeChargedAis241270Days"
-                )),
-                quantity_to_be_charged_ais_271_300_days: getValue(findField(item,
-                    "quantity-to-be-charged-ais-271-300-days",
-                    "quantity_to_be_charged_ais_271_300_days",
-                    "quantityToBeChargedAis271300Days"
-                )),
-                quantity_to_be_charged_ais_301_330_days: getValue(findField(item,
-                    "quantity-to-be-charged-ais-301-330-days",
-                    "quantity_to_be_charged_ais_301_330_days",
-                    "quantityToBeChargedAis301330Days"
-                )),
-                quantity_to_be_charged_ais_331_365_days: getValue(findField(item,
-                    "quantity-to-be-charged-ais-331-365-days",
-                    "quantity_to_be_charged_ais_331_365_days",
-                    "quantityToBeChargedAis331365Days"
-                )),
-                quantity_to_be_charged_ais_365_plus_days: getValue(findField(item,
-                    "quantity-to-be-charged-ais-365-plus-days",
-                    "quantity_to_be_charged_ais_365_plus_days",
-                    "quantityToBeChargedAis365PlusDays"
-                )),
-                unfulfillable_quantity: getValue(findField(item,
-                    "unfulfillable-quantity",
-                    "unfulfillable_quantity",
-                    "unfulfillableQuantity"
-                )),
-                // Low-inventory-level fee inputs (tasks-logics.xlsx). Amazon's column
-                // names are not publicly documented, so null (not "0") when the
-                // column is absent: the task must read "no data", not "0 days".
-                // The report's real headers are stored on the document (`headers`)
-                // to settle the names from the first live run.
-                historical_days_of_supply_short: rawOrNull(findField(item,
-                    "short-term-historical-days-of-supply",
-                    "short_term_historical_days_of_supply",
-                    "historical-days-of-supply-short-term"
-                )),
-                historical_days_of_supply_long: rawOrNull(findField(item,
-                    "long-term-historical-days-of-supply",
-                    "long_term_historical_days_of_supply",
-                    "historical-days-of-supply-long-term"
-                )),
-                historical_days_of_supply: rawOrNull(findField(item,
-                    "historical-days-of-supply",
-                    "historical_days_of_supply"
-                )),
-                low_inventory_level_fee_applied: rawOrNull(findField(item,
-                    "low-inventory-level-fee-applied",
-                    "low_inventory_level_fee_applied",
-                    "low-inventory-level-fee-applied-in-current-week"
-                )),
-            });
+            const row = mapPlanningRow(item);
+            if (row) result.push(row);
         });
-
-
-
-
 
         const createReport = await FbaInventoryPlanningData.create({
             User: userId,
@@ -404,3 +432,5 @@ getReport.spApiAsync = {
 };
 
 module.exports = getReport;
+module.exports.mapPlanningRow = mapPlanningRow;
+module.exports.convertTSVToJson = convertTSVToJson;

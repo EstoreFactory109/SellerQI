@@ -45,6 +45,8 @@ describe('detectReturnReasonSpike', () => {
         expect(detectReturnReasonSpike({ returns: input(old), now: NOW }).tasks).toHaveLength(0);
         expect(isProductFaultReturn('ORDERED_WRONG_ITEM')).toBe(false);
         expect(isProductFaultReturn('wrong item')).toBe(true);
+        expect(isProductFaultReturn('SWITCHEROO')).toBe(true);
+        expect(isProductFaultReturn('QUALITY_UNACCEPTABLE')).toBe(false);
     });
 
     it('makes no verdict on a stale, missing or unreadable report', () => {

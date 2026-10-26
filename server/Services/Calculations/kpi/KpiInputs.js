@@ -475,7 +475,8 @@ function buildPlanning(doc) {
                 asin: r.asin,
                 short: toNum(r.historical_days_of_supply_short),
                 long: toNum(r.historical_days_of_supply_long),
-                feeApplied: r.low_inventory_level_fee_applied ?? null
+                feeApplied: r.low_inventory_level_fee_applied ?? null,
+                exempt: r.low_inventory_level_fee_exempt ?? null
             }))
     };
 }

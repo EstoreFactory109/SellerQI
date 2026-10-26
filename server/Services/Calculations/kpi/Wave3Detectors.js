@@ -167,8 +167,10 @@ function detectLowInventoryFeeRisk({ planning, salesByAsin = {}, productsByAsin 
     const byAsin = new Map();
     for (const r of rows) {
         if (!r.asin) continue;
-        const flag = String(r.feeApplied ?? '').trim().toLowerCase();
-        const applied = ['yes', 'y', 'true', '1'].includes(flag);
+        const yes = (v) => ['yes', 'y', 'true', '1'].includes(String(v ?? '').trim().toLowerCase());
+        // Spreadsheet: respect Amazon's exemptions (shown in the report).
+        if (yes(r.exempt)) continue;
+        const applied = yes(r.feeApplied);
         const short = r.short;
         const long = r.long;
         const bothUnder = (limit) => short !== null && long !== null && short < limit && long < limit;
