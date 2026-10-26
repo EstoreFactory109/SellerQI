@@ -178,7 +178,7 @@ router.get('/top-products', auth, getLocation, analyseDataCache(3600, 'top-produ
 
 // ===== MULTI-PHASE DASHBOARD (Progressive Loading) =====
 // Phase 1: Instant (~50ms) - precomputed error counts, product counts, date range
-// Every marketplace side by side, each in its own currency (caches internally; behind ALL_MARKETPLACES_DASHBOARD_ENABLED).
+// Every marketplace side by side, each in its own currency (caches internally; on unless ALL_MARKETPLACES_DASHBOARD_ENABLED=false).
 router.get('/dashboard-marketplaces', auth, getMarketplaceComparisonData);
 router.get('/dashboard-phase1', auth, getLocation, analyseDataCache(3600, 'dashboard-phase1'), getDashboardPhase1);
 
