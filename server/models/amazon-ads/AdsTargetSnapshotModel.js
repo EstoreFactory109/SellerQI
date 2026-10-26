@@ -28,6 +28,9 @@ const adsTargetSnapshotSchema = new mongoose.Schema(
         windowStart: { type: String, default: "" },
         windowEnd: { type: String, default: "" },
         targets: { type: [targetSchema], default: [] },
+        // Amazon's budget recommendations for enabled campaigns (7-day time in budget,
+        // suggested budget, estimated missed sales); null when the read failed.
+        budgetRecs: { type: mongoose.Schema.Types.Mixed, default: null },
         targetCount: { type: Number, default: 0 }
     },
     { timestamps: true }

@@ -180,6 +180,7 @@ const EFFORT_MINUTES = {
     'conversion:priced_above_featured_offer': 5, // change a price
     'inventory:subscribe_and_save': 15,     // fix the suspension reason
     'inventory:inbound_placement_fees': 10, // choose the optimised split next time
+    'sponsoredAds:budget_limited_profitable': 3, // raise a budget
     'inventory:inbound_shortage': 20,       // open a case with documents
     'inventory:refund_not_returned': 15,    // file a claim per order
     'conversion:high_traffic_low_conversion': 45, // listing work
@@ -317,6 +318,7 @@ const IMPACT_WEIGHT = {
     'conversion:priced_above_featured_offer': 55,
     'inventory:subscribe_and_save': 30,
     'inventory:inbound_placement_fees': 25,
+    'sponsoredAds:budget_limited_profitable': 55,
     'inventory:inbound_shortage': 72,
     'inventory:refund_not_returned': 72,
     // Spreadsheet P3 / P4.

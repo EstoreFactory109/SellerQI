@@ -56,6 +56,7 @@ const PRIORITY_LEVEL = {
     'conversion:priced_above_featured_offer': 'P3',
     'inventory:subscribe_and_save': 'P4',
     'inventory:inbound_placement_fees': 'P4',
+    'sponsoredAds:budget_limited_profitable': 'P3',
     'inventory:listing_warnings': 'P4',
     'inventory:handling_time_long': 'P4',
 

@@ -109,6 +109,13 @@ const RETURNS_FEE_DAYS = 90;
 const RETURNS_FEE_WARN_SHARE = 0.80;
 const RETURNS_FEE_MIN_SHIPPED = 25;
 
+// Spreadsheet "Profitable campaigns running out of budget": out of budget on 5 of the
+// last 7 days and ACoS below break-even. Amazon reports the share of time in budget
+// over 7 days, not a count of days, so "most days" is read as under 90% of the time
+// in budget with missed sales (internal). Campaign ACoS against the account's 40%
+// target (campaigns mix products, so no single product break-even applies).
+const BUDGET_TIME_IN_BUDGET_MAX = 0.9;
+
 // Spreadsheet "Detail page changed without us": changes in the last 7 days that no
 // recorded edit (Fix It, an approved task fix) explains. A recorded edit up to 3 days
 // before the change counts as ours (internal). A price that changed on 3+ of the last
@@ -222,6 +229,7 @@ module.exports = {
     LOW_TRAFFIC_CVR_RATIO,
     LOW_TRAFFIC_MIN_ORDERS,
     TRAFFIC_MIX_MIN_ASINS,
+    BUDGET_TIME_IN_BUDGET_MAX,
     REFUND_CLAIM_FROM_DAYS,
     REFUND_CLAIM_TO_DAYS,
     RETURNS_FEE_DAYS,

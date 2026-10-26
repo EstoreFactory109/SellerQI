@@ -196,6 +196,10 @@ const GROUP_COPY = {
         title: 'Subscribe & Save offers Amazon has suspended',
         action: 'Fix the stock or price issue to restart deliveries'
     },
+    'sponsoredAds:budget_limited_profitable': {
+        title: 'Profitable campaigns running out of budget',
+        action: 'Raise the budget so they run all day'
+    },
     'inventory:inbound_placement_fees': {
         title: 'Inbound placement fees paid this month',
         action: 'Use Amazon\'s optimised split on future shipments'

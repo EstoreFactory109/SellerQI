@@ -40,9 +40,13 @@ jest.mock('../../../Services/AmazonAds/ProductAds.js', () => ({
 }));
 const mockTargetBids = jest.fn();
 let mockLiveTargets = new Map();
+let mockLiveCampaigns = [];
+const mockBudget = jest.fn();
 jest.mock('../../../Services/AmazonAds/AdsTargets.js', () => ({
     listTargetBids: async () => mockLiveTargets,
-    updateTargetBids: (...a) => mockTargetBids(...a)
+    updateTargetBids: (...a) => mockTargetBids(...a),
+    listCampaignBudgets: async () => mockLiveCampaigns,
+    updateCampaignBudget: (...a) => mockBudget(...a)
 }));
 const mockUpdateContent = jest.fn();
 const mockFixed = [];
@@ -68,7 +72,7 @@ beforeEach(() => {
     mockTasks.length = 0; mockLogs.length = 0;
     mockTaskUpdates.length = 0;
     mockAddToNegative.mockReset(); mockPause.mockReset(); mockBids.mockReset(); mockSnapshot = null;
-    mockUpdateContent.mockReset(); mockFixed.length = 0; mockTargetBids.mockReset(); mockLiveTargets = new Map(); mockProductAds = []; mockPauseAds.mockReset();
+    mockUpdateContent.mockReset(); mockFixed.length = 0; mockTargetBids.mockReset(); mockLiveTargets = new Map(); mockProductAds = []; mockPauseAds.mockReset(); mockLiveCampaigns = []; mockBudget.mockReset();
     process.env.AMAZON_ADS_CLIENT_ID = 'cid';
     delete process.env.TASK_ACTIONS_DISABLED;
 });
@@ -267,5 +271,28 @@ describe('pause_product_ads', () => {
         const [none] = await run(['T11']);
         expect(none.status).toBe('failed');
         expect(none.message).toContain('no enabled Sponsored Products ads');
+    });
+});
+
+describe('raise_budget', () => {
+    const task = { taskId: 'T12', asin: 'CAMPAIGN:C1', errorCategory: 'sponsoredAds', errorType: 'budget_limited_profitable',
+        renderData: { campaignId: 'C1', campaignName: 'Garlic exact', budget: 5, suggestedBudget: 10 } };
+
+    it('proposes Amazon\'s suggested budget', () => {
+        expect(S.proposedActionFor(task)).toMatchObject({ type: 'raise_budget', payload: { campaignId: 'C1', budget: 10, expectedCurrentBudget: 5 } });
+        expect(S.proposedActionFor({ ...task, renderData: { ...task.renderData, suggestedBudget: 5 } })).toBeNull();
+    });
+
+    it('raises it only when the live budget is unchanged', async () => {
+        mockTasks.push(task);
+        mockLiveCampaigns = [{ campaignId: 'C1', budget: 5 }];
+        mockBudget.mockResolvedValue({ campaigns: { success: [{}], error: [] } });
+        expect((await run(['T12']))[0].status).toBe('succeeded');
+        expect(mockBudget).toHaveBeenCalledWith(expect.objectContaining({ campaignId: 'C1', budget: 10 }));
+        mockLogs.length = 0; mockLiveCampaigns = [{ campaignId: 'C1', budget: 8 }]; mockBudget.mockReset();
+        const [changed] = await run(['T12']);
+        expect(changed.status).toBe('failed');
+        expect(changed.message).toContain('changed since the suggestion');
+        expect(mockBudget).not.toHaveBeenCalled();
     });
 });

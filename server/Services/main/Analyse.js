@@ -978,6 +978,7 @@ class AnalyseService {
             campaignSpendSales: allData.campaignSpendSales || null,
             AdGroupsByAsin: allData.adGroupsByAsin || null,
             AdsTargets: allData.adsTargets?.targets || null,
+            AdsBudgetRecs: allData.adsTargets ? { at: allData.adsTargets.createdAt, recs: allData.adsTargets.budgetRecs } : null,
             // Per-unit COGS by ASIN ({} until the seller enters it): the loss-making rule needs it.
             cogsValues: (allData.cogsData && allData.cogsData.success && allData.cogsData.data?.cogsValues) || {},
             AdsGroupData: (allData.AdsGroupData || { adsGroupData: [] }).adsGroupData,

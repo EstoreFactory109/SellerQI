@@ -97,6 +97,56 @@ async function updateTargetBids({ bids, accessToken, profileId, region }) {
     return res.data;
 }
 
+const CAMPAIGN_MEDIA = 'application/vnd.spCampaign.v3+json';
+
+/** Enabled campaigns with their daily budget (a read). Optionally only these ids. */
+async function listCampaignBudgets(accessToken, profileId, region, campaignIds = null) {
+    const out = [];
+    let nextToken = null;
+    let pages = 0;
+    do {
+        const body = { maxResults: 1000, stateFilter: { include: ['ENABLED'] }, ...(campaignIds ? { campaignIdFilter: { include: campaignIds.map(String) } } : {}), ...(nextToken ? { nextToken } : {}) };
+        const res = await axios.post(`${BASE_URIS[region]}/sp/campaigns/list`, body, { headers: headers(accessToken, profileId, CAMPAIGN_MEDIA) });
+        for (const c of res.data?.campaigns || []) {
+            out.push({ campaignId: String(c.campaignId), name: c.name || '', budget: Number(c.budget?.budget) || null, budgetType: c.budget?.budgetType || '' });
+        }
+        nextToken = res.data?.nextToken || null;
+        pages++;
+    } while (nextToken && pages < 50);
+    return out;
+}
+
+/** Amazon's budget recommendations (7-day time in budget, missed sales), 100 campaigns per call. */
+async function readBudgetRecommendations(accessToken, profileId, region, campaigns) {
+    const out = [];
+    for (let i = 0; i < campaigns.length; i += 100) {
+        const slice = campaigns.slice(i, i + 100);
+        const res = await axios.post(`${BASE_URIS[region]}/sp/campaigns/budgetRecommendations`, { campaignIds: slice.map(c => c.campaignId) },
+            { headers: headers(accessToken, profileId, 'application/vnd.budgetrecommendation.v3+json') });
+        const byId = new Map(slice.map(c => [c.campaignId, c]));
+        for (const r of res.data?.budgetRecommendationsSuccessResults || []) {
+            const c = byId.get(String(r.campaignId)) || {};
+            const m = r.sevenDaysMissedOpportunities || {};
+            out.push({
+                campaignId: String(r.campaignId), name: c.name || '', budget: c.budget, budgetType: c.budgetType,
+                suggestedBudget: Number(r.suggestedBudget) || null,
+                percentTimeInBudget: Number.isFinite(Number(m.percentTimeInBudget)) ? Number(m.percentTimeInBudget) : null,
+                missedSalesLower: Number(m.estimatedMissedSalesLower) || 0,
+                missedSalesUpper: Number(m.estimatedMissedSalesUpper) || 0,
+                startDate: m.startDate || '', endDate: m.endDate || ''
+            });
+        }
+    }
+    return out;
+}
+
+/** Set a campaign's daily budget (v3 PUT /sp/campaigns). Only after the seller approved it. */
+async function updateCampaignBudget({ campaignId, budget, accessToken, profileId, region }) {
+    const body = { campaigns: [{ campaignId: String(campaignId), budget: { budget: Number(budget), budgetType: 'DAILY' } }] };
+    const res = await axios.put(`${BASE_URIS[region]}/sp/campaigns`, body, { headers: headers(accessToken, profileId, CAMPAIGN_MEDIA) });
+    return res.data;
+}
+
 /** Pure: report rows -> targets that spent, one per target id. Exported for tests. */
 function targetsFromReport(rows = []) {
     const byId = new Map();
@@ -138,9 +188,17 @@ function buildSpecs({ userId, country, region, accessToken, profileId, marketpla
             const targets = targetsFromReport(rows);
             const bids = targets.length ? await listTargetBids(accessToken, profileId, region, targets.map(t => t.targetId)) : new Map();
             for (const t of targets) t.bid = bids.get(t.targetId)?.bid ?? null;
+            // Budget recommendations ride along weekly; a failure leaves them null.
+            let budgetRecs = null;
+            try {
+                const campaigns = (await listCampaignBudgets(accessToken, profileId, region)).filter(c => c.budgetType === 'DAILY');
+                budgetRecs = campaigns.length ? await readBudgetRecommendations(accessToken, profileId, region, campaigns) : [];
+            } catch (error) {
+                logger.warn('[AdsTargets] budget recommendations unavailable', { userId: String(userId), country, region, error: error.message });
+            }
             const AdsTargetSnapshot = require('../../models/amazon-ads/AdsTargetSnapshotModel.js');
             const uid = mongoose.Types.ObjectId.isValid(String(userId)) ? new mongoose.Types.ObjectId(String(userId)) : userId;
-            await AdsTargetSnapshot.create({ userId: uid, country, region, windowStart: window.startDate, windowEnd: window.endDate, targets, targetCount: targets.length });
+            await AdsTargetSnapshot.create({ userId: uid, country, region, windowStart: window.startDate, windowEnd: window.endDate, targets, targetCount: targets.length, budgetRecs });
             logger.info('[AdsTargets] stored', { userId: String(userId), country, region, targets: targets.length, withBid: targets.filter(t => t.bid !== null).length });
             return { empty: targets.length === 0 };
         }
@@ -152,6 +210,9 @@ module.exports = {
     targetsFromReport,
     listTargetBids,
     updateTargetBids,
+    listCampaignBudgets,
+    readBudgetRecommendations,
+    updateCampaignBudget,
     adsAsync: {
         serviceName: 'adsTargetsData',
         buildSpecs,

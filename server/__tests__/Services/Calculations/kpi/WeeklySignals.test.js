@@ -57,3 +57,30 @@ describe('detectInboundPlacementFees', () => {
         expect(W3.detectInboundPlacementFees({ weeklySignals: { placementFees: null } }).covered).toBe(false);
     });
 });
+
+describe('detectBudgetLimitedProfitable', () => {
+    const NOW = new Date('2026-10-26T12:00:00Z');
+    const recs = (over) => ({ at: new Date('2026-10-25T00:00:00Z'), recs: [{ campaignId: 'C1', name: 'Garlic exact', budget: 5, suggestedBudget: 10, percentTimeInBudget: 0.69, missedSalesLower: 37, missedSalesUpper: 92, ...over }] });
+    const rows = (spend, sales) => [{ campaignId: 'C1', totalSpend: spend, totalSales: sales }];
+
+    it('flags a profitable campaign that ran out of budget, with Amazon\'s suggestion', () => {
+        const { tasks } = W3.detectBudgetLimitedProfitable({ budgetRecs: recs(), campaignRows: rows(30, 100), now: NOW });
+        expect(tasks).toHaveLength(1);
+        expect(tasks[0].error).toContain('within its budget only 69% of the time');
+        expect(tasks[0].solution).toContain('Amazon suggests $10.00 a day (now $5.00)');
+        expect(tasks[0].amount).toBe(37);
+    });
+
+    it('skips campaigns above the ACoS target, mostly in budget, or without missed sales', () => {
+        expect(W3.detectBudgetLimitedProfitable({ budgetRecs: recs(), campaignRows: rows(50, 100), now: NOW }).tasks).toHaveLength(0);
+        expect(W3.detectBudgetLimitedProfitable({ budgetRecs: recs({ percentTimeInBudget: 0.95 }), campaignRows: rows(30, 100), now: NOW }).tasks).toHaveLength(0);
+        expect(W3.detectBudgetLimitedProfitable({ budgetRecs: recs({ missedSalesUpper: 0 }), campaignRows: rows(30, 100), now: NOW }).tasks).toHaveLength(0);
+        // -1 is Amazon's "unknown" (seen live).
+        expect(W3.detectBudgetLimitedProfitable({ budgetRecs: recs({ percentTimeInBudget: -1 }), campaignRows: rows(30, 100), now: NOW }).tasks).toHaveLength(0);
+    });
+
+    it('makes no verdict on an old or failed read', () => {
+        expect(W3.detectBudgetLimitedProfitable({ budgetRecs: { at: new Date('2026-10-01'), recs: [] }, now: NOW }).covered).toBe(false);
+        expect(W3.detectBudgetLimitedProfitable({ budgetRecs: { at: NOW, recs: null }, now: NOW }).covered).toBe(false);
+    });
+});

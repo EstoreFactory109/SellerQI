@@ -550,7 +550,49 @@ function detectInboundPlacementFees({ weeklySignals }) {
     };
 }
 
+/**
+ * Profitable campaigns running out of budget. Amazon's budget recommendations (weekly)
+ * against the campaign's ACoS from the PPC page's campaign totals.
+ */
+function detectBudgetLimitedProfitable({ budgetRecs, campaignRows = [], now }) {
+    const { TARGET_ACOS_PERCENT } = require('../TaskRules.js');
+    if (!budgetRecs || !Array.isArray(budgetRecs.recs) || !(now.getTime() - new Date(budgetRecs.at).getTime() <= 10 * R.DAY_MS)) {
+        return { tasks: [], covered: false };
+    }
+    const acosOf = new Map();
+    for (const c of campaignRows || []) {
+        const spend = Number(c?.totalSpend) || 0;
+        const sales = Number(c?.totalSales) || 0;
+        if (c?.campaignId && sales > 0) acosOf.set(String(c.campaignId), (spend / sales) * 100);
+    }
+    const tasks = [];
+    for (const r of budgetRecs.recs) {
+        const acos = acosOf.get(String(r.campaignId));
+        // Amazon sends -1 when it does not know the time in budget: no verdict.
+        if (!(r.percentTimeInBudget >= 0 && r.percentTimeInBudget < R.BUDGET_TIME_IN_BUDGET_MAX) || !(r.missedSalesUpper > 0)) continue;
+        if (!(acos > 0 && acos < TARGET_ACOS_PERCENT)) continue;
+        const pct = Math.round(r.percentTimeInBudget * 100);
+        const raise = Number(r.suggestedBudget) > Number(r.budget);
+        tasks.push({
+            asin: `CAMPAIGN:${r.campaignId}`,
+            productName: (r.name || `Campaign ${r.campaignId}`).substring(0, 100),
+            errorCategory: 'sponsoredAds',
+            errorType: 'budget_limited_profitable',
+            error: `PPC | Budget Running Out: The campaign "${r.name || r.campaignId}" was within its budget only ${pct}% of the time over 7 days, while its ACoS is ${Math.round(acos * 10) / 10}% (under the ${TARGET_ACOS_PERCENT}% target). Amazon estimates $${Math.round(r.missedSalesLower)}–$${Math.round(r.missedSalesUpper)} in missed sales.`,
+            solution: raise
+                ? `Raise the budget so it runs all day. Amazon suggests $${Number(r.suggestedBudget).toFixed(2)} a day (now $${Number(r.budget).toFixed(2)}).`
+                : 'Raise the budget so it runs all day.',
+            amount: Math.round(Number(r.missedSalesLower) * 100) / 100,
+            amountIsEstimated: true,
+            renderData: { campaignId: String(r.campaignId), campaignName: r.name, budget: r.budget, suggestedBudget: r.suggestedBudget, percentTimeInBudget: r.percentTimeInBudget, acos: Math.round(acos * 10) / 10 },
+            status: PENDING
+        });
+    }
+    return { tasks, covered: true };
+}
+
 module.exports = {
+    detectBudgetLimitedProfitable,
     detectPricedAboveFeaturedOffer,
     detectSubscribeSaveSuspended,
     detectInboundPlacementFees,

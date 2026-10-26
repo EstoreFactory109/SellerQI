@@ -12,6 +12,8 @@
  *   wasted_spend_keyword   -> pause the keyword
  *   product_acos_above_breakeven -> lower the bids of the keywords proposed on the
  *     task (renderData.bidChanges); any keyword whose bid changed since is skipped
+ *   budget_limited_profitable -> raise the campaign's daily budget to Amazon's
+ *     suggestion (current budget re-read live; skipped if it changed)
  *   ads_on_unbuyable -> pause that product's enabled product ads (found live at
  *     approval); the seller turns them back on once the product can sell
  *   listing text tasks (title, bullets, description, backend keywords) -> replace
@@ -110,6 +112,18 @@ function proposedActionFor(task) {
     }
     if (task?.errorCategory !== 'sponsoredAds') return null;
     const d = task.renderData || {};
+
+    if (task.errorType === 'budget_limited_profitable') {
+        const budget = Number(d.budget);
+        const suggested = Number(d.suggestedBudget);
+        if (!d.campaignId || !(suggested > budget)) return null;
+        return {
+            type: 'raise_budget',
+            label: 'Raise budget',
+            summary: `Raise the daily budget of "${d.campaignName || d.campaignId}" from $${budget.toFixed(2)} to $${suggested.toFixed(2)} (Amazon's suggestion), so it stays on all day. You can lower it again in Amazon Ads at any time.`,
+            payload: { campaignId: String(d.campaignId), budget: suggested, expectedCurrentBudget: budget }
+        };
+    }
 
     if (task.errorType === 'ads_on_unbuyable' && task.asin && /^[A-Z0-9]{10}$/i.test(task.asin)) {
         return {
@@ -244,6 +258,18 @@ async function execute(action, { userId, country, region }) {
         const sent = kwSend.length + tgSend.length;
         if (errors.length > 0) throw Object.assign(new Error(`Amazon rejected ${errors.length} of ${sent}: ${JSON.stringify(errors[0]).slice(0, 300)}`), { response: responses });
         return { ...responses, sent, skippedChanged: action.payload.bids.length - sent };
+    }
+    if (action.type === 'raise_budget') {
+        const { listCampaignBudgets, updateCampaignBudget } = require('../AmazonAds/AdsTargets.js');
+        const [live] = await listCampaignBudgets(accessToken, profileId, adsRegion, [action.payload.campaignId]);
+        if (!live) throw new Error('This campaign is no longer enabled, so its budget was not changed.');
+        if (Math.abs(Number(live.budget) - action.payload.expectedCurrentBudget) >= 0.005) {
+            throw new Error(`This campaign's budget is now $${Number(live.budget).toFixed(2)}, changed since the suggestion, so nothing was sent.`);
+        }
+        const result = await updateCampaignBudget({ campaignId: action.payload.campaignId, budget: action.payload.budget, accessToken, profileId, region: adsRegion });
+        const errors = v3Errors(result);
+        if (errors.length > 0) throw Object.assign(new Error(`Amazon rejected it: ${JSON.stringify(errors[0]).slice(0, 300)}`), { response: result });
+        return result;
     }
     if (action.type === 'pause_product_ads') {
         const { listEnabledProductAdsForAsin, pauseProductAds } = require('../AmazonAds/ProductAds.js');
