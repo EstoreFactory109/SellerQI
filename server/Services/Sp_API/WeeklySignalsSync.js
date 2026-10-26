@@ -169,7 +169,12 @@ async function readSubscribeSave({ host, headers, marketplaceId }) {
         const res = await axios.post(`${host}/replenishment/2022-11-07/offers/search`,
             { filters: { marketplaceId, programTypes: ['SUBSCRIBE_AND_SAVE'] }, pagination: { limit: 100, offset } }, { headers, timeout: 60000 });
         const page = res.data?.offers || [];
-        for (const o of page) offers.push({ asin: o.asin, sku: o.sku, eligibility: String(o.eligibility || ''), subscriptions: Number(o.subscriptions) || 0 });
+        for (const o of page) {
+            offers.push({
+                asin: o.asin, sku: o.sku, eligibility: String(o.eligibility || ''), subscriptions: Number(o.subscriptions) || 0,
+                autoEnrollment: String(o.offerProgramConfiguration?.preferences?.autoEnrollment || '')
+            });
+        }
         if (page.length < 100) break;
     }
     return offers;

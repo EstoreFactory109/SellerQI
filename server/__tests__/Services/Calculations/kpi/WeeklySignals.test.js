@@ -47,6 +47,18 @@ describe('detectSubscribeSaveSuspended', () => {
         expect(tasks.map(t => t.asin)).toEqual(['B1']);
         expect(tasks[0].error).toContain('3 subscribers');
     });
+
+    it('flags eligible offers opted out with no subscribers as not enrolled (live shape, Oct 2026)', () => {
+        const { tasks } = W3.detectSubscribeSaveSuspended({ weeklySignals: { subscribeSave: [
+            { asin: 'B3', sku: 'S3', eligibility: 'ELIGIBLE', subscriptions: 0, autoEnrollment: 'OPTED_OUT' },
+            { asin: 'B4', sku: 'S4', eligibility: 'ELIGIBLE', subscriptions: 2, autoEnrollment: 'OPTED_OUT' },
+            { asin: 'B5', sku: 'S5', eligibility: 'ELIGIBLE', subscriptions: 0, autoEnrollment: 'OPTED_IN' },
+            { asin: 'B6', sku: 'S6', eligibility: 'ELIGIBLE', subscriptions: 0 },
+            { asin: 'B7', sku: 'S7', eligibility: 'INELIGIBLE', subscriptions: 0, autoEnrollment: 'OPTED_OUT' }
+        ] } });
+        expect(tasks.map(t => [t.asin, t.renderData.state])).toEqual([['B3', 'not_enrolled']]);
+        expect(tasks[0].error).toContain('Not Enrolled');
+    });
 });
 
 describe('detectInboundPlacementFees', () => {

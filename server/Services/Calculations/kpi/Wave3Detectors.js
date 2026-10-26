@@ -501,10 +501,11 @@ function detectPricedAboveFeaturedOffer({ weeklySignals, products = [], buyBoxRo
 }
 
 /**
- * Subscribe & Save. Spreadsheet: eligible consumable ASIN not enrolled. Amazon's
- * Replenishment API lists only offers already in the program, so "eligible but not
- * enrolled" cannot be read; what it does show is an offer Amazon has suspended, which
- * stops serving its subscribers. That is the task here.
+ * Subscribe & Save. Spreadsheet: eligible consumable ASIN not enrolled. The
+ * Replenishment API has no "enrolled" field; the closest it gives (seen live) is an
+ * offer Amazon calls ELIGIBLE that the seller opted out of auto-enrollment and that
+ * has no subscribers, which is the "not enrolled" task here. It also shows offers
+ * Amazon has suspended, which stop serving their subscribers.
  */
 function detectSubscribeSaveSuspended({ weeklySignals, productsByAsin = new Map() }) {
     const offers = weeklySignals?.subscribeSave;
@@ -512,7 +513,22 @@ function detectSubscribeSaveSuspended({ weeklySignals, productsByAsin = new Map(
     const seen = new Set();
     const tasks = [];
     for (const o of offers) {
-        if (o?.eligibility !== 'SUSPENDED' || !o.asin || seen.has(o.asin)) continue;
+        if (!o?.asin || seen.has(o.asin)) continue;
+        if (o.eligibility === 'ELIGIBLE' && o.autoEnrollment === 'OPTED_OUT' && !(o.subscriptions > 0)) {
+            seen.add(o.asin);
+            tasks.push({
+                asin: o.asin,
+                productName: nameOf(productsByAsin, o.asin),
+                errorCategory: 'inventory',
+                errorType: 'subscribe_and_save',
+                error: 'Subscribe & Save | Not Enrolled: Amazon says this product can be sold on Subscribe & Save, but it is opted out and has no subscribers.',
+                solution: 'Enrol it in Seller Central (Programs > Subscribe & Save) to win repeat orders from subscribers.',
+                renderData: { sku: o.sku, subscriptions: 0, state: 'not_enrolled' },
+                status: PENDING
+            });
+            continue;
+        }
+        if (o.eligibility !== 'SUSPENDED') continue;
         seen.add(o.asin);
         tasks.push({
             asin: o.asin,
