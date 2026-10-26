@@ -113,7 +113,12 @@ async function detectAndStoreLowInventoryAlerts(userId, region, country) {
 
     // Running-out verdicts per SKU row, from the same rule as the tasks.
     const verdicts = new Map();
-    for (const row of replenishmentQty(products)) {
+    const Seller = require('../../../models/user-auth/sellerCentralModel.js');
+    const account = await Seller.findOne({ User: userId }).select('sellerAccount.country sellerAccount.region sellerAccount.replenishLeadTimeDays').lean()
+      .then(s => (s?.sellerAccount || []).find(a => a.country === country && a.region === region))
+      .catch(() => null);
+    const leadTimeDays = Number(account?.replenishLeadTimeDays) > 0 ? Number(account.replenishLeadTimeDays) : undefined;
+    for (const row of replenishmentQty(products, leadTimeDays ? { leadTimeDays } : {})) {
       if (row.status === 'Error') verdicts.set(`${row.asin}|${row.sku}`, row);
     }
     // ASINs already emailed as running out in the last week.

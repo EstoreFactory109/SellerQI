@@ -904,6 +904,35 @@ const confirmListingChanges = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, { confirmed: updated.modifiedCount || 0 }, 'Marked as your change'));
 });
 
+/**
+ * GET / PUT /api/pagewise/inventory/lead-time  Body (PUT): { days: 1-365 | null }
+ * The seller's replenishment lead time for this marketplace; null returns to the
+ * 45-day default. Used from the next data refresh.
+ */
+const getLeadTime = asyncHandler(async (req, res) => {
+    const Seller = require('../../models/user-auth/sellerCentralModel.js');
+    const { REPLENISH_DEFAULT_LEAD_TIME_DAYS } = require('../../Services/Calculations/Inventory_.js');
+    const seller = await Seller.findOne({ User: req.userId }).select('sellerAccount.country sellerAccount.region sellerAccount.replenishLeadTimeDays').lean();
+    const account = (seller?.sellerAccount || []).find(a => a.country === req.country && a.region === req.region);
+    const days = Number(account?.replenishLeadTimeDays) > 0 ? Number(account.replenishLeadTimeDays) : null;
+    return res.status(200).json(new ApiResponse(200, { days, defaultDays: REPLENISH_DEFAULT_LEAD_TIME_DAYS }, 'Lead time'));
+});
+
+const setLeadTime = asyncHandler(async (req, res) => {
+    const raw = req.body?.days;
+    const days = raw === null || raw === '' ? null : Number(raw);
+    if (days !== null && !(Number.isInteger(days) && days >= 1 && days <= 365)) {
+        return res.status(400).json(new ApiError(400, 'Lead time must be a whole number of days from 1 to 365'));
+    }
+    const Seller = require('../../models/user-auth/sellerCentralModel.js');
+    const update = days === null
+        ? { $unset: { 'sellerAccount.$[acct].replenishLeadTimeDays': '' } }
+        : { $set: { 'sellerAccount.$[acct].replenishLeadTimeDays': days } };
+    const result = await Seller.updateOne({ User: req.userId }, update, { arrayFilters: [{ 'acct.country': req.country, 'acct.region': req.region }] });
+    if (!result.matchedCount) return res.status(404).json(new ApiError(404, 'Seller account not found'));
+    return res.status(200).json(new ApiResponse(200, { days }, 'Lead time saved; it applies from the next data refresh'));
+});
+
 const updateTaskStatus = asyncHandler(async (req, res) => {
     const userId = req.userId;
     const { taskId, status } = req.body;
@@ -4197,6 +4226,8 @@ const getDashboardPhase3 = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+    getLeadTime,
+    setLeadTime,
     confirmListingChanges,
     approveTaskActions,
     getDashboardData,

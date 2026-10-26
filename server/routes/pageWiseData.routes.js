@@ -34,6 +34,8 @@ const {
     updateTaskStatus,
     approveTaskActions,
     confirmListingChanges,
+    getLeadTime,
+    setLeadTime,
     getInventoryData,
     getAsinWiseSalesData,
     getYourProductsData,
@@ -591,6 +593,10 @@ router.post('/tasks/approve-actions', auth, getLocation, approveTaskActions);
 
 // "I made this change" on a detail-page-changed task.
 router.post('/tasks/listing-changes/confirm', auth, getLocation, confirmListingChanges);
+
+// The seller's replenishment lead time for this marketplace.
+router.get('/inventory/lead-time', auth, getLocation, getLeadTime);
+router.put('/inventory/lead-time', auth, getLocation, setLeadTime);
 
 // ===== PPC METRICS (from PPCMetrics Model) =====
 // Get latest PPC metrics for dashboards

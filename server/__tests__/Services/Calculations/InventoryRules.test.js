@@ -16,6 +16,7 @@ describe('replenishmentQty', () => {
         expect(row.status).toBe('Error');
         expect(row.daysOfSupply).toBe(15);
         expect(row.Message).toContain('run out in about 15 days');
+        expect(row.Message).toContain('inside your 45-day lead time plus 14 days');
         expect(row.Message).toContain('Amazon recommends 100 units');
     });
 

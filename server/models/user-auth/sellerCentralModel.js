@@ -167,6 +167,15 @@ const sellerCentral=new mongoose.Schema({
   spiOrdersAuthDeniedReason: {
     type: String,
     required: false,
+  },
+  // Days from ordering stock to it being sellable at Amazon, set by the seller.
+  // Unset = the 45-day default (tasks-logics.xlsx "Products to Replenish").
+  replenishLeadTimeDays: {
+    type: Number,
+    required: false,
+    min: 1,
+    max: 365,
+    default: undefined
   }
 }, {timestamps: true})
 

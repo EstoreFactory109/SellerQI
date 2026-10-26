@@ -96,7 +96,7 @@ const replenishmentQty = (productArr, { leadTimeDays = REPLENISH_DEFAULT_LEAD_TI
             replenishmentArr.push({
                 ...row,
                 status: "Error",
-                Message: `These products will run out in about ${daysOfSupply ?? 0} days at the current sales rate (${available} available, ${inbound} inbound, ${unitsSold30} sold in the last 30 days).${qtyHint}`,
+                Message: `These products will run out in about ${daysOfSupply ?? 0} days at the current sales rate (${available} available, ${inbound} inbound, ${unitsSold30} sold in the last 30 days), inside your ${leadTimeDays}-day lead time plus ${REPLENISH_BUFFER_DAYS} days.${qtyHint}`,
                 HowToSolve: "Place a purchase order or send inventory now, using Amazon's recommended quantity as a guide."
             });
         } else {

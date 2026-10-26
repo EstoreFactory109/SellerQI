@@ -182,7 +182,7 @@ class AnalyseService {
 
         // Process inventory analysis
         stepStart = Date.now();
-        const inventoryAnalysis = this.processInventoryAnalysis(allData, { userId, country, region });
+        const inventoryAnalysis = this.processInventoryAnalysis(allData, { userId, country, region, leadTimeDays: SellerAccount?.replenishLeadTimeDays });
         result.InventoryAnalysis = inventoryAnalysis.analysis;
         logger.info(`[PERF] processInventoryAnalysis completed in ${Date.now() - stepStart}ms`);
         
@@ -1243,7 +1243,9 @@ class AnalyseService {
         // Process Replenishment/Restock Data for each ASIN
         if (safeRestockData.Products && Array.isArray(safeRestockData.Products)) {
             try {
-                const replenishmentResults = replenishmentQty(safeRestockData.Products);
+                // The seller's own lead time when set, else the default.
+                const leadTimeDays = Number(context.leadTimeDays) > 0 ? Number(context.leadTimeDays) : undefined;
+                const replenishmentResults = replenishmentQty(safeRestockData.Products, leadTimeDays ? { leadTimeDays } : {});
                 inventoryAnalysis.replenishment = replenishmentResults || [];
             } catch (error) {
                 logger.error(`Error processing replenishment data: ${error.message}`);

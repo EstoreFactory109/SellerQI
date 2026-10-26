@@ -225,6 +225,27 @@ export default function Tasks() {
   const [approveTask, setApproveTask] = useState(null);
   // The removal_confirm_receipt task whose "Confirm what arrived" form is open.
   const [receiptTaskId, setReceiptTaskId] = useState(null);
+  // Replenishment lead time for this marketplace (server default 45 days when unset).
+  const [leadTime, setLeadTime] = useState(null); // { days, defaultDays }
+  const [leadTimeEditing, setLeadTimeEditing] = useState(false);
+  const [leadTimeInput, setLeadTimeInput] = useState('');
+  const [leadTimeNote, setLeadTimeNote] = useState(null);
+  const saveLeadTime = async () => {
+    const days = leadTimeInput.trim() === '' ? null : Number(leadTimeInput);
+    if (days !== null && !(Number.isInteger(days) && days >= 1 && days <= 365)) {
+      setLeadTimeNote({ ok: false, text: 'Enter a whole number of days from 1 to 365.' });
+      return;
+    }
+    try {
+      await axiosInstance.put('/api/pagewise/inventory/lead-time', { days }, { withCredentials: true });
+      setLeadTime((lt) => ({ ...(lt || {}), days }));
+      setLeadTimeEditing(false);
+      setLeadTimeNote({ ok: true, text: 'Saved. Replenishment tasks use it from the next data refresh.' });
+      trackEvent('lead_time_set', { days: days ?? 'default' });
+    } catch (err) {
+      setLeadTimeNote({ ok: false, text: err.response?.data?.message || 'Could not save. Please try again.' });
+    }
+  };
   // detail_page_changed: the seller says the change was theirs.
   const [mineSaving, setMineSaving] = useState(null);
   const markChangeAsMine = async (item) => {
@@ -327,6 +348,15 @@ export default function Tasks() {
       dispatch(fetchTasks());
     }
   }, [userData?.userId, tasks.length, dispatch]);
+
+  // The lead time replenishment tasks are judged on, only when there are any.
+  const hasReplenishTasks = tasks.some((t) => String(t.errorType || '').startsWith('replenishment_needed'));
+  useEffect(() => {
+    if (!hasReplenishTasks || leadTime) return;
+    axiosInstance.get('/api/pagewise/inventory/lead-time', { withCredentials: true })
+      .then((res) => setLeadTime(res.data?.data || null))
+      .catch(() => {});
+  }, [hasReplenishTasks, leadTime]);
 
   // Create a map of ASIN to product details for quick lookup
   const productDetailsMap = useMemo(() => {
@@ -1011,6 +1041,36 @@ export default function Tasks() {
                                 {resellerNotes[item.taskId].text}
                               </span>
                             )}
+                          </div>
+                        )}
+                        {String(item.errorType || '').startsWith('replenishment_needed') && leadTime && (
+                          <div className="mt-2 text-xs flex flex-wrap items-center gap-2" style={{ color: COLORS.textSecondary }}>
+                            {leadTimeEditing ? (
+                              <>
+                                <label htmlFor={`lead-time-${item.taskId}`}>Your lead time (days):</label>
+                                <input
+                                  id={`lead-time-${item.taskId}`}
+                                  type="number"
+                                  min="1"
+                                  max="365"
+                                  value={leadTimeInput}
+                                  onChange={(e) => setLeadTimeInput(e.target.value)}
+                                  placeholder={String(leadTime.defaultDays)}
+                                  className="w-20 rounded border px-2 py-0.5"
+                                  style={{ borderColor: COLORS.border, background: COLORS.surfaceElevated, color: COLORS.textPrimary }}
+                                />
+                                <button type="button" onClick={saveLeadTime} className="px-2 py-0.5 rounded text-xs font-semibold" style={{ background: COLORS.accent, color: '#061021' }}>Save</button>
+                                <button type="button" onClick={() => setLeadTimeEditing(false)} className="px-2 py-0.5 rounded text-xs border" style={{ borderColor: COLORS.border, color: COLORS.textSecondary, background: 'transparent' }}>Cancel</button>
+                              </>
+                            ) : (
+                              <>
+                                <span>Judged on a {leadTime.days || leadTime.defaultDays}-day lead time{leadTime.days ? '' : ' (default)'} plus 14 days.</span>
+                                <button type="button" onClick={() => { setLeadTimeInput(leadTime.days ? String(leadTime.days) : ''); setLeadTimeEditing(true); setLeadTimeNote(null); }} className="underline" style={{ color: COLORS.accent, background: 'transparent' }}>
+                                  Set your lead time
+                                </button>
+                              </>
+                            )}
+                            {leadTimeNote && <span role="status" style={{ color: leadTimeNote.ok ? COLORS.good : COLORS.watch }}>{leadTimeNote.text}</span>}
                           </div>
                         )}
                         {item.errorType === 'detail_page_changed' && !completedTasks.has(item.taskId) && (

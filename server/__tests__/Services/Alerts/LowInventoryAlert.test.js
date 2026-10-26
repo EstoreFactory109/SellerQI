@@ -14,12 +14,16 @@ jest.mock('../../../models/alerts/Alert.js', () => ({
         create: async (doc) => { mockCreated.push(doc); return { _id: { toString: () => 'id' }, ...doc }; }
     }
 }));
+let mockLeadTime;
+jest.mock('../../../models/user-auth/sellerCentralModel.js', () => ({
+    findOne: () => ({ select: () => ({ lean: () => Promise.resolve({ sellerAccount: [{ country: 'US', region: 'NA', replenishLeadTimeDays: mockLeadTime }] }) }) })
+}));
 const { detectAndStoreLowInventoryAlerts } = require('../../../Services/Alerts/Other-Alerts/LowInventoryAlertService.js');
 
 const row = (over) => ({ asin: 'A1', merchantSku: 'S1', currencyCode: 'USD', available: '30', inbound: '0', unitsSoldLast30Days: '60', alert: '', recommendedReplenishmentQty: '100', ...over });
 const doc = (products) => ({ _id: 'd', createdAt: new Date(), Products: products });
 
-beforeEach(() => { mockDocs.length = 0; mockRecent.length = 0; mockCreated.length = 0; });
+beforeEach(() => { mockDocs.length = 0; mockRecent.length = 0; mockCreated.length = 0; mockLeadTime = undefined; });
 
 it('emails products running out, with days left and Amazon\'s quantity', async () => {
     mockDocs.push(doc([row(), row({ asin: 'A2', merchantSku: 'S2', inbound: '200' })]));
@@ -39,4 +43,12 @@ it('sends a product at most once a week', async () => {
     mockDocs.push(doc([row()]));
     mockRecent.push({ products: [{ asin: 'A1', alert: 'low_stock' }] });
     expect((await detectAndStoreLowInventoryAlerts('U', 'NA', 'US')).created).toBe(false);
+});
+
+it('uses the seller\'s own lead time when set', async () => {
+    // 2/day, 30 + 100 inbound = 65 days: fine at 45 + 14, running out at 60 + 14.
+    mockDocs.push(doc([row({ inbound: '100' })]));
+    expect((await detectAndStoreLowInventoryAlerts('U', 'NA', 'US')).created).toBe(false);
+    mockLeadTime = 60;
+    expect((await detectAndStoreLowInventoryAlerts('U', 'NA', 'US')).created).toBe(true);
 });
