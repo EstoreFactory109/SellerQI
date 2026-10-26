@@ -591,7 +591,60 @@ function detectBudgetLimitedProfitable({ budgetRecs, campaignRows = [], now }) {
     return { tasks, covered: true };
 }
 
+const FEEDBACK_NEW_DAYS = 30;
+// Amazon removes feedback that is only about an Amazon-fulfilled delivery, or that is
+// a product review rather than about the seller. A rough guide from the comment, so
+// the task says "looks like", never that Amazon will remove it.
+const DELIVERY_WORDS = /\b(deliver\w*|shipp\w*|arriv\w*|package|parcel|post office|carrier|courier|tracking|never (?:got|received|came)|lost in|late)\b/i;
+const PRODUCT_WORDS = /\b(quality|broke|broken|defective|doesn'?t work|does not work|stopped working|flimsy|cheap(?:ly)?|smell\w*|taste\w*|too (?:small|big|large)|size|fit|waste of money)\b/i;
+
+/** Pure: what a negative comment is mostly about. */
+function feedbackTopic(comment) {
+    const text = String(comment || '');
+    if (DELIVERY_WORDS.test(text)) return 'delivery';
+    if (PRODUCT_WORDS.test(text)) return 'product';
+    return 'other';
+}
+
+/**
+ * Negative seller feedback, one task per order. Spreadsheet: new 1 or 2 star feedback
+ * since the last run, cooldown per order. The weekly report covers 60 days; feedback
+ * from the last 30 days becomes a task (older feedback is past the useful time to
+ * reach the buyer). Feedback the buyer or Amazon removed drops out of the report, and
+ * the task resolves.
+ */
+function detectNegativeFeedbackOrders({ weeklySignals, now }) {
+    const feedback = weeklySignals?.sellerFeedback;
+    if (!feedback || !Array.isArray(feedback.negatives)) return { tasks: [], covered: false };
+    const since = now.getTime() - FEEDBACK_NEW_DAYS * R.DAY_MS;
+    const tasks = [];
+    for (const f of feedback.negatives) {
+        const at = f?.date ? Date.parse(`${f.date}T00:00:00Z`) : NaN;
+        if (!f?.orderId || (Number.isFinite(at) && at < since)) continue;
+        const topic = feedbackTopic(f.comment);
+        const advice = {
+            delivery: 'It looks like it is about delivery. If Amazon shipped this order (FBA), ask Amazon to remove it: Seller Central > Performance > Feedback > Request removal.',
+            product: 'It looks like a product review rather than feedback on you as a seller; Amazon removes those on request: Seller Central > Performance > Feedback > Request removal.',
+            other: 'Contact the buyer to put things right, then ask them to update their feedback.'
+        }[topic];
+        const quote = String(f.comment || '').trim();
+        tasks.push({
+            asin: `ORDER:${f.orderId}`,
+            productName: `Order ${f.orderId}`,
+            errorCategory: 'account',
+            errorType: 'negative_feedback_order',
+            error: `Account Health | Negative Feedback: You received ${f.rating}-star seller feedback on order ${f.orderId}${f.date ? ` (${f.date})` : ''}${quote ? `: "${quote.length > 200 ? `${quote.slice(0, 200)}…` : quote}"` : '.'}`,
+            solution: `${advice} You can also send Amazon's standard request asking the buyer to update their feedback (once per order).`,
+            renderData: { orderId: f.orderId, rating: f.rating, date: f.date, topic, responded: !!f.responded },
+            status: PENDING
+        });
+    }
+    return { tasks, covered: true };
+}
+
 module.exports = {
+    detectNegativeFeedbackOrders,
+    feedbackTopic,
     detectBudgetLimitedProfitable,
     detectPricedAboveFeaturedOffer,
     detectSubscribeSaveSuspended,

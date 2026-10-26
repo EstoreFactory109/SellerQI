@@ -28,6 +28,7 @@ const PRIORITY_LEVEL = {
     'account:a_z_claims': 'P1',
     'account:ahr_early_warning': 'P1',
     'account:negativeFeedbacks': 'P2',
+    'account:negative_feedback_order': 'P2',
     'account:NCX': 'P2',
     'account:invoice_defect_rate': 'P2',
     'account:responseUnder24HoursCount': 'P3',

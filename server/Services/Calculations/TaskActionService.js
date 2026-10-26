@@ -19,6 +19,8 @@
  *   listing text tasks (title, bullets, description, backend keywords) -> replace
  *     that field with text the seller writes or picks from AI suggestions, checked
  *     against the same listing rules before anything is sent ("Fix It")
+ *   negative_feedback_order -> send Amazon's own "please update your feedback"
+ *     message for that order (Messaging API; Amazon writes it, once per order)
  *
  * Kill switch: TASK_ACTIONS_DISABLED=true stops every change (proposals are still
  * shown, approving returns an error).
@@ -108,6 +110,16 @@ function proposedActionFor(task) {
             field: listing.field,
             summary: `Replace this product's ${listing.label} on Amazon with the text you approve below.`,
             payload: { field: listing.field, asin: task.asin }
+        };
+    }
+    if (task?.errorCategory === 'account' && task.errorType === 'negative_feedback_order') {
+        const orderId = String(task.renderData?.orderId || '').trim();
+        if (!orderId) return null;
+        return {
+            type: 'request_feedback_update',
+            label: 'Ask buyer to update feedback',
+            summary: `Send Amazon's standard message asking the buyer of order ${orderId} to consider updating their feedback. Amazon writes the message and allows it once per order; it cannot offer anything in return. Best sent after you have resolved the buyer's problem.`,
+            payload: { orderId }
         };
     }
     if (task?.errorCategory !== 'sponsoredAds') return null;
@@ -215,6 +227,10 @@ async function executeListingFix(action, { userId, country, region }) {
 
 async function execute(action, { userId, country, region }) {
     if (action.type === 'update_listing_content') return executeListingFix(action, { userId, country, region });
+    if (action.type === 'request_feedback_update') {
+        const { requestFeedbackUpdate } = require('../Sp_API/FeedbackRequest.js');
+        return requestFeedbackUpdate({ userId, country, region, orderId: action.payload.orderId });
+    }
     const { resolveAdsCredentials } = require('../AmazonAds/resolveAdsCredentials.js');
     const clientId = process.env.AMAZON_ADS_CLIENT_ID;
     if (!clientId) throw new Error('AMAZON_ADS_CLIENT_ID is not set');

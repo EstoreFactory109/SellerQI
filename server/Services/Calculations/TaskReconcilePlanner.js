@@ -106,6 +106,7 @@ const SOURCE_BY_TYPE = {
     'inventory:subscribe_and_save': 'kpi.subscribeSave',
     'inventory:inbound_placement_fees': 'kpi.placementFees',
     'sponsoredAds:budget_limited_profitable': 'kpi.budgetLimited',
+    'account:negative_feedback_order': 'kpi.sellerFeedback',
     'inventory:inbound_shortage': 'kpi.inboundShortage',
     'inventory:refund_not_returned': 'kpi.refundNotReturned',
     'conversion:high_traffic_low_conversion': 'kpi.trafficMix',

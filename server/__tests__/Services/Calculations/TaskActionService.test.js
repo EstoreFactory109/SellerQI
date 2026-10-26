@@ -54,6 +54,8 @@ jest.mock('../../../Services/Sp_API/UpdateProductContentService.js', () => ({
     updateProductContent: (...a) => mockUpdateContent(...a),
     FIX_STATUS: { SUCCESS: 'SUCCESS', PARTIAL_SUCCESS: 'PARTIAL_SUCCESS', CONFLICT_RESOLVED: 'CONFLICT_RESOLVED' }
 }));
+const mockFeedbackRequest = jest.fn();
+jest.mock('../../../Services/Sp_API/FeedbackRequest.js', () => ({ requestFeedbackUpdate: (...a) => mockFeedbackRequest(...a) }));
 jest.mock('../../../models/system/ListingFixStatusModel.js', () => ({ markAsFixed: async (p) => { mockFixed.push(p); } }));
 jest.mock('../../../models/user-auth/sellerCentralModel.js', () => ({
     findOne: () => ({ select: () => ({ lean: async () => ({ brand: 'Acme', sellerAccount: [{ country: 'US', region: 'NA', products: [{ asin: 'B01', sku: 'OLD', status: 'Inactive' }, { asin: 'B01', sku: 'SKU-1', status: 'Active' }] }] }) }) })
@@ -294,5 +296,23 @@ describe('raise_budget', () => {
         expect(changed.status).toBe('failed');
         expect(changed.message).toContain('changed since the suggestion');
         expect(mockBudget).not.toHaveBeenCalled();
+    });
+});
+
+describe('request_feedback_update', () => {
+    const task = { taskId: 'T13', asin: 'ORDER:114-1', errorCategory: 'account', errorType: 'negative_feedback_order', renderData: { orderId: '114-1', rating: 1 } };
+
+    it('proposes Amazon\'s standard message for the order', () => {
+        expect(S.proposedActionFor(task)).toMatchObject({ type: 'request_feedback_update', payload: { orderId: '114-1' } });
+        expect(S.proposedActionFor({ ...task, renderData: {} })).toBeNull();
+    });
+
+    it('sends it once, and never twice', async () => {
+        mockTasks.push(task);
+        mockFeedbackRequest.mockResolvedValue({ orderId: '114-1', sent: true });
+        expect((await run(['T13']))[0].status).toBe('succeeded');
+        expect(mockFeedbackRequest).toHaveBeenCalledWith(expect.objectContaining({ orderId: '114-1', country: 'US', region: 'NA' }));
+        expect((await run(['T13']))[0].status).toBe('skipped');
+        expect(mockFeedbackRequest).toHaveBeenCalledTimes(1);
     });
 });

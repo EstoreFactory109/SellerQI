@@ -10,6 +10,8 @@
  *   seller has in the program, with eligibility.
  * - Inbound placement fees (Fulfillment Inbound 2024-03-20): inbound plans created in
  *   the last 30 days, and the fees of each plan's accepted placement option.
+ * - Seller feedback (GET_SELLER_FEEDBACK_DATA report, last 60 days): the 1 and 2 star
+ *   ratings only, with the order ID and comment (the rater email is not kept).
  */
 const axios = require('axios');
 const logger = require('../../utils/Logger.js');
@@ -18,6 +20,10 @@ const MAX_FOEP_SKUS = 200;
 const FOEP_BATCH = 40;
 const FOEP_PAUSE_MS = 31000;
 const PLACEMENT_WINDOW_DAYS = 30;
+const FEEDBACK_WINDOW_DAYS = 60;
+// Report dates are short dates in the marketplace's own order: month first in North
+// America ("10/5/26" seen live on US), day first elsewhere.
+const MONTH_FIRST = new Set(['US', 'CA', 'MX']);
 
 const hostOf = (baseUri) => `https://${String(baseUri).replace(/^https?:\/\//, '').replace(/\/$/, '')}`;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -40,6 +46,57 @@ function parseFoepResponses(responses = []) {
         });
     }
     return rows;
+}
+
+/** Pure: a feedback report date ("10/5/26", "10/05/2026" or ISO) -> 'YYYY-MM-DD', or null. */
+function feedbackDay(value, country) {
+    const text = String(value || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+    const m = text.match(/^(\d{1,2})[/.](\d{1,2})[/.](\d{2}|\d{4})$/);
+    if (!m) return null;
+    const [a, b] = [Number(m[1]), Number(m[2])];
+    const [month, day] = MONTH_FIRST.has(String(country || '').toUpperCase()) ? [a, b] : [b, a];
+    const year = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/** Pure: parsed report rows -> the 1-2 star feedback, one per order. Exported for tests. */
+function negativeFeedbackRows(records = [], country) {
+    const byOrder = new Map();
+    for (const r of records || []) {
+        const rating = Number(r?.Rating ?? r?.rating);
+        const orderId = String(r?.['Order ID'] ?? r?.['order-id'] ?? '').trim();
+        if (!(rating >= 1 && rating <= 2) || !orderId) continue;
+        byOrder.set(orderId, {
+            orderId,
+            rating,
+            date: feedbackDay(r.Date ?? r.date, country),
+            comment: String(r.Comments ?? r.comments ?? '').slice(0, 1000),
+            responded: String(r['Your Response'] ?? '').trim().length > 0
+        });
+    }
+    return [...byOrder.values()];
+}
+
+async function readSellerFeedback({ accessToken, baseUri, marketplaceId, country, now }) {
+    const { runSpApiReportInline } = require('./spApiReportAdapter.js');
+    const { parseAsync } = require('../../utils/asyncCsvParser');
+    const result = await runSpApiReportInline({
+        accessToken,
+        baseuri: String(baseUri).replace(/^https?:\/\//, '').replace(/\/$/, ''),
+        body: {
+            reportType: 'GET_SELLER_FEEDBACK_DATA',
+            marketplaceIds: [marketplaceId],
+            dataStartTime: new Date(now.getTime() - FEEDBACK_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+            dataEndTime: now.toISOString()
+        },
+        retries: 1
+    });
+    if (result.status === 'NO_DATA') return { windowDays: FEEDBACK_WINDOW_DAYS, negatives: [] };
+    if (result.status !== 'DONE') throw new Error(`feedback report ${result.status}: ${result.note || ''}`);
+    const records = await parseAsync(result.buffer, { delimiter: '\t', columns: true, reportType: 'GET_SELLER_FEEDBACK_DATA' });
+    return { windowDays: FEEDBACK_WINDOW_DAYS, total: records.length, negatives: negativeFeedbackRows(records, country) };
 }
 
 async function readFeaturedOffers({ host, headers, marketplaceId, skus }) {
@@ -122,13 +179,15 @@ const syncWeeklySignals = async (accessToken, marketplaceIds, userId, baseUri, c
         User: userId, country, region,
         featuredOffers: skus ? await part('Featured offer expected price', () => readFeaturedOffers({ host, headers, marketplaceId, skus })) : null,
         subscribeSave: await part('Subscribe & Save offers', () => readSubscribeSave({ host, headers, marketplaceId })),
-        placementFees: await part('Inbound placement fees', () => readPlacementFees({ host, headers, now }))
+        placementFees: await part('Inbound placement fees', () => readPlacementFees({ host, headers, now })),
+        sellerFeedback: await part('Seller feedback', () => readSellerFeedback({ accessToken, baseUri, marketplaceId, country, now }))
     };
     const WeeklySignals = require('../../models/products/WeeklySignalsModel.js');
     const saved = await WeeklySignals.create(doc);
     logger.info('[WeeklySignals] stored', {
         userId: String(userId), country, region,
-        featuredOffers: doc.featuredOffers?.length ?? null, subscribeSave: doc.subscribeSave?.length ?? null, placementFeesTotal: doc.placementFees?.total ?? null
+        featuredOffers: doc.featuredOffers?.length ?? null, subscribeSave: doc.subscribeSave?.length ?? null, placementFeesTotal: doc.placementFees?.total ?? null,
+        negativeFeedback: doc.sellerFeedback?.negatives?.length ?? null
     });
     return saved;
 };
@@ -139,3 +198,6 @@ module.exports.parseFoepResponses = parseFoepResponses;
 module.exports.readFeaturedOffers = readFeaturedOffers;
 module.exports.readSubscribeSave = readSubscribeSave;
 module.exports.readPlacementFees = readPlacementFees;
+module.exports.readSellerFeedback = readSellerFeedback;
+module.exports.negativeFeedbackRows = negativeFeedbackRows;
+module.exports.feedbackDay = feedbackDay;

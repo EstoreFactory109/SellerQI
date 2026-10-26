@@ -3,7 +3,7 @@
  * (suspended offers; "eligible but not enrolled" is not readable), inbound placement fees.
  */
 const W3 = require('../../../../Services/Calculations/kpi/Wave3Detectors.js');
-const { parseFoepResponses } = require('../../../../Services/Sp_API/WeeklySignalsSync.js');
+const { parseFoepResponses, negativeFeedbackRows, feedbackDay } = require('../../../../Services/Sp_API/WeeklySignalsSync.js');
 
 describe('parseFoepResponses (live response shape, Oct 2026)', () => {
     it('reads the expected price, or none without a competing offer', () => {
@@ -82,5 +82,51 @@ describe('detectBudgetLimitedProfitable', () => {
     it('makes no verdict on an old or failed read', () => {
         expect(W3.detectBudgetLimitedProfitable({ budgetRecs: { at: new Date('2026-10-01'), recs: [] }, now: NOW }).covered).toBe(false);
         expect(W3.detectBudgetLimitedProfitable({ budgetRecs: { at: NOW, recs: null }, now: NOW }).covered).toBe(false);
+    });
+});
+
+describe('negativeFeedbackRows (live report columns, Oct 2026)', () => {
+    it('keeps 1-2 star rows per order, without the rater email', () => {
+        const rows = negativeFeedbackRows([
+            { Date: '10/5/26', Rating: '1', Comments: 'post office says it was delivered in another state', 'Your Response': '', 'Order ID': '114-1', 'Rater Email': 'x@y.com' },
+            { Date: '10/6/26', Rating: '5', Comments: 'great', 'Your Response': '', 'Order ID': '114-2' },
+            { Date: '10/7/26', Rating: '2', Comments: '', 'Your Response': 'Sorry!', 'Order ID': '114-3' }
+        ], 'US');
+        expect(rows).toEqual([
+            { orderId: '114-1', rating: 1, date: '2026-10-05', comment: 'post office says it was delivered in another state', responded: false },
+            { orderId: '114-3', rating: 2, date: '2026-10-07', comment: '', responded: true }
+        ]);
+    });
+
+    it('reads dates month first in North America, day first elsewhere', () => {
+        expect(feedbackDay('10/5/26', 'US')).toBe('2026-10-05');
+        expect(feedbackDay('10/5/26', 'UK')).toBe('2026-05-10');
+        expect(feedbackDay('2026-10-05T00:00:00Z', 'DE')).toBe('2026-10-05');
+        expect(feedbackDay('13/13/26', 'US')).toBeNull();
+    });
+});
+
+describe('detectNegativeFeedbackOrders', () => {
+    const now = new Date('2026-10-26T12:00:00Z');
+    const signals = (negatives) => ({ sellerFeedback: { windowDays: 60, negatives } });
+
+    it('makes one task per order from the last 30 days, with removal advice by topic', () => {
+        const { tasks, covered } = W3.detectNegativeFeedbackOrders({ now, weeklySignals: signals([
+            { orderId: '114-1', rating: 1, date: '2026-10-05', comment: 'Never received it, the package was lost' },
+            { orderId: '114-2', rating: 2, date: '2026-10-20', comment: 'Poor quality, broke after a day' },
+            { orderId: '114-3', rating: 1, date: '2026-10-21', comment: 'Seller was rude' },
+            { orderId: '114-4', rating: 1, date: '2026-09-01', comment: 'old' }
+        ]) });
+        expect(covered).toBe(true);
+        expect(tasks.map(t => [t.asin, t.renderData.topic])).toEqual([['ORDER:114-1', 'delivery'], ['ORDER:114-2', 'product'], ['ORDER:114-3', 'other']]);
+        expect(tasks[0]).toMatchObject({ errorCategory: 'account', errorType: 'negative_feedback_order' });
+        expect(tasks[0].error).toContain('1-star seller feedback on order 114-1');
+        expect(tasks[0].solution).toContain('Request removal');
+        expect(tasks[2].solution).toContain('Contact the buyer');
+    });
+
+    it('makes no verdict when the report was not read', () => {
+        expect(W3.detectNegativeFeedbackOrders({ now, weeklySignals: { sellerFeedback: null } })).toEqual({ tasks: [], covered: false });
+        expect(W3.detectNegativeFeedbackOrders({ now, weeklySignals: signals([]) })).toEqual({ tasks: [], covered: true });
     });
 });

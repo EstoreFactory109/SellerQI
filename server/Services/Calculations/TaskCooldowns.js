@@ -25,6 +25,7 @@ const COOLDOWN_DAYS = {
     'account:invoice_defect_rate': UNTIL_RESOLVED,
     'account:a_z_claims': PER_EVENT,
     'account:negativeFeedbacks': PER_EVENT,
+    'account:negative_feedback_order': PER_EVENT,
     'account:NCX': 30,
     'account:responseUnder24HoursCount': 1,
     'account:ahr_early_warning': 7,

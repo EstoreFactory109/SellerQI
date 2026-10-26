@@ -352,6 +352,10 @@ const GROUP_COPY = {
         title: 'Products flagged for negative customer experience',
         action: 'Fix the product or listing problems driving complaints'
     },
+    'account:negative_feedback_order': {
+        title: 'Orders with new negative seller feedback',
+        action: 'Request removal where allowed, or contact the buyer'
+    },
     'account:negativeFeedbacks': {
         title: 'Negative seller feedback needing a response',
         action: 'Respond to each, and request removal where the rules allow'

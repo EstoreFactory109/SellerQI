@@ -14,6 +14,7 @@ const { calculateSponsoredAdsMetrics, calculateNegativeKeywordsMetrics } = requi
 const { createDefaultDashboardData, mergeWithDefaults } = require('./DefaultDataStructure.js');
 const CreateTaskService = require('./CreateTasksService.js');
 const { runKpiDetectors } = require('./kpi/index.js');
+const withoutKey = (obj, key) => { const { [key]: _omit, ...rest } = obj; return rest; };
 const { priorityLevelFor, blocksAmazonReady } = require('./TaskPriorityLevels.js');
 const logger = require('../../utils/Logger.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
@@ -2005,7 +2006,11 @@ const analyseData = async (data, userId = null, options = {}) => {
         inventoryProductWiseErrors: inventoryProductWiseErrors,
         profitabilityErrorDetails: profitabilityErrorsData.errorDetails,
         sponsoredAdsErrorDetails: sponsoredAdsErrorsData.errorDetails,
-        AccountErrors: data.AccountData?.accountHealth || {},
+        // Per-order negative feedback (weekly report) replaces the account-level
+        // "your negative feedback count rose" task once it has been read.
+        AccountErrors: kpiResult.coverage?.['kpi.sellerFeedback'] === true
+            ? withoutKey(data.AccountData?.accountHealth || {}, 'negativeFeedbacks')
+            : (data.AccountData?.accountHealth || {}),
         kpiTasks: kpiResult.tasks,
         TotalProducts: TotalProducts
     };
