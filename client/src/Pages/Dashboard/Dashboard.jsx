@@ -1179,9 +1179,16 @@ const DashboardContent = () => {
                   feesAtRisk?.storageUtilization ? `Storage: ${feesAtRisk.storageUtilization.ratio} weeks of stock (surcharge over 22)` : null
                 ].filter(Boolean).join(' · ') || undefined}
                 status={(feesAtRisk?.agedSurcharge?.amount > 0 || feesAtRisk?.lowInventoryFee?.products > 0 || feesAtRisk?.storageUtilization?.amount > 0) ? STATUS.WATCH : undefined}
-                statusLabel={(feesAtRisk?.agedSurcharge?.amount > 0 || feesAtRisk?.lowInventoryFee?.products > 0 || feesAtRisk?.storageUtilization?.amount > 0) ? 'Avoidable' : undefined}
+                statusLabel={(feesAtRisk?.available || feesAtRisk?.storageUtilization)
+                  ? ((feesAtRisk?.agedSurcharge?.amount > 0 || feesAtRisk?.lowInventoryFee?.products > 0 || feesAtRisk?.storageUtilization?.amount > 0) ? 'Avoidable' : undefined)
+                  : 'Waiting for data'}
                 noData={(feesAtRisk?.available || feesAtRisk?.storageUtilization) ? undefined : {
-                  message: 'Fees at risk appear once Amazon\'s inventory planning report has been read for this marketplace.',
+                  // Nothing for the seller to set up: Amazon's report has to arrive (or be re-read).
+                  message: feesAtRisk?.reason === 'stale'
+                    ? 'Amazon\'s inventory planning report for this marketplace is out of date. Fees at risk appear after the next one is read.'
+                    : feesAtRisk?.reason === 'columns_missing'
+                      ? 'Fees at risk appear after the next daily read of Amazon\'s inventory planning report.'
+                      : 'Fees at risk appear once Amazon\'s inventory planning report has been read for this marketplace.',
                 }}
                 footnote={(feesAtRisk?.available || feesAtRisk?.storageUtilization)
                   ? `Aged inventory surcharge and storage utilization surcharge (Amazon's estimates${feesAtRisk?.storageUtilization?.month ? `, storage for ${feesAtRisk.storageUtilization.month}` : ''}) and low-inventory fee; returns processing fees not included.`
