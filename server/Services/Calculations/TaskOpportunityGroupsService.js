@@ -352,6 +352,10 @@ const GROUP_COPY = {
         title: 'Products flagged for negative customer experience',
         action: 'Fix the product or listing problems driving complaints'
     },
+    'inventory:storage_utilization_risk': {
+        title: 'Account storage near or over Amazon\'s surcharge level',
+        action: 'Slow inbound and clear the products taking the most space'
+    },
     'account:negative_feedback_order': {
         title: 'Orders with new negative seller feedback',
         action: 'Request removal where allowed, or contact the buyer'

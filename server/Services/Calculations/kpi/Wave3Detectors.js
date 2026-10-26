@@ -591,6 +591,43 @@ function detectBudgetLimitedProfitable({ budgetRecs, campaignRows = [], now }) {
     return { tasks, covered: true };
 }
 
+/**
+ * Storage utilization surcharge risk. Spreadsheet: account ratio over 22 weeks
+ * (surcharge), early warning over 18; only accounts the surcharge can apply to
+ * (Amazon: 25+ cubic feet a day on average). The ratio is last month's (Amazon's
+ * monthly storage fee report). Amazon also exempts sellers new to FBA, which no API
+ * shows: over 22 weeks with no surcharge charged, the task says it may be exempt.
+ */
+function detectStorageUtilization({ weeklySignals }) {
+    const su = weeklySignals?.storageUtilization;
+    if (!su || su.ratio === null || su.ratio === undefined || !/week/i.test(String(su.ratioUnits || 'weeks'))) return { tasks: [], covered: false };
+    const cubicFeet = /feet|ft/i.test(String(su.volumeUnits || ''));
+    // Outside cubic-feet marketplaces the 25 cubic feet floor is not checked.
+    if (cubicFeet && !(Number(su.totalVolume) >= R.STORAGE_UTILIZATION_MIN_CUBIC_FEET)) return { tasks: [], covered: true };
+    const ratio = Number(su.ratio);
+    if (!(ratio > R.STORAGE_UTILIZATION_WARN_WEEKS)) return { tasks: [], covered: true };
+    const over = ratio > R.STORAGE_UTILIZATION_SURCHARGE_WEEKS;
+    const surcharge = Number(su.estimatedSurcharge) || 0;
+    const top = (su.topAsins || []).map(a => a.asin).join(', ');
+    const weeks = Math.round(ratio * 10) / 10;
+    return {
+        tasks: [{
+            asin: 'ACCOUNT',
+            productName: 'Storage utilization',
+            errorCategory: 'inventory',
+            errorType: 'storage_utilization_risk',
+            error: over
+                ? `Inventory | Storage Utilization: Your account holds about ${weeks} weeks of stock (${su.month || 'last month'}), over Amazon's ${R.STORAGE_UTILIZATION_SURCHARGE_WEEKS} weeks, which adds a surcharge to all storage.${surcharge > 0 ? ` Amazon estimated the surcharge at ${usd(surcharge, su.currency)}.` : ' Amazon charged no surcharge, so the account may be exempt (new to FBA).'}`
+                : `Inventory | Storage Utilization: Your account holds about ${weeks} weeks of stock (${su.month || 'last month'}). Over ${R.STORAGE_UTILIZATION_SURCHARGE_WEEKS} weeks, Amazon adds a surcharge to all storage.`,
+            solution: `Pause big inbound shipments and clear slow movers until the ratio is under ${R.STORAGE_UTILIZATION_SURCHARGE_WEEKS} weeks.${top ? ` The products taking the most space: ${top}.` : ''}`,
+            ...(over && surcharge > 0 ? { amount: surcharge, amountIsEstimated: true } : {}),
+            renderData: { ratio: weeks, month: su.month, surcharge, totalVolume: su.totalVolume, topAsins: su.topAsins || [], level: over ? 'surcharge' : 'warning' },
+            status: PENDING
+        }],
+        covered: true
+    };
+}
+
 const FEEDBACK_NEW_DAYS = 30;
 // Amazon removes feedback that is only about an Amazon-fulfilled delivery, or that is
 // a product review rather than about the seller. A rough guide from the comment, so
@@ -643,6 +680,7 @@ function detectNegativeFeedbackOrders({ weeklySignals, now }) {
 }
 
 module.exports = {
+    detectStorageUtilization,
     detectNegativeFeedbackOrders,
     feedbackTopic,
     detectBudgetLimitedProfitable,

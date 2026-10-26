@@ -116,6 +116,11 @@ const RETURNS_FEE_MIN_SHIPPED = 25;
 // target (campaigns mix products, so no single product break-even applies).
 const BUDGET_TIME_IN_BUDGET_MAX = 0.9;
 
+// Storage utilization surcharge (Amazon rule: over 22 weeks, 25+ cubic feet a day; 18 is internal).
+const STORAGE_UTILIZATION_SURCHARGE_WEEKS = 22;
+const STORAGE_UTILIZATION_WARN_WEEKS = 18;
+const STORAGE_UTILIZATION_MIN_CUBIC_FEET = 25;
+
 // Spreadsheet "Detail page changed without us": changes in the last 7 days that no
 // recorded edit (Fix It, an approved task fix) explains. A recorded edit up to 3 days
 // before the change counts as ours (internal). A price that changed on 3+ of the last
@@ -230,6 +235,9 @@ module.exports = {
     LOW_TRAFFIC_MIN_ORDERS,
     TRAFFIC_MIX_MIN_ASINS,
     BUDGET_TIME_IN_BUDGET_MAX,
+    STORAGE_UTILIZATION_SURCHARGE_WEEKS,
+    STORAGE_UTILIZATION_WARN_WEEKS,
+    STORAGE_UTILIZATION_MIN_CUBIC_FEET,
     REFUND_CLAIM_FROM_DAYS,
     REFUND_CLAIM_TO_DAYS,
     RETURNS_FEE_DAYS,

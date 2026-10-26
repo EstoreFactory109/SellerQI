@@ -26,6 +26,7 @@ const COOLDOWN_DAYS = {
     'account:a_z_claims': PER_EVENT,
     'account:negativeFeedbacks': PER_EVENT,
     'account:negative_feedback_order': PER_EVENT,
+    'inventory:storage_utilization_risk': 30,
     'account:NCX': 30,
     'account:responseUnder24HoursCount': 1,
     'account:ahr_early_warning': 7,

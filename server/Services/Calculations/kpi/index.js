@@ -57,6 +57,7 @@ const KPI_SOURCES = Object.freeze({
     'inventory:inbound_placement_fees': 'kpi.placementFees',
     'sponsoredAds:budget_limited_profitable': 'kpi.budgetLimited',
     'account:negative_feedback_order': 'kpi.sellerFeedback',
+    'inventory:storage_utilization_risk': 'kpi.storageUtilization',
     // Alignment of an existing check (runs without a wave flag)
     'ranking:listing_errors': 'kpi.listingErrors',
     'sponsoredAds:product_acos_above_breakeven': 'kpi.productAcos'
@@ -271,6 +272,7 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, profitR
         add(safely('priced_above_featured_offer', context, () => W3.detectPricedAboveFeaturedOffer({ weeklySignals: inputs.weeklySignals, products, buyBoxRows: data.BuyBoxData?.asinBuyBoxData, productsByAsin })), 'conversion:priced_above_featured_offer');
         add(safely('subscribe_and_save', context, () => W3.detectSubscribeSaveSuspended({ weeklySignals: inputs.weeklySignals, productsByAsin })), 'inventory:subscribe_and_save');
         add(safely('budget_limited_profitable', context, () => W3.detectBudgetLimitedProfitable({ budgetRecs: data.AdsBudgetRecs, campaignRows: data.campaignSpendSales, now })), 'sponsoredAds:budget_limited_profitable');
+        add(safely('storage_utilization_risk', context, () => W3.detectStorageUtilization({ weeklySignals: inputs.weeklySignals })), 'inventory:storage_utilization_risk');
         add(safely('negative_feedback_order', context, () => W3.detectNegativeFeedbackOrders({ weeklySignals: inputs.weeklySignals, now })), 'account:negative_feedback_order');
         add(safely('inbound_placement_fees', context, () => W3.detectInboundPlacementFees({ weeklySignals: inputs.weeklySignals })), 'inventory:inbound_placement_fees');
         add(safely('returns_fee_risk', context, () => W3.detectReturnsFeeRisk({ returns: inputs.returns, shipped90: inputs.shipped90, fbaFees: inputs.fbaFees, country, productsByAsin, now })), 'inventory:returns_fee_risk');

@@ -939,14 +939,18 @@ const setLeadTime = asyncHandler(async (req, res) => {
  * newest FBA inventory planning report. Aged inventory surcharge: Amazon's own
  * estimate (estimated-ais-*), summed. Low-inventory-level fee: products Amazon says
  * it charges this week and that are not exempt (the report gives no per-unit amount).
- * Storage utilization and returns processing fees are not included (no data).
+ * Storage utilization: last month's ratio and surcharge from the weekly signals.
+ * Returns processing fees are not included (no threshold data).
  */
 const getFeesAtRisk = asyncHandler(async (req, res) => {
     const Planning = require('../../models/inventory/GET_FBA_INVENTORY_PLANNING_DATA_Model.js');
     const { feesAtRiskFromPlanning } = require('../../Services/Calculations/FeesAtRisk.js');
     const doc = await Planning.findOne({ User: req.userId, country: req.country, region: req.region })
         .sort({ createdAt: -1 }).select('createdAt data.asin data.estimated_ais_total data.low_inventory_level_fee_applied data.low_inventory_level_fee_exempt').lean();
-    return res.status(200).json(new ApiResponse(200, feesAtRiskFromPlanning(doc), 'Fees at risk'));
+    const signals = await require('../../models/products/WeeklySignalsModel.js')
+        .findOne({ User: req.userId, country: req.country, region: req.region, storageUtilization: { $ne: null }, createdAt: { $gte: new Date(Date.now() - 40 * 24 * 60 * 60 * 1000) } })
+        .sort({ createdAt: -1 }).select('storageUtilization').lean().catch(() => null);
+    return res.status(200).json(new ApiResponse(200, feesAtRiskFromPlanning(doc, new Date(), signals?.storageUtilization), 'Fees at risk'));
 });
 
 const updateTaskStatus = asyncHandler(async (req, res) => {

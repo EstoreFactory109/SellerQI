@@ -130,3 +130,36 @@ describe('detectNegativeFeedbackOrders', () => {
         expect(W3.detectNegativeFeedbackOrders({ now, weeklySignals: signals([]) })).toEqual({ tasks: [], covered: true });
     });
 });
+
+describe('storageUtilizationFrom (live report columns, Oct 2026)', () => {
+    const { storageUtilizationFrom } = require('../../../../Services/Sp_API/WeeklySignalsSync.js');
+    it('reads the account ratio, sums volume and surcharge, and ranks products by space', () => {
+        const row = (asin, vol, sus) => ({ asin, estimated_total_item_volume: String(vol), est_sus: String(sus), storage_utilization_ratio: '24.5', storage_utilization_ratio_units: 'weeks', month_of_charge: '2026-09', volume_units: 'cubic feet', currency: 'USD' });
+        expect(storageUtilizationFrom([row('A', 10, 1.5), row('B', 30, 4), row('A', 5, 0.5)])).toEqual({
+            month: '2026-09', ratio: 24.5, ratioUnits: 'weeks', currency: 'USD', volumeUnits: 'cubic feet',
+            totalVolume: 45, estimatedSurcharge: 6, topAsins: [{ asin: 'B', volume: 30 }, { asin: 'A', volume: 15 }]
+        });
+        expect(storageUtilizationFrom([]).ratio).toBeNull();
+    });
+});
+
+describe('detectStorageUtilization', () => {
+    const su = (over) => ({ storageUtilization: { month: '2026-09', ratio: 24, ratioUnits: 'weeks', volumeUnits: 'cubic feet', totalVolume: 100, estimatedSurcharge: 40, currency: 'USD', topAsins: [{ asin: 'B1', volume: 50 }], ...over } });
+
+    it('raises the surcharge task over 22 weeks, with Amazon\'s estimate', () => {
+        const [task] = W3.detectStorageUtilization({ weeklySignals: su() }).tasks;
+        expect(task).toMatchObject({ errorType: 'storage_utilization_risk', amount: 40, renderData: { level: 'surcharge' } });
+        expect(task.solution).toContain('B1');
+    });
+
+    it('warns between 18 and 22 weeks, and says when no surcharge was charged', () => {
+        expect(W3.detectStorageUtilization({ weeklySignals: su({ ratio: 19 }) }).tasks[0].renderData.level).toBe('warning');
+        expect(W3.detectStorageUtilization({ weeklySignals: su({ estimatedSurcharge: 0 }) }).tasks[0].error).toContain('may be exempt');
+    });
+
+    it('stays quiet under 18 weeks or under 25 cubic feet, and makes no verdict without the report', () => {
+        expect(W3.detectStorageUtilization({ weeklySignals: su({ ratio: 7.6 }) })).toEqual({ tasks: [], covered: true });
+        expect(W3.detectStorageUtilization({ weeklySignals: su({ totalVolume: 20 }) })).toEqual({ tasks: [], covered: true });
+        expect(W3.detectStorageUtilization({ weeklySignals: { storageUtilization: null } })).toEqual({ tasks: [], covered: false });
+    });
+});

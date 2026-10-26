@@ -110,6 +110,7 @@ const ALL_TASK_TYPES = [
     ['inventory', 'inbound_placement_fees'],
     ['sponsoredAds', 'budget_limited_profitable'],
     ['account', 'negative_feedback_order'],
+    ['inventory', 'storage_utilization_risk'],
     ['inventory', 'inbound_shortage'],
     ['inventory', 'refund_not_returned'],
     ['conversion', 'high_traffic_low_conversion'],

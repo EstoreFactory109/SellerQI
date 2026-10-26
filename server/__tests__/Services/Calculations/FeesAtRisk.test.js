@@ -23,3 +23,12 @@ it('says why it has nothing to show', () => {
     // Saved before the parser read these columns.
     expect(feesAtRiskFromPlanning(doc([{ asin: 'A' }]), NOW)).toMatchObject({ available: false, reason: 'columns_missing' });
 });
+
+describe('feesAtRiskFromPlanning with storage utilization', () => {
+    it('adds last month\'s storage surcharge when the storage report was read', () => {
+        const r = feesAtRiskFromPlanning(null, new Date(), { ratio: 24.04, month: '2026-09', estimatedSurcharge: 40 });
+        expect(r.storageUtilization).toEqual({ ratio: 24, month: '2026-09', amount: 40 });
+        expect(r.notIncluded).toEqual(['returns processing fee']);
+        expect(feesAtRiskFromPlanning(null, new Date(), null).notIncluded).toContain('storage utilization surcharge');
+    });
+});

@@ -12,6 +12,9 @@
  *   the last 30 days, and the fees of each plan's accepted placement option.
  * - Seller feedback (GET_SELLER_FEEDBACK_DATA report, last 60 days): the 1 and 2 star
  *   ratings only, with the order ID and comment (the rater email is not kept).
+ * - Storage utilization (GET_FBA_STORAGE_FEE_CHARGES_DATA, the last full month): the
+ *   account's storage utilization ratio in weeks, Amazon's surcharge estimate, and
+ *   the products taking the most space (columns confirmed on a live US report).
  */
 const axios = require('axios');
 const logger = require('../../utils/Logger.js');
@@ -99,6 +102,56 @@ async function readSellerFeedback({ accessToken, baseUri, marketplaceId, country
     return { windowDays: FEEDBACK_WINDOW_DAYS, total: records.length, negatives: negativeFeedbackRows(records, country) };
 }
 
+/** Pure: storage fee report rows -> the account summary. Exported for tests. */
+function storageUtilizationFrom(records = []) {
+    let ratio = null;
+    let ratioUnits = '';
+    let volume = 0;
+    let surcharge = 0;
+    let month = '';
+    let volumeUnits = '';
+    let currency = '';
+    const byAsin = new Map();
+    for (const r of records || []) {
+        const value = Number(r?.storage_utilization_ratio);
+        if (ratio === null && String(r?.storage_utilization_ratio ?? '').trim() !== '' && Number.isFinite(value)) {
+            ratio = value;
+            ratioUnits = String(r.storage_utilization_ratio_units || '');
+        }
+        const v = Number(r?.estimated_total_item_volume) || 0;
+        volume += v;
+        surcharge += Number(r?.est_sus) || 0;
+        month = month || String(r?.month_of_charge || '');
+        volumeUnits = volumeUnits || String(r?.volume_units || '');
+        currency = currency || String(r?.currency || '');
+        if (r?.asin) byAsin.set(r.asin, (byAsin.get(r.asin) || 0) + v);
+    }
+    const topAsins = [...byAsin.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
+        .map(([asin, vol]) => ({ asin, volume: Math.round(vol * 100) / 100 }));
+    return {
+        month, ratio, ratioUnits, currency, volumeUnits,
+        totalVolume: Math.round(volume * 100) / 100,
+        estimatedSurcharge: Math.round(surcharge * 100) / 100,
+        topAsins
+    };
+}
+
+async function readStorageUtilization({ accessToken, baseUri, marketplaceId, now }) {
+    const { runSpApiReportInline } = require('./spApiReportAdapter.js');
+    const { parseAsync } = require('../../utils/asyncCsvParser');
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0, 23, 59, 59));
+    const result = await runSpApiReportInline({
+        accessToken,
+        baseuri: String(baseUri).replace(/^https?:\/\//, '').replace(/\/$/, ''),
+        body: { reportType: 'GET_FBA_STORAGE_FEE_CHARGES_DATA', marketplaceIds: [marketplaceId], dataStartTime: start.toISOString(), dataEndTime: end.toISOString() },
+        retries: 1
+    });
+    if (result.status === 'NO_DATA') return storageUtilizationFrom([]);
+    if (result.status !== 'DONE') throw new Error(`storage fee report ${result.status}: ${result.note || ''}`);
+    return storageUtilizationFrom(await parseAsync(result.buffer, { delimiter: '\t', columns: true, reportType: 'GET_FBA_STORAGE_FEE_CHARGES_DATA' }));
+}
+
 async function readFeaturedOffers({ host, headers, marketplaceId, skus }) {
     const rows = [];
     for (let i = 0; i < skus.length; i += FOEP_BATCH) {
@@ -180,14 +233,16 @@ const syncWeeklySignals = async (accessToken, marketplaceIds, userId, baseUri, c
         featuredOffers: skus ? await part('Featured offer expected price', () => readFeaturedOffers({ host, headers, marketplaceId, skus })) : null,
         subscribeSave: await part('Subscribe & Save offers', () => readSubscribeSave({ host, headers, marketplaceId })),
         placementFees: await part('Inbound placement fees', () => readPlacementFees({ host, headers, now })),
-        sellerFeedback: await part('Seller feedback', () => readSellerFeedback({ accessToken, baseUri, marketplaceId, country, now }))
+        sellerFeedback: await part('Seller feedback', () => readSellerFeedback({ accessToken, baseUri, marketplaceId, country, now })),
+        storageUtilization: await part('Storage utilization', () => readStorageUtilization({ accessToken, baseUri, marketplaceId, now }))
     };
     const WeeklySignals = require('../../models/products/WeeklySignalsModel.js');
     const saved = await WeeklySignals.create(doc);
     logger.info('[WeeklySignals] stored', {
         userId: String(userId), country, region,
         featuredOffers: doc.featuredOffers?.length ?? null, subscribeSave: doc.subscribeSave?.length ?? null, placementFeesTotal: doc.placementFees?.total ?? null,
-        negativeFeedback: doc.sellerFeedback?.negatives?.length ?? null
+        negativeFeedback: doc.sellerFeedback?.negatives?.length ?? null,
+        storageRatio: doc.storageUtilization?.ratio ?? null
     });
     return saved;
 };
@@ -201,3 +256,5 @@ module.exports.readPlacementFees = readPlacementFees;
 module.exports.readSellerFeedback = readSellerFeedback;
 module.exports.negativeFeedbackRows = negativeFeedbackRows;
 module.exports.feedbackDay = feedbackDay;
+module.exports.readStorageUtilization = readStorageUtilization;
+module.exports.storageUtilizationFrom = storageUtilizationFrom;

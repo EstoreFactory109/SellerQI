@@ -7,6 +7,7 @@ const mongoose = require("mongoose");
  * - subscribeSave: the seller's Subscribe & Save offers and their status
  * - placementFees: inbound placement fees on plans created in the last 30 days
  * - sellerFeedback: 1-2 star seller feedback of the last 60 days, per order
+ * - storageUtilization: last full month's storage utilization ratio and surcharge
  * Each part is null when its read failed (not "nothing found").
  */
 const weeklySignalsSchema = new mongoose.Schema(
@@ -17,7 +18,8 @@ const weeklySignalsSchema = new mongoose.Schema(
         featuredOffers: { type: mongoose.Schema.Types.Mixed, default: null },
         subscribeSave: { type: mongoose.Schema.Types.Mixed, default: null },
         placementFees: { type: mongoose.Schema.Types.Mixed, default: null },
-        sellerFeedback: { type: mongoose.Schema.Types.Mixed, default: null }
+        sellerFeedback: { type: mongoose.Schema.Types.Mixed, default: null },
+        storageUtilization: { type: mongoose.Schema.Types.Mixed, default: null }
     },
     { timestamps: true }
 );

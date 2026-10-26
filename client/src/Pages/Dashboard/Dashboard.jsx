@@ -1169,19 +1169,22 @@ const DashboardContent = () => {
               <KPICard
                 label="Fees at Risk"
                 meaning="Fees you can still avoid this month"
-                tooltip="Estimated fees you can still avoid this month: aged inventory and low-inventory fees. Storage utilization and returns processing fees are not included yet."
+                tooltip="Estimated fees you can still avoid this month: aged inventory surcharge, low-inventory fee and storage utilization surcharge. Returns processing fees are not included yet."
                 loading={feesAtRiskLoading}
-                value={feesAtRisk?.agedSurcharge ? formatFullCurrency(feesAtRisk.agedSurcharge.amount) : undefined}
-                secondaryValue={feesAtRisk?.lowInventoryFee
-                  ? `${feesAtRisk.lowInventoryFee.products} product${feesAtRisk.lowInventoryFee.products === 1 ? '' : 's'} paying the low-inventory fee`
+                value={(feesAtRisk?.agedSurcharge || feesAtRisk?.storageUtilization)
+                  ? formatFullCurrency((feesAtRisk?.agedSurcharge?.amount || 0) + (feesAtRisk?.storageUtilization?.amount || 0))
                   : undefined}
-                status={(feesAtRisk?.agedSurcharge?.amount > 0 || feesAtRisk?.lowInventoryFee?.products > 0) ? STATUS.WATCH : undefined}
-                statusLabel={(feesAtRisk?.agedSurcharge?.amount > 0 || feesAtRisk?.lowInventoryFee?.products > 0) ? 'Avoidable' : undefined}
-                noData={feesAtRisk?.available ? undefined : {
+                secondaryValue={[
+                  feesAtRisk?.lowInventoryFee ? `${feesAtRisk.lowInventoryFee.products} product${feesAtRisk.lowInventoryFee.products === 1 ? '' : 's'} paying the low-inventory fee` : null,
+                  feesAtRisk?.storageUtilization ? `Storage: ${feesAtRisk.storageUtilization.ratio} weeks of stock (surcharge over 22)` : null
+                ].filter(Boolean).join(' · ') || undefined}
+                status={(feesAtRisk?.agedSurcharge?.amount > 0 || feesAtRisk?.lowInventoryFee?.products > 0 || feesAtRisk?.storageUtilization?.amount > 0) ? STATUS.WATCH : undefined}
+                statusLabel={(feesAtRisk?.agedSurcharge?.amount > 0 || feesAtRisk?.lowInventoryFee?.products > 0 || feesAtRisk?.storageUtilization?.amount > 0) ? 'Avoidable' : undefined}
+                noData={(feesAtRisk?.available || feesAtRisk?.storageUtilization) ? undefined : {
                   message: 'Fees at risk appear once Amazon\'s inventory planning report has been read for this marketplace.',
                 }}
-                footnote={feesAtRisk?.available
-                  ? `Aged inventory surcharge (Amazon's estimate) and low-inventory fee only; storage utilization and returns processing fees not included.`
+                footnote={(feesAtRisk?.available || feesAtRisk?.storageUtilization)
+                  ? `Aged inventory surcharge and storage utilization surcharge (Amazon's estimates${feesAtRisk?.storageUtilization?.month ? `, storage for ${feesAtRisk.storageUtilization.month}` : ''}) and low-inventory fee; returns processing fees not included.`
                   : undefined}
                 onClick={() => navigate('/seller-central-checker/tasks?category=inventory')}
               />

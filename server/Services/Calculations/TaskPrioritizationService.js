@@ -128,6 +128,7 @@ const EFFORT_MINUTES = {
     // ── Account health: mostly remediation plans; two are genuinely quick.
     'account:negativeFeedbacks': 5,
     'account:negative_feedback_order': 5, // answer one buyer / request removal
+    'inventory:storage_utilization_risk': 30, // slow inbound, clear slow movers
     'account:responseUnder24HoursCount': 5,
     'account:validTrackingRateStatus': 10,
     'account:a_z_claims': 15,
@@ -213,6 +214,7 @@ const IMPACT_WEIGHT = {
     'account:NCX': 55,
     'account:negativeFeedbacks': 50,
     'account:negative_feedback_order': 50,
+    'inventory:storage_utilization_risk': 50,
     'account:validTrackingRateStatus': 30,
     'account:responseUnder24HoursCount': 28,
     // A status that keeps slipping is a warning, not a sustained failure: about 60%
