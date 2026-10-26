@@ -8,7 +8,7 @@ import App from './App.jsx'
 import { BrowserRouter } from "react-router-dom";
 import DeviceWrapper from './Components/DeviceWrapper/DeviceWrapper.jsx';
 
-// Sends the page's marketplace with every API request (no-op unless VITE_PER_PAGE_MARKETPLACE).
+// Sends the page's marketplace with every API request (no-op when VITE_PER_PAGE_MARKETPLACE is 'false').
 installMarketplaceHeader(store);
 
 ReactDOM.createRoot(document.getElementById('root')).render(

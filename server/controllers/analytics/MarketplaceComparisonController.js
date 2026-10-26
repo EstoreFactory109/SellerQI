@@ -7,7 +7,7 @@
  *   hintCurrency  optional ISO code for the faint "≈" comparison hint (default USD; "none" turns it off)
  *   startDate/endDate  optional YYYY-MM-DD custom range applied to every marketplace
  *
- * Behind ALL_MARKETPLACES_DASHBOARD_ENABLED (default off → 404) so it can ship dark.
+ * On by default; ALL_MARKETPLACES_DASHBOARD_ENABLED=false switches it off (→ 404).
  */
 const asyncHandler = require('../../utils/AsyncHandler.js');
 const { ApiResponse } = require('../../utils/ApiResponse.js');
@@ -18,7 +18,7 @@ const { getMarketplaceComparison } = require('../../Services/Calculations/Market
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 
 const getMarketplaceComparisonData = asyncHandler(async (req, res) => {
-    if (process.env.ALL_MARKETPLACES_DASHBOARD_ENABLED !== 'true') {
+    if (process.env.ALL_MARKETPLACES_DASHBOARD_ENABLED === 'false') {
         return res.status(404).json(new ApiResponse(404, '', 'Not found'));
     }
 

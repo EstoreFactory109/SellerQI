@@ -234,8 +234,8 @@ async function start() {
     }
 
     // Daily currency exchange rates for the combined (all-marketplaces) Dashboard. Same
-    // reasoning as the Zoho block above. Logs only (writes nothing) while FX_RATES_ENABLED
-    // is off, which is the default.
+    // reasoning as the Zoho block above. On by default; logs only (writes nothing) when
+    // FX_RATES_ENABLED=false.
     try {
         const { setupCron: setupFxRatesCron } = require('./fxRatesStandalone.js');
         setupFxRatesCron();

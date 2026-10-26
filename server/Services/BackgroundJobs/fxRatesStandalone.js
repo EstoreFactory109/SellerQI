@@ -11,7 +11,7 @@
  *
  * SAFETY (mirrors zohoTaskSyncStandalone.js)
  *   - One OrchestrationCronLock per slot per UTC day, so two hosts cannot both fetch.
- *   - FX_RATES_ENABLED is OFF by default. While off, the tick logs what it would fetch and
+ *   - FX_RATES_ENABLED is ON by default (2026-10-27; set 'false' to stop). While off, the tick logs what it would fetch and
  *     writes nothing. (FxService still fetches once by itself if the collection is empty and
  *     a combined Dashboard is requested — that path is only reachable once the feature is on.)
  *
@@ -26,7 +26,7 @@ const logger = require('../../utils/Logger.js');
 const dbConnect = require('../../config/dbConn.js');
 
 const HOLDER = `fx-rates-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-const ENABLED = process.env.FX_RATES_ENABLED === 'true';
+const ENABLED = process.env.FX_RATES_ENABLED !== 'false';
 const CRON_MAIN = process.env.FX_RATES_CRON || '30 16 * * 1-5';
 const CRON_RETRY = process.env.FX_RATES_RETRY_CRON || '0 20 * * 1-5';
 const LOCK_TTL_MS = 60 * 60 * 1000;

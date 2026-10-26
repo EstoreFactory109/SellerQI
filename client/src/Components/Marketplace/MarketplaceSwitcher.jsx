@@ -22,7 +22,7 @@ const Item = ({ active, onClick, children }) => (
 /**
  * A page's own marketplace picker (replaces the app-wide TopNav pill).
  *
- * Renders nothing while VITE_PER_PAGE_MARKETPLACE is off, or when the user has a single
+ * Renders nothing when VITE_PER_PAGE_MARKETPLACE is 'false', or when the user has a single
  * marketplace (there is nothing to choose). `allowAll` adds "All marketplaces" — the
  * Dashboard only.
  */

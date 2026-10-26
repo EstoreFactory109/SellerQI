@@ -26,7 +26,7 @@ import DownloadReport from '../../Components/DownloadReport/DownloadReport.jsx'
 import { StatusPill, KPICard, VerdictBanner, HealthGauge, ActionCard, InfoTooltip, STATUS, COLORS, getStatusConfig } from '../../Components/Shared/index.js'
 
 /**
- * The Dashboard page. With VITE_ALL_MARKETPLACES_DASHBOARD on (and 2+ marketplaces) it opens on
+ * The Dashboard page. With VITE_ALL_MARKETPLACES_DASHBOARD on (the default) and 2+ marketplaces it opens on
  * "All marketplaces": every marketplace side by side, each in its own currency. Its switcher (or
  * a column header) opens one marketplace's full Dashboard.
  */
