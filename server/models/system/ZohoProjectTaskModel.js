@@ -27,6 +27,44 @@ const CommentSchema = new mongoose.Schema({
     authorName: { type: String, default: null },
     createdAt: { type: Date, default: null },
     attachmentCount: { type: Number, default: 0 },
+    // Deliverables candidates (Services/Zoho/zohoDeliverables.js). Files are WorkDrive
+    // attachments on the comment; links are share links found in it.
+    attachments: {
+        type: [{
+            _id: false,
+            fileId: String,
+            name: String,
+            mimeType: String,
+            size: Number,
+            downloadUrl: String,
+            previewUrl: String,
+            permanentUrl: String,
+            thirdPartyFileId: String,
+            addedAt: Date,
+            addedByName: String,
+        }],
+        default: [],
+    },
+    links: { type: [String], default: [] },
+    authorIsClient: { type: Boolean, default: false },
+}, { _id: false });
+
+/** The AI's verdict on one candidate deliverable, reused while its context is unchanged. */
+const DeliverableDecisionSchema = new mongoose.Schema({
+    key: { type: String, required: true },
+    decision: { type: String, enum: ['yes', 'no', 'unsure'], required: true },
+    reason: { type: String, default: null },
+    contextHash: { type: String, default: null },
+    decidedAt: { type: Date, default: null },
+    decidedBy: { type: String, default: null }, // model name, or 'fallback'
+}, { _id: false });
+
+/** A staff decision that beats the AI. Never written by the sync, so it survives every run. */
+const DeliverableOverrideSchema = new mongoose.Schema({
+    key: { type: String, required: true },
+    visibility: { type: String, enum: ['show', 'hide'], required: true },
+    by: { type: String, default: null },
+    at: { type: Date, default: null },
 }, { _id: false });
 
 const ZohoProjectTaskSchema = new mongoose.Schema({
@@ -74,6 +112,10 @@ const ZohoProjectTaskSchema = new mongoose.Schema({
     taskUpdatedAt: { type: Date, default: null },
 
     hasAttachments: { type: Boolean, default: false },
+    // Deliverables shown on the client's Status page: the AI's verdicts (rewritten by the sync)
+    // and staff overrides (never touched by the sync).
+    deliverableDecisions: { type: [DeliverableDecisionSchema], default: [] },
+    deliverableOverrides: { type: [DeliverableOverrideSchema], default: [] },
     // Kept even though the client is shown only the summary: it is the input the
     // summary is derived from, so without it a re-summarise (prompt change,
     // model change) would need a full re-fetch from Zoho.

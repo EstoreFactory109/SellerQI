@@ -107,6 +107,7 @@ const { getEsfClientDashboard } = require('../controllers/analytics/EsfClientDas
 const { getEsfProjectStatus } = require('../controllers/analytics/EsfProjectStatusController.js');
 const { getEsfUntapped } = require('../controllers/analytics/EsfUntappedController.js');
 const { postEsfTaskReply } = require('../controllers/analytics/EsfProjectReplyController.js');
+const { downloadDeliverable, downloadTaskZip, setDeliverableVisibility } = require('../controllers/analytics/EsfDeliverablesController.js');
 const { getEsfBilling, downloadEsfInvoice } = require('../controllers/analytics/EsfBillingController.js');
 const { getEsfMessages, getEsfMessageThread, postEsfMessageReply, postEsfNewTicket, downloadEsfAttachment, postEsfTaskRequest } = require('../controllers/analytics/EsfClientMessagesController.js');
 const gmailUpload = require('../middlewares/multer/gmailUpload.js');
@@ -416,6 +417,15 @@ router.post(
     }),
     postEsfTaskReply
 );
+
+/**
+ * Deliverables the team produced (Zoho WorkDrive files on task comments), for the Status page.
+ * Binary responses: deliberately NOT behind analyseDataCache, which would corrupt them, as
+ * with the invoice PDF route. Scoped to the client's own project inside the controller.
+ */
+router.get('/esf/project-status/files/:key', auth, esfClientOnly, downloadDeliverable);
+router.get('/esf/project-status/tasks/:taskId/files.zip', auth, esfClientOnly, downloadTaskZip);
+router.post('/esf/project-status/files/:key/visibility', auth, esfClientOnly, setDeliverableVisibility);
 
 // ===== ISSUES PAGE =====
 // Returns issues summary data
