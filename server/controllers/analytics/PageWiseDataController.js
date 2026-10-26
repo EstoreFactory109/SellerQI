@@ -861,7 +861,7 @@ const getTasksData = asyncHandler(async (req, res) => {
  * Each change is re-derived from the stored task, never taken from the body.
  */
 const approveTaskActions = asyncHandler(async (req, res) => {
-    const { taskIds } = req.body || {};
+    const { taskIds, content } = req.body || {};
     if (!Array.isArray(taskIds) || taskIds.length === 0) {
         return res.status(400).json(new ApiError(400, 'taskIds is required'));
     }
@@ -877,6 +877,8 @@ const approveTaskActions = asyncHandler(async (req, res) => {
         country: req.country,
         region: req.region,
         taskIds,
+        // Text the seller approved for listing fixes, keyed by taskId; ignored for every other change.
+        content: content && typeof content === 'object' ? content : {},
         approvedBy: { userId: req.userId, memberId: req.memberId, adminId: req.adminId, superAdminId: req.superAdminId }
     });
     return res.status(200).json(new ApiResponse(200, { results }, 'Approved changes processed'));

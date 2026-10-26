@@ -32,6 +32,16 @@ jest.mock('../../../Services/AmazonAds/Pause-ArchiveKeywords.js', () => ({
     updateKeywordBids: (...args) => mockBids(...args)
 }));
 let mockSnapshot = null;
+const mockUpdateContent = jest.fn();
+const mockFixed = [];
+jest.mock('../../../Services/Sp_API/UpdateProductContentService.js', () => ({
+    updateProductContent: (...a) => mockUpdateContent(...a),
+    FIX_STATUS: { SUCCESS: 'SUCCESS', PARTIAL_SUCCESS: 'PARTIAL_SUCCESS', CONFLICT_RESOLVED: 'CONFLICT_RESOLVED' }
+}));
+jest.mock('../../../models/system/ListingFixStatusModel.js', () => ({ markAsFixed: async (p) => { mockFixed.push(p); } }));
+jest.mock('../../../models/user-auth/sellerCentralModel.js', () => ({
+    findOne: () => ({ select: () => ({ lean: async () => ({ brand: 'Acme', sellerAccount: [{ country: 'US', region: 'NA', products: [{ asin: 'B01', sku: 'OLD', status: 'Inactive' }, { asin: 'B01', sku: 'SKU-1', status: 'Active' }] }] }) }) })
+}));
 jest.mock('../../../utils/ppcSnapshotLoader.js', () => ({ loadKeywordSnapshot: async () => mockSnapshot }));
 
 const S = require('../../../Services/Calculations/TaskActionService.js');
@@ -46,6 +56,7 @@ beforeEach(() => {
     mockTasks.length = 0; mockLogs.length = 0;
     mockTaskUpdates.length = 0;
     mockAddToNegative.mockReset(); mockPause.mockReset(); mockBids.mockReset(); mockSnapshot = null;
+    mockUpdateContent.mockReset(); mockFixed.length = 0;
     process.env.AMAZON_ADS_CLIENT_ID = 'cid';
     delete process.env.TASK_ACTIONS_DISABLED;
 });
@@ -151,5 +162,43 @@ describe('lower_bids', () => {
         expect(r.status).toBe('failed');
         expect(r.message).toContain('changed since the suggestion');
         expect(mockBids).not.toHaveBeenCalled();
+    });
+});
+
+describe('update_listing_content (Fix It from the Tasks page)', () => {
+    const titleTask = { taskId: 'T7', asin: 'B01', errorCategory: 'ranking', errorType: 'titleresult_restricted_words' };
+    const approve = (content) => S.approveTaskActions({ userId: 'U', country: 'US', region: 'NA', taskIds: ['T7'], content, approvedBy: { userId: 'U' } });
+    const GOOD = 'Acme Stainless Steel Garlic Press with Silicone Peeler, Dishwasher Safe Mincer for Garlic and Ginger, 2 Piece Set';
+
+    it('proposes an editable fix for listing text tasks only', () => {
+        expect(S.proposedActionFor(titleTask)).toMatchObject({ type: 'update_listing_content', editable: true, field: 'title', label: 'Fix the title' });
+        expect(S.proposedActionFor({ ...titleTask, errorType: 'bulletpoints_char_limit' }).field).toBe('bulletpoints');
+        expect(S.proposedActionFor({ ...titleTask, errorType: 'backend_keywords_underused' }).field).toBe('generic_keyword');
+        expect(S.proposedActionFor({ ...titleTask, errorType: 'listing_errors' })).toBeNull();
+        expect(S.proposedActionFor({ ...titleTask, asin: 'ERROR:abc' })).toBeNull();
+    });
+
+    it('refuses text that still breaks a listing rule, sending nothing', async () => {
+        mockTasks.push(titleTask);
+        const [r] = await approve({ T7: 'Best garlic press ever!!! 100% guaranteed #1' });
+        expect(r.status).toBe('failed');
+        expect(r.message).toBeTruthy();
+        expect(mockUpdateContent).not.toHaveBeenCalled();
+        expect(mockLogs).toHaveLength(0);
+    });
+
+    it('sends approved text to the active SKU and records it as our change', async () => {
+        mockTasks.push(titleTask);
+        mockUpdateContent.mockResolvedValue({ status: 'SUCCESS', message: 'ok' });
+        const [r] = await approve({ T7: GOOD });
+        expect(r.status).toBe('succeeded');
+        expect(mockUpdateContent).toHaveBeenCalledWith(expect.objectContaining({ sku: 'SKU-1', dataToBeUpdated: 'title', valueToBeUpdated: GOOD }));
+        expect(mockFixed).toEqual([expect.objectContaining({ asin: 'B01', sku: 'SKU-1', attribute: 'title', valueApplied: GOOD })]);
+        expect(mockLogs[0].summary).toContain(GOOD);
+    });
+
+    it('checks backend keyword bytes and splits bullets by line', () => {
+        expect(S.validateListingContent('generic_keyword', 'x'.repeat(251)).ok).toBe(false);
+        expect(S.validateListingContent('bulletpoints', 'One\nTwo\n\n').value).toEqual(['One', 'Two']);
     });
 });

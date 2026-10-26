@@ -17,15 +17,23 @@ import { trackEvent } from '../../utils/analytics.js';
  * @param {() => void} props.onClose
  * @param {(taskId: string) => void} props.onApproved - called once Amazon accepted the change
  */
+const FIELD_LABEL = { title: 'New title', bulletpoints: 'New bullet points (one per line)', description: 'New description', generic_keyword: 'New backend keywords' };
+
 const ApproveChangeModal = ({ task, onClose, onApproved }) => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [done, setDone] = useState(false);
+  // Listing fixes: the text the seller approves, and AI suggestions to start from.
+  const [text, setText] = useState('');
+  const [suggesting, setSuggesting] = useState(false);
+  const [titleOptions, setTitleOptions] = useState([]);
 
   useEffect(() => {
     setSaving(false);
     setError('');
     setDone(false);
+    setText('');
+    setTitleOptions([]);
   }, [task?.taskId]);
 
   useEffect(() => {
@@ -37,12 +45,38 @@ const ApproveChangeModal = ({ task, onClose, onApproved }) => {
 
   if (!task?.proposedAction) return null;
   const action = task.proposedAction;
+  const editable = !!action.editable;
+
+  const suggest = async () => {
+    setSuggesting(true);
+    setError('');
+    try {
+      const res = await axiosInstance.post('/api/ai/ranking-content', { asin: task.asin, attribute: action.field }, { withCredentials: true });
+      const d = res.data?.data || {};
+      if (Array.isArray(d.titles) && d.titles.length) { setTitleOptions(d.titles); setText(d.titles[0]); }
+      else if (d.title) setText(d.title);
+      else if (Array.isArray(d.bulletpoints)) setText(d.bulletpoints.join('\n'));
+      else if (d.description) setText(d.description);
+      else if (d.keywords !== undefined) setText(d.keywords);
+      trackEvent('task_action_suggest', { field: action.field });
+    } catch (err) {
+      setError(err.response?.data?.message || 'Could not get suggestions. You can still write the text yourself.');
+    } finally {
+      setSuggesting(false);
+    }
+  };
 
   const approve = async () => {
+    if (editable && !text.trim()) {
+      setError('Write the new text, or get AI suggestions, before approving.');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
-      const res = await axiosInstance.post('/api/pagewise/tasks/approve-actions', { taskIds: [task.taskId] }, { withCredentials: true });
+      const body = { taskIds: [task.taskId] };
+      if (editable) body.content = { [task.taskId]: action.field === 'bulletpoints' ? text.split('\n').map((l) => l.trim()).filter(Boolean) : text.trim() };
+      const res = await axiosInstance.post('/api/pagewise/tasks/approve-actions', body, { withCredentials: true });
       const result = (res.data?.data?.results || [])[0];
       trackEvent('task_action_approve', { type: action.type, status: result?.status || 'unknown' });
       if (result?.status === 'succeeded' || (result?.status === 'skipped' && /already/i.test(result.message || ''))) {
@@ -91,9 +125,41 @@ const ApproveChangeModal = ({ task, onClose, onApproved }) => {
         </div>
         <div className="px-6 pt-3 pb-6">
           <p className="m-0 text-sm leading-relaxed" style={{ color: COLORS.textPrimary }}>{action.summary}</p>
+          {editable && !done && (
+            <div className="mt-4 flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <label htmlFor="approve-change-text" className="text-xs font-semibold" style={{ color: COLORS.textSecondary }}>
+                  {FIELD_LABEL[action.field] || 'New text'}
+                </label>
+                <button type="button" onClick={suggest} disabled={suggesting || saving} className="px-3 py-1 rounded-lg text-xs border" style={{ borderColor: COLORS.border, color: COLORS.textPrimary, background: 'transparent' }}>
+                  {suggesting ? 'Getting suggestions…' : 'AI suggestions'}
+                </button>
+              </div>
+              {titleOptions.length > 1 && (
+                <div className="flex flex-col gap-1.5">
+                  {titleOptions.map((t, i) => (
+                    <button key={i} type="button" onClick={() => setText(t)} className="text-left text-xs px-2.5 py-1.5 rounded-lg border" style={{ borderColor: text === t ? COLORS.accent : COLORS.border, color: COLORS.textPrimary, background: 'transparent' }}>
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <textarea
+                id="approve-change-text"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                rows={action.field === 'title' ? 3 : 7}
+                className="w-full rounded-lg border p-2.5 text-sm"
+                style={{ borderColor: COLORS.border, background: COLORS.surfaceElevated, color: COLORS.textPrimary }}
+              />
+              <p className="m-0 text-xs" style={{ color: COLORS.textMuted }}>We check this against Amazon's listing rules before sending it.</p>
+            </div>
+          )}
           {!done && (
             <p className="m-0 mt-3 text-xs leading-relaxed" style={{ color: COLORS.textSecondary }}>
-              This changes your Amazon Ads account. Nothing is sent until you approve, and every change is recorded with who approved it.
+              {editable
+                ? 'This changes your product listing on Amazon. Nothing is sent until you approve, and every change is recorded with who approved it.'
+                : 'This changes your Amazon Ads account. Nothing is sent until you approve, and every change is recorded with who approved it.'}
             </p>
           )}
           {done && (

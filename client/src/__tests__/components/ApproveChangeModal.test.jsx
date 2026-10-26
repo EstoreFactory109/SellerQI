@@ -52,3 +52,32 @@ describe('ApproveChangeModal', () => {
     expect(mockPost).not.toHaveBeenCalled();
   });
 });
+
+describe('ApproveChangeModal listing fixes', () => {
+  const LISTING = {
+    taskId: 'T7', asin: 'B01',
+    proposedAction: { type: 'update_listing_content', label: 'Fix the bullet points', editable: true, field: 'bulletpoints', summary: "Replace this product's bullet points on Amazon with the text you approve below.", done: false },
+  };
+
+  it('asks for text before approving, and sends bullets one per line', async () => {
+    mockPost.mockReset();
+    mockPost.mockResolvedValue({ data: { data: { results: [{ taskId: 'T7', status: 'succeeded' }] } } });
+    const onApproved = vi.fn();
+    render(<ApproveChangeModal task={LISTING} onClose={vi.fn()} onApproved={onApproved} />);
+    fireEvent.click(screen.getByText('Approve: Fix the bullet points'));
+    expect(screen.getByRole('alert').textContent).toContain('Write the new text');
+    fireEvent.change(screen.getByLabelText('New bullet points (one per line)'), { target: { value: 'First\nSecond\n' } });
+    fireEvent.click(screen.getByText('Approve: Fix the bullet points'));
+    await waitFor(() => expect(onApproved).toHaveBeenCalledWith('T7'));
+    expect(mockPost).toHaveBeenCalledWith('/api/pagewise/tasks/approve-actions', { taskIds: ['T7'], content: { T7: ['First', 'Second'] } }, { withCredentials: true });
+  });
+
+  it('fills the field from AI suggestions', async () => {
+    mockPost.mockReset();
+    mockPost.mockResolvedValue({ data: { data: { bulletpoints: ['AI one', 'AI two'] } } });
+    render(<ApproveChangeModal task={LISTING} onClose={vi.fn()} onApproved={vi.fn()} />);
+    fireEvent.click(screen.getByText('AI suggestions'));
+    await waitFor(() => expect(screen.getByLabelText('New bullet points (one per line)').value).toBe('AI one\nAI two'));
+    expect(mockPost).toHaveBeenCalledWith('/api/ai/ranking-content', { asin: 'B01', attribute: 'bulletpoints' }, { withCredentials: true });
+  });
+});

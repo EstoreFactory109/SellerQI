@@ -12,6 +12,9 @@
  *   wasted_spend_keyword   -> pause the keyword
  *   product_acos_above_breakeven -> lower the bids of the keywords proposed on the
  *     task (renderData.bidChanges); any keyword whose bid changed since is skipped
+ *   listing text tasks (title, bullets, description, backend keywords) -> replace
+ *     that field with text the seller writes or picks from AI suggestions, checked
+ *     against the same listing rules before anything is sent ("Fix It")
  *
  * Kill switch: TASK_ACTIONS_DISABLED=true stops every change (proposals are still
  * shown, approving returns an error).
@@ -36,7 +39,73 @@ const actionsDisabled = () => String(process.env.TASK_ACTIONS_DISABLED || '').to
  */
 const money = (n) => Number(n).toFixed(2);
 
+// Ranking task prefix -> the listing field Fix It updates.
+const LISTING_FIELDS = [
+    ['titleresult_', 'title', 'title'],
+    ['bulletpoints_', 'bulletpoints', 'bullet points'],
+    ['description_', 'description', 'description'],
+    ['backend_keywords_', 'generic_keyword', 'backend keywords']
+];
+
+function listingFieldOf(task) {
+    if (task?.errorCategory !== 'ranking' || !task.asin || /^[A-Z]+:/.test(task.asin)) return null;
+    const hit = LISTING_FIELDS.find(([prefix]) => String(task.errorType || '').startsWith(prefix));
+    return hit ? { field: hit[1], label: hit[2] } : null;
+}
+
+/**
+ * Checks text the seller approved for a listing field against the listing rules,
+ * so a fix never sends content that breaks them. Titles must pass every title rule;
+ * bullets and description must have no restricted words or claims; backend keywords
+ * must fit Amazon's byte limit (using little of it is advice, not a blocker).
+ * @returns {{ok: boolean, value: any, reason?: string}}
+ */
+function validateListingContent(field, raw, { brand = '' } = {}) {
+    const R = require('./Rankings.js');
+    const reasons = (result, keys) => keys
+        .map(k => result?.[k])
+        .filter(x => x && x.status === 'Error')
+        .map(x => x.Message)
+        .join(' ');
+    if (field === 'title') {
+        const value = String(raw || '').trim();
+        if (!value) return { ok: false, value, reason: 'Enter a title.' };
+        const r = R.checkTitle(value, { brand, strict: true });
+        return r.NumberOfErrors > 0 ? { ok: false, value, reason: reasons(r, Object.keys(r)) || 'This title still breaks a listing rule.' } : { ok: true, value };
+    }
+    if (field === 'bulletpoints') {
+        const value = (Array.isArray(raw) ? raw : String(raw || '').split('\n')).map(s => String(s).trim()).filter(Boolean);
+        if (value.length === 0) return { ok: false, value, reason: 'Enter at least one bullet point.' };
+        const r = R.checkBulletPoints(value, { strict: true });
+        return r.RestictedWords?.status === 'Error' ? { ok: false, value, reason: r.RestictedWords.Message } : { ok: true, value };
+    }
+    if (field === 'description') {
+        const value = String(raw || '').trim();
+        if (!value) return { ok: false, value, reason: 'Enter a description.' };
+        const r = R.checkDescription([value], { strict: true });
+        return r.RestictedWords?.status === 'Error' ? { ok: false, value, reason: r.RestictedWords.Message } : { ok: true, value };
+    }
+    if (field === 'generic_keyword') {
+        const value = String(raw || '').trim();
+        if (!value) return { ok: false, value, reason: 'Enter backend keywords.' };
+        const bytes = new TextEncoder().encode(value).length;
+        return bytes > 250 ? { ok: false, value, reason: `These keywords are ${bytes} bytes; Amazon ignores all of them over 250.` } : { ok: true, value };
+    }
+    return { ok: false, value: raw, reason: 'This field cannot be updated here.' };
+}
+
 function proposedActionFor(task) {
+    const listing = listingFieldOf(task);
+    if (listing) {
+        return {
+            type: 'update_listing_content',
+            label: `Fix the ${listing.label}`,
+            editable: true,
+            field: listing.field,
+            summary: `Replace this product's ${listing.label} on Amazon with the text you approve below.`,
+            payload: { field: listing.field, asin: task.asin }
+        };
+    }
     if (task?.errorCategory !== 'sponsoredAds') return null;
     const d = task.renderData || {};
     const campaign = d.campaignName ? ` in the campaign "${d.campaignName}"` : '';
@@ -90,7 +159,34 @@ function v3Errors(result) {
 }
 
 /** Sends one approved change to Amazon. Throws on any failure. */
+/** Listing fix: the seller's text, sent through the same service as Fix It, and recorded the same way. */
+async function executeListingFix(action, { userId, country, region }) {
+    const Seller = require('../../models/user-auth/sellerCentralModel.js');
+    const seller = await Seller.findOne({ User: userId }).select('sellerAccount.country sellerAccount.region sellerAccount.products.asin sellerAccount.products.sku sellerAccount.products.status').lean();
+    const account = (seller?.sellerAccount || []).find(a => a.country === country && a.region === region);
+    const product = (account?.products || []).find(p => p.asin === action.payload.asin && p.status === 'Active' && p.sku)
+        || (account?.products || []).find(p => p.asin === action.payload.asin && p.sku);
+    if (!product) throw new Error('No SKU found for this product, so the listing cannot be updated.');
+
+    const { updateProductContent, FIX_STATUS } = require('../Sp_API/UpdateProductContentService.js');
+    const result = await updateProductContent({
+        sku: product.sku, userId, country, region,
+        dataToBeUpdated: action.payload.field, valueToBeUpdated: action.payload.value
+    });
+    const accepted = [FIX_STATUS.SUCCESS, FIX_STATUS.PARTIAL_SUCCESS, FIX_STATUS.CONFLICT_RESOLVED].includes(result?.status);
+    if (!accepted) throw Object.assign(new Error(result?.message || 'Amazon did not accept the change.'), { response: result });
+
+    // The record Fix It keeps too: "changed by us" for the detail-page-change check.
+    const ListingFixStatus = require('../../models/system/ListingFixStatusModel.js');
+    await ListingFixStatus.markAsFixed({
+        userId, country, region, asin: action.payload.asin, sku: product.sku,
+        attribute: action.payload.field, valueApplied: action.payload.value
+    }).catch(() => null);
+    return { status: result.status, sku: product.sku, message: result.message };
+}
+
 async function execute(action, { userId, country, region }) {
+    if (action.type === 'update_listing_content') return executeListingFix(action, { userId, country, region });
     const { resolveAdsCredentials } = require('../AmazonAds/resolveAdsCredentials.js');
     const clientId = process.env.AMAZON_ADS_CLIENT_ID;
     if (!clientId) throw new Error('AMAZON_ADS_CLIENT_ID is not set');
@@ -138,7 +234,7 @@ async function execute(action, { userId, country, region }) {
  * @param {Object} params.approvedBy - { userId, memberId, adminId, superAdminId }
  * @returns {Promise<Array<{taskId, status: 'succeeded'|'failed'|'skipped', message}>>}
  */
-async function approveTaskActions({ userId, country, region, taskIds = [], approvedBy = {} }) {
+async function approveTaskActions({ userId, country, region, taskIds = [], approvedBy = {}, content = {} }) {
     if (actionsDisabled()) throw new Error('Changes on Amazon are switched off');
     const ids = [...new Set((taskIds || []).map(String))].slice(0, MAX_ACTIONS_PER_REQUEST);
     const tasks = await TaskItem.find({ userId, country, region, taskId: { $in: ids } }).lean();
@@ -152,7 +248,20 @@ async function approveTaskActions({ userId, country, region, taskIds = [], appro
             results.push({ taskId, status: 'skipped', message: 'There is no change to make for this task.' });
             continue;
         }
-        const done = await TaskActionLog.findOne({ userId, country, region, taskId, actionType: action.type, status: 'succeeded' }).lean();
+        if (action.editable) {
+            // The one place the request supplies content: the text the seller approved.
+            const brand = await require('../../models/user-auth/sellerCentralModel.js')
+                .findOne({ User: userId }).select('brand').lean().then(s => s?.brand || '').catch(() => '');
+            const checked = validateListingContent(action.field, content?.[taskId], { brand });
+            if (!checked.ok) {
+                results.push({ taskId, status: 'failed', message: checked.reason });
+                continue;
+            }
+            action.payload = { ...action.payload, value: checked.value };
+            action.summary = `${action.summary.replace(' with the text you approve below.', '')}: ${Array.isArray(checked.value) ? checked.value.join(' | ') : checked.value}`.slice(0, 2000);
+        }
+        // Listing text can be fixed again with different text; ads changes only once.
+        const done = action.editable ? null : await TaskActionLog.findOne({ userId, country, region, taskId, actionType: action.type, status: 'succeeded' }).lean();
         if (done) {
             results.push({ taskId, status: 'skipped', message: 'This change was already made.' });
             continue;
@@ -201,13 +310,17 @@ async function annotateProposedActions(userId, tasks = []) {
         } catch (_) { /* no log read = not known to be done */ }
     }
     return withActions.map(({ task, action }) => (action
-        ? { ...task, proposedAction: { type: action.type, label: action.label, summary: action.summary, done: doneIds.has(task.taskId) } }
+        ? { ...task, proposedAction: {
+            type: action.type, label: action.label, summary: action.summary, done: doneIds.has(task.taskId),
+            ...(action.editable ? { editable: true, field: action.field } : {})
+        } }
         : task));
 }
 
 module.exports = {
     MAX_ACTIONS_PER_REQUEST,
     proposedActionFor,
+    validateListingContent,
     approveTaskActions,
     annotateProposedActions,
     actionsDisabled
