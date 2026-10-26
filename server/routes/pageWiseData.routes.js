@@ -36,6 +36,7 @@ const {
     confirmListingChanges,
     getLeadTime,
     setLeadTime,
+    getFeesAtRisk,
     getInventoryData,
     getAsinWiseSalesData,
     getYourProductsData,
@@ -597,6 +598,9 @@ router.post('/tasks/listing-changes/confirm', auth, getLocation, confirmListingC
 // The seller's replenishment lead time for this marketplace.
 router.get('/inventory/lead-time', auth, getLocation, getLeadTime);
 router.put('/inventory/lead-time', auth, getLocation, setLeadTime);
+
+// Fees at Risk dashboard tile (the fees we have data for).
+router.get('/dashboard/fees-at-risk', auth, getLocation, getFeesAtRisk);
 
 // ===== PPC METRICS (from PPCMetrics Model) =====
 // Get latest PPC metrics for dashboards

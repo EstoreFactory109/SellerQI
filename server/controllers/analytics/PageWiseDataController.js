@@ -933,6 +933,22 @@ const setLeadTime = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, { days }, 'Lead time saved; it applies from the next data refresh'));
 });
 
+/**
+ * GET /api/pagewise/dashboard/fees-at-risk
+ * tasks-logics.xlsx "Fees at Risk" tile, partly: the fees we have data for, from the
+ * newest FBA inventory planning report. Aged inventory surcharge: Amazon's own
+ * estimate (estimated-ais-*), summed. Low-inventory-level fee: products Amazon says
+ * it charges this week and that are not exempt (the report gives no per-unit amount).
+ * Storage utilization and returns processing fees are not included (no data).
+ */
+const getFeesAtRisk = asyncHandler(async (req, res) => {
+    const Planning = require('../../models/inventory/GET_FBA_INVENTORY_PLANNING_DATA_Model.js');
+    const { feesAtRiskFromPlanning } = require('../../Services/Calculations/FeesAtRisk.js');
+    const doc = await Planning.findOne({ User: req.userId, country: req.country, region: req.region })
+        .sort({ createdAt: -1 }).select('createdAt data.asin data.estimated_ais_total data.low_inventory_level_fee_applied data.low_inventory_level_fee_exempt').lean();
+    return res.status(200).json(new ApiResponse(200, feesAtRiskFromPlanning(doc), 'Fees at risk'));
+});
+
 const updateTaskStatus = asyncHandler(async (req, res) => {
     const userId = req.userId;
     const { taskId, status } = req.body;
@@ -4226,6 +4242,7 @@ const getDashboardPhase3 = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+    getFeesAtRisk,
     getLeadTime,
     setLeadTime,
     confirmListingChanges,

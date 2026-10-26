@@ -353,6 +353,23 @@ const DashboardContent = () => {
     };
   }, []);
 
+  // Fees at Risk (tasks-logics.xlsx tile), partly: aged inventory surcharge and the
+  // low-inventory-level fee, from the newest planning report. Storage utilization and
+  // returns processing fees have no data source and are named as not included.
+  const [feesAtRisk, setFeesAtRisk] = useState(null);
+  const [feesAtRiskLoading, setFeesAtRiskLoading] = useState(true);
+  useEffect(() => {
+    if (!runSingleFetches) return undefined;
+    let cancelled = false;
+    setFeesAtRiskLoading(true);
+    axiosInstance
+      .get('/api/pagewise/dashboard/fees-at-risk')
+      .then((res) => { if (!cancelled) setFeesAtRisk(res.data?.data ?? null); })
+      .catch(() => { if (!cancelled) setFeesAtRisk(null); })
+      .finally(() => { if (!cancelled) setFeesAtRiskLoading(false); });
+    return () => { cancelled = true; };
+  }, [runSingleFetches]);
+
   // Wasted ad spend: always ask the same endpoint the Campaign Audit page uses (with the
   // calendar range when one is selected), so the Dashboard and Campaign Audit agree. The
   // server's one-time dashboard summary value is only the fallback while this loads/fails.
@@ -1146,6 +1163,30 @@ const DashboardContent = () => {
               )}
             </div>
           </div>
+
+          {runSingleFetches && (
+            <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-[22px]'>
+              <KPICard
+                label="Fees at Risk"
+                meaning="Fees you can still avoid this month"
+                tooltip="Estimated fees you can still avoid this month: aged inventory and low-inventory fees. Storage utilization and returns processing fees are not included yet."
+                loading={feesAtRiskLoading}
+                value={feesAtRisk?.agedSurcharge ? formatFullCurrency(feesAtRisk.agedSurcharge.amount) : undefined}
+                secondaryValue={feesAtRisk?.lowInventoryFee
+                  ? `${feesAtRisk.lowInventoryFee.products} product${feesAtRisk.lowInventoryFee.products === 1 ? '' : 's'} paying the low-inventory fee`
+                  : undefined}
+                status={(feesAtRisk?.agedSurcharge?.amount > 0 || feesAtRisk?.lowInventoryFee?.products > 0) ? STATUS.WATCH : undefined}
+                statusLabel={(feesAtRisk?.agedSurcharge?.amount > 0 || feesAtRisk?.lowInventoryFee?.products > 0) ? 'Avoidable' : undefined}
+                noData={feesAtRisk?.available ? undefined : {
+                  message: 'Fees at risk appear once Amazon\'s inventory planning report has been read for this marketplace.',
+                }}
+                footnote={feesAtRisk?.available
+                  ? `Aged inventory surcharge (Amazon's estimate) and low-inventory fee only; storage utilization and returns processing fees not included.`
+                  : undefined}
+                onClick={() => navigate('/seller-central-checker/tasks?category=inventory')}
+              />
+            </div>
+          )}
 
           <div className='mb-3 mt-2'>
             <h2 className='m-0 text-lg font-semibold tracking-[-0.01em]' style={{ color: COLORS.textPrimary }}>Ads</h2>
