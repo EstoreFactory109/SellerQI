@@ -13,7 +13,8 @@ const check = (refunds, { returned = [], reimbursed = [] } = {}) => buildRefundC
     { createdAt: daysAgo(2), windowStart: daysAgo(150), lines: returned.map(orderId => ({ orderId })) },
     { data: reimbursed.map(amazon_order_id => ({ amazon_order_id })) }
 );
-const run = (refundCheck, products = [{ asin: 'A1', sku: 'S1' }]) => W1.detectRefundNotReturned({ refundCheck, products, now: NOW });
+const STOCK = { byAsin: { A1: { skus: ['S1'] } } };
+const run = (refundCheck, products = [{ asin: 'A1', sku: 'S1' }], stock = STOCK) => W1.detectRefundNotReturned({ refundCheck, stock, products, now: NOW });
 
 describe('detectRefundNotReturned', () => {
     it('flags refunds with no return and no reimbursement, per product', () => {
@@ -27,6 +28,10 @@ describe('detectRefundNotReturned', () => {
 
     it('skips seller-fulfilled orders and refunds older than the returns report', () => {
         expect(run(check([refund('111-1')]), [{ asin: 'A1', sku: 'S1', fulfillmentChannel: 'DEFAULT' }]).tasks).toHaveLength(0);
+        // Not in Amazon's inventory: seller-fulfilled, its returns never reach the report.
+        expect(run(check([refund('111-1', 70, { sku: 'FBM-1' })])).tasks).toHaveLength(0);
+        // No FBA inventory read: no verdict.
+        expect(run(check([refund('111-1')]), undefined, null).covered).toBe(false);
         const short = buildRefundCheck([refund('111-1', 100)], { createdAt: daysAgo(2), windowStart: daysAgo(90), lines: [] }, { data: [] });
         expect(run(short).tasks).toHaveLength(0);
     });

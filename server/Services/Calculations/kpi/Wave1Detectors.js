@@ -553,18 +553,23 @@ function detectInboundShortage({ inboundShortage, products = [], now }) {
  * (a seller-fulfilled return is the seller's own business). One task per product,
  * listing the orders; there is no Amazon API to file the claims, so the task says how.
  */
-function detectRefundNotReturned({ refundCheck, products = [], productsByAsin = new Map(), now }) {
+function detectRefundNotReturned({ refundCheck, stock = null, products = [], productsByAsin = new Map(), now }) {
     if (!refundCheck || !refundCheck.reimbursementsRead || !refundCheck.returnsFetchedAt
-        || ageDays(refundCheck.returnsFetchedAt, now) > REIMBURSEMENT_INPUT_MAX_AGE_DAYS) {
+        || ageDays(refundCheck.returnsFetchedAt, now) > REIMBURSEMENT_INPUT_MAX_AGE_DAYS || !stock?.byAsin) {
         return { tasks: [], covered: false };
     }
+    // FBA SKUs: the ones in Amazon's inventory. A seller-fulfilled return goes back to
+    // the seller, never into Amazon's returns report, so those refunds would all read
+    // as "not returned" (103 of 261 flagged orders on a live US account).
+    const fbaSkus = new Set();
+    for (const entry of Object.values(stock.byAsin)) for (const sku of entry?.skus || []) fbaSkus.add(String(sku));
     const channelBySku = new Map(products.filter(p => p?.sku).map(p => [String(p.sku), p.fulfillmentChannel || null]));
     const windowStart = refundCheck.returnsWindowStart ? Date.parse(refundCheck.returnsWindowStart) : NaN;
     const byAsin = new Map();
     for (const r of refundCheck.refunds || []) {
         const orderId = String(r?.orderId || '').trim();
         if (!orderId || !r.asin) continue;
-        if (channelBySku.get(String(r.sku || '')) === 'DEFAULT') continue; // seller-fulfilled
+        if (!fbaSkus.has(String(r.sku || '')) || channelBySku.get(String(r.sku || '')) === 'DEFAULT') continue; // seller-fulfilled
         // The returns report must reach back to the refund, or "no return" is unknown.
         if (!Number.isFinite(windowStart) || windowStart > new Date(r.refundDate).getTime()) continue;
         if (refundCheck.returnedOrders.has(orderId) || refundCheck.reimbursedOrders.has(orderId)) continue;
