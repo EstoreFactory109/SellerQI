@@ -6,15 +6,19 @@
  * Creates LowInventory alerts for:
  * - Out of stock (0 inventory): only when the ASIN had inventory > 0 in the second-latest doc
  *   and 0 in the latest doc (avoids re-alerting for ASINs already at 0).
- * - Low stock: when recommendedReplenishmentQty > 30 (based on latest doc only).
+ * - Running out: the same rule as the replenishment tasks (Inventory_.replenishmentQty,
+ *   tasks-logics.xlsx "Products to Replenish"): days of supply under lead time + 14 days,
+ *   or Amazon's reorder alert, on products selling 1+ unit a day. Each product is sent at
+ *   most once a week (the spreadsheet's 7-day cooldown).
  */
 
 const RestockInventoryRecommendations = require('../../../models/inventory/GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT_Model.js');
 const { LowInventoryAlert } = require('../../../models/alerts/Alert.js');
+const { replenishmentQty } = require('../../Calculations/Inventory_.js');
 const logger = require('../../../utils/Logger.js');
 
-/** Replenishment qty threshold: above this is considered "low stock" / Error (same as Inventory_.js) */
-const LOW_STOCK_REPLENISHMENT_QTY_THRESHOLD = 30;
+/** Days before a product still running out is emailed again (tasks-logics.xlsx cooldown). */
+const LOW_STOCK_COOLDOWN_DAYS = 7;
 
 /** Number of days within which stored data is considered fresh enough for alerts */
 const ALERT_DATA_FRESH_DAYS = 3;
@@ -107,15 +111,31 @@ async function detectAndStoreLowInventoryAlerts(userId, region, country) {
     const products = doc.Products || [];
     const alertProducts = [];
 
+    // Running-out verdicts per SKU row, from the same rule as the tasks.
+    const verdicts = new Map();
+    for (const row of replenishmentQty(products)) {
+      if (row.status === 'Error') verdicts.set(`${row.asin}|${row.sku}`, row);
+    }
+    // ASINs already emailed as running out in the last week.
+    const recentlySent = new Set();
+    const since = new Date(Date.now() - LOW_STOCK_COOLDOWN_DAYS * 24 * 60 * 60 * 1000);
+    const recent = await LowInventoryAlert.find({ User: userId, region, country, createdAt: { $gte: since } })
+      .select('products.asin products.alert').lean().catch(() => []);
+    for (const a of recent || []) {
+      for (const p of a.products || []) if (p?.asin && p.alert !== 'out_of_stock') recentlySent.add(p.asin);
+    }
+
     for (const p of products) {
       const alertVal = (p.alert || p.Alert || '').toString().trim().toLowerCase();
       const qty = Number(p.recommendedReplenishmentQty || p.RecommendedReplenishmentQty) || 0;
       const available = (p.available || p.Available || '0').toString();
       const asin = (p.asin || '').toString().trim();
       if (!asin) continue;
+      const sku = (p.merchantSku || p.MerchantSku || p.sku || '').toString();
 
       const isOutOfStock = alertVal === 'out_of_stock';
-      const isLowStock = !isOutOfStock && qty > LOW_STOCK_REPLENISHMENT_QTY_THRESHOLD;
+      const running = verdicts.get(`${asin}|${sku}`);
+      const isLowStock = !isOutOfStock && !!running && !recentlySent.has(asin);
 
       if (isOutOfStock) {
         // Only alert for 0 inventory when previous doc had > 0 (i.e. not already at 0 in second-last doc)
@@ -130,13 +150,15 @@ async function detectAndStoreLowInventoryAlerts(userId, region, country) {
           });
         }
       } else if (isLowStock) {
+        recentlySent.add(asin); // one row per ASIN even with several SKUs
+        const days = running.daysOfSupply ?? 0;
         alertProducts.push({
           asin,
-          sku: (p.merchantSku || p.MerchantSku || p.sku || '').toString() || undefined,
+          sku: sku || undefined,
           available,
           recommendedReplenishmentQty: String(qty),
           alert: alertVal || 'low_stock',
-          message: `Low stock. ${available} units available. Amazon recommends replenishing ${qty} units.`,
+          message: `Runs out in about ${days} day${days === 1 ? '' : 's'} at the current sales rate (${running.available} available, ${running.inbound} inbound).${qty > 0 ? ` Amazon recommends sending ${qty} units.` : ''}`,
         });
       }
     }
@@ -191,5 +213,5 @@ module.exports = {
   detectAndStoreLowInventoryAlerts,
   isWithinLastNDays,
   ALERT_DATA_FRESH_DAYS,
-  LOW_STOCK_REPLENISHMENT_QTY_THRESHOLD,
+  LOW_STOCK_COOLDOWN_DAYS,
 };
