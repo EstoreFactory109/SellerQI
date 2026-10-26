@@ -17,7 +17,8 @@
  *   detected, not stored            -> insert as pending
  *   detected, stored                -> refresh content (amount, text, renderData);
  *                                      status: resolved -> pending (reopened);
- *                                      completed for > COMPLETED_GRACE_DAYS -> pending
+ *                                      completed for longer than the check's cooldown
+ *                                      (TaskCooldowns, tasks-logics.xlsx) -> pending
  *                                      with stillDetected; otherwise unchanged
  *   not detected, stored, open      -> resolved, IF its data source was covered this
  *                                      run and the mass-resolve rail did not trip
@@ -273,7 +274,9 @@ function planReconcile({ existing = [], desired = [], coverage = {}, priorRailTr
             // the last time anything (in practice, the status change) touched them.
             const completedAt = have.completedAt || have.updatedAt;
             const completedMs = completedAt ? new Date(completedAt).getTime() : NaN;
-            const graceOver = Number.isFinite(completedMs) && nowMs - completedMs > COMPLETED_GRACE_DAYS * DAY_MS;
+            // The spreadsheet's cooldown for this check (TaskCooldowns); 7 days when unlisted.
+            const graceDays = require('./TaskCooldowns.js').cooldownDaysFor(have);
+            const graceOver = Number.isFinite(completedMs) && nowMs - completedMs > graceDays * DAY_MS;
             if (!graceOver && !have.completedAt && completedAt) {
                 // Pin the fallback before this write bumps updatedAt: otherwise every
                 // content refresh would restart the grace period and it never ends.

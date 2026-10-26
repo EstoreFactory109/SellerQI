@@ -56,7 +56,7 @@ const CogsService = require('../Finance/CogsService.js');
 const adsKeywordsPerformanceModel = require('../../models/amazon-ads/adsKeywordsPerformanceModel.js');
 const { loadLatestSnapshotDoc, loadKeywordSnapshot } = require('../../utils/ppcSnapshotLoader.js');
 const { buildLtsfAmountMap, classifyBuyBoxLoss } = require('../Calculations/RecoverableAmountUtils.js');
-const { freshInventoryReportOrNull, filterInboundIssuesToWindow } = require('../Calculations/InventoryReportFreshness.js');
+const { freshInventoryReportOrNull, filterInboundIssuesToWindow, INBOUND_NEW_ISSUE_DAYS } = require('../Calculations/InventoryReportFreshness.js');
 const GetOrderDataModel = require('../../models/products/OrderAndRevenueModel.js');
 const WeeklyFinanceModel = require('../../models/finance/WeekLyFinanceModel.js');
 const userModel = require('../../models/user-auth/userModel.js');
@@ -1169,7 +1169,8 @@ class AnalyseService {
         // window was applied on the day it ran; re-apply it now so a document
         // from earlier in the week cannot surface issues that have aged out.
         const safeInboundNonComplianceData = {
-            ErrorData: filterInboundIssuesToWindow(inboundDoc?.ErrorData)
+            // Tasks: problems Amazon reported this week (new since the last look).
+            ErrorData: filterInboundIssuesToWindow(inboundDoc?.ErrorData, new Date(), INBOUND_NEW_ISSUE_DAYS)
         };
         const safeRestockData = restockDoc || { Products: [] };
 
