@@ -338,6 +338,8 @@ function getTaskPriorityMeta(task) {
         effortMinutes,
         impactWeight: mappedWeight === undefined ? DEFAULT_IMPACT_WEIGHT : mappedWeight,
         isQuickWin: effortMinutes <= QUICK_WIN_MAX_MINUTES,
+        // tasks-logics.xlsx P1-P4 label (TaskPriorityLevels requires this file, so lazily).
+        priorityLevel: require('./TaskPriorityLevels.js').priorityLevelFor(task),
         // Lets callers spot task types that slipped through without a mapping,
         // rather than silently inheriting the defaults.
         isKnownTaskType: mappedEffort !== undefined

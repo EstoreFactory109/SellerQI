@@ -30,7 +30,7 @@ const ProductChecker = ({ loading = false }) => {
     <div className="p-5 h-full flex flex-col">
       <div className="flex items-start gap-1.5 mb-1">
         <h2 className="m-0 text-lg font-semibold" style={{ color: COLORS.textPrimary }}>Issue mix</h2>
-        <InfoTooltip text="Quick overview of product issues categorized by ranking, conversion, and account impact to help you prioritize fixes." />
+        <InfoTooltip text="Quick overview of product issues grouped by ranking, conversion and account impact, so you can fix the most important first." />
       </div>
       <p className="m-0 mb-4 text-sm" style={{ color: COLORS.textSecondary }}>
         Where the {totalIssues.toLocaleString()} open issues sit. Counts, not urgency.

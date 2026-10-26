@@ -14,6 +14,7 @@ const { calculateSponsoredAdsMetrics, calculateNegativeKeywordsMetrics } = requi
 const { createDefaultDashboardData, mergeWithDefaults } = require('./DefaultDataStructure.js');
 const CreateTaskService = require('./CreateTasksService.js');
 const { runKpiDetectors } = require('./kpi/index.js');
+const { priorityLevelFor, blocksAmazonReady } = require('./TaskPriorityLevels.js');
 const logger = require('../../utils/Logger.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
@@ -2005,12 +2006,24 @@ const analyseData = async (data, userId = null, options = {}) => {
         TotalProducts: TotalProducts
     };
     let previewTasks;
-    if (!persistTasks) {
-        try {
-            previewTasks = CreateTaskService.generateAllTasks(taskSources);
-        } catch (error) {
-            logger.error('Error generating preview tasks:', { message: error.message });
-        }
+    let detectedTasks = null;
+    try {
+        detectedTasks = CreateTaskService.generateAllTasks(taskSources);
+        if (!persistTasks) previewTasks = detectedTasks;
+    } catch (error) {
+        logger.error('Error generating tasks from detected issues:', { message: error.message });
+    }
+
+    // tasks-logics.xlsx "Amazon Ready Products": ASINs with no open P1-P3 task. A
+    // P4 (polish) task no longer costs a product the badge; any task type, listing
+    // or not, does from P3 up. Falls back to the listing-check list when the
+    // candidates or the task list are unavailable.
+    const candidates = data.ConversionData?.AmazonReadyCandidates;
+    if (Array.isArray(candidates) && Array.isArray(detectedTasks)) {
+        const blocked = new Set(detectedTasks
+            .filter(t => t?.asin && blocksAmazonReady(priorityLevelFor(t)))
+            .map(t => t.asin));
+        dashboardData.amazonReadyProducts = candidates.filter(asin => activeProductSet.has(asin) && !blocked.has(asin));
     }
 
     if (userId && persistTasks) {

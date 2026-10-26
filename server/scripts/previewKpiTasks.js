@@ -63,7 +63,14 @@ async function previewMarketplace(userId, country, region) {
     // persistTasks:false = no task writes. The userId stays, so live per-ASIN finance is read.
     const result = await analyseData(analysed.message, userId, { persistTasks: false });
     const inputs = analysed.message.KpiInputs || null;
-    return { tasks: result?.kpiTasks || [], allTasks: result?.previewTasks || [], inputs, stale: result?.kpiStaleSources || [] };
+    const conversion = analysed.message?.ConversionData || {};
+    const ready = {
+        // Listing checks only (before), and no open P1-P3 task (now shown on the dashboard).
+        listingChecks: (conversion.AmazonReadyproducts || []).length,
+        noP1toP3: (result?.dashboardData?.amazonReadyProducts || []).length,
+        candidates: (conversion.AmazonReadyCandidates || []).length
+    };
+    return { tasks: result?.kpiTasks || [], allTasks: result?.previewTasks || [], inputs, stale: result?.kpiStaleSources || [], ready };
 }
 
 const describeInputs = (inputs) => {
@@ -110,10 +117,11 @@ async function main() {
         for (const { country, region } of account.marketplaces) {
             const label = `${account.userId} ${country}-${region}`;
             try {
-                const { tasks, allTasks, inputs, stale } = await withTimeout(previewMarketplace(account.userId, country, region), TIMEOUT_MS, label);
+                const { tasks, allTasks, inputs, stale, ready } = await withTimeout(previewMarketplace(account.userId, country, region), TIMEOUT_MS, label);
                 const byType = {};
                 for (const t of tasks) (byType[t.errorType] = byType[t.errorType] || []).push(t);
                 console.log(`\n${label}: ${tasks.length} tasks  [${describeInputs(inputs)}]`);
+                if (ready) console.log(`  Amazon Ready: ${ready.noP1toP3} of ${ready.candidates} judged (listing checks alone gave ${ready.listingChecks})`);
                 if (stale.length) console.log(`  STALE: ${stale.map(s => `${s.source} ${s.ageHours}h > ${s.maxHours}h`).join(', ')}`);
                 for (const [type, list] of Object.entries(byType)) {
                     totals[type] = (totals[type] || 0) + list.length;

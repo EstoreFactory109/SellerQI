@@ -13,6 +13,7 @@ import {
 import { fetchTasks, updateTaskStatus } from '../../redux/slices/TasksSlice.js';
 import { TasksPageSkeleton } from '../../Components/Skeleton/PageSkeletons.jsx';
 import { COLORS } from '../../Components/Shared/index.js';
+
 import { formatCurrencyWithLocale } from '../../utils/currencyUtils.js';
 import {
   BUCKET,
@@ -31,6 +32,14 @@ import RemovalReceiptModal from '../../Components/Tasks/RemovalReceiptModal.jsx'
 import axiosInstance from '../../config/axios.config.js';
 import { openTasksOf, summarizeUrgency } from '../../utils/taskUrgency.js';
 import { trackEvent } from '../../utils/analytics.js';
+
+// tasks-logics.xlsx priority labels. Word + colour, never colour alone.
+const PRIORITY_BADGE = {
+  P1: { label: 'Urgent', fg: COLORS.fix, bg: 'rgba(239,68,68,.14)', title: 'Fix now: account, money with a deadline, or sales stopped' },
+  P2: { label: 'High', fg: COLORS.watch, bg: 'rgba(245,166,35,.14)', title: 'Fix this week: losing sales or at risk' },
+  P3: { label: 'Medium', fg: COLORS.accent, bg: 'rgba(59,130,246,.14)', title: 'Worth fixing: costs money or performance' },
+  P4: { label: 'Low', fg: COLORS.textMuted, bg: 'rgba(107,116,134,.14)', title: 'Polish when you have time' },
+};
 
 // Helper function to escape special regex characters in currency symbol
 const escapeRegex = (str) => {
@@ -363,6 +372,8 @@ export default function Tasks() {
         effortMinutes: task.effortMinutes,
         impactWeight: task.impactWeight,
         isQuickWin: !!task.isQuickWin,
+        // tasks-logics.xlsx P1-P4 (server TaskPriorityLevels).
+        priorityLevel: task.priorityLevel || null,
         // Task-specific details some actions need (e.g. the seller IDs on a
         // new_seller_on_brand task).
         renderData: task.renderData || null
@@ -1000,6 +1011,15 @@ export default function Tasks() {
                         )}
                       </div>
                       <div className="flex-none text-right flex flex-col items-end gap-1.5">
+                        {PRIORITY_BADGE[item.priorityLevel] && (
+                          <span
+                            className="inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
+                            title={PRIORITY_BADGE[item.priorityLevel].title}
+                            style={{ background: PRIORITY_BADGE[item.priorityLevel].bg, color: PRIORITY_BADGE[item.priorityLevel].fg }}
+                          >
+                            {item.priorityLevel} {PRIORITY_BADGE[item.priorityLevel].label}
+                          </span>
+                        )}
                         {item.amount > 0 && (
                           <span className="text-sm font-bold tabular-nums whitespace-nowrap" style={{ color: COLORS.good }}>
                             {formatCurrencyWithLocale(item.amount, currency)}{item.amountIsEstimated ? '*' : ''}

@@ -434,13 +434,13 @@ const TotalSales = ({ onGrossProfitChange } = {}) => {
                   : `Every dollar of the ${formatCurrencyWithLocale(totalSales, currency, 2)} you sold ${periodLabel}.`}
             </p>
           </div>
-          <InfoTooltip text="Total product sales from finance data (DailySkuFinance) for the selected date range." />
+          <InfoTooltip text="Total revenue in the selected date range." />
         </div>
         {!showEmptyState && <div className="text-right flex-none">
           <div className="flex items-center justify-end gap-1.5">
             <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted }}>You keep</div>
             <InfoTooltip
-              text="Sales minus Amazon fees, refunds, overhead, PPC spend, and COGS (when entered) — same calculation as the Profitability dashboard."
+              text="Sales minus Amazon fees (referral, fulfilment, storage, aged inventory and low-inventory fees), ad spend, refunds, overhead and product cost where provided. Same calculation as the Profitability dashboard."
               position="left"
             />
           </div>

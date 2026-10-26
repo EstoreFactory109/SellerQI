@@ -1063,7 +1063,7 @@ const DashboardContent = () => {
             <KPICard
               label="Money Amazon Owes You"
               meaning="Unclaimed FBA reimbursements"
-              tooltip="Cases from the last 30 days where Amazon lost, damaged, or over-charged you. You still have to file the claim."
+              tooltip="Estimated amount Amazon may owe you for lost, damaged or over-charged items. Most claims must be filed within 60 days, and you still have to file each one."
               loading={!isPhase1Complete || reimbursementLoading}
               value={formatFullCurrency(expectedReimbursement)}
               status={expectedReimbursement > 0 ? STATUS.SETUP : undefined}
@@ -1080,7 +1080,7 @@ const DashboardContent = () => {
             <KPICard
               label="Total Sales"
               meaning="Everything you sold this period"
-              tooltip="Total sales across all your orders for the selected period, before Amazon fees, refunds, ad spend and product costs."
+              tooltip="Total revenue in the selected date range, before Amazon fees, refunds, ad spend and product costs."
               loading={grossProfitData.loading}
               value={formatFullCurrency(grossProfitData.totalSales)}
               footnote={totalSalesNote}
@@ -1095,7 +1095,7 @@ const DashboardContent = () => {
             <KPICard
               label="Gross Profit"
               meaning={grossProfitMarginLabel || 'What you kept after costs'}
-              tooltip="Sales minus Amazon fees, refunds, overhead, PPC spend, and product costs (when entered) — the same figure shown in Where Your Money Goes below."
+              tooltip="Sales minus Amazon fees (referral, fulfilment, storage, aged inventory and low-inventory fees), ad spend, refunds, overhead and product cost where provided. The same figure shown in Where Your Money Goes below."
               loading={grossProfitData.loading}
               value={formatFullCurrency(grossProfitData.grossProfitRaw)}
               status={grossProfitStatus}

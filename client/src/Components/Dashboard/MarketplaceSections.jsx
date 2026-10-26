@@ -297,12 +297,12 @@ const MarketplaceSection = ({ m, onOpen }) => {
           <div className='grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3'>
             <Tile label='Total Sales' value={formatMoney(x.totalSales, cur)} hint={hintFor(x.totalSales, m)}
               note={present(x.totalSales) ? (present(x.adSalesSharePct) ? `${x.adSalesSharePct.toFixed(0)}% of sales came from ads` : 'Everything you sold this period') : 'No finance data for this period yet'} />
-            <Tile label='Gross Profit' tooltip='Sales minus Amazon fees, refunds, overhead, ad spend and product costs (where entered).'
+            <Tile label='Gross Profit' tooltip='Sales minus Amazon fees (referral, fulfilment, storage, aged inventory and low-inventory fees), ad spend, refunds, overhead and product cost where provided.'
               value={formatMoney(x.grossProfit, cur)} valueColor={colorOf(marginStatus(x.marginPct))} hint={hintFor(x.grossProfit, m)}
               note={costsNote(x)}>
               {marginBar}
             </Tile>
-            <Tile label='Money Amazon owes you' tooltip='Unclaimed FBA reimbursements — you still have to file each claim.'
+            <Tile label='Money Amazon owes you' tooltip='Estimated amount Amazon may owe you for lost, damaged or over-charged items. Most claims must be filed within 60 days.'
               value={formatMoney(x.moneyOwed, cur)} hint={hintFor(x.moneyOwed, m)}
               note={x.moneyOwed > 0 ? 'Ready to claim' : 'No unclaimed reimbursements found'} />
             <Tile label='Open issues' value={present(x.totalIssues) ? Number(x.totalIssues).toLocaleString() : '—'}
@@ -410,7 +410,7 @@ const UsdTotals = ({ totals, windowsDiffer }) => {
           <Tile label='Total sales' value={formatMoney(totals.totalSales, 'USD')}>{hasFinance && subLine('sales')}</Tile>
           <Tile
             label='Gross profit'
-            tooltip='Sales minus Amazon fees, refunds, overhead, ad spend and product costs (where entered), added across marketplaces in USD.'
+            tooltip='Sales minus Amazon fees (referral, fulfilment, storage, aged inventory and low-inventory fees), ad spend, refunds, overhead and product cost where provided, added across marketplaces in USD.'
             value={formatMoney(totals.grossProfit, 'USD')}
             valueColor={colorOf(marginStatus(totals.marginPct))}
           >

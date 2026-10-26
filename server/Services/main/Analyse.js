@@ -1113,7 +1113,13 @@ class AnalyseService {
                 brandStoryScrapePresent,
                 ProductWithOutBuybox: buyboxResult,
                 // Unique: an ASIN listed under several SKUs is one product.
-                AmazonReadyproducts: [...new Set(AmazonReadyProducts)]
+                AmazonReadyproducts: [...new Set(AmazonReadyProducts)],
+                // Active ASINs whose listing was scraped: the products that CAN be
+                // judged ready. DashboardCalculation narrows them to those with no
+                // open P1-P3 task (tasks-logics.xlsx "Amazon Ready Products").
+                AmazonReadyCandidates: [...new Set(SellerAccount.products
+                    .filter(p => p && p.status === 'Active' && p.asin && scraped.has(p.asin))
+                    .map(p => p.asin))]
             },
             defaulters: DefaulterList
         };
