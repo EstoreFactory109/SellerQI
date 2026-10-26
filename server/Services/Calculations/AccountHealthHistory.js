@@ -43,6 +43,12 @@ const AHR_NEAR_CUTOFF_MARGIN = 20;
 const METRIC_RULES = {
     accountStatuses: { good: 'NORMAL', critical: ['DEACTIVATED'] },
     listingPolicyViolations: { good: 'GOOD' },
+    // Derived per report by AccountHealth.deriveV2 (tasks-logics.xlsx alignment):
+    // the worst status across every policy category, the ODR of the channel that
+    // carried orders, and on-time delivery.
+    policyStatus: { good: 'GOOD' },
+    odrStatus: { good: 'GOOD', mild: ['FAIR'] },
+    onTimeDeliveryStatus: { good: 'GOOD', mild: ['FAIR'] },
     validTrackingRateStatus: { good: 'GOOD', mild: ['FAIR'] },
     orderWithDefectsStatus: { good: 'GOOD', mild: ['FAIR'] },
     lateShipmentRateStatus: { good: 'GOOD', mild: ['FAIR'] },

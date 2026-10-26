@@ -53,6 +53,7 @@ const {
     downloadTaskRequestAttachment,
 } = require('../controllers/esf/esfTaskRequests.js');
 const esfAuth = require('../middlewares/Auth/esfAuth.js');
+const { getClientActivityOverview, getClientActivity } = require('../controllers/esf/esfActivity.js');
 const { refuseIfOtherSession } = require('../middlewares/Auth/singleSession.js');
 const gmailUpload = require('../middlewares/multer/gmailUpload.js');
 const { authRateLimiter, registerRateLimiter } = require('../middlewares/rateLimiting.js');
@@ -146,6 +147,10 @@ router.get('/messages/:threadId/attachments/:messageId/:index', esfAuth, downloa
  * creates a real task in the shared Zoho portal on the client's behalf.
  */
 router.get('/task-requests', esfAuth, listTaskRequests);
+
+// Client activity monitoring — owner/admins only (enforced in the controller).
+router.get('/activity', esfAuth, getClientActivityOverview);
+router.get('/activity/clients/:clientId', esfAuth, getClientActivity);
 router.patch('/task-requests/:requestId/accept', esfAuth, acceptTaskRequest);
 router.patch('/task-requests/:requestId/reject', esfAuth, rejectTaskRequest);
 router.patch('/task-requests/:requestId/dismiss-suggestion', esfAuth, dismissStagedDecision);

@@ -30,6 +30,7 @@ const sendVerificationCode = require('../../Services/SMS/sendSMS.js');
 const subscriptionVerificationService = require('../../Services/User/SubscriptionVerificationService.js');
 const { sendRegisteredEmail } = require('../../Services/Email/SendEmailOnRegistered.js');
 const AccountMember = require('../../models/user-auth/AccountMemberModel.js');
+const { ownsMarketplace, parseMarketplaceHeader } = require('../../utils/marketplaceAccess.js');
 
 // A member of someone else's account signs in by emailed link with this address;
 // it cannot also be the login of an account of its own.
@@ -796,21 +797,44 @@ const updateUserPhone = asyncHandler(async (req, res) => {
     }
 })
 
+/**
+ * The marketplace a user is switching to, if it is genuinely theirs.
+ *
+ * switchAccount used to sign whatever country/region the body named, so a crafted request could
+ * mint a location cookie for a marketplace the user doesn't own. Every switch now has to match a
+ * marketplace on the user's own Seller record.
+ */
+const resolveRequestedMarketplace = async (req) => {
+    const parsed = parseMarketplaceHeader(`${req.body?.country || ''}:${req.body?.region || ''}`);
+    if (!parsed) return { error: 400 };
+    if (!(await ownsMarketplace(req.userId, parsed.country, parsed.region))) return { error: 403 };
+    return { marketplace: parsed };
+};
+
+/**
+ * Remembers the pick as the user's default marketplace — but only when the account owner made it.
+ * Admin, agency, super-admin and team-member sessions act on someone else's account, so their
+ * browsing must not change that owner's default.
+ */
+const savePreferredMarketplace = async (req, { country, region }) => {
+    if (req.adminId || req.superAdminId || req.memberId) return false;
+    await UserModel.updateOne({ _id: req.userId }, { $set: { preferredMarketplace: { country, region } } });
+    return true;
+};
+
 const switchAccount = asyncHandler(async (req, res) => {
-    const userId = req.userId; // Getting admin id from auth middleware
+    const userId = req.userId;
 
-    const { country, region } = req.body;
-
-    console.log("from switchAccount: ", userId, country, region);
-
-    // Check if admin id exists
-
-    // Validate required fields
-    if (!country || !region) {
+    const { marketplace, error } = await resolveRequestedMarketplace(req);
+    if (error === 400) {
         logger.error(new ApiError(400, "country, and region are required"));
         return res.status(400).json(new ApiResponse(400, "", "userId, country, and region are required"));
     }
-
+    if (error === 403) {
+        logger.warn(`[switchAccount] user ${userId} asked for a marketplace they don't own: ${req.body?.country}:${req.body?.region}`);
+        return res.status(403).json(new ApiResponse(403, "", "Marketplace not connected to this account"));
+    }
+    const { country, region } = marketplace;
 
     let AccessToken = await createAccessToken(userId);
     let RefreshToken = await createRefreshToken(userId);
@@ -821,6 +845,13 @@ const switchAccount = asyncHandler(async (req, res) => {
         return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating tokens"));
     }
 
+    try {
+        await savePreferredMarketplace(req, marketplace);
+    } catch (err) {
+        // The switch itself still succeeds; only the remembered default is lost.
+        logger.warn(`[switchAccount] could not save preferred marketplace for ${userId}: ${err.message}`);
+    }
+
     const option = getHttpsCookieOptions();
 
     return res.status(200)
@@ -829,6 +860,39 @@ const switchAccount = asyncHandler(async (req, res) => {
         .cookie("IBEXLocationToken", LocationToken, option)
         .json(new ApiResponse(200, "", "Account switched successfully"));
 
+});
+
+/**
+ * PUT /app/preferences/marketplace — a page's marketplace switcher.
+ *
+ * Unlike switchAccount this does not re-issue the session tokens or expect a page reload: pages
+ * send the marketplace on each request themselves. It moves the location cookie too, so pages that
+ * still rely on the cookie (and QMate) follow the user's latest choice.
+ */
+const setPreferredMarketplace = asyncHandler(async (req, res) => {
+    const { marketplace, error } = await resolveRequestedMarketplace(req);
+    if (error === 400) {
+        return res.status(400).json(new ApiResponse(400, "", "country and region are required"));
+    }
+    if (error === 403) {
+        return res.status(403).json(new ApiResponse(403, "", "Marketplace not connected to this account"));
+    }
+
+    const LocationToken = await createLocationToken(marketplace.country, marketplace.region);
+    if (!LocationToken) {
+        return res.status(500).json(new ApiResponse(500, "", "Internal server error in creating tokens"));
+    }
+
+    let saved = false;
+    try {
+        saved = await savePreferredMarketplace(req, marketplace);
+    } catch (err) {
+        logger.warn(`[setPreferredMarketplace] could not save preference for ${req.userId}: ${err.message}`);
+    }
+
+    return res.status(200)
+        .cookie("IBEXLocationToken", LocationToken, getHttpsCookieOptions())
+        .json(new ApiResponse(200, { ...marketplace, saved }, "Marketplace updated"));
 });
 
 const verifyEmailForPasswordReset = asyncHandler(async (req, res) => {
@@ -2175,6 +2239,7 @@ module.exports = {
     updateDetails,
     updateUserPhone,
     switchAccount,
+    setPreferredMarketplace,
     verifyEmailForPasswordReset,
     verifyResetPasswordCode,
     resetPassword,

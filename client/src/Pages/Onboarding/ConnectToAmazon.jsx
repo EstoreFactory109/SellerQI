@@ -1,54 +1,189 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from 'framer-motion';
-import { Globe, ChevronDown, ArrowRight, Loader2, Search, AlertTriangle } from 'lucide-react';
+import { Globe, ChevronDown, ArrowRight, Loader2, Search, AlertTriangle, Star } from 'lucide-react';
 import axios from 'axios';
 import { useSelector } from 'react-redux';
 import { hasPremiumAccess } from '../../utils/subscriptionCheck.js';
 import { devLog } from '../../utils/devLogger.js';
 import OnboardingShell from '../../Components/Onboarding/OnboardingShell.jsx';
 import { COLORS } from '../../Components/Shared/index.js';
+import { COUNTRY_DATA, REGION_NAMES } from '../../utils/amazonMarketplaces.js';
+import {
+  fetchChecklist,
+  goToAmazon,
+  errorMessage,
+  CHECKLIST_PATH,
+} from '../../utils/multiMarketplaceOnboarding.js';
 
 // Matches the onboarding shell's inset panel shade.
 const PANEL_BG = '#10141C';
 
-// Complete list of Amazon marketplaces with region mapping
-const COUNTRY_DATA = [
-  // North America (NA)
-  { code: 'CA', name: 'Canada', marketplaceId: 'A2EUQ1WTGCTBG2', region: 'NA', flag: '🇨🇦' },
-  { code: 'US', name: 'United States of America', marketplaceId: 'ATVPDKIKX0DER', region: 'NA', flag: '🇺🇸' },
-  { code: 'MX', name: 'Mexico', marketplaceId: 'A1AM78C64UM0Y8', region: 'NA', flag: '🇲🇽' },
-  { code: 'BR', name: 'Brazil', marketplaceId: 'A2Q3Y263D00KWC', region: 'NA', flag: '🇧🇷' },
-  
-  // Europe (EU)
-  { code: 'IE', name: 'Ireland', marketplaceId: 'A28R8C7NBKEWEA', region: 'EU', flag: '🇮🇪' },
-  { code: 'ES', name: 'Spain', marketplaceId: 'A1RKKUPIHCS9HS', region: 'EU', flag: '🇪🇸' },
-  { code: 'UK', name: 'United Kingdom', marketplaceId: 'A1F83G8C2ARO7P', region: 'EU', flag: '🇬🇧' },
-  { code: 'FR', name: 'France', marketplaceId: 'A13V1IB3VIYZZH', region: 'EU', flag: '🇫🇷' },
-  { code: 'BE', name: 'Belgium', marketplaceId: 'AMEN7PMS3EDWL', region: 'EU', flag: '🇧🇪' },
-  { code: 'NL', name: 'Netherlands', marketplaceId: 'A1805IZSGTT6HS', region: 'EU', flag: '🇳🇱' },
-  { code: 'DE', name: 'Germany', marketplaceId: 'A1PA6795UKMFR9', region: 'EU', flag: '🇩🇪' },
-  { code: 'IT', name: 'Italy', marketplaceId: 'APJ6JRA9NG5V4', region: 'EU', flag: '🇮🇹' },
-  { code: 'SE', name: 'Sweden', marketplaceId: 'A2NODRKZP88ZB9', region: 'EU', flag: '🇸🇪' },
-  { code: 'ZA', name: 'South Africa', marketplaceId: 'AE08WJ6YKNBMC', region: 'EU', flag: '🇿🇦' },
-  { code: 'PL', name: 'Poland', marketplaceId: 'A1C3SOZRARQ6R3', region: 'EU', flag: '🇵🇱' },
-  { code: 'EG', name: 'Egypt', marketplaceId: 'ARBP9OOSHTCHU', region: 'EU', flag: '🇪🇬' },
-  { code: 'TR', name: 'Turkey', marketplaceId: 'A33AVAJ2PDY3EV', region: 'EU', flag: '🇹🇷' },
-  { code: 'SA', name: 'Saudi Arabia', marketplaceId: 'A17E79C6D8DWNP', region: 'EU', flag: '🇸🇦' },
-  { code: 'AE', name: 'United Arab Emirates', marketplaceId: 'A2VIGQ35RCS4UG', region: 'EU', flag: '🇦🇪' },
-  { code: 'IN', name: 'India', marketplaceId: 'A21TJRUUN4KGV', region: 'EU', flag: '🇮🇳' },
-  
-  // Far East (FE)
-  { code: 'SG', name: 'Singapore', marketplaceId: 'A19VAU5U5O7RUS', region: 'FE', flag: '🇸🇬' },
-  { code: 'AU', name: 'Australia', marketplaceId: 'A39IBJ37TRP1C6', region: 'FE', flag: '🇦🇺' },
-  { code: 'JP', name: 'Japan', marketplaceId: 'A1VC38T7YXB528', region: 'FE', flag: '🇯🇵' },
-];
+/** Regions of the picked marketplaces, the main marketplace's region first (it is approved first). */
+const regionsOf = (codes, main) => {
+  const regionOfCode = (c) => COUNTRY_DATA.find((x) => x.code === c)?.region;
+  return [...new Set([regionOfCode(main), ...codes.map(regionOfCode)].filter(Boolean))];
+};
 
-// Region display names
-const REGION_NAMES = {
-  'NA': 'North America',
-  'EU': 'Europe',
-  'FE': 'Far East'
+/** Shorter names for the picker tiles, so they fit without truncating. */
+const TILE_NAMES = { US: 'United States', AE: 'UAE', SA: 'Saudi Arabia', UK: 'United Kingdom' };
+const tileName = (country) => TILE_NAMES[country.code] || country.name;
+
+/** Largest marketplaces first within each region, so most sellers find theirs in the first row. */
+const TILE_ORDER = ['US', 'CA', 'MX', 'BR', 'UK', 'DE', 'FR', 'IT', 'ES', 'NL', 'SE', 'PL', 'BE', 'IE', 'TR', 'AE', 'SA', 'EG', 'IN', 'ZA', 'JP', 'AU', 'SG'];
+const BY_SIZE = [...COUNTRY_DATA].sort((a, b) => TILE_ORDER.indexOf(a.code) - TILE_ORDER.indexOf(b.code));
+
+/**
+ * Multi-marketplace picker: tick every marketplace the seller sells in, star one as main.
+ * A compact grid of tiles per region (23 marketplaces), with a summary of the picks and the order
+ * the regions will be approved in.
+ */
+const MarketplaceMultiPicker = ({ selected, main, onToggle, onMain }) => {
+  const [query, setQuery] = useState('');
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? BY_SIZE.filter((c) => c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q) || tileName(c).toLowerCase().includes(q)) : BY_SIZE;
+  }, [query]);
+  const regions = regionsOf(selected, main);
+  const ordered = [main, ...selected.filter((c) => c !== main)].filter(Boolean);
+
+  return (
+    <div>
+      <div className="relative" style={{ marginBottom: 14 }}>
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: COLORS.textMuted }} />
+        <input
+          type="text"
+          placeholder="Search marketplaces…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="w-full pl-10 pr-4 outline-none"
+          style={{ height: 40, background: COLORS.surface, border: `1px solid ${COLORS.border}`, color: COLORS.textPrimary, borderRadius: 10, fontSize: 13 }}
+        />
+      </div>
+
+      <div className="flex flex-col" style={{ gap: 16 }}>
+        {['NA', 'EU', 'FE'].map((regionCode) => {
+          const tiles = visible.filter((c) => c.region === regionCode);
+          if (!tiles.length) return null;
+          const count = selected.filter((code) => COUNTRY_DATA.find((c) => c.code === code)?.region === regionCode).length;
+          return (
+            <section key={regionCode}>
+              <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: COLORS.textMuted }}>
+                  {REGION_NAMES[regionCode]}
+                </span>
+                {count > 0 && (
+                  <span style={{ fontSize: 11, fontWeight: 600, color: '#7EA8F8' }}>{count} selected</span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3" style={{ gap: 8 }}>
+                {tiles.map((country) => {
+                  const on = selected.includes(country.code);
+                  const isMain = on && main === country.code;
+                  return (
+                    <div
+                      key={country.code}
+                      className="relative flex items-center transition-colors"
+                      style={{
+                        minHeight: 44,
+                        borderRadius: 10,
+                        border: `1px solid ${isMain ? COLORS.accent : on ? 'rgba(59,130,246,.45)' : COLORS.border}`,
+                        background: isMain ? 'rgba(59,130,246,.16)' : on ? 'rgba(59,130,246,.08)' : COLORS.surface,
+                        boxShadow: isMain ? '0 0 0 3px rgba(59,130,246,.15)' : 'none',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => onToggle(country.code)}
+                        aria-pressed={on}
+                        aria-label={country.name}
+                        title={country.name}
+                        className="flex flex-1 min-w-0 items-center self-stretch text-left"
+                        style={{ gap: 9, padding: '6px 6px 6px 12px', fontSize: 13, color: on ? COLORS.textPrimary : COLORS.textSecondary }}
+                      >
+                        <span style={{ fontSize: 18, lineHeight: 1 }}>{country.flag}</span>
+                        {/* Wraps rather than truncating on narrow screens. */}
+                        <span style={{ fontWeight: on ? 600 : 500, lineHeight: '16px' }}>{tileName(country)}</span>
+                      </button>
+                      {on && (
+                        <button
+                          type="button"
+                          onClick={() => !isMain && onMain(country.code)}
+                          aria-label={isMain ? `${country.name} is your main marketplace` : `Make ${country.name} main`}
+                          title={isMain ? 'Main marketplace' : 'Make main'}
+                          className="flex-none flex items-center justify-center"
+                          style={{ width: 32, alignSelf: 'stretch', cursor: isMain ? 'default' : 'pointer' }}
+                        >
+                          <Star
+                            className="w-4 h-4"
+                            style={{ color: isMain ? '#7EA8F8' : COLORS.textMuted }}
+                            fill={isMain ? '#7EA8F8' : 'none'}
+                          />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })}
+        {!visible.length && (
+          <div className="py-8 text-center" style={{ color: COLORS.textMuted, fontSize: 13, border: `1px dashed ${COLORS.border}`, borderRadius: 10 }}>
+            No marketplaces match &ldquo;{query}&rdquo;
+          </div>
+        )}
+      </div>
+
+      <div style={{ marginTop: 16, padding: '14px 16px', borderRadius: 12, border: `1px solid ${COLORS.border}`, background: PANEL_BG }}>
+        {selected.length === 0 ? (
+          <div style={{ fontSize: 13, color: COLORS.textMuted }}>
+            Tick the marketplaces you sell in. Star the one you want to see first.
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center" style={{ gap: 6 }}>
+              {ordered.map((code) => {
+                const country = COUNTRY_DATA.find((c) => c.code === code);
+                const isMain = code === main;
+                return (
+                  <span
+                    key={code}
+                    className="inline-flex items-center"
+                    style={{
+                      gap: 6,
+                      padding: '4px 10px',
+                      borderRadius: 999,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      background: isMain ? 'rgba(59,130,246,.18)' : COLORS.surfaceElevated,
+                      color: isMain ? '#AFC8FB' : COLORS.textSecondary,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{country?.flag}</span>
+                    {tileName(country)}
+                    {isMain && <Star className="w-3 h-3" style={{ color: '#7EA8F8' }} fill="#7EA8F8" />}
+                  </span>
+                );
+              })}
+            </div>
+            <div className="flex items-center flex-wrap" style={{ gap: 6, marginTop: 10, fontSize: 12, color: COLORS.textSecondary }}>
+              <span>You&rsquo;ll approve</span>
+              {regions.map((r, i) => (
+                <React.Fragment key={r}>
+                  {i > 0 && <ArrowRight className="w-3 h-3" style={{ color: COLORS.textMuted }} />}
+                  <span style={{ fontWeight: 600, color: COLORS.textPrimary }}>{REGION_NAMES[r]}</span>
+                </React.Fragment>
+              ))}
+              <span style={{ color: COLORS.textMuted }}>
+                · {regions.length === 1 ? 'one Amazon approval' : `${regions.length} Amazon approvals`}
+              </span>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
 };
 
 // `basePath`, when given, overrides the agency-derived client route prefix so
@@ -60,6 +195,29 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [checkingSubscription, setCheckingSubscription] = useState(true);
+  // Multi-marketplace onboarding (server-flagged, self-serve sellers only): this page then picks
+  // the MAIN marketplace and goes straight to Amazon; the other marketplaces come next.
+  const isSelfServe = !isAgencyContext && !basePath;
+  const [multiMarketplace, setMultiMarketplace] = useState(false);
+  // Multi mode: every marketplace the seller sells in; `marketPlace` is the main one among them.
+  const [picked, setPicked] = useState([]);
+
+  const chooseMain = (code) => {
+    const country = COUNTRY_DATA.find((c) => c.code === code);
+    if (!country) return;
+    setMarketPlace(code);
+    setRegion(country.region);
+  };
+
+  const togglePicked = (code) => {
+    const next = picked.includes(code) ? picked.filter((c) => c !== code) : [...picked, code];
+    setPicked(next);
+    // The first pick is the main one until the seller says otherwise; un-picking the main one
+    // hands it to the next pick.
+    if (!next.includes(marketPlace)) {
+      if (next.length) chooseMain(next[0]); else { setMarketPlace(''); setRegion(''); }
+    }
+  };
   const marketplaceDropdownRef = useRef(null);
   const navigate = useNavigate();
 
@@ -95,11 +253,26 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
       // Allow all authenticated users to proceed (skip pricing check)
       // New signups with LITE package can connect Amazon first, then pay later
       devLog('ConnectToAmazon: User authenticated - allowing access');
+      if (isSelfServe) {
+        try {
+          const checklist = await fetchChecklist();
+          if (checklist?.enabled) {
+            // Already part-way through: carry on from the checklist.
+            if (checklist.primary) {
+              navigate(CHECKLIST_PATH, { replace: true });
+              return;
+            }
+            setMultiMarketplace(true);
+          }
+        } catch {
+          // Unknown: keep the current single-marketplace flow.
+        }
+      }
       setCheckingSubscription(false);
     };
 
     checkAuth();
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, navigate, isSelfServe]);
   
   // Get selected country data
   const selectedCountry = useMemo(() => {
@@ -144,6 +317,18 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
     }
     
     setLoading(true);
+
+    if (multiMarketplace) {
+      try {
+        // Nothing is saved yet: the marketplace is created once Amazon approves the region.
+        await goToAmazon({ kind: 'spapi', region, primaryCountry: marketPlace, plannedCountries: picked });
+      } catch (error) {
+        setLoading(false);
+        alert(errorMessage(error, 'Could not open Amazon. Please try again.'));
+      }
+      return;
+    }
+
     try {
       devLog("ConnectToAmazon submit:", { region, country: marketPlace });
       
@@ -204,7 +389,9 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
           <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 14, color: COLORS.textPrimary }}>Exactly what happens next</div>
           <div className="flex flex-col" style={{ gap: 13 }}>
             {[
-              'You pick the marketplace your account sells in — that tells us which Amazon region to talk to.',
+              multiMarketplace
+                ? 'You tick the marketplaces you sell in and choose a main one — the one you want to see first.'
+                : 'You pick the marketplace your account sells in — that tells us which Amazon region to talk to.',
               "Amazon's own consent page opens, so you sign in on amazon.com and not on our site.",
               'Amazon sends you back here and the scan starts. No keys to copy, nothing to paste.',
             ].map((line, i) => (
@@ -248,7 +435,21 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
 
         <form onSubmit={handleSubmit}>
           {/* One marketplace only, and it governs both connections — flagged up front
-              because picking the wrong one here makes the Ads profiles in step 3 mismatch. */}
+              because picking the wrong one here makes the Ads profiles in step 3 mismatch.
+              With multi-marketplace onboarding this is only the MAIN one, so say that instead. */}
+          {multiMarketplace ? (
+            <div
+              className="flex items-start gap-2.5"
+              style={{ padding: '13px 15px', border: '1px solid rgba(59,130,246,.3)', borderRadius: 11, background: 'rgba(59,130,246,.07)', marginBottom: 16 }}
+            >
+              <Globe className="w-4 h-4 flex-shrink-0" style={{ color: '#7EA8F8', marginTop: 1 }} />
+              <div style={{ fontSize: 13, lineHeight: '20px', color: '#C7CFDD' }}>
+                <span style={{ fontWeight: 600, color: COLORS.textPrimary }}>Tick every marketplace you sell in.</span>{' '}
+                Amazon approves one region at a time, so you&rsquo;ll approve once per region — every marketplace in that
+                region comes with it. Choose a main marketplace: it&rsquo;s prepared first and opens your dashboard.
+              </div>
+            </div>
+          ) : (
           <div
             className="flex items-start gap-2.5"
             style={{ padding: '13px 15px', border: '1px solid rgba(245,166,35,.3)', borderRadius: 11, background: 'rgba(245,166,35,.07)', marginBottom: 16 }}
@@ -260,13 +461,17 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
               one can be connected during setup. Choosing a different one later means reconnecting both accounts.
             </div>
           </div>
+          )}
 
           <div style={{ marginBottom: 14 }}>
             <label className="flex items-center gap-2" style={{ fontSize: 12, fontWeight: 600, color: COLORS.textSecondary, marginBottom: 8 }}>
               <Globe className="w-3.5 h-3.5" style={{ color: COLORS.textMuted }} />
-              Which marketplace is your account in?
+              {multiMarketplace ? 'Which marketplaces do you sell in?' : 'Which marketplace is your account in?'}
             </label>
 
+                  {multiMarketplace ? (
+                    <MarketplaceMultiPicker selected={picked} main={marketPlace} onToggle={togglePicked} onMain={chooseMain} />
+                  ) : (
                   <div className="relative" ref={marketplaceDropdownRef}>
                     {/* Selected Country Display / Dropdown Trigger */}
                     <button
@@ -368,6 +573,7 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
                       </motion.div>
                     )}
                   </div>
+                  )}
           </div>
 
           <button
@@ -388,7 +594,7 @@ const AmazonConnect = ({ isAgencyContext = false, clientId = null, agencyName = 
             {loading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Saving…
+                {multiMarketplace ? 'Opening Amazon…' : 'Saving…'}
               </>
             ) : (
               <>

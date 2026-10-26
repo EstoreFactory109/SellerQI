@@ -431,6 +431,21 @@ productWiseSponsoredAdsItemSchema.statics.distinctEntityIdsForBatch = async func
  * ACOS/TACOS and profitability need. Campaign/adGroup are intentionally absent: no consumer of
  * this grain reads them (see aggregateBatchByCampaignDate for the one that does).
  */
+/**
+ * Which ad groups advertised each ASIN since `fromDay` (YYYY-MM-DD), for the newest
+ * batch: one row per (asin, campaignId, adGroupId). The ACoS bid-cut proposal needs it
+ * to find the keywords that spend on a product; the daily rollups drop ad groups.
+ */
+productWiseSponsoredAdsItemSchema.statics.adGroupsByAsinSince = async function(userId, country, region, fromDay) {
+    const { batchId } = await this.findLatestBatchMeta(userId, country, region);
+    if (!batchId) return [];
+    return this.aggregate([
+        { $match: { batchId, date: { $gte: fromDay }, adGroupId: { $nin: [null, ''] } } },
+        { $group: { _id: { asin: '$asin', campaignId: '$campaignId', adGroupId: '$adGroupId' } } },
+        { $project: { _id: 0, asin: '$_id.asin', campaignId: '$_id.campaignId', adGroupId: '$_id.adGroupId' } }
+    ]).allowDiskUse(true);
+};
+
 productWiseSponsoredAdsItemSchema.statics.aggregateBatchByAsinAdTypeDate = async function(batchId) {
     const bid = batchId instanceof mongoose.Types.ObjectId ? batchId : new mongoose.Types.ObjectId(batchId);
 

@@ -58,3 +58,12 @@ describe('filterInboundIssuesToWindow', () => {
         expect(filterInboundIssuesToWindow(undefined, NOW)).toEqual([]);
     });
 });
+
+describe('inbound problems for tasks: new this week', () => {
+    const { filterInboundIssuesToWindow, INBOUND_NEW_ISSUE_DAYS } = require('../../../Services/Calculations/InventoryReportFreshness.js');
+    it('keeps problems reported in the last 7 days only', () => {
+        const now = new Date('2026-10-26T12:00:00Z');
+        const rows = [{ issueReportedDate: '2026-10-24' }, { issueReportedDate: '2026-10-10' }];
+        expect(filterInboundIssuesToWindow(rows, now, INBOUND_NEW_ISSUE_DAYS)).toEqual([{ issueReportedDate: '2026-10-24' }]);
+    });
+});

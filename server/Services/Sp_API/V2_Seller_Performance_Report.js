@@ -101,6 +101,8 @@ const extractExtendedMetrics = (refinedData) => {
         validTrackingRate: rateDetail(metrics.validTrackingRate, 'shipmentCount'),
         onTimeDeliveryRate: rateDetail(metrics.onTimeDeliveryRate, 'shipmentCountWithValidTracking'),
         unitOnTimeDeliveryRate: rateDetail(metrics.unitOnTimeDeliveryRate, 'totalUnitCount'),
+        // Amazon Business invoices; absent for sellers Amazon Business does not apply to.
+        invoiceDefectRate: rateDetail(metrics.invoiceDefectRate, 'orderCount'),
     };
     const rateDetails = Object.fromEntries(Object.entries(details).filter(([, detail]) => detail));
 
@@ -109,11 +111,12 @@ const extractExtendedMetrics = (refinedData) => {
     const policyMetrics = [];
     for (const [key, node] of Object.entries(metrics)) {
         if (!node || typeof node !== 'object' || Array.isArray(node)) continue;
-        if (!('defectsCount' in node)) continue;
+        // policyViolationWarnings carries warningsCount instead of defectsCount.
+        if (!('defectsCount' in node) && !('warningsCount' in node)) continue;
         policyMetrics.push({
             key,
             status: String(node.status || ''),
-            count: countOf(node.defectsCount),
+            count: countOf('defectsCount' in node ? node.defectsCount : node.warningsCount),
         });
     }
 
@@ -127,6 +130,8 @@ const extractExtendedMetrics = (refinedData) => {
         onTimeDeliveryRatePct: details.onTimeDeliveryRate?.pct ?? null,
         unitOnTimeDeliveryRateStatus: details.unitOnTimeDeliveryRate?.status || '',
         unitOnTimeDeliveryRatePct: details.unitOnTimeDeliveryRate?.pct ?? null,
+        invoiceDefectRateStatus: details.invoiceDefectRate?.status || '',
+        invoiceDefectRatePct: details.invoiceDefectRate?.pct ?? null,
         // Target, condition and basis for each rate, keyed as above.
         rateDetails,
         chargebackCount: sumCounts('chargebacks'),
@@ -148,7 +153,8 @@ const extractExtendedMetrics = (refinedData) => {
  * which is what has always kept a malformed report out of the collection.
  */
 const buildSnapshot = (refinedData) => ({
-    ahrScore: refinedData.performanceMetrics[0].accountHealthRating.ahrScore,
+    // Amazon omits the score for some accounts; store null ("no data"), never 0.
+    ahrScore: refinedData.performanceMetrics[0].accountHealthRating.ahrScore ?? null,
     accountStatuses: refinedData.accountStatuses[0].status,
     listingPolicyViolations: refinedData.performanceMetrics[0].listingPolicyViolations.status,
     validTrackingRateStatus: refinedData.performanceMetrics[0].validTrackingRate.status,

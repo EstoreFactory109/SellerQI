@@ -10,6 +10,7 @@ import AnalysingAccount from './Pages/Onboarding/AnalysingAccount.jsx';
 import ProtectedAuthRouteWrapper from './Layout/ProtectedAuthRouteWrapper.jsx';
 import LoginPageGuard, { PortalGate } from './Layout/LoginPageGuard.jsx';
 import { rememberPortalPage } from './utils/portalPages.js';
+import { startActivityTracking, trackPage } from './utils/activityTracker.js';
 import MemberLogin from './Pages/Auth/MemberLogin.jsx';
 import MemberLinkLanding from './Pages/Auth/MemberLinkLanding.jsx';
 import MainLayout from './Layout/MainPagesLayout.jsx';
@@ -43,10 +44,12 @@ import AboutUs from './Pages/Static/AboutUs.jsx';
 import HowItWorks from './Pages/Static/HowItWorks.jsx';
 import PromotionsPage from './Pages/Marketing/PromotionsPage.jsx';
 import Advertisement from './Pages/Marketing/advertisement.jsx';
-import QMate from './Pages/Tools/QMate.jsx';
 import Features from './Pages/Marketing/features.jsx';
 import InventoryManagement from './Pages/Marketing/inventoryManagement.jsx';
 import ConnectAccounts from './Pages/Onboarding/ConnectAccounts.jsx';
+import ConnectMarketplaces from './Pages/Onboarding/ConnectMarketplaces.jsx';
+import AdminActivity from './Pages/Admin/AdminActivity.jsx';
+import EsfActivity from './Pages/ESF/EsfActivity.jsx';
 import ProfileIDSelection from './Pages/Onboarding/ProfileIDSeclection.jsx';
 import PaymentCancel from './Pages/Payment/PaymentCancel.jsx';
 import PaymentFailed from './Pages/Payment/PaymentFailed.jsx';
@@ -99,7 +102,6 @@ import Tasks from './Pages/Tools/Tasks.jsx';
 import EcommerceHolidaysCalendar from './Pages/Tools/EventCalender.jsx';
 import ReimbursementDashboard from './Pages/Dashboard/ReimbursementDashboard.jsx';
 import YourProducts from './Pages/Products/YourProducts.jsx';
-import PreAnalysis from './Pages/Products/PreAnalysis.jsx';
 import NotificationsPage from './Pages/Notifications/NotificationsPage.jsx';
 import NotificationDetailsPage from './Pages/Notifications/NotificationDetailsPage.jsx';
 import AuthError from './Pages/Auth/AuthError.jsx';
@@ -137,6 +139,10 @@ const App = () => {
   useEffect(() => {
     rememberPortalPage(pathname, search);
   }, [pathname, search]);
+
+  // Activity monitoring: page opens and heartbeats on seller pages (see utils/activityTracker.js).
+  useEffect(() => { startActivityTracking(); }, []);
+  useEffect(() => { trackPage(pathname); }, [pathname]);
 
   // Keep demo-mode flag in sync: set it while browsing demo pages,
   // clear it when leaving demo pages so main routes stay unaffected.
@@ -214,6 +220,7 @@ const App = () => {
             <Route path='users' element={<EsfUsers />} />
             <Route path='messages' element={<EsfMessages />} />
             <Route path='task-requests' element={<EsfTaskRequests />} />
+            <Route path='activity' element={<EsfActivity />} />
             <Route path='estore-factory/zoho-projects' element={<EsfEstoreFactoryZoho />} />
             <Route path='settings' element={<EsfSettings />} />
           </Route>
@@ -230,6 +237,7 @@ const App = () => {
           <Route path='logs/email' element={<AdminEmailLogs />} />
           <Route path='logs/payment' element={<AdminPaymentLogs />} />
           <Route path='logs/user' element={<AdminUserLogs />} />
+          <Route path='activity' element={<AdminActivity />} />
           <Route path='logs/user/:userId' element={<AdminUserLogDetails />} />
           <Route path='ticket-messages' element={<AdminTicketMessages />} />
         </Route>
@@ -237,6 +245,7 @@ const App = () => {
         <Route path='/unsubscribe-alerts' element={<UnsubscribeAlerts />} />
         <Route path='/connect-to-amazon' element={<ConnectToAmazon />} />
         <Route path='/connect-accounts' element={<ConnectAccounts />} />
+        <Route path='/connect-marketplaces' element={<ConnectMarketplaces />} />
         <Route path='/auth/callback' element={<FetchingTokens />} />
         <Route path='/analyse-account' element={<AnalysingAccount />} />
         <Route path='/reset-password/:code' element={<ResetPassword />} />
@@ -299,7 +308,7 @@ const App = () => {
               <Route path='estore-factory/billing' element={<EstoreFactoryBilling />} />
             </Route>
             <Route path='review-request' element={<RecentOrders />} />
-            <Route path='qmate' element={<QMate />} />
+            <Route path='qmate' element={<Navigate to='/seller-central-checker/dashboard' replace />} />
             <Route path='profitibility-dashboard' element={<ProfitibilityDashboard />} />
             <Route path='ppc-dashboard' element={<PPCDashboard />} />
             <Route path='keyword-analysis' element={<KeywordAnalysisDashboard />} />
@@ -309,7 +318,7 @@ const App = () => {
             <Route path='settings' element={<Settings />} />
             <Route path='reimbursement-dashboard' element={<ReimbursementDashboard />} />
             <Route path='your-products' element={<YourProducts />} />
-            <Route path='pre-analysis' element={<PreAnalysis />} />
+            <Route path='pre-analysis' element={<Navigate to='/seller-central-checker/dashboard' replace />} />
             <Route path='tasks' element={<Tasks />} />
             <Route path='ecommerce-calendar' element={<EcommerceHolidaysCalendar />} />
             <Route path='notifications' element={<NotificationsPage />} />

@@ -443,7 +443,7 @@ function extractPromptText(interpretation) {
 
 /**
  * Wasted-spend analysis (PART 3 Category B, #15-23). Combines wasted keywords
- * (spend > $0, sales < $0.01) and zero-sales search terms (clicks >= 10,
+ * (spend > $0, sales < $0.01) and zero-sales search terms (clicks >= 15,
  * sales < $0.01) — BOTH from PPCCampaignAnalysisService, so the thresholds and
  * numbers match the Campaign Audit Dashboard exactly (NOT the legacy
  * QMatePPCService 50%/$5 thresholds).
@@ -512,7 +512,7 @@ async function getWastedSpendAnalysis(userContext, dateRange) {
       data: zeroTermData,
       total: zeroTermTotal,
       totalSpend: zeroTermTotalSpend,
-      criteria: 'clicks >= 10, sales < $0.01',
+      criteria: 'clicks >= 15, sales < $0.01',
     },
     worstCampaigns,
     savingsOpportunity: `Pausing these keywords could save $${totalWastedSpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/period`,

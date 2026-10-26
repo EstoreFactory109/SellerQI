@@ -944,7 +944,7 @@ const getTopPerformingKeywords = async (userId, country, region, page = 1, limit
 };
 
 /**
- * Get Search Terms with Zero Sales (clicks >= 10 and sales < 0.01)
+ * Get Search Terms with Zero Sales (clicks >= SEARCH_TERM_MIN_CLICKS and sales < 0.01)
  * Tab 4: Aggregates search terms
  */
 const getSearchTermsZeroSales = async (userId, country, region, page = 1, limit = 10, startDate = null, endDate = null) => {

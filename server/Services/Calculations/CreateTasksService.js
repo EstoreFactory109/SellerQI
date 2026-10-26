@@ -17,7 +17,7 @@ const mongoose = require('mongoose');
 const Task = require('../../models/MCP/TaskModel.js');
 const TaskItem = require('../../models/MCP/TaskItemModel.js');
 const logger = require('../../utils/Logger.js');
-const { getTaskPriorityMeta } = require('./TaskPrioritizationService.js');
+const { getTaskPriorityMeta, normalizeErrorType } = require('./TaskPrioritizationService.js');
 const { buildGroupsFromTasks } = require('./TaskOpportunityGroupsService.js');
 const { planReconcile } = require('./TaskReconcilePlanner.js');
 const { taskReconcileModeFor, MODES: RECONCILE_MODES } = require('../../utils/taskReconcileGate.js');
@@ -146,6 +146,14 @@ const renderProfitabilityTaskText = (errorType, renderData = {}) => {
     const sales = typeof renderData.sales === 'number' ? renderData.sales : 0;
     const profitMargin = typeof renderData.profitMargin === 'number' ? renderData.profitMargin : 0;
 
+    if (errorType === 'negative_profit' && typeof renderData.units === 'number' && renderData.units > 0) {
+        // tasks-logics.xlsx "Loss-making product" (rows judged after COGS on 10+ units).
+        const perUnit = Math.abs(netProfit) / renderData.units;
+        return {
+            error: `Profitability | Loss-Making Product: This product lost about $${perUnit.toFixed(2)} per unit last month after all costs (${renderData.units} units, net -$${Math.abs(netProfit).toFixed(2)} on $${sales.toFixed(2)} of sales).`,
+            solution: 'We will review price, ad spend and fees with you to make it profitable or decide whether to keep it.'
+        };
+    }
     if (errorType === 'negative_profit') {
         const totalCosts = sales - netProfit;
         return {
@@ -251,9 +259,15 @@ const renderBuyBoxTaskText = (renderData = {}) => {
     const pageViews = renderData.pageViews || 0;
     const sessions = renderData.sessions || 0;
 
-    // Upstream only ever flags buyBoxPercentage === 0 (see the asinBuyBoxData
-    // filter in DashboardCalculation.js), so this is the only tailored tier;
-    // anything else falls through to the generic message below.
+    // Upstream flags a session-weighted share under 80% (classifyBuyBoxLoss);
+    // 80%+ or a missing share falls through to the generic message below.
+    // tasks-logics.xlsx: held the Buy Box on under 80% of visits over 7 days.
+    if (typeof buyBoxPercentage === 'number' && buyBoxPercentage > 0 && buyBoxPercentage < 80) {
+        return {
+            error: `Buy Box | Losing Visits: This product held the Buy Box on only ${buyBoxPercentage}% of visits in the last 7 days, so many shoppers bought from another seller or saw no Add to Cart button.`,
+            solution: 'Check whether another seller is winning the offer, whether your price is above the featured offer price, and whether stock or account health is affecting your eligibility.'
+        };
+    }
     if (buyBoxPercentage === 0) {
         return {
             error: `Buy Box | No Ownership: This product has 0% Buy Box ownership. With ${pageViews} page views and ${sessions} sessions, you're losing potential sales to competitors who own the Buy Box.`,
@@ -271,6 +285,73 @@ const renderBuyBoxTaskText = (renderData = {}) => {
  */
 class CreateTaskService {
     /**
+     * Every task the detected issues produce, without ids or writes. Shared by
+     * createTasksFromErrors and previews (analyseData with persistTasks: false).
+     * @param {Object} data - the same error arrays createTasksFromErrors takes
+     * @returns {Array} task records
+     */
+    generateAllTasks(data) {
+        const productNameMap = new Map();
+        if (Array.isArray(data.TotalProducts)) {
+            data.TotalProducts.forEach(product => {
+                if (product.asin) {
+                    const name = product.itemName || product.title || product.productName || product.name || null;
+                    if (name) {
+                        productNameMap.set(product.asin, name);
+                    }
+                }
+            });
+        }
+        
+        const tasks = [];
+        
+        if (data.rankingProductWiseErrors) {
+            tasks.push(...this.generateRankingTasks(data.rankingProductWiseErrors));
+        }
+        
+        if (data.conversionProductWiseErrors) {
+            tasks.push(...this.generateConversionTasks(data.conversionProductWiseErrors));
+        }
+        
+        if (data.inventoryProductWiseErrors) {
+            tasks.push(...this.generateInventoryTasks(data.inventoryProductWiseErrors));
+        }
+        
+        if (data.profitabilityErrorDetails) {
+            tasks.push(...this.generateProfitabilityTasks(data.profitabilityErrorDetails, productNameMap));
+        }
+        
+        if (data.sponsoredAdsErrorDetails) {
+            tasks.push(...this.generateSponsoredAdsTasks(data.sponsoredAdsErrorDetails, productNameMap));
+        }
+        
+        if (data.AccountErrors) {
+            tasks.push(...this.generateAccountTasks(data.AccountErrors));
+        }
+
+        // tasks-logics.xlsx detectors (kpi/): already task-shaped, with their own text.
+        if (Array.isArray(data.kpiTasks)) {
+            // An empty shelf is one problem: the out-of-stock task (with its lost
+            // sales) replaces the product's replenishment tasks, which Amazon's
+            // restock alert also raises for out-of-stock SKUs.
+            const outOfStock = new Set(data.kpiTasks
+                .filter(t => t.errorCategory === 'inventory' && t.errorType === 'out_of_stock')
+                .map(t => t.asin));
+            if (outOfStock.size > 0) {
+                for (let i = tasks.length - 1; i >= 0; i--) {
+                    const t = tasks[i];
+                    if (t.errorCategory === 'inventory' && outOfStock.has(t.asin)
+                        && normalizeErrorType(t.errorType) === 'replenishment_needed') {
+                        tasks.splice(i, 1);
+                    }
+                }
+            }
+            tasks.push(...data.kpiTasks.map(task => ({ status: TaskStatus.PENDING, ...task })));
+        }
+        return tasks;
+    }
+
+    /**
      * Main method to create tasks from all error categories
      * 
      * OPTIMIZED: Tasks are now stored in the TaskItem collection (one document per task)
@@ -286,47 +367,8 @@ class CreateTaskService {
             // built from the others' products.
             const { userId, country = null, region = null } = data;
             const scope = country && region ? ` [${country}-${region}]` : '';
-            
-            // Create a product name map from TotalProducts for quick lookup
-            const productNameMap = new Map();
-            if (Array.isArray(data.TotalProducts)) {
-                data.TotalProducts.forEach(product => {
-                    if (product.asin) {
-                        const name = product.itemName || product.title || product.productName || product.name || null;
-                        if (name) {
-                            productNameMap.set(product.asin, name);
-                        }
-                    }
-                });
-            }
-            
-            // Generate tasks from all error categories
-            const tasks = [];
-            
-            if (data.rankingProductWiseErrors) {
-                tasks.push(...this.generateRankingTasks(data.rankingProductWiseErrors));
-            }
-            
-            if (data.conversionProductWiseErrors) {
-                tasks.push(...this.generateConversionTasks(data.conversionProductWiseErrors));
-            }
-            
-            if (data.inventoryProductWiseErrors) {
-                tasks.push(...this.generateInventoryTasks(data.inventoryProductWiseErrors));
-            }
-            
-            if (data.profitabilityErrorDetails) {
-                tasks.push(...this.generateProfitabilityTasks(data.profitabilityErrorDetails, productNameMap));
-            }
-            
-            if (data.sponsoredAdsErrorDetails) {
-                tasks.push(...this.generateSponsoredAdsTasks(data.sponsoredAdsErrorDetails, productNameMap));
-            }
-            
-            if (data.AccountErrors) {
-                tasks.push(...this.generateAccountTasks(data.AccountErrors));
-            }
 
+            const tasks = this.generateAllTasks(data);
             for (const task of tasks) {
                 task.taskId = stableTaskId(userId, country, region, task);
             }
@@ -654,12 +696,14 @@ class CreateTaskService {
                     const check = section[key];
                     if (check?.status !== 'Error') return;
 
+                    // A short title is the low-priority side of the length check.
+                    const type = key === 'charLim' && check.kind === 'short' ? 'too_short' : errorType;
                     tasks.push({
                         taskId: generateTaskId(),
                         productName,
                         asin,
                         errorCategory: 'ranking',
-                        errorType: `${sectionKey.toLowerCase()}_${errorType}`,
+                        errorType: `${sectionKey.toLowerCase()}_${type}`,
                         error: `${sectionLabels[sectionKey]} | ${label}: ${check.Message || fallbackMessage}`,
                         solution: check.HowTOSolve || fallbackSolution,
                         status: TaskStatus.PENDING
@@ -674,7 +718,8 @@ class CreateTaskService {
                     productName,
                     asin,
                     errorCategory: 'ranking',
-                    errorType: 'backend_keywords_char_limit',
+                    // Using too few bytes is low priority; going over the limit is not.
+                    errorType: error.data.charLim.kind === 'underused' ? 'backend_keywords_underused' : 'backend_keywords_char_limit',
                     error: `${sectionLabels.charLim}: ${error.data.charLim.Message || 'Backend keywords exceed Amazon\'s byte limit.'}`,
                     solution: error.data.charLim.HowTOSolve || 'Reduce your backend search terms to stay within Amazon\'s 249-byte limit.',
                     status: TaskStatus.PENDING
@@ -687,6 +732,20 @@ class CreateTaskService {
             // object to the string 'Error', so it never fired, and its label said
             // "Title". The errorType is new because no 'duplicate_words' task was
             // ever created under the old one.
+            // Backend words the title already has (tasks-logics.xlsx).
+            if (error.data.titleOverlap?.status === 'Error') {
+                tasks.push({
+                    taskId: generateTaskId(),
+                    productName,
+                    asin,
+                    errorCategory: 'ranking',
+                    errorType: 'backend_keywords_title_overlap',
+                    error: `${sectionLabels.charLim} | Words Already in Title: ${error.data.titleOverlap.Message}`,
+                    solution: error.data.titleOverlap.HowTOSolve,
+                    status: TaskStatus.PENDING
+                });
+            }
+
             if (error.data.dublicateWords?.status === 'Error') {
                 tasks.push({
                     taskId: generateTaskId(),
@@ -774,6 +833,8 @@ class CreateTaskService {
                     errorType,
                     error: `${label}: ${errorData.Message || fallbackMessage}`,
                     solution: errorData.HowToSolve || errorData.HowTOSolve || fallbackSolution,
+                    // Read by TaskPriorityLevels (A+ is P3 only for top sellers).
+                    ...(typeof errorData.topSeller === 'boolean' ? { renderData: { topSeller: errorData.topSeller } } : {}),
                     status: TaskStatus.PENDING
                 });
             });
@@ -956,6 +1017,7 @@ class CreateTaskService {
                     sales: error.sales,
                     ads: error.ads,
                     profitMargin: error.profitMargin,
+                    units: error.units,
                     message: error.message
                 },
                 amount: error.amount || 0,
@@ -1051,7 +1113,12 @@ class CreateTaskService {
                     // products a campaign advertises (see AdsProductAttributionService).
                     // Keyword/search-term records have no ASIN of their own, so the
                     // campaign is the only link to a product.
-                    campaignId: error.campaignId ? String(error.campaignId) : undefined
+                    campaignId: error.campaignId ? String(error.campaignId) : undefined,
+                    // Needed to make the fix on Amazon once the seller approves it
+                    // (TaskActionService): the negative goes in this ad group, and
+                    // the keyword is paused by its ID.
+                    adGroupId: error.adGroupId ? String(error.adGroupId) : undefined,
+                    keywordId: error.keywordId ? String(error.keywordId) : undefined
                 },
                 amount: error.amount || 0,
                 status: TaskStatus.PENDING
@@ -1080,6 +1147,7 @@ class CreateTaskService {
             orderWithDefectsStatus: 'Order Defect Rate',
             lateShipmentRateStatus: 'Late Shipment Rate',
             CancellationRate: 'Cancellation Rate',
+            onTimeDeliveryRateStatus: 'On-Time Delivery Rate',
             negativeFeedbacks: 'Negative Feedback',
             NCX: 'Negative Customer Experience',
             a_z_claims: 'A-to-Z Claims',
@@ -1188,10 +1256,12 @@ class CreateTaskService {
             // lean renderData-backed types) and annotated with effort/impact so
             // the client can sort them into High impact / Quick wins / the rest.
             const rawTasks = await TaskItem.findByUserId(userId, options);
-            const tasks = rawTasks.map(task => ({
+            // Each fix SellerQI can make on Amazon once the seller approves it
+            // (TaskActionService) rides along as proposedAction.
+            const tasks = await require('./TaskActionService.js').annotateProposedActions(userId, rawTasks.map(task => ({
                 ...this.renderTaskIfNeeded(task),
                 ...getTaskPriorityMeta(task)
-            }));
+            })));
             const taskCounts = await TaskItem.countByStatus(userId, country, region);
 
             // The same issue-type groups the Dashboard's "Top things to fix" shows,

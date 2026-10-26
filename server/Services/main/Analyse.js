@@ -56,7 +56,7 @@ const CogsService = require('../Finance/CogsService.js');
 const adsKeywordsPerformanceModel = require('../../models/amazon-ads/adsKeywordsPerformanceModel.js');
 const { loadLatestSnapshotDoc, loadKeywordSnapshot } = require('../../utils/ppcSnapshotLoader.js');
 const { buildLtsfAmountMap, classifyBuyBoxLoss } = require('../Calculations/RecoverableAmountUtils.js');
-const { freshInventoryReportOrNull, filterInboundIssuesToWindow } = require('../Calculations/InventoryReportFreshness.js');
+const { freshInventoryReportOrNull, filterInboundIssuesToWindow, INBOUND_NEW_ISSUE_DAYS } = require('../Calculations/InventoryReportFreshness.js');
 const GetOrderDataModel = require('../../models/products/OrderAndRevenueModel.js');
 const WeeklyFinanceModel = require('../../models/finance/WeekLyFinanceModel.js');
 const userModel = require('../../models/user-auth/userModel.js');
@@ -66,6 +66,9 @@ const differenceCalculation = require('../Calculations/DifferenceCalcualtion.js'
 const KeywordTrackingModel = require('../../models/amazon-ads/KeywordTrackingModel.js');
 // PPC Units Sold model for date-wise units sold data
 const PPCUnitsSold = require('../../models/amazon-ads/PPCUnitsSoldModel.js');
+// Inputs for the tasks-logics.xlsx detectors, only for accounts with a wave enabled
+const { enabledKpiWaves } = require('../Calculations/kpi/kpiGate.js');
+const { loadKpiInputs } = require('../Calculations/kpi/KpiInputs.js');
 
 class AnalyseService {
     /**
@@ -155,9 +158,23 @@ class AnalyseService {
         });
         logger.info(`[PERF] createBaseResult completed in ${Date.now() - stepStart}ms`);
 
+        // Inputs for the tasks-logics.xlsx detectors (DashboardCalculation runs them).
+        // Absent unless a wave is enabled for this account, so everyone else's
+        // message is unchanged. A failure leaves them absent: no new tasks, none resolved.
+        const kpiWaves = enabledKpiWaves(userId);
+        if (kpiWaves.length > 0) {
+            stepStart = Date.now();
+            try {
+                result.KpiInputs = await loadKpiInputs({ userId, country, region, waves: kpiWaves, allData });
+            } catch (error) {
+                logger.error('[Analyse] KPI inputs not built', { userId, country, region, error: error.message });
+            }
+            logger.info(`[PERF] loadKpiInputs completed in ${Date.now() - stepStart}ms`);
+        }
+
         // Process conversion and ranking data
         stepStart = Date.now();
-        const conversionData = this.processConversionData(SellerAccount, allData);
+        const conversionData = this.processConversionData(SellerAccount, allData, sellerCentral?.brand);
         result.RankingsData = conversionData.rankingsData;
         result.ConversionData = conversionData.conversionData;
         result.Defaulters = conversionData.defaulters;
@@ -165,7 +182,7 @@ class AnalyseService {
 
         // Process inventory analysis
         stepStart = Date.now();
-        const inventoryAnalysis = this.processInventoryAnalysis(allData, { userId, country, region });
+        const inventoryAnalysis = this.processInventoryAnalysis(allData, { userId, country, region, leadTimeDays: SellerAccount?.replenishLeadTimeDays });
         result.InventoryAnalysis = inventoryAnalysis.analysis;
         logger.info(`[PERF] processInventoryAnalysis completed in ${Date.now() - stepStart}ms`);
         
@@ -402,7 +419,9 @@ class AnalyseService {
             cogsData,
             ltsfData,
             fbaInventoryDetailData,
-            campaignSpendSales
+            campaignSpendSales,
+            adGroupsByAsin,
+            adsTargets
         ] = await Promise.all([
             timedQuery('v2Data', () => V2_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
             timedQuery('v1Data', () => V1_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
@@ -469,7 +488,19 @@ class AnalyseService {
                     .catch((error) => {
                         logger.warn('[Analyse] PPC campaign totals unavailable; high-ACOS tasks fall back to date-wise spend', { error: error.message });
                         return null;
-                    }))
+                    })),
+            // ASIN -> ad groups over the last 20 days, so an ACoS-above-break-even task can
+            // propose bid cuts on the keywords that spend on that product.
+            timedQuery('adGroupsByAsin', () =>
+                require('../../models/amazon-ads/ProductWiseSponsoredAdsItemModel.js')
+                    .adGroupsByAsinSince(userId, country, region, new Date(Date.now() - 20 * 86400000).toISOString().slice(0, 10))
+                    .catch(() => null)),
+            // Product and auto targets with bids (weekly), for target bid cuts.
+            timedQuery('adsTargets', () =>
+                require('../../models/amazon-ads/AdsTargetSnapshotModel.js')
+                    .findOne({ userId, country, region, createdAt: { $gte: new Date(Date.now() - 10 * 86400000) } })
+                    .sort({ createdAt: -1 }).lean()
+                    .catch(() => null))
         ]);
         
         const fetchEndTime = Date.now();
@@ -589,7 +620,9 @@ class AnalyseService {
             cogsData,
             ltsfData,
             fbaInventoryDetailData,
-            campaignSpendSales
+            campaignSpendSales,
+            adGroupsByAsin,
+            adsTargets
         };
     }
 
@@ -943,6 +976,11 @@ class AnalyseService {
             GetOrderData: (allData.GetOrderData || { RevenueData: [] }).RevenueData,
             GetDateWisePPCspendData: (allData.GetDateWisePPCspendData || { dateWisePPCSpends: [] }).dateWisePPCSpends,
             campaignSpendSales: allData.campaignSpendSales || null,
+            AdGroupsByAsin: allData.adGroupsByAsin || null,
+            AdsTargets: allData.adsTargets?.targets || null,
+            AdsBudgetRecs: allData.adsTargets ? { at: allData.adsTargets.createdAt, recs: allData.adsTargets.budgetRecs } : null,
+            // Per-unit COGS by ASIN ({} until the seller enters it): the loss-making rule needs it.
+            cogsValues: (allData.cogsData && allData.cogsData.success && allData.cogsData.data?.cogsValues) || {},
             AdsGroupData: (allData.AdsGroupData || { adsGroupData: [] }).adsGroupData,
             keywordTrackingData: (allData.keywordTrackingData || { keywords: [] }).keywords || [],
             DifferenceData: differenceData.percentageDifference,
@@ -960,7 +998,7 @@ class AnalyseService {
     /**
      * Process conversion and ranking data
      */
-    static processConversionData(SellerAccount, allData) {
+    static processConversionData(SellerAccount, allData, accountBrand = '') {
         const safeProductReviews = allData.numberOfProductReviews || { Products: [] };
         const safeListingItems = allData.GetlistingAllItems || { GenericKeyword: [] };
         const safeAplusResponse = allData.aplusResponse || { ApiContentDetails: [] };
@@ -1011,12 +1049,20 @@ class AnalyseService {
         const imageResultArray = [], videoResultArray = [],
               productStarRatingResultArray = [], RankingResultArray = [], BackendKeywordResultArray = [];
 
+        // Per-ASIN brand (weekly listing sync), else the account's brand: a special
+        // character that is part of the brand name is allowed in a title.
+        const brandByAsin = new Map();
+        for (const p of SellerAccount.products || []) if (p?.asin && p.brand && !brandByAsin.has(p.asin)) brandByAsin.set(p.asin, p.brand);
+        // Titles, so backend keywords can be checked for words the title already has.
+        const titleByAsin = new Map();
+
         safeProductReviews.Products.forEach(product => {
+            if (product?.asin && product.product_title) titleByAsin.set(product.asin, product.product_title);
             if (!DefaulterList.ProductReviews.includes(product.asin)) {
                 const imageResult = checkNumberOfImages(product.product_photos);
                 const videoResult = checkIfVideoExists(product.video_url);
                 const productStarRatingResult = checkStarRating(product.product_star_ratings, product.product_num_ratings);
-                const rankings = getRankings(product);
+                const rankings = getRankings(product, { brand: brandByAsin.get(product.asin) || accountBrand || '' });
                 if (product.asin) scraped.add(product.asin);
 
                 // "No data" (no reviews yet, no image data) must not cost a product its
@@ -1036,7 +1082,7 @@ class AnalyseService {
         safeListingItems.GenericKeyword.forEach(item => {
             const asin = item.asin;
             if (!DefaulterList.ListingAllItems.includes(asin)) {
-                const keywordStatus = BackendKeyWordOrAttributesStatus(item.value);
+                const keywordStatus = BackendKeyWordOrAttributesStatus(item.value, { title: titleByAsin.get(asin) || '' });
                 // Errors only (a short-keywords Warning is not counted in
                 // NumberOfErrors), and never re-adds: one SKU's clean keywords
                 // must not undo another check's verdict.
@@ -1086,7 +1132,13 @@ class AnalyseService {
                 brandStoryScrapePresent,
                 ProductWithOutBuybox: buyboxResult,
                 // Unique: an ASIN listed under several SKUs is one product.
-                AmazonReadyproducts: [...new Set(AmazonReadyProducts)]
+                AmazonReadyproducts: [...new Set(AmazonReadyProducts)],
+                // Active ASINs whose listing was scraped: the products that CAN be
+                // judged ready. DashboardCalculation narrows them to those with no
+                // open P1-P3 task (tasks-logics.xlsx "Amazon Ready Products").
+                AmazonReadyCandidates: [...new Set(SellerAccount.products
+                    .filter(p => p && p.status === 'Active' && p.asin && scraped.has(p.asin))
+                    .map(p => p.asin))]
             },
             defaulters: DefaulterList
         };
@@ -1118,7 +1170,8 @@ class AnalyseService {
         // window was applied on the day it ran; re-apply it now so a document
         // from earlier in the week cannot surface issues that have aged out.
         const safeInboundNonComplianceData = {
-            ErrorData: filterInboundIssuesToWindow(inboundDoc?.ErrorData)
+            // Tasks: problems Amazon reported this week (new since the last look).
+            ErrorData: filterInboundIssuesToWindow(inboundDoc?.ErrorData, new Date(), INBOUND_NEW_ISSUE_DAYS)
         };
         const safeRestockData = restockDoc || { Products: [] };
 
@@ -1145,12 +1198,19 @@ class AnalyseService {
             });
         }
 
+        // Selling price per ASIN, to value unfulfillable units when COGS is missing.
+        const restockPriceMap = {};
+        (safeRestockData.Products || []).forEach((row) => {
+            const price = Number(row?.price);
+            if (row?.asin && price > 0) restockPriceMap[row.asin] = price;
+        });
+
         // Process Inventory Planning Data for each ASIN
         if (safeInventoryPlanningData.data && Array.isArray(safeInventoryPlanningData.data)) {
             safeInventoryPlanningData.data.forEach(item => {
                 if (item && item.asin) {
                     try {
-                        const planningResult = processInventoryPlanningData(item, costMap, ltsfAmountMap);
+                        const planningResult = processInventoryPlanningData(item, costMap, ltsfAmountMap, restockPriceMap);
                         inventoryAnalysis.inventoryPlanning.push(planningResult);
                     } catch (error) {
                         logger.error(`Error processing inventory planning data for ASIN ${item.asin}: ${error.message}`);
@@ -1194,7 +1254,9 @@ class AnalyseService {
         // Process Replenishment/Restock Data for each ASIN
         if (safeRestockData.Products && Array.isArray(safeRestockData.Products)) {
             try {
-                const replenishmentResults = replenishmentQty(safeRestockData.Products);
+                // The seller's own lead time when set, else the default.
+                const leadTimeDays = Number(context.leadTimeDays) > 0 ? Number(context.leadTimeDays) : undefined;
+                const replenishmentResults = replenishmentQty(safeRestockData.Products, leadTimeDays ? { leadTimeDays } : {});
                 inventoryAnalysis.replenishment = replenishmentResults || [];
             } catch (error) {
                 logger.error(`Error processing replenishment data: ${error.message}`);

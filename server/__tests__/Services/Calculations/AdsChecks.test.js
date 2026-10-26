@@ -95,7 +95,7 @@ const kw = (over = {}) => ({
 });
 const term = (over = {}) => ({
     date: '2026-10-01', searchTerm: 'cheap widget', keyword: 'blue widget', campaignId: 'c1', adGroupId: 'ag1',
-    clicks: 12, spend: 8, sales: 0, ...over,
+    clicks: 15, spend: 8, sales: 0, ...over,
 });
 const CURRENT_TERM = { date: '2026-10-15', searchTerm: 'converting', campaignId: 'c9', adGroupId: 'ag9', clicks: 3, spend: 1, sales: 30 };
 
@@ -121,6 +121,13 @@ describe('calculateSponsoredAdsErrors', () => {
         const details = calculateSponsoredAdsErrors([], [kw()], [term()], [], [], OPTS).errorDetails;
         expect(ofType(details, 'wasted_spend_keyword')).toHaveLength(0);
         expect(ofType(details, 'search_term_zero_sales')).toHaveLength(0);
+    });
+
+    // tasks-logics.xlsx: 15+ clicks, 0 orders, spend over the product price.
+    it('needs 15+ clicks and spend over the reference price', () => {
+        expect(ofType(run([], [term({ clicks: 14 })]), 'search_term_zero_sales')).toHaveLength(0);
+        expect(ofType(run([], [term()], { referencePrice: 7.99 }), 'search_term_zero_sales')).toHaveLength(1);
+        expect(ofType(run([], [term()], { referencePrice: 20 }), 'search_term_zero_sales')).toHaveLength(0);
     });
 
     it('drops a zero-sale search term the seller already added as a negative', () => {

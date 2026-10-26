@@ -67,6 +67,52 @@ const SUNDAY_FUNCTIONS = {
         apiDataKey: 'removalOrdersData',
         isDefaultExport: true
     },
+    // FBA fee estimates per SKU (size tier, dimensions, expected fulfilment fee), for the
+    // tasks-logics.xlsx "FBA fee increase or size tier change" task, which compares this
+    // week's snapshot with last week's. Weekly: fees and size tiers change rarely, and
+    // ProductWiseFBADataService keeps the last 3 batches, so that is 3 weeks of history.
+    // Its columns are copied as-is from the report, so no header mapping can drift.
+    'fbaFeeEstimatesData': {
+        service: require('../Sp_API/GetProductWiseFBAData.js'),
+        functionName: null, // Default export, use service directly
+        description: 'FBA Fee Estimates',
+        requiresAccessToken: true,
+        apiDataKey: 'fbaFeeEstimatesData',
+        isDefaultExport: true
+    },
+    // Who offers on the seller's own brand listings (top 200 by revenue), for the
+    // tasks-logics.xlsx "New seller on brand listing" task. Weekly: the Product Pricing
+    // batch call allows one request per 11s, so 200 ASINs take about two minutes.
+    // Batch 3, after the brand sync. Stored in BrandOfferSnapshot, never in
+    // CompetitiveOffers (the ESF Buy Box report's source).
+    // FBA customer returns with their reasons, for the tasks-logics.xlsx "Return
+    // reason spike" task. Weekly: the rule looks at 30 days of returns.
+    'customerReturnsData': {
+        service: require('../Sp_API/GET_FBA_FULFILLMENT_CUSTOMER_RETURNS_DATA.js'),
+        functionName: null, // Default export, use service directly
+        description: 'FBA Customer Returns',
+        requiresAccessToken: true,
+        apiDataKey: 'customerReturnsData',
+        isDefaultExport: true
+    },
+    // Weekly reads for "priced above featured offer", Subscribe & Save and inbound
+    // placement fees (tasks-logics.xlsx). Batch 3, after the daily Sales & Traffic read.
+    'weeklySignalsData': {
+        service: require('../Sp_API/WeeklySignalsSync.js'),
+        functionName: null, // Default export, use service directly
+        description: 'Weekly pricing, Subscribe & Save and placement fee reads',
+        requiresAccessToken: true,
+        apiDataKey: 'weeklySignalsData',
+        isDefaultExport: true
+    },
+    'brandOffersData': {
+        service: require('../Sp_API/BrandOffersSync.js'),
+        functionName: null, // Default export, use service directly
+        description: 'Brand Listing Offers',
+        requiresAccessToken: true,
+        apiDataKey: 'brandOffersData',
+        isDefaultExport: true
+    },
     // ── The two AI views are NOT registered here, deliberately ──
     // Both derive from TaskItem, and tasks are refreshed by addNewAccountHistory,
     // which runs AFTER fetchScheduledApiData completes. A batch-5 service would

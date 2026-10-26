@@ -22,108 +22,93 @@ const currencyToCountry = {
     'EGP': 'EG'
 };
 
+// tasks-logics.xlsx "Aged inventory surcharge": estimate over $25 ($25 internal), or
+// 91-180-day units not selling within AGED_SELL_THROUGH_DAYS (see inventoryPlanningData).
+const AGED_SURCHARGE_MIN_USD = 25;
+const AGED_SELL_THROUGH_DAYS = 45;
+
+// tasks-logics.xlsx "Unfulfillable inventory": 5+ units or $50+ in value.
+const UNFULFILLABLE_MIN_UNITS = 5;
+const UNFULFILLABLE_MIN_VALUE = 50;
+
+// tasks-logics.xlsx "Products to Replenish": flag when days of supply
+// (available + inbound) is under the lead time + 14 days, or Amazon's alert
+// says reorder now / out of stock. Default lead time 45 days until the seller
+// gives one. Only SKUs selling 1+ unit a day over 30 days are judged.
+const REPLENISH_DEFAULT_LEAD_TIME_DAYS = 45;
+const REPLENISH_BUFFER_DAYS = 14;
+const REPLENISH_MIN_UNITS_30D = 30;
+
+const normaliseRestockAlert = (alert) => String(alert || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+// Amazon's report sends 'out_of_stock' and 'low_stock' (its "reorder now" signal);
+// 'reorder_now' is kept in case the header text changes.
+const URGENT_RESTOCK_ALERTS = new Set(['out_of_stock', 'low_stock', 'reorder_now']);
+
 /**
- * Evaluate replenishment status for products based on Amazon's recommended replenishment quantity and alert status.
- * 
- * Logic (priority order):
- * 1. If alert is "out_of_stock" → Critical Error (highest priority)
- * 2. If Amazon recommends >30 units → Error (low inventory, urgent)
- * 3. If Amazon recommends 11-30 units → Warning (monitor closely)
- * 4. If Amazon recommends 0-10 units → Success (healthy inventory)
- * 
- * Note: Same ASIN can appear multiple times (different SKUs). Each is processed separately.
- * 
- * @param {Array} productArr - Array of products with replenishment data
- * @returns {Array} - Array of products with status, message, and how to solve
+ * Evaluate replenishment per restock row (same ASIN can appear once per SKU).
+ *
+ * @param {Array} productArr - restock report rows
+ * @param {Object} [options]
+ * @param {number} [options.leadTimeDays] - seller's lead time, default 45
+ * @returns {Array} rows with status Error (task) or Success
  */
-const replenishmentQty = (productArr) => {
+const replenishmentQty = (productArr, { leadTimeDays = REPLENISH_DEFAULT_LEAD_TIME_DAYS } = {}) => {
+    const thresholdDays = leadTimeDays + REPLENISH_BUFFER_DAYS;
     let replenishmentArr = [];
-    
+
     productArr.forEach(elm => {
         const asin = elm.asin;
         if (!asin) return;
-        
+
         // Handle both old field name (RecommendedReplenishmentQty) and new field name (recommendedReplenishmentQty)
         const qty = Number(elm.RecommendedReplenishmentQty || elm.recommendedReplenishmentQty) || 0;
-        
-        // Get alert field - stored as "out_of_stock" or ""
         const alert = elm.alert || elm.Alert || "";
-        
-        // Get available quantity from the product data
         const available = Number(elm.available || elm.Available || 0);
-        
-        // Get SKU for identification when same ASIN has multiple entries
+        const inbound = Number(elm.inbound || elm.Inbound || 0) || 0;
+        const unitsSold30 = Number(elm.unitsSoldLast30Days) || 0;
         const sku = elm.merchantSku || elm.MerchantSku || elm.sku || "";
-        
-        // Get currency code and derive country code
         const currencyCode = elm.currencyCode || elm.CurrencyCode || "";
         const countryCode = currencyToCountry[currencyCode.toUpperCase()] || "";
-        
-        // Helper to format ASIN with country code
-        const asinDisplay = countryCode ? `${asin} (${countryCode})` : asin;
-        
-        // PRIORITY 1: Check for out_of_stock alert (Critical)
-        if (alert === "out_of_stock") {
+
+        const dailyUnits = unitsSold30 / 30;
+        const daysOfSupply = dailyUnits > 0 ? Math.floor((available + inbound) / dailyUnits) : null;
+        const judged = unitsSold30 >= REPLENISH_MIN_UNITS_30D;
+        const flagged = judged && (
+            (daysOfSupply !== null && daysOfSupply < thresholdDays)
+            || URGENT_RESTOCK_ALERTS.has(normaliseRestockAlert(alert))
+        );
+
+        const row = {
+            asin,
+            sku,
+            countryCode,
+            data: qty,
+            recommendedReplenishmentQty: qty,
+            alert,
+            available,
+            inbound,
+            unitsSoldLast30Days: unitsSold30,
+            daysOfSupply
+        };
+
+        if (flagged) {
+            const qtyHint = qty > 0 ? ` Amazon recommends ${qty} units.` : '';
             replenishmentArr.push({
-                asin: asin,
-                sku: sku,
-                countryCode: countryCode,
-                data: qty,
-                recommendedReplenishmentQty: qty,
-                alert: alert,
-                available: available,
+                ...row,
                 status: "Error",
-                Message: `CRITICAL: ${asinDisplay} (SKU: ${sku || 'N/A'}) is OUT OF STOCK! Currently ${available} units available. You are losing sales and your ranking/Buy Box eligibility is being damaged. Immediate action required.`,
-                HowToSolve: `Urgently create an FBA shipment to replenish this product with ${qty > 0 ? qty : 'recommended'} units. If you have inventory available, consider using Amazon's partnered carrier for faster inbound. Contact your supplier immediately if you need to reorder. In the meantime, pause advertising spend for this product to avoid wasted ad costs.`
+                Message: `These products will run out in about ${daysOfSupply ?? 0} days at the current sales rate (${available} available, ${inbound} inbound, ${unitsSold30} sold in the last 30 days), inside your ${leadTimeDays}-day lead time plus ${REPLENISH_BUFFER_DAYS} days.${qtyHint}`,
+                HowToSolve: "Place a purchase order or send inventory now, using Amazon's recommended quantity as a guide."
             });
-        }
-        // PRIORITY 2: High replenishment qty (>30)
-        else if (qty > 30) {
+        } else {
             replenishmentArr.push({
-                asin: asin,
-                sku: sku,
-                countryCode: countryCode,
-                data: qty,
-                recommendedReplenishmentQty: qty,
-                alert: alert,
-                available: available,
-                status: "Error",
-                Message: `Urgent: ${asinDisplay} (SKU: ${sku || 'N/A'}) - Only ${available} units available. Amazon recommends replenishing ${qty} units. Risk of stockout is high.`,
-                HowToSolve: "Act quickly to replenish your inventory. Create an FBA shipment immediately with the recommended quantity. Analyze your sales data to forecast demand more accurately. Consider setting up automatic restocking alerts in Amazon Seller Central. Evaluate your supply chain for bottlenecks and improve efficiency in manufacturing lead times and shipping."
-            });
-        }
-        // PRIORITY 3: Moderate replenishment qty (11-30)
-        else if (qty > 10) {
-            replenishmentArr.push({
-                asin: asin,
-                sku: sku,
-                countryCode: countryCode,
-                data: qty,
-                recommendedReplenishmentQty: qty,
-                alert: alert,
-                available: available,
-                status: "Warning",
-                Message: `${asinDisplay} (SKU: ${sku || 'N/A'}) - ${available} units available. Amazon recommends replenishing ${qty} units. Monitor inventory levels to avoid potential stockouts.`,
-                HowToSolve: "Plan your next replenishment shipment soon. Review your sales trends and lead times to ensure timely restocking. Consider creating an FBA shipment within the next 1-2 weeks."
-            });
-        }
-        // PRIORITY 4: Low/zero replenishment qty (0-10) - Healthy
-        else {
-            replenishmentArr.push({
-                asin: asin,
-                sku: sku,
-                countryCode: countryCode,
-                data: qty,
-                recommendedReplenishmentQty: qty,
-                alert: alert,
-                available: available,
+                ...row,
                 status: "Success",
-                Message: `Great job! ${asinDisplay} (SKU: ${sku || 'N/A'}) - ${available} units available. Your stock is sufficient to meet customer demand.`,
+                Message: "Stock levels cover expected sales until the next shipment arrives.",
                 HowToSolve: ""
             });
         }
     });
-    
+
     return replenishmentArr;
 }
 
@@ -131,31 +116,57 @@ const replenishmentQty = (productArr) => {
  * @param {Object} data - raw inventory planning row for one ASIN
  * @param {Object} costMap - {[asin]: per-unit COGS}, default {} when unknown
  * @param {Object} ltsfAmountMap - {[asin]: real long-term storage fee $ from the LTSF sync}, default {} when not yet synced
+ * @param {Object} priceMap - {[asin]: selling price}, values unfulfillable units when COGS is unknown
  */
-const inventoryPlanningData=(data, costMap = {}, ltsfAmountMap = {})=>{
+const inventoryPlanningData=(data, costMap = {}, ltsfAmountMap = {}, priceMap = {})=>{
     let longTermStorageFees={};
     const Total=Number(data.quantity_to_be_charged_ais_181_210_days)+Number(data.quantity_to_be_charged_ais_211_240_days)+Number(data.quantity_to_be_charged_ais_241_270_days)+Number(data.quantity_to_be_charged_ais_271_300_days)+Number(data.quantity_to_be_charged_ais_301_330_days)+Number(data.quantity_to_be_charged_ais_331_365_days)+Number(data.quantity_to_be_charged_ais_365_plus_days);
 
-    if(Total!==0){
+    // tasks-logics.xlsx "Aged inventory surcharge": Amazon's estimated surcharge over
+    // $25, or units aged 91-180 days that will not sell before day 181 at the current
+    // rate. Units in that band reach 181 days in 1 to 90 days, 45 on average, so
+    // they are judged against 45 days of sales (internal). Reports without the
+    // estimate columns keep the old rule (any unit in a surcharge bucket).
+    const estimate = data.estimated_ais_total === null || data.estimated_ais_total === undefined
+        ? null : Number(data.estimated_ais_total);
+    const aged91 = Number(data.inv_age_91_to_180_days);
+    const sold90 = Number(data.units_shipped_t90);
+    const agingUnsold = Number.isFinite(aged91) && Number.isFinite(sold90) && aged91 > 0
+        ? Math.max(0, Math.round(aged91 - (sold90 / 90) * AGED_SELL_THROUGH_DAYS)) : 0;
+    const surchargeDue = estimate !== null && Number.isFinite(estimate)
+        ? estimate > AGED_SURCHARGE_MIN_USD
+        : Total > 0;
+    const fee = Number(ltsfAmountMap[data.asin]) || (Number.isFinite(estimate) ? estimate : 0) || 0;
+
+    if(surchargeDue || agingUnsold > 0){
         longTermStorageFees.status="Error";
-        longTermStorageFees.Message="Your inventory has been stored in FBA for a long period, making it eligible for Long-Term Storage Fees (LTSF). These fees can significantly increase your operating costs, reducing profit margins.";
-        longTermStorageFees.HowToSolve="Review your inventory levels and sales velocity to identify slow-moving or stagnant stock. Consider running promotions or lowering prices to increase sales and reduce inventory levels. Alternatively, remove excess inventory from FBA to avoid additional LTSF. Strategically plan your inventory replenishment based on demand forecasts to prevent future stock from becoming eligible for LTSF.";
-        // Real $ from the GET_FBA_FULFILLMENT_LONGTERM_STORAGE_FEE_CHARGES_DATA sync when
-        // available; 0 until that sync is enabled + has run for this account.
-        longTermStorageFees.amount = ltsfAmountMap[data.asin] || 0;
+        longTermStorageFees.Message = surchargeDue
+            ? `${Total} units have been in Amazon's warehouse long enough to attract an aged inventory surcharge${fee > 0 ? ` of about $${fee.toFixed(2)} a month` : ''}.`
+            : `About ${agingUnsold} units aged 91-180 days will not sell before they reach 181 days at the current sales rate, when Amazon starts charging an aged inventory surcharge.`;
+        longTermStorageFees.HowToSolve="Clear this stock with a price drop, coupon or deal, or create a removal or liquidation order before the next charge on the 15th.";
+        longTermStorageFees.units = Total;
+        longTermStorageFees.agingUnsoldUnits = agingUnsold;
+        // Real $ from the LTSF sync when it runs, else Amazon's estimate from this report.
+        longTermStorageFees.amount = fee;
     }else{
         longTermStorageFees.status="Success";
-        longTermStorageFees.Message="Great job managing your FBA inventory efficiently! Keeping your inventory levels optimized helps avoid Long-Term Storage Fees and maximizes your profitability." ;
+        longTermStorageFees.Message="None of your stock is old enough to be charged an aged inventory surcharge.";
         longTermStorageFees.HowToSolve="";
         longTermStorageFees.amount = 0;
     }
 
     let unfulfillable={}
 
-    if(Number(data.unfulfillable_quantity)>0){
+    const unfulfillableUnits = Number(data.unfulfillable_quantity) || 0;
+    // Valued at cost when the seller entered COGS, otherwise at selling price.
+    const unitValue = Number(costMap[data.asin]) || Number(priceMap[data.asin]) || 0;
+    const unfulfillableValue = unfulfillableUnits * unitValue;
+
+    if(unfulfillableUnits >= UNFULFILLABLE_MIN_UNITS || (unfulfillableUnits > 0 && unfulfillableValue >= UNFULFILLABLE_MIN_VALUE)){
         unfulfillable.status="Error";
-        unfulfillable.Message=`You have unfulfillable inventory in FBA, which can tie up resources and increase operational costs due to items that cannot be sold in their current condition. Unfulfillable Quantity: ${data.unfulfillable_quantity} units`;
-        unfulfillable.HowToSolve="Review the details of your unfulfillable inventory through your Amazon Seller Central account to understand the reasons for its status (such as damaged, customer returns, etc.). Decide whether to have the inventory returned to you for assessment, refurbishing, or disposal. If the items are repairable or repackageable, consider doing so to move them back to fulfillable status. Implement strategies to reduce future occurrences, such as improving packaging or quality control processes.";
+        unfulfillable.units = unfulfillableUnits;
+        unfulfillable.Message=`${unfulfillableUnits} units of this product are unsellable and still taking up paid storage.`;
+        unfulfillable.HowToSolve="Create a removal order to get them back, or a disposal order if they are not worth recovering.";
         // CAPITAL, not profit — stock value that cannot be sold. Kept out of `amount`
         // so it never enters a profit total; see RecoverableAmountUtils for why.
         unfulfillable.capitalAmount = computeInventoryUnfulfillableAmount({ costPerUnit: costMap[data.asin], quantity: Number(data.unfulfillable_quantity) });
@@ -209,4 +220,4 @@ const inboundNonComplianceData=(data)=>{
 }
 
 
-module.exports={replenishmentQty,inventoryPlanningData,inventoryStrandedData,inboundNonComplianceData}
+module.exports={UNFULFILLABLE_MIN_UNITS,UNFULFILLABLE_MIN_VALUE,REPLENISH_DEFAULT_LEAD_TIME_DAYS,REPLENISH_BUFFER_DAYS,REPLENISH_MIN_UNITS_30D,replenishmentQty,inventoryPlanningData,inventoryStrandedData,inboundNonComplianceData}

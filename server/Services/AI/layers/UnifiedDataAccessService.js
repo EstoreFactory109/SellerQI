@@ -25,7 +25,7 @@ const {
 } = require('../../Calculations/RecommendationService.js');
 const { fetchAndEnrichWithComparison } = require('../../Calculations/ProductPerformanceComparisonService.js');
 const { resolveAsinFinance } = require('../../Finance/AsinFinanceWindowService.js');
-const { summarizeBuyBoxCounts, activeAsinSetOf } = require('../../Calculations/RecoverableAmountUtils.js');
+const { summarizeBuyBoxCounts, activeAsinSetOf, buyBoxJudgedAsinSetOf } = require('../../Calculations/RecoverableAmountUtils.js');
 const ExpenseReadService = require('../../Finance/ExpenseReadService.js');
 const { buildExpenseReportResponseFromDB } = require('../../Sp_API/FinanceService.js');
 const { pickSnapshotFeeTotalsForCalendar } = require('../../../utils/expenseSnapshotCalendar.js');
@@ -446,7 +446,7 @@ async function fetchIssuesByProductParity({ userId, country, region, question })
             // (summarizeBuyBoxCounts), so productsWithoutBuyBox = the No Buy Box task count.
             buyBoxSummary: rawData?.BuyBoxData
                 ? {
-                      ...summarizeBuyBoxCounts(rawData.BuyBoxData, activeAsinSetOf(rawData.TotalProducts)),
+                      ...summarizeBuyBoxCounts(rawData.BuyBoxData, buyBoxJudgedAsinSetOf(rawData.TotalProducts)),
                       dateRange: rawData.BuyBoxData.dateRange,
                   }
                 : null,

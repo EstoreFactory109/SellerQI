@@ -73,6 +73,10 @@ const GROUP_COPY = {
         title: 'Products with unresolved profitability problems',
         action: 'Review pricing, fees and ad spend on these ASINs'
     },
+    'profitability:cogs_missing': {
+        title: 'Products with no cost of goods on file',
+        action: 'Enter unit costs so true profit can be measured'
+    },
 
     // ── Sponsored Ads ──
     'sponsoredAds:wasted_spend_keyword': {
@@ -117,6 +121,19 @@ const GROUP_COPY = {
         title: 'Ad targets needing a closer look',
         action: 'Review these targets against their performance data'
     },
+    'sponsoredAds:tacos_rising': {
+        title: 'Ad spend rising faster than sales',
+        action: 'Trim the campaigns that grew spend without growing sales'
+    },
+    'sponsoredAds:top_seller_not_advertised': {
+        title: 'Best sellers with no ads running',
+        action: 'Launch campaigns to protect and grow these products',
+        isGrowthOpportunity: true
+    },
+    'sponsoredAds:ads_on_unbuyable': {
+        title: 'Ads running on products shoppers cannot buy',
+        action: 'Pause these ads until the product can sell again'
+    },
 
     // ── Inventory ──
     'inventory:unfulfillable_inventory': {
@@ -138,6 +155,114 @@ const GROUP_COPY = {
     'inventory:replenishment_needed': {
         title: 'Products about to run out of stock',
         action: 'Create an FBA shipment before these go unavailable'
+    },
+    'inventory:listing_suppressed': {
+        title: 'Listings Amazon is hiding from shoppers',
+        action: 'Fix the issue Amazon flagged so these become buyable again'
+    },
+    'inventory:out_of_stock': {
+        title: 'Selling products with nothing in stock',
+        action: 'Send stock now — every day out of stock is lost sales'
+    },
+    'inventory:removal_shortfall': {
+        title: 'Removal orders that came back short',
+        action: 'Claim the missing units from Amazon before the window closes'
+    },
+    'inventory:weeks_of_cover': {
+        title: 'Products with far more stock than they sell',
+        action: 'Pause inbound and promote these down to 8-12 weeks of cover'
+    },
+    'inventory:listing_warnings': {
+        title: 'Listings with Amazon warnings that can turn into blocks',
+        action: 'Fix the flagged field on each before Amazon blocks it'
+    },
+    'inventory:low_inventory_fee_risk': {
+        title: 'Products paying, or close to paying, the low-inventory fee',
+        action: 'Send stock to hold at least 28 days of sales'
+    },
+    'inventory:fba_fee_increase': {
+        title: 'Products Amazon now charges more to fulfil',
+        action: 'Check the measurements and ask for a re-measure if wrong'
+    },
+    'sponsoredAds:product_acos_above_breakeven': {
+        title: 'Products whose ads cost more than they earn',
+        action: 'Lower bids or pause the targets above break-even ACoS'
+    },
+    'conversion:priced_above_featured_offer': {
+        title: 'Products priced above what wins the Buy Box',
+        action: 'Match Amazon\'s expected price where the margin allows'
+    },
+    'inventory:subscribe_and_save': {
+        title: 'Subscribe & Save offers Amazon has suspended',
+        action: 'Fix the stock or price issue to restart deliveries'
+    },
+    'sponsoredAds:budget_limited_profitable': {
+        title: 'Profitable campaigns running out of budget',
+        action: 'Raise the budget so they run all day'
+    },
+    'inventory:inbound_placement_fees': {
+        title: 'Inbound placement fees paid this month',
+        action: 'Use Amazon\'s optimised split on future shipments'
+    },
+    'inventory:returns_fee_risk': {
+        title: 'Products near or over Amazon\'s return-rate threshold',
+        action: 'Fix the return cause before the returns fee applies'
+    },
+    'ranking:detail_page_changed': {
+        title: 'Listings changed with no record of who changed them',
+        action: 'Check each one, and restore it or mark the change as yours'
+    },
+    'inventory:return_reason_spike': {
+        title: 'Products returned as defective, wrong or not as described',
+        action: 'Read the return comments and fix the listing or the product'
+    },
+    'inventory:lost_damaged_unreimbursed': {
+        title: 'Units Amazon lost or damaged and has not paid for',
+        action: 'File claims before the 60-day window closes'
+    },
+    'inventory:refund_not_returned': {
+        title: 'Refunds where the item never came back',
+        action: 'File a claim for each order before 120 days'
+    },
+    'inventory:inbound_shortage': {
+        title: 'Shipments Amazon checked in short',
+        action: 'Open a case with the invoice and proof of delivery'
+    },
+    'conversion:high_traffic_low_conversion': {
+        title: 'Products with plenty of visits but few sales',
+        action: 'Improve images, price position and A+ content'
+    },
+    'conversion:low_traffic_high_conversion': {
+        title: 'Products that convert well but get few visitors',
+        action: 'Send more traffic through ads and better keywords'
+    },
+    'ranking:listing_errors': {
+        title: 'Listings Amazon has flagged with errors',
+        action: 'Fix the flagged field before Amazon suppresses the listing'
+    },
+    'ranking:backend_keywords_underused': {
+        title: 'Listings using little of their backend keyword space',
+        action: 'Add synonyms and alternate searches up to the 250-byte limit'
+    },
+    'ranking:titleresult_too_short': {
+        title: 'Titles too short to carry the searches shoppers use',
+        action: 'Add size, material, quantity and key use to these titles'
+    },
+    'ranking:backend_keywords_title_overlap': {
+        title: 'Backend keywords repeating words already in the title',
+        action: 'Swap those words for new searches the title does not cover'
+    },
+    'inventory:new_seller_on_brand': {
+        title: 'New sellers on your own brand listings',
+        action: 'Check each one: authorised reseller, or test buy and report'
+    },
+    'inventory:handling_time_long': {
+        title: 'Seller-fulfilled products promising slow delivery',
+        action: 'Shorten handling time where your team can ship faster'
+    },
+    'inventory:removal_confirm_receipt': {
+        title: 'Removal orders waiting for you to confirm what arrived',
+        action: 'Enter the units you received so missing ones can be claimed'
     },
 
     // ── Conversion ──
@@ -165,6 +290,22 @@ const GROUP_COPY = {
         title: 'Products whose rating is driving buyers away',
         action: 'Address the complaints behind the low rating'
     },
+    'conversion:sales_drop': {
+        title: 'Products whose sales suddenly fell',
+        action: 'Find what changed: price, Buy Box, reviews or ads'
+    },
+    'conversion:conversion_rate_drop': {
+        title: 'Products converting fewer visitors than before',
+        action: 'Check price, images, reviews and competing offers'
+    },
+    'conversion:traffic_drop': {
+        title: 'Products getting fewer visitors than before',
+        action: 'Check search rank, ad spend and listing status'
+    },
+    'conversion:rating_drop': {
+        title: 'Products whose rating is falling',
+        action: 'Fix the complaint behind the recent low reviews'
+    },
     'conversion:insufficient_reviews': {
         title: 'Products with too few reviews to build trust',
         action: 'Enrol these in review programmes to build social proof'
@@ -174,6 +315,14 @@ const GROUP_COPY = {
     'account:accountStatus': {
         title: 'Your selling account is at risk',
         action: 'Resolve this with Amazon immediately — it can stop all sales'
+    },
+    'account:invoice_defect_rate': {
+        title: 'Amazon Business orders missing invoices',
+        action: 'Upload the missing invoices and automate future ones'
+    },
+    'account:ahr_early_warning': {
+        title: 'Your Account Health Rating is falling',
+        action: 'Find what moved the score this week before it reaches At Risk'
     },
     'account:PolicyViolations': {
         title: 'Policy violations on your account',
@@ -195,9 +344,21 @@ const GROUP_COPY = {
         title: 'Cancellation rate above Amazon\'s limit',
         action: 'Keep stock accurate so orders are not cancelled'
     },
+    'account:onTimeDeliveryRateStatus': {
+        title: 'On-time delivery rate below Amazon\'s target',
+        action: 'Use more reliable carriers and realistic transit times'
+    },
     'account:NCX': {
         title: 'Products flagged for negative customer experience',
         action: 'Fix the product or listing problems driving complaints'
+    },
+    'inventory:storage_utilization_risk': {
+        title: 'Account storage near or over Amazon\'s surcharge level',
+        action: 'Slow inbound and clear the products taking the most space'
+    },
+    'account:negative_feedback_order': {
+        title: 'Orders with new negative seller feedback',
+        action: 'Request removal where allowed, or contact the buyer'
     },
     'account:negativeFeedbacks': {
         title: 'Negative seller feedback needing a response',
@@ -233,6 +394,10 @@ const GROUP_COPY = {
     'account:CancellationRate_unstable': {
         title: 'Cancellation rate keeps slipping',
         action: 'Keep stock accurate so orders are not cancelled'
+    },
+    'account:onTimeDeliveryRateStatus_unstable': {
+        title: 'On-time delivery rate keeps dipping',
+        action: 'Use more reliable carriers and realistic transit times'
     },
     'account:validTrackingRateStatus_unstable': {
         title: 'Valid tracking rate keeps dipping',

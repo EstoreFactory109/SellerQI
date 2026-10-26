@@ -123,15 +123,19 @@ describe('CreateTasksService renderers', () => {
             expect(error).toContain('0% Buy Box ownership');
         });
 
-        // Upstream only ever flags buyBoxPercentage === 0, so any other value
-        // falls through to the generic message.
-        it('falls back to the source message for any non-zero percentage', () => {
-            const { error } = CreateTaskService.renderBuyBoxTaskText({ buyBoxPercentage: 32.4, message: 'Custom buybox note' });
+        it('renders the partial tier for a share under 80%', () => {
+            const { error, solution } = CreateTaskService.renderBuyBoxTaskText({ buyBoxPercentage: 32.4, message: 'Custom buybox note' });
+            expect(error).toContain('only 32.4% of visits in the last 7 days');
+            expect(solution).toBeTruthy();
+        });
+
+        it('falls back to the source message at 80% or more', () => {
+            const { error } = CreateTaskService.renderBuyBoxTaskText({ buyBoxPercentage: 85, message: 'Custom buybox note' });
             expect(error).toBe('Custom buybox note');
         });
 
-        it('falls back to a safe default when there is no source message either', () => {
-            const { error, solution } = CreateTaskService.renderBuyBoxTaskText({ buyBoxPercentage: 60 });
+        it('falls back to a safe default when there is no share or message', () => {
+            const { error, solution } = CreateTaskService.renderBuyBoxTaskText({});
             expect(error).toContain('not winning the Buy Box');
             expect(solution).toBeTruthy();
         });
@@ -461,6 +465,45 @@ describe('CreateTasksService.createTasksFromErrors — tasksRebuilt signal', () 
         const result = await CreateTaskService.createTasksFromErrors(errorPayload);
 
         expect(result.tasksRebuilt).toBe(true);
+    });
+});
+
+describe('CreateTasksService.createTasksFromErrors — tasks-logics.xlsx detector tasks', () => {
+    beforeEach(() => {
+        Task.findOne.mockResolvedValue({ taskRenewalDate: new Date(Date.now() + 3 * 864e5), tasks: [], save: jest.fn() });
+        TaskItem.bulkInsertTasks.mockResolvedValue({ insertedCount: 1 });
+        TaskItem.countByStatus.mockResolvedValue({ total: 1, pending: 1, completed: 0, in_progress: 0 });
+    });
+
+    it('stores kpiTasks as given, pending, with a stable id and their own text', async () => {
+        const kpiTask = {
+            asin: 'A1', productName: 'Garlic Press', errorCategory: 'inventory', errorType: 'out_of_stock',
+            error: 'Out of Stock: ...', solution: 'Send new stock ...', amount: 600, amountIsEstimated: true
+        };
+        await CreateTaskService.createTasksFromErrors({ userId: 'user1', country: 'US', region: 'NA', kpiTasks: [kpiTask] });
+        await CreateTaskService.createTasksFromErrors({ userId: 'user1', country: 'US', region: 'NA', kpiTasks: [kpiTask] });
+
+        const [first] = TaskItem.bulkInsertTasks.mock.calls[0][1];
+        const [second] = TaskItem.bulkInsertTasks.mock.calls[1][1];
+        expect(first).toMatchObject({ ...kpiTask, status: 'pending' });
+        expect(first.taskId).toMatch(/^task_[0-9a-f]{24}$/);
+        expect(second.taskId).toBe(first.taskId);
+        // Baked-in text passes through the read-time renderer untouched.
+        expect(CreateTaskService.renderTaskIfNeeded(first).error).toBe('Out of Stock: ...');
+    });
+
+    it('an out-of-stock task replaces that product\'s replenishment tasks, not other products\'', async () => {
+        const replenishment = (asin, sku) => ({
+            asin, Title: asin, replenishmentErrorData: [{ status: 'Error', sku, recommendedReplenishmentQty: 40, available: 0 }]
+        });
+        await CreateTaskService.createTasksFromErrors({
+            userId: 'user1', country: 'US', region: 'NA',
+            inventoryProductWiseErrors: [replenishment('A1', 'S1'), replenishment('A2', 'S2')],
+            kpiTasks: [{ asin: 'A1', productName: 'Garlic Press', errorCategory: 'inventory', errorType: 'out_of_stock', error: 'e', solution: 's' }]
+        });
+
+        const stored = TaskItem.bulkInsertTasks.mock.calls[0][1].map(t => `${t.asin}:${t.errorType}`);
+        expect(stored).toEqual(['A2:replenishment_needed_S2', 'A1:out_of_stock']);
     });
 });
 

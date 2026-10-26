@@ -27,7 +27,7 @@ const { calculateAccountHealthPercentage, checkAccountHealth } = require('./Acco
 const { loadV2History } = require('./AccountHealthHistory.js');
 const IssueSummary = require('../../models/system/IssueSummaryModel.js');
 const PPCCampaignAnalysisService = require('./PPCCampaignAnalysisService.js');
-const { classifyBuyBoxLoss, summarizeBuyBoxCounts, activeAsinSetOf } = require('./RecoverableAmountUtils.js');
+const { classifyBuyBoxLoss, summarizeBuyBoxCounts, activeAsinSetOf, buyBoxJudgedAsinSetOf } = require('./RecoverableAmountUtils.js');
 
 // Only what classifyBuyBoxLoss needs to decide and count — not sales/pageViews
 // for every ASIN on every one of the 7 days.
@@ -49,7 +49,7 @@ const BUYBOX_SUMMARY_PROJECTION = 'date dateRange createdAt totalProducts asinBu
  * @returns {{totalProducts:number, productsWithBuyBox:number, productsWithoutBuyBox:number, productsWithLowBuyBox:number, productsWithUnknownBuyBox:number}}
  */
 function summarizeBuyBoxDays(days, products) {
-    return summarizeBuyBoxCounts(classifyBuyBoxLoss(days), activeAsinSetOf(products));
+    return summarizeBuyBoxCounts(classifyBuyBoxLoss(days), buyBoxJudgedAsinSetOf(products));
 }
 
 /**

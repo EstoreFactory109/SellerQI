@@ -13,46 +13,12 @@ import { amazonMarketplaceCurrencies } from '../../utils/amazonAllowedCountries.
 import Calender, { isClickInsideGaCalDropdown } from '../Calender/Calender.jsx'
 import { useDashboardData } from '../../hooks/usePageData.js'
 import useEsfPageAccess, { clearEsfPageAccessCache } from '../../hooks/useEsfPageAccess.js'
+import MarketplaceLabel from '../Marketplace/MarketplaceLabel.jsx'
+import { PER_PAGE_MARKETPLACE } from '../../utils/featureFlags.js'
 
 const DASHBOARD_ROUTES = ['/seller-central-checker/dashboard', '/seller-central-checker-demo/dashboard']
 
-// Marketplace shown as flag + Amazon domain (e.g. "🇺🇸 Amazon.com") instead of the full country name.
-const marketplaceMeta = {
-    US: { flag: '🇺🇸', domain: 'Amazon.com' },
-    CA: { flag: '🇨🇦', domain: 'Amazon.ca' },
-    MX: { flag: '🇲🇽', domain: 'Amazon.com.mx' },
-    BR: { flag: '🇧🇷', domain: 'Amazon.com.br' },
-    IE: { flag: '🇮🇪', domain: 'Amazon.ie' },
-    UK: { flag: '🇬🇧', domain: 'Amazon.co.uk' },
-    DE: { flag: '🇩🇪', domain: 'Amazon.de' },
-    FR: { flag: '🇫🇷', domain: 'Amazon.fr' },
-    IT: { flag: '🇮🇹', domain: 'Amazon.it' },
-    ES: { flag: '🇪🇸', domain: 'Amazon.es' },
-    NL: { flag: '🇳🇱', domain: 'Amazon.nl' },
-    BE: { flag: '🇧🇪', domain: 'Amazon.com.be' },
-    SE: { flag: '🇸🇪', domain: 'Amazon.se' },
-    PL: { flag: '🇵🇱', domain: 'Amazon.pl' },
-    ZA: { flag: '🇿🇦', domain: 'Amazon.co.za' },
-    TR: { flag: '🇹🇷', domain: 'Amazon.com.tr' },
-    SA: { flag: '🇸🇦', domain: 'Amazon.sa' },
-    AE: { flag: '🇦🇪', domain: 'Amazon.ae' },
-    EG: { flag: '🇪🇬', domain: 'Amazon.eg' },
-    IN: { flag: '🇮🇳', domain: 'Amazon.in' },
-    JP: { flag: '🇯🇵', domain: 'Amazon.co.jp' },
-    SG: { flag: '🇸🇬', domain: 'Amazon.sg' },
-    AU: { flag: '🇦🇺', domain: 'Amazon.com.au' },
-}
-
-const MarketplaceLabel = ({ countryCode, textClassName = '' }) => {
-    const meta = marketplaceMeta[countryCode]
-    if (!meta) return <span className={textClassName}>{countryCode || 'Marketplace'}</span>
-    return (
-        <span className="inline-flex items-center gap-1.5">
-            <span style={{ fontSize: '13px' }}>{meta.flag}</span>
-            <span className={textClassName}>{meta.domain}</span>
-        </span>
-    )
-}
+// Flag + Amazon domain label (e.g. "🇺🇸 Amazon.com"), shared with the per-page switcher.
 
 const TopNav = () => {
     const navigate = useNavigate()
@@ -434,6 +400,9 @@ const TopNav = () => {
                     </div>
                 )}
 
+                {/* The app-wide marketplace pill. With per-page switching on, each page has its own
+                    MarketplaceSwitcher instead (Components/Marketplace), so this is hidden. */}
+                {!PER_PAGE_MARKETPLACE && (
                 <div className='fit-content relative' ref={dropdownRef}>
                     <div
                         className={`group px-3 py-2 rounded-lg outline-none text-[13px] flex justify-center items-center gap-2 border transition-colors duration-200 ${
@@ -537,6 +506,7 @@ const TopNav = () => {
                     </AnimatePresence>
 
                 </div>
+                )}
 
                 {/* Date range - always visible in the navbar, on every page. The underlying
                     startDate/endDate/calendarMode in Redux already drives filtering on

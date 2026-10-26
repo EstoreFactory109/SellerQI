@@ -17,7 +17,8 @@
  *   detected, not stored            -> insert as pending
  *   detected, stored                -> refresh content (amount, text, renderData);
  *                                      status: resolved -> pending (reopened);
- *                                      completed for > COMPLETED_GRACE_DAYS -> pending
+ *                                      completed for longer than the check's cooldown
+ *                                      (TaskCooldowns, tasks-logics.xlsx) -> pending
  *                                      with stillDetected; otherwise unchanged
  *   not detected, stored, open      -> resolved, IF its data source was covered this
  *                                      run and the mass-resolve rail did not trip
@@ -73,7 +74,47 @@ const SOURCE_BY_TYPE = {
     'sponsoredAds:high_acos': 'sponsoredAds.campaigns',
     'sponsoredAds:wasted_spend_keyword': 'sponsoredAds.keywords',
     'sponsoredAds:search_term_zero_sales': 'sponsoredAds.searchTerms',
-    'sponsoredAds:auto_campaign_migration_needed': 'sponsoredAds.autoMigration'
+    'sponsoredAds:auto_campaign_migration_needed': 'sponsoredAds.autoMigration',
+
+    // tasks-logics.xlsx detectors: each has its own input (kpi/index.js KPI_SOURCES).
+    'inventory:listing_suppressed': 'kpi.suppressed',
+    'inventory:out_of_stock': 'kpi.outOfStock',
+    'sponsoredAds:ads_on_unbuyable': 'kpi.adsOnUnbuyable',
+    'profitability:cogs_missing': 'kpi.cogsMissing',
+    'account:ahr_early_warning': 'kpi.ahrEarlyWarning',
+    'inventory:removal_shortfall': 'kpi.removalShortfall',
+    'inventory:removal_confirm_receipt': 'kpi.removalShortfall',
+    'conversion:sales_drop': 'kpi.salesDrop',
+    'conversion:conversion_rate_drop': 'kpi.conversionDrop',
+    'conversion:traffic_drop': 'kpi.trafficDrop',
+    'sponsoredAds:tacos_rising': 'kpi.tacos',
+    'sponsoredAds:top_seller_not_advertised': 'kpi.topSellerAds',
+    'conversion:rating_drop': 'kpi.ratingDrop',
+    'inventory:weeks_of_cover': 'kpi.weeksOfCover',
+    'inventory:listing_warnings': 'kpi.listingWarnings',
+    'account:invoice_defect_rate': 'kpi.invoiceDefect',
+    'inventory:low_inventory_fee_risk': 'kpi.lowInventoryFee',
+    'inventory:fba_fee_increase': 'kpi.fbaFeeIncrease',
+    'inventory:handling_time_long': 'kpi.handlingTime',
+    'inventory:new_seller_on_brand': 'kpi.newSellerOnBrand',
+    'ranking:listing_errors': 'kpi.listingErrors',
+    'inventory:lost_damaged_unreimbursed': 'kpi.lostDamaged',
+    'inventory:return_reason_spike': 'kpi.returnReasons',
+    'ranking:detail_page_changed': 'kpi.detailPageChanged',
+    'inventory:returns_fee_risk': 'kpi.returnsFee',
+    'conversion:priced_above_featured_offer': 'kpi.featuredOfferPrice',
+    'inventory:subscribe_and_save': 'kpi.subscribeSave',
+    'inventory:inbound_placement_fees': 'kpi.placementFees',
+    'sponsoredAds:budget_limited_profitable': 'kpi.budgetLimited',
+    'account:negative_feedback_order': 'kpi.sellerFeedback',
+    'inventory:storage_utilization_risk': 'kpi.storageUtilization',
+    'inventory:inbound_shortage': 'kpi.inboundShortage',
+    'inventory:refund_not_returned': 'kpi.refundNotReturned',
+    'conversion:high_traffic_low_conversion': 'kpi.trafficMix',
+    'conversion:low_traffic_high_conversion': 'kpi.trafficMix',
+    'sponsoredAds:product_acos_above_breakeven': 'kpi.productAcos',
+    'ranking:backend_keywords_title_overlap': 'ranking.backend',
+    'ranking:backend_keywords_underused': 'ranking.backend'
 };
 
 /** @returns {string} the coverage key for a task */
@@ -239,7 +280,9 @@ function planReconcile({ existing = [], desired = [], coverage = {}, priorRailTr
             // the last time anything (in practice, the status change) touched them.
             const completedAt = have.completedAt || have.updatedAt;
             const completedMs = completedAt ? new Date(completedAt).getTime() : NaN;
-            const graceOver = Number.isFinite(completedMs) && nowMs - completedMs > COMPLETED_GRACE_DAYS * DAY_MS;
+            // The spreadsheet's cooldown for this check (TaskCooldowns); 7 days when unlisted.
+            const graceDays = require('./TaskCooldowns.js').cooldownDaysFor(have);
+            const graceOver = Number.isFinite(completedMs) && nowMs - completedMs > graceDays * DAY_MS;
             if (!graceOver && !have.completedAt && completedAt) {
                 // Pin the fallback before this write bumps updatedAt: otherwise every
                 // content refresh would restart the grace period and it never ends.

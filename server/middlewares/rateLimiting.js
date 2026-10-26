@@ -405,6 +405,22 @@ const analyticsRateLimiter = rateLimit({
 });
 
 /**
+ * Activity ping limiter (activity monitoring heartbeats and page opens).
+ * Own key prefix: every other limiter counts against `rate_limit:user:<id>`, and heartbeats
+ * must not eat into a user's dashboard budget. A real browser sends ~2-10 a minute.
+ */
+const activityRateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 40,
+    standardHeaders: false,
+    legacyHeaders: false,
+    keyGenerator: (req) => `rate_limit:activity:${getRateLimitKey(req)}`,
+    store: createRedisStore(60 * 1000),
+    // Pings are fire-and-forget: answer quietly, never with a body the client has to handle.
+    handler: (req, res) => res.status(429).end(),
+});
+
+/**
  * Payment rate limiter
  * For payment-related endpoints
  */
@@ -468,6 +484,7 @@ module.exports = {
     otpRateLimiter,
     integrationRateLimiter,
     analyticsRateLimiter,
+    activityRateLimiter,
     paymentRateLimiter,
     webhookRateLimiter,
     skipWebhookRateLimit

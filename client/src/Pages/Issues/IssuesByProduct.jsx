@@ -10,6 +10,7 @@ import { formatCurrencyWithLocale } from '../../utils/currencyUtils.js';
 import axiosInstance from '../../config/axios.config.js';
 import { fetchProductsWithIssues, fetchIssuesSummary } from '../../redux/slices/PageDataSlice.js';
 import { classifyBuyBoxIssue } from '../../utils/buyBoxIssue.js';
+import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitcher.jsx'
 
 // Helper function to format messages with important details highlighted on separate line
 const formatMessageWithHighlight = (message) => {
@@ -1522,6 +1523,7 @@ const IssuesByProduct = () => {
                                 Product Analysis
                             </div>
                         </div>
+                        <MarketplaceSwitcher />
                     </div>
                 </div>
             </div>

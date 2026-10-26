@@ -1126,11 +1126,11 @@ class ScheduledIntegration {
                  'ledgerSummaryViewData', 'ledgerDetailViewData', 'fbaReimbursementsData',
                  'calculateShipmentDiscrepancy', 'calculateLostInventoryReimbursement', 'calculateDamagedInventoryReimbursement',
                  'calculateDisposedInventoryReimbursement', 'ltsfData',
-                 'suppressedListingsData', 'removalOrdersData'].includes(functionKey)) {
+                 'suppressedListingsData', 'removalOrdersData', 'fbaFeeEstimatesData', 'customerReturnsData'].includes(functionKey)) {
                 return 2;
             }
             // Batch 3: Shipment Data, Brand Data, Ad Groups Data, MCP SalesOnly, MCP BuyBox
-            if (['shipment', 'brandData', 'adGroupsData', 'mcpEconomicsData', 'mcpBuyBoxData'].includes(functionKey)) {
+            if (['shipment', 'brandData', 'adGroupsData', 'mcpEconomicsData', 'mcpBuyBoxData', 'brandOffersData', 'weeklySignalsData'].includes(functionKey)) {
                 return 3;
             }
             // Finance: ISOLATED from batch 3 because syncFinanceData polls Amazon for 10-25 min
@@ -2224,39 +2224,17 @@ class ScheduledIntegration {
      */
     static async handleSuccess(userId, Country, Region) {
         logger.info("handleSuccess starting");
-        
+
         try {
-            const userModel = require('../../models/user-auth/userModel.js');
-            const { sendAnalysisReadyEmail } = require('../Email/SendAnalysisReadyEmail.js');
-            const { markFirstAnalysisDone } = require('../User/userServices.js');
-            
-            const userInfo = await userModel.findById(userId).select("analyseAccountSuccess email firstName");
-
-            if (userInfo && userInfo.analyseAccountSuccess === 1) {
-                if (userInfo.email && userInfo.firstName) {
-                    const dashboardUrl = process.env.DASHBOARD_URL || `${process.env.CLIENT_BASE_URL}/dashboard`;
-                    const emailSent = await sendAnalysisReadyEmail(
-                        userInfo.email,
-                        userInfo.firstName,
-                        dashboardUrl
-                    );
-
-                    if (emailSent) {
-                        userInfo.analyseAccountSuccess = 0;
-                        await userInfo.save();
-                        
-                        // Mark first analysis as done when email is successfully sent
-                        // This flag indicates the analysis is complete and dashboard is ready
-                        await markFirstAnalysisDone(userId);
-                        logger.info(`FirstAnalysisDone marked as true for user ${userId}`);
-                    }
-                }
-            }
-            
+            // Unlock the dashboard, then send the ready email best-effort. See firstAnalysisReady.js
+            // for why the flag no longer waits for the email.
+            const { completeFirstAnalysis } = require('../User/firstAnalysisReady.js');
+            const { marked } = await completeFirstAnalysis(userId);
+            if (marked) logger.info(`FirstAnalysisDone marked as true for user ${userId}`);
             logger.info("handleSuccess ended");
-        } catch (emailError) {
-            logger.error("Error sending analysis ready email", {
-                error: emailError.message,
+        } catch (error) {
+            logger.error("Error completing first analysis", {
+                error: error.message,
                 userId
             });
         }
@@ -2742,7 +2720,7 @@ class ScheduledIntegration {
         inventory: [
             'RestockinventoryData', 'fbaInventoryPlanningData',
             'strandedInventoryData', 'inboundNonComplianceData', 'ltsfData',
-            'suppressedListingsData', 'removalOrdersData'
+            'suppressedListingsData', 'removalOrdersData', 'fbaFeeEstimatesData', 'customerReturnsData'
         ],
         // Performance slice (batch 1/2 — V2/V1 perf + reviews + ledger/reimbursement reads)
         performance: [
@@ -2752,7 +2730,7 @@ class ScheduledIntegration {
             'calculateDamagedInventoryReimbursement', 'calculateDisposedInventoryReimbursement'
         ],
         // MCP slice (batch 3 — shipment + brand + adGroups + MCP SalesOnly + BuyBox)
-        mcp: ['shipment', 'brandData', 'adGroupsData', 'mcpEconomicsData', 'mcpBuyBoxData'],
+        mcp: ['shipment', 'brandData', 'adGroupsData', 'mcpEconomicsData', 'mcpBuyBoxData', 'brandOffersData', 'weeklySignalsData'],
         // Finance slice (isolated finance phase)
         finance: ['financeSync'],
         // Keywords slice (batch 4)
@@ -2898,6 +2876,7 @@ class ScheduledIntegration {
             require('../Sp_API/GET_LEDGER_DETAIL_VIEW_DATA.js').spApiAsync,
             require('../Sp_API/GET_MERCHANTS_LISTINGS_FYP_REPORT.js').spApiAsync,
             require('../Sp_API/GET_FBA_FULFILLMENT_REMOVAL_ORDER_DETAIL_DATA.js').spApiAsync,
+            require('../Sp_API/GetProductWiseFBAData.js').spApiAsync,
         ];
         const services = convertible.filter(s => shouldRunFunction(s.serviceName, dow));
         const excludeKeys = services.map(s => s.serviceName);
@@ -3069,6 +3048,9 @@ class ScheduledIntegration {
             require('../AmazonAds/GetPPCProductWise.js').adsAsync,
             require('../AmazonAds/GetWastedSpendKeywords.js').adsAsync,
             require('../AmazonAds/GetDateWiseSpendKeywords.js').adsAsync,
+            // Weekly (skips itself while this week's snapshot exists): product and auto
+            // targets with bids, so ACoS tasks can propose target bid cuts too.
+            require('../AmazonAds/AdsTargets.js').adsAsync,
         ];
         return this._runAsyncAdsPhase({ userId, Region, Country, phaseData, group: 'sched_ads', services, sliceKeys: [SLICE_KEYS.ADS] });
     }

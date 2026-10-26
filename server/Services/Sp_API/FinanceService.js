@@ -1536,6 +1536,8 @@ function createFinanceIndex({ orderIdFilter = null } = {}) {
     // Non-null only for the Step 2 use above; `null` means "retain everything".
     _orderIdFilter: orderIdFilter,
     // Observability: how many rows were discarded by the filter.
+    // Refunded principal per order (RefundOrder): the rows are aggregated away below.
+    refundRows: [],
     filteredOutCount: 0,
     // ── Expenses that should be placed on PURCHASE DATE (via orderId join) ──
     expensesByOrderSku: new Map(),        // "orderId||sku" → expense[]
@@ -1641,6 +1643,10 @@ function addFinanceRowsToIndex(index, expenseRows = [], revenueRows = []) {
 
   for (const r of revenueRows) {
     if (!keep(r)) { index.filteredOutCount++; continue; }
+    // Kept for "refund given, item not returned" before the order id is aggregated away.
+    if (r.transactionType === 'Refund' && r.category === 'Product Sales' && r.orderId && index.refundRows) {
+      index.refundRows.push({ orderId: r.orderId, sku: r.sku && r.sku !== 'N/A' ? r.sku : '', asin: r.asin || '', units: Number(r.quantity) || 0, amount: Number(r.amount) || 0, postedDate: r.postedDate || null });
+    }
     // Skip Product Sales from Shipment — those come from the Sales Report.
     // But KEEP Product Sales from Refund — that's the refunded amount (negative).
     if (r.category === 'Product Sales' && PURCHASE_DATE_TXN_TYPES.has(r.transactionType)) continue;
@@ -1684,6 +1690,44 @@ function addFinanceRowsToIndex(index, expenseRows = [], revenueRows = []) {
   }
 
   return index;
+}
+
+/**
+ * Store refunds per order and SKU (RefundOrder). Rows for the same order and SKU are
+ * summed; a refund already stored keeps its earliest date. Never fails the sync.
+ */
+async function saveRefundOrders(userId, country, region, refundRows = []) {
+  if (!Array.isArray(refundRows) || refundRows.length === 0) return 0;
+  try {
+    const byKey = new Map();
+    for (const r of refundRows) {
+      const date = r.postedDate ? new Date(r.postedDate) : null;
+      if (!date || Number.isNaN(date.getTime())) continue;
+      const key = `${r.orderId}||${r.sku}`;
+      const cur = byKey.get(key) || { orderId: r.orderId, sku: r.sku, asin: r.asin, amount: 0, units: 0, refundDate: date };
+      cur.amount += Math.abs(r.amount);
+      cur.units = Math.max(cur.units, r.units);
+      if (!cur.asin && r.asin) cur.asin = r.asin;
+      if (date < cur.refundDate) cur.refundDate = date;
+      byKey.set(key, cur);
+    }
+    const RefundOrder = require('../../models/finance/RefundOrderModel.js');
+    const ops = [...byKey.values()].map(r => ({
+      updateOne: {
+        filter: { User: userId, country, region, orderId: r.orderId, sku: r.sku },
+        update: {
+          $set: { asin: r.asin, amount: Math.round(r.amount * 100) / 100, units: r.units },
+          $min: { refundDate: r.refundDate }
+        },
+        upsert: true
+      }
+    }));
+    if (ops.length) await RefundOrder.bulkWrite(ops, { ordered: false });
+    return ops.length;
+  } catch (error) {
+    logger.warn(`[RefundOrders] could not store refunds: ${error.message}`, { userId: String(userId), country, region });
+    return 0;
+  }
 }
 
 /** Log the dedup tallies once, after all pages have been folded. */
@@ -2067,6 +2111,7 @@ async function processSalesReportRows({ userId, country, regionModel, startDate,
     throw tagHop(err, HOP_NAMES.FINANCE_WALK);
   });
   logFinanceIndexDedup(financeIndex);
+  await saveRefundOrders(userId, country, regionModel, financeIndex.refundRows);
 
   logger.info(
     `[Step1] Finance API done: ${expenseRowCount} expense / ${revenueRowCount} revenue rows over ` +
@@ -3370,6 +3415,7 @@ const financeSalesReportAsync = {
 };
 
 module.exports = {
+  saveRefundOrders,
   syncFinanceData,
   fetchNewSalesAndExpenses,
   // The Sales Report type createReport actually requests. Exported so anything that needs to

@@ -219,12 +219,18 @@ describe('AccountHealth', () => {
         expect(result.a_z_claims.Message).toContain('A-to-Z Guarantee Claim');
       });
 
-      it('should detect response time issues', () => {
-        const v1Data = { ...healthyV1Data, responseUnder24HoursCount: 3 };
+      it('should detect buyer messages left unanswered past 24 hours', () => {
+        const v1Data = { ...healthyV1Data, noResponseOver24HoursCount: 3 };
         const result = checkAccountHealth(healthyV2Data, v1Data);
 
         expect(result.responseUnder24HoursCount.status).toBe('Error');
-        expect(result.responseUnder24HoursCount.Message).toContain('24 hours');
+        expect(result.responseUnder24HoursCount.Message).toBe('3 buyer messages have waited more than 24 hours for a reply. Delayed responses can negatively impact your seller metrics, customer satisfaction, and account health.');
+      });
+
+      // responseUnder24Hours counts replies made IN time; it used to raise this task.
+      it('does not flag replies made in time, nor a report without the unanswered count', () => {
+        expect(checkAccountHealth(healthyV2Data, { ...healthyV1Data, responseUnder24HoursCount: 12 }).responseUnder24HoursCount).toEqual({});
+        expect(checkAccountHealth(healthyV2Data, { ...healthyV1Data, noResponseOver24HoursCount: null }).responseUnder24HoursCount).toEqual({});
       });
     });
 
@@ -268,7 +274,7 @@ describe('AccountHealth', () => {
           preFulfillmentCancellationCount: { count: 1 },
           refundsCount: { count: 1 },
           a_z_claims: { count: 1 },
-          responseUnder24HoursCount: 3,
+          noResponseOver24HoursCount: 3,
         };
 
         const result = checkAccountHealth(v2Data, v1Data);

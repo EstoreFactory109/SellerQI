@@ -163,66 +163,20 @@ async function _processV1Document(accessToken, reportDocumentId, baseuri, userId
     const xmlData = fullReport.data;
     const jsonData = await convertXMLToJson(xmlData);
 
-    let negativeFeedbacks=null;
-    let lateShipmentCount=null
-    let preFulfillmentCancellationCount=null
-    let refundsCount=null
-    let a_z_claims=null
-
-    const sortedorderDefectMetricsMetrics= jsonData.sellerPerformanceReports.sellerPerformanceReport.orderDefects.orderDefectMetrics.sort((a, b) => new Date(a.timeFrame.end) - new Date(b.timeFrame.end));
-
-    const negetiveFeedbackData={
-        startDate:sortedorderDefectMetricsMetrics[0].timeFrame.start,
-        endDate:sortedorderDefectMetricsMetrics[0].timeFrame.end,
-        count:sortedorderDefectMetricsMetrics[0].negativeFeedbacks.count
-    }
-    negativeFeedbacks=negetiveFeedbackData
-
-    const a_z_claims_data={
-        startDate:sortedorderDefectMetricsMetrics[0].timeFrame.start,
-        endDate:sortedorderDefectMetricsMetrics[0].timeFrame.end,
-        count:sortedorderDefectMetricsMetrics[0].a_z_claims.count
-    }
-    a_z_claims=a_z_claims_data
-
-
-    const sortedcustomerExperienceMetrics= jsonData.sellerPerformanceReports.sellerPerformanceReport.customerExperience.customerExperienceMetrics.sort((a, b) => new Date(a.timeFrame.end) - new Date(b.timeFrame.end));
-
-    const lateShipmentCount_data={
-        startDate:sortedcustomerExperienceMetrics[0].timeFrame.start,
-        endDate:sortedcustomerExperienceMetrics[0].timeFrame.end,
-        count:sortedcustomerExperienceMetrics[0].lateShipment.count
-    }
-    lateShipmentCount=lateShipmentCount_data
-
-    const preFulfillmentCancellationCount_data={
-        startDate:sortedcustomerExperienceMetrics[0].timeFrame.start,
-        endDate:sortedcustomerExperienceMetrics[0].timeFrame.end,
-        count:sortedcustomerExperienceMetrics[0].preFulfillmentCancellation.count
-    }
-    preFulfillmentCancellationCount=preFulfillmentCancellationCount_data
-
-    const refundsCount_data={
-        startDate:sortedcustomerExperienceMetrics[0].timeFrame.start,
-        endDate:sortedcustomerExperienceMetrics[0].timeFrame.end,
-        count:sortedcustomerExperienceMetrics[0].refunds.count
-    }
-    refundsCount=refundsCount_data
-
-    let responseUnder24HoursCount=jsonData.sellerPerformanceReports.sellerPerformanceReport.buyerSellerContactResponseTimeMetrics.responseTimeMetrics.responseUnder24Hours;
-
     const User=userId
+    const metrics = extractV1Metrics(jsonData);
+    const previous = await GET_V1_SELLER_PERFORMANCE_REPORT.findOne({ User, country, region })
+        .sort({ createdAt: -1 })
+        .select('negativeFeedbacks negativeFeedbacksRoseAt')
+        .lean()
+        .catch(() => null);
 
     const createReportData=await GET_V1_SELLER_PERFORMANCE_REPORT.create({
         User,
         region,
         country,
-        negativeFeedbacks,
-        lateShipmentCount,
-        preFulfillmentCancellationCount,
-        refundsCount,
-        a_z_claims,
-        responseUnder24HoursCount
+        ...metrics,
+        ...feedbackRise(previous, metrics, new Date())
     })
 
     if(!createReportData){
@@ -234,6 +188,103 @@ async function _processV1Document(accessToken, reportDocumentId, baseuri, userId
     logger.info("Data saved successfully");
     logger.info("V1_Seller_Performance_Report ended");
     return createReportData;
+}
+
+/**
+ * The counts we keep, from the parsed V1 XML. Exported for tests.
+ *
+ * WHICH WINDOW
+ * The metric lists hold several entries. This used to sort them by window end,
+ * oldest first, and take [0] — the OLDEST window: reports fetched on 20-24 Oct
+ * 2026 all stored windows ending 23-24 Sep. Now the entries ending latest are
+ * used. If several share that end (one per fulfilment channel, say), their
+ * counts are added, which is right whichever way Amazon splits the list.
+ *
+ * xml2js runs with explicitArray:false, so a list of one arrives as a bare
+ * object; both shapes are accepted.
+ *
+ * RESPONSE TIME
+ * `responseUnder24Hours` counts replies made in time; it is still stored but no
+ * longer judged (on 24 Oct 2026 it was 0 on all 81 live marketplaces).
+ * `noResponseForContactsOlderThan24Hours` — the field the spec names — is the
+ * count of buyer messages left unanswered past 24 hours. It is read from
+ * wherever it sits (Amazon's docs list it under buyerSellerContactResponseTimeMetrics;
+ * the old code found responseUnder24Hours one level deeper) and stored as null
+ * when the report does not carry it, so no task is ever raised on a guess.
+ */
+const asList = (x) => (Array.isArray(x) ? x : (x ? [x] : []));
+const countOf = (node) => {
+    const raw = node && typeof node === 'object' ? (node.count ?? node._) : node;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+};
+
+function latestWindow(entries, fields) {
+    const list = asList(entries).filter(e => e && e.timeFrame && e.timeFrame.end);
+    if (list.length === 0) return Object.fromEntries(fields.map(f => [f, null]));
+    const newestEnd = list.reduce((max, e) => (new Date(e.timeFrame.end) > new Date(max) ? e.timeFrame.end : max), list[0].timeFrame.end);
+    const newest = list.filter(e => new Date(e.timeFrame.end).getTime() === new Date(newestEnd).getTime());
+    const out = {};
+    for (const field of fields) {
+        const counts = newest.map(e => countOf(e[field])).filter(c => c !== null);
+        out[field] = {
+            startDate: newest[0].timeFrame.start,
+            endDate: newest[0].timeFrame.end,
+            count: counts.length ? String(counts.reduce((a, b) => a + b, 0)) : ''
+        };
+    }
+    return out;
+}
+
+/**
+ * Carries "when did negative feedback last go up" from the previous report.
+ * @returns {{negativeFeedbacksRoseAt: Date|null, negativeFeedbacksCompared: boolean}}
+ */
+function feedbackRise(previous, metrics, now) {
+    const count = (doc) => {
+        const raw = doc?.negativeFeedbacks?.count;
+        if (raw === '' || raw === null || raw === undefined) return null;
+        const n = Number(raw);
+        return Number.isFinite(n) ? n : null;
+    };
+    const before = count(previous);
+    const after = count(metrics);
+    if (before === null || after === null) {
+        return { negativeFeedbacksRoseAt: previous?.negativeFeedbacksRoseAt || null, negativeFeedbacksCompared: false };
+    }
+    return {
+        negativeFeedbacksRoseAt: after > before ? now : (previous.negativeFeedbacksRoseAt || null),
+        negativeFeedbacksCompared: true
+    };
+}
+
+function extractV1Metrics(jsonData) {
+    const report = jsonData.sellerPerformanceReports.sellerPerformanceReport;
+    const defects = latestWindow(report.orderDefects.orderDefectMetrics, ['negativeFeedbacks', 'a_z_claims']);
+    const cx = latestWindow(report.customerExperience.customerExperienceMetrics, ['lateShipment', 'preFulfillmentCancellation', 'refunds']);
+
+    const contact = report.buyerSellerContactResponseTimeMetrics || {};
+    const timing = asList(contact.responseTimeMetrics)[0] || {};
+    const firstNumber = (...values) => {
+        for (const v of values) {
+            const n = countOf(v);
+            if (n !== null) return n;
+        }
+        return null;
+    };
+
+    return {
+        negativeFeedbacks: defects.negativeFeedbacks,
+        a_z_claims: defects.a_z_claims,
+        lateShipmentCount: cx.lateShipment,
+        preFulfillmentCancellationCount: cx.preFulfillmentCancellation,
+        refundsCount: cx.refunds,
+        responseUnder24HoursCount: timing.responseUnder24Hours ?? contact.responseUnder24Hours,
+        noResponseOver24HoursCount: firstNumber(
+            contact.noResponseForContactsOlderThan24Hours,
+            timing.noResponseForContactsOlderThan24Hours
+        )
+    };
 }
 
 async function convertXMLToJson(xmlData) {
@@ -268,3 +319,5 @@ getReport.spApiAsync = {
 };
 
 module.exports = getReport;
+module.exports.extractV1Metrics = extractV1Metrics;
+module.exports.feedbackRise = feedbackRise;

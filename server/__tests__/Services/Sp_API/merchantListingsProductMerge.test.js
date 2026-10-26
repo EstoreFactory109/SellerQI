@@ -106,6 +106,33 @@ describe('carryForwardProductFields — the fields that were being wiped', () =>
     });
 });
 
+describe('carryForwardProductFields — weekly listing-sync fields', () => {
+    // Written on Sunday by the active-SKU listing sync; Monday's rebuild used to wipe them,
+    // so listing warnings and handling time lived for one day a week.
+    test('carries listingIssues, fulfilment channel and handling time across the rebuild', () => {
+        const prev = stored({
+            listingIssues: [{ code: '18027', message: 'Add a color', severity: 'WARNING' }],
+            fulfillmentChannel: 'DEFAULT',
+            handlingTimeDays: 5
+        });
+        const [row] = carryForwardProductFields([prev], [incoming()]);
+        expect(row.listingIssues).toEqual(prev.listingIssues);
+        expect(row.fulfillmentChannel).toBe('DEFAULT');
+        expect(row.handlingTimeDays).toBe(5);
+    });
+
+    test('an empty issue list is carried too, so a fixed listing stays clear', () => {
+        const [row] = carryForwardProductFields([stored({ listingIssues: [] })], [incoming()]);
+        expect(row.listingIssues).toEqual([]);
+    });
+
+    test('nothing is invented for a SKU the weekly sync has not reached', () => {
+        const [row] = carryForwardProductFields([stored()], [incoming()]);
+        expect(row).not.toHaveProperty('listingIssues');
+        expect(row).not.toHaveProperty('handlingTimeDays');
+    });
+});
+
 describe('carryForwardProductFields — the `issues` status gate', () => {
     // THE regression test. Without the gate this passes stale strings through forever.
     test('a product fixed to Active LOSES its stale issues', () => {

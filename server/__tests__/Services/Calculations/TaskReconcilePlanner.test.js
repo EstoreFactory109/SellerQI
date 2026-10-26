@@ -189,7 +189,8 @@ describe('TaskReconcilePlanner', () => {
 
         it('reopens a completed task still detected after the grace period, flagged stillDetected', () => {
             const { ops, summary } = plan({
-                existing: [storedTask({ status: 'completed', completedAt: daysAgo(8) })],
+                // Loss-making's cooldown is 30 days (tasks-logics.xlsx).
+                existing: [storedTask({ status: 'completed', completedAt: daysAgo(31) })],
                 desired: [desiredTask()]
             });
             const { update } = updates(ops)[0].updateOne;
@@ -197,6 +198,21 @@ describe('TaskReconcilePlanner', () => {
             expect(update.$unset.completedAt).toBe('');
             expect(update.$inc).toEqual({ reopenCount: 1 });
             expect(summary.stillDetected).toBe(1);
+        });
+
+        it('waits each check\'s own cooldown before raising a done task again', () => {
+            const reopened = (over, days) => {
+                const { ops } = plan({
+                    existing: [storedTask({ ...over, status: 'completed', completedAt: daysAgo(days) })],
+                    desired: [desiredTask(over)]
+                });
+                return updates(ops)[0]?.updateOne.update.$set.status === 'pending';
+            };
+            // Loss-making: 30 days. Listing suppressed: 3. Account status: until resolved (1).
+            expect(reopened({}, 8)).toBe(false);
+            expect(reopened({ errorCategory: 'inventory', errorType: 'listing_suppressed' }, 4)).toBe(true);
+            expect(reopened({ errorCategory: 'account', errorType: 'accountStatus', asin: 'ACCOUNT' }, 2)).toBe(true);
+            expect(reopened({ errorCategory: 'conversion', errorType: 'missing_video' }, 60)).toBe(false);
         });
 
         it('falls back to updatedAt for a completed row with no completedAt', () => {
@@ -211,7 +227,7 @@ describe('TaskReconcilePlanner', () => {
             expect(update.$set.completedAt).toEqual(daysAgo(2));
 
             const old = plan({
-                existing: [storedTask({ status: 'completed', completedAt: undefined, updatedAt: daysAgo(9) })],
+                existing: [storedTask({ status: 'completed', completedAt: undefined, updatedAt: daysAgo(31) })],
                 desired: [desiredTask()]
             });
             expect(updates(old.ops)[0].updateOne.update.$set.status).toBe('pending');

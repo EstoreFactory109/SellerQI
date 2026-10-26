@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState, useRef, useCallback } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import axios from 'axios';
 import { COLORS } from '../../Components/Shared/index.js';
+import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitcher.jsx'
 
 const REVIEW_STATUS_CONFIG = {
   not_requested: { label: 'Not requested', bg: 'rgba(165,174,192,.14)', color: COLORS.textSecondary },
@@ -287,6 +288,7 @@ const RecentOrders = () => {
             <p style={{ margin: 0, color: COLORS.textSecondary, fontSize: '14px', maxWidth: '76ch' }}>
               Amazon lets you ask for a review between 5 and 30 days after delivery — once per order. Outside that window the button disappears.
             </p>
+            <MarketplaceSwitcher className="mt-3 inline-block" />
           </div>
           <div style={{ flex: 'none', border: `1px solid ${COLORS.border}`, borderRadius: '12px', background: COLORS.surface, padding: '14px 16px', minWidth: '300px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '7px' }}>

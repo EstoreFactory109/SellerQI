@@ -85,7 +85,13 @@ const findProhibitedClaims = (str) => matchTerms(str, PROHIBITED_CLAIMS);
 // These apply to every product type except media, in every store except Saudi
 // Arabia, Egypt, Türkiye, and the United Arab Emirates.
 
-const TITLE_MAX_LENGTH = 75;
+// Amazon's title requirements effective 21 Jan 2025: at most 200 characters, spaces
+// included, for most categories (some categories set a lower cap; the category is
+// not stored here, so 200 is the bar). The code used 75, which flagged most titles.
+const TITLE_MAX_LENGTH = 200;
+// tasks-logics.xlsx: a title under 80 characters is a low-priority task - it is
+// likely leaving searchable words out. Internal.
+const TITLE_MIN_RECOMMENDED_LENGTH = 80;
 
 // Never permitted in a title, in any context.
 const TITLE_PROHIBITED_CHARACTERS = ['!', '$', '?', '_', '{', '}', '^', '¬', '¦'];
@@ -195,31 +201,44 @@ const findTitleCapitalizationIssue = (str) => {
 };
 
 
-const checkTitle = (str) => {
+// `strict` (for checking AI-written suggestions) keeps our word list as an error, so a
+// generated title is never offered with wording we would ourselves flag for review.
+const checkTitle = (str, { brand = '', strict = false } = {}) => {
     let result = {};
     let errorCount = 0;
 
     const title = typeof str === 'string' ? str : '';
 
-    // 1. Character limit - titles must not exceed 75 characters, spaces included.
+    // 1. Character limit - at most 200 characters (Amazon), and under 80 is too
+    //    short to carry the search terms (tasks-logics.xlsx, low priority).
     if (!title.trim()) {
         errorCount++;
         result.charLim = {
             status: "Error",
             Message: "Your product title is missing. Amazon requires a title that clearly and concisely describes the product.",
-            HowTOSolve: "Add a title containing the minimum information needed to identify the product, such as brand plus product type (for example, \"Sony Headphones\"), and keep it within 75 characters."
+            HowTOSolve: "Add a title containing the minimum information needed to identify the product, such as brand plus product type (for example, \"Sony Headphones\"), and keep it within 200 characters."
         }
     } else if (title.length > TITLE_MAX_LENGTH) {
         errorCount++;
         result.charLim = {
             status: "Error",
-            Message: `Your product title is ${title.length} characters, which exceeds Amazon's 75-character limit. Titles over the limit can be automatically corrected or kept out of search results, and they are truncated on mobile screens.`,
-            HowTOSolve: "Trim the title to 75 characters or fewer, ordering the words brand, flavor or style, product type, key attribute, color, size or pack count, model number. Move the remaining detail (materials, use cases) into Item highlights, which gives you another 125 characters shown below the title."
+            Message: `Your product title is ${title.length} characters, which exceeds Amazon's ${TITLE_MAX_LENGTH}-character limit. Titles over the limit can be automatically corrected or kept out of search results.`,
+            HowTOSolve: `Shorten the title to ${TITLE_MAX_LENGTH} characters or fewer, ordering the words brand, flavor or style, product type, key attribute, color, size or pack count, model number. Move the remaining detail (materials, use cases) into the bullet points.`
+        }
+    } else if (title.length < TITLE_MIN_RECOMMENDED_LENGTH) {
+        errorCount++;
+        result.charLim = {
+            status: "Error",
+            // Low priority (spreadsheet P4): its own task type, so it never ranks
+            // with an over-limit title. Pages keep reading charLim as before.
+            kind: 'short',
+            Message: `Your product title is only ${title.length} characters. Titles under ${TITLE_MIN_RECOMMENDED_LENGTH} characters usually leave out words shoppers search for, such as size, material, quantity or key use.`,
+            HowTOSolve: `Add the details a shopper would search for - key attribute, size or pack count, material, color, main use - while staying within Amazon's ${TITLE_MAX_LENGTH}-character limit and not repeating any word more than twice.`
         }
     } else {
         result.charLim = {
             status: "Success",
-            Message: `Great job! Your product title is ${title.length} characters, within Amazon's 75-character limit.`,
+            Message: `Great job! Your product title is ${title.length} characters, within Amazon's ${TITLE_MAX_LENGTH}-character limit.`,
             HowTOSolve: ""
         }
     }
@@ -231,11 +250,14 @@ const checkTitle = (str) => {
         ...matchPhrases(title, TITLE_RESTRICTED_PHRASES)
     ])];
 
+    // A hit on our own word list is a review flag, not a task (tasks-logics.xlsx:
+    // "Claims list hit alone = review flag"). What Amazon itself flags arrives as a
+    // listing issue with severity ERROR and becomes the task instead.
     if (RestictedWords.length>0) {
-        errorCount++;
+        if (strict) errorCount++;
         result.RestictedWords = {
-            status: "Error",
-            Message: `Your product title contains restricted, promotional, or subjective wording that Amazon does not allow in titles. This covers promotional phrases such as "free shipping" or "100% quality guaranteed", subjective commentary such as "Hot Item" or "Best Seller", and restricted phrases such as "FSA/HSA eligible". The words used are: ${RestictedWords.join(', ')}`,
+            status: strict ? "Error" : "Warning",
+            Message: `Please review: your product title contains wording Amazon may not allow in titles. This covers promotional phrases such as "free shipping" or "100% quality guaranteed", subjective commentary such as "Hot Item" or "Best Seller", and restricted phrases such as "FSA/HSA eligible". The words used are: ${RestictedWords.join(', ')}`,
             HowTOSolve: "Remove these words and describe the product factually instead. Keep claims, offers, and eligibility statements out of the title - Amazon can suppress or automatically correct titles that contain them."
         }
     } else {
@@ -246,10 +268,24 @@ const checkTitle = (str) => {
         }
     }
 
-    // 3. Special characters - prohibited outright, decorative, or contextual misuse.
-    const { prohibited, decorative, decorativeContextual } = findTitleCharacterIssues(title);
+    // 3. Special characters. A character that is part of the brand name is allowed
+    //    (tasks-logics.xlsx), so the brand is taken out before checking. ~ # < > *
+    //    used decoratively are a review flag only, not a task.
+    const brandText = typeof brand === 'string' ? brand.trim() : '';
+    const titleWithoutBrand = brandText
+        ? title.replace(new RegExp(escapeForRegex(brandText), 'gi'), ' ')
+        : title;
+    const { prohibited, decorative, decorativeContextual } = findTitleCharacterIssues(titleWithoutBrand);
 
-    if (prohibited.length > 0 || decorative.length > 0 || decorativeContextual.length > 0) {
+    if (decorativeContextual.length > 0) {
+        result.contextualCharacters = {
+            status: "Warning",
+            Message: `Please review: ${decorativeContextual.join(', ')} in your title look decorative. Amazon allows them only as identifiers ("Style #4301") or measurements ("<10 lb").`,
+            HowTOSolve: "Keep these symbols only where they are part of a model number or measurement."
+        }
+    }
+
+    if (prohibited.length > 0 || decorative.length > 0) {
         errorCount++;
         const details = [];
         if (prohibited.length > 0) {
@@ -257,9 +293,6 @@ const checkTitle = (str) => {
         }
         if (decorative.length > 0) {
             details.push(`non-language or decorative symbols: ${decorative.join(', ')}`);
-        }
-        if (decorativeContextual.length > 0) {
-            details.push(`symbols used decoratively rather than as an identifier or measurement: ${decorativeContextual.join(', ')}`);
         }
         result.checkSpecialCharacters = {
             status: "Error",
@@ -320,7 +353,7 @@ const checkTitle = (str) => {
     if (spelledOutNumbers.length > 0) {
         result.spelledOutNumbers = {
             status: "Warning",
-            Message: `Your product title spells out numbers instead of using numerals: ${spelledOutNumbers.join(', ')}. Numerals are quicker for customers to scan and use fewer of the 75 available characters.`,
+            Message: `Your product title spells out numbers instead of using numerals: ${spelledOutNumbers.join(', ')}. Numerals are quicker for customers to scan and use fewer of the 200 available characters.`,
             HowTOSolve: "Replace spelled-out numbers with numerals and abbreviate measurements - \"2-Pack Cotton Towels, 24 x 48 inches\" rather than \"Two-Pack Cotton Towels, Twenty-Four x Forty-Eight inches\". Measurement abbreviations such as cm, oz, in, and kg are allowed."
         }
     } else {
@@ -348,7 +381,9 @@ const notCheckedOutsideTitle = (where) => ({
 // The scrape stores [] both when a listing has no bullet points and when it could
 // not read them, so an empty array is NO DATA, not a failure: it produces no error
 // and no task. (A non-array is treated the same way.)
-const checkBulletPoints = (arr) => {
+const MIN_BULLET_POINTS = 5;
+
+const checkBulletPoints = (arr, { strict = false } = {}) => {
     let result = {};
     const bullets = Array.isArray(arr) ? arr.filter((str) => typeof str === 'string') : [];
 
@@ -363,11 +398,17 @@ const checkBulletPoints = (arr) => {
         findProhibitedClaims(str).forEach((word) => claims.add(word));
     });
 
-    if(charLimErrCount>0){
+    // tasks-logics.xlsx: fewer than 5 bullets, or any bullet under 150 characters.
+    // An empty list stays "no data" (see the note above checkBulletPoints).
+    const tooFew = bullets.length > 0 && bullets.length < MIN_BULLET_POINTS;
+    if(charLimErrCount>0 || tooFew){
+        const parts = [];
+        if (tooFew) parts.push(`Your listing has ${bullets.length} bullet point${bullets.length === 1 ? '' : 's'}; Amazon gives you ${MIN_BULLET_POINTS}.`);
+        if (charLimErrCount > 0) parts.push(`${charLimErrCount} of your bullet points ${charLimErrCount === 1 ? 'is' : 'are'} under 150 characters.`);
         result.charLim={
             status:"Error",
-            Message:"Your bullet points are under 150 characters. Short bullet points may not provide enough detail to effectively communicate the features and benefits of your products, potentially affecting customer interest and conversion rates.",
-            HowTOSolve:"Enhance your bullet points to be at least 150 characters long, focusing on key features, benefits, and differentiators of your product. Use this space to clearly articulate why customers should choose your product, including any unique selling propositions.."
+            Message:`${parts.join(' ')} Short or missing bullet points may not give shoppers enough detail to decide.`,
+            HowTOSolve:"Use all five bullet points, each at least 150 characters: lead with the key feature, then the benefit, then any detail (size, material, compatibility) that helps a shopper decide."
         }
     }else{
         result.charLim={
@@ -376,10 +417,11 @@ const checkBulletPoints = (arr) => {
             HowTOSolve:""
         }
     }
+    // Review flag only (tasks-logics.xlsx); Amazon's own ERROR flags are the task.
     if(claims.size>0){
         result.RestictedWords={
-            status:"Error",
-            Message:`Your bullet points contain medical, drug, or pesticide claims that Amazon prohibits on product detail pages. Such claims can get your listing suppressed or removed. The words used are: ${[...claims].join(', ')}`,
+            status: strict ? "Error" : "Warning",
+            Message:`Please review: your bullet points contain wording that reads as a medical, drug, or pesticide claim, which Amazon prohibits on product detail pages. Such claims can get your listing suppressed or removed. The words used are: ${[...claims].join(', ')}`,
             HowTOSolve:"Remove these claims from your bullet points. Describe what the product is and does without claiming it cures, treats, or prevents a disease, kills germs or pests, or contains a restricted substance - unless the product is registered for that claim and Amazon has approved it."
         }
     }else{
@@ -407,7 +449,7 @@ const checkBulletPoints = (arr) => {
 // error count added up across all of them - so the header could say 4 errors for
 // a description with one visible failing check. Each check now runs once over the
 // whole description and counts once.
-const checkDescription = (arr) => {
+const checkDescription = (arr, { strict = false } = {}) => {
     let result = {};
     const paragraphs = Array.isArray(arr)
         ? arr.filter((str) => typeof str === 'string' && str.trim())
@@ -434,10 +476,11 @@ const checkDescription = (arr) => {
     }
 
     const claims = [...new Set(paragraphs.flatMap((str) => findProhibitedClaims(str)))];
+    // Review flag only (tasks-logics.xlsx); Amazon's own ERROR flags are the task.
     if (claims.length > 0) {
         result.RestictedWords = {
-            status: "Error",
-            Message: `Your product description contains medical, drug, or pesticide claims that Amazon prohibits on product detail pages. The words used are: ${claims.join(', ')}`,
+            status: strict ? "Error" : "Warning",
+            Message: `Please review: your product description contains wording that reads as a medical, drug, or pesticide claim, which Amazon prohibits on product detail pages. The words used are: ${claims.join(', ')}`,
             HowTOSolve: "Remove these claims from the description. Describe the product factually without claiming it cures, treats, or prevents a disease, kills germs or pests, or contains a restricted substance."
         }
     } else {
@@ -479,7 +522,19 @@ const findDuplicateWords = (str) => {
     return [...duplicates];
 }
 
-const BackendKeyWordOrAttributesStatus = (str) => {
+// tasks-logics.xlsx: using under 150 of the 250 bytes is a low-priority task.
+const BACKEND_KEYWORDS_MIN_BYTES = 150;
+
+/** Backend words (3+ letters, not stop-words) that the title already contains. */
+const findWordsInTitle = (str, title) => {
+    if (typeof str !== 'string' || typeof title !== 'string' || !title) return [];
+    const words = (s) => (s.toLowerCase().match(/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu) || [])
+        .filter((w) => w.length >= 3 && !BACKEND_KEYWORD_STOP_WORDS.has(w));
+    const inTitle = new Set(words(title));
+    return [...new Set(words(str).filter((w) => inTitle.has(w)))];
+}
+
+const BackendKeyWordOrAttributesStatus = (str, { title = '' } = {}) => {
     let result = {};
     let errorCount = 0;
 
@@ -506,12 +561,13 @@ const BackendKeyWordOrAttributesStatus = (str) => {
             Message: `Your backend keywords exceed Amazon's 250-byte limit (currently ${byteLength} bytes). Amazon will ignore keywords beyond this limit.`,
             HowTOSolve: "Reduce your keywords to 249 bytes or less. Remove unnecessary words, avoid repetition, and prioritize high-value search terms."
         }
-    } else if (byteLength < 200) {
-        // A warning, not an error: it is not counted in NumberOfErrors and never
-        // becomes a task (tasks are raised on "Error" only). Counting it made the
-        // header error total exceed the task list for most products.
+    } else if (byteLength < BACKEND_KEYWORDS_MIN_BYTES) {
+        errorCount++;
         result.charLim = {
-            status: "Warning",
+            status: "Error",
+            // Low priority (spreadsheet P4), unlike going over the limit (P2): its own
+            // task type and weight. Pages keep reading charLim as before.
+            kind: 'underused',
             Message: `Your backend keywords use only ${byteLength} of 250 available bytes. You may be missing valuable search terms.`,
             HowTOSolve: "Add more relevant keywords like synonyms, alternate terms, misspellings, and related search phrases to maximize visibility."
         }
@@ -539,13 +595,30 @@ const BackendKeyWordOrAttributesStatus = (str) => {
         }
     }
 
+    // Words already in the title are wasted here: Amazon indexes the title too.
+    const inTitle = findWordsInTitle(str, title);
+    if (inTitle.length > 0) {
+        errorCount++;
+        result.titleOverlap = {
+            status: "Error",
+            Message: `Your backend keywords repeat words already in your title, which Amazon indexes anyway: ${inTitle.slice(0, 15).join(', ')}`,
+            HowTOSolve: "Remove these words from the backend search terms and use the bytes for synonyms, alternate names and other searches the title does not cover."
+        }
+    } else if (title) {
+        result.titleOverlap = {
+            status: "Success",
+            Message: "Your backend keywords do not repeat words from your title.",
+            HowTOSolve: ""
+        }
+    }
+
     result.NumberOfErrors = errorCount;
     return result;
 }
 
-const getRankings = (ProductDetails) => {
+const getRankings = (ProductDetails, { brand = '' } = {}) => {
     // console.log(ProductDetails.product_title)
-    const titleResult = checkTitle(ProductDetails.product_title);
+    const titleResult = checkTitle(ProductDetails.product_title, { brand });
     // Empty (or missing) bullets and description are NO DATA, not failures: the
     // scrape stores [] both when a listing has none and when it could not read
     // them. Both checks return zero errors for [], so no task is raised; the ESF
@@ -579,6 +652,10 @@ module.exports = {
     checkBulletPoints,
     checkDescription,
     TITLE_MAX_LENGTH,
+    TITLE_MIN_RECOMMENDED_LENGTH,
+    MIN_BULLET_POINTS,
+    BACKEND_KEYWORDS_MIN_BYTES,
+    findWordsInTitle,
     TITLE_PROHIBITED_CHARACTERS,
     TITLE_CONTEXTUAL_CHARACTERS,
     TITLE_RESTRICTED_PHRASES,

@@ -408,8 +408,8 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
 
   // Resolve the user's marketplace (country + region + matching config entry)
   // right before redirecting to Amazon. The source of truth is the
-  // standalone /app/user-location endpoint, which returns the country/region
-  // stored on the logged-in user's seller account.
+  // /app/user-location endpoint, which returns the marketplace in the URL when
+  // the user owns it, otherwise the session's, otherwise their first one.
   //
   //   - Agency context is intentionally skipped — the agency owner is not
   //     connecting their own marketplace; the target client's marketplace
@@ -431,7 +431,13 @@ const ConnectAccounts = ({ isAgencyContext = false, clientId = null, agencyName 
     }
 
     try {
-      const response = await axiosInstance.get('/app/user-location');
+      // Pass the marketplace this page was opened for. The server uses it when the user
+      // owns it (and moves the session to it, since the tokens are saved to the session's
+      // marketplace); otherwise it falls back to the session's, then the first one. Without
+      // it, adding a second marketplace always got the first one's consent page.
+      const response = await axiosInstance.get('/app/user-location', {
+        params: countryCode && region ? { country: countryCode.toUpperCase(), region: region.toUpperCase() } : {},
+      });
       const data = response?.data?.data;
       if (response?.status === 200 && data && data.country && data.region) {
         const key = String(data.country).toUpperCase();

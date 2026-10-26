@@ -127,11 +127,14 @@ const EFFORT_MINUTES = {
 
     // ── Account health: mostly remediation plans; two are genuinely quick.
     'account:negativeFeedbacks': 5,
+    'account:negative_feedback_order': 5, // answer one buyer / request removal
+    'inventory:storage_utilization_risk': 30, // slow inbound, clear slow movers
     'account:responseUnder24HoursCount': 5,
     'account:validTrackingRateStatus': 10,
     'account:a_z_claims': 15,
     'account:lateShipmentRateStatus': 20,
     'account:CancellationRate': 20,
+    'account:onTimeDeliveryRateStatus': 20,
     'account:PolicyViolations': 30,
     'account:orderWithDefectsStatus': 30,
     'account:NCX': 30,
@@ -144,7 +147,50 @@ const EFFORT_MINUTES = {
     'account:orderWithDefectsStatus_unstable': 30,
     'account:lateShipmentRateStatus_unstable': 20,
     'account:CancellationRate_unstable': 20,
-    'account:validTrackingRateStatus_unstable': 10
+    'account:onTimeDeliveryRateStatus_unstable': 20,
+    'account:validTrackingRateStatus_unstable': 10,
+
+    // ── tasks-logics.xlsx detectors (kpi/) ──
+    'inventory:listing_suppressed': 15,     // fix the flagged field or upload a document
+    'inventory:out_of_stock': 30,           // create and send an FBA shipment
+    'inventory:removal_shortfall': 20,      // open a case with the order and what arrived
+    'inventory:removal_confirm_receipt': 5, // type in what arrived per order
+    'sponsoredAds:ads_on_unbuyable': 3,     // pause the ad group: a couple of clicks
+    'profitability:cogs_missing': 20,       // enter unit costs for the listed products
+    'account:ahr_early_warning': 30,        // find what moved the score and fix it
+    // Wave 2
+    'conversion:sales_drop': 30,            // find the cause: price, Buy Box, reviews, ads
+    'conversion:conversion_rate_drop': 30,
+    'conversion:traffic_drop': 30,
+    'sponsoredAds:tacos_rising': 30,        // review campaigns that grew spend
+    'sponsoredAds:top_seller_not_advertised': 20, // set up an auto campaign
+    'conversion:rating_drop': 60,           // read reviews, fix the cause
+    'inventory:weeks_of_cover': 20,         // pause inbound, set a coupon
+    // Wave 3
+    'inventory:listing_warnings': 10,       // fix one flagged field
+    'account:invoice_defect_rate': 15,      // upload missing invoices
+    'inventory:low_inventory_fee_risk': 30, // create an FBA shipment
+    'inventory:fba_fee_increase': 20,       // check dimensions, open a case
+    'inventory:handling_time_long': 5,      // change one offer setting
+    'inventory:new_seller_on_brand': 15,    // check the seller, test buy if unknown
+    // Spreadsheet alignment
+    'ranking:listing_errors': 10,           // fix the field Amazon flagged
+    'inventory:lost_damaged_unreimbursed': 15, // file a claim
+    'inventory:return_reason_spike': 30,    // read comments, fix listing or supplier
+    'ranking:detail_page_changed': 10,      // check and restore, or mark as yours
+    'inventory:returns_fee_risk': 45,       // find and fix the return cause
+    'conversion:priced_above_featured_offer': 5, // change a price
+    'inventory:subscribe_and_save': 15,     // fix the suspension reason
+    'inventory:inbound_placement_fees': 10, // choose the optimised split next time
+    'sponsoredAds:budget_limited_profitable': 3, // raise a budget
+    'inventory:inbound_shortage': 20,       // open a case with documents
+    'inventory:refund_not_returned': 15,    // file a claim per order
+    'conversion:high_traffic_low_conversion': 45, // listing work
+    'conversion:low_traffic_high_conversion': 20, // ads/keywords
+    'sponsoredAds:product_acos_above_breakeven': 5, // lower bids / pause targets
+    'ranking:backend_keywords_title_overlap': 3,
+    'ranking:backend_keywords_underused': 10,  // add synonyms and alternate terms
+    'ranking:titleresult_too_short': 10        // add searched details to the title
 };
 
 /**
@@ -163,8 +209,12 @@ const IMPACT_WEIGHT = {
     'account:orderWithDefectsStatus': 75,
     'account:lateShipmentRateStatus': 68,
     'account:CancellationRate': 68,
+    // Spreadsheet P1, same tier as late shipment and cancellation.
+    'account:onTimeDeliveryRateStatus': 68,
     'account:NCX': 55,
     'account:negativeFeedbacks': 50,
+    'account:negative_feedback_order': 50,
+    'inventory:storage_utilization_risk': 50,
     'account:validTrackingRateStatus': 30,
     'account:responseUnder24HoursCount': 28,
     // A status that keeps slipping is a warning, not a sustained failure: about 60%
@@ -174,6 +224,7 @@ const IMPACT_WEIGHT = {
     'account:orderWithDefectsStatus_unstable': 45,
     'account:lateShipmentRateStatus_unstable': 41,
     'account:CancellationRate_unstable': 41,
+    'account:onTimeDeliveryRateStatus_unstable': 41,
     'account:validTrackingRateStatus_unstable': 18,
 
     // Money leaving the account right now.
@@ -202,6 +253,39 @@ const IMPACT_WEIGHT = {
     'inventory:unfulfillable_inventory': 60,
     'inventory:replenishment_needed': 52,
     'inventory:inbound_non_compliance': 34,
+    // tasks-logics.xlsx: a listing shoppers cannot buy, or nothing on the shelf, is
+    // the same class of loss as stranded stock; ads on them are money with no
+    // possible return; a removal shortfall is a claim with a deadline.
+    'inventory:listing_suppressed': 78,
+    'inventory:out_of_stock': 74,
+    'sponsoredAds:ads_on_unbuyable': 66,
+    'inventory:removal_shortfall': 48,
+    // Not a loss yet, only the question that finds one: below the claim itself.
+    'inventory:removal_confirm_receipt': 30,
+    // Without unit costs no profit figure is real: below money already being lost.
+    'profitability:cogs_missing': 40,
+    // At or above the client's account-risk floor (ACCOUNT_RISK_MIN_WEIGHT = 68),
+    // so it shows as a risk, but below the sustained Amazon statuses.
+    'account:ahr_early_warning': 70,
+    // Business invoices: a real Amazon metric, but only for Amazon Business sellers.
+    'account:invoice_defect_rate': 45,
+    // Wave 2: sales already falling, then the signals that explain or precede it.
+    'conversion:sales_drop': 64,
+    'conversion:conversion_rate_drop': 62,
+    'conversion:traffic_drop': 56,
+    'conversion:rating_drop': 50,
+    'sponsoredAds:tacos_rising': 44,
+    'inventory:weeks_of_cover': 42,
+    // Growth, not loss: below every loss above.
+    'sponsoredAds:top_seller_not_advertised': 33,
+    // Wave 3: fees being charged now, then warnings that can become blocks.
+    'inventory:fba_fee_increase': 57,
+    'inventory:low_inventory_fee_risk': 54,
+    'inventory:listing_warnings': 46,
+    // A later promised delivery date costs conversion, but it is a setting, not a loss.
+    'inventory:handling_time_long': 30,
+    // A hijacker takes sales and a counterfeit costs reviews and the account's standing.
+    'inventory:new_seller_on_brand': 60,
 
     // Conversion drag.
     'conversion:insufficient_images': 55,
@@ -223,6 +307,29 @@ const IMPACT_WEIGHT = {
     'ranking:duplicate_words': 45, // retired errorType
     'ranking:backend_keywords_char_limit': 36,
     'ranking:backend_keywords_duplicate_words': 36,
+    'ranking:backend_keywords_title_overlap': 30,
+    // Spreadsheet P4: worth doing, never ahead of a real problem.
+    'ranking:backend_keywords_underused': 14,
+    'ranking:titleresult_too_short': 16,
+    // Amazon itself flagged it, and unfixed it can lead to suppression (spreadsheet P2).
+    'ranking:listing_errors': 66,
+    // Spreadsheet P1 with a deadline: money Amazon owes, lost if the window closes.
+    'inventory:lost_damaged_unreimbursed': 72,
+    'inventory:return_reason_spike': 45,
+    // Spreadsheet P2: someone else editing the listing can cost sales fast.
+    'ranking:detail_page_changed': 70,
+    'inventory:returns_fee_risk': 45,
+    'conversion:priced_above_featured_offer': 55,
+    'inventory:subscribe_and_save': 30,
+    'inventory:inbound_placement_fees': 25,
+    'sponsoredAds:budget_limited_profitable': 55,
+    'inventory:inbound_shortage': 72,
+    'inventory:refund_not_returned': 72,
+    // Spreadsheet P3 / P4.
+    'conversion:high_traffic_low_conversion': 50,
+    'conversion:low_traffic_high_conversion': 30,
+    // Same family as high_acos (58), but judged on the product's own break-even.
+    'sponsoredAds:product_acos_above_breakeven': 60,
     'ranking:bulletpoints_char_limit': 35,
     'ranking:bulletpoints_restricted_words': 35,
     'ranking:bulletpoints_special_characters': 35,
@@ -252,6 +359,8 @@ function getTaskPriorityMeta(task) {
         effortMinutes,
         impactWeight: mappedWeight === undefined ? DEFAULT_IMPACT_WEIGHT : mappedWeight,
         isQuickWin: effortMinutes <= QUICK_WIN_MAX_MINUTES,
+        // tasks-logics.xlsx P1-P4 label (TaskPriorityLevels requires this file, so lazily).
+        priorityLevel: require('./TaskPriorityLevels.js').priorityLevelFor(task),
         // Lets callers spot task types that slipped through without a mapping,
         // rather than silently inheriting the defaults.
         isKnownTaskType: mappedEffort !== undefined

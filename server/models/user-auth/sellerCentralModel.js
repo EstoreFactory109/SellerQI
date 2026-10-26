@@ -79,6 +79,38 @@ const Products=new mongoose.Schema({
     type: Boolean,
     required: false,
     default: false
+  },
+  // From the weekly listing-items sync: who fulfils this SKU ('DEFAULT' = the seller,
+  // i.e. FBM; anything else = Amazon) and the handling time the seller set. Unset until
+  // that sync has run for the SKU.
+  fulfillmentChannel:{
+    type: String,
+    required: false,
+    default: undefined
+  },
+  handlingTimeDays:{
+    type: Number,
+    required: false,
+    default: undefined
+  },
+  // The listing's brand, from the same weekly sync; compared with the account's brand
+  // to tell the seller's own brand listings from resale ones.
+  brand:{
+    type: String,
+    required: false,
+    default: undefined
+  },
+  // Fingerprint of the bullet points and the main image URL from the weekly sync, so
+  // a change between two syncs can be noticed (ListingChanges, "detail page changed").
+  bulletsHash:{
+    type: String,
+    required: false,
+    default: undefined
+  },
+  mainImage:{
+    type: String,
+    required: false,
+    default: undefined
   }
 },{timestamps:true})
 
@@ -135,6 +167,15 @@ const sellerCentral=new mongoose.Schema({
   spiOrdersAuthDeniedReason: {
     type: String,
     required: false,
+  },
+  // Days from ordering stock to it being sellable at Amazon, set by the seller.
+  // Unset = the 45-day default (tasks-logics.xlsx "Products to Replenish").
+  replenishLeadTimeDays: {
+    type: Number,
+    required: false,
+    min: 1,
+    max: 365,
+    default: undefined
   }
 }, {timestamps: true})
 

@@ -16,12 +16,25 @@ const { getAsinWisePL } = require('../Finance/FinanceDashboardReadService.js');
 const { getProductWiseSponsoredAdsData } = require('../amazon-ads/ProductWiseSponsoredAdsService.js');
 const { classifyProfitabilityRow } = require('./RecoverableAmountUtils.js');
 
+// Per-unit COGS by ASIN, {} when none is entered or the read fails: the loss rule
+// (tasks-logics.xlsx "Loss-making product") needs it, as the tasks do.
+const loadCogsMap = async (userId, country) => {
+    try {
+        const cogs = await require('../Finance/CogsService.js').getCogs(userId, country);
+        return (cogs && cogs.success && cogs.data?.cogsValues) || {};
+    } catch (error) {
+        logger.warn('[Profitability] COGS unavailable', { userId, country, error: error.message });
+        return {};
+    }
+};
+
+
 // ── Issue calculation (unchanged logic) ──
 
 // `financeFresh` defaults to true: the dated path builds rows from live DailySkuFinance
 // (getAsinWisePL). The rule is shared with the tasks and the Profitability page
 // (RecoverableAmountUtils.classifyProfitabilityRow).
-const calculateProfitabilityIssues = (profitabilityData, { financeFresh = true } = {}) => {
+const calculateProfitabilityIssues = (profitabilityData, { financeFresh = true, cogsMap = null } = {}) => {
     let totalErrors = 0;
     const issues = [];
     
@@ -29,7 +42,7 @@ const calculateProfitabilityIssues = (profitabilityData, { financeFresh = true }
         const sales = item.sales || 0;
         const adsSpend = item.ads || 0;
         const amazonFees = item.amzFee || item.totalFees || 0;
-        const verdict = classifyProfitabilityRow(item, { financeFresh });
+        const verdict = classifyProfitabilityRow(item, { financeFresh, cogsMap });
         
         if (verdict) {
             const { netProfit, profitMargin } = verdict;
@@ -155,13 +168,14 @@ const getRecommendationForLowMargin = (item, profitMargin, adsSpend, amazonFees)
 // ── Data fetching from new finance flow ──
 
 async function buildProfitabilityFromFinanceFlow(userId, country, region, startDate, endDate) {
-    const [asinWiseRows, sellerData, productWiseSponsoredAds] = await Promise.all([
+    const [asinWiseRows, sellerData, productWiseSponsoredAds, cogsMap] = await Promise.all([
         getAsinWisePL({ userId, country, region, startDate, endDate }),
         Seller.findOne(
             { User: userId },
             { 'sellerAccount': { $elemMatch: { region, country } } }
         ).lean(),
         getProductWiseSponsoredAdsData(userId, country, region),
+        loadCogsMap(userId, country),
     ]);
 
     const products = sellerData?.sellerAccount?.[0]?.products || [];
@@ -205,7 +219,7 @@ async function buildProfitabilityFromFinanceFlow(userId, country, region, startD
         });
     });
 
-    return { allProfitabilityData, activeProductCount: activeProductSet.size };
+    return { allProfitabilityData, activeProductCount: activeProductSet.size, cogsMap };
 }
 
 // ── Public API ──
@@ -216,8 +230,8 @@ const getProfitabilityIssues = async (userId, country, region, page = 1, limit =
 
     // If date range is provided, always compute real-time from DailySkuFinance
     if (startDate && endDate) {
-        const { allProfitabilityData } = await buildProfitabilityFromFinanceFlow(userId, country, region, startDate, endDate);
-        const issuesData = calculateProfitabilityIssues(allProfitabilityData);
+        const { allProfitabilityData, cogsMap } = await buildProfitabilityFromFinanceFlow(userId, country, region, startDate, endDate);
+        const issuesData = calculateProfitabilityIssues(allProfitabilityData, { cogsMap });
 
         const totalItems = issuesData.totalErrors;
         const totalPages = Math.ceil(totalItems / limit);
@@ -295,8 +309,8 @@ const getProfitabilityIssues = async (userId, country, region, page = 1, limit =
     fallbackStart.setDate(yesterday.getDate() - 29);
     const fallbackStartStr = fallbackStart.toISOString().slice(0, 10);
 
-    const { allProfitabilityData } = await buildProfitabilityFromFinanceFlow(userId, country, region, fallbackStartStr, fallbackEnd);
-    const issuesData = calculateProfitabilityIssues(allProfitabilityData);
+    const { allProfitabilityData, cogsMap } = await buildProfitabilityFromFinanceFlow(userId, country, region, fallbackStartStr, fallbackEnd);
+    const issuesData = calculateProfitabilityIssues(allProfitabilityData, { cogsMap });
 
     const totalItems = issuesData.totalErrors;
     const totalPages = Math.ceil(totalItems / limit);
@@ -335,8 +349,8 @@ const getProfitabilityIssuesSummary = async (userId, country, region, startDate 
     logger.info(`[PERF] ProfitabilityIssuesService.getProfitabilityIssuesSummary starting`, { userId, startDate, endDate });
 
     if (startDate && endDate) {
-        const { allProfitabilityData, activeProductCount } = await buildProfitabilityFromFinanceFlow(userId, country, region, startDate, endDate);
-        const issuesData = calculateProfitabilityIssues(allProfitabilityData);
+        const { allProfitabilityData, activeProductCount, cogsMap } = await buildProfitabilityFromFinanceFlow(userId, country, region, startDate, endDate);
+        const issuesData = calculateProfitabilityIssues(allProfitabilityData, { cogsMap });
 
         const fetchTime = Date.now() - startTime;
         logger.info(`[PERF] ProfitabilityIssuesSummary (finance-flow) completed in ${fetchTime}ms`);
@@ -377,8 +391,8 @@ const getProfitabilityIssuesSummary = async (userId, country, region, startDate 
     fallbackStart.setDate(yesterday.getDate() - 29);
     const fallbackStartStr = fallbackStart.toISOString().slice(0, 10);
 
-    const { allProfitabilityData, activeProductCount } = await buildProfitabilityFromFinanceFlow(userId, country, region, fallbackStartStr, fallbackEnd);
-    const issuesData = calculateProfitabilityIssues(allProfitabilityData);
+    const { allProfitabilityData, activeProductCount, cogsMap } = await buildProfitabilityFromFinanceFlow(userId, country, region, fallbackStartStr, fallbackEnd);
+    const issuesData = calculateProfitabilityIssues(allProfitabilityData, { cogsMap });
     const fetchTime = Date.now() - startTime;
     logger.info(`[PERF] ProfitabilityIssuesSummary (realtime-fallback) completed in ${fetchTime}ms`);
 

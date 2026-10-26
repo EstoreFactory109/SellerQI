@@ -11,6 +11,7 @@ import {
   FileText,
   Mail,
   Activity,
+  Radio,
 } from 'lucide-react';
 import axiosInstance from '../config/axios.config.js';
 import sellerQILogo from '../assets/Logo/sellerQILogo.png';
@@ -18,6 +19,7 @@ import sellerQILogo from '../assets/Logo/sellerQILogo.png';
 const PAGE_TITLES = {
   '/manage-accounts': { title: 'Accounts', subtitle: 'Manage and monitor user accounts' },
   '/manage-accounts/subscription': { title: 'Subscription', subtitle: 'Subscription and billing' },
+  '/manage-accounts/activity': { title: 'User activity', subtitle: 'Who is using SellerQI right now, and which pages they view' },
   '/manage-accounts/logs/email': { title: 'Email Logs', subtitle: 'Email delivery and logs' },
   '/manage-accounts/logs/payment': { title: 'Payment Logs', subtitle: 'Payment and transaction logs' },
   '/manage-accounts/logs/user': { title: 'User Logs', subtitle: 'User activity and session logs' },
@@ -116,6 +118,16 @@ const ManageAccountsLayout = () => {
             >
               <CreditCard className="w-5 h-5 shrink-0" />
               <span className="text-sm font-medium">Subscription</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => navTo('/manage-accounts/activity')}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${
+                pathname === '/manage-accounts/activity' ? 'bg-blue-500/15 border border-blue-500/30 text-blue-100 shadow-sm' : 'text-gray-400 hover:bg-white/[0.04] hover:text-gray-200'
+              }`}
+            >
+              <Radio className="w-5 h-5 shrink-0" />
+              <span className="text-sm font-medium">User activity</span>
             </button>
             <div>
               <button

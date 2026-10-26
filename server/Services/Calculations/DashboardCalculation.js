@@ -13,6 +13,9 @@ const Profitability = require('./ProfitabilityCalculation.js');
 const { calculateSponsoredAdsMetrics, calculateNegativeKeywordsMetrics } = require('./SponsoredAdsCalculation.js');
 const { createDefaultDashboardData, mergeWithDefaults } = require('./DefaultDataStructure.js');
 const CreateTaskService = require('./CreateTasksService.js');
+const { runKpiDetectors } = require('./kpi/index.js');
+const withoutKey = (obj, key) => { const { [key]: _omit, ...rest } = obj; return rest; };
+const { priorityLevelFor, blocksAmazonReady } = require('./TaskPriorityLevels.js');
 const logger = require('../../utils/Logger.js');
 const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBigAccountsModel.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
@@ -24,7 +27,7 @@ const DataFetchTracking = require('../../models/system/DataFetchTrackingModel.js
 const { resolveAsinFinance } = require('../Finance/AsinFinanceWindowService.js');
 const { isStoredEconomicsDoc } = require('../Finance/LiveEconomicsService.js');
 const { sumEconomicsSales } = require('../Finance/EconomicsFinanceFormat.js');
-const { computeProfitabilityAmount, classifyProfitabilityRow, computeSponsoredAdsAmount, computeBuyBoxBenchmark, computeBuyBoxLostRevenueAmount, computeBuyBoxProfitImpact } = require('./RecoverableAmountUtils.js');
+const { computeProfitabilityAmount, classifyProfitabilityRow, computeSponsoredAdsAmount, computeBuyBoxBenchmark, computeBuyBoxLostRevenueAmount, computeBuyBoxProfitImpact, buyBoxJudgedAsinSetOf } = require('./RecoverableAmountUtils.js');
 const {
     TARGET_ACOS_PERCENT,
     SEARCH_TERM_MIN_CLICKS,
@@ -527,7 +530,7 @@ const calculateCampaignWiseTotalSalesAndCost = (dateWisePPCData) => {
  * @param {Array} totalProducts - Array of all products with names
  * @returns {Object} Total errors and error details
  */
-const calculateProfitabilityErrors = (profitibilityData, totalProducts = [], { financeFresh = true } = {}) => {
+const calculateProfitabilityErrors = (profitibilityData, totalProducts = [], { financeFresh = true, cogsMap = null } = {}) => {
     let totalErrors = 0;
     let totalAmount = 0;
     const errorDetails = [];
@@ -545,7 +548,7 @@ const calculateProfitabilityErrors = (profitibilityData, totalProducts = [], { f
     profitibilityData.forEach((item) => {
         // COGS is 0 until the seller enters it. The rule itself is shared with the
         // Profitability pages (RecoverableAmountUtils.classifyProfitabilityRow).
-        const verdict = classifyProfitabilityRow(item, { financeFresh });
+        const verdict = classifyProfitabilityRow(item, { financeFresh, cogsMap });
         if (!verdict) return;
         totalErrors++;
         totalAmount += verdict.amount;
@@ -556,6 +559,8 @@ const calculateProfitabilityErrors = (profitibilityData, totalProducts = [], { f
             ads: item.ads || 0,
             netProfit: verdict.netProfit,
             profitMargin: verdict.profitMargin,
+            // Units only when the loss was judged with COGS, so the task can say "per unit".
+            units: cogsMap && Number(cogsMap[item.asin]) > 0 ? (Number(item.quantity) || 0) : undefined,
             errorType: verdict.errorType,
             amount: verdict.amount
         });
@@ -580,13 +585,25 @@ const calculateProfitabilityErrors = (profitibilityData, totalProducts = [], { f
  * @param {Array} keywords - Keywords data for manual campaign lookup
  * @returns {Object} { totalErrors, errorDetails }
  */
+// Median price of the account's active products, 0 when none has a price.
+const medianActivePrice = (products) => {
+    const prices = (Array.isArray(products) ? products : [])
+        .filter((p) => p && p.status === 'Active')
+        .map((p) => Number(p.price) || 0)
+        .filter((n) => n > 0)
+        .sort((a, b) => a - b);
+    if (prices.length === 0) return 0;
+    const mid = Math.floor(prices.length / 2);
+    return prices.length % 2 ? prices[mid] : (prices[mid - 1] + prices[mid]) / 2;
+};
+
 const calculateSponsoredAdsErrors = (
     campaignWiseTotalSalesAndCost = [],
     adsKeywordsPerformanceData = [],
     searchTerms = [],
     campaignData = [],
     keywords = [],
-    { negativeKeywords = [], country = null, now = new Date() } = {}
+    { negativeKeywords = [], country = null, now = new Date(), referencePrice = 0 } = {}
 ) => {
     let totalErrors = 0;
     let totalAmount = 0;
@@ -702,6 +719,7 @@ const calculateSponsoredAdsErrors = (
                 campaignName: keyword.campaignName || 'Unknown Campaign',
                 campaignId: keyword.campaignId,
                 adGroupName: keyword.adGroupName,
+                adGroupId: keyword.adGroupId,
                 spend: keyword.cost,
                 sales: keyword.attributedSales30d,
                 clicks: keyword.clicks,
@@ -713,7 +731,8 @@ const calculateSponsoredAdsErrors = (
         }
     });
     
-    // 3. Search Terms with Zero Sales (clicks >= 10 and sales < 0.01)
+    // 3. Search Terms with Zero Sales (TaskRules.SEARCH_TERM_MIN_CLICKS, no sales,
+    // spend over the reference product price when one is known)
     // Aggregate search terms by searchTerm+campaign+adGroup to avoid duplicates
     const aggregatedSearchTermsMap = new Map();
     
@@ -748,8 +767,8 @@ const calculateSponsoredAdsErrors = (
     const negatedIndex = buildNegatedIndex(negativeKeywords);
     
     aggregatedSearchTerms.forEach((term) => {
-        // Count as error if clicks >= 10 and sales < 0.01
-        if (term.clicks >= SEARCH_TERM_MIN_CLICKS && term.sales < 0.01 && !isNegated(negatedIndex, term)) {
+        const spendOverPrice = !(referencePrice > 0) || term.spend > referencePrice;
+        if (term.clicks >= SEARCH_TERM_MIN_CLICKS && term.sales < 0.01 && spendOverPrice && !isNegated(negatedIndex, term)) {
             totalErrors++;
             // Its spend is already inside its keyword's amount when that keyword is
             // itself flagged as wasted: count it once.
@@ -766,6 +785,7 @@ const calculateSponsoredAdsErrors = (
                 campaignName: term.campaignName || 'Unknown Campaign',
                 campaignId: term.campaignId,
                 adGroupName: term.adGroupName,
+                adGroupId: term.adGroupId,
                 clicks: term.clicks,
                 spend: term.spend,
                 sales: term.sales,
@@ -1273,11 +1293,12 @@ const analyseData = async (data, userId = null, options = {}) => {
             ? (totalGrossProfit / totalSalesForMargin) * 100
             : 0;
 
-        // Use MCP BuyBox data - filter products with buyBoxPercentage = 0.
-        // BuyBoxData is the multi-day effective doc from classifyBuyBoxLoss, so 0%
-        // here means "0% on the ASIN's last two days with traffic", not one bad day.
+        // The verdict from classifyBuyBoxLoss (under 80% of visits over 7 days on 50+
+        // sessions). An ASIN with no stock on any of its listings is left to the
+        // out-of-stock task (tasks-logics.xlsx: "otherwise 'Out of stock' owns it").
+        const judgedAsins = buyBoxJudgedAsinSetOf(TotalProducts);
         productsWithOutBuyboxError = data.BuyBoxData.asinBuyBoxData
-            .filter((p) => p && p.buyBoxPercentage === 0 && p.childAsin && activeProductSet.has(p.childAsin))
+            .filter((p) => p && p.buyBoxLost === true && p.childAsin && judgedAsins.has(p.childAsin))
             .map((p) => {
                 // Average day across the observed days when the effective doc
                 // carries it; the newest day's figures otherwise (older callers).
@@ -1357,6 +1378,8 @@ const analyseData = async (data, userId = null, options = {}) => {
 
     // This is for getting conversion error for each product
     // OPTIMIZED: Uses Maps for O(1) lookups instead of O(n) array.find()
+    // tasks-logics.xlsx "A+ Content": P3 for a top-20%-revenue product, P4 otherwise.
+    const topRevenue = require('./kpi/Wave1Detectors.js').topRevenueAsins(economicsData.asinPpcSales || {});
     const getConversionErrors = (asin) => {
         let errorCount = 0;
         const convData = { asin };
@@ -1364,7 +1387,7 @@ const analyseData = async (data, userId = null, options = {}) => {
         // Use Map lookups (O(1)) instead of array.find() (O(n))
         const aplusFound = aplusErrorMap.get(asin);
         if (aplusFound) {
-            convData.aplusErrorData = aplusFound.data;
+            convData.aplusErrorData = { ...aplusFound.data, topSeller: topRevenue.has(asin) };
             errorCount++;
         }
 
@@ -1824,7 +1847,7 @@ const analyseData = async (data, userId = null, options = {}) => {
     const financeFresh = resolvedAsinFinance.financeFresh;
     
     try {
-        profitabilityErrorsData = calculateProfitabilityErrors(profitibilityData, TotalProducts, { financeFresh });
+        profitabilityErrorsData = calculateProfitabilityErrors(profitibilityData, TotalProducts, { financeFresh, cogsMap: data.cogsValues || {} });
         profitabilityErrorsOk = true;
     } catch (error) {
         logger.error("Error calculating profitability errors:", error);
@@ -1842,7 +1865,7 @@ const analyseData = async (data, userId = null, options = {}) => {
             data.searchTerms || [],
             data.campaignData || [],
             data.keywords || [],
-            { negativeKeywords: data.negetiveKeywords || [], country }
+            { negativeKeywords: data.negetiveKeywords || [], country, referencePrice: medianActivePrice(TotalProducts) }
         );
         sponsoredAdsErrorsOk = true;
     } catch (error) {
@@ -1954,34 +1977,84 @@ const analyseData = async (data, userId = null, options = {}) => {
 
     logger.info(`Dashboard data processed successfully with ${activeProducts.length} active products`);
     
+    // tasks-logics.xlsx detectors. A no-op ({ tasks: [], coverage: {} }) unless Analyse
+    // attached KpiInputs for an enabled wave (kpi/kpiGate.js).
+    let kpiResult = { tasks: [], coverage: {} };
+    try {
+        kpiResult = runKpiDetectors(data, {
+            salesByAsin: economicsData.asinPpcSales || {},
+            financeFresh,
+            profitRows: profitibilityData,
+            cogsMap: data.cogsValues || {},
+            country,
+            userId
+        });
+    } catch (error) {
+        logger.error('Error running KPI detectors:', { message: error.message });
+    }
+
     // Call CreateTask service if userId is provided and writes are wanted
     let tasksRebuilt = false;
     // How old the AI views must be before this change regenerates them. 0 for a full
     // build; reconcile asks for more so routine drift does not buy an LLM call daily.
     let taskAiRefreshMinIntervalHours = 0;
+    // The detected issues every task comes from. Built once: persisted below, or, for
+    // a preview (persistTasks: false), turned into the task list without writing.
+    const taskSources = {
+        rankingProductWiseErrors: rankingProductWiseErrors,
+        conversionProductWiseErrors: conversionProductWiseErrors,
+        inventoryProductWiseErrors: inventoryProductWiseErrors,
+        profitabilityErrorDetails: profitabilityErrorsData.errorDetails,
+        sponsoredAdsErrorDetails: sponsoredAdsErrorsData.errorDetails,
+        // Per-order negative feedback (weekly report) replaces the account-level
+        // "your negative feedback count rose" task once it has been read.
+        AccountErrors: kpiResult.coverage?.['kpi.sellerFeedback'] === true
+            ? withoutKey(data.AccountData?.accountHealth || {}, 'negativeFeedbacks')
+            : (data.AccountData?.accountHealth || {}),
+        kpiTasks: kpiResult.tasks,
+        TotalProducts: TotalProducts
+    };
+    let previewTasks;
+    let detectedTasks = null;
+    try {
+        detectedTasks = CreateTaskService.generateAllTasks(taskSources);
+        if (!persistTasks) previewTasks = detectedTasks;
+    } catch (error) {
+        logger.error('Error generating tasks from detected issues:', { message: error.message });
+    }
+
+    // tasks-logics.xlsx "Amazon Ready Products": ASINs with no open P1-P3 task. A
+    // P4 (polish) task no longer costs a product the badge; any task type, listing
+    // or not, does from P3 up. Falls back to the listing-check list when the
+    // candidates or the task list are unavailable.
+    const candidates = data.ConversionData?.AmazonReadyCandidates;
+    if (Array.isArray(candidates) && Array.isArray(detectedTasks)) {
+        const blocked = new Set(detectedTasks
+            .filter(t => t?.asin && blocksAmazonReady(priorityLevelFor(t)))
+            .map(t => t.asin));
+        dashboardData.amazonReadyProducts = candidates.filter(asin => activeProductSet.has(asin) && !blocked.has(asin));
+    }
+
     if (userId && persistTasks) {
         try {
             logger.info(`Creating tasks for user: ${userId}`);
             const taskResult = await CreateTaskService.createTasksFromCalculateServiceData(userId, {
-                rankingProductWiseErrors: rankingProductWiseErrors,
-                conversionProductWiseErrors: conversionProductWiseErrors,
-                inventoryProductWiseErrors: inventoryProductWiseErrors,
-                profitabilityErrorDetails: profitabilityErrorsData.errorDetails,
-                sponsoredAdsErrorDetails: sponsoredAdsErrorsData.errorDetails,
-                AccountErrors: data.AccountData?.accountHealth || {},
-                TotalProducts: TotalProducts,
+                ...taskSources,
                 forceReconcile: forceTaskReconcile,
-                coverage: buildTaskCoverage(data, {
-                    activeProductSet,
-                    profitabilityRows: profitibilityData,
-                    profitabilityOk: profitabilityErrorsOk,
-                    financeFresh,
-                    // The rows high-ACOS was actually judged on (the PPC page's campaign
-                    // totals when available), so coverage describes the real input.
-                    campaignRows: Array.isArray(data.campaignSpendSales) ? data.campaignSpendSales : campaignWiseTotalSalesAndCost,
-                    sponsoredAdsOk: sponsoredAdsErrorsOk,
-                    country
-                })
+                coverage: {
+                    ...buildTaskCoverage(data, {
+                        activeProductSet,
+                        profitabilityRows: profitibilityData,
+                        profitabilityOk: profitabilityErrorsOk,
+                        financeFresh,
+                        // The rows high-ACOS was actually judged on (the PPC page's campaign
+                        // totals when available), so coverage describes the real input.
+                        campaignRows: Array.isArray(data.campaignSpendSales) ? data.campaignSpendSales : campaignWiseTotalSalesAndCost,
+                        sponsoredAdsOk: sponsoredAdsErrorsOk,
+                        country
+                    }),
+                    ...kpiResult.coverage
+                }
             }, country, region);
             // Only a full rebuild changes what the derived AI views summarise; stays
             // false if task creation threw, so a failed build never triggers them.
@@ -2001,7 +2074,9 @@ const analyseData = async (data, userId = null, options = {}) => {
     const totalCalcTime = Date.now() - calcStartTime;
     logger.info(`[PERF] DashboardCalculation TOTAL time: ${totalCalcTime}ms`);
     logger.info("=== DashboardCalculation: Returning dashboard data ===");
-    return { dashboardData, tasksRebuilt, taskAiRefreshMinIntervalHours };
+    // kpiTasks is for previews (persistTasks: false); page callers read dashboardData only.
+    // kpiTasks / previewTasks are for previews (persistTasks: false); page callers read dashboardData only.
+    return { dashboardData, tasksRebuilt, taskAiRefreshMinIntervalHours, kpiTasks: kpiResult.tasks, kpiStaleSources: kpiResult.staleSources || [], kpiDataFaults: kpiResult.dataFaults || [], previewTasks };
 };
 
 module.exports = {

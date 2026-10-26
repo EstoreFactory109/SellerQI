@@ -6,7 +6,7 @@
  * verified as the user actually sees them.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, fireEvent, act } from '@testing-library/react';
 import { Provider } from 'react-redux';
 import { MemoryRouter } from 'react-router-dom';
 import { configureStore } from '@reduxjs/toolkit';
@@ -14,6 +14,14 @@ import Tasks from '../../Pages/Tools/Tasks.jsx';
 
 // The component dispatches a fetch thunk on mount; stub the network layer so the
 // pre-seeded store state is what renders.
+// The Fix it packages are off by default (VITE_FIX_IT_PACKAGES); most tests here cover them, so
+// they run with the switch on. The "switched off" block below flips it.
+const flags = vi.hoisted(() => ({ FIX_IT_PACKAGES: true }));
+vi.mock('../../utils/featureFlags.js', async (importOriginal) => ({
+  ...(await importOriginal()),
+  get FIX_IT_PACKAGES() { return flags.FIX_IT_PACKAGES; },
+}));
+
 vi.mock('../../redux/slices/TasksSlice.js', async () => {
   const actual = await vi.importActual('../../redux/slices/TasksSlice.js');
   return {
@@ -60,10 +68,10 @@ const TASKS = [
   adsQuick({ taskId: 't-q4', asin: 'B009', errorType: 'high_acos', error: 'Acos two', amount: 2, effortMinutes: 5, impactWeight: 58 }),
 ];
 
-const makeStore = (tasks, groups = []) => configureStore({
+const makeStore = (tasks, groups = [], currency = 'A$') => configureStore({
   reducer: {
     tasks: () => ({ tasks, groups, taskRenewalDate: null, loading: false, error: null, completedTasks: [], lastFetched: Date.now() }),
-    currency: () => ({ currency: 'A$' }),
+    currency: () => ({ currency }),
     Auth: () => ({ user: { _id: 'u1' } }),
     Dashboard: () => ({ DashBoardInfo: { TotalProduct: [] } }),
     pageData: () => ({}),
@@ -71,9 +79,9 @@ const makeStore = (tasks, groups = []) => configureStore({
 });
 
 // The page reads ?category=&type= for Dashboard deep-links, so it needs a Router.
-const renderTasks = (tasks = TASKS, { groups = [], route = '/' } = {}) =>
+const renderTasks = (tasks = TASKS, { groups = [], route = '/', currency = 'A$' } = {}) =>
   render(
-    <Provider store={makeStore(tasks, groups)}>
+    <Provider store={makeStore(tasks, groups, currency)}>
       <MemoryRouter initialEntries={[route]}><Tasks /></MemoryRouter>
     </Provider>
   );
@@ -93,7 +101,11 @@ describe('Tasks page - recoverable amount', () => {
 
   it('omits the amount entirely for a task with no recoverable value (no "A$0.00" noise)', () => {
     renderTasks();
-    expect(screen.queryByText('A$0.00')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Everything else').closest('button'));
+    expect(screen.getByText(/No amount task/)).toBeInTheDocument();
+    // The only A$0.00 allowed is the live loss counter's starting value.
+    const live = screen.getByTestId('live-loss');
+    screen.queryAllByText('A$0.00').forEach(el => expect(live.contains(el)).toBe(true));
   });
 
   it('sums the recoverable amount per bucket', () => {
@@ -270,5 +282,203 @@ describe('Tasks page - CSV export', () => {
     const zeroRow = lines.find(l => l.includes('No amount task'));
     expect(zeroRow).not.toContain('A$0.00');
     expect(zeroRow).toMatch(/,,,Pending$/);
+  });
+});
+
+describe('Tasks page - Fix it', () => {
+  it('no longer shows the completion progress line', () => {
+    renderTasks();
+    expect(screen.queryByText(/You've completed/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/keep going/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/still pending/)).not.toBeInTheDocument();
+  });
+
+  it('shows a Fix it button that opens the three packages', () => {
+    renderTasks();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Fix it/ }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('$25')).toBeInTheDocument();
+    expect(within(dialog).getByText('$299')).toBeInTheDocument();
+    expect(within(dialog).getByText('$499')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Purchase' })).toBeDisabled();
+  });
+
+  it('shows the total number of tasks', () => {
+    renderTasks();
+    expect(screen.getByTestId('total-tasks')).toHaveTextContent(String(TASKS.length));
+    expect(screen.getByText(/tasks in total/)).toBeInTheDocument();
+  });
+
+  it('uses the singular for one task, and explains an empty list', () => {
+    renderTasks([makeTask({ taskId: 'only', asin: 'B1' })]);
+    expect(screen.getByText(/task in total/)).toBeInTheDocument();
+    expect(screen.queryByText(/tasks in total/)).not.toBeInTheDocument();
+  });
+
+  it('counts finished tasks in the total too', () => {
+    renderTasks([makeTask({ taskId: 'a', asin: 'B1' }), { ...makeTask({ taskId: 'b', asin: 'B2' }), status: 'completed' }]);
+    expect(screen.getByTestId('total-tasks')).toHaveTextContent('2');
+  });
+
+  // Nothing to fix means nothing to sell: no button, just the explanation.
+  it('shows the total but no Fix it button when there are no tasks', () => {
+    renderTasks([]);
+    expect(screen.queryByRole('button', { name: /Fix it/ })).not.toBeInTheDocument();
+    expect(screen.getByTestId('total-tasks')).toHaveTextContent('0');
+    expect(screen.getByText(/No tasks yet/)).toBeInTheDocument();
+  });
+
+  it('closes the packages again', () => {
+    renderTasks();
+    fireEvent.click(screen.getByRole('button', { name: /Fix it/ }));
+    fireEvent.click(screen.getByLabelText('Close'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});
+
+describe('Tasks page - urgency card', () => {
+  // TASKS: A$1,007.03 of open recoverable money over 9 tasks.
+  //   profitability:negative_profit 583.07, conversion:no_buybox 214.55 (est.),
+  //   sponsoredAds:wasted_spend_keyword 187.41, search_term_zero_sales 17, high_acos 5
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('leads with the monthly loss in large type', () => {
+    renderTasks(TASKS, { groups: GROUPS });
+    const headline = screen.getByTestId('urgency-headline');
+    expect(headline).toHaveTextContent('A$1,007every month');
+    expect(headline).not.toHaveTextContent('(est.)');
+    expect(screen.getByText(/across/)).toHaveTextContent('across 9 open tasks');
+  });
+
+  it('projects the same rate per day, over the rest of the month, and per year', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2026, 9, 14)); // Oct 14 -> 18 days left including today
+    renderTasks();
+    expect(screen.getByText('Every day').previousSibling).toHaveTextContent('A$34');
+    expect(screen.getByText('Rest of this month (18d)').previousSibling).toHaveTextContent('A$604');
+    expect(screen.getByText('Over a year').previousSibling).toHaveTextContent('A$12,084');
+  });
+
+  it('runs a live counter of money lost while the page is open', () => {
+    vi.useFakeTimers();
+    renderTasks();
+    const counter = screen.getByTestId('live-loss');
+    expect(counter).toHaveTextContent('A$0.00 lost since you opened this page');
+    // A$1,007.03 / 30 / 86400 per second -> A$1.40 after an hour.
+    act(() => { vi.advanceTimersByTime(3600 * 1000); });
+    expect(counter).toHaveTextContent('A$1.40');
+  });
+
+  it('hides the live counter when the rate is too small to move', () => {
+    renderTasks([makeTask({ taskId: 's', asin: 'B1', amount: 300 })]); // ~A$0.42/hour
+    expect(screen.queryByTestId('live-loss')).not.toBeInTheDocument();
+  });
+
+  it('lists the top leaks with their monthly amounts, biggest first', () => {
+    renderTasks(TASKS, { groups: GROUPS });
+    const leaking = screen.getByText(/Where it.s leaking/).parentElement;
+    const text = leaking.textContent;
+    expect(text).toContain('Products losing money on every sale');
+    expect(text).toContain('A$583/mo');
+    expect(text).toContain('Keywords spending money with zero sales');
+    expect(text.indexOf('Products losing')).toBeLessThan(text.indexOf('Keywords spending'));
+  });
+
+  it('marks the headline (est.) when most of the money is estimated', () => {
+    renderTasks([makeTask({ taskId: 'e', asin: 'B1', amount: 100, amountIsEstimated: true })]);
+    expect(screen.getByTestId('urgency-headline')).toHaveTextContent('(est.)');
+  });
+
+  it('says the figures are estimates from the last 30 days, not guarantees', () => {
+    renderTasks();
+    expect(screen.getByText(/last 30 days of your data.*not guarantees/)).toBeInTheDocument();
+  });
+
+  it('shows capital stuck in stock separately, never inside the monthly figure', () => {
+    renderTasks([
+      makeTask({ taskId: 'm', asin: 'B1', amount: 300 }),
+      { ...makeTask({ taskId: 'c', asin: 'B2', errorCategory: 'inventory', errorType: 'stranded_inventory' }), capitalAmount: 5000 },
+    ]);
+    expect(screen.getByTestId('urgency-headline')).toHaveTextContent('A$300every month');
+    expect(screen.getByText(/of capital stuck in unsellable stock/)).toHaveTextContent('A$5,000');
+  });
+
+  it('falls back to a task count when no open task carries money', () => {
+    renderTasks([makeTask({ taskId: 'r', asin: 'B1', errorCategory: 'ranking', errorType: 'titleresult_char_limit', amount: 0 })]);
+    expect(screen.getByTestId('urgency-headline')).toHaveTextContent('1 open task is holding back your listings');
+    expect(screen.queryByText(/every month/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Fix it/ })).toBeInTheDocument();
+  });
+
+  it('has no separate risk banner: account risk lives inside the one card', () => {
+    renderTasks([
+      ...TASKS,
+      makeTask({ taskId: 'acct', asin: 'ACCOUNT', errorCategory: 'account', errorType: 'PolicyViolations', impactWeight: 90 }),
+    ]);
+    const card = screen.getByRole('region', { name: 'What your open tasks are costing you' });
+    const risk = within(card).getByRole('alert');
+    expect(risk).toHaveTextContent('1 issue puts your selling account at risk');
+    expect(risk).toHaveTextContent('Policy Violations');
+    expect(within(card).getByText(/account at risk/i, { selector: 'span' })).toBeInTheDocument();
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+  });
+
+  it('shows no account risk when no account issue is open', () => {
+    renderTasks();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  // Prices are USD; the anchor compares them with recovered money.
+  it('anchors the trial price against what the top tasks are worth (USD only)', () => {
+    renderTasks([makeTask({ taskId: 'u1', asin: 'B1', amount: 900 }), makeTask({ taskId: 'u2', asin: 'B2', amount: 600 })], { currency: '$' });
+    const anchor = screen.getByTestId('price-anchor');
+    expect(anchor).toHaveTextContent(`Your top 2 tasks are worth ~$1,500/mo. Our team will fix them for $25 — less than one day of what you're losing.`);
+  });
+
+  it('uses a plain price line for non-USD marketplaces', () => {
+    renderTasks();
+    expect(screen.getByTestId('price-anchor')).toHaveTextContent('Plans start at $25 for 2 tasks.');
+  });
+
+  it('offers "Have us fix these" on the High impact bucket', () => {
+    renderTasks();
+    const header = screen.getByText('High impact').closest('div');
+    fireEvent.click(within(header).getByRole('button', { name: 'Have us fix these' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('passes the open tasks to the packages, so each shows its value', () => {
+    renderTasks();
+    fireEvent.click(screen.getByRole('button', { name: /Fix it now/ }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Recommended for your 9 tasks')).toBeInTheDocument();
+    expect(within(dialog).getByText('$25').closest('button')).toHaveTextContent('Covers your top 2 tasks, worth ~A$787/mo');
+  });
+
+  it('records where the packages were opened from', () => {
+    window.gtag = vi.fn();
+    renderTasks();
+    fireEvent.click(screen.getByRole('button', { name: /Fix it now/ }));
+    expect(window.gtag).toHaveBeenCalledWith('event', 'fixit_open', {
+      source: 'hero', open_tasks: 9, monthly_recoverable: 1007.03,
+    });
+    delete window.gtag;
+  });
+});
+
+describe('Tasks page - Fix it switched off (the default)', () => {
+  beforeEach(() => { flags.FIX_IT_PACKAGES = false; });
+  afterEach(() => { flags.FIX_IT_PACKAGES = true; });
+
+  it('shows no Fix it buttons and no price line, but keeps what the tasks cost', () => {
+    renderTasks();
+    expect(screen.queryByRole('button', { name: /Fix it now/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Have us fix these' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('price-anchor')).not.toBeInTheDocument();
+    expect(screen.getByTestId('urgency-headline')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });

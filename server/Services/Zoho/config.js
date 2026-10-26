@@ -46,6 +46,18 @@ const SCOPES = [
     // the error body.
     'ZohoProjects.tasks.ALL',
     /**
+     * Deliverables on the client's Status page (added 2026-10-27). The team's files are
+     * WorkDrive attachments on task comments: their download_url / preview_url answered
+     * 401 INVALID_OAUTHSCOPE with the scopes above, so reading them needs WorkDrive. The
+     * project Documents/folders endpoints (v2 and v3) refused the same way without
+     * documents.READ. Both read-only. They take effect at the next Reconnect; until then
+     * the existing grant keeps working and downloads just stay unavailable. Verify with
+     * server/scripts/probeZohoDeliverables.js after the reconnect — a typo here consents
+     * cleanly and then fails exactly as if the scope were missing (see tasklists below).
+     */
+    'WorkDrive.files.READ',
+    'ZohoProjects.documents.READ',
+    /**
      * ALL, not READ: accepting a client's task request files it under a tasklist, and
      * creates one when nothing fits.
      *
@@ -195,6 +207,15 @@ const PATHS = {
 const ATTACHMENTS_ENABLED = process.env.ZOHO_TASK_ATTACHMENTS_ENABLED === 'true';
 
 /**
+ * Deliverables on the client's Status page: the team's files and share links on a task, as
+ * judged by the AI (Services/AI/ZohoDeliverableClassifier.js). DEFAULT OFF — off, the sync
+ * still stores file metadata (no extra Zoho calls; it is in the comments payload already) but
+ * makes no AI calls and the page shows nothing new. Downloads also need the WorkDrive scope
+ * below and a reconnect (probed 2026-10-27: download_url answers INVALID_OAUTHSCOPE without it).
+ */
+const DELIVERABLES_ENABLED = process.env.ZOHO_DELIVERABLES_ENABLED === 'true';
+
+/**
  * Zoho Billing is a different product on a different host from Projects.
  *
  * Projects has its own dedicated hostname (projectsapi.zoho.com); Billing is served
@@ -241,6 +262,7 @@ const REQUEST_TIMEOUT_MS = 20000;
 const TOKEN_REQUEST_TIMEOUT_MS = 15000;
 
 module.exports = {
+    DELIVERABLES_ENABLED,
     getCredentials,
     SCOPES,
     ATTACHMENTS_ENABLED,

@@ -4,6 +4,12 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import axiosInstance from "../../config/axios.config";
 import sellerQILogo from '../../assets/Logo/sellerQILogo.png';
 import { devLog, devWarn } from "../../utils/devLogger.js";
+import {
+  pendingOnboardingTrip,
+  completeAmazonTrip,
+  errorMessage,
+  CHECKLIST_PATH,
+} from "../../utils/multiMarketplaceOnboarding.js";
 
 const FetchingTokens = () => {
   const [showAccessText, setShowAccessText] = useState(true);
@@ -338,13 +344,36 @@ const FetchingTokens = () => {
       }
     }
 
+    // Multi-marketplace onboarding trips carry a server-issued state we remember; they go
+    // back to the connect checklist instead of the single-marketplace flow below.
+    const onboardingTrip = pendingOnboardingTrip(state);
+    if (onboardingTrip) {
+      if (hasProcessed.current) return;
+      hasProcessed.current = true;
+      const code = onboardingTrip.kind === 'spapi' ? authCode : amazonAdsAuthCode;
+      if (!code) {
+        navigate(CHECKLIST_PATH, { replace: true, state: { error: 'Amazon did not complete the connection. Please try again.' } });
+        return;
+      }
+      completeAmazonTrip({ kind: onboardingTrip.kind, state, authCode: code, sellingPartnerId })
+        .then((result) => navigate(CHECKLIST_PATH, {
+          replace: true,
+          state: { justConnected: { kind: onboardingTrip.kind, region: result?.region } },
+        }))
+        .catch((err) => navigate(CHECKLIST_PATH, {
+          replace: true,
+          state: { error: errorMessage(err, 'Could not finish connecting to Amazon. Please try again.') },
+        }));
+      return;
+    }
+
     // Check which OAuth flow we're processing based on localStorage flag
     if (localStorage.getItem('amazonAdsLoading') === 'true') {
       generateAmazonAdsTokens();
     } else {
       generateTokens();
     }
-  }, [authCode, state, sellingPartnerId, navigate]);
+  }, [authCode, amazonAdsAuthCode, state, sellingPartnerId, navigate]);
 
   // Hexagonal rotation animation
   const hexRotateVariants = {

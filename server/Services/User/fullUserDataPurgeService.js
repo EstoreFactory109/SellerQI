@@ -65,6 +65,7 @@ const ProductWiseFBADataItem = require('../../models/inventory/ProductWiseFBADat
 const GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE = require('../../models/inventory/GET_FBA_FULFILLMENT_INBOUND_NONCOMPLAIANCE_DATA.js');
 const EmailLogs = require('../../models/system/EmailLogsModel.js');
 const UserAccountLogs = require('../../models/system/ErrorLogs.js');
+const UserPageView = require('../../models/system/UserPageViewModel.js');
 
 const ListingItemsKeyword = require('../../models/products/ListingItemsKeywordModel.js');
 const ListingItems = require('../../models/products/GetListingItemsModel.js');
@@ -83,6 +84,7 @@ const ProductWiseSales = require('../../models/products/ProductWiseSalesModel.js
 const OrderAndRevenue = require('../../models/products/OrderAndRevenueModel.js');
 const FBAReimbursements = require('../../models/finance/FBAReimbursementsModel.js');
 const AgencySeller = require('../../models/user-auth/AgencySellerModel.js');
+const RegionGrant = require('../../models/user-auth/RegionGrantModel.js');
 const DataFetchTracking = require('../../models/system/DataFetchTrackingModel.js');
 const AccountHistory = require('../../models/user-auth/AccountHistory.js');
 const LedgerDetailView = require('../../models/finance/LedgerDetailViewModel.js');
@@ -92,6 +94,15 @@ const APlusPremium = require('../../models/seller-performance/APlusPremiumModel.
 const CompetitiveOffers = require('../../models/products/CompetitiveOffersModel.js');
 const SuppressedListings = require('../../models/products/SuppressedListingsModel.js');
 const RemovalOrders = require('../../models/inventory/RemovalOrdersModel.js');
+const CustomerReturns = require('../../models/inventory/CustomerReturnsModel.js');
+const TaskActionLog = require('../../models/MCP/TaskActionLogModel.js');
+const ListingChangeEvent = require('../../models/products/ListingChangeEventModel.js');
+const RefundOrder = require('../../models/finance/RefundOrderModel.js');
+const AdsTargetSnapshot = require('../../models/amazon-ads/AdsTargetSnapshotModel.js');
+const WeeklySignals = require('../../models/products/WeeklySignalsModel.js');
+const RemovalReceipt = require('../../models/inventory/RemovalReceiptModel.js');
+const BrandOfferSnapshot = require('../../models/products/BrandOfferSnapshotModel.js');
+const AuthorizedReseller = require('../../models/products/AuthorizedResellerModel.js');
 const NumberOfProductReviews = require('../../models/seller-performance/NumberOfProductReviewsModel.js');
 // Alert.js exports a map of discriminators, not a model. Importing the module
 // object made `Alert.deleteMany` undefined, so every alert purge threw and was
@@ -149,6 +160,8 @@ const collectionsWithUser = [
     // Members of this seller account. They have no data of their own; without the
     // account they belong to, their invitations and sign-ins are meaningless.
     { model: AccountMember, key: 'owner' },
+    // Holds Amazon refresh tokens from multi-marketplace onboarding.
+    { model: RegionGrant, key: 'User' },
     { model: ListingItemsKeyword, key: 'User' },
     { model: ListingItems, key: 'User' },
     { model: BuyBoxData, key: 'User' },
@@ -177,6 +190,15 @@ const collectionsWithUser = [
     { model: CompetitiveOffers, key: 'User' },
     { model: SuppressedListings, key: 'User' },
     { model: RemovalOrders, key: 'User' },
+    { model: CustomerReturns, key: 'User' },
+    { model: TaskActionLog, key: 'userId' },
+    { model: ListingChangeEvent, key: 'User' },
+    { model: RefundOrder, key: 'User' },
+    { model: AdsTargetSnapshot, key: 'userId' },
+    { model: WeeklySignals, key: 'User' },
+    { model: RemovalReceipt, key: 'User' },
+    { model: BrandOfferSnapshot, key: 'User' },
+    { model: AuthorizedReseller, key: 'User' },
     { model: NumberOfProductReviews, key: 'User' },
     { model: Alert, key: 'User' },
     { model: GET_FBA_INVENTORY_PLANNING_DATA, key: 'User' },
@@ -268,6 +290,7 @@ const collectionsWithUserId = [
     { model: ProductWiseFBADataItem, key: 'userId' },
     { model: GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE, key: 'userId' },
     { model: UserAccountLogs, key: 'userId' },
+    { model: UserPageView, key: 'userId' },
     { model: ListingFixStatus, key: 'userId' },
     { model: WhatsAppLink, key: 'userId' },
 ];

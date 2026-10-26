@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useSelector } from 'react-redux';
-import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X, Send, Loader2 } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
@@ -23,7 +22,6 @@ const SUGGESTIONS = [
  *   empty box. Matches the existing suggestion chips, which also send on click.
  */
 const QMatePanel = ({ isOpen, onClose, initialQuestion = null }) => {
-  const navigate = useNavigate();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -104,11 +102,6 @@ const QMatePanel = ({ isOpen, onClose, initialQuestion = null }) => {
     // sendMessage is stable enough here; re-running on it would double-send.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, initialQuestion]);
-
-  const goToFullChat = () => {
-    onClose();
-    navigate('/seller-central-checker/qmate');
-  };
 
   return (
     <AnimatePresence>
@@ -221,9 +214,6 @@ const QMatePanel = ({ isOpen, onClose, initialQuestion = null }) => {
               </form>
               <div className="flex items-center justify-between mt-2">
                 <span className="text-[11px]" style={{ color: COLORS.textMuted }}>QMate can make mistakes — check important info.</span>
-                <button type="button" onClick={goToFullChat} className="text-[11px] font-medium" style={{ color: '#7EA8F8' }}>
-                  Open full chat →
-                </button>
               </div>
             </div>
           </motion.div>

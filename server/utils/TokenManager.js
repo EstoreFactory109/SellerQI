@@ -1,5 +1,6 @@
 const { generateAccessToken } = require('../Services/Sp_API/GenerateTokens.js');
 const { generateAdsAccessToken } = require('../Services/AmazonAds/GenerateToken.js');
+const crypto = require('crypto');
 const logger = require('./Logger.js');
 
 /**
@@ -16,8 +17,28 @@ const TOKEN_ENTRY_TTL_MS = Math.max(
 
 class TokenManager {
     constructor() {
-        this.tokens = new Map(); // Store tokens by userId
-        this.refreshPromises = new Map(); // Prevent concurrent refresh attempts
+        this.tokens = new Map(); // Store tokens by keyFor(userId, refresh tokens)
+        this.refreshPromises = new Map(); // Prevent concurrent refresh attempts, same key
+    }
+
+    /**
+     * Cache key for one set of Amazon credentials.
+     *
+     * WHY NOT userId ALONE. One user can have marketplaces in several Amazon regions, each with
+     * its own refresh tokens (and their first fetches, or the daily run, process them in parallel
+     * in the same worker). Keyed by userId, the second region's setTokens overwrote the first's
+     * access tokens, and the first region's next call was sent with the other region's token.
+     * Keying by the refresh tokens separates regions; countries in one region share their tokens,
+     * so they still share one entry. The refresh tokens are hashed, not used raw, in the key.
+     * With no refresh token at all the key is the userId, as before.
+     */
+    keyFor(userId, spRefreshToken, adsRefreshToken) {
+        if (!spRefreshToken && !adsRefreshToken) return String(userId);
+        const fingerprint = crypto.createHash('sha256')
+            .update(`${spRefreshToken || ''}\n${adsRefreshToken || ''}`)
+            .digest('hex')
+            .slice(0, 16);
+        return `${userId}:${fingerprint}`;
     }
 
     /**
@@ -45,7 +66,7 @@ class TokenManager {
     setTokens(userId, spApiToken, adsToken, spRefreshToken, adsRefreshToken) {
         const now = Date.now();
         this._evictStaleTokens(now);
-        this.tokens.set(userId, {
+        this.tokens.set(this.keyFor(userId, spRefreshToken, adsRefreshToken), {
             spApiToken,
             adsToken,
             spRefreshToken,
@@ -57,13 +78,13 @@ class TokenManager {
     }
 
     // Get current tokens
-    getTokens(userId) {
-        return this.tokens.get(userId);
+    getTokens(userId, spRefreshToken, adsRefreshToken) {
+        return this.tokens.get(this.keyFor(userId, spRefreshToken, adsRefreshToken));
     }
 
     // Check if tokens are near expiry (55 minutes = 3300 seconds)
-    areTokensNearExpiry(userId) {
-        const tokenData = this.tokens.get(userId);
+    areTokensNearExpiry(userId, spRefreshToken, adsRefreshToken) {
+        const tokenData = this.getTokens(userId, spRefreshToken, adsRefreshToken);
         if (!tokenData) return true;
 
         const now = Date.now();
@@ -79,20 +100,21 @@ class TokenManager {
 
     // Refresh both tokens together
     async refreshBothTokens(userId, spRefreshToken, adsRefreshToken) {
-        // Prevent concurrent refresh attempts for the same user
-        if (this.refreshPromises.has(userId)) {
+        // Prevent concurrent refresh attempts for the same credentials
+        const key = this.keyFor(userId, spRefreshToken, adsRefreshToken);
+        if (this.refreshPromises.has(key)) {
             logger.info(`Token refresh already in progress for user ${userId}, waiting...`);
-            return await this.refreshPromises.get(userId);
+            return await this.refreshPromises.get(key);
         }
 
         const refreshPromise = this._performTokenRefresh(userId, spRefreshToken, adsRefreshToken);
-        this.refreshPromises.set(userId, refreshPromise);
+        this.refreshPromises.set(key, refreshPromise);
 
         try {
             const result = await refreshPromise;
             return result;
         } finally {
-            this.refreshPromises.delete(userId);
+            this.refreshPromises.delete(key);
         }
     }
 
@@ -152,18 +174,20 @@ class TokenManager {
             }
 
             // Update stored tokens (only if they were successfully refreshed)
+            const previous = this.getTokens(userId, spRefreshToken, adsRefreshToken);
             this.setTokens(
                 userId, 
-                newSpApiToken || this.getTokens(userId)?.spApiToken, 
-                newAdsToken || this.getTokens(userId)?.adsToken, 
+                newSpApiToken || previous?.spApiToken, 
+                newAdsToken || previous?.adsToken, 
                 spRefreshToken, 
                 adsRefreshToken
             );
 
             logger.info(`Successfully refreshed tokens for user ${userId}: SP-API=${!!newSpApiToken}, Ads=${!!newAdsToken}`);
+            const stored = this.getTokens(userId, spRefreshToken, adsRefreshToken);
             return {
-                spApiToken: newSpApiToken || this.getTokens(userId)?.spApiToken,
-                adsToken: newAdsToken || this.getTokens(userId)?.adsToken
+                spApiToken: stored?.spApiToken,
+                adsToken: stored?.adsToken
             };
 
         } catch (error) {
@@ -280,13 +304,13 @@ class TokenManager {
 
     // Get valid tokens with proactive refresh
     async getValidTokens(userId, spRefreshToken, adsRefreshToken) {
-        let tokenData = this.getTokens(userId);
+        let tokenData = this.getTokens(userId, spRefreshToken, adsRefreshToken);
         
         // If no tokens stored or tokens are near expiry, refresh them
-        if (!tokenData || this.areTokensNearExpiry(userId)) {
+        if (!tokenData || this.areTokensNearExpiry(userId, spRefreshToken, adsRefreshToken)) {
             logger.info(`Proactively refreshing tokens for user ${userId} (${!tokenData ? 'no tokens stored' : 'tokens near expiry'})`);
-            const refreshedTokens = await this.refreshBothTokens(userId, spRefreshToken, adsRefreshToken);
-            tokenData = this.getTokens(userId);
+            await this.refreshBothTokens(userId, spRefreshToken, adsRefreshToken);
+            tokenData = this.getTokens(userId, spRefreshToken, adsRefreshToken);
         }
 
         return {

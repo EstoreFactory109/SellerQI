@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BadgeAlert, ClipboardPlus, Clock8, ChartLine, LaptopMinimalCheck, ChevronRight, Activity, Calendar, DollarSign, Lock, Package, BarChart3, LogOut, Bot, User, UserPlus, Link2, LifeBuoy, CreditCard, Building2, ListChecks, TrendingUp, FileText, MessageSquare, Receipt } from 'lucide-react';
+import { LayoutDashboard, BadgeAlert, ClipboardPlus, Clock8, ChartLine, LaptopMinimalCheck, ChevronRight, Activity, Calendar, DollarSign, Lock, Package, BarChart3, LogOut, Bot, User, UserPlus, Link2, LifeBuoy, CreditCard, Building2, ListChecks, TrendingUp, FileText, MessageSquare, Receipt, Users, Settings } from 'lucide-react';
 import useEsfPageAccess from '../../hooks/useEsfPageAccess.js';
 import { useDispatch, useSelector } from 'react-redux';
 import { logout } from '../../redux/slices/authSlice.js'
@@ -97,7 +97,7 @@ const NavItem = ({ to, icon: Icon, label, isActive: isActiveOverride, locked, on
         const isActive = !!isActiveOverride;
         return (
             <div
-                className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg font-medium text-sm cursor-pointer transition-colors"
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg font-medium text-sm cursor-pointer transition-colors"
                 style={baseStyle({ isActive })}
                 onClick={onClick}
             >
@@ -107,7 +107,7 @@ const NavItem = ({ to, icon: Icon, label, isActive: isActiveOverride, locked, on
     }
 
     return (
-        <NavLink to={to} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg font-medium text-sm transition-colors" style={baseStyle}>
+        <NavLink to={to} className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg font-medium text-sm transition-colors" style={baseStyle}>
             {content}
         </NavLink>
     );
@@ -120,6 +120,28 @@ const NavGroupLabel = ({ children }) => (
     </div>
 );
 
+// A group of pages behind one row. Used for Your Growth Team and Account & Settings.
+// The count pill shows on the row only while it is collapsed (open, it sits on the child itself).
+const NavDropdown = ({ icon, label, open, onToggle, isActive, count, locked, children }) => (
+    <div className="space-y-0.5">
+        <NavItem icon={icon} label={label} isActive={isActive} locked={locked} count={open ? undefined : count} onClick={onToggle} expanded={open} />
+        <AnimatePresence initial={false}>
+            {open && (
+                <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    className="ml-3 pl-2 space-y-0 overflow-hidden [&_a]:!py-1"
+                    style={{ borderLeft: `1px solid ${COLORS.border}` }}
+                >
+                    {children}
+                </motion.div>
+            )}
+        </AnimatePresence>
+    </div>
+);
+
 const dropdownItemClass = "flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm font-medium transition-colors";
 
 const LeftNavSection = () => {
@@ -128,7 +150,6 @@ const LeftNavSection = () => {
     const navigate=useNavigate();
     const location = useLocation();
     const [loader,setLoader]=useState(false)
-    const [sponsoredAdsDropdownOpen, setSponsoredAdsDropdownOpen] = useState(false);
 
     // Get user subscription plan from Redux store
     const user = useSelector((state) => state.Auth?.user);
@@ -232,22 +253,17 @@ const LeftNavSection = () => {
     const currentSettingsTab = searchParams.get('tab') || 'profile';
     const isIssuesPage = location.pathname === '/seller-central-checker/issues';
     const isSettingsPage = location.pathname === '/seller-central-checker/settings';
-    const isPPCDashboardPage = location.pathname === '/seller-central-checker/ppc-dashboard';
-    const isKeywordAnalysisPage = location.pathname === '/seller-central-checker/keyword-analysis';
-    const isSponsoredAdsPage = isPPCDashboardPage || isKeywordAnalysisPage;
-    const isIssuesSection = isIssuesPage || location.pathname === '/seller-central-checker/issues-by-product';
-
-    // Keep sponsored ads dropdown open if we're on any sponsored ads-related page
+    // Two dropdown groups (Your Growth Team, Account & Settings), one open at a time (an accordion) so the
+    // menu always fits the screen.
+    // The group holding the current page opens by itself, so the page is never hidden in a
+    // collapsed group.
+    const isGrowthTeamPage = location.pathname.includes('/client-dashboard') || location.pathname.includes('/estore-factory/');
+    const groupForPath = isGrowthTeamPage ? 'growth' : isSettingsPage ? 'account' : null;
+    const [openGroup, setOpenGroup] = useState(groupForPath);
     React.useEffect(() => {
-        if (isSponsoredAdsPage) {
-            setSponsoredAdsDropdownOpen(true);
-        }
-    }, [isSponsoredAdsPage]);
-
-    // Handle Sponsored Ads button click — just toggles the dropdown, never navigates
-    const handleSponsoredAdsClick = () => {
-        setSponsoredAdsDropdownOpen(!sponsoredAdsDropdownOpen);
-    };
+        if (groupForPath) setOpenGroup(groupForPath);
+    }, [groupForPath]);
+    const toggleGroup = (group) => setOpenGroup((current) => (current === group ? null : group));
 
     const logoutUser=async(e)=>{
         e.preventDefault();
@@ -281,7 +297,7 @@ const LeftNavSection = () => {
                 {/* Top Section - Logo and Navigation */}
                 <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
                     {/* Logo Section - unchanged */}
-                    <div className="w-full px-3 py-4 flex-shrink-0">
+                    <div className="w-full px-3 py-3 flex-shrink-0">
                         <div className="flex items-center justify-center">
                             <img
                                 src={sellerQILogo}
@@ -297,132 +313,40 @@ const LeftNavSection = () => {
 
                     {/* Navigation Section - grouped into categories */}
                     <div className="flex-1 overflow-y-auto scrollbar-hide min-h-0 flex flex-col">
-                    <div className="px-2 py-2 flex flex-col gap-3.5">
+                    <div className="px-2 py-1.5 flex flex-col gap-1.5">
 
-                        {/* Overview */}
-                        <div>
-                            <NavGroupLabel>Overview</NavGroupLabel>
-                            <div className="space-y-0.5">
-                                {(!isLiteUser || isPremiumLocked) && (
-                                    <NavItem to="/seller-central-checker/dashboard" icon={LayoutDashboard} label="Dashboard" locked={isPremiumLocked} />
-                                )}
-                                {(!isLiteUser || isPremiumLocked) && (
-                                    <NavItem to="/seller-central-checker/qmate" icon={Bot} label="Amazon Copilot" locked={isPremiumLocked} tag="AI" />
-                                )}
-                            </div>
-                        </div>
+                        {/* Main pages — no group headings, so the whole menu fits on one screen */}
+                        <div className="space-y-0.5">
+                            {(!isLiteUser || isPremiumLocked) && (
+                                <NavItem to="/seller-central-checker/dashboard" icon={LayoutDashboard} label="Dashboard" locked={isPremiumLocked} />
+                            )}
+                            {(!isLiteUser || isPremiumLocked) && (
+                                <NavItem to="/seller-central-checker/your-products" icon={Package} label="Your Products" locked={isPremiumLocked} count={yourProductsCount} />
+                            )}
+                            {(!isLiteUser || isPremiumLocked) && (
+                                <NavItem to="/seller-central-checker/tasks" icon={ClipboardPlus} label="Tasks" locked={isPremiumLocked} count={pendingTasksCount} countTone="watch" />
+                            )}
 
-                        {/* Optimize */}
-                        <div>
-                            <NavGroupLabel>Optimize</NavGroupLabel>
-                            <div className="space-y-0.5">
-                                {(!isLiteUser || isPremiumLocked) && (
-                                    <NavItem to="/seller-central-checker/your-products" icon={Package} label="Your Products" locked={isPremiumLocked} count={yourProductsCount} />
-                                )}
-                                <NavItem to="/seller-central-checker/pre-analysis" icon={BarChart3} label="Listing Analyzer" />
-
-                                {/* Sponsored Ads with Dropdown */}
-                                {(!isLiteUser || isPremiumLocked) &&
-                                 (isPageAllowed('ppc-dashboard') || isPageAllowed('keyword-analysis')) && (
-                                    <div className="space-y-0.5">
-                                        <NavItem
-                                            icon={LaptopMinimalCheck}
-                                            label="Sponsored Ads"
-                                            isActive={isSponsoredAdsPage}
-                                            locked={isPremiumLocked}
-                                            onClick={handleSponsoredAdsClick}
-                                            expanded={sponsoredAdsDropdownOpen}
-                                        />
-                                        <AnimatePresence>
-                                            {sponsoredAdsDropdownOpen && (
-                                                <motion.div
-                                                    initial={{ opacity: 0, height: 0 }}
-                                                    animate={{ opacity: 1, height: "auto" }}
-                                                    exit={{ opacity: 0, height: 0 }}
-                                                    transition={{ duration: 0.3, ease: "easeInOut", opacity: { duration: 0.2 } }}
-                                                    className="ml-4 space-y-0.5 overflow-hidden"
-                                                >
-                                                    {isPageAllowed('ppc-dashboard') && (
-                                                    <motion.div initial={{ y: -10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }} transition={{ delay: 0.15, duration: 0.2 }}>
-                                                        <NavLink to="/seller-central-checker/ppc-dashboard" className={dropdownItemClass} style={({ isActive }) => dropdownItemStyle(isActive)}>
-                                                            <div className="w-1.5 h-1.5 bg-current rounded-full opacity-60"></div>
-                                                            Campaign Audit
-                                                        </NavLink>
-                                                    </motion.div>
-                                                    )}
-                                                    {isPageAllowed('keyword-analysis') && (
-                                                    <motion.div initial={{ y: -10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }} transition={{ delay: 0.175, duration: 0.2 }}>
-                                                        <NavLink to="/seller-central-checker/keyword-analysis" className={dropdownItemClass} style={({ isActive }) => dropdownItemStyle(isActive)}>
-                                                            <div className="w-1.5 h-1.5 bg-current rounded-full opacity-60"></div>
-                                                            Keyword Opportunities
-                                                        </NavLink>
-                                                    </motion.div>
-                                                    )}
-                                                </motion.div>
-                                            )}
-                                        </AnimatePresence>
-                                    </div>
-                                )}
-
-                                {(!isLiteUser || isPremiumLocked) && (
-                                    <NavItem to="/seller-central-checker/tasks" icon={ClipboardPlus} label="Tasks" locked={isPremiumLocked} count={pendingTasksCount} countTone="watch" />
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Money & Health */}
-                        <div>
-                            <NavGroupLabel>Money &amp; Health</NavGroupLabel>
-                            <div className="space-y-0.5">
-                                {(!isLiteUser || isPremiumLocked) && (
-                                    <NavItem to="/seller-central-checker/profitibility-dashboard" icon={ChartLine} label="Profitibility" locked={isPremiumLocked} />
-                                )}
-                                {(!isLiteUser || isPremiumLocked) && (
-                                    <NavItem to="/seller-central-checker/reimbursement-dashboard" icon={DollarSign} label="Reimbursement" locked={isPremiumLocked} />
-                                )}
-                                {(!isLiteUser || isPremiumLocked) && (
-                                    <NavItem
-                                        to="/seller-central-checker/issues?tab=account"
-                                        icon={BadgeAlert}
-                                        label="Account Issues"
-                                        isActive={isIssuesPage && currentTab === 'account'}
-                                        locked={isPremiumLocked}
-                                        count={accountIssuesCount}
-                                    />
-                                )}
-                                {SHOW_RECENT_ORDERS_NAV && (!isLiteUser || isPremiumLocked) && (
+                            {/* Money & Health pages — listed directly (no heading, no dropdown) */}
+                                <NavItem to="/seller-central-checker/profitibility-dashboard" icon={ChartLine} label="Profitibility" locked={isPremiumLocked} />
+                                <NavItem to="/seller-central-checker/reimbursement-dashboard" icon={DollarSign} label="Reimbursement" locked={isPremiumLocked} />
+                                <NavItem
+                                    to="/seller-central-checker/issues?tab=account"
+                                    icon={BadgeAlert}
+                                    label="Account Issues"
+                                    isActive={isIssuesPage && currentTab === 'account'}
+                                    locked={isPremiumLocked}
+                                    count={accountIssuesCount}
+                                />
+                                {SHOW_RECENT_ORDERS_NAV && (
                                     <NavItem to="/seller-central-checker/review-request" icon={Clock8} label="Review Requests" locked={isPremiumLocked} />
                                 )}
-                            </div>
-                        </div>
-
-                        {/* Ecommerce Calendar - Available for ALL users including LITE - HIDDEN */}
-                        {false && (
-                            <NavLink
-                                to="/seller-central-checker/ecommerce-calendar"
-                                className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg font-medium text-sm transition-colors"
-                            >
-                                {({ isActive }) => (
-                                    <>
-                                        <Calendar className="w-4 h-4 flex-shrink-0" style={{ color: isActive ? COLORS.accent : COLORS.textMuted }} />
-                                        <span className="font-medium">Ecommerce Calendar</span>
-                                    </>
-                                )}
-                            </NavLink>
-                        )}
-
-                        {/* History */}
-                        <div>
-                            <NavGroupLabel>History</NavGroupLabel>
-                            <div className="space-y-0.5">
-                                {(!isLiteUser || isPremiumLocked) && (
-                                    <NavItem to="/seller-central-checker/account-history" icon={Clock8} label="Accounts History" locked={isPremiumLocked} />
-                                )}
+                                <NavItem to="/seller-central-checker/account-history" icon={Clock8} label="Accounts History" locked={isPremiumLocked} />
                                 {/* User Logging - Only for Super Admins */}
                                 {isSuperAdmin && (
                                     <NavLink
                                         to="/seller-central-checker/user-logging"
-                                        className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg font-medium text-sm transition-colors"
+                                        className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg font-medium text-sm transition-colors"
                                         style={({ isActive }) => ({
                                             background: isActive ? 'rgba(239,68,68,.14)' : 'transparent',
                                             color: isActive ? COLORS.fix : COLORS.textSecondary,
@@ -442,90 +366,101 @@ const LeftNavSection = () => {
                                         )}
                                     </NavLink>
                                 )}
-                            </div>
+
+                            {/* Your Growth Team — Estore Factory-managed clients only */}
+                            {isEsfClient && (
+                                <NavDropdown icon={Users} label="Your Growth Team" open={openGroup === 'growth'} onToggle={() => toggleGroup('growth')} isActive={isGrowthTeamPage}>
+                                    <NavItem to="/seller-central-checker/client-dashboard" icon={Building2} label="Overview" />
+                                    <NavItem to="/seller-central-checker/estore-factory/status" icon={ListChecks} label="Status" />
+                                    <NavItem to="/seller-central-checker/estore-factory/untapped" icon={TrendingUp} label="Untapped" />
+                                    <NavItem to="/seller-central-checker/estore-factory/reports" icon={FileText} label="Reports" />
+                                    <NavItem to="/seller-central-checker/estore-factory/messages" icon={MessageSquare} label="Messages" />
+                                    <NavItem to="/seller-central-checker/estore-factory/billing" icon={Receipt} label="Billing" />
+                                </NavDropdown>
+                            )}
+
+                            {/* Account & Settings — hidden for an agency admin viewing a client */}
+                            {!isAgencyAdminViewingClient && (
+                                <NavDropdown icon={Settings} label="Account & Settings" open={openGroup === 'account'} onToggle={() => toggleGroup('account')} isActive={isSettingsPage}>
+                                    <NavItem to="/seller-central-checker/settings?tab=profile" icon={User} label="User Profile" isActive={isSettingsPage && currentSettingsTab === 'profile'} />
+                                    <NavItem to="/seller-central-checker/settings?tab=members" icon={UserPlus} label="Add Member" isActive={isSettingsPage && currentSettingsTab === 'members'} />
+
+                                    {/* Account Integration - Only for PRO users (not AGENCY) */}
+                                    {!isLiteUser && !isAgencyUser && (
+                                        <NavItem to="/seller-central-checker/settings?tab=account-integration" icon={Link2} label="Account Integration" isActive={isSettingsPage && currentSettingsTab === 'account-integration'} />
+                                    )}
+
+                                    {/* Support - Available for non-AGENCY users */}
+                                    {!isAgencyUser && (
+                                        <NavItem to="/seller-central-checker/settings?tab=support" icon={LifeBuoy} label="Support" isActive={isSettingsPage && currentSettingsTab === 'support'} />
+                                    )}
+
+                                    {/* Plans & Billing is hidden from the menu. The page itself still opens from the
+                                        trial banner and the upgrade prompts, which link straight to it. */}
+
+                                    {/* Admin Section - Only for AGENCY users */}
+                                    {isAgencyUser && (
+                                        <>
+                                            <div className="flex items-center gap-2 px-2.5 py-1 mt-1">
+                                                <div className="h-px flex-1" style={{ background: COLORS.border }}></div>
+                                                <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: COLORS.accent }}>Admin</span>
+                                                <div className="h-px flex-1" style={{ background: COLORS.border }}></div>
+                                            </div>
+                                            <NavItem to="/seller-central-checker/settings?tab=admin-user-profile" icon={User} label="Admin User Profile" isActive={isSettingsPage && currentSettingsTab === 'admin-user-profile'} />
+                                            <NavItem to="/seller-central-checker/settings?tab=admin-account-integration" icon={Link2} label="Admin Integrations" isActive={isSettingsPage && currentSettingsTab === 'admin-account-integration'} />
+                                            <NavItem to="/seller-central-checker/settings?tab=admin-plans-billing" icon={CreditCard} label="Admin Billing" isActive={isSettingsPage && currentSettingsTab === 'admin-plans-billing'} />
+                                            <NavItem to="/seller-central-checker/settings?tab=admin-support" icon={LifeBuoy} label="Admin Support" isActive={isSettingsPage && currentSettingsTab === 'admin-support'} />
+                                        </>
+                                    )}
+                                </NavDropdown>
+                            )}
                         </div>
 
-                        {/* Estore Factory - ESF-only pages, kept out of the personal Overview group */}
-                        {isEsfClient && (
-                        <div>
-                            <NavGroupLabel>Estore Factory</NavGroupLabel>
-                            <div className="space-y-0.5">
-                                <NavItem to="/seller-central-checker/client-dashboard" icon={Building2} label="Overview" />
-                                <NavItem to="/seller-central-checker/estore-factory/status" icon={ListChecks} label="Status" />
-                                <NavItem to="/seller-central-checker/estore-factory/untapped" icon={TrendingUp} label="Untapped" />
-                                <NavItem to="/seller-central-checker/estore-factory/reports" icon={FileText} label="Reports" />
-                                <NavItem to="/seller-central-checker/estore-factory/messages" icon={MessageSquare} label="Messages" />
-                                <NavItem to="/seller-central-checker/estore-factory/billing" icon={Receipt} label="Billing" />
-                            </div>
-                        </div>
-                        )}
-
-                        {/* Account & Settings - flat list like the other categories, no dropdown */}
-                        {!isAgencyAdminViewingClient && (
-                        <div>
-                            <NavGroupLabel>Account &amp; Settings</NavGroupLabel>
-                            <div className="space-y-0.5">
-                                <NavItem to="/seller-central-checker/settings?tab=profile" icon={User} label="User Profile" isActive={isSettingsPage && currentSettingsTab === 'profile'} />
-                                <NavItem to="/seller-central-checker/settings?tab=members" icon={UserPlus} label="Add Member" isActive={isSettingsPage && currentSettingsTab === 'members'} />
-
-                                {/* Account Integration - Only for PRO users (not AGENCY) */}
-                                {!isLiteUser && !isAgencyUser && (
-                                    <NavItem to="/seller-central-checker/settings?tab=account-integration" icon={Link2} label="Account Integration" isActive={isSettingsPage && currentSettingsTab === 'account-integration'} />
-                                )}
-
-                                {/* Support - Available for non-AGENCY users */}
-                                {!isAgencyUser && (
-                                    <NavItem to="/seller-central-checker/settings?tab=support" icon={LifeBuoy} label="Support" isActive={isSettingsPage && currentSettingsTab === 'support'} />
-                                )}
-
-                                <NavItem to="/seller-central-checker/settings?tab=plans-billing" icon={CreditCard} label="Plans & Billing" isActive={isSettingsPage && currentSettingsTab === 'plans-billing'} />
-
-                                {/* Admin Section - Only for AGENCY users */}
-                                {isAgencyUser && (
+                        {/* Ecommerce Calendar - Available for ALL users including LITE - HIDDEN */}
+                        {false && (
+                            <NavLink
+                                to="/seller-central-checker/ecommerce-calendar"
+                                className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg font-medium text-sm transition-colors"
+                            >
+                                {({ isActive }) => (
                                     <>
-                                        <div className="flex items-center gap-2 px-2.5 py-1 mt-1.5">
-                                            <div className="h-px flex-1" style={{ background: COLORS.border }}></div>
-                                            <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: COLORS.accent }}>Admin</span>
-                                            <div className="h-px flex-1" style={{ background: COLORS.border }}></div>
-                                        </div>
-                                        <NavItem to="/seller-central-checker/settings?tab=admin-user-profile" icon={User} label="Admin User Profile" isActive={isSettingsPage && currentSettingsTab === 'admin-user-profile'} />
-                                        <NavItem to="/seller-central-checker/settings?tab=admin-account-integration" icon={Link2} label="Admin Integrations" isActive={isSettingsPage && currentSettingsTab === 'admin-account-integration'} />
-                                        <NavItem to="/seller-central-checker/settings?tab=admin-plans-billing" icon={CreditCard} label="Admin Billing" isActive={isSettingsPage && currentSettingsTab === 'admin-plans-billing'} />
-                                        <NavItem to="/seller-central-checker/settings?tab=admin-support" icon={LifeBuoy} label="Admin Support" isActive={isSettingsPage && currentSettingsTab === 'admin-support'} />
+                                        <Calendar className="w-4 h-4 flex-shrink-0" style={{ color: isActive ? COLORS.accent : COLORS.textMuted }} />
+                                        <span className="font-medium">Ecommerce Calendar</span>
                                     </>
                                 )}
-                            </div>
-                        </div>
+                            </NavLink>
                         )}
 
-                        {/* Book Consultation Button - Hidden for agency admin viewing client (kept as its own orange CTA accent, not part of the neutral nav palette) */}
-                        {!isAgencyAdminViewingClient && (
-                        <NavLink
-                            to="/seller-central-checker/consultation"
-                            className="group flex items-center gap-2 px-2.5 py-2 rounded-lg font-medium text-sm cursor-pointer transition-all duration-300 border-2 border-orange-400 text-orange-400 hover:bg-gradient-to-r hover:from-orange-400 hover:to-amber-500 hover:text-black hover:shadow-lg hover:shadow-orange-500/25"
-                        >
-                            <Calendar className="w-4 h-4 flex-shrink-0 text-orange-400 group-hover:text-black transition-colors duration-300" />
-                            <span className="font-semibold flex-1">Need Help?</span>
-                            <div className="w-1.5 h-1.5 bg-orange-400 rounded-full animate-pulse group-hover:bg-yellow-300 transition-colors duration-300"></div>
-                        </NavLink>
-                        )}
-
-                        {/* Logout - Hidden for agency admin viewing client */}
-                        {!isAgencyAdminViewingClient && (
-                        <button
-                            className='group flex items-center gap-2 px-2.5 py-2 rounded-lg font-medium text-sm transition-colors w-full'
-                            style={{ color: COLORS.fix, borderTop: `1px solid ${COLORS.border}`, paddingTop: '10px' }}
-                            onClick={(e)=>logoutUser(e)}
-                        >
-                            <LogOut className="w-4 h-4 flex-shrink-0" style={{ color: COLORS.fix }} />
-                            <span className="font-medium">Log Out</span>
-                            {loader && <BeatLoader color={COLORS.fix} size={6} />}
-                        </button>
-                        )}
                     </div>
                 </div>
                 </div>
             </div>
+
+            {/* Pinned at the end of the menu, below the page list: Need Help? and Log Out.
+                Hidden for an agency admin viewing a client. */}
+            {!isAgencyAdminViewingClient && (
+            <div className="flex-shrink-0 px-2 pt-2 pb-1 flex flex-col gap-1.5" style={{ borderTop: `1px solid ${COLORS.border}` }}>
+                {/* Book Consultation - its own orange CTA accent, not part of the neutral nav palette */}
+                <NavLink
+                    to="/seller-central-checker/consultation"
+                    className="group flex items-center gap-2 px-2.5 py-1 rounded-lg font-medium text-sm cursor-pointer transition-all duration-300 border-2 border-orange-400 text-orange-400 hover:bg-gradient-to-r hover:from-orange-400 hover:to-amber-500 hover:text-black hover:shadow-lg hover:shadow-orange-500/25"
+                >
+                    <Calendar className="w-4 h-4 flex-shrink-0 text-orange-400 group-hover:text-black transition-colors duration-300" />
+                    <span className="font-semibold flex-1">Need Help?</span>
+                    <div className="w-1.5 h-1.5 bg-orange-400 rounded-full animate-pulse group-hover:bg-yellow-300 transition-colors duration-300"></div>
+                </NavLink>
+
+                <button
+                    className='group flex items-center gap-2 px-2.5 py-1 rounded-lg font-medium text-sm transition-colors w-full'
+                    style={{ color: COLORS.fix }}
+                    onClick={(e)=>logoutUser(e)}
+                >
+                    <LogOut className="w-4 h-4 flex-shrink-0" style={{ color: COLORS.fix }} />
+                    <span className="font-medium">Log Out</span>
+                    {loader && <BeatLoader color={COLORS.fix} size={6} />}
+                </button>
+            </div>
+            )}
 
             {/* Account/plan identity box - pinned at the very bottom, unlike the nav above */}
             <div className="flex-shrink-0 flex items-center gap-2.5 px-4 py-3.5" style={{ borderTop: `1px solid ${COLORS.border}` }}>

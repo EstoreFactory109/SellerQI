@@ -58,16 +58,17 @@ import {
   resetTabPagination
 } from '../../redux/slices/PPCCampaignAnalysisSlice.js';
 import { COLORS, InfoTooltip } from '../../Components/Shared/index.js';
+import CampaignAuditKpis, { useCampaignAuditKpis } from '../../Components/Dashboard/SamePageComponents/CampaignAuditKpis.jsx';
 
 import { parseLocalDate } from '../../utils/dateUtils.js';
 import { shouldUseCalendarDateRange } from '../../utils/totalSalesFilterUrl.js';
 import { getAdsPerformanceVerdict } from '../../utils/adsPerformanceVerdict.js';
-import { computeTacos, formatPercentOrNA } from '../../utils/ppcKpis.js';
 import { usePPCData } from '../../hooks/usePageData.js';
 import { fetchDashboardPhase1 } from '../../redux/slices/PageDataSlice.js';
 import { PageSkeleton, CampaignAnalysisSkeleton } from '../../Components/Skeleton/PageSkeletons.jsx';
 import { SkeletonBar } from '../../Components/Skeleton/Skeleton.jsx';
 import axiosInstance from '../../config/axios.config.js';
+import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitcher.jsx'
 
 // Helper function to get actual end date (yesterday due to 24-hour data delay)
 const getActualEndDate = () => {
@@ -1241,7 +1242,7 @@ const PPCDashboard = () => {
   // LEGACY: Filtered search terms for CSV export only
   const filteredSearchTerms = useMemo(() => {
     if (!computeLegacyData) return [];
-    return aggregatedSearchTerms.filter(term => term.clicks >= 10 && term.sales < 0.01);
+    return aggregatedSearchTerms.filter(term => term.clicks >= 15 && term.sales < 0.01);
   }, [computeLegacyData, aggregatedSearchTerms]);
   
   // Transform the data for the chart — PRIMARY source is the backend
@@ -1818,130 +1819,7 @@ const PPCDashboard = () => {
   // is always the authoritative source for ALL five PPC KPIs over the
   // currently selected window. Legacy slices remain only as zero-data
   // fallbacks for users whose accounts haven't been ingested yet.
-  const kpiData = useMemo(() => {
-    let spend = 0;
-    let ppcSales = 0;
-    let unitsSold = 0;
-    let tacos = null; // null = compute on-frontend if backend didn't provide it
-    let impressions = 0;
-    let clicks = 0;
-    let ctr = null; // null = derive from clicks/impressions
-    let cpc = null;
-    let roas = null;
-
-    if (ppcKPISummary && (ppcKPISummary.spend > 0 || ppcKPISummary.sales > 0 || ppcKPISummary.unitsSold > 0)) {
-      // PRIMARY: date-range aggregate from /api/pagewise/ppc/summary
-      spend = Number(ppcKPISummary.spend || 0);
-      ppcSales = Number(ppcKPISummary.sales || 0);
-      unitsSold = Number(ppcKPISummary.unitsSold || 0);
-      tacos = ppcKPISummary.tacos != null ? Number(ppcKPISummary.tacos) : null;
-      impressions = Number(ppcKPISummary.impressions || 0);
-      clicks = Number(ppcKPISummary.clicks || 0);
-      ctr = ppcKPISummary.ctr != null ? Number(ppcKPISummary.ctr) : null;
-      cpc = ppcKPISummary.cpc != null ? Number(ppcKPISummary.cpc) : null;
-      roas = ppcKPISummary.roas != null ? Number(ppcKPISummary.roas) : null;
-    } else if (ppcSummary?.totalSpend > 0 || ppcSummary?.totalSales > 0) {
-      // Fallback 1: PPCMetrics model rollup (no date filter)
-      spend = Number(ppcSummary.totalSpend || 0);
-      ppcSales = Number(ppcSummary.totalSales || 0);
-      unitsSold = Number(ppcSummary.totalUnits || 0);
-      impressions = Number(ppcSummary.totalImpressions || 0);
-      clicks = Number(ppcSummary.totalClicks || 0);
-    } else {
-      // Fallback 2: legacy sponsoredAdsMetrics (e.g. first-load / not-yet-ingested users)
-      const adsPPCSpend = Number(sponsoredAdsMetrics?.totalCost || 0);
-      spend = adsPPCSpend > 0 ? adsPPCSpend : Number(info?.accountFinance?.ProductAdsPayment || 0);
-      ppcSales = Number(sponsoredAdsMetrics?.totalSalesIn30Days || 0);
-      unitsSold = Number(sponsoredAdsMetrics?.totalProductsPurchased || 0);
-      impressions = Number(sponsoredAdsMetrics?.totalImpressions || 0);
-      clicks = Number(sponsoredAdsMetrics?.totalClicks || 0);
-    }
-
-    const acos = ppcSales > 0 ? (spend / ppcSales) * 100 : 0;
-
-    // Real total-sales figure (all channels, same window as PPC sales) — prefer
-    // the backend's own aggregate over back-deriving one from TACoS.
-    // null = no sales data at all (TotalWeeklySale is null with no finance data).
-    let totalSales = ppcKPISummary?.totalSales != null ? Number(ppcKPISummary.totalSales) : null;
-    if (!totalSales) {
-      const totalSalesData = info?.TotalSales;
-      if (Array.isArray(totalSalesData) && totalSalesData.length > 0) {
-        totalSales = totalSalesData.reduce((sum, item) => sum + (parseFloat(item.TotalAmount) || 0), 0);
-      } else if (info?.TotalWeeklySale != null) {
-        totalSales = Number(info.TotalWeeklySale);
-      }
-    }
-
-    // TACoS: prefer the backend value (uses SalesOnlyMetrics aggregated over
-    // the same window as PPC). Only fall back to the locally-derived totalSales
-    // if the backend didn't supply one — and with no sales it is '—', not 0% or ∞.
-    tacos = computeTacos({ backendTacos: tacos, spend, totalSales });
-
-    // Derive engagement KPIs locally if backend didn't supply them (fallback paths).
-    if (ctr == null) ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
-    if (cpc == null) cpc = clicks > 0 ? spend / clicks : 0;
-    if (roas == null) roas = spend > 0 ? ppcSales / spend : 0;
-
-    // Real captions — only shown when there's real data behind them (no invented numbers).
-    const pctOfTotalSales = totalSales > 0 ? (ppcSales / totalSales) * 100 : null;
-    const wastedSpendCaption = totalWastedSpend > 0
-      ? `${formatCurrencyWithLocale(totalWastedSpend, currency)} wasted`
-      : null;
-
-    const primary = [
-      {
-        label: 'PPC Sales',
-        value: formatCurrencyWithLocale(ppcSales, currency),
-        icon: TrendingUp,
-        caption: pctOfTotalSales != null ? `${pctOfTotalSales.toFixed(0)}% of total sales` : null,
-      },
-      {
-        label: 'Ad Spend',
-        value: formatCurrencyWithLocale(spend, currency),
-        icon: DollarSign,
-        caption: wastedSpendCaption,
-        captionColor: wastedSpendCaption ? '#F87171' : undefined,
-      },
-      {
-        label: 'ACoS',
-        value: `${acos.toFixed(2)}%`,
-        icon: Gauge,
-        valueColor: acos > 25 ? '#F87171' : undefined,
-        caption: 'Healthy: under 25%',
-        tooltip: 'Ad cost as % of ad sales. Lower is better.',
-      },
-      {
-        label: 'TACoS',
-        value: formatPercentOrNA(tacos),
-        icon: Gauge,
-        valueColor: tacos != null && tacos > 15 ? COLORS.watch : undefined,
-        caption: 'Share of total sales driven by ads',
-        tooltip: 'Ad spend as % of total sales — how dependent the business is on ads.',
-      },
-      {
-        label: 'ROAS',
-        value: `${roas.toFixed(2)}x`,
-        icon: Target,
-        valueColor: roas >= 4 ? COLORS.good : undefined,
-        caption: 'Healthy: above 4x',
-        tooltip: 'Return on ad spend — dollars earned per $1 spent.',
-      },
-      {
-        label: 'Units from Ads',
-        value: `${Number(unitsSold || 0).toLocaleString()}`,
-        icon: Package,
-      },
-    ];
-
-    const mini = [
-      { label: 'Impressions', value: `${Number(impressions || 0).toLocaleString()}`, icon: Eye },
-      { label: 'Clicks', value: `${Number(clicks || 0).toLocaleString()}`, icon: MousePointerClick },
-      { label: 'CTR', value: `${Number(ctr || 0).toFixed(2)}%`, icon: Percent },
-      { label: 'CPC', value: formatCurrencyWithLocale(cpc, currency), icon: Coins },
-    ];
-
-    return { primary, mini, roas, spend, wastedSpend: totalWastedSpend };
-  }, [ppcKPISummary, ppcSummary, sponsoredAdsMetrics, info?.TotalSales, info?.TotalWeeklySale, info?.accountFinance, currency, totalWastedSpend]);
+  const kpiData = useCampaignAuditKpis({ ppcKPISummary, ppcSummary, sponsoredAdsMetrics, info, currency, totalWastedSpend });
 
   const formatYAxis = (value) => {
     return formatYAxisCurrency(value, currency);
@@ -2177,6 +2055,7 @@ const PPCDashboard = () => {
             </div>
 
             <div className='flex items-center gap-2'>
+              <MarketplaceSwitcher />
               <div className='relative' ref={CalenderRef}>
                 <button
                   ref={calendarAnchorRef}
@@ -2262,71 +2141,8 @@ const PPCDashboard = () => {
             );
           })()}
 
-          {/* KPI Cards - skeleton when summary loading */}
-          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '10px' }}>
-            {ppcKPISummaryLoading ? (
-              Array.from({ length: 6 }).map((_, index) => (
-                <motion.div
-                  key={`skeleton-${index}`}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3, delay: index * 0.05 }}
-                  className="transition-all duration-300 h-full flex flex-col"
-                  style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: '12px', padding: '14px 16px' }}
-                  aria-hidden
-                >
-                  <div className="mb-2 flex-shrink-0">
-                    <SkeletonBar height="0.75rem" width="70%" className="bg-[#21262d]" />
-                  </div>
-                  <div className="mt-auto">
-                    <SkeletonBar height="1.25rem" width="55%" className="bg-[#21262d]" />
-                  </div>
-                </motion.div>
-              ))
-            ) : (
-              kpiData.primary.map((kpi, index) => {
-                const Icon = kpi.icon;
-                return (
-                  <motion.div
-                    key={kpi.label}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.5, delay: index * 0.1 }}
-                    className="transition-all duration-300 h-full flex flex-col"
-                    style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: '12px', padding: '14px 16px' }}
-                  >
-                    <div className="flex items-center gap-1.5 mb-2 flex-shrink-0">
-                      {Icon && <Icon className="w-3.5 h-3.5 flex-shrink-0" style={{ color: COLORS.textMuted }} />}
-                      <span className="text-[11px] font-semibold uppercase tracking-wide truncate flex-1" style={{ color: COLORS.textSecondary }}>{kpi.label}</span>
-                      {kpi.tooltip && <InfoTooltip text={kpi.tooltip} />}
-                    </div>
-                    <div className="mt-auto">
-                      <div className="text-[22px] font-bold leading-tight truncate" style={{ color: kpi.valueColor || COLORS.textPrimary }}>{kpi.value}</div>
-                      {kpi.caption && (
-                        <div className="text-xs mt-1.5 truncate" style={{ color: kpi.captionColor || COLORS.textMuted }}>{kpi.caption}</div>
-                      )}
-                    </div>
-                  </motion.div>
-                );
-              })
-            )}
-          </div>
-
-          {/* Engagement mini-stats */}
-          {!ppcKPISummaryLoading && (
-            <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px', marginBottom: '10px' }}>
-              {kpiData.mini.map((kpi) => (
-                <div
-                  key={kpi.label}
-                  className="flex items-baseline justify-between"
-                  style={{ border: `1px solid ${COLORS.border}`, borderRadius: '10px', background: COLORS.bgBase, padding: '11px 14px' }}
-                >
-                  <span className="text-xs" style={{ color: COLORS.textSecondary }}>{kpi.label}</span>
-                  <span className="text-[15px] font-semibold" style={{ color: COLORS.textPrimary }}>{kpi.value}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          {/* KPI Cards + engagement mini-stats - skeleton when summary loading */}
+          <CampaignAuditKpis kpiData={kpiData} loading={ppcKPISummaryLoading} />
 
           {/* Performance Chart - skeleton when summary loading */}
           <motion.div

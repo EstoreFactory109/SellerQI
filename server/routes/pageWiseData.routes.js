@@ -6,6 +6,7 @@
  */
 
 const express = require('express');
+const { getMarketplaceComparisonData } = require('../controllers/analytics/MarketplaceComparisonController.js');
 const router = express.Router();
 const auth = require('../middlewares/Auth/auth.js');
 const { getLocation, getLocationOptional } = require('../middlewares/Auth/getLocation.js');
@@ -31,6 +32,11 @@ const {
     getReimbursementData,
     getTasksData,
     updateTaskStatus,
+    approveTaskActions,
+    confirmListingChanges,
+    getLeadTime,
+    setLeadTime,
+    getFeesAtRisk,
     getInventoryData,
     getAsinWiseSalesData,
     getYourProductsData,
@@ -101,6 +107,7 @@ const { getEsfClientDashboard } = require('../controllers/analytics/EsfClientDas
 const { getEsfProjectStatus } = require('../controllers/analytics/EsfProjectStatusController.js');
 const { getEsfUntapped } = require('../controllers/analytics/EsfUntappedController.js');
 const { postEsfTaskReply } = require('../controllers/analytics/EsfProjectReplyController.js');
+const { downloadDeliverable, downloadTaskZip, setDeliverableVisibility } = require('../controllers/analytics/EsfDeliverablesController.js');
 const { getEsfBilling, downloadEsfInvoice } = require('../controllers/analytics/EsfBillingController.js');
 const { getEsfMessages, getEsfMessageThread, postEsfMessageReply, postEsfNewTicket, downloadEsfAttachment, postEsfTaskRequest } = require('../controllers/analytics/EsfClientMessagesController.js');
 const gmailUpload = require('../middlewares/multer/gmailUpload.js');
@@ -171,6 +178,8 @@ router.get('/top-products', auth, getLocation, analyseDataCache(3600, 'top-produ
 
 // ===== MULTI-PHASE DASHBOARD (Progressive Loading) =====
 // Phase 1: Instant (~50ms) - precomputed error counts, product counts, date range
+// Every marketplace side by side, each in its own currency (caches internally; behind ALL_MARKETPLACES_DASHBOARD_ENABLED).
+router.get('/dashboard-marketplaces', auth, getMarketplaceComparisonData);
 router.get('/dashboard-phase1', auth, getLocation, analyseDataCache(3600, 'dashboard-phase1'), getDashboardPhase1);
 
 // Phase 2: Core (~150ms) - sales totals, account health, finance summary, PPC summary
@@ -409,6 +418,15 @@ router.post(
     postEsfTaskReply
 );
 
+/**
+ * Deliverables the team produced (Zoho WorkDrive files on task comments), for the Status page.
+ * Binary responses: deliberately NOT behind analyseDataCache, which would corrupt them, as
+ * with the invoice PDF route. Scoped to the client's own project inside the controller.
+ */
+router.get('/esf/project-status/files/:key', auth, esfClientOnly, downloadDeliverable);
+router.get('/esf/project-status/tasks/:taskId/files.zip', auth, esfClientOnly, downloadTaskZip);
+router.post('/esf/project-status/files/:key/visibility', auth, esfClientOnly, setDeliverableVisibility);
+
 // ===== ISSUES PAGE =====
 // Returns issues summary data
 router.get('/issues', auth, getLocation, analyseDataCache(3600, 'issues'), getIssuesData);
@@ -580,6 +598,19 @@ router.get('/tasks', auth, getLocation, getTasksData);
 
 // Update task status
 router.put('/tasks/status', auth, validateTaskStatusBody, updateTaskStatus);
+
+// Make the changes the seller approved on the Tasks page (TaskActionService).
+router.post('/tasks/approve-actions', auth, getLocation, approveTaskActions);
+
+// "I made this change" on a detail-page-changed task.
+router.post('/tasks/listing-changes/confirm', auth, getLocation, confirmListingChanges);
+
+// The seller's replenishment lead time for this marketplace.
+router.get('/inventory/lead-time', auth, getLocation, getLeadTime);
+router.put('/inventory/lead-time', auth, getLocation, setLeadTime);
+
+// Fees at Risk dashboard tile (the fees we have data for).
+router.get('/dashboard/fees-at-risk', auth, getLocation, getFeesAtRisk);
 
 // ===== PPC METRICS (from PPCMetrics Model) =====
 // Get latest PPC metrics for dashboards

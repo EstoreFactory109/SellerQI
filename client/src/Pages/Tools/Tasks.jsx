@@ -10,9 +10,10 @@ import {
   ChevronRight,
   Info
 } from 'lucide-react';
-import { fetchTasks, updateTaskStatus } from '../../redux/slices/TasksSlice.js';
+import { fetchTasks, updateTaskStatus, toggleTaskStatusLocal } from '../../redux/slices/TasksSlice.js';
 import { TasksPageSkeleton } from '../../Components/Skeleton/PageSkeletons.jsx';
 import { COLORS } from '../../Components/Shared/index.js';
+
 import { formatCurrencyWithLocale } from '../../utils/currencyUtils.js';
 import {
   BUCKET,
@@ -24,6 +25,24 @@ import {
   groupKeyForTask,
   indexGroups
 } from '../../utils/taskBuckets.js';
+import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitcher.jsx'
+import FixItPackagesModal from '../../Components/Tasks/FixItPackagesModal.jsx';
+import FixItUrgencyCard from '../../Components/Tasks/FixItUrgencyCard.jsx';
+import { FIX_IT_PACKAGES } from '../../utils/featureFlags.js';
+import RemovalReceiptModal from '../../Components/Tasks/RemovalReceiptModal.jsx';
+import ApproveChangeModal from '../../Components/Tasks/ApproveChangeModal.jsx';
+import BulkApproveModal from '../../Components/Tasks/BulkApproveModal.jsx';
+import axiosInstance from '../../config/axios.config.js';
+import { openTasksOf, summarizeUrgency } from '../../utils/taskUrgency.js';
+import { trackEvent } from '../../utils/analytics.js';
+
+// tasks-logics.xlsx priority labels. Word + colour, never colour alone.
+const PRIORITY_BADGE = {
+  P1: { label: 'Urgent', fg: COLORS.fix, bg: 'rgba(239,68,68,.14)', title: 'Fix now: account, money with a deadline, or sales stopped' },
+  P2: { label: 'High', fg: COLORS.watch, bg: 'rgba(245,166,35,.14)', title: 'Fix this week: losing sales or at risk' },
+  P3: { label: 'Medium', fg: COLORS.accent, bg: 'rgba(59,130,246,.14)', title: 'Worth fixing: costs money or performance' },
+  P4: { label: 'Low', fg: COLORS.textMuted, bg: 'rgba(107,116,134,.14)', title: 'Polish when you have time' },
+};
 
 // Helper function to escape special regex characters in currency symbol
 const escapeRegex = (str) => {
@@ -203,6 +222,74 @@ const FormattedHowToSolve = ({ text }) => {
 export default function Tasks() {
   const dispatch = useDispatch();
   const [searchQuery, setSearchQuery] = useState('');
+  const [showFixIt, setShowFixIt] = useState(false);
+  // The task whose "approve this change on Amazon" dialog is open.
+  const [approveTask, setApproveTask] = useState(null);
+  // Several selected ad changes approved together.
+  const [bulkApproveTasks, setBulkApproveTasks] = useState(null);
+  // The removal_confirm_receipt task whose "Confirm what arrived" form is open.
+  const [receiptTaskId, setReceiptTaskId] = useState(null);
+  // Replenishment lead time for this marketplace (server default 45 days when unset).
+  const [leadTime, setLeadTime] = useState(null); // { days, defaultDays }
+  const [leadTimeEditing, setLeadTimeEditing] = useState(false);
+  const [leadTimeInput, setLeadTimeInput] = useState('');
+  const [leadTimeNote, setLeadTimeNote] = useState(null);
+  const saveLeadTime = async () => {
+    const days = leadTimeInput.trim() === '' ? null : Number(leadTimeInput);
+    if (days !== null && !(Number.isInteger(days) && days >= 1 && days <= 365)) {
+      setLeadTimeNote({ ok: false, text: 'Enter a whole number of days from 1 to 365.' });
+      return;
+    }
+    try {
+      await axiosInstance.put('/api/pagewise/inventory/lead-time', { days }, { withCredentials: true });
+      setLeadTime((lt) => ({ ...(lt || {}), days }));
+      setLeadTimeEditing(false);
+      setLeadTimeNote({ ok: true, text: 'Saved. Replenishment tasks use it from the next data refresh.' });
+      trackEvent('lead_time_set', { days: days ?? 'default' });
+    } catch (err) {
+      setLeadTimeNote({ ok: false, text: err.response?.data?.message || 'Could not save. Please try again.' });
+    }
+  };
+  // detail_page_changed: the seller says the change was theirs.
+  const [mineSaving, setMineSaving] = useState(null);
+  const markChangeAsMine = async (item) => {
+    setMineSaving(item.taskId);
+    try {
+      await axiosInstance.post('/api/pagewise/tasks/listing-changes/confirm', { taskId: item.taskId }, { withCredentials: true });
+      trackEvent('listing_change_confirm_mine');
+      if (!completedTasks.has(item.taskId)) dispatch(toggleTaskStatusLocal({ taskId: item.taskId }));
+    } catch (err) {
+      setResellerNotes((n) => ({ ...n, [item.taskId]: { ok: false, text: err.response?.data?.message || 'Could not save. Please try again.' } }));
+    } finally {
+      setMineSaving(null);
+    }
+  };
+  // new_seller_on_brand tasks: which one is saving, and per-task messages.
+  const [resellerSaving, setResellerSaving] = useState(null);
+  const [resellerNotes, setResellerNotes] = useState({});
+
+  // "These are my authorised resellers": whitelist the task's new seller IDs, so they
+  // are never flagged again on this marketplace, and tick the task off.
+  const markAuthorisedResellers = async (item) => {
+    const sellerIds = item.renderData?.sellerIds || [];
+    if (sellerIds.length === 0) return;
+    const ok = window.confirm(
+      `Mark ${sellerIds.length === 1 ? `seller ${sellerIds[0]}` : `sellers ${sellerIds.join(', ')}`} as authorised to sell your products? ` +
+      'You will not be warned about them again on this marketplace.'
+    );
+    if (!ok) return;
+    setResellerSaving(item.taskId);
+    try {
+      await axiosInstance.post('/api/authorized-resellers', { sellerIds }, { withCredentials: true });
+      setResellerNotes((n) => ({ ...n, [item.taskId]: { ok: true, text: 'Saved as authorised. They will not be flagged again.' } }));
+      trackEvent('authorized_resellers_add', { count: sellerIds.length });
+      if (!completedTasks.has(item.taskId)) dispatch(updateTaskStatus({ taskId: item.taskId, status: 'completed' }));
+    } catch (err) {
+      setResellerNotes((n) => ({ ...n, [item.taskId]: { ok: false, text: err.response?.data?.message || 'Could not save. Please try again.' } }));
+    } finally {
+      setResellerSaving(null);
+    }
+  };
   // Deep-link support: the Dashboard's "Top things to fix" links here with
   // ?category=&type= so a seller lands on the individual rows that make up the
   // figure they just clicked, instead of the unfiltered list.
@@ -266,6 +353,15 @@ export default function Tasks() {
     }
   }, [userData?.userId, tasks.length, dispatch]);
 
+  // The lead time replenishment tasks are judged on, only when there are any.
+  const hasReplenishTasks = tasks.some((t) => String(t.errorType || '').startsWith('replenishment_needed'));
+  useEffect(() => {
+    if (!hasReplenishTasks || leadTime) return;
+    axiosInstance.get('/api/pagewise/inventory/lead-time', { withCredentials: true })
+      .then((res) => setLeadTime(res.data?.data || null))
+      .catch(() => {});
+  }, [hasReplenishTasks, leadTime]);
+
   // Create a map of ASIN to product details for quick lookup
   const productDetailsMap = useMemo(() => {
     const map = new Map();
@@ -320,11 +416,20 @@ export default function Tasks() {
         stillDetected: !!task.stillDetected,
         amount: task.amount || 0,
         amountIsEstimated: !!task.amountIsEstimated,
+        // Stock value stuck in FBA: a one-off figure, never added to monthly money.
+        capitalAmount: task.capitalAmount || 0,
         // Effort/impact come from the server (TaskPrioritizationService) and drive
         // the bucketing below.
         effortMinutes: task.effortMinutes,
         impactWeight: task.impactWeight,
-        isQuickWin: !!task.isQuickWin
+        isQuickWin: !!task.isQuickWin,
+        // tasks-logics.xlsx P1-P4 (server TaskPriorityLevels).
+        priorityLevel: task.priorityLevel || null,
+        // A fix SellerQI can make on Amazon once the seller approves it (server TaskActionService).
+        proposedAction: task.proposedAction || null,
+        // Task-specific details some actions need (e.g. the seller IDs on a
+        // new_seller_on_brand task).
+        renderData: task.renderData || null
       };
     });
   }, [tasks, productDetailsMap]);
@@ -451,6 +556,21 @@ export default function Tasks() {
   );
 
   const groupsById = useMemo(() => indexGroups(taskGroups), [taskGroups]);
+
+  // What leaving the open tasks undone costs: drives the hero, the risk banner and
+  // the per-package value in the Fix it modal. Open tasks only, so ticking one off
+  // lowers the figures straight away.
+  const openTasks = useMemo(() => openTasksOf(transformedTasks, completedTasks), [transformedTasks, completedTasks]);
+  const urgency = useMemo(() => summarizeUrgency(openTasks, taskGroups), [openTasks, taskGroups]);
+
+  const openFixIt = (source) => {
+    trackEvent('fixit_open', {
+      source,
+      open_tasks: urgency.openCount,
+      monthly_recoverable: urgency.monthlyRecoverable,
+    });
+    setShowFixIt(true);
+  };
 
   // "1 of 93 keywords spending money with zero sales · A$187.41 total" — shown on
   // highlighted rows so a A$26.37 task reads as part of the Dashboard's A$187.41,
@@ -617,6 +737,7 @@ export default function Tasks() {
           <p className="m-0 text-sm" style={{ color: COLORS.textSecondary }}>Every issue we found, turned into something you can actually do. Start at the top.</p>
         </div>
         <div className='flex items-center gap-2 flex-shrink-0'>
+          <MarketplaceSwitcher />
           {/* Export Button */}
           <button
             onClick={exportToCSV}
@@ -640,24 +761,15 @@ export default function Tasks() {
         </div>
       </div>
 
-      {/* Progress summary - real completion numbers, real percentage */}
-      <div className="rounded-2xl border px-5 py-[18px] mb-3" style={{ background: COLORS.surface, borderColor: COLORS.border }}>
-        <div className="flex items-baseline justify-between gap-4 mb-[11px]">
-          <div className="text-[15px] font-semibold" style={{ color: COLORS.textPrimary }}>
-            You&apos;ve completed <span className="tabular-nums">{completedTasksCount}</span> of {totalTasksCount}
-            {totalTasksCount === 0 ? '' : pendingTasksCount > 0 ? ' — keep going.' : ' — nice work.'}
-          </div>
-          <div className="text-[13px] tabular-nums flex-shrink-0" style={{ color: COLORS.textSecondary }}>{progressPct}%</div>
-        </div>
-        <div className="h-[7px] rounded overflow-hidden" style={{ background: COLORS.border }}>
-          <div className="h-full rounded transition-all duration-300" style={{ background: COLORS.good, width: `${progressWidth}%` }} />
-        </div>
-        <div className="mt-[11px] text-xs" style={{ color: COLORS.textMuted }}>
-          {totalTasksCount === 0
-            ? 'No tasks yet — tasks are generated from the issues we find on your account.'
-            : `${pendingTasksCount} task${pendingTasksCount === 1 ? '' : 's'} still pending.`}
-        </div>
-      </div>
+      {/* One card: what the open tasks cost, what threatens the account, and the
+          way out. Every figure comes from the seller's own open tasks. */}
+      <FixItUrgencyCard
+        urgency={urgency}
+        openTasks={openTasks}
+        totalTasks={transformedTasks.length}
+        currency={currency}
+        onFix={FIX_IT_PACKAGES ? openFixIt : undefined}
+      />
 
       {/* Renew date tip - always visible (same style as Your Products page) */}
       <div className="bg-blue-500/10 border-l-4 border-blue-500/40 p-2 mb-2 rounded-r space-y-3">
@@ -827,6 +939,16 @@ export default function Tasks() {
                   <span className="text-[13px] flex-shrink-0" style={{ color: COLORS.textSecondary }}>{pendingInGroup} pending</span>
                   <ChevronRight size={16} style={{ color: COLORS.textMuted, transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s', flexShrink: 0 }} />
                 </button>
+                {FIX_IT_PACKAGES && groupId === BUCKET.HIGH_IMPACT && pendingInGroup > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => openFixIt('bucket')}
+                    className="flex-none px-[11px] py-1.5 rounded-lg text-xs font-semibold transition-opacity hover:opacity-90 whitespace-nowrap"
+                    style={{ background: 'rgba(59,130,246,.14)', color: COLORS.accent }}
+                  >
+                    Have us fix these
+                  </button>
+                )}
                 {items.length > 0 && (
                   <button
                     type="button"
@@ -903,6 +1025,95 @@ export default function Tasks() {
                           <span style={{ color: COLORS.textMuted }}>How to fix — </span>
                           <FormattedHowToSolve text={item.howToSolve} />
                         </div>
+                        {item.errorType === 'new_seller_on_brand' && (item.renderData?.sellerIds || []).length > 0 && (
+                          <div className="mt-2.5 flex items-center gap-2.5 flex-wrap">
+                            {!completedTasks.has(item.taskId) && (
+                              <button
+                                type="button"
+                                onClick={() => markAuthorisedResellers(item)}
+                                disabled={resellerSaving === item.taskId}
+                                className="px-3.5 py-1.5 rounded-lg text-xs font-semibold border disabled:opacity-50"
+                                style={{ borderColor: COLORS.border, color: COLORS.textPrimary, background: 'transparent' }}
+                              >
+                                {resellerSaving === item.taskId
+                                  ? 'Saving…'
+                                  : (item.renderData.sellerIds.length === 1 ? 'This is my authorised reseller' : 'These are my authorised resellers')}
+                              </button>
+                            )}
+                            {resellerNotes[item.taskId] && (
+                              <span role="status" className="text-xs" style={{ color: resellerNotes[item.taskId].ok ? COLORS.good : COLORS.watch }}>
+                                {resellerNotes[item.taskId].text}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {String(item.errorType || '').startsWith('replenishment_needed') && leadTime && (
+                          <div className="mt-2 text-xs flex flex-wrap items-center gap-2" style={{ color: COLORS.textSecondary }}>
+                            {leadTimeEditing ? (
+                              <>
+                                <label htmlFor={`lead-time-${item.taskId}`}>Your lead time (days):</label>
+                                <input
+                                  id={`lead-time-${item.taskId}`}
+                                  type="number"
+                                  min="1"
+                                  max="365"
+                                  value={leadTimeInput}
+                                  onChange={(e) => setLeadTimeInput(e.target.value)}
+                                  placeholder={String(leadTime.defaultDays)}
+                                  className="w-20 rounded border px-2 py-0.5"
+                                  style={{ borderColor: COLORS.border, background: COLORS.surfaceElevated, color: COLORS.textPrimary }}
+                                />
+                                <button type="button" onClick={saveLeadTime} className="px-2 py-0.5 rounded text-xs font-semibold" style={{ background: COLORS.accent, color: '#061021' }}>Save</button>
+                                <button type="button" onClick={() => setLeadTimeEditing(false)} className="px-2 py-0.5 rounded text-xs border" style={{ borderColor: COLORS.border, color: COLORS.textSecondary, background: 'transparent' }}>Cancel</button>
+                              </>
+                            ) : (
+                              <>
+                                <span>Judged on a {leadTime.days || leadTime.defaultDays}-day lead time{leadTime.days ? '' : ' (default)'} plus 14 days.</span>
+                                <button type="button" onClick={() => { setLeadTimeInput(leadTime.days ? String(leadTime.days) : ''); setLeadTimeEditing(true); setLeadTimeNote(null); }} className="underline" style={{ color: COLORS.accent, background: 'transparent' }}>
+                                  Set your lead time
+                                </button>
+                              </>
+                            )}
+                            {leadTimeNote && <span role="status" style={{ color: leadTimeNote.ok ? COLORS.good : COLORS.watch }}>{leadTimeNote.text}</span>}
+                          </div>
+                        )}
+                        {item.errorType === 'detail_page_changed' && !completedTasks.has(item.taskId) && (
+                          <button
+                            type="button"
+                            onClick={() => markChangeAsMine(item)}
+                            disabled={mineSaving === item.taskId}
+                            className="mt-2.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold border"
+                            style={{ borderColor: COLORS.border, color: COLORS.textPrimary, background: 'transparent' }}
+                          >
+                            {mineSaving === item.taskId ? 'Saving…' : 'I made this change'}
+                          </button>
+                        )}
+                        {item.errorType === 'detail_page_changed' && resellerNotes[item.taskId] && (
+                          <span role="status" className="block mt-1 text-xs" style={{ color: COLORS.watch }}>{resellerNotes[item.taskId].text}</span>
+                        )}
+                        {item.proposedAction && !item.proposedAction.done && !completedTasks.has(item.taskId) && (
+                          <button
+                            type="button"
+                            onClick={() => { setApproveTask(item); trackEvent('task_action_open', { type: item.proposedAction.type }); }}
+                            className="mt-2.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold"
+                            style={{ background: COLORS.accent, color: '#061021' }}
+                          >
+                            {item.proposedAction.label}…
+                          </button>
+                        )}
+                        {item.proposedAction?.done && (
+                          <span className="mt-2.5 inline-block text-xs" style={{ color: COLORS.good }}>Changed on Amazon after your approval.</span>
+                        )}
+                        {item.errorType === 'removal_confirm_receipt' && !completedTasks.has(item.taskId) && (
+                          <button
+                            type="button"
+                            onClick={() => { setReceiptTaskId(item.taskId); trackEvent('removal_receipts_open'); }}
+                            className="mt-2.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold"
+                            style={{ background: COLORS.accent, color: '#061021' }}
+                          >
+                            Confirm what arrived
+                          </button>
+                        )}
                         {groupId !== BUCKET.EVERYTHING_ELSE && getGroupContext(item) && (
                           <div className="text-[11px] mt-1.5" style={{ color: COLORS.textMuted }}>
                             {getGroupContext(item)}
@@ -910,6 +1121,15 @@ export default function Tasks() {
                         )}
                       </div>
                       <div className="flex-none text-right flex flex-col items-end gap-1.5">
+                        {PRIORITY_BADGE[item.priorityLevel] && (
+                          <span
+                            className="inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
+                            title={PRIORITY_BADGE[item.priorityLevel].title}
+                            style={{ background: PRIORITY_BADGE[item.priorityLevel].bg, color: PRIORITY_BADGE[item.priorityLevel].fg }}
+                          >
+                            {item.priorityLevel} {PRIORITY_BADGE[item.priorityLevel].label}
+                          </span>
+                        )}
                         {item.amount > 0 && (
                           <span className="text-sm font-bold tabular-nums whitespace-nowrap" style={{ color: COLORS.good }}>
                             {formatCurrencyWithLocale(item.amount, currency)}{item.amountIsEstimated ? '*' : ''}
@@ -995,6 +1215,20 @@ export default function Tasks() {
           >
             Export selected
           </button>
+          {(() => {
+            const approvable = transformedTasks.filter((t) => selectedTaskIds.has(t.taskId) && t.proposedAction && !t.proposedAction.editable
+              && !t.proposedAction.done && !completedTasks.has(t.taskId));
+            return approvable.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => { setBulkApproveTasks(approvable); trackEvent('task_action_bulk_open', { count: approvable.length }); }}
+                className="px-3 py-2 rounded-lg text-[13px] border transition-colors"
+                style={{ borderColor: COLORS.accent, color: COLORS.textPrimary, background: 'transparent' }}
+              >
+                Approve {approvable.length} change{approvable.length === 1 ? '' : 's'}…
+              </button>
+            ) : null;
+          })()}
           <button
             type="button"
             onClick={markSelectedComplete}
@@ -1006,6 +1240,39 @@ export default function Tasks() {
         </div>
       )}
       </div>
+
+      <FixItPackagesModal
+        open={showFixIt}
+        onClose={() => setShowFixIt(false)}
+        openTasks={openTasks}
+        currency={currency}
+      />
+
+      <BulkApproveModal
+        tasks={bulkApproveTasks}
+        onClose={() => setBulkApproveTasks(null)}
+        onApproved={(taskId) => {
+          if (!completedTasks.has(taskId)) dispatch(toggleTaskStatusLocal({ taskId }));
+        }}
+      />
+      <ApproveChangeModal
+        task={approveTask}
+        onClose={() => setApproveTask(null)}
+        // The server marks the task done; mirror it locally without a second write.
+        onApproved={(taskId) => {
+          if (!completedTasks.has(taskId)) dispatch(toggleTaskStatusLocal({ taskId }));
+        }}
+      />
+      <RemovalReceiptModal
+        open={!!receiptTaskId}
+        onClose={() => setReceiptTaskId(null)}
+        // Answered: the ask is done. Any shortfall comes back as its own claim task.
+        onConfirmed={() => {
+          if (receiptTaskId && !completedTasks.has(receiptTaskId)) {
+            dispatch(updateTaskStatus({ taskId: receiptTaskId, status: 'completed' }));
+          }
+        }}
+      />
     </div>
   );
 }

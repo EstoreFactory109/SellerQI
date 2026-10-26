@@ -33,6 +33,9 @@ const ZohoOpportunityMatchService = require('../AI/ZohoOpportunityMatchService.j
 const ZohoProjectsService = require('./ZohoProjectsService.js');
 const { mapWithConcurrency } = ZohoProjectsService;
 const ZohoTaskSummaryService = require('../AI/ZohoTaskSummaryService.js');
+const { classifyDeliverables } = require('../AI/ZohoDeliverableClassifier.js');
+const { candidatesForTask } = require('./zohoDeliverables.js');
+const { DELIVERABLES_ENABLED } = require('./config.js');
 const { parseOpportunity, PARSER_VERSION } = require('../AI/UntappedParserService.js');
 const ZohoAuth = require('./ZohoAuth.js');
 const { ApiError } = require('../../utils/ApiError.js');
@@ -102,7 +105,7 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
     // summary instead of paying to regenerate identical text.
     const existing = tasks.length
         ? await ZohoProjectTask.find({ projectId, taskId: { $in: tasks.map((t) => t.id) } })
-            .select('taskId commentSummary waitingOnClient team').lean()
+            .select('taskId commentSummary waitingOnClient team deliverableDecisions').lean()
         : [];
     const priorByTask = new Map(existing.map((row) => [row.taskId, {
         ...(row.commentSummary || {}),
@@ -124,6 +127,26 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
         });
     });
     const summaryByTask = new Map(tasks.map((task, i) => [task.id, summaries[i]]));
+
+    // Deliverables: which of the team's files and links the client should get. Only when the
+    // feature is on; an unchanged file reuses its stored verdict, so this is cheap after the
+    // first run. A failure never blocks the sync — the task just keeps its old verdicts.
+    const decisionsByTask = new Map();
+    if (DELIVERABLES_ENABLED) {
+        const priorDecisions = new Map(existing.map((row) => [row.taskId, row.deliverableDecisions || []]));
+        const decided = await mapWithConcurrency(tasks, SUMMARY_CONCURRENCY, async (task) => {
+            const candidates = candidatesForTask({
+                comments: (task.comments || []).map((c) => ({ ...c, commentId: c.id })),
+            });
+            try {
+                return await classifyDeliverables(task, candidates, priorDecisions.get(task.id));
+            } catch (error) {
+                logger.warn(`[ZohoTaskSync] deliverables not classified for task ${task.id}: ${error.message}`);
+                return null;
+            }
+        });
+        tasks.forEach((task, i) => { if (decided[i]) decisionsByTask.set(task.id, decided[i]); });
+    }
 
     if (tasks.length) {
         // One round trip for the whole project rather than a write per task.
@@ -188,7 +211,11 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
                                 authorName: c.authorName,
                                 createdAt: c.createdAt,
                                 attachmentCount: c.attachmentCount,
+                                attachments: c.attachments || [],
+                                links: c.links || [],
+                                authorIsClient: Boolean(c.authorIsClient),
                             })),
+                            ...(decisionsByTask.has(task.id) ? { deliverableDecisions: decisionsByTask.get(task.id) } : {}),
                             syncedAt: new Date(),
                         },
                     },

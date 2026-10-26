@@ -15,7 +15,10 @@ const asyncHandler = require('../../utils/AsyncHandler.js');
 const logger = require('../../utils/Logger.js');
 const UserModel = require('../../models/user-auth/userModel.js');
 const ZohoTaskSync = require('../../Services/Zoho/ZohoTaskSync.js');
-const { ATTACHMENTS_ENABLED } = require('../../Services/Zoho/config.js');
+const zohoConfig = require('../../Services/Zoho/config.js');
+const { ATTACHMENTS_ENABLED } = zohoConfig;
+const { candidatesForTask, isShown } = require('../../Services/Zoho/zohoDeliverables.js');
+const { classifyActor } = require('../../Services/Activity/actor.js');
 const { latestLine } = require('../../Services/AI/ZohoTaskSummaryService.js');
 
 /**
@@ -30,7 +33,46 @@ const { latestLine } = require('../../Services/AI/ZohoTaskSummaryService.js');
  *
  * Also never ships portalId or any Zoho identifier the client has no use for.
  */
-const toClientTask = (task) => {
+/**
+ * The task's deliverables: the team's files and share links the client should get.
+ *
+ * Clients see only what is shown (an AI "yes", or a staff "show"). ESF staff and the super
+ * admin, when logged in as the client, also see what is hidden and why, so they can correct
+ * the AI. Never ships a Zoho URL for a file — files are fetched through our own download
+ * endpoint; links are the team's own share links and open directly.
+ */
+const deliverablesFor = (task, { staffView = false } = {}) => {
+    if (!zohoConfig.DELIVERABLES_ENABLED) return [];
+    const decisions = new Map((task.deliverableDecisions || []).map((d) => [d.key, d]));
+    const overrides = new Map((task.deliverableOverrides || []).map((o) => [o.key, o.visibility]));
+    return candidatesForTask(task)
+        .map((c) => {
+            const decision = decisions.get(c.key);
+            const override = overrides.get(c.key) || null;
+            const shown = isShown(decision?.decision, override);
+            return {
+                key: c.key,
+                kind: c.kind,
+                name: c.name,
+                mimeType: c.mimeType || null,
+                size: c.size || null,
+                addedAt: c.addedAt || null,
+                ...(c.kind === 'link' ? { url: c.url } : {}),
+                ...(staffView ? {
+                    shown,
+                    aiDecision: decision?.decision || 'pending',
+                    aiReason: decision?.reason || null,
+                    override,
+                } : {}),
+                _shown: shown,
+            };
+        })
+        .filter((d) => staffView || d._shown)
+        .map(({ _shown, ...d }) => d)
+        .sort((a, b) => new Date(a.addedAt || 0) - new Date(b.addedAt || 0));
+};
+
+const toClientTask = (task, { staffView = false } = {}) => {
     const comments = task.comments || [];
     const latest = comments.reduce(
         (newest, c) => (!newest || new Date(c.createdAt || 0) > new Date(newest.createdAt || 0) ? c : newest),
@@ -75,6 +117,7 @@ const toClientTask = (task) => {
                 attachments: (r.attachments || []).filter((a) => a.uploaded).map((a) => a.name),
             }))
             .sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0)),
+        deliverables: deliverablesFor(task, { staffView }),
     };
 };
 
@@ -174,7 +217,13 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
 
         const board = await ZohoTaskSync.getTaskBoard(projectId);
 
-        const inProgress = board.inProgress.map(toClientTask);
+        // ESF staff / super admin logged in as this client also see hidden deliverables and
+        // can correct the AI; the client never does.
+        const actor = zohoConfig.DELIVERABLES_ENABLED ? await classifyActor(req) : { kind: 'owner' };
+        const staffView = ['esf_staff', 'super_admin'].includes(actor.kind);
+        const view = (t) => toClientTask(t, { staffView });
+
+        const inProgress = board.inProgress.map(view);
 
         /**
          * Coming up is two different things in one list: work the team has actually
@@ -189,7 +238,7 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
          * what is already underway.
          */
         const comingUp = [
-            ...board.comingUp.map(toClientTask).map((t) => ({ ...t, source: 'scheduled' })),
+            ...board.comingUp.map(view).map((t) => ({ ...t, source: 'scheduled' })),
             ...(board.suggested || []).map((s) => ({
                 id: `suggested:${s.candidateId}`,
                 name: s.title,
@@ -238,7 +287,9 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
             waitingOnYou,
             inProgress,
             comingUp,
-            completed: board.completed.map(toClientTask),
+            completed: board.completed.map(view),
+            deliverablesEnabled: zohoConfig.DELIVERABLES_ENABLED,
+            canManageDeliverables: zohoConfig.DELIVERABLES_ENABLED && staffView,
             // Surfaced so the page can say how fresh this is — it is a nightly
             // sync, and silently showing day-old data as live would be worse.
             syncedAt: board.syncedAt,
@@ -256,4 +307,4 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
     }
 });
 
-module.exports = { getEsfProjectStatus, toClientTask };
+module.exports = { getEsfProjectStatus, toClientTask, deliverablesFor };

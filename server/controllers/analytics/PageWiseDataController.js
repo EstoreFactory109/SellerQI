@@ -855,6 +855,104 @@ const getTasksData = asyncHandler(async (req, res) => {
 /**
  * Update task status
  */
+/**
+ * POST /api/pagewise/tasks/approve-actions
+ * Body: { taskIds: string[] } — the changes the seller approved on the Tasks page.
+ * Each change is re-derived from the stored task, never taken from the body.
+ */
+const approveTaskActions = asyncHandler(async (req, res) => {
+    const { taskIds, content } = req.body || {};
+    if (!Array.isArray(taskIds) || taskIds.length === 0) {
+        return res.status(400).json(new ApiError(400, 'taskIds is required'));
+    }
+    const TaskActionService = require('../../Services/Calculations/TaskActionService.js');
+    if (taskIds.length > TaskActionService.MAX_ACTIONS_PER_REQUEST) {
+        return res.status(400).json(new ApiError(400, `At most ${TaskActionService.MAX_ACTIONS_PER_REQUEST} changes at a time`));
+    }
+    if (TaskActionService.actionsDisabled()) {
+        return res.status(503).json(new ApiError(503, 'Changes on Amazon are switched off right now'));
+    }
+    const results = await TaskActionService.approveTaskActions({
+        userId: req.userId,
+        country: req.country,
+        region: req.region,
+        taskIds,
+        // Text the seller approved for listing fixes, keyed by taskId; ignored for every other change.
+        content: content && typeof content === 'object' ? content : {},
+        approvedBy: { userId: req.userId, memberId: req.memberId, adminId: req.adminId, superAdminId: req.superAdminId }
+    });
+    return res.status(200).json(new ApiResponse(200, { results }, 'Approved changes processed'));
+});
+
+/**
+ * POST /api/pagewise/tasks/listing-changes/confirm
+ * Body: { taskId } — the seller says a "detail page changed" task's changes were
+ * theirs: those changes are never reported again, and the task is done.
+ */
+const confirmListingChanges = asyncHandler(async (req, res) => {
+    const { taskId } = req.body || {};
+    if (!taskId) return res.status(400).json(new ApiError(400, 'taskId is required'));
+    const TaskItem = require('../../models/MCP/TaskItemModel.js');
+    const ListingChangeEvent = require('../../models/products/ListingChangeEventModel.js');
+    const task = await TaskItem.findOne({ userId: req.userId, country: req.country, region: req.region, taskId, errorType: 'detail_page_changed' }).lean();
+    if (!task) return res.status(404).json(new ApiError(404, 'Task not found'));
+    const ids = (task.renderData?.eventIds || []).filter(Boolean);
+    const updated = ids.length
+        ? await ListingChangeEvent.updateMany({ _id: { $in: ids }, User: req.userId, country: req.country, region: req.region }, { $set: { sellerConfirmed: true } })
+        : { modifiedCount: 0 };
+    await TaskItem.updateOne({ _id: task._id }, { $set: { status: 'completed', completedAt: new Date(), stillDetected: false } });
+    return res.status(200).json(new ApiResponse(200, { confirmed: updated.modifiedCount || 0 }, 'Marked as your change'));
+});
+
+/**
+ * GET / PUT /api/pagewise/inventory/lead-time  Body (PUT): { days: 1-365 | null }
+ * The seller's replenishment lead time for this marketplace; null returns to the
+ * 45-day default. Used from the next data refresh.
+ */
+const getLeadTime = asyncHandler(async (req, res) => {
+    const Seller = require('../../models/user-auth/sellerCentralModel.js');
+    const { REPLENISH_DEFAULT_LEAD_TIME_DAYS } = require('../../Services/Calculations/Inventory_.js');
+    const seller = await Seller.findOne({ User: req.userId }).select('sellerAccount.country sellerAccount.region sellerAccount.replenishLeadTimeDays').lean();
+    const account = (seller?.sellerAccount || []).find(a => a.country === req.country && a.region === req.region);
+    const days = Number(account?.replenishLeadTimeDays) > 0 ? Number(account.replenishLeadTimeDays) : null;
+    return res.status(200).json(new ApiResponse(200, { days, defaultDays: REPLENISH_DEFAULT_LEAD_TIME_DAYS }, 'Lead time'));
+});
+
+const setLeadTime = asyncHandler(async (req, res) => {
+    const raw = req.body?.days;
+    const days = raw === null || raw === '' ? null : Number(raw);
+    if (days !== null && !(Number.isInteger(days) && days >= 1 && days <= 365)) {
+        return res.status(400).json(new ApiError(400, 'Lead time must be a whole number of days from 1 to 365'));
+    }
+    const Seller = require('../../models/user-auth/sellerCentralModel.js');
+    const update = days === null
+        ? { $unset: { 'sellerAccount.$[acct].replenishLeadTimeDays': '' } }
+        : { $set: { 'sellerAccount.$[acct].replenishLeadTimeDays': days } };
+    const result = await Seller.updateOne({ User: req.userId }, update, { arrayFilters: [{ 'acct.country': req.country, 'acct.region': req.region }] });
+    if (!result.matchedCount) return res.status(404).json(new ApiError(404, 'Seller account not found'));
+    return res.status(200).json(new ApiResponse(200, { days }, 'Lead time saved; it applies from the next data refresh'));
+});
+
+/**
+ * GET /api/pagewise/dashboard/fees-at-risk
+ * tasks-logics.xlsx "Fees at Risk" tile, partly: the fees we have data for, from the
+ * newest FBA inventory planning report. Aged inventory surcharge: Amazon's own
+ * estimate (estimated-ais-*), summed. Low-inventory-level fee: products Amazon says
+ * it charges this week and that are not exempt (the report gives no per-unit amount).
+ * Storage utilization: last month's ratio and surcharge from the weekly signals.
+ * Returns processing fees are not included (no threshold data).
+ */
+const getFeesAtRisk = asyncHandler(async (req, res) => {
+    const Planning = require('../../models/inventory/GET_FBA_INVENTORY_PLANNING_DATA_Model.js');
+    const { feesAtRiskFromPlanning } = require('../../Services/Calculations/FeesAtRisk.js');
+    const doc = await Planning.findOne({ User: req.userId, country: req.country, region: req.region })
+        .sort({ createdAt: -1 }).select('createdAt data.asin data.estimated_ais_total data.low_inventory_level_fee_applied data.low_inventory_level_fee_exempt').lean();
+    const signals = await require('../../models/products/WeeklySignalsModel.js')
+        .findOne({ User: req.userId, country: req.country, region: req.region, storageUtilization: { $ne: null }, createdAt: { $gte: new Date(Date.now() - 40 * 24 * 60 * 60 * 1000) } })
+        .sort({ createdAt: -1 }).select('storageUtilization').lean().catch(() => null);
+    return res.status(200).json(new ApiResponse(200, feesAtRiskFromPlanning(doc, new Date(), signals?.storageUtilization), 'Fees at risk'));
+});
+
 const updateTaskStatus = asyncHandler(async (req, res) => {
     const userId = req.userId;
     const { taskId, status } = req.body;
@@ -1504,7 +1602,7 @@ const getNavbarData = asyncHandler(async (req, res) => {
         // Get user data
         // `name`, `selectedPlan` and `isSuperAdminSession` are not fields on this schema,
         // so selecting them yielded undefined for all three.
-        const user = await User.findById(userId).select('firstName lastName email profilePic packageType accessType').lean();
+        const user = await User.findById(userId).select('firstName lastName email profilePic packageType accessType preferredMarketplace').lean();
         
         if (!user) {
             return res.status(404).json(
@@ -1581,7 +1679,11 @@ const getNavbarData = asyncHandler(async (req, res) => {
                 Brand: brandName,
                 accountHealthPercentage,
                 Country,
-                Region
+                Region,
+                // The page switchers' saved default, and where Country/Region came from
+                // (explicit header, cookie, saved preference or primary — see getLocation).
+                PreferredMarketplace: user?.preferredMarketplace?.country ? user.preferredMarketplace : null,
+                MarketplaceSource: req.marketplaceSource || null
             }, "Navbar data retrieved successfully")
         );
 
@@ -2320,73 +2422,9 @@ const getTopOpportunities = asyncHandler(async (req, res) => {
     }
 
     try {
-        const TopOpportunitiesService = require('../../Services/AI/TopOpportunitiesService.js');
-        const stored = await TopOpportunitiesService.getTopOpportunities(userId, country, region);
-
-        if (stored) {
-            return res.status(200).json(
-                new ApiResponse(200, stored, 'Top opportunities fetched successfully')
-            );
-        }
-
-        // Nothing stored yet (e.g. account synced before this feature shipped).
-        // Serve the deterministic ranking so the page still has content.
-        //
-        // This MUST use the same task-derived groups as the stored path. Most
-        // accounts have nothing stored, so if this fell back to a different source
-        // the dashboard would disagree with the Tasks page for almost everyone.
-        const TaskOpportunityGroupsService = require('../../Services/Calculations/TaskOpportunityGroupsService.js');
-        const ranked = await TaskOpportunityGroupsService.getTaskOpportunityGroups(userId, country, region);
-
-        if (!ranked.success) {
-            return res.status(200).json(
-                new ApiResponse(200, {
-                    opportunities: [],
-                    candidatesConsidered: 0,
-                    issuesConsidered: 0,
-                    totalEstimatedRecovery: 0,
-                    usedFallback: true,
-                    fallbackReason: ranked.error || 'No tasks available for this account'
-                }, 'No top opportunities available yet')
-            );
-        }
-
-        const { getCurrencyCode } = require('../../utils/marketplaceCurrency.js');
-        // Pass country so money in the generated prose uses the marketplace's
-        // own currency rather than defaulting to dollars.
-        const opportunities = TopOpportunitiesService.buildDeterministicSelections(
-            ranked.groups,
-            undefined,
-            country
-        );
-
-        // Headline figures come from the per-ASIN rollup, never from summing groups.
-        const rollup = await TaskOpportunityGroupsService.getTopProductsToFix(userId, country, region);
-        const accountFigures = rollup.success
-            ? { potentialProfitImpact: rollup.potentialProfitImpact || 0, capitalTiedUp: rollup.capitalTiedUp || 0 }
-            : { potentialProfitImpact: 0, capitalTiedUp: 0 };
-
-        return res.status(200).json(
-            new ApiResponse(200, {
-                currencyCode: getCurrencyCode(country),
-                opportunities,
-                candidatesConsidered: ranked.groups.length,
-                issuesConsidered: ranked.tasksConsidered,
-                // Sum of the SHOWN opportunities only — a subset, not the headline.
-                totalEstimatedRecovery: Math.round(
-                    opportunities.reduce((sum, o) => sum + (o.amount || 0), 0) * 100
-                ) / 100,
-                // Account-wide and de-duplicated per ASIN. Must come from the rollup,
-                // not from summing groups: a product's profit gap already contains its
-                // wasted ad spend, and that overlap crosses issue types.
-                potentialProfitImpact: accountFigures.potentialProfitImpact,
-                capitalTiedUp: accountFigures.capitalTiedUp,
-                generatedAt: new Date(),
-                source: 'api_fallback',
-                usedFallback: true,
-                fallbackReason: 'Not yet generated by the scheduled pipeline'
-            }, 'Top opportunities computed on the fly (not yet generated)')
-        );
+        const { getTopOpportunitiesForMarketplace } = require('../../Services/Calculations/TopOpportunitiesResolver.js');
+        const { data, message } = await getTopOpportunitiesForMarketplace(userId, country, region);
+        return res.status(200).json(new ApiResponse(200, data, message));
 
     } catch (error) {
         logger.error('Error in getTopOpportunities:', {
@@ -4208,6 +4246,11 @@ const getDashboardPhase3 = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+    getFeesAtRisk,
+    getLeadTime,
+    setLeadTime,
+    confirmListingChanges,
+    approveTaskActions,
     getDashboardData,
     getDashboardSummary,
     getProductCheckerData,

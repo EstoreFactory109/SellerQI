@@ -12,11 +12,9 @@ const logger = require('../../utils/Logger.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const { URIs, marketplaceConfig, spapiRegions } = require('../../controllers/config/config.js');
 const tokenManager = require('../../utils/TokenManager.js');
-const { sendAnalysisReadyEmail } = require('../Email/SendAnalysisReadyEmail.js');
 const LoggingHelper = require('../../utils/LoggingHelper.js');
 const axios = require('axios');
 const userModel = require('../../models/user-auth/userModel.js');
-const { markFirstAnalysisDone } = require('../User/userServices.js');
 const { yieldToEventLoop } = require('../../utils/asyncCsvParser.js');
 
 // Helper function to add timeout to promises
@@ -1695,7 +1693,24 @@ class Integration {
             if (b2bPricingData.length > 0) {
                 await this.updateSellerProductB2BPricing(userId, Country, Region, b2bPricingData);
             }
-            
+
+            // Amazon's issues on ACTIVE listings (GetListingItem already asks for them).
+            // They were fetched and dropped; only inactive SKUs kept theirs. Stored on the
+            // catalogue row like the inactive ones, so the listing-warnings task can read
+            // them. `issues` is left out on purpose: that field belongs to inactive SKUs.
+            const activeListingIssues = genericKeyWordArray
+                .filter(item => item && item.sku && (Array.isArray(item.listingIssues) || item.fulfillmentChannel))
+                .map(item => ({
+                    sku: item.sku,
+                    listingIssues: item.listingIssues,
+                    fulfillmentChannel: item.fulfillmentChannel,
+                    handlingTimeDays: item.handlingTimeDays,
+                    brand: item.brand
+                }));
+            if (activeListingIssues.length > 0) {
+                await this.updateSellerProductIssues(userId, Country, Region, activeListingIssues);
+            }
+
             logger.info("processListingItems ended");
         } catch (listingError) {
             logger.error("Error during listing items processing", {
@@ -1953,6 +1968,7 @@ class Integration {
             // Create a map of SKU to issues for quick lookup (chunked for large datasets)
             const issuesMap = new Map();
             const listingIssuesMap = new Map();
+            const fulfillmentMap = new Map();
             const MAP_BUILD_CHUNK_SIZE = 500;
             for (let i = 0; i < issuesDataArray.length; i++) {
                 const item = issuesDataArray[i];
@@ -1964,6 +1980,10 @@ class Integration {
                 if (Array.isArray(item.listingIssues)) {
                     listingIssuesMap.set(item.sku, item.listingIssues);
                 }
+                // Fulfilment channel and handling time, from the active-SKU listing sync.
+                if (item.fulfillmentChannel) {
+                    fulfillmentMap.set(item.sku, { channel: item.fulfillmentChannel, handlingTimeDays: item.handlingTimeDays, brand: item.brand, bullets: item.bullets, bulletsHash: item.bulletsHash, mainImage: item.mainImage });
+                }
                 // Yield periodically for large arrays
                 if ((i + 1) % MAP_BUILD_CHUNK_SIZE === 0) {
                     await yieldToEventLoop();
@@ -1974,6 +1994,9 @@ class Integration {
             const products = sellerDetails.sellerAccount[accountIndex].products;
             let updatedCount = 0;
             const CHUNK_SIZE = 200;
+            // Bullet, main image and brand changes since the last weekly sync.
+            const { diffWeeklyListing, recordListingChanges } = require('../Calculations/ListingChanges.js');
+            const listingChanges = [];
 
             for (let i = 0; i < products.length; i += CHUNK_SIZE) {
                 const chunk = products.slice(i, Math.min(i + CHUNK_SIZE, products.length));
@@ -1988,12 +2011,23 @@ class Integration {
                     if (listingIssuesMap.has(product.sku)) {
                         product.listingIssues = listingIssuesMap.get(product.sku);
                     }
+                    if (fulfillmentMap.has(product.sku)) {
+                        const f = fulfillmentMap.get(product.sku);
+                        product.fulfillmentChannel = f.channel;
+                        // null = the listing sets no handling time; stored as unset, not 0.
+                        product.handlingTimeDays = Number.isFinite(f.handlingTimeDays) ? f.handlingTimeDays : undefined;
+                        listingChanges.push(...diffWeeklyListing(product, f));
+                        if (f.brand) product.brand = f.brand;
+                        if (f.bulletsHash) product.bulletsHash = f.bulletsHash;
+                        if (f.mainImage) product.mainImage = f.mainImage;
+                    }
                 }
                 // Yield to event loop to allow lock extension
                 await yieldToEventLoop();
             }
 
             await sellerDetails.save();
+            await recordListingChanges(userId, Country, Region, listingChanges);
 
             logger.info("updateSellerProductIssues ended", {
                 updatedCount,
@@ -2147,35 +2181,17 @@ class Integration {
      */
     static async handleSuccess(userId, Country, Region) {
         logger.info("handleSuccess starting");
-        
+
         try {
-            const userInfo = await userModel.findById(userId).select("analyseAccountSuccess email firstName");
-
-            if (userInfo && userInfo.analyseAccountSuccess === 1) {
-                if (userInfo.email && userInfo.firstName) {
-                    const dashboardUrl = process.env.DASHBOARD_URL || `${process.env.CLIENT_BASE_URL}/dashboard`;
-                    const emailSent = await sendAnalysisReadyEmail(
-                        userInfo.email,
-                        userInfo.firstName,
-                        dashboardUrl
-                    );
-
-                    if (emailSent) {
-                        userInfo.analyseAccountSuccess = 0;
-                        await userInfo.save();
-                        
-                        // Mark first analysis as done when email is successfully sent
-                        // This flag indicates the analysis is complete and dashboard is ready
-                        await markFirstAnalysisDone(userId);
-                        logger.info(`FirstAnalysisDone marked as true for user ${userId}`);
-                    }
-                }
-            }
-            
+            // Unlock the dashboard, then send the ready email best-effort. See firstAnalysisReady.js
+            // for why the flag no longer waits for the email.
+            const { completeFirstAnalysis } = require('../User/firstAnalysisReady.js');
+            const { marked } = await completeFirstAnalysis(userId);
+            if (marked) logger.info(`FirstAnalysisDone marked as true for user ${userId}`);
             logger.info("handleSuccess ended");
-        } catch (emailError) {
-            logger.error("Error sending analysis ready email", {
-                error: emailError.message,
+        } catch (error) {
+            logger.error("Error completing first analysis", {
+                error: error.message,
                 userId
             });
         }

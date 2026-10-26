@@ -1,5 +1,11 @@
-// One threshold for every surface: tasks said 7 while the ESF report said 5.
-const MIN_PRODUCT_IMAGES = 5;
+// One threshold for every surface. tasks-logics.xlsx: fewer than 7 images.
+const MIN_PRODUCT_IMAGES = 7;
+
+// tasks-logics.xlsx star rating: under 4.0 is the serious tier (it drops the product out
+// of the "4 stars & up" filter), under 4.3 the mild one; judged only on 20+ ratings.
+const STAR_RATING_SERIOUS = 4.0;
+const STAR_RATING_TARGET = 4.3;
+const STAR_RATING_MIN_COUNT = 20;
 
 // A check that had nothing to judge. Never an issue and never a task: downstream
 // only acts on status "Error", and the Amazon-ready gate only on "Error" too.
@@ -68,10 +74,25 @@ const checkStarRating = (product_star_ratings, product_num_ratings) => {
             HowToSolve: ""
         };
     }
-    if (rating < 4.3) {
+    // A handful of ratings swings on one review: not judged until there are 20.
+    if (hasRatingCount && Number(product_num_ratings) < STAR_RATING_MIN_COUNT) {
+        return {
+            status: NO_DATA,
+            Message: `This product has fewer than ${STAR_RATING_MIN_COUNT} ratings, too few to judge its rating.`,
+            HowToSolve: ""
+        };
+    }
+    if (rating < STAR_RATING_SERIOUS) {
         return {
             status: "Error",
-            Message: "Your product rating is below 4.3 stars. A lower rating can deter potential buyers and negatively impact your product's visibility and sales on Amazon.",
+            Message: `Your product is rated ${rating} stars, below 4.0, which drops it out of shoppers' "4 stars & up" filter and costs visibility and sales.`,
+            HowToSolve: "Read the recent 1- and 2-star reviews for a common complaint and fix it, whether that is the listing (wrong size, misleading images), the packaging, or the product itself. Then keep requesting reviews on every eligible order so new ratings reflect the fix."
+        }
+    }
+    if (rating < STAR_RATING_TARGET) {
+        return {
+            status: "Error",
+            Message: `Your product is rated ${rating} stars, below 4.3. A lower rating can deter potential buyers and negatively impact your product's visibility and sales on Amazon.`,
             HowToSolve: "Investigate the causes of lower ratings by reviewing customer feedback. Address any recurring issues related to product quality, packaging, or discrepancies in the listing description. Enhance the product experience and actively engage with customers to resolve their concerns. Consider making improvements to the product based on feedback and encourage satisfied customers to leave positive reviews."
         }
     } else {
@@ -223,4 +244,7 @@ const checkBrandStory = (productsList) => {
 };
 
 
-module.exports = { checkNumberOfImages, checkIfVideoExists, checkStarRating, checkAPlus, checkProductWithOutBuyBox, checkBrandStory, marketplaceShowsBrandStory, aplusStateOf, MIN_PRODUCT_IMAGES, NO_DATA }
+module.exports = {
+    STAR_RATING_SERIOUS,
+    STAR_RATING_TARGET,
+    STAR_RATING_MIN_COUNT, checkNumberOfImages, checkIfVideoExists, checkStarRating, checkAPlus, checkProductWithOutBuyBox, checkBrandStory, marketplaceShowsBrandStory, aplusStateOf, MIN_PRODUCT_IMAGES, NO_DATA }

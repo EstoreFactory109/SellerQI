@@ -1,27 +1,94 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
 import { TrendingUp, AlertTriangle, DollarSign, Box, ShoppingBag, Activity, LineChart, PieChart, Users, Filter, Award, Target, Receipt, TrendingDown, Gauge, FileWarning } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
-import ProductChecker from '../../Components/Dashboard/SamePageComponents/ProductChecker.jsx'
+import CampaignAuditKpis, { useCampaignAuditKpis, MiniBar } from '../../Components/Dashboard/SamePageComponents/CampaignAuditKpis.jsx'
 import TotalSales from '../../Components/Dashboard/SamePageComponents/TotalSales.jsx'
 import ErrorBoundary from '../../Components/ErrorBoundary/ErrorBoundary.jsx'
-import { SkeletonChart, SkeletonTableBody } from '../../Components/Skeleton/PageSkeletons.jsx'
+import { SkeletonChart } from '../../Components/Skeleton/PageSkeletons.jsx'
 import { SkeletonBar } from '../../Components/Skeleton/Skeleton.jsx'
 import { useSelector, useDispatch } from 'react-redux'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
+import useMarketplace, { ALL_MARKETPLACES } from '../../hooks/useMarketplace.js'
+import MarketplaceSections, { comparisonExportRows } from '../../Components/Dashboard/MarketplaceSections.jsx'
+import { ALL_MARKETPLACES_DASHBOARD } from '../../utils/featureFlags.js'
+import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitcher.jsx'
 import { formatCurrencyWithLocale } from '../../utils/currencyUtils.js'
 import { fetchReimbursementSummary } from '../../redux/slices/ReimbursementSlice.js'
 import { fetchLatestPPCMetrics, selectPPCSummary, selectLatestPPCMetricsLoading, selectPPCDateWiseMetrics } from '../../redux/slices/PPCMetricsSlice.js'
-import { fetchPPCKPISummary, selectPPCKPISummary } from '../../redux/slices/PPCCampaignAnalysisSlice.js'
+import { fetchPPCKPISummary, selectPPCKPISummary, selectPPCKPISummaryLoading } from '../../redux/slices/PPCCampaignAnalysisSlice.js'
 import { parseLocalDate } from '../../utils/dateUtils.js'
 import { shouldUseCalendarDateRange } from '../../utils/totalSalesFilterUrl.js'
+import { useQMate } from '../../contexts/QMateContext.js'
 import { useDashboardData } from '../../hooks/usePageData.js'
-import { useTopProducts } from '../../hooks/useTopProducts.js'
 import { devLog } from '../../utils/devLogger.js'
 import axiosInstance from '../../config/axios.config.js'
 import DownloadReport from '../../Components/DownloadReport/DownloadReport.jsx'
 import { StatusPill, KPICard, VerdictBanner, HealthGauge, ActionCard, InfoTooltip, STATUS, COLORS, getStatusConfig } from '../../Components/Shared/index.js'
 
+/**
+ * The Dashboard page. With VITE_ALL_MARKETPLACES_DASHBOARD on (and 2+ marketplaces) it opens on
+ * "All marketplaces": every marketplace side by side, each in its own currency. Its switcher (or
+ * a column header) opens one marketplace's full Dashboard.
+ */
 const Dashboard = () => {
+  const { isAll, select, marketplaces } = useMarketplace({ allowAll: ALL_MARKETPLACES_DASHBOARD })
+  const [searchParams] = useSearchParams()
+  const hasMarketplaceParam = searchParams.has('marketplace')
+  const canShowAll = ALL_MARKETPLACES_DASHBOARD && marketplaces.length > 1
+
+  // "All marketplaces" is the default: arriving with no ?marketplace= opens it.
+  useEffect(() => {
+    if (canShowAll && !hasMarketplaceParam) select(ALL_MARKETPLACES)
+  }, [canShowAll, hasMarketplaceParam, select])
+
+  if (canShowAll && (isAll || !hasMarketplaceParam)) {
+    return <AllMarketplacesDashboard onOpenMarketplace={select} />
+  }
+  return <DashboardContent />
+}
+
+const AllMarketplacesDashboard = ({ onOpenMarketplace }) => {
+  const [data, setData] = useState(null)
+
+  return (
+    <div
+      className='w-full min-h-full bg-[#0B0E14] text-[#F5F7FA] text-sm leading-5'
+      style={{ fontFamily: "Geist, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" }}
+    >
+      <div className='px-7 pt-[26px] pb-6 max-w-[1400px] w-full'>
+        <div className='flex items-end justify-between gap-6 flex-wrap mb-[22px]'>
+          <div>
+            <h1 className='m-0 mb-1 text-2xl leading-8 font-semibold tracking-[-0.02em] text-[#F5F7FA]'>Dashboard</h1>
+            <p className='m-0 text-sm text-[#A5AEC0]'>One section per marketplace, each in its own currency. Open one for its full Dashboard.</p>
+          </div>
+          <div className='flex items-center gap-2 flex-wrap'>
+            <MarketplaceSwitcher allowAll />
+            <DownloadReport
+              buttonText="Export report"
+              filename="SellerQI_All_Marketplaces"
+              showIcon={false}
+              buttonClass="flex items-center gap-2 px-[14px] py-[9px] border border-[#252C3A] hover:border-[#3B4658] rounded-lg bg-[#151A23] text-[#F5F7FA] text-[13px] font-medium transition-colors"
+              prepareDataFunc={() => {
+                // DownloadReport treats null as "the page already explained", so say why here.
+                if (!data) {
+                  alert('Your marketplaces are still loading. Please export again once the figures are shown.')
+                  return null
+                }
+                return comparisonExportRows(data)
+              }}
+            />
+          </div>
+        </div>
+        <MarketplaceSections
+          onData={setData}
+          onOpenMarketplace={(m) => onOpenMarketplace({ country: m.country, region: m.region })}
+        />
+      </div>
+    </div>
+  )
+}
+
+const DashboardContent = () => {
   const [selectedPeriod, setSelectedPeriod] = useState('Last 30 Days')
   const [dismissedFixKeys, setDismissedFixKeys] = useState([])
   // Reported up by TotalSales.jsx (below) — the real Gross Profit figure it already
@@ -31,6 +98,7 @@ const Dashboard = () => {
   const totalSalesSectionRef = useRef(null)
   const topFixesSectionRef = useRef(null)
   const navigate = useNavigate()
+  const { askQMate } = useQMate()
   const dispatch = useDispatch()
   const location = useLocation()
 
@@ -94,15 +162,20 @@ const Dashboard = () => {
   // Phase 3: Charts (~200ms) - datewiseSales, orders, products arrays
   // Phase 4: Top Products (~50ms) - top 4 products by issues
   const {
-    data: dashboardInfo,
+    data: singleDashboardInfo,
     loading: dashboardLoading,
     error: dashboardError,
-    isPhase1Complete,
-    isPhase2Complete,
-    isPhase3Complete,
-    isPhase4Complete,
+    isPhase1Complete: singlePhase1Complete,
+    isPhase2Complete: singlePhase2Complete,
+    isPhase3Complete: singlePhase3Complete,
     isFullyLoaded
   } = useDashboardData()
+
+  const dashboardInfo = singleDashboardInfo
+  const isPhase1Complete = singlePhase1Complete
+  const isPhase2Complete = singlePhase2Complete
+  const isPhase3Complete = singlePhase3Complete
+  const runSingleFetches = singlePhase1Complete
   
   // Get reimbursement data from Redux (cached)
   const reimbursementData = useSelector(state => state.reimbursement)
@@ -111,8 +184,8 @@ const Dashboard = () => {
   const reimbursementLastFetched = reimbursementData?.lastFetched
   
   // Calculate last 30 days total (matching ReimbursementDashboard logic)
-  const expectedReimbursement = useMemo(() => {
-    if (!reimbursementRawData) return 0;
+  const reimbursementBreakdown = useMemo(() => {
+    if (!reimbursementRawData) return { total: 0, parts: [] };
     
     // Helper function to check if date is within last 30 days
     const isWithinLast30Days = (dateValue) => {
@@ -164,14 +237,24 @@ const Dashboard = () => {
     );
     const disposedTotal = filteredDisposed.reduce((sum, item) => sum + (item.expectedAmount || 0), 0);
     
-    return shipmentTotal + lostTotal + damagedTotal + disposedTotal;
+    return {
+      total: shipmentTotal + lostTotal + damagedTotal + disposedTotal,
+      parts: [
+        { label: 'shipment discrepancies', amount: shipmentTotal },
+        { label: 'lost inventory', amount: lostTotal },
+        { label: 'damaged inventory', amount: damagedTotal },
+        { label: 'disposed inventory', amount: disposedTotal },
+      ],
+    };
   }, [reimbursementRawData]);
+  const expectedReimbursement = reimbursementBreakdown.total;
 
   // Note: dashboardInfo is now obtained from useDashboardData hook above
   
   // Get PPC metrics from PPCMetrics model (NEW - primary source for PPC data)
   const ppcSummaryLatest = useSelector(selectPPCSummary)
   const ppcKPISummary = useSelector(selectPPCKPISummary)
+  const ppcKPISummaryLoading = useSelector(selectPPCKPISummaryLoading)
   const ppcDateWiseMetrics = useSelector(selectPPCDateWiseMetrics)
   const ppcMetricsLoading = useSelector(selectLatestPPCMetricsLoading)
   const ppcMetricsLastFetched = useSelector(state => state.ppcMetrics?.latestMetrics?.lastFetched)
@@ -249,10 +332,6 @@ const Dashboard = () => {
   const [topOpportunities, setTopOpportunities] = useState(null);
   const [topOpportunitiesLoading, setTopOpportunitiesLoading] = useState(true);
 
-  // The product-level view of the same tasks, for the "QMate noticed" card.
-  const { products: topProducts, loading: topProductsLoading } = useTopProducts();
-  const topProduct = topProducts.length > 0 ? topProducts[0] : null;
-
   useEffect(() => {
     let cancelled = false;
 
@@ -274,31 +353,47 @@ const Dashboard = () => {
     };
   }, []);
 
+  // Fees at Risk (tasks-logics.xlsx tile), partly: aged inventory surcharge and the
+  // low-inventory-level fee, from the newest planning report. Storage utilization and
+  // returns processing fees have no data source and are named as not included.
+  const [feesAtRisk, setFeesAtRisk] = useState(null);
+  const [feesAtRiskLoading, setFeesAtRiskLoading] = useState(true);
   useEffect(() => {
-    if (!isDateRangeSelected || !dashboardInfo?.startDate || !dashboardInfo?.endDate) {
-      setCustomRangeMoneyWasted(null);
-      return;
-    }
+    if (!runSingleFetches) return undefined;
+    let cancelled = false;
+    setFeesAtRiskLoading(true);
+    axiosInstance
+      .get('/api/pagewise/dashboard/fees-at-risk')
+      .then((res) => { if (!cancelled) setFeesAtRisk(res.data?.data ?? null); })
+      .catch(() => { if (!cancelled) setFeesAtRisk(null); })
+      .finally(() => { if (!cancelled) setFeesAtRiskLoading(false); });
+    return () => { cancelled = true; };
+  }, [runSingleFetches]);
+
+  // Wasted ad spend: always ask the same endpoint the Campaign Audit page uses (with the
+  // calendar range when one is selected), so the Dashboard and Campaign Audit agree. The
+  // server's one-time dashboard summary value is only the fallback while this loads/fails.
+  useEffect(() => {
+    if (!runSingleFetches) return;
 
     let cancelled = false;
     setCustomRangeMoneyWastedLoading(true);
 
+    const params = { page: 1, limit: 1 };
+    if (isDateRangeSelected && dashboardInfo?.startDate && dashboardInfo?.endDate) {
+      params.startDate = dashboardInfo.startDate;
+      params.endDate = dashboardInfo.endDate;
+    }
+
     axiosInstance
-      .get('/api/pagewise/ppc/wasted-spend', {
-        params: {
-          page: 1,
-          limit: 1,
-          startDate: dashboardInfo.startDate,
-          endDate: dashboardInfo.endDate,
-        },
-      })
+      .get('/api/pagewise/ppc/wasted-spend', { params })
       .then((res) => {
         if (!cancelled) {
-          setCustomRangeMoneyWasted(res.data?.data?.totalWastedSpend ?? 0);
+          setCustomRangeMoneyWasted(res.data?.data?.totalWastedSpend ?? null);
         }
       })
       .catch(() => {
-        if (!cancelled) setCustomRangeMoneyWasted(0);
+        if (!cancelled) setCustomRangeMoneyWasted(null);
       })
       .finally(() => {
         if (!cancelled) setCustomRangeMoneyWastedLoading(false);
@@ -307,7 +402,7 @@ const Dashboard = () => {
     return () => {
       cancelled = true;
     };
-  }, [isDateRangeSelected, dashboardInfo?.startDate, dashboardInfo?.endDate]);
+  }, [runSingleFetches, isDateRangeSelected, dashboardInfo?.startDate, dashboardInfo?.endDate]);
 
   // Get currency from Redux
   const currency = useSelector(state => state.currency?.currency) || '$';
@@ -369,10 +464,10 @@ const Dashboard = () => {
     const shouldFetch = !reimbursementLastFetched || (now - reimbursementLastFetched) > CACHE_DURATION;
     
     // Defer reimbursement fetch until Phase 1 is complete (don't block initial load)
-    if (shouldFetch && !reimbursementLoading && isPhase1Complete) {
+    if (shouldFetch && !reimbursementLoading && runSingleFetches) {
       dispatch(fetchReimbursementSummary());
     }
-  }, [dispatch, reimbursementLastFetched, reimbursementLoading, isPhase1Complete])
+  }, [dispatch, reimbursementLastFetched, reimbursementLoading, runSingleFetches])
 
   // Fetch PPC metrics from PPCMetrics model (cached for 5 minutes)
   // Note: Basic PPC summary is now included in dashboard summary
@@ -384,11 +479,21 @@ const Dashboard = () => {
     const shouldFetch = !ppcMetricsLastFetched || (now - ppcMetricsLastFetched) > CACHE_DURATION;
     
     // Defer PPC fetch until Phase 1 is complete (don't block initial load)
-    if (shouldFetch && !ppcMetricsLoading && isPhase1Complete) {
+    if (shouldFetch && !ppcMetricsLoading && runSingleFetches) {
       dispatch(fetchLatestPPCMetrics());
+    }
+  }, [dispatch, ppcMetricsLastFetched, ppcMetricsLoading, runSingleFetches])
+
+  // Campaign Audit boxes: fetch the KPI summary for the selected calendar window (same
+  // call the Campaign Audit page makes). The thunk caches per date range.
+  useEffect(() => {
+    if (!runSingleFetches) return;
+    if (isDateRangeSelected) {
+      dispatch(fetchPPCKPISummary({ startDate: dashboardInfo.startDate, endDate: dashboardInfo.endDate }));
+    } else {
       dispatch(fetchPPCKPISummary());
     }
-  }, [dispatch, ppcMetricsLastFetched, ppcMetricsLoading, isPhase1Complete])
+  }, [dispatch, runSingleFetches, isDateRangeSelected, dashboardInfo?.startDate, dashboardInfo?.endDate])
 
   // Calculate PPC sales using PPCMetrics model (PRIMARY) or fallback to legacy data
   const calculatePPCSales = () => {
@@ -471,18 +576,26 @@ const Dashboard = () => {
   // used everywhere in the redesigned sections (KPI cards, Verdict Banner, Top Things to Fix).
   const formatFullCurrency = (value) => formatCurrencyWithLocale(value, currency, 2);
 
-  // Money Wasted in Ads — from phase 3 (DataFetchTracking window) or custom-range API (Campaign Audit logic)
+  // Money Wasted in Ads — Campaign Audit's wasted-spend total (fetched above); phase-3 summary value is the fallback
   const moneyWastedInAds = useMemo(() => {
-    if (isDateRangeSelected && customRangeMoneyWasted != null) {
+    if (customRangeMoneyWasted != null) {
       return customRangeMoneyWasted;
     }
     return dashboardInfo?.moneyWastedInAds ?? dashboardInfo?.ppcSummary?.moneyWastedInAds ?? 0;
   }, [
-    isDateRangeSelected,
     customRangeMoneyWasted,
     dashboardInfo?.moneyWastedInAds,
     dashboardInfo?.ppcSummary?.moneyWastedInAds,
   ]);
+
+  const campaignAuditKpis = useCampaignAuditKpis({
+    ppcKPISummary,
+    ppcSummary,
+    sponsoredAdsMetrics,
+    info: dashboardInfo,
+    currency,
+    totalWastedSpend: moneyWastedInAds,
+  })
 
   // --- Real data for the redesigned Verdict Banner + KPI row (§3.1) ---
   // Everything below reuses values already computed above — no new fetches, no invented numbers.
@@ -718,73 +831,59 @@ const Dashboard = () => {
       : grossProfitData.grossProfitRaw >= 0
         ? STATUS.GOOD
         : STATUS.FIX;
-  const grossProfitStatusLabel = cogsIncomplete ? 'Partial — Set up' : undefined;
-  const grossProfitFootnote = grossProfitData.hasFinanceData && cogsIncomplete ? (
-    <>
-      Only {productsWithCogsCount} of {totalProducts} products have costs added, so this is understated.
-    </>
-  ) : undefined;
+  const costCoveragePct = totalProducts > 0 ? Math.round((productsWithCogsCount / totalProducts) * 100) : 0;
+  const grossProfitStatusLabel = cogsIncomplete
+    ? (productsWithCogsCount === 0 ? 'Costs not set up' : `${costCoveragePct}% costed`)
+    : undefined;
+  // One short line (kept compact so this card doesn't make the whole row taller).
+  const grossProfitFootnote = grossProfitData.hasFinanceData && cogsIncomplete
+    ? `Costs missing for ${(totalProducts - productsWithCogsCount).toLocaleString()} of ${totalProducts.toLocaleString()} products`
+    : undefined;
+  const marginPct = grossProfitData.hasFinanceData && grossProfitData.totalSales > 0
+    ? (grossProfitData.grossProfitRaw / grossProfitData.totalSales) * 100
+    : null;
+  const marginBar = marginPct != null ? (
+    <MiniBar
+      pct={Math.max(0, marginPct)}
+      color={marginPct >= 15 ? COLORS.good : marginPct >= 0 ? COLORS.watch : '#F87171'}
+      leftLabel={marginPct >= 0 ? `${marginPct.toFixed(1)}% of sales kept` : `${Math.abs(marginPct).toFixed(1)}% loss on sales`}
+      rightLabel={marginPct >= 0 ? `${(100 - marginPct).toFixed(1)}% went to costs` : undefined}
+    />
+  ) : null;
 
-  // Account health detail (2x2 grid, bottom-left of the money-goes/issue-mix row).
-  // The backend only reports Good/Error + a descriptive message for these 4 metrics —
-  // no numeric rate exists anywhere in the data layer, so these show real status + real
-  // message text rather than a fabricated percentage (unlike the mock's "8.3%" example).
-  const accountErrorsDetail = dashboardInfo?.AccountErrors || {};
-  // Level 'warning' = a status Amazon keeps flipping (judged over the last 7 daily
-  // reports server-side): shown amber as Unstable, not red as an issue.
-  const isUnstableDetail = (d) => d?.status === 'Error' && d?.level === 'warning';
-  const accountHealthDetail = [
-    {
-      key: 'cr',
-      label: 'Cancellation Rate',
-      isError: accountErrorsDetail?.CancellationRate?.status === 'Error',
-      isUnstable: isUnstableDetail(accountErrorsDetail?.CancellationRate),
-      message: accountErrorsDetail?.CancellationRate?.Message,
-    },
-    {
-      key: 'ncx',
-      label: 'NCX',
-      tooltip: 'Negative Customer Experience rate — orders that ended in a complaint, return, or bad review.',
-      isError: accountErrorsDetail?.NCX?.status === 'Error',
-      isUnstable: isUnstableDetail(accountErrorsDetail?.NCX),
-      message: accountErrorsDetail?.NCX?.Message,
-    },
-    {
-      key: 'policy',
-      label: 'Policy Violations',
-      isError: accountErrorsDetail?.PolicyViolations?.status === 'Error',
-      isUnstable: isUnstableDetail(accountErrorsDetail?.PolicyViolations),
-      message: accountErrorsDetail?.PolicyViolations?.Message,
-    },
-    {
-      key: 'odr',
-      label: 'ODR',
-      tooltip: 'Order Defect Rate — orders with a claim, chargeback, or negative feedback.',
-      isError: accountErrorsDetail?.orderWithDefectsStatus?.status === 'Error',
-      isUnstable: isUnstableDetail(accountErrorsDetail?.orderWithDefectsStatus),
-      message: accountErrorsDetail?.orderWithDefectsStatus?.Message,
-    },
-  ];
+  // Data-driven footnotes for the Performance cards (computed from the same figures shown above).
+  const reimbursementTopPart = [...reimbursementBreakdown.parts].sort((a, b) => b.amount - a.amount)[0];
+  const reimbursementNote = expectedReimbursement > 0 && reimbursementTopPart?.amount > 0
+    ? `Biggest share: ${reimbursementTopPart.label} (${formatFullCurrency(reimbursementTopPart.amount)})`
+    : undefined;
 
-  // Issue mix — ProductChecker.jsx reads these counts straight from the Redux
-  // dashboard slice, so the export reads the same object.
-  const issueMixInfo = useSelector((state) => state.Dashboard.DashBoardInfo);
-  const issueMix = [
-    { label: 'Rankings', count: issueMixInfo?.TotalRankingerrors || 0 },
-    { label: 'Conversion', count: issueMixInfo?.totalErrorInConversion || 0 },
-    { label: 'Sponsored Ads', count: issueMixInfo?.totalSponsoredAdsErrors || 0 },
-    { label: 'Profitability', count: issueMixInfo?.totalProfitabilityErrors || 0 },
-    { label: 'Inventory', count: issueMixInfo?.totalInventoryErrors || 0 },
-    { label: 'Account & Policy', count: issueMixInfo?.totalErrorInAccount || 0 },
-  ];
+  const adsShare = campaignAuditKpis.adsSharePct != null ? Math.min(100, campaignAuditKpis.adsSharePct) : null;
+  const totalSalesNote = adsShare != null ? (
+    <div className='flex flex-col gap-2'>
+      <MiniBar
+        pct={adsShare}
+        color={COLORS.accent}
+        leftLabel={`${adsShare.toFixed(0)}% from ads`}
+        rightLabel={`${(100 - adsShare).toFixed(0)}% other sales`}
+      />
+      <span>Ad-driven vs. other sales this period</span>
+    </div>
+  ) : `Sales for ${grossProfitData.periodLabel || selectedPeriod}`;
+
+  const biggestCostSlice = (grossProfitData.visibleSlices || [])
+    .filter((slice) => slice.id !== 'grossProfit' && slice.value > 0)
+    .sort((a, b) => b.value - a.value)[0];
+  const biggestCostNote = biggestCostSlice && grossProfitData.totalSales > 0
+    ? `Biggest cost: ${biggestCostSlice.label} (${Math.round((biggestCostSlice.value / grossProfitData.totalSales) * 100)}% of sales)`
+    : undefined;
 
   // Export report — every value and sentence below is the one rendered on this
   // page (verdict banner, KPI cards, Top things to fix, Where your money goes,
   // account health, issue mix, QMate noticed), so the file matches the screen.
   const prepareDashboardExportData = () => {
-    const stillLoading = !isPhase1Complete || !isPhase2Complete || !isPhase3Complete || !isPhase4Complete ||
-      !verdictDataReady || grossProfitData.loading || ppcMetricsLoading || topProductsLoading ||
-      (isDateRangeSelected && customRangeMoneyWastedLoading);
+    const stillLoading = !isPhase1Complete || !isPhase2Complete || !isPhase3Complete ||
+      !verdictDataReady || grossProfitData.loading || ppcMetricsLoading ||
+      customRangeMoneyWastedLoading;
     if (stillLoading) {
       alert('The dashboard is still loading. Please export again once all figures are shown.');
       return null;
@@ -859,7 +958,7 @@ const Dashboard = () => {
       visibleFixes.forEach((fix, index) => {
         rows.push([String(index + 1).padStart(2, '0'), fix.title, fix.badge, fix.value, fix.valueLabel || '', fix.why || '']);
       });
-      rows.push([`Dollar figures are estimates for ${selectedPeriod}.`]);
+      rows.push([`Amounts in ${currency} are estimates for ${selectedPeriod}.`]);
     } else {
       rows.push(['All clear for now — Nothing high-impact is outstanding right now.']);
     }
@@ -871,7 +970,7 @@ const Dashboard = () => {
       const moneySlices = grossProfitData.visibleSlices || [];
       const salesForPct = grossProfitData.totalSales;
       const breakdownAmount = (amount) => `${amount < 0 ? '-' : ''}${currency}${Math.abs(amount).toFixed(2)}`;
-      rows.push([`Every dollar of the ${formatFullCurrency(salesForPct)} you sold ${grossProfitData.periodLabel || 'this period'}.`]);
+      rows.push([`Where the ${formatFullCurrency(salesForPct)} you sold ${grossProfitData.periodLabel || 'this period'} went.`]);
       rows.push(['You keep', formatFullCurrency(grossProfitData.grossProfitRaw)]);
       rows.push(['Category', 'Item', 'Amount', '% of Sales']);
       moneySlices.forEach((slice) => {
@@ -886,39 +985,6 @@ const Dashboard = () => {
       rows.push(['No finance data available for this period. Run integration to sync finance data.']);
     }
     rows.push([]);
-
-    // Account health detail (2x2 grid)
-    rows.push(['Account Health Detail']);
-    rows.push(['Metric', 'Status', 'Details']);
-    accountHealthDetail.forEach((item) => {
-      rows.push([
-        item.label,
-        item.isUnstable ? 'Unstable' : pillLabel(item.isError ? STATUS.FIX : STATUS.GOOD),
-        item.message || (item.isError ? 'Needs attention — see Account Issues for details.' : 'No issues detected.'),
-      ]);
-    });
-    rows.push([]);
-
-    // Issue mix
-    const issueMixTotal = issueMix.reduce((sum, c) => sum + c.count, 0);
-    rows.push(['Issue Mix']);
-    rows.push([`Where the ${issueMixTotal.toLocaleString()} open issues sit. Counts, not urgency.`]);
-    rows.push(['Category', 'Open Issues']);
-    issueMix.forEach((c) => rows.push([c.label, c.count.toLocaleString()]));
-    rows.push([]);
-
-    // QMate noticed card
-    rows.push(['QMate Noticed']);
-    if (topProduct) {
-      let noticed = topProduct.productName || topProduct.asin;
-      if ((topProduct.profitImpact || 0) > 0) {
-        noticed += ` has about ${formatFullCurrency(topProduct.profitImpact)}${topProduct.amountIsEstimated ? '*' : ''} of profit in play.`;
-      }
-      if (topProduct.why) noticed += ` ${topProduct.why}`;
-      rows.push([noticed]);
-    } else {
-      rows.push(['No single product stands out as needing attention right now.']);
-    }
 
     return rows;
   };
@@ -942,7 +1008,8 @@ const Dashboard = () => {
               <h1 className='m-0 mb-1 text-2xl leading-8 font-semibold tracking-[-0.02em] text-[#F5F7FA]'>Dashboard</h1>
               <p className='m-0 text-sm text-[#A5AEC0]'>Your account health, sales, and top issues — ranked by what needs attention first.</p>
             </div>
-            <div className='flex items-center gap-2'>
+            <div className='flex items-center gap-2 flex-wrap'>
+              <MarketplaceSwitcher allowAll={ALL_MARKETPLACES_DASHBOARD} />
               <DownloadReport
                 buttonText="Export report"
                 filename="SellerQI_Dashboard_Summary"
@@ -950,13 +1017,6 @@ const Dashboard = () => {
                 buttonClass="flex items-center gap-2 px-[14px] py-[9px] border border-[#252C3A] hover:border-[#3B4658] rounded-lg bg-[#151A23] text-[#F5F7FA] text-[13px] font-medium transition-colors"
                 prepareDataFunc={prepareDashboardExportData}
               />
-              <button
-                type="button"
-                onClick={() => navigate('/seller-central-checker/qmate')}
-                className="px-[14px] py-[9px] rounded-lg bg-[#3B82F6] hover:bg-[#5A97F8] text-[#061021] text-[13px] font-semibold transition-colors"
-              >
-                Ask QMate
-              </button>
             </div>
           </div>
 
@@ -1011,12 +1071,16 @@ const Dashboard = () => {
             )}
           </div>
 
+          <div className='mb-3 mt-2'>
+            <h2 className='m-0 text-lg font-semibold tracking-[-0.01em]' style={{ color: COLORS.textPrimary }}>Performance</h2>
+            <p className='m-0 mt-0.5 text-sm' style={{ color: COLORS.textMuted }}>Your profit, account health and money owed at a glance.</p>
+          </div>
           {/* KPI row — real data: reimbursements owed, wasted ad spend, net profit, account health */}
           <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-[22px]'>
             <KPICard
               label="Money Amazon Owes You"
               meaning="Unclaimed FBA reimbursements"
-              tooltip="Cases from the last 30 days where Amazon lost, damaged, or over-charged you. You still have to file the claim."
+              tooltip="Estimated amount Amazon may owe you for lost, damaged or over-charged items. Most claims must be filed within 60 days, and you still have to file each one."
               loading={!isPhase1Complete || reimbursementLoading}
               value={formatFullCurrency(expectedReimbursement)}
               status={expectedReimbursement > 0 ? STATUS.SETUP : undefined}
@@ -1026,109 +1090,47 @@ const Dashboard = () => {
                 actionLabel: 'View reimbursements',
                 href: '/seller-central-checker/reimbursement-dashboard',
               }}
-              footnote={formatRelativeTime(reimbursementLastFetched) ? `Updated ${formatRelativeTime(reimbursementLastFetched)}` : undefined}
+              footnote={[reimbursementNote, formatRelativeTime(reimbursementLastFetched) ? `Updated ${formatRelativeTime(reimbursementLastFetched)}` : null].filter(Boolean).join(' · ') || undefined}
               onClick={() => navigate('/seller-central-checker/reimbursement-dashboard')}
             />
 
             <KPICard
-              label="Wasted Ad Spend"
-              meaning="ACoS — ad cost as % of ad sales"
-              tooltip="ACoS = ad cost as a % of the sales those ads made. Lower is better. Above 30% usually means you're paying more than the margin is worth."
-              loading={!isPhase2Complete || ppcMetricsLoading}
-              value={`${acos}%`}
-              secondaryValue={moneyWastedInAds > 0 ? `${formatFullCurrency(moneyWastedInAds)} wasted` : undefined}
-              status={acosStatus}
-              benchmark={acosBenchmark}
-              onClick={() => navigate('/seller-central-checker/ppc-dashboard')}
+              label="Total Sales"
+              meaning="Everything you sold this period"
+              tooltip="Total revenue in the selected date range, before Amazon fees, refunds, ad spend and product costs."
+              loading={grossProfitData.loading}
+              value={formatFullCurrency(grossProfitData.totalSales)}
+              footnote={totalSalesNote}
+              noData={grossProfitData.hasFinanceData ? undefined : {
+                message: 'No finance data available for this period yet.',
+                actionLabel: 'View breakdown',
+                onAction: (e) => { e.preventDefault(); e.stopPropagation(); scrollToTotalSales(); },
+              }}
+              onClick={() => navigate('/seller-central-checker/profitibility-dashboard')}
             />
 
-            {/* Sales & Profit — a two-value variant of the KPI card. Total Sales and Gross
-                Profit get identical type treatment (same size/weight) so neither reads as
-                "the real number" with the other as an afterthought. */}
-            <div
-              className='rounded-2xl border p-5 flex flex-col gap-2.5 transition-colors cursor-pointer'
-              style={{ background: COLORS.surface, borderColor: COLORS.border }}
-              onClick={() => navigate('/seller-central-checker/profitibility-dashboard')}
-              role='button'
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  navigate('/seller-central-checker/profitibility-dashboard');
-                }
+            <KPICard
+              label="Gross Profit"
+              meaning={grossProfitMarginLabel || 'What you kept after costs'}
+              tooltip="Sales minus Amazon fees (referral, fulfilment, storage, aged inventory and low-inventory fees), ad spend, refunds, overhead and product cost where provided. The same figure shown in Where Your Money Goes below."
+              loading={grossProfitData.loading}
+              value={formatFullCurrency(grossProfitData.grossProfitRaw)}
+              status={grossProfitStatus}
+              statusLabel={grossProfitStatusLabel}
+              footnote={(marginBar || biggestCostNote || grossProfitFootnote) ? (
+                <div className='flex flex-col gap-2'>
+                  {marginBar}
+                  {biggestCostNote && <span>{biggestCostNote}</span>}
+                  {grossProfitFootnote && <span>{grossProfitFootnote}</span>}
+                </div>
+              ) : undefined}
+              noData={grossProfitData.hasFinanceData ? undefined : {
+                message: 'No finance data available for this period yet.',
+                actionLabel: 'View breakdown',
+                onAction: (e) => { e.preventDefault(); e.stopPropagation(); scrollToTotalSales(); },
               }}
-            >
-              <div className='flex items-start gap-2 min-h-[32px]'>
-                <div>
-                  <div className='text-sm font-semibold uppercase tracking-wide' style={{ color: COLORS.textSecondary }}>Sales &amp; Profit</div>
-                  <div className='text-xs mt-0.5' style={{ color: COLORS.textMuted }}>What you sold vs. what you kept</div>
-                </div>
-                <div className='ml-auto'>
-                  <InfoTooltip
-                    text='Total Sales is everything sold this period. Gross Profit is Sales minus Amazon fees, refunds, overhead, PPC spend, and COGS (when entered) — the same figure shown in Where Your Money Goes below.'
-                    position='right'
-                  />
-                </div>
-              </div>
-
-              {grossProfitData.loading ? (
-                <>
-                  <div className='h-6 rounded animate-pulse' style={{ background: COLORS.border }} />
-                  <div className='h-6 rounded animate-pulse' style={{ background: COLORS.border }} />
-                  <div className='h-4 w-24 rounded animate-pulse' style={{ background: COLORS.border }} />
-                </>
-              ) : !grossProfitData.hasFinanceData ? (
-                <>
-                  <StatusPill status={STATUS.SETUP} />
-                  <div className='text-sm' style={{ color: COLORS.textSecondary }}>No finance data available for this period yet.</div>
-                  <a
-                    href='#'
-                    onClick={(e) => { e.preventDefault(); scrollToTotalSales(); }}
-                    className='text-sm font-semibold'
-                    style={{ color: COLORS.accent }}
-                  >
-                    View breakdown →
-                  </a>
-                </>
-              ) : (
-                <>
-                  {/* Stacked, not side-by-side — at this card's width (~270px in the 4-col
-                      grid) two numbers sharing one row forced ellipsis-truncation on real
-                      values. Full-width rows give each figure room to always render in full. */}
-                  <div className='flex flex-col gap-2'>
-                    <div className='flex items-baseline justify-between gap-3'>
-                      <div className='text-xs font-semibold uppercase tracking-wide' style={{ color: COLORS.textMuted }}>Total Sales</div>
-                      <div className='text-2xl font-bold tracking-tight tabular-nums' style={{ color: COLORS.textPrimary }}>
-                        {formatFullCurrency(grossProfitData.totalSales)}
-                      </div>
-                    </div>
-                    <div className='h-px' style={{ background: COLORS.border }} />
-                    <div className='flex items-baseline justify-between gap-3'>
-                      <div className='text-xs font-semibold uppercase tracking-wide' style={{ color: COLORS.textMuted }}>Gross Profit</div>
-                      <div
-                        className='text-2xl font-bold tracking-tight tabular-nums'
-                        style={{ color: grossProfitData.grossProfitRaw >= 0 ? getStatusConfig(STATUS.GOOD).color : getStatusConfig(STATUS.FIX).color }}
-                      >
-                        {formatFullCurrency(grossProfitData.grossProfitRaw)}
-                      </div>
-                    </div>
-                  </div>
-
-                  {grossProfitMarginLabel && (
-                    <div className='text-sm font-medium' style={{ color: COLORS.textSecondary }}>{grossProfitMarginLabel}</div>
-                  )}
-
-                  {grossProfitStatus && <StatusPill status={grossProfitStatus} label={grossProfitStatusLabel} />}
-
-                  {grossProfitFootnote && (
-                    <>
-                      <div className='h-px' style={{ background: COLORS.border }} />
-                      <div className='text-sm' style={{ color: COLORS.textMuted }}>{grossProfitFootnote}</div>
-                    </>
-                  )}
-                </>
-              )}
-            </div>
+              onClick={() => navigate('/seller-central-checker/profitibility-dashboard')}
+            />
 
             <div className='rounded-2xl border flex items-center gap-4 p-5' style={{ background: COLORS.surface, borderColor: COLORS.border }}>
               <div className='flex-1 min-w-0 flex flex-col gap-2.5'>
@@ -1162,6 +1164,46 @@ const Dashboard = () => {
             </div>
           </div>
 
+          {runSingleFetches && (
+            <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-[22px]'>
+              <KPICard
+                label="Fees at Risk"
+                meaning="Fees you can still avoid this month"
+                tooltip="Estimated fees you can still avoid this month: aged inventory surcharge, low-inventory fee and storage utilization surcharge. Returns processing fees are not included yet."
+                loading={feesAtRiskLoading}
+                value={(feesAtRisk?.agedSurcharge || feesAtRisk?.storageUtilization)
+                  ? formatFullCurrency((feesAtRisk?.agedSurcharge?.amount || 0) + (feesAtRisk?.storageUtilization?.amount || 0))
+                  : undefined}
+                secondaryValue={[
+                  feesAtRisk?.lowInventoryFee ? `${feesAtRisk.lowInventoryFee.products} product${feesAtRisk.lowInventoryFee.products === 1 ? '' : 's'} paying the low-inventory fee` : null,
+                  feesAtRisk?.storageUtilization ? `Storage: ${feesAtRisk.storageUtilization.ratio} weeks of stock (surcharge over 22)` : null
+                ].filter(Boolean).join(' · ') || undefined}
+                status={(feesAtRisk?.agedSurcharge?.amount > 0 || feesAtRisk?.lowInventoryFee?.products > 0 || feesAtRisk?.storageUtilization?.amount > 0) ? STATUS.WATCH : undefined}
+                statusLabel={(feesAtRisk?.agedSurcharge?.amount > 0 || feesAtRisk?.lowInventoryFee?.products > 0 || feesAtRisk?.storageUtilization?.amount > 0) ? 'Avoidable' : undefined}
+                noData={(feesAtRisk?.available || feesAtRisk?.storageUtilization) ? undefined : {
+                  message: 'Fees at risk appear once Amazon\'s inventory planning report has been read for this marketplace.',
+                }}
+                footnote={(feesAtRisk?.available || feesAtRisk?.storageUtilization)
+                  ? `Aged inventory surcharge and storage utilization surcharge (Amazon's estimates${feesAtRisk?.storageUtilization?.month ? `, storage for ${feesAtRisk.storageUtilization.month}` : ''}) and low-inventory fee; returns processing fees not included.`
+                  : undefined}
+                onClick={() => navigate('/seller-central-checker/tasks?category=inventory')}
+              />
+            </div>
+          )}
+
+          <div className='mb-3 mt-2'>
+            <h2 className='m-0 text-lg font-semibold tracking-[-0.01em]' style={{ color: COLORS.textPrimary }}>Ads</h2>
+            <p className='m-0 mt-0.5 text-sm' style={{ color: COLORS.textMuted }}>How your ad campaigns are performing for this period.</p>
+          </div>
+          {/* Advertising — the same 10 PPC boxes as the Campaign Audit page */}
+          <div className='mb-[22px]'>
+            <CampaignAuditKpis kpiData={campaignAuditKpis} loading={ppcKPISummaryLoading} groupLabels variant='dashboard' />
+          </div>
+
+          <div className='mb-3 mt-2'>
+            <h2 className='m-0 text-lg font-semibold tracking-[-0.01em]' style={{ color: COLORS.textPrimary }}>What to fix first</h2>
+            <p className='m-0 mt-0.5 text-sm' style={{ color: COLORS.textMuted }}>The actions worth the most to your profit, in order.</p>
+          </div>
           {/* Top Things to Fix — every row reuses a value already computed above, or already
               shown elsewhere on this page (ProductChecker.jsx's category counts). */}
           <div ref={topFixesSectionRef} className='rounded-2xl border overflow-hidden mb-[22px]' style={{ background: COLORS.surface, borderColor: COLORS.border }}>
@@ -1171,7 +1213,7 @@ const Dashboard = () => {
                   <h2 className='m-0 text-xl font-semibold' style={{ color: COLORS.textPrimary }}>Top things to fix</h2>
                   <button
                     type='button'
-                    onClick={() => navigate('/seller-central-checker/qmate')}
+                    onClick={() => askQMate?.()}
                     className='flex items-center gap-1 pl-1 pr-2 py-0.5 rounded-full text-xs font-semibold border transition-colors'
                     style={{ background: 'rgba(59,130,246,.12)', borderColor: 'rgba(59,130,246,.35)', color: '#7EA8F8' }}
                     title='Ask QMate about these fixes'
@@ -1180,7 +1222,7 @@ const Dashboard = () => {
                     QMate
                   </button>
                 </div>
-                <p className='m-0 mt-1 text-sm' style={{ color: COLORS.textSecondary }}>Ordered by estimated dollar impact — the top one is worth more than the rest combined.</p>
+                <p className='m-0 mt-1 text-sm' style={{ color: COLORS.textSecondary }}>Ordered by estimated profit impact — the top one is worth more than the rest combined.</p>
               </div>
               <div className='text-right'>
                 <div className='text-xs font-semibold uppercase tracking-wide' style={{ color: COLORS.textMuted }}>Potential profit impact</div>
@@ -1243,127 +1285,25 @@ const Dashboard = () => {
                 >
                   See all {totalIssues.toLocaleString()} issues →
                 </button>
-                <span className='text-xs' style={{ color: COLORS.textMuted }}>Dollar figures are estimates for {selectedPeriod}.</span>
+                <span className='text-xs' style={{ color: COLORS.textMuted }}>Amounts in {currency} are estimates for {selectedPeriod}.</span>
               </div>
             )}
           </div>
 
-          {/* Where your money goes (+ account health detail) | Issue mix + QMate noticed — matches the mock's 2-column layout */}
-          <div className='grid grid-cols-1 lg:grid-cols-[1.45fr_1fr] gap-4 mb-[22px]'>
-            <div className='flex flex-col gap-4'>
-              {/* TotalSales - needs Phase 3 data (datewiseSales array for chart) */}
-              <motion.div ref={totalSalesSectionRef} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className='rounded-2xl border overflow-visible' style={{ background: COLORS.surface, borderColor: COLORS.border }}>
-                {!isPhase3Complete ? (
-                  <div className="p-5"><SkeletonChart height={220} /></div>
-                ) : (
-                  <ErrorBoundary title="Sales Data Unavailable" message="Unable to load sales data.">
-                    <TotalSales onGrossProfitChange={setGrossProfitData} />
-                  </ErrorBoundary>
-                )}
-              </motion.div>
-
-              {/* Account health detail — 2x2 grid, real status + message per metric (see note above) */}
-              <div className='grid grid-cols-2 gap-3'>
-                {!isPhase2Complete ? (
-                  [0, 1, 2, 3].map((i) => (
-                    <div key={i} className='rounded-xl border p-3.5 h-[104px] animate-pulse' style={{ background: COLORS.surface, borderColor: COLORS.border }} />
-                  ))
-                ) : (
-                  accountHealthDetail.map((item) => (
-                    <div key={item.key} className='rounded-xl border p-3.5 flex flex-col gap-1.5' style={{ background: COLORS.surface, borderColor: COLORS.border }}>
-                      <div className='flex items-start gap-1.5'>
-                        <div className='text-xs font-semibold uppercase tracking-wide' style={{ color: COLORS.textSecondary }}>{item.label}</div>
-                        {item.tooltip && <InfoTooltip text={item.tooltip} position="right" />}
-                      </div>
-                      <StatusPill
-                        status={item.isUnstable ? STATUS.WATCH : item.isError ? STATUS.FIX : STATUS.GOOD}
-                        label={item.isUnstable ? 'Unstable' : undefined}
-                        compact
-                      />
-                      <div className='text-xs leading-[18px] line-clamp-3' style={{ color: COLORS.textSecondary }}>
-                        {item.message || (item.isError ? 'Needs attention — see Account Issues for details.' : 'No issues detected.')}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            <div className='flex flex-col gap-4'>
-              {/* Product Checker ("Issue mix") - skeleton until Phase 4 (top 4 products) data is ready */}
-              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, delay: 0.03 }} className='rounded-2xl border overflow-hidden' style={{ background: COLORS.surface, borderColor: COLORS.border }}>
-                {!isPhase4Complete ? (
-                  <div className="p-5"><SkeletonTableBody rows={3} /></div>
-                ) : (
-                  <ErrorBoundary title="Product Analysis Unavailable" message="Unable to load product analysis data.">
-                    <ProductChecker />
-                  </ErrorBoundary>
-                )}
-              </motion.div>
-
-              {/* "QMate noticed" — the single product costing this seller the most,
-                  from the same task data as "Top things to fix" and the Tasks page
-                  (see TaskOpportunityGroupsService). This card previously showed every
-                  seller the same invented ASIN and percentages. */}
-              <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.2, delay: 0.06 }}
-                className='rounded-2xl border p-5 flex-1 flex flex-col justify-between'
-                style={{ background: `linear-gradient(160deg, rgba(59,130,246,.10), transparent 60%), ${COLORS.surface}`, borderColor: COLORS.border }}
-              >
-                <div>
-                  <div className='flex items-center gap-2 mb-2'>
-                    <div className='w-[22px] h-[22px] rounded-md flex items-center justify-center text-xs font-bold' style={{ background: COLORS.accent, color: '#061021' }}>Q</div>
-                    <div className='text-sm font-semibold' style={{ color: COLORS.textPrimary }}>QMate noticed</div>
-                  </div>
-
-                  {topProductsLoading ? (
-                    <div className='h-16 rounded-lg animate-pulse' style={{ background: 'rgba(255,255,255,.04)' }} />
-                  ) : topProduct ? (
-                    <p className='m-0 text-sm' style={{ color: COLORS.textSecondary }}>
-                      <b style={{ color: COLORS.textPrimary }}>{topProduct.productName || topProduct.asin}</b>
-                      {(topProduct.profitImpact || 0) > 0 && (
-                        <>
-                          {' '}has about{' '}
-                          <b style={{ color: getStatusConfig(STATUS.GOOD).color }}>
-                            {formatFullCurrency(topProduct.profitImpact)}{topProduct.amountIsEstimated ? '*' : ''}
-                          </b>
-                          {' '}of profit in play.
-                        </>
-                      )}
-                      {topProduct.why ? ` ${topProduct.why}` : ''}
-                    </p>
-                  ) : (
-                    <p className='m-0 text-sm' style={{ color: COLORS.textSecondary }}>
-                      No single product stands out as needing attention right now.
-                    </p>
-                  )}
-                </div>
-
-                <div className='flex gap-2 mt-3'>
-                  {topProduct && (
-                    <button
-                      type='button'
-                      onClick={() => navigate(`/seller-central-checker/tasks?asin=${encodeURIComponent(topProduct.asin)}`)}
-                      className='flex-1 py-2.5 rounded-lg text-sm font-semibold border'
-                      style={{ background: 'rgba(59,130,246,.12)', borderColor: 'rgba(59,130,246,.4)', color: '#7EA8F8' }}
-                    >
-                      Fix this product →
-                    </button>
-                  )}
-                  <button
-                    type='button'
-                    onClick={() => navigate('/seller-central-checker/qmate')}
-                    className={`${topProduct ? '' : 'w-full '}py-2.5 px-3 rounded-lg text-sm font-semibold border`}
-                    style={{ background: 'transparent', borderColor: COLORS.border, color: COLORS.textSecondary }}
-                  >
-                    Ask QMate
-                  </button>
-                </div>
-              </motion.div>
-            </div>
+          <div className='mb-3 mt-2'>
+            <h2 className='m-0 text-lg font-semibold tracking-[-0.01em]' style={{ color: COLORS.textPrimary }}>Sales & profit</h2>
+            <p className='m-0 mt-0.5 text-sm' style={{ color: COLORS.textMuted }}>What you sold and where the money goes.</p>
           </div>
+          {/* Where your money goes */}
+          <motion.div ref={totalSalesSectionRef} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className='rounded-2xl border overflow-visible mb-[22px]' style={{ background: COLORS.surface, borderColor: COLORS.border }}>
+            {!isPhase3Complete ? (
+              <div className="p-5"><SkeletonChart height={220} /></div>
+            ) : (
+              <ErrorBoundary title="Sales Data Unavailable" message="Unable to load sales data.">
+                <TotalSales onGrossProfitChange={setGrossProfitData} />
+              </ErrorBoundary>
+            )}
+          </motion.div>
 
       </div>
     </div>

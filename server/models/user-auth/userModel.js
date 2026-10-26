@@ -262,6 +262,16 @@ const userSchema = new mongoose.Schema(
         required: false,
         default: null,
       },
+      // Activity monitoring: when the seller (or a member of their account) was last actually
+      // using SellerQI, and on which page. Staff opening the account never move these.
+      lastActiveAt: {
+        type: Date,
+        default: null,
+      },
+      lastActivePath: {
+        type: String,
+        default: null,
+      },
       packageType:{
         type:String,
         required:true,
@@ -362,6 +372,12 @@ const userSchema = new mongoose.Schema(
       subscribedToAlerts: {
         type: Boolean,
         default: true
+      },
+      // The marketplace the user last picked in a page's marketplace switcher. Used when a
+      // request names no marketplace and carries no location cookie (see getLocation.js).
+      preferredMarketplace: {
+        country: { type: String, default: null },
+        region: { type: String, enum: ['NA', 'EU', 'FE', null], default: null },
       },
       FirstAnalysisDone: {
         type: Boolean,

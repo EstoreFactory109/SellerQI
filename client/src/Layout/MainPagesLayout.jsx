@@ -1,5 +1,6 @@
 import { Outlet, useLocation } from 'react-router-dom'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { useSelector } from 'react-redux'
 import TopNav from '../Components/Navigation/TopNav'
 import LeftNavSection from '../Components/Navigation/LeftNavSection'
 import LeftNavSectionForTablet from '../Components/Navigation/LeftNavSectionForTablet'
@@ -18,6 +19,11 @@ const MainPagesLayout = () => {
   // close so reopening the drawer manually doesn't re-ask the last question.
   const [qmateQuestion, setQmateQuestion] = useState(null)
   const onQMatePage = location.pathname.includes('qmate')
+  // Remount the page when its marketplace changes. Switching resets the marketplace-scoped
+  // Redux slices (store.js), but pages fetch on mount, so an already-mounted page would sit
+  // on empty state. The old switcher got the same effect from a full page reload.
+  const selectedMarketplace = useSelector((s) => s.marketplace?.selected)
+  const marketplaceKey = selectedMarketplace ? `${selectedMarketplace.country}:${selectedMarketplace.region}` : 'none'
 
   /**
    * Height opt-ins, because the wrapper around <Outlet/> is auto-height by default and
@@ -144,7 +150,9 @@ const MainPagesLayout = () => {
                 >
                     <ErrorBoundary resetKey={location.pathname} title="Page Error" message="Something went wrong loading this page. Try navigating again or refreshing.">
                         <QMateContext.Provider value={qmateValue}>
-                            <Outlet/>
+                            <Fragment key={marketplaceKey}>
+                                <Outlet/>
+                            </Fragment>
                         </QMateContext.Provider>
                     </ErrorBoundary>
                 </div>
@@ -155,29 +163,37 @@ const MainPagesLayout = () => {
             QMate chat page itself (where it would be redundant). Opens a slide-in chat
             drawer in place, rather than navigating away to the full QMate page. */}
         {!onQMatePage && (
-            <button
-                type="button"
-                onClick={() => setQmatePanelOpen(true)}
-                className="fixed z-50 flex items-center gap-2 rounded-full shadow-2xl transition-colors"
-                style={{
-                    right: 26,
-                    bottom: 26,
-                    padding: '11px 16px 11px 12px',
-                    border: '1px solid rgba(59,130,246,.45)',
-                    background: COLORS.surface,
-                    color: COLORS.textPrimary,
-                    fontSize: 13,
-                    fontWeight: 600,
-                }}
-            >
-                <span
-                    className="w-[22px] h-[22px] rounded-md flex items-center justify-center text-xs font-bold"
-                    style={{ background: COLORS.accent, color: '#061021' }}
+            <div className="fixed z-50 group" style={{ right: 26, bottom: 26 }}>
+                {/* Hover/focus description so sellers know what this button is */}
+                <div
+                    role="tooltip"
+                    className="pointer-events-none absolute bottom-full right-0 mb-3 w-[280px] rounded-xl p-3 text-xs leading-[18px] shadow-2xl opacity-0 translate-y-1 transition-all duration-150 group-hover:opacity-100 group-hover:translate-y-0 group-focus-within:opacity-100 group-focus-within:translate-y-0"
+                    style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, color: COLORS.textSecondary }}
                 >
-                    Q
-                </span>
-                Ask QMate
-            </button>
+                    <div className="font-semibold mb-1" style={{ color: COLORS.textPrimary }}>QMate — your AI Copilot</div>
+                    Ask it anything about your Amazon account — sales, profit, ads, inventory, issues — and it answers from your own data.
+                </div>
+                <button
+                    type="button"
+                    onClick={() => setQmatePanelOpen(true)}
+                    aria-label="Ask QMate, your AI Copilot. Ask anything about your Amazon account."
+                    className="flex items-center gap-2 rounded-full shadow-2xl transition-colors"
+                    style={{
+                        padding: '10px 16px 10px 11px',
+                        border: '1px solid rgba(59,130,246,.45)',
+                        background: COLORS.surface,
+                        color: COLORS.textPrimary,
+                    }}
+                >
+                    <span
+                        className="w-[22px] h-[22px] rounded-md flex items-center justify-center text-xs font-bold"
+                        style={{ background: COLORS.accent, color: '#061021' }}
+                    >
+                        Q
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>Ask QMate</span>
+                </button>
+            </div>
         )}
 
         <QMatePanel isOpen={qmatePanelOpen} onClose={closeQMate} initialQuestion={qmateQuestion} />

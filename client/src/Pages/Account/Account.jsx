@@ -6,6 +6,7 @@ import Table from '../../Components/Account/Table.jsx';
 import Chart from '../../Components/Account/Chart.jsx';
 import { useAccountHistoryData } from '../../hooks/usePageData.js';
 import { SkeletonChart, SkeletonTableBody } from '../../Components/Skeleton/PageSkeletons.jsx';
+import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitcher.jsx'
 
 const AccountHistoryPanel = () => {
   // Fetch account history data using the hook (automatically fetches on mount)
@@ -30,6 +31,7 @@ const AccountHistoryPanel = () => {
             <h1 className="text-base font-bold" style={{ color: '#f3f4f6' }}>
               Account History
             </h1>
+            <MarketplaceSwitcher className="ml-auto" />
           </div>
         </motion.div>
 

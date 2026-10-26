@@ -11,10 +11,11 @@ const { AnalyseService } = require('../../../Services/main/Analyse.js');
 
 const cleanProduct = (asin, overrides = {}) => ({
     asin,
-    product_title: 'Acme Ceramic Coffee Mug, 12 oz, Blue',
-    about_product: ['A'.repeat(160)],
+    // Clean under the spreadsheet's rules: 80+ character title, five full bullets, 7 images.
+    product_title: 'Acme Ceramic Coffee Mug, 12 oz, Blue, Dishwasher and Microwave Safe Stoneware Cup',
+    about_product: Array.from({ length: 5 }, (_, i) => `Bullet ${i} ` + 'A'.repeat(160)),
     product_description: ['A'.repeat(1800)],
-    product_photos: ['1', '2', '3', '4', '5'],
+    product_photos: ['1', '2', '3', '4', '5', '6', '7'],
     video_url: ['https://v'],
     product_star_ratings: '4.6',
     product_num_ratings: '120',
@@ -43,6 +44,8 @@ describe('Amazon-ready products', () => {
         products,
         reviews: [
             cleanProduct('CLEAN'),
+            // Too short (under 80 characters) - a real error, unlike its wording,
+            // which is only a review flag now.
             cleanProduct('TITLE', { product_title: 'Acme Mug - Best Seller, Free Shipping' }),
             cleanProduct('IMG', { product_photos: ['1'] }),
             cleanProduct('KW'),
@@ -71,11 +74,12 @@ describe('Amazon-ready products', () => {
         expect(result().conversionData.AmazonReadyproducts).toEqual(['CLEAN']);
     });
 
-    it('does not let a short-keyword Warning cost readiness', () => {
+    it('does not let a review-only flag cost readiness', () => {
         const r = run({
             products: [{ asin: 'A', status: 'Active' }],
-            reviews: [cleanProduct('A')],
-            keywords: [{ asin: 'A', value: 'short keywords' }],
+            // "guarantee" is on our word list: a Warning, not an error.
+            reviews: [cleanProduct('A', { about_product: Array.from({ length: 5 }, (_, i) => `Backed by our guarantee ${i} ` + 'A'.repeat(160)) })],
+            keywords: [{ asin: 'A', value: goodKeywords }],
         });
         expect(r.conversionData.AmazonReadyproducts).toEqual(['A']);
     });

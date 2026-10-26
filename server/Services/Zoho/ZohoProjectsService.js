@@ -18,6 +18,7 @@ const logger = require('../../utils/Logger.js');
 const { ApiError } = require('../../utils/ApiError.js');
 const { zohoRequest, paginate, unwrap, resolvePortalId } = require('./ZohoProjectsClient.js');
 const { toPlainText, toPlainLabel } = require('./zohoRichText.js');
+const { normaliseAttachment, extractShareLinks } = require('./zohoDeliverables.js');
 const {
     PATHS,
     PAGE_SIZE,
@@ -219,14 +220,36 @@ const normaliseTask = (task = {}) => ({
  * plain text here so nothing downstream ever stores or renders third-party HTML
  * — see zohoRichText.js.
  */
-const normaliseComment = (comment = {}) => ({
-    id: asId(comment.id, comment.id_string),
-    content: toPlainText(comment.comment || comment.content || ''),
-    authorName: (comment.created_by && (comment.created_by.full_name || comment.created_by.name))
-        || comment.added_by_name || comment.added_by || null,
-    createdAt: asDate(comment.created_time, comment.created_time_long, comment.added_time),
-    attachmentCount: Array.isArray(comment.attachments) ? comment.attachments.length : 0
-});
+/** Marker that EsfProjectReplyController.buildComment puts on a client's reply sent via SellerQI. */
+const CLIENT_REPLY_MARKER = /^Client reply from .* sent via the SellerQI portal/;
+
+const normaliseComment = (comment = {}) => {
+    const raw = comment.comment || comment.content || '';
+    const content = toPlainText(raw);
+    return {
+        id: asId(comment.id, comment.id_string),
+        content,
+        authorName: (comment.created_by && (comment.created_by.full_name || comment.created_by.name))
+            || comment.added_by_name || comment.added_by || null,
+        createdAt: asDate(comment.created_time, comment.created_time_long, comment.added_time),
+        attachmentCount: Array.isArray(comment.attachments) ? comment.attachments.length : 0,
+        /**
+         * The files and share links on the comment, for the Status page's deliverables. Links
+         * are read from the raw HTML because toPlainText drops href targets.
+         */
+        attachments: Array.isArray(comment.attachments)
+            ? comment.attachments.map(normaliseAttachment).filter(Boolean)
+            : [],
+        links: extractShareLinks(raw),
+        /**
+         * Written by the client: a Zoho client user, or a reply the client sent through
+         * SellerQI (posted under the agency's account, so only the marker shows it). Their own
+         * files are never offered back to them as deliverables.
+         */
+        authorIsClient: Boolean(comment.created_by && comment.created_by.is_client_user)
+            || CLIENT_REPLY_MARKER.test(content),
+    };
+};
 
 const normaliseActivity = (activity = {}) => ({
     id: asId(activity.id, activity.id_string),
@@ -788,7 +811,72 @@ const uploadTaskAttachment = async ({ projectId, taskId, file, portalId, timeout
     };
 };
 
+/** WorkDrive scope the connection must hold before any download is attempted. */
+const WORKDRIVE_READ_SCOPE = 'WorkDrive.files.READ';
+
+/**
+ * Whether file downloads can work on the current Zoho connection.
+ *
+ * Checked BEFORE calling Zoho: without the WorkDrive scope every download answers 401
+ * INVALID_OAUTHSCOPE, and zohoRequest treats a 401 as an expired token and forces a refresh
+ * — so each click would mint a token, and Zoho's refresh limit can then lock the whole
+ * integration out for ~30 minutes (see memory zoho-attachments-not-provisioned).
+ */
+const canDownloadFiles = async () => {
+    const { getConnection } = require('./ZohoAuth.js');
+    const connection = await getConnection();
+    return Boolean(connection && Array.isArray(connection.scopes) && connection.scopes.includes(WORKDRIVE_READ_SCOPE));
+};
+
+/**
+ * Bytes of a deliverable file (a WorkDrive attachment on a task comment).
+ *
+ * Tries the attachment's own download_url (or preview_url for a thumbnail) with our token,
+ * then WorkDrive's documented download endpoint by file id. Zoho reports some errors as
+ * small JSON bodies, so those are refused rather than served as a "file".
+ *
+ * @param {{ downloadUrl, previewUrl, thirdPartyFileId }} file
+ * @param {{ preview?: boolean }} options
+ * @returns {Promise<Buffer>}
+ */
+const downloadDeliverableFile = async (file, { preview = false } = {}) => {
+    const urls = [
+        preview ? file.previewUrl : null,
+        file.downloadUrl,
+        file.thirdPartyFileId ? `https://download.zoho.com/v1/workdrive/download/${encodeURIComponent(file.thirdPartyFileId)}` : null,
+    ].filter(Boolean);
+
+    let lastError = null;
+    for (const url of urls) {
+        try {
+            const u = new URL(url);
+            const data = await zohoRequest({
+                baseUrl: u.origin,
+                path: `${u.pathname}${u.search}`,
+                responseType: 'arraybuffer',
+                headers: { Accept: '*/*' },
+                timeout: 60000,
+                context: 'Download a deliverable from Zoho WorkDrive',
+            });
+            const buffer = Buffer.from(data);
+            const head = buffer.slice(0, 24).toString('utf8');
+            if (buffer.length < 512 && /^\s*\{\s*"(ERROR|error|errors)/.test(head)) {
+                lastError = new ApiError(502, 'Zoho did not return the file');
+                continue;
+            }
+            return buffer;
+        } catch (error) {
+            lastError = error;
+        }
+    }
+    throw lastError || new ApiError(404, 'This file is no longer available in Zoho');
+};
+
 module.exports = {
+    normaliseComment,
+    canDownloadFiles,
+    downloadDeliverableFile,
+    WORKDRIVE_READ_SCOPE,
     listPortals,
     listProjects,
     createProject,

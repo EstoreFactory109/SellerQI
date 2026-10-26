@@ -37,6 +37,24 @@ const findSellerAccount = async (userId, country, region) => {
 };
 
 /**
+ * Multi-marketplace onboarding keeps each region's approval on a RegionGrant until the seller
+ * confirms its marketplaces. Once no marketplace in the region uses a token any more, drop the
+ * grant's copy too, so disconnecting really removes it.
+ */
+const forgetUnusedRegionTokens = async (sellerCentral, userId, region) => {
+  try {
+    const RegionGrant = require('../../models/user-auth/RegionGrantModel.js');
+    const inRegion = (sellerCentral.sellerAccount || []).filter((acc) => acc.region === region);
+    const unset = {};
+    if (!inRegion.some((acc) => acc.spiRefreshToken)) unset.spiRefreshToken = null;
+    if (!inRegion.some((acc) => acc.adsRefreshToken)) { unset.adsRefreshToken = null; unset.adsProfiles = []; }
+    if (Object.keys(unset).length) await RegionGrant.updateOne({ User: userId, region }, { $set: unset });
+  } catch (_) {
+    // Best effort: the grant is onboarding state, never read by the data pipeline.
+  }
+};
+
+/**
  * Delete only the Amazon Ads refresh token for a specific seller account.
  * This keeps SP-API refresh token and all other fields untouched.
  *
@@ -65,6 +83,7 @@ const clearAdsRefreshTokenForAccount = async (userId, country, region) => {
   sellerAccount.adsRefreshToken = null;
 
   await sellerCentral.save();
+  await forgetUnusedRegionTokens(sellerCentral, userId, region);
 
   return {
     success: true,
@@ -95,6 +114,7 @@ const clearAllRefreshTokensForAccount = async (userId, country, region) => {
   sellerAccount.adsRefreshToken = null;
 
   await sellerCentral.save();
+  await forgetUnusedRegionTokens(sellerCentral, userId, region);
 
   return {
     success: true,

@@ -32,6 +32,7 @@ import { fetchCogs } from '../../redux/slices/cogsSlice.js';
 import { computeTotalCogs } from '../../utils/cogsCalculations.js';
 import { COLORS, ProductsToFixList } from '../../Components/Shared/index.js';
 import { useTopProducts } from '../../hooks/useTopProducts.js';
+import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitcher.jsx'
 
 // Helper function to get actual end date (yesterday due to 24-hour data delay)
 const getActualEndDate = () => {
@@ -1223,6 +1224,7 @@ const ProfitabilityDashboard = () => {
                     <Calender anchorRef={calendarAnchorRef} setOpenCalender={setOpenCalender} />
                   )}
                 </div>
+                <MarketplaceSwitcher />
                 <DownloadReport prepareDataFunc={prepareProfitabilityData} filename="Profitability_Dashboard_Report" buttonText="Export" showIcon={true} />
               </div>
             </div>

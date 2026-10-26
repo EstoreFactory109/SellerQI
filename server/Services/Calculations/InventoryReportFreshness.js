@@ -25,6 +25,11 @@ const INVENTORY_REPORT_MAX_AGE_DAYS = 7;
 // only issues reported in the last 30 days, and so must the reader, or an
 // older document carries months-old issues forward as current.
 const INBOUND_ISSUE_WINDOW_DAYS = 30;
+// tasks-logics.xlsx "Inbound shipment problems": a problem not seen in the previous
+// run. The report is read daily, but a task needs to stay up long enough to act on,
+// so a problem counts as new for a week after Amazon reported it. The "per shipment"
+// cooldown (TaskCooldowns) keeps a closed problem from coming back.
+const INBOUND_NEW_ISSUE_DAYS = 7;
 
 /**
  * Returns `doc` when it is recent enough to present as current, else null.
@@ -82,5 +87,6 @@ module.exports = {
     freshInventoryReportOrNull,
     filterInboundIssuesToWindow,
     INVENTORY_REPORT_MAX_AGE_DAYS,
-    INBOUND_ISSUE_WINDOW_DAYS
+    INBOUND_ISSUE_WINDOW_DAYS,
+    INBOUND_NEW_ISSUE_DAYS
 };

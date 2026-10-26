@@ -22,6 +22,19 @@ const AsinWiseSalesForBigAccounts = require('../../models/MCP/AsinWiseSalesForBi
 const { getProductWiseSponsoredAdsData } = require('../amazon-ads/ProductWiseSponsoredAdsService.js');
 const Profitability = require('./ProfitabilityCalculation.js');
 const { classifyProfitabilityRow } = require('./RecoverableAmountUtils.js');
+
+// Per-unit COGS by ASIN, {} when none is entered or the read fails: the loss rule
+// (tasks-logics.xlsx "Loss-making product") needs it, as the tasks do.
+const loadCogsMap = async (userId, country) => {
+    try {
+        const cogs = await require('../Finance/CogsService.js').getCogs(userId, country);
+        return (cogs && cogs.success && cogs.data?.cogsValues) || {};
+    } catch (error) {
+        logger.warn('[Profitability] COGS unavailable', { userId, country, error: error.message });
+        return {};
+    }
+};
+
 const { calculateSponsoredAdsMetrics } = require('./SponsoredAdsCalculation.js');
 // AsinFinanceWindowService requires this module back, but only lazily inside
 // resolveAsinFinance, so loading it here at the top is cycle-safe.
@@ -90,7 +103,8 @@ const fetchProfitabilityData = async (userId, country, region) => {
         economicsMetricsData,
         sellerData,
         productWiseSponsoredAds,
-        dateWisePPCspendData
+        dateWisePPCspendData,
+        cogsMap
     ] = await Promise.all([
         loadLiveEconomics(userId, region, country),
         Seller.findOne(
@@ -103,7 +117,8 @@ const fetchProfitabilityData = async (userId, country, region) => {
         ).lean(),
         getProductWiseSponsoredAdsData(userId, country, region),
         // Returns the merged FLAT ROW ARRAY, not a document — see the unwrap below.
-        GetDateWisePPCspendModel.findMergedDateWiseSpends(userId, country, region, { lookbackDays: PROFITABILITY_PPC_LOOKBACK_DAYS })
+        GetDateWisePPCspendModel.findMergedDateWiseSpends(userId, country, region, { lookbackDays: PROFITABILITY_PPC_LOOKBACK_DAYS }),
+        loadCogsMap(userId, country)
     ]);
 
     const fetchTime = Date.now() - startTime;
@@ -149,6 +164,7 @@ const fetchProfitabilityData = async (userId, country, region) => {
         adsPPCSpend,
         // All ad types (incl. Sponsored Brands) over the economics window — the TACoS numerator.
         accountAdSpend,
+        cogsMap,
         // calculateProfitabilityDashboard needs the account key for the live
         // per-ASIN fallback (resolveAsinFinance) when EconomicsMetrics is stale.
         userId,
@@ -418,7 +434,7 @@ const convertToTotalSales = (economicsMetrics) => {
  * Calculate profitability errors
  * (Same logic as DashboardCalculation.calculateProfitabilityErrors)
  */
-const calculateProfitabilityErrors = (profitibilityData, totalProducts = [], { financeFresh = true } = {}) => {
+const calculateProfitabilityErrors = (profitibilityData, totalProducts = [], { financeFresh = true, cogsMap = null } = {}) => {
     let totalErrors = 0;
     const errorDetails = [];
     
@@ -435,7 +451,7 @@ const calculateProfitabilityErrors = (profitibilityData, totalProducts = [], { f
         // Same rule as the tasks (RecoverableAmountUtils.classifyProfitabilityRow): no
         // verdict on a row with no sales unless it is fresh ad spend, and none at all
         // on stale finance.
-        const verdict = classifyProfitabilityRow(item, { financeFresh });
+        const verdict = classifyProfitabilityRow(item, { financeFresh, cogsMap });
         if (!verdict) return;
         totalErrors++;
         errorDetails.push({
@@ -470,6 +486,7 @@ const calculateProfitabilityDashboard = async (rawData) => {
         dateWisePPCspendData,
         adsPPCSpend,
         accountAdSpend,
+        cogsMap = null,
         userId,
         country,
         region
@@ -561,7 +578,8 @@ const calculateProfitabilityDashboard = async (rawData) => {
     // DailySkuFinance): EconomicsMetrics stopped being written in April 2026 and
     // issues from that doc would describe April.
     const profitabilityErrorsData = calculateProfitabilityErrors(profitibilityData, TotalProducts, {
-        financeFresh: resolvedFinance.financeFresh
+        financeFresh: resolvedFinance.financeFresh,
+        cogsMap
     });
 
     // Convert to legacy formats

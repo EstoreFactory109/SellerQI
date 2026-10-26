@@ -68,6 +68,13 @@ const LOG_RETENTION = {
         indexName: 'ttl_createdAt',
         retentionDays: days('LOG_RETENTION_PAYMENT_DAYS', 365),
     },
+    // Seller page visits for activity monitoring (who viewed which page, for how long).
+    pageViews: {
+        model: 'UserPageView',
+        dateField: 'startedAt',
+        indexName: 'ttl_startedAt',
+        retentionDays: days('LOG_RETENTION_PAGE_VIEW_DAYS', 90),
+    },
 };
 
 /** Retention window in seconds for a given policy key (for expireAfterSeconds). */
